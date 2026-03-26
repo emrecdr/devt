@@ -1,0 +1,131 @@
+---
+name: architecture-health-scanner
+description: Use when analyzing architecture scanner output to cluster findings, classify true/false positives, and prioritize fixes. Use after running the project scanner configured in .devt.json. Also trigger on 'scanner results', 'architecture health', 'tech debt triage', 'false positives', or when prioritizing findings from any static analysis tool.
+---
+
+# Architecture Health Scanner
+
+## Overview
+
+This skill teaches how to interpret scanner output, not how to run the scanner. The project provides its own scanner tool (configured in `.devt.json` under `arch_scanner.command`). This skill turns raw findings into a prioritized remediation plan.
+
+Raw scanner output is noise. Interpretation converts noise into signal by clustering related findings, identifying root causes, and separating true problems from acceptable trade-offs.
+
+## When to Use
+
+- After the architecture scanner has been run and produced output
+- When reviewing scanner results to decide what to fix
+- When prioritizing technical debt remediation
+- During architecture reviews or health checks
+
+## The Process
+
+### Step 1: Verify Scanner Was Run
+
+Check that scanner output exists. The scanner command is defined in `.devt.json` under `arch_scanner.command`. If no output exists, the scanner must be run first — this skill does not run it.
+
+### Step 2: Parse Output
+
+Read the scanner output and extract individual findings. Each finding should have:
+
+- **Detection category** (see `references/detection-categories.md`)
+- **Location** (file, line, module)
+- **Description** (what was detected)
+- **Severity** (if provided by scanner)
+
+### Step 3: Cluster by Module
+
+Group findings by module/service. This reveals which areas of the codebase have the most issues and helps identify systemic problems vs. isolated incidents.
+
+### Step 4: Cluster by Root Cause
+
+Multiple findings often share a single root cause. Examples:
+
+- 10 "missing type hint" findings in one module = one developer skipped type hints
+- 5 "cross-service import" findings = one architectural boundary is unclear
+- 3 "duplicate model" findings = one domain concept is defined in multiple places
+
+Fixing the root cause resolves all related findings at once.
+
+### Step 5: Classify Each Finding
+
+Read the actual code before classifying. Never classify from the scanner description alone.
+
+| Classification | Criteria | Action |
+|---------------|----------|--------|
+| **True Positive** | Real issue confirmed by reading the code | Fix it |
+| **Acceptable Design** | Intentional trade-off with documented rationale | Document it |
+| **False Positive** | Scanner limitation, code is actually correct | Dismiss with explanation |
+
+See `references/interpretation-rules.md` for detailed classification guidance.
+
+### Step 6: Prioritize
+
+Assign each true positive to a priority bucket:
+
+| Priority | Criteria | Timeline |
+|----------|----------|----------|
+| **Fix Now** | Security risk, data integrity, blocking other work | This sprint |
+| **Fix Soon** | Architectural violation, growing tech debt | Next 2 sprints |
+| **Document** | Known trade-off, acceptable for now | Add ADR or comment |
+| **Ignore** | False positive or trivially low impact | Dismiss in report |
+
+### Step 7: Write Remediation Plan
+
+Structure the output as:
+
+```
+## Scanner Health Report
+
+### Fix Now (X findings)
+- [Module] Root cause → affected findings → suggested fix
+
+### Fix Soon (X findings)
+- [Module] Root cause → affected findings → suggested fix
+
+### Documented Trade-offs (X findings)
+- [Module] Why this is acceptable → reference to ADR/decision
+
+### Dismissed (X findings)
+- [Finding] Why this is a false positive
+```
+
+## Gate Functions
+
+### Gate: Scanner Output Exists
+
+- [ ] Scanner has been run (output file or recent execution confirmed)
+- [ ] Output is parseable and contains findings
+
+### Gate: Code Read Before Classification
+
+- [ ] Every finding classified as "acceptable" or "false positive" has been verified by reading the actual code
+- [ ] No finding was classified based solely on the scanner description
+
+### Gate: Root Causes Identified
+
+- [ ] Related findings are grouped by root cause
+- [ ] Each priority bucket has actionable remediation steps
+
+## Red Flags — STOP
+
+- "All findings are false positives" — Unlikely. Re-examine your classification criteria.
+- "We'll fix these later" — Later means never. Prioritize and schedule concretely.
+- "The scanner is wrong" — The scanner may be imprecise, but read the code before dismissing.
+- "This is just tech debt" — Tech debt with a remediation plan is managed. Without one, it is rot.
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "Too many findings to address" | Cluster by root cause — 50 findings may be 5 fixes |
+| "The scanner flags too much" | That is why you classify — not all findings are equal |
+| "We know about these issues" | Knowing is not fixing. Prioritize and schedule. |
+| "This would require a big refactor" | Big refactors start with small, prioritized steps |
+
+## Integration
+
+- **Prerequisites**: Scanner must have been run (check `.devt.json` for `arch_scanner.command`)
+- **References**: `references/detection-categories.md`, `references/interpretation-rules.md`
+- **Used by agents**: architect (primary consumer), coordinator (for planning)
+- **Related skills**: code-review-guide (for individual file issues), strategic-analysis (for refactor planning)

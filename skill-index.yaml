@@ -1,0 +1,103 @@
+# Skill Index — maps agents to their relevant technique skills
+# Skills are auto-discovered by Claude via descriptions, but this
+# provides explicit guidance for the workflow orchestrator.
+
+agents:
+  programmer:
+    skills:
+      - codebase-scan
+      - scratchpad
+      - api-docs-fetcher
+      - strategic-analysis
+    reads:
+      - .dev-rules/coding-standards.md
+      - .dev-rules/architecture.md
+      - .dev-rules/quality-gates.md
+
+  tester:
+    skills:
+      - scratchpad
+    reads:
+      - .dev-rules/testing-patterns.md
+      - .dev-rules/quality-gates.md
+
+  code-reviewer:
+    skills:
+      - code-review-guide
+      - codebase-scan
+      - scratchpad
+    reads:
+      - .dev-rules/coding-standards.md
+      - CLAUDE.md
+
+  docs-writer:
+    skills:
+      - scratchpad
+    reads:
+      - .dev-rules/documentation.md
+
+  architect:
+    skills:
+      - codebase-scan
+      - architecture-health-scanner
+    reads:
+      - .dev-rules/architecture.md
+
+  retro:
+    skills:
+      - lesson-extraction
+      - autoskill
+    reads:
+      - .devt-state/*.md
+
+  verifier:
+    skills:
+      - codebase-scan
+    reads:
+      - .dev-rules/quality-gates.md
+      - .devt-state/impl-summary.md
+      - .devt-state/test-summary.md
+      - .devt-state/review.md
+      - .devt-state/plan.md
+      - CLAUDE.md
+
+  researcher:
+    skills:
+      - codebase-scan
+      - strategic-analysis
+    reads:
+      - .dev-rules/coding-standards.md
+      - .dev-rules/architecture.md
+      - CLAUDE.md
+      - .devt-state/decisions.md
+
+  debugger:
+    skills:
+      - codebase-scan
+    reads:
+      - .dev-rules/coding-standards.md
+      - .dev-rules/quality-gates.md
+      - .devt-state/debug-context.md
+
+  curator:
+    skills:
+      - playbook-curation
+      - semantic-search
+      - memory-compaction
+      - autoskill
+
+workflows:
+  dev-workflow:
+    skills:
+      - complexity-assessment
+      - codebase-scan
+      - semantic-search
+  create-plan:
+    skills:
+      - codebase-scan
+      - complexity-assessment
+  quality-gates:
+    skills: []
+  weekly-report:
+    skills:
+      - weekly-report

@@ -1,0 +1,52 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" session-start.sh"
+      }]
+    }],
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" stop-hook.sh",
+        "timeout": 5,
+        "statusMessage": "Cleaning up workflow state..."
+      }]
+    }],
+    "SubagentStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" subagent-status.sh start",
+        "async": true
+      }]
+    }],
+    "SubagentStop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" subagent-status.sh stop",
+        "async": true
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" context-monitor.sh",
+        "async": false
+      }]
+    }],
+    "UserPromptSubmit": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" workflow-context-injector.sh",
+        "statusMessage": "Loading workflow context..."
+      }]
+    }]
+  }
+}

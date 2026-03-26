@@ -1,0 +1,10 @@
+active: false
+phase: null
+tier: null
+iteration: 0
+task: null
+workflow_id: null
+last_session: null
+stopped_at: null
+resume_context: null
+decisions: []

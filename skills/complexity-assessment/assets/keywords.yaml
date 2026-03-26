@@ -1,0 +1,74 @@
+# Complexity signal keywords grouped by dimension.
+# When these words appear in a task description, they suggest
+# the corresponding dimension should score higher.
+# These are generic — not project-specific.
+
+scope:
+  high:
+    - refactor
+    - migrate
+    - redesign
+    - rewrite
+    - overhaul
+    - restructure
+    - rename across
+  medium:
+    - update
+    - extend
+    - enhance
+    - add support for
+
+integration:
+  high:
+    - cross-service
+    - API contract
+    - external API
+    - webhook
+    - third-party
+    - inter-module
+    - event bus
+  medium:
+    - shared interface
+    - dependency injection
+    - service boundary
+
+infrastructure:
+  high:
+    - database migration
+    - schema change
+    - deployment
+    - new service
+    - infrastructure
+    - index
+  medium:
+    - configuration
+    - environment variable
+    - feature flag
+    - cache
+
+dependencies:
+  high:
+    - authentication
+    - authorization
+    - RBAC
+    - multi-tenant
+    - cascading
+    - transactional
+  medium:
+    - repository
+    - service layer
+    - domain model
+
+risk:
+  high:
+    - data migration
+    - security
+    - breaking change
+    - irreversible
+    - production data
+    - deletion
+    - permissions
+  medium:
+    - backwards compatible
+    - existing tests
+    - rollback

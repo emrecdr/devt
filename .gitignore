@@ -1,0 +1,12 @@
+# Runtime state (per-project, not committed)
+.devt-state/
+
+# Semantic database (generated from playbook)
+memory/semantic/*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/

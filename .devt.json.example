@@ -1,0 +1,38 @@
+{
+  "_comment": "devt project configuration. Copy to .devt.json and customize.",
+
+  "model_profile": "balanced",
+  "_model_profile_options": "quality | balanced | budget | inherit",
+  "_model_profile_doc": "Controls which Claude model tier each agent uses. quality=all opus, balanced=opus for critical agents, budget=sonnet/haiku, inherit=use parent session model.",
+
+  "model_overrides": {
+    "_doc": "Per-agent model overrides. Keys: programmer, tester, code-reviewer, docs-writer, architect, retro, curator. Values: opus, sonnet, haiku, inherit.",
+    "tester": "opus"
+  },
+
+  "git": {
+    "provider": "github",
+    "_provider_options": "github | bitbucket | gitlab",
+    "_provider_doc": "Git hosting provider for PR/MR links and CI integration.",
+
+    "workspace": "emrecamdere",
+    "_workspace_doc": "Organization or workspace name on the git provider.",
+
+    "slug": "my-project",
+    "_slug_doc": "Repository slug (used for constructing URLs).",
+
+    "primary_branch": "main",
+    "_primary_branch_doc": "Default branch name for PRs and comparisons.",
+
+    "contributors": ["emre", "claude"],
+    "_contributors_doc": "List of contributor names for commit attribution and weekly reports."
+  },
+
+  "arch_scanner": {
+    "command": "uv run python scripts/arch_scanner.py",
+    "_command_doc": "Shell command to run the architecture health scanner. Set to null to disable.",
+
+    "report_dir": "docs/reports",
+    "_report_dir_doc": "Directory where scanner reports are written."
+  }
+}
