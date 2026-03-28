@@ -14,16 +14,18 @@ Fast-path development cycle: scan, implement, test, review. Skips documentation,
 
 <available_agent_types>
 The following agent types are used in this workflow:
+
 - `devt:programmer` — implementation specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:tester` — testing specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:code-reviewer` — code review specialist, READ-ONLY (Read, Bash, Glob, Grep)
 
 Not used in this workflow:
+
 - `devt:architect` — structural review specialist
 - `devt:docs-writer` — documentation specialist
 - `devt:retro` — lesson extraction specialist
 - `devt:curator` — playbook quality maintenance specialist
-</available_agent_types>
+  </available_agent_types>
 
 <agent_skill_injection>
 Before dispatching any agent, check `.devt.json` for an `agent_skills` configuration block:
@@ -63,11 +65,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 ```
 
 Load project context:
+
 - Read `.dev-rules/coding-standards.md`
 - Read `.dev-rules/architecture.md`
 - Read `.dev-rules/quality-gates.md`
 - Read `.dev-rules/testing-patterns.md`
 - Read `CLAUDE.md` if it exists
+- Read `.devt-state/spec.md` if it exists (from `/devt:specify`)
+  - If spec exists: use it as the primary requirements source
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE
@@ -83,6 +88,7 @@ Perform a brief codebase scan focused on the task:
 Read `${CLAUDE_PLUGIN_ROOT}/skills/codebase-scan/` for the scan protocol.
 
 Scan for:
+
 - Existing patterns to reuse (prioritize over inventing new ones)
 - Interfaces and contracts the implementation must satisfy
 - Existing tests to understand testing conventions
@@ -95,6 +101,7 @@ Write results to `.devt-state/scan-results.md`.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scan status=DONE
 ```
+
 </step>
 
 <step name="implement" gate="impl-summary.md is written with status DONE or DONE_WITH_CONCERNS">
@@ -111,8 +118,9 @@ Dispatch the programmer agent:
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <task>{task_description}</task>
   <context>
-    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/quality-gates.md, .dev-rules/architecture.md</files_to_read>
+    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/quality-gates.md, .dev-rules/architecture.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt-state/scan-results.md</scan_results>
+    <decisions>Read .devt-state/decisions.md (if exists)</decisions>
     <review_feedback>Read .devt-state/review.md (if this is a fix iteration)</review_feedback>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
@@ -121,6 +129,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/impl-summary.md` and check status:
+
 - DONE or DONE_WITH_CONCERNS: proceed to test
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
@@ -128,6 +137,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
+
 </step>
 
 <step name="test" gate="test-summary.md is written with status DONE or DONE_WITH_CONCERNS">
@@ -141,7 +151,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     Cover happy paths, error paths, and key edge cases.
   </task>
   <context>
-    <files_to_read>.dev-rules/testing-patterns.md, .dev-rules/quality-gates.md</files_to_read>
+    <files_to_read>.dev-rules/testing-patterns.md, .dev-rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt-state/impl-summary.md</impl_summary>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
@@ -150,6 +160,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/test-summary.md` and check status:
+
 - DONE or DONE_WITH_CONCERNS: proceed to review
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
@@ -157,6 +168,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$STATUS
 ```
+
 </step>
 
 <step name="review" gate="review.md is written with verdict APPROVED or APPROVED_WITH_NOTES">
@@ -170,9 +182,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review ALL code in scope — do not filter by origin or label findings as pre-existing.
   </task>
   <context>
-    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md, .dev-rules/quality-gates.md</files_to_read>
+    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md, .dev-rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt-state/impl-summary.md</impl_summary>
     <test_summary>Read .devt-state/test-summary.md</test_summary>
+    <decisions>Read .devt-state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
   Write review to .devt-state/review.md
@@ -191,41 +204,74 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     - Report: "Review returned NEEDS_WORK after 2 iterations. Remaining findings require user input."
     - Status: BLOCKED
 
-*Note: Quick-implement limits review iterations to 2 (vs 3 in full workflow) for speed.
-Architectural issues still surface to user via BLOCKED status.*
+_Note: Quick-implement limits review iterations to 2 (vs 3 in full workflow) for speed.
+Architectural issues still surface to user via BLOCKED status._
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status=$STATUS verdict=$VERDICT
 ```
+
 </step>
 
 <step name="finalize" gate="final status is reported to user">
+
+Generate `.devt-state/workflow-state.md` — a compact state summary for session continuity:
+
+```markdown
+# Workflow State
+
+## Overview
+- **Task**: {one-line task description}
+- **Tier**: SIMPLE (quick-implement)
+- **Status**: {DONE|DONE_WITH_CONCERNS|BLOCKED}
+- **Iterations**: {N implement-review cycles}
+
+## Phase Summary
+
+| Phase | Status | Key Output |
+|-------|--------|-----------|
+| scan | DONE | {N patterns found} |
+| implement | DONE | {N files modified} |
+| test | DONE | {N passed, M failed} |
+| review | {verdict} | {score}/100 |
+
+## Key Decisions
+{Extract from impl-summary.md}
+```
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE
 ```
 
 Report to the user:
+
 - **Implementation**: files modified/created (from impl-summary.md)
 - **Tests**: pass/fail counts (from test-summary.md)
 - **Review verdict**: APPROVED / APPROVED_WITH_NOTES
 - **Review score**: N/100
 - **Iterations**: how many implement-review cycles occurred
 - **Overall status**: DONE | DONE_WITH_CONCERNS | BLOCKED
-</step>
+  </step>
 
 ---
 
 <deviation_rules>
-1. **Auto-fix: bugs** — If a quality gate fails during implementation or testing, the responsible agent fixes it within their step. No separate iteration.
-2. **Auto-fix: lint** — Linting failures are fixed immediately by the programmer agent before writing impl-summary.md.
-3. **Auto-fix: deps** — Missing dependencies are installed by the programmer agent following project package manager conventions.
-4. **STOP: architecture** — If the code-reviewer identifies an architectural concern requiring a design decision, the workflow STOPS and surfaces to the user. Do NOT make architectural decisions autonomously.
+Agents follow Rules 1-4 from the programmer agent's deviation framework (see `agents/programmer.md`):
+
+1. **Rule 1 (Auto-fix): Bugs** — Logic errors, type errors, null references, security flaws. Fix inline.
+2. **Rule 2 (Auto-fix): Missing critical functionality** — Missing error handling, input validation, auth checks. Fix inline.
+3. **Rule 3 (Auto-fix): Blocking issues** — Missing dependency, broken imports, build errors. Fix inline.
+4. **Rule 4 (STOP): Architectural changes** — Workflow STOPS and surfaces to user.
+
+**Attempt limit**: 3 auto-fix attempts per issue, then DONE_WITH_CONCERNS. Track as `[Rule N - Type]`.
+
+**Scope**: Only auto-fix issues directly caused by the current task. Pre-existing issues are logged to `.devt-state/scratchpad.md` under category `Deferred`.
 </deviation_rules>
 
 <success_criteria>
+
 - Implementation is complete (impl-summary.md status is DONE or DONE_WITH_CONCERNS)
 - All tests pass (test-summary.md shows zero failures)
 - Code review is APPROVED or APPROVED_WITH_NOTES (score >= 80)
 - Final status: **DONE** or **DONE_WITH_CONCERNS**
-</success_criteria>
+  </success_criteria>

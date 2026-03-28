@@ -8,9 +8,20 @@ and producing a prescriptive recommendation. This step prevents wrong approaches
 and surfaces pitfalls before any code is written.
 </purpose>
 
+<prerequisites>
+- `.dev-rules/` directory exists with coding-standards.md, architecture.md
+- `${CLAUDE_PLUGIN_ROOT}` is set (devt plugin is loaded)
+- `node` is available on PATH
+</prerequisites>
+
 <available_agent_types>
+
 - devt:researcher — technical investigation specialist, READ-ONLY (Read, Bash, Glob, Grep)
-</available_agent_types>
+  </available_agent_types>
+
+<agent_skill_injection>
+Before dispatching the researcher agent, check `.devt.json` for `agent_skills.researcher`. If not configured, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for defaults (codebase-scan, strategic-analysis).
+</agent_skill_injection>
 
 <process>
 
@@ -41,29 +52,31 @@ If skipping, report why and suggest next command. Do NOT dispatch the researcher
 <step name="research" gate="research.md is written to .devt-state/">
 ## Step 3: Dispatch Researcher
 
-Task(subagent_type="devt:researcher", model="{models.architect}", prompt="
-  <task>
-    Research implementation approaches for: {task_description}
-    Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
-  </task>
-  <context>
-    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md</files_to_read>
-    <decisions>Read .devt-state/decisions.md (if exists)</decisions>
-    <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
-  </context>
-  Write findings to .devt-state/research.md
+Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
+<task>
+Research implementation approaches for: {task_description}
+Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
+</task>
+<context>
+<files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md</files_to_read>
+<decisions>Read .devt-state/decisions.md (if exists)</decisions>
+<template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
+</context>
+Write findings to .devt-state/research.md
 ")
 
 Gate: Read .devt-state/research.md and check status:
+
 - DONE: proceed to present
 - NEEDS_CONTEXT: ask user for clarification, re-dispatch
 - DONE_WITH_CONCERNS: proceed but flag concerns
-</step>
+  </step>
 
 <step name="present" gate="user has seen findings">
 ## Step 4: Present Findings
 
 Show the user:
+
 - **Summary**: recommended approach (2-3 sentences)
 - **Key finding**: most important pattern/pitfall discovered
 - **Open questions**: anything that needs user decision
@@ -76,15 +89,17 @@ Append answers to .devt-state/research.md.
 ## Step 5: Suggest Next Step
 
 Based on research completeness:
+
 - If approach is clear: "Research complete. Run /devt:plan to create an implementation plan, or /devt:workflow to start implementing."
 - If concerns flagged: "Research has concerns. Review .devt-state/research.md before proceeding."
 - If user provided answers to open questions: update research.md and suggest proceeding.
-</step>
+  </step>
 
 </process>
 
 <success_criteria>
+
 - .devt-state/research.md exists with recommended approach
 - All open questions resolved (or explicitly deferred)
 - User has reviewed summary
-</success_criteria>
+  </success_criteria>

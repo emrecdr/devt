@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+[[ $- == *i* ]] && return
 # Inject active workflow state into user prompts.
 # Reads workflow state via devt-tools.cjs and outputs additionalContext JSON.
 # Exit code 2 = skip (no active workflow).
-set -uo pipefail
+set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -20,8 +21,10 @@ RESULT=$(node -e "
     ', iteration=' + (state.iteration || 0) +
     ', task=' + (state.task || 'none');
   const output = {
-    hookSpecificOutput: { additionalContext: context },
-    hookEventName: 'UserPromptSubmit'
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: context
+    }
   };
   process.stdout.write(JSON.stringify(output));
 " "$STATE_JSON" 2>/dev/null)

@@ -11,13 +11,15 @@ Search before you build. Every new implementation must be preceded by a thorough
 
 Skipping this step is the single most common cause of duplicate code, inconsistent patterns, and wasted effort. A 5-minute scan prevents hours of rework.
 
-## When to Use
+## The Iron Law
 
-- Before implementing any new feature, class, function, or pattern
-- Before creating any new file (the file or its equivalent may already exist)
-- Before defining a new interface, protocol, or error type
-- When a task says "create" or "add" — verify it does not already exist
-- When fixing a bug — find all occurrences of the same pattern
+```
+NO NEW CODE WITHOUT SCANNING FOR EXISTING ALTERNATIVES FIRST
+```
+
+If you haven't run all 4 search steps, you cannot claim "nothing exists." Duplication is the most common implementation failure — a 5-minute scan prevents hours of rework.
+
+Without scanning first, agents frequently duplicate existing functionality, creating maintenance burden and inconsistency. The scan also reveals naming conventions, architectural patterns, and reusable utilities that improve implementation quality. Duplication is the single most common form of generative debt.
 
 ## The Process
 
@@ -49,7 +51,7 @@ Search for the structural pattern you plan to implement.
 
 ```
 Grep: Protocol, Interface, Repository, Service — in the same domain
-Glob: **/repository_interfaces.py, **/errors.py, **/dto.py
+Glob: **/repository_interfaces*, **/errors*, **/dto*
 ```
 
 Understand the existing conventions before adding your own.
@@ -77,10 +79,11 @@ Before writing any code, summarize:
 ### Search Strategy Example
 
 **Searching for: "user notification system"**
-1. Search by name: `Grep "notification" --include="*.py"` -> finds NotificationService
-2. Search by concept: `Grep "send.*email|push.*message|alert"` -> finds email_sender.py, push_service.py
-3. Search by pattern: look in service layer for anything that dispatches messages -> finds event_bus.py
-4. Check tests: `Glob **/test_notif* **/notification*test*` -> reveals existing test coverage
+
+1. Search by name: `Grep "notification"` -> finds NotificationService
+2. Search by concept: `Grep "send.*email|push.*message|alert"` -> finds email_sender, push_service
+3. Search by pattern: look in service layer for anything that dispatches messages -> finds event_bus
+4. Check tests: `Glob **/test*notif* **/notification*test*` -> reveals existing test coverage
 
 Each search layer finds things the others miss. Skip none.
 
@@ -94,16 +97,16 @@ If the scan found existing code:
 
 ## Anti-patterns
 
-| Don't | Why It Fails | Do Instead |
-|-------|-------------|------------|
-| "I already know the codebase" | You do not. Memory is selective and stale. | Search anyway -- prove it with results |
-| "This is definitely new" | Unproven assumptions create duplicates | Show search results for name, concept, and pattern |
-| "I'll just create a quick version" | Quick versions become permanent duplicates | Search first, create only if truly new |
-| "The existing one is different enough" | "Different enough" is not quantified | State exactly what differs and why reuse fails |
-| "I'll refactor later to deduplicate" | No you will not. Deduplicate now. | Extend or fix existing code before creating new |
-| "I searched and found nothing" | Searched by name only, not by concept or pattern | Run all 4 search steps before declaring "nothing found" |
-| "The existing one is in a different module" | Cross-module reuse is the entire point of scanning | Import from the owning module |
-| "The existing implementation is bad" | Two bad versions is worse than one fixed version | Fix the existing code. Do not fork it. |
+| Don't                                       | Why It Fails                                       | Do Instead                                              |
+| ------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| "I already know the codebase"               | You do not. Memory is selective and stale.         | Search anyway -- prove it with results                  |
+| "This is definitely new"                    | Unproven assumptions create duplicates             | Show search results for name, concept, and pattern      |
+| "I'll just create a quick version"          | Quick versions become permanent duplicates         | Search first, create only if truly new                  |
+| "The existing one is different enough"      | "Different enough" is not quantified               | State exactly what differs and why reuse fails          |
+| "I'll refactor later to deduplicate"        | No you will not. Deduplicate now.                  | Extend or fix existing code before creating new         |
+| "I searched and found nothing"              | Searched by name only, not by concept or pattern   | Run all 4 search steps before declaring "nothing found" |
+| "The existing one is in a different module" | Cross-module reuse is the entire point of scanning | Import from the owning module                           |
+| "The existing implementation is bad"        | Two bad versions is worse than one fixed version   | Fix the existing code. Do not fork it.                  |
 
 ## Integration
 

@@ -6,13 +6,7 @@
 ## Pattern
 
 <!-- Name your architecture pattern and draw the dependency flow. -->
-<!-- Example: Clean Architecture, Hexagonal, MVC, etc.
-```
-Presentation -> Application -> Domain
-      |              |
-   Infrastructure
-```
--->
+<!-- Example: Clean Architecture / Hexagonal / Feature-First -->
 
 ## Project Layout
 

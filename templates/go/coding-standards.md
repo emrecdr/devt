@@ -39,12 +39,12 @@
 
 ## Concurrency
 
-- Prefer channels for communication between goroutines
-- Use mutexes only for protecting shared state within a struct
-- Always pass `context.Context` as first parameter for cancellation
-- Use `errgroup` for managing groups of goroutines
-- Never start goroutines without a way to stop them (context or done channel)
-- Channel direction in function signatures: `ch <-chan T` or `ch chan<- T`
+- Use `context.Context` for cancellation and timeouts in all long-running operations
+- Prefer `errgroup.Group` for parallel tasks that need error collection
+- Use channels for communication between goroutines, mutexes for shared state protection
+- Always handle goroutine lifecycle — no fire-and-forget goroutines without cleanup
+- Use `sync.WaitGroup` when you need to wait for multiple goroutines without error propagation
+- Avoid goroutine leaks — every goroutine must have a termination path
 
 ## Initialization
 

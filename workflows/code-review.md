@@ -13,16 +13,18 @@ Standalone code review: READ-ONLY analysis with findings and recommendations. No
 
 <available_agent_types>
 The following agent type is used in this workflow:
+
 - `devt:code-reviewer` — code review specialist, READ-ONLY (Read, Bash, Glob, Grep)
 
 Not used in this workflow:
+
 - `devt:programmer` — implementation specialist
 - `devt:tester` — testing specialist
 - `devt:architect` — structural review specialist
 - `devt:docs-writer` — documentation specialist
 - `devt:retro` — lesson extraction specialist
 - `devt:curator` — playbook quality maintenance specialist
-</available_agent_types>
+  </available_agent_types>
 
 <agent_skill_injection>
 Before dispatching the code-reviewer agent, check `.devt.json` for an `agent_skills` configuration block:
@@ -53,13 +55,14 @@ If not configured, omit the block.
 
 <step name="context_init" gate="compound init succeeds">
 
-Initialize the workflow:
+Initialize the workflow (read-only — do NOT reset .devt-state/ as it may contain artifacts from a prior workflow that this review depends on):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init review
 ```
 
 Load project context:
+
 - Read `.dev-rules/coding-standards.md`
 - Read `.dev-rules/architecture.md`
 - Read `.dev-rules/quality-gates.md`
@@ -88,17 +91,21 @@ Write the file list to `.devt-state/review-scope.md`:
 
 ```markdown
 # Review Scope
+
 ## Files
-- path/to/file1.py
-- path/to/file2.py
+
+- path/to/file1
+- path/to/file2
 
 ## Source
+
 <how the file list was determined: user-specified / git-diff / impl-summary / user-prompt>
 ```
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scope status=DONE
 ```
+
 </step>
 
 <step name="review" gate="review.md is written to .devt-state/">
@@ -126,6 +133,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status=DONE
 ```
+
 </step>
 
 <step name="present_findings" gate="findings are reported to the user">
@@ -143,21 +151,24 @@ This is a READ-ONLY workflow. Do NOT offer to fix findings. If the user wants fi
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE
 ```
+
 </step>
 
 ---
 
 <deviation_rules>
+
 1. **Auto-fix: bugs** — Not applicable. This is a READ-ONLY workflow.
 2. **Auto-fix: lint** — Not applicable. This is a READ-ONLY workflow.
 3. **Auto-fix: deps** — Not applicable. This is a READ-ONLY workflow.
 4. **STOP: architecture** — If no files can be identified for review (no git diff, no user input, no impl-summary), STOP with NEEDS_CONTEXT and ask the user to specify files.
-</deviation_rules>
+   </deviation_rules>
 
 <success_criteria>
+
 - Review scope is determined (at least one file to review)
 - Code review is complete (review.md is written with verdict and findings)
 - Findings are presented to the user with severity, location, and rule references
 - No code was modified (READ-ONLY)
 - Final status: **DONE**
-</success_criteria>
+  </success_criteria>

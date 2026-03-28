@@ -8,51 +8,65 @@ Every review starts at **100 points**.
 
 ## Deductions
 
-| Severity | Points | Description |
-|----------|--------|-------------|
-| Critical | -15 | Violations that could cause security breaches, data loss, system failures, or fundamental architecture breaks |
-| Important | -7 | Violations that degrade maintainability, introduce bugs, or break conventions in meaningful ways |
-| Minor | -3 | Style violations, naming issues, or small deviations from best practices |
+| Severity  | Points | Description                                                                                                   |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| Critical  | -15    | Violations that could cause security breaches, data loss, system failures, or fundamental architecture breaks |
+| Important | -7     | Violations that degrade maintainability, introduce bugs, or break conventions in meaningful ways              |
+| Minor     | -3     | Style violations, naming issues, or small deviations from best practices                                      |
 
 ## Deduction Categories
 
+### Spec/Plan Alignment (-15 / -7 / -3)
+
+- Critical: Required feature not implemented, captured decision (from /devt:clarify) ignored, impl-summary claims verified false
+- Important: Unplanned feature added (scope creep), requirement interpretation doesn't match intent
+- Minor: Minor deviation from plan that doesn't affect functionality
+
+**Note**: Spec alignment is checked FIRST. If spec is not met, verdict is NEEDS_WORK regardless of code quality.
+
 ### Architecture (-15 / -7 / -3)
+
 - Critical: Layer boundary violation, circular dependency, wrong module placement for business logic
 - Important: Missing abstraction at boundary, tight coupling between modules
 - Minor: Suboptimal file organization, slightly unclear responsibility split
 
 ### Security (-15 / -7 / -3)
+
 - Critical: Missing auth, injection vector, secrets in code, unvalidated input in sensitive operations
 - Important: Missing rate limiting, overly verbose error responses, insufficient authorization scope
 - Minor: Missing input length constraints on non-sensitive fields
 
 ### Performance (-15 / -7 / -3)
+
 - Critical: Unbounded query in user-facing hot path, blocking call in async context
 - Important: N+1 query pattern, redundant database round-trips, missing pagination
 - Minor: Unnecessary data fetching, suboptimal but functional query
 
 ### Error Handling (-15 / -7 / -3)
+
 - Critical: Swallowed exceptions hiding failures, generic catch-all masking typed errors
 - Important: Wrong error type/status code, missing error handling on external calls
 - Minor: Error message could be more descriptive, inconsistent error format
 
 ### Test Coverage (-15 / -7 / -3)
+
 - Critical: No tests for new public functionality
 - Important: Missing error path tests, over-mocking hiding real bugs
 - Minor: Missing edge case coverage, test names could be more descriptive
 
 ### Code Quality (-15 / -7 / -3)
+
 - Critical: Duplicated business logic across modules (divergence risk)
 - Important: Significant code duplication, missing type annotations on public API
 - Minor: Naming issues, magic numbers, excessive nesting, dead code
 
 ## Verdict Thresholds
 
-| Score Range | Verdict | Meaning |
-|-------------|---------|---------|
-| 90 - 100 | APPROVED | Code meets standards. Ship it. |
-| 80 - 89 | APPROVED_WITH_NOTES | Code is acceptable but has issues worth addressing. |
-| 0 - 79 | NEEDS_WORK | Code has significant issues that must be fixed before proceeding. |
+| Score Range | Verdict             | Meaning                                                           |
+| ----------- | ------------------- | ----------------------------------------------------------------- |
+| 90 - 100    | APPROVED            | Code meets standards. Ship it.                                    |
+| 80 - 89     | APPROVED_WITH_NOTES | Code is acceptable but has issues worth addressing.               |
+| 0 - 79      | NEEDS_WORK          | Code has significant issues that must be fixed before proceeding. |
 
 ## Scoring Integrity Rules
 

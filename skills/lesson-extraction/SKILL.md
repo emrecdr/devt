@@ -11,14 +11,15 @@ Every completed task contains lessons that can prevent future mistakes or accele
 
 The goal is not to document everything. It is to capture lessons that are specific enough to be actionable, general enough to be reusable, and evidence-based enough to be trustworthy.
 
-## When to Use
+## The Iron Law
 
-- After completing any implementation task
-- After resolving a bug that took significant investigation
-- After discovering a non-obvious pattern or pitfall
-- After a code review reveals a recurring issue
-- When the user explicitly asks to record a lesson
-- During retrospectives
+```
+ALL 4 QUALITY FILTERS MUST PASS — NO PARTIAL CREDIT
+```
+
+The learning playbook is only valuable if entries are actionable and generalizable. Without quality filters, it accumulates vague observations ("tests are important"), project-specific trivia, and gut feelings that dilute the signal. Each filter catches a different failure mode — specificity prevents vagueness, generalizability prevents overfitting, actionability prevents philosophy, and evidence prevents speculation.
+
+A candidate that fails ANY filter (specific, generalizable, actionable, evidence-based) is discarded. Better to extract 2 strong lessons than 10 weak ones.
 
 ## The Process
 
@@ -41,9 +42,9 @@ Each lesson uses this YAML format:
     Clear, actionable description of the lesson.
     Include the context, the problem, and the solution.
   category: architecture | coding | testing | tooling | process | debugging
-  importance: 7        # 1-10, how impactful is this lesson
-  confidence: 0.8      # 0.0-1.0, how certain are you this is correct
-  decay_days: 180      # days before this lesson should be re-evaluated
+  importance: 7 # 1-10, how impactful is this lesson
+  confidence: 0.8 # 0.0-1.0, how certain are you this is correct
+  decay_days: 180 # days before this lesson should be re-evaluated
   tags: [error-handling, repository-pattern, data-access]
   evidence: |
     Concrete evidence from the session: file paths, error messages,
@@ -62,45 +63,45 @@ Every entry MUST pass all 4 filters before being accepted:
 #### Filter 2: Generalizable (not one-off)
 
 - PASS: "When a route handler catches generic `Exception` before custom app errors, those custom errors get swallowed and return 500 instead of their mapped status code"
-- FAIL: "The user_service.py file on line 47 has a bug"
+- FAIL: "The user_service file on line 47 has a bug"
 
 #### Filter 3: Actionable (not observation)
 
-- PASS: "Always search for existing interfaces in `repository_interfaces.py` before creating a new Protocol — duplicates cause dependency injection conflicts"
+- PASS: "Always search for existing interfaces before creating a new one — duplicates cause dependency injection conflicts"
 - FAIL: "The codebase has a lot of interfaces"
 
 #### Filter 4: Evidence-based (not theoretical)
 
-- PASS: "Confirmed by incident: missing `email_status_logs` cleanup in `delete_hard()` caused FK constraint violation on user deletion (file: user_repository.py)"
+- PASS: "Confirmed by incident: missing `email_status_logs` cleanup in `delete_hard()` caused FK constraint violation on user deletion (file: user_repository)"
 - FAIL: "FK constraints could theoretically cause issues during deletion"
 
 ### Step 4: Calibrate Scores
 
 #### Importance (1-10)
 
-| Score | Criteria |
-|-------|----------|
-| 1-3 | Nice to know. Minor convenience. |
-| 4-6 | Saves meaningful time or prevents common mistakes. |
-| 7-8 | Prevents significant bugs or architectural issues. |
-| 9-10 | Prevents data loss, security issues, or hours of debugging. |
+| Score | Criteria                                                    |
+| ----- | ----------------------------------------------------------- |
+| 1-3   | Nice to know. Minor convenience.                            |
+| 4-6   | Saves meaningful time or prevents common mistakes.          |
+| 7-8   | Prevents significant bugs or architectural issues.          |
+| 9-10  | Prevents data loss, security issues, or hours of debugging. |
 
 #### Confidence (0.0-1.0)
 
-| Score | Criteria |
-|-------|----------|
-| 0.0-0.3 | Hypothesis. Not fully validated. |
-| 0.4-0.6 | Observed once. Likely correct but needs more evidence. |
-| 0.7-0.8 | Observed multiple times. Well-understood mechanism. |
+| Score   | Criteria                                                      |
+| ------- | ------------------------------------------------------------- |
+| 0.0-0.3 | Hypothesis. Not fully validated.                              |
+| 0.4-0.6 | Observed once. Likely correct but needs more evidence.        |
+| 0.7-0.8 | Observed multiple times. Well-understood mechanism.           |
 | 0.9-1.0 | Proven. Documented in official sources or extensively tested. |
 
 #### Decay Days
 
-| Duration | When to use |
-|----------|-------------|
-| 30-60 | Tooling-specific, version-dependent (may change with updates) |
-| 90-180 | Framework patterns, architectural lessons (stable but evolving) |
-| 365+ | Fundamental principles (rarely change) |
+| Duration | When to use                                                     |
+| -------- | --------------------------------------------------------------- |
+| 30-60    | Tooling-specific, version-dependent (may change with updates)   |
+| 90-180   | Framework patterns, architectural lessons (stable but evolving) |
+| 365+     | Fundamental principles (rarely change)                          |
 
 ### Step 5: Write to Playbook
 
@@ -125,20 +126,17 @@ If any filter fails, rewrite the entry or discard it.
 - [ ] Confidence reflects evidence strength, not gut feeling
 - [ ] Decay days match the lesson's expected shelf life
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "Everything I did today is a lesson" — No. Most work is routine. Extract only what is reusable.
-- "This is important but I can't explain why" — If you cannot articulate the lesson, it is not ready.
-- "Everyone knows this" — If everyone knew it, the mistake would not have happened.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "This is too specific to our project" | Extract the general principle. The specific example is evidence. |
-| "This is obvious" | Obvious lessons still get violated. If it caused a bug, record it. |
-| "I'll remember this" | You will not. In 3 months, you will make the same mistake. |
-| "The lesson is just 'be more careful'" | That is not a lesson. What specific check would have caught it? |
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "Everything I did today is a lesson" | Most work is routine, not reusable insight | Extract only what prevents future mistakes |
+| "This is important but I can't explain why" | Inarticulate lessons are not ready to record | Clarify the lesson until it is specific and actionable |
+| "Everyone knows this" | If everyone knew it, the mistake would not have happened | Record it with evidence |
+| "This is too specific to our project" | The specific example is evidence; the principle generalizes | Extract the general principle |
+| "This is obvious" | Obvious lessons still get violated | If it caused a bug, record it |
+| "I'll remember this" | You will not. In 3 months, you will make the same mistake. | Write it down with evidence and decay date |
+| "The lesson is just 'be more careful'" | That is not a lesson | Identify the specific check that would have caught it |
 
 ## Integration
 

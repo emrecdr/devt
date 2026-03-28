@@ -9,6 +9,8 @@ agents:
       - scratchpad
       - api-docs-fetcher
       - strategic-analysis
+      - tdd-patterns
+      - verification-patterns
     reads:
       - .dev-rules/coding-standards.md
       - .dev-rules/architecture.md
@@ -17,6 +19,7 @@ agents:
   tester:
     skills:
       - scratchpad
+      - tdd-patterns
     reads:
       - .dev-rules/testing-patterns.md
       - .dev-rules/quality-gates.md
@@ -40,6 +43,9 @@ agents:
     skills:
       - codebase-scan
       - architecture-health-scanner
+      - api-docs-fetcher
+      - strategic-analysis
+      - complexity-assessment
     reads:
       - .dev-rules/architecture.md
 
@@ -53,6 +59,7 @@ agents:
   verifier:
     skills:
       - codebase-scan
+      - verification-patterns
     reads:
       - .dev-rules/quality-gates.md
       - .devt-state/impl-summary.md

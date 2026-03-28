@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # Scaffold .dev-rules/ from a template
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE="${1:-blank}"

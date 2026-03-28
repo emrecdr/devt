@@ -14,16 +14,18 @@ Retrospective and curation: extract lessons from the current session, validate t
 
 <available_agent_types>
 The following agent types are used in this workflow:
+
 - `devt:retro` — lesson extraction specialist (Read, Write, Bash, Glob, Grep)
 - `devt:curator` — playbook quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep)
 
 Not used in this workflow:
+
 - `devt:programmer` — implementation specialist
 - `devt:tester` — testing specialist
 - `devt:code-reviewer` — code review specialist
 - `devt:architect` — structural review specialist
 - `devt:docs-writer` — documentation specialist
-</available_agent_types>
+  </available_agent_types>
 
 <agent_skill_injection>
 Before dispatching any agent, check `.devt.json` for an `agent_skills` configuration block:
@@ -56,6 +58,7 @@ If not configured, omit the block.
 <step name="gather_context" gate="artifacts are identified and accessible">
 
 Identify available workflow artifacts by checking for these files:
+
 - `.devt-state/impl-summary.md`
 - `.devt-state/test-summary.md`
 - `.devt-state/review.md`
@@ -65,9 +68,10 @@ Identify available workflow artifacts by checking for these files:
 List which artifacts exist. If none exist, the retro agent will work from session context (the conversation history) instead.
 
 Also check for:
+
 - `learning-playbook.md` — existing playbook for deduplication
 - `CLAUDE.md` — project rules for evaluating lesson relevance
-</step>
+  </step>
 
 <step name="extract" gate="lessons.yaml is written to .devt-state/">
 
@@ -102,9 +106,10 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/lessons.yaml`:
+
 - If it contains at least one lesson: proceed to curate
 - If it contains zero lessons (all candidates were filtered out): report "No lessons met the quality threshold" and STOP with DONE
-</step>
+  </step>
 
 <step name="curate" gate="curation-summary.md is written and learning-playbook.md is updated">
 
@@ -126,6 +131,7 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   Write summary to .devt-state/curation-summary.md
 ")
 ```
+
 </step>
 
 <step name="report" gate="results are presented to the user">
@@ -145,17 +151,19 @@ Final status: **DONE**
 ---
 
 <deviation_rules>
+
 1. **Auto-fix: bugs** — Not applicable. This workflow reads and writes knowledge artifacts, not code.
 2. **Auto-fix: lint** — Not applicable.
 3. **Auto-fix: deps** — If `learning-playbook.md` does not exist, the curator agent creates it from scratch.
 4. **STOP: architecture** — If the retro agent encounters contradictory evidence (two artifacts disagree about what happened), it flags the contradiction in `lessons.yaml` for the curator to resolve. The curator decides which version to trust.
-</deviation_rules>
+   </deviation_rules>
 
 <success_criteria>
+
 - Retro agent has reviewed all available artifacts
 - Each extracted lesson passes the 4-filter test
 - Curator has evaluated all incoming lessons (accept/merge/edit/reject/archive)
 - `learning-playbook.md` is updated (or created) with accepted entries
 - Expired and low-confidence entries are pruned
 - Final status: **DONE**
-</success_criteria>
+  </success_criteria>

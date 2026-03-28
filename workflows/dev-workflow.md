@@ -4,6 +4,32 @@ Full development pipeline with complexity-tiered execution: scan, implement, tes
 
 ---
 
+<autonomous_mode>
+## Autonomous Mode (`--autonomous`)
+
+When the task description contains `--autonomous`, the workflow operates in autonomous mode:
+
+**Auto-proceed when:**
+- Quality gates pass (lint, typecheck, tests)
+- Review verdict is APPROVED or APPROVED_WITH_NOTES (score >= 80)
+- Verification status is VERIFIED
+- No blockers or missing context
+
+**Still pause for (even in autonomous mode):**
+- Review score < 50 (BLOCKED — likely architectural issue)
+- Any agent returns BLOCKED or NEEDS_CONTEXT
+- Repair operator reaches PRUNE stage (deferred findings need user awareness)
+- Risk & simplicity warning triggers (simpler approach detected)
+- Max iteration limits exceeded
+
+**Detection:** Check if the task description string contains `--autonomous`. Strip the flag before passing the task to agents. Store `autonomous: true` in workflow state.
+
+**Output in autonomous mode:** Display a compact status line at each phase transition instead of asking for confirmation:
+```
+--- Phase 3/7: Testing --- tester: DONE (4 tests, all passing). Proceeding...
+```
+</autonomous_mode>
+
 <prerequisites>
 - `.devt.json` exists in project root (run `/init` first if not)
 - `.dev-rules/` directory exists with project conventions
@@ -14,6 +40,7 @@ Full development pipeline with complexity-tiered execution: scan, implement, tes
 
 <available_agent_types>
 The following agent types can be dispatched via Task():
+
 - `devt:programmer` — implementation specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:tester` — testing specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:code-reviewer` — code review specialist, READ-ONLY (Read, Bash, Glob, Grep)
@@ -24,7 +51,7 @@ The following agent types can be dispatched via Task():
 - `devt:verifier` — goal-backward verification specialist, READ-ONLY (Read, Bash, Glob, Grep)
 - `devt:researcher` — technical investigation specialist, READ-ONLY (Read, Bash, Glob, Grep)
 - `devt:debugger` — systematic debugging specialist, 4-phase investigation protocol (Read, Write, Edit, Bash, Glob, Grep)
-</available_agent_types>
+  </available_agent_types>
 
 <agent_skill_injection>
 Before dispatching any agent, check `.devt.json` for an `agent_skills` configuration block:
@@ -48,8 +75,23 @@ If `agent_skills.<agent_type>` exists, inject the skill references into the agen
 </agent_skills>
 ```
 
-If `agent_skills` is not configured or the key is missing for the agent type, omit the block entirely.
+If `agent_skills` is not configured or the key is missing for the agent type, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for the default agent→skill mapping and inject those defaults.
 </agent_skill_injection>
+
+<task_handoff>
+## Structured Task Handoff
+
+When dispatching agents via `Task()`, use the structured handoff format from `${CLAUDE_PLUGIN_ROOT}/templates/task-handoff-template.md`. Fill in fields from available `.devt-state/` artifacts:
+
+- **Objective**: from task description + spec.md (if exists)
+- **Acceptance criteria**: from spec.md or derived from task description
+- **Prior artifacts**: summarize each existing .devt-state/ file (do NOT reference missing files)
+- **Constraints**: from .dev-rules/ + CLAUDE.md + decisions.md
+- **Test scenarios**: from spec.md (if exists) — include in tester dispatch only
+- **Handoff notes**: from previous agent's output + concerns from workflow state
+
+This ensures every agent receives consistent, complete context — no missing information, no free-form prompts that vary between dispatches.
+</task_handoff>
 
 ---
 
@@ -64,22 +106,33 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 ```
 
 This compound init:
+
 1. Validates `.devt.json` exists and is valid
 2. Creates/resets `.devt-state/` for a fresh workflow run
 3. Records workflow start time and task description
 
 Then load project context:
+
+- Read `${CLAUDE_PLUGIN_ROOT}/protocols/status-enum.md` for status values and transition mapping
+- Read `${CLAUDE_PLUGIN_ROOT}/protocols/checkpoint-protocol.md` for checkpoint format
 - Read `.dev-rules/coding-standards.md`
 - Read `.dev-rules/architecture.md`
 - Read `.dev-rules/quality-gates.md`
 - Read `.dev-rules/testing-patterns.md`
 - Read `CLAUDE.md` if it exists
 - Search for relevant lessons: check `learning-playbook.md` for entries tagged with keywords from the task description
+- Read `.devt-state/spec.md` if it exists (from `/devt:specify`)
+  - If spec exists: use it as the primary requirements source — decisions, API design, test scenarios
+  - If no spec: derive requirements from the task description
 - Read `.devt-state/plan.md` if it exists (from `/devt:plan`)
   - If plan exists: use it to guide implementation (programmer reads it as context)
   - If no plan: proceed normally (programmer plans internally)
 - Read `.devt-state/research.md` if it exists (from /devt:research)
   - If research.md has status DONE_WITH_CONCERNS, flag concerns to planner/programmer as additional context
+- Read `.devt-state/handoff.json` if it exists (from /devt:pause)
+  - If handoff exists: restore phase, iteration, and remaining_tasks as resume context
+  - Use handoff.next_action to guide which step to resume from
+  - Compare handoff.last_commit with current `git rev-parse HEAD` — if they differ, warn user that codebase may have changed since pause
 
 Store the task description for reference by all subsequent steps.
 
@@ -88,6 +141,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init 
 ```
 
 Parse the init output JSON:
+
 - If `workflow_lock.locked` is true: STOP. Report: "A workflow is already active. Run /devt:cancel-workflow first."
 - If `dev_rules.missing_rules` is non-empty: WARN user which required files are missing
 - If `warnings` array is non-empty: report each warning
@@ -99,27 +153,75 @@ Parse the init output JSON:
 
 ---
 
+## Step 0.5: Flow Deviation Detection
+
+<step name="flow_deviation" gate="workflow scope is confirmed">
+
+Before assessing complexity, check if the task description implies skipping phases:
+
+**Detection signals:**
+- Words like "just", "only", "quick" → user may want partial workflow
+- "implement" without mentioning tests → testing might be skipped accidentally
+- "fix this" without mentioning review → review might be skipped
+- Explicit phase requests: "validate and implement" → no testing or review mentioned
+
+**If deviation detected:**
+
+Ask via AskUserQuestion (even in `--autonomous` mode — scope decisions always need confirmation):
+
+```yaml
+question: "Your request implies a partial workflow. Which do you prefer?"
+header: "Workflow Scope"
+multiSelect: false
+options:
+  - label: "Full workflow (Recommended)"
+    description: "implement → test → review → verify → docs — ensures quality and catches issues early"
+  - label: "Partial workflow — as requested"
+    description: "{describe which phases would run based on the user's wording}"
+```
+
+If user chooses full workflow: proceed normally.
+If user chooses partial: record the skipped phases in workflow state and respect them throughout.
+
+**If no deviation detected:** proceed silently.
+
+**Never skip phases silently.** If the user says "just implement this", that's a signal to ASK — not to skip tests and review without saying anything.
+</step>
+
+---
+
 ## Step 1: Complexity Assessment
 
-<step name="assess" gate="complexity tier is determined: SIMPLE, STANDARD, or COMPLEX">
+<step name="assess" gate="complexity tier is determined: TRIVIAL, SIMPLE, STANDARD, or COMPLEX">
 
 Use the complexity-assessment skill to evaluate the task:
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/complexity-assessment/` for the assessment rubric.
 
 Evaluate the task against these dimensions:
+
 - **Scope**: How many files/modules will be touched?
 - **Risk**: Does it touch critical paths, data models, or cross-service boundaries?
 - **Novelty**: Is this a well-trodden pattern or something new?
 - **Dependencies**: Are there cross-cutting concerns (auth, audit, events)?
 
-Assign a complexity tier:
+### Quick Classification Heuristic
 
-| Tier | Criteria | Steps |
-|------|----------|-------|
-| **SIMPLE** | Single file/function, well-known pattern, no cross-cutting concerns | implement, test, review (3 steps) |
-| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting | scan, implement, test, review, verify, docs, retro, curate (8 steps) |
-| **COMPLEX** | New patterns, cross-service, architectural decisions needed | scan, architect, implement, test, review, verify, docs, retro, curate, autoskill (10 steps) |
+```
+TRIVIAL if:   <=3 files AND no new patterns AND no cross-module deps AND no API changes AND no schema changes
+SIMPLE if:    <=2 files AND 1 service AND 0 integrations AND no infra changes
+COMPLEX if:   10+ files OR 3+ services OR 2+ integrations OR infra changes OR new patterns needed
+STANDARD:     Everything else
+```
+
+### Tier → Steps Mapping
+
+| Tier         | Criteria                                                            | Steps                                                                                       |
+| ------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **TRIVIAL**  | Typo fix, config change, <=3 files, no decisions needed             | execute inline, validate quality gates (no subagents)                                       |
+| **SIMPLE**   | Single file/function, well-known pattern, no cross-cutting concerns | implement, test, review (3 steps)                                                           |
+| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting      | scan, implement, test, review, verify, docs, retro, autoskill (8 steps)                     |
+| **COMPLEX**  | New patterns, cross-service, architectural decisions needed         | research, plan, scan, [arch-health?], architect, implement, test, review, verify, docs, retro, curate (11-12 steps) |
 
 Record the tier:
 
@@ -128,26 +230,103 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=assess comple
 ```
 
 Report the tier and reasoning to the user before proceeding. The user can override the tier.
-
-If tier is COMPLEX and no .devt-state/research.md exists:
-  Suggest: "This is a complex task. Consider running /devt:research first to investigate approaches."
 </step>
 
 ---
 
-### Design Gate (COMPLEX tasks only)
+### TRIVIAL Path (inline execution, no subagents)
 
-<step name="design_gate" gate="plan must exist for COMPLEX tasks">
+<step name="trivial_path" gate="changes are made and quality gates pass">
 
-*Only applies if complexity tier is COMPLEX.*
+_Only applies if complexity tier is TRIVIAL._
 
-If no `.devt-state/plan.md` exists:
-  STOP. Tell the user:
-  "This task was assessed as COMPLEX. A plan is required before implementation.
-   Run `/devt:plan` first to create a validated implementation plan,
-   then re-run `/devt:workflow`."
+Execute the task directly in the main session. No subagents. No `.devt-state/` artifacts.
 
-If `.devt-state/plan.md` exists: proceed to Step 2.
+1. Read `.dev-rules/coding-standards.md` and `.dev-rules/quality-gates.md`
+2. Make the change directly
+3. Run quality gates
+4. If gates fail: fix and retry (max 3 attempts). If still failing, upgrade to SIMPLE tier.
+5. Report: files changed, gates passed. Done.
+
+STOP here — do not proceed to subsequent steps.
+</step>
+
+---
+
+### Risk & Simplicity Warning (STANDARD + COMPLEX)
+
+<step name="risk_warning" gate="risk check completed">
+
+_Skip if TRIVIAL or SIMPLE._
+
+Before proceeding, evaluate:
+
+1. **Simpler approach exists?** — Is the proposed solution more complex than the problem requires?
+2. **Over-engineering risk?** — Does the task description imply abstractions or patterns beyond what's needed?
+3. **High-risk change?** — Does it touch auth, data integrity, public APIs, or 10+ files?
+4. **Breaking change?** — Does it change API contracts, database schema, or external interfaces?
+
+If ANY warning triggers, present options to the user via AskUserQuestion:
+
+```yaml
+question: "I detected a potential concern before proceeding."
+header: "Risk Check"
+multiSelect: false
+options:
+  - label: "Proceed with current approach"
+    description: "{describe the approach and its trade-offs}"
+  - label: "Use simpler alternative (Recommended)"
+    description: "{describe the simpler approach if one exists}"
+  - label: "Let me reconsider the task"
+    description: "Pause to rethink scope or approach"
+```
+
+If no warnings trigger, proceed silently.
+</step>
+
+---
+
+### Auto-Research & Auto-Plan (COMPLEX only)
+
+<step name="auto_research_plan" gate="research and plan exist for COMPLEX tasks">
+
+_Only applies if complexity tier is COMPLEX._
+
+**Auto-Research**: If no `.devt-state/research.md` exists, dispatch the researcher agent automatically:
+
+```
+Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
+  <task>Research implementation approaches for: {task_description}</task>
+  <context>
+    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md</files_to_read>
+    <spec>Read .devt-state/spec.md (if exists)</spec>
+    <decisions>Read .devt-state/decisions.md (if exists)</decisions>
+    <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
+    <agent_skills>{injected from .devt.json if available}</agent_skills>
+  </context>
+  Write findings to .devt-state/research.md
+")
+```
+
+If research.md already exists: skip, use existing findings.
+
+**Auto-Plan**: If no `.devt-state/plan.md` exists, create one inline using the planning logic from `${CLAUDE_PLUGIN_ROOT}/workflows/create-plan.md` (Steps 3-5: analyze, plan, validate). Do NOT dispatch a separate subagent for planning — the main session creates the plan.
+
+If plan.md already exists: skip, use existing plan.
+
+Present the plan summary to the user and ask to proceed:
+
+```yaml
+question: "Plan is ready. Proceed with implementation?"
+header: "Plan Review"
+multiSelect: false
+options:
+  - label: "Proceed"
+    description: "{N tasks, M files to change}"
+  - label: "Revise the plan"
+    description: "Make changes before execution"
+```
+</step>
 
 **Why**: COMPLEX tasks involve architectural decisions that should be planned and validated
 before code is written. Skipping planning leads to rework.
@@ -158,6 +337,7 @@ before code is written. Skipping planning leads to rework.
 ### Optional: Clarify Assumptions
 
 For STANDARD and COMPLEX tasks, consider running the clarify-task workflow first:
+
 - Read `${CLAUDE_PLUGIN_ROOT}/workflows/clarify-task.md`
 - Identify gray areas in the task
 - Present choices to user, capture decisions in `.devt-state/decisions.md`
@@ -171,13 +351,14 @@ This step is recommended but not mandatory. Skip for well-defined tasks with cle
 
 <step name="scan" gate="scan-results.md is written to .devt-state/">
 
-*Skip this step if complexity is SIMPLE.*
+_Skip this step if complexity is SIMPLE._
 
 Use the codebase-scan skill to survey relevant code:
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/codebase-scan/` for the scan protocol.
 
 Scan for:
+
 - Existing implementations related to the task (patterns to reuse)
 - Module boundaries and interfaces involved
 - Error types, constants, enums in the domain
@@ -185,6 +366,7 @@ Scan for:
 - Cross-module dependencies and integration points
 
 Write results to `.devt-state/scan-results.md` with:
+
 - Files relevant to the task (grouped by module)
 - Existing patterns to follow (with file references)
 - Interfaces and contracts to satisfy
@@ -193,6 +375,120 @@ Write results to `.devt-state/scan-results.md` with:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scan status=DONE
 ```
+
+</step>
+
+---
+
+## Step 2.5: Regression Baseline (STANDARD + COMPLEX)
+
+<step name="regression_baseline" gate="baseline-gates.md is written to .devt-state/ or step is skipped">
+
+_Skip this step if complexity is SIMPLE._
+_Skip this step if `config.workflow.regression_baseline` is `false`._
+
+Run quality gates **before** implementation to establish a baseline. This captures the current pass/fail state so that any regressions introduced by the implementation can be detected.
+
+```bash
+# Read quality gate commands from .dev-rules/quality-gates.md and run them
+# Capture output — failures here are PRE-EXISTING, not caused by this task
+```
+
+Write results to `.devt-state/baseline-gates.md`:
+
+```markdown
+# Baseline Quality Gates
+
+Captured before implementation to detect regressions.
+
+| Gate | Command | Result | Notes |
+|------|---------|--------|-------|
+| lint | {command} | PASS/FAIL | {pre-existing failures if any} |
+| typecheck | {command} | PASS/FAIL | {pre-existing failures if any} |
+| tests | {command} | PASS/FAIL ({N passed, M failed}) | {pre-existing failures if any} |
+```
+
+**Important**: Pre-existing failures are noted but NOT blocking. The baseline exists to compare AFTER implementation — new failures not in the baseline are regressions.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=regression_baseline status=DONE
+```
+
+</step>
+
+---
+
+## Step 2.7: Architecture Health Scan (COMPLEX only, optional)
+
+<step name="arch_health" gate="user has decided whether to run arch-health scan">
+
+_Only applies if complexity tier is COMPLEX._
+
+Evaluate whether an architecture health scan should be recommended before implementation. Analyze the plan and scan results for architectural risk signals:
+
+**Risk signals** (if ANY are true, recommend the scan):
+- Plan touches 3+ modules or services
+- Plan adds new cross-module dependencies
+- Plan introduces a new architectural pattern (new service, new layer, new integration)
+- Plan modifies shared infrastructure (core/, base classes, middleware)
+- Plan changes database schema across multiple services
+- Scan results show existing coupling or boundary violations in the affected area
+
+**Present the recommendation via AskUserQuestion:**
+
+```yaml
+question: "This task has architectural risk signals. Run an architecture health scan before implementing?"
+header: "Architecture Health Scan"
+multiSelect: false
+options:
+  - label: "Yes — scan first (Recommended)"
+    description: "Detect existing violations in affected modules before adding complexity. Findings feed into the architect review."
+  - label: "Skip — proceed without scan"
+    description: "Go straight to architect review and implementation"
+```
+
+If **no risk signals** detected, skip silently — do not ask.
+
+**If user chooses Yes:**
+
+Run the arch-health scan workflow inline (delta mode — only new findings since last baseline):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=IN_PROGRESS
+```
+
+Dispatch the architect agent with the scan protocol:
+
+```
+Task(subagent_type="devt:architect", model="{models.architect}", prompt="
+  <task>
+    Run an architecture health scan on the modules affected by this task.
+    Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
+    Classify each finding as: true positive, false positive, or pre-existing.
+    Report only findings relevant to the planned changes.
+  </task>
+  <context>
+    <files_to_read>.dev-rules/architecture.md, .dev-rules/coding-standards.md</files_to_read>
+    <scan_results>Read .devt-state/scan-results.md for affected modules</scan_results>
+    <plan>Read .devt-state/plan.md for planned changes</plan>
+    <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
+    <agent_skills>{injected from .devt.json if available}</agent_skills>
+  </context>
+  Write findings to .devt-state/arch-health-scan.md
+")
+```
+
+**Gate check**: Read `.devt-state/arch-health-scan.md`:
+
+- If true-positive findings exist in affected modules: pass them as additional context to the architect review (Step 3) and programmer (Step 4)
+- If clean: proceed normally
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=DONE
+```
+
+**If user chooses Skip:** proceed to Step 3 directly.
+
 </step>
 
 ---
@@ -201,7 +497,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scan status=D
 
 <step name="architect" gate="arch-review.md is written to .devt-state/">
 
-*Skip this step if complexity is SIMPLE or STANDARD.*
+_Skip this step if complexity is SIMPLE or STANDARD._
 
 Dispatch the architect agent to review the proposed approach before implementation:
 
@@ -213,8 +509,10 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     Identify risks before implementation begins.
   </task>
   <context>
-    <files_to_read>.dev-rules/architecture.md, .dev-rules/coding-standards.md</files_to_read>
+    <files_to_read>.dev-rules/architecture.md, .dev-rules/coding-standards.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt-state/scan-results.md</scan_results>
+    <plan>Read .devt-state/plan.md (if exists)</plan>
+    <arch_health>Read .devt-state/arch-health-scan.md (if exists — from Step 2.7). If present, factor existing violations into your review: flag any planned changes that would worsen existing issues.</arch_health>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
   Write findings to .devt-state/arch-review.md
@@ -222,6 +520,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/arch-review.md` and check status:
+
 - DONE: proceed to implement
 - DONE_WITH_CONCERNS: proceed to implement, but pass concerns to programmer as context:
   "Architecture review flagged concerns: [extract from arch-review.md]. Address these during implementation."
@@ -231,6 +530,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect status=$STATUS
 ```
+
 </step>
 
 ---
@@ -251,10 +551,12 @@ Dispatch the programmer agent:
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <task>{task_description}</task>
   <context>
-    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/quality-gates.md, .dev-rules/architecture.md</files_to_read>
+    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/quality-gates.md, .dev-rules/architecture.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt-state/scan-results.md for existing patterns and code to reuse. If this file doesn't exist, the task was assessed as SIMPLE and no scan was performed.</scan_results>
     <arch_review>Read .devt-state/arch-review.md (if it exists)</arch_review>
     <plan>Read .devt-state/plan.md (if it exists — from /devt:plan)</plan>
+    <research>Read .devt-state/research.md (if it exists — from /devt:research)</research>
+    <decisions>Read .devt-state/decisions.md (if it exists — from /devt:clarify)</decisions>
     <review_feedback>Read .devt-state/review.md (if this is a fix iteration)</review_feedback>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
@@ -263,6 +565,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/impl-summary.md` and check status:
+
 - DONE or DONE_WITH_CONCERNS: proceed to test
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
@@ -270,6 +573,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
+
 </step>
 
 ---
@@ -287,7 +591,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     Cover happy paths, error paths, edge cases, and boundary conditions.
   </task>
   <context>
-    <files_to_read>.dev-rules/testing-patterns.md, .dev-rules/quality-gates.md</files_to_read>
+    <files_to_read>.dev-rules/testing-patterns.md, .dev-rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt-state/impl-summary.md</impl_summary>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
@@ -296,6 +600,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 ```
 
 **Gate check**: Read `.devt-state/test-summary.md` and check status:
+
 - DONE or DONE_WITH_CONCERNS: proceed to review
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
@@ -303,6 +608,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$STATUS
 ```
+
 </step>
 
 ---
@@ -320,9 +626,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review ALL code in scope — do not filter by origin or label findings as pre-existing.
   </task>
   <context>
-    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md, .dev-rules/quality-gates.md</files_to_read>
+    <files_to_read>.dev-rules/coding-standards.md, .dev-rules/architecture.md, .dev-rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt-state/impl-summary.md</impl_summary>
     <test_summary>Read .devt-state/test-summary.md</test_summary>
+    <decisions>Read .devt-state/decisions.md (if exists — from /devt:clarify)</decisions>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
   Write review to .devt-state/review.md
@@ -332,18 +639,25 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 **Gate check**: Read `.devt-state/review.md` and check verdict:
 
 - **APPROVED** or **APPROVED_WITH_NOTES**: proceed to next step
-- **NEEDS_WORK**:
-  - Read the current iteration count from `.devt-state/`
-  - If iteration < 3: go back to **Step 4 (implement)** with review feedback
-    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=$((ITER+1)) verdict=NEEDS_WORK`
-    - The programmer agent will read `.devt-state/review.md` as `<review_feedback>`
-  - If iteration >= 3: surface all unresolved findings to the user and STOP
-    - Report: "Code review returned NEEDS_WORK after 3 iterations. Unresolved findings require user input."
-    - Status: BLOCKED
+- **NEEDS_WORK** — apply the **repair operator** based on iteration count:
+  - **Iteration 1 → RETRY**: go back to **Step 4 (implement)** with review feedback
+    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=2 verdict=NEEDS_WORK repair=RETRY`
+    - The programmer agent reads `.devt-state/review.md` as `<review_feedback>` and addresses all findings
+  - **Iteration 2 → DECOMPOSE**: analyze unresolved findings from review.md
+    - Classify each finding: is it fixable in isolation, or does it require cross-cutting changes?
+    - Re-dispatch programmer with a **focused scope**: only the fixable findings, explicitly deferring cross-cutting ones to `.devt-state/scratchpad.md`
+    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=3 verdict=NEEDS_WORK repair=DECOMPOSE`
+  - **Iteration 3 → PRUNE**: stop iterating
+    - Collect all remaining unresolved findings from review.md
+    - Write them to `.devt-state/scratchpad.md` under `## Deferred Review Findings`
+    - Proceed with status DONE_WITH_CONCERNS (do not BLOCK)
+    - Report: "Review iteration limit reached. N findings deferred to scratchpad. Proceeding with implementation."
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=3 verdict=NEEDS_WORK repair=PRUNE`
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status=$STATUS verdict=$VERDICT
 ```
+
 </step>
 
 ---
@@ -352,20 +666,22 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 <step name="verify" gate="verification.md is written with status VERIFIED">
 
-*Skip this step if complexity is SIMPLE.*
+_Skip this step if complexity is SIMPLE._
+_Skip this step if `config.workflow.verification` is `false`._
 
 Dispatch the verifier agent:
 
 ```
-Task(subagent_type="devt:verifier", model="{models.code-reviewer}", prompt="
+Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <task>
     Verify the implementation achieves the original task goal.
     Use goal-backward verification: trace from requirements to code.
   </task>
   <context>
     <original_task>{task_description}</original_task>
-    <files_to_read>.devt-state/impl-summary.md, .devt-state/test-summary.md, .devt-state/review.md</files_to_read>
+    <files_to_read>.devt-state/impl-summary.md, .devt-state/test-summary.md, .devt-state/review.md, .dev-rules/quality-gates.md, CLAUDE.md</files_to_read>
     <plan>Read .devt-state/plan.md (if exists)</plan>
+    <decisions>Read .devt-state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
   Write verification to .devt-state/verification.md
@@ -377,16 +693,22 @@ Task(subagent_type="devt:verifier", model="{models.code-reviewer}", prompt="
 - **VERIFIED**: proceed to docs
 - **VERIFIED** with DONE_WITH_CONCERNS: proceed to docs, but report concerns to user:
   "Verification passed with concerns: [extract from verification.md]"
-- **GAPS_FOUND**: go back to **Step 4 (implement)** with gap list as feedback
-  - This counts as a review iteration
-  - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify iteration=$((ITER+1)) verdict=GAPS_FOUND`
-  - The programmer agent will read `.devt-state/verification.md` as additional `<review_feedback>`
-  - If iteration >= 3: surface all unresolved gaps to the user and STOP
+- **GAPS_FOUND** — apply the **repair operator** based on verify iteration:
+  - Track verify iterations separately from review iterations (use VERIFY_ITER counter, starting at 0)
+  - **VERIFY_ITER 0 → RETRY**: go back to **Step 4 (implement)** with gap list as feedback
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=1 verdict=GAPS_FOUND repair=RETRY`
+    - The programmer agent reads `.devt-state/verification.md` as additional `<review_feedback>`
+  - **VERIFY_ITER 1 → PRUNE**: stop iterating
+    - Write remaining gaps to `.devt-state/scratchpad.md` under `## Deferred Verification Gaps`
+    - Proceed with status DONE_WITH_CONCERNS
+    - Report: "Verification gap limit reached. N gaps deferred to scratchpad."
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=2 verdict=GAPS_FOUND repair=PRUNE`
 - **FAILED**: surface to user as BLOCKED
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=$STATUS
 ```
+
 </step>
 
 ---
@@ -395,9 +717,11 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status
 
 <step name="docs" gate="docs-summary.md is written to .devt-state/">
 
-*Skip this step if complexity is SIMPLE.*
+_Skip this step if complexity is SIMPLE._
+_Skip this step if `config.workflow.docs` is `false`._
 
 **Pre-dispatch check**: Read `.devt-state/impl-summary.md` status.
+
 - If DONE or DONE_WITH_CONCERNS: dispatch docs-writer
 - If BLOCKED: skip docs step (nothing to document)
 - If file missing: skip docs step with warning "No implementation summary found"
@@ -412,7 +736,7 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
     Delete documentation for any removed features.
   </task>
   <context>
-    <files_to_read>.dev-rules/documentation.md (if exists)</files_to_read>
+    <files_to_read>.dev-rules/documentation.md (if exists), CLAUDE.md</files_to_read>
     <impl_summary>Read .devt-state/impl-summary.md</impl_summary>
     <test_summary>Read .devt-state/test-summary.md</test_summary>
     <review>Read .devt-state/review.md</review>
@@ -425,6 +749,7 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=docs status=DONE
 ```
+
 </step>
 
 ---
@@ -433,7 +758,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=docs status=D
 
 <step name="retro" gate="lessons.yaml is written to .devt-state/">
 
-*Skip this step if complexity is SIMPLE.*
+_Skip this step if complexity is SIMPLE._
+_Skip this step if `config.workflow.retro` is `false`._
 
 Dispatch the retro agent:
 
@@ -450,7 +776,10 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
       .devt-state/test-summary.md,
       .devt-state/review.md,
       .devt-state/arch-review.md (if exists),
-      .devt-state/docs-summary.md (if exists)
+      .devt-state/docs-summary.md (if exists),
+      CLAUDE.md (if exists),
+      .dev-rules/coding-standards.md,
+      .dev-rules/testing-patterns.md
     </files_to_read>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
@@ -461,6 +790,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=DONE
 ```
+
 </step>
 
 ---
@@ -469,9 +799,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 <step name="curate" gate="curation-summary.md is written and learning-playbook.md is updated">
 
-*Skip this step if complexity is SIMPLE or STANDARD.*
+_Skip this step if complexity is SIMPLE or STANDARD._
 
 **Pre-dispatch check**: Read `.devt-state/lessons.yaml`.
+
 - If file exists and has entries: dispatch curator
 - If file exists but empty: skip curation (retro found no lessons)
 - If file missing: skip curation with note "No lessons extracted"
@@ -487,7 +818,7 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
     Prune expired or low-confidence entries.
   </task>
   <context>
-    <files_to_read>learning-playbook.md (if exists), .devt-state/lessons.yaml</files_to_read>
+    <files_to_read>learning-playbook.md (if exists), .devt-state/lessons.yaml, CLAUDE.md</files_to_read>
     <agent_skills>{injected from .devt.json if available}</agent_skills>
   </context>
   Write summary to .devt-state/curation-summary.md
@@ -497,19 +828,22 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=curate status=DONE
 ```
+
 </step>
 
 ---
 
-## Step 10: Autoskill (COMPLEX only)
+## Step 10: Autoskill (STANDARD + COMPLEX)
 
 <step name="autoskill" gate="autoskill analysis is complete">
 
-*Skip this step if complexity is SIMPLE or STANDARD.*
+_Skip this step if complexity is SIMPLE._
+_Skip this step if `config.workflow.autoskill` is `false`._
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/autoskill/` for the autoskill protocol.
 
 Analyze the completed workflow for patterns that could be automated:
+
 - Repeated manual interventions that could become skills
 - Agent prompt patterns that could be extracted into reusable templates
 - Quality gate patterns that could be added to `.dev-rules/`
@@ -520,6 +854,7 @@ Report proposals to the user — do NOT auto-apply them.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=autoskill status=DONE
 ```
+
 </step>
 
 ---
@@ -528,13 +863,49 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=autoskill sta
 
 <step name="finalize" gate="final status is reported to user">
 
-Summarize the workflow results:
+Generate a compact state summary for session continuity:
+
+Write `.devt-state/workflow-state.md` with the following structure (enables instant context restoration if the session is resumed):
+
+```markdown
+# Workflow State
+
+## Overview
+- **Task**: {one-line task description}
+- **Tier**: {SIMPLE|STANDARD|COMPLEX}
+- **Status**: {DONE|DONE_WITH_CONCERNS|BLOCKED}
+- **Iterations**: {N implement-review cycles}
+
+## Phase Summary
+
+| Phase | Status | Key Output |
+|-------|--------|-----------|
+| assess | DONE | {tier} ({score}/15) |
+| scan | DONE/SKIPPED | {N patterns found} |
+| arch_health | DONE/SKIPPED | {N findings or "clean" or "skipped by user"} |
+| architect | DONE/SKIPPED | {summary or N/A} |
+| implement | DONE | {N files modified} |
+| test | DONE | {N passed, M failed} |
+| review | {verdict} | {score}/100 |
+| verify | {status}/SKIPPED | {summary} |
+| docs | DONE/SKIPPED | {N files updated} |
+| retro | DONE/SKIPPED | {N lessons extracted} |
+
+## Key Decisions
+{Extract from impl-summary.md and decisions.md if they exist}
+
+## Concerns
+{Extract from any DONE_WITH_CONCERNS artifacts}
+```
+
+Then summarize the workflow results:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE
 ```
 
 Report to the user:
+
 - **Complexity tier**: SIMPLE / STANDARD / COMPLEX
 - **Steps executed**: list of steps that ran
 - **Implementation**: files modified/created (from impl-summary.md)
@@ -560,28 +931,37 @@ If BLOCKED, explain what is blocking and what user action is needed.
 <model_selection_guidance>
 When dispatching agents, match model capability to task complexity:
 
-| Task Type | Signal | Model |
-|-----------|--------|-------|
-| Mechanical implementation | Clear spec, 1-2 files, known pattern | Budget model (fast) |
-| Integration work | Multiple files, cross-module coordination | Standard model |
-| Architecture/design review | System-wide judgment, trade-offs | Best available model |
-| Code review | Quality decisions, pattern detection | Best available model |
-| Verification | Goal tracing, wiring checks, outcome validation | Best available model |
-| Documentation | Straightforward updates | Budget model |
-| Lesson extraction | Pattern recognition across artifacts | Standard model |
+| Task Type                  | Signal                                          | Model                |
+| -------------------------- | ----------------------------------------------- | -------------------- |
+| Mechanical implementation  | Clear spec, 1-2 files, known pattern            | Budget model (fast)  |
+| Integration work           | Multiple files, cross-module coordination       | Standard model       |
+| Architecture/design review | System-wide judgment, trade-offs                | Best available model |
+| Code review                | Quality decisions, pattern detection            | Best available model |
+| Verification               | Goal tracing, wiring checks, outcome validation | Best available model |
+| Documentation              | Straightforward updates                         | Budget model         |
+| Lesson extraction          | Pattern recognition across artifacts            | Standard model       |
 
 The `models` object from compound init provides the configured model per agent.
 Override in .devt.json `model_overrides` for project-specific tuning.
 </model_selection_guidance>
 
 <deviation_rules>
-1. **Auto-fix: bugs** — If a quality gate fails during implementation or testing, the responsible agent (programmer or tester) fixes it within their step. This does not count as a review iteration.
-2. **Auto-fix: lint** — Linting failures detected during implementation are fixed immediately by the programmer agent before writing impl-summary.md. The fix loop is internal to the agent.
-3. **Auto-fix: deps** — If a missing dependency is detected (import error, package not found), the programmer agent installs it following the project's package manager conventions and retries.
-4. **STOP: architecture** — If the architect agent (Step 3) or code-reviewer agent (Step 6) identifies an architectural concern that requires a design decision (new pattern, boundary change, API contract change), the workflow STOPS and surfaces the decision to the user. Do NOT make architectural decisions autonomously.
+Agents follow Rules 1-4 from the programmer agent's deviation framework (see `agents/programmer.md`):
+
+1. **Rule 1 (Auto-fix): Bugs** — Logic errors, type errors, null references, security flaws. Agent fixes inline, no workflow iteration.
+2. **Rule 2 (Auto-fix): Missing critical functionality** — Missing error handling, input validation, auth checks, rate limiting. Agent fixes inline.
+3. **Rule 3 (Auto-fix): Blocking issues** — Missing dependency, broken imports, wrong types, build errors. Agent fixes inline.
+4. **Rule 4 (STOP): Architectural changes** — New database table, major schema change, new service layer, switching libraries. Workflow STOPS and surfaces to user.
+
+**Shared process for Rules 1-3**: Fix → add/update tests if applicable → verify fix → continue → track as `[Rule N - Type]` in summary.
+
+**Attempt limit**: After 3 auto-fix attempts on a single issue within an agent, the agent reports DONE_WITH_CONCERNS. This does not count as a review iteration.
+
+**Scope**: Only auto-fix issues directly caused by the current task. Pre-existing issues are logged to `.devt-state/scratchpad.md` under category `Deferred`.
 </deviation_rules>
 
 <success_criteria>
+
 - Implementation is complete (impl-summary.md status is DONE or DONE_WITH_CONCERNS)
 - All tests pass (test-summary.md shows zero failures)
 - Code review is APPROVED or APPROVED_WITH_NOTES (score >= 80)
@@ -589,4 +969,4 @@ Override in .devt.json `model_overrides` for project-specific tuning.
 - Documentation is updated (if STANDARD or COMPLEX)
 - Lessons are extracted and curated (if applicable)
 - Final status: **DONE** or **DONE_WITH_CONCERNS**
-</success_criteria>
+  </success_criteria>

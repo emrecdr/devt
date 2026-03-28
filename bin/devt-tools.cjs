@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-'use strict';
+"use strict";
 
 /**
  * devt CLI tools — state machine bridge between markdown prompts and filesystem state.
  *
  * Zero dependencies. Node.js stdlib only.
- * Follows GSD's compound-init pattern: one call returns all context as JSON.
+ * Compound-init pattern: one call returns all context as JSON.
  *
  * Usage:
  *   node devt-tools.cjs init workflow "<task>"    # Compound init for workflows
@@ -18,16 +18,17 @@
  *   node devt-tools.cjs setup --template <name>   # Interactive project setup
  */
 
-const path = require('path');
+const path = require("path");
 
 // Module imports
-const initCmd = require('./modules/init.cjs');
-const state = require('./modules/state.cjs');
-const config = require('./modules/config.cjs');
-const modelProfiles = require('./modules/model-profiles.cjs');
-const setup = require('./modules/setup.cjs');
+const initCmd = require("./modules/init.cjs");
+const state = require("./modules/state.cjs");
+const config = require("./modules/config.cjs");
+const modelProfiles = require("./modules/model-profiles.cjs");
+const setup = require("./modules/setup.cjs");
+const update = require("./modules/update.cjs");
 
-const PLUGIN_ROOT = path.resolve(__dirname, '..');
+const PLUGIN_ROOT = path.resolve(__dirname, "..");
 
 function main() {
   const args = process.argv.slice(2);
@@ -41,21 +42,33 @@ function main() {
 
   try {
     switch (command) {
-      case 'init':
-        console.log(JSON.stringify(initCmd.run(subcommand, args.slice(2), PLUGIN_ROOT)));
+      case "init":
+        console.log(
+          JSON.stringify(initCmd.run(subcommand, args.slice(2), PLUGIN_ROOT)),
+        );
         break;
-      case 'state':
+      case "state":
         console.log(JSON.stringify(state.run(subcommand, args.slice(2))));
         break;
-      case 'config':
+      case "config":
         console.log(JSON.stringify(config.run(subcommand, args.slice(2))));
         break;
-      case 'models':
-        console.log(JSON.stringify(modelProfiles.run(subcommand, args.slice(2))));
+      case "models":
+        console.log(
+          JSON.stringify(modelProfiles.run(subcommand, args.slice(2))),
+        );
         break;
-      case 'setup':
+      case "setup":
         console.log(JSON.stringify(setup.run(args.slice(1), PLUGIN_ROOT)));
         break;
+      case "update":
+        update.run(subcommand, args.slice(2), PLUGIN_ROOT).then((result) => {
+          console.log(JSON.stringify(result));
+        }).catch((err) => {
+          console.error(JSON.stringify({ error: err.message }));
+          process.exit(1);
+        });
+        return; // async — don't fall through to main() exit
       default:
         console.error(`Unknown command: ${command}`);
         printUsage();
@@ -77,6 +90,16 @@ Commands:
   config get|set            Config resolution (defaults ← global ← project)
   models get <profile>      Agent→model mapping for a profile
   setup --template <name>   Scaffold .dev-rules/ for a project
+        [--mode create|update|reinit]  create=fresh, update=add missing, reinit=overwrite
+        [--config JSON]    Extra config to merge into .devt.json
+        [--detect]         Just detect stack and git info, don't set up
+  update check [--force]    Check for newer version on GitHub (--force bypasses cache)
+  update status             Combined: install type + dirty tree + version (one call)
+  update local-version      Show installed version
+  update install-type       Detect how devt was installed (plugin/git/unknown)
+  update dirty              Check for local modifications in plugin directory
+  update clear-cache        Clear the update check cache
+  update changelog          Fetch and parse changelog from GitHub
 `);
 }
 

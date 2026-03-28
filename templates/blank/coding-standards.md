@@ -6,7 +6,7 @@
 ## Language & Runtime
 
 <!-- Specify language version, runtime, key frameworks. -->
-<!-- Example: Python 3.13+ / FastAPI / Pydantic v2 -->
+<!-- Example: Python 3.12+ / TypeScript 5+ / Go 1.22+ -->
 
 ## Type Safety
 
@@ -16,12 +16,7 @@
 ## Naming Conventions
 
 <!-- Define naming rules for functions, classes, constants, files. -->
-<!-- Example table:
-| Element   | Convention    | Example          |
-|-----------|---------------|------------------|
-| Functions | snake_case    | get_user()       |
-| Classes   | CamelCase     | UserService      |
--->
+<!-- Example: snake_case for functions, CamelCase for classes, UPPER_SNAKE for constants -->
 
 ## Code Structure
 
@@ -31,7 +26,7 @@
 ## Error Handling
 
 <!-- Define error class hierarchy and handling patterns. -->
-<!-- Example: All errors extend base AppError, no generic catches -->
+<!-- Example: Custom error classes extending a base AppError, no generic catches -->
 
 ## Patterns
 

@@ -11,13 +11,15 @@ A learning playbook degrades without curation. Duplicate entries accumulate, out
 
 The curator's job is not to grow the playbook. It is to maintain signal-to-noise ratio.
 
-## When to Use
+## The Iron Law
 
-- After new lessons are extracted (review before committing to playbook)
-- During periodic maintenance (weekly or monthly)
-- When the playbook exceeds a manageable size (50+ entries warrant pruning)
-- When contradictory lessons are discovered
-- When a lesson is proven wrong by new evidence
+```
+NO DUPLICATE OR CONTRADICTORY ENTRIES IN THE PLAYBOOK
+```
+
+Agents query the playbook for guidance before starting work. Duplicate entries create false emphasis (the lesson appears more important than it is), and contradictory entries force the agent to guess which is correct — often choosing whichever was loaded last. A curated playbook gives clear, unambiguous guidance; an uncurated one creates confusion proportional to its size.
+
+Every new entry must be checked against existing entries. Duplicates dilute signal. Contradictions erode trust. The curator's job is quality, not volume.
 
 ## The Process
 
@@ -116,20 +118,17 @@ For each, decide: renew (reset decay), archive, or delete.
 - [ ] No entry accepted that fails quality filters
 - [ ] Scores are calibrated (not all 10/1.0, not all 1/0.1)
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "Just add it, we'll clean up later" — Later means never. Curate now.
-- "This contradicts an existing entry but both seem right" — Resolve it. Ambiguity is debt.
-- "The playbook is too long to review" — That is exactly when curation is most needed.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "More entries = better playbook" | More noise = worse playbook. Quality over quantity. |
-| "Removing entries loses knowledge" | Archiving preserves knowledge while reducing noise |
-| "The duplicate is slightly different" | If the actionable advice is the same, merge |
-| "I'm not sure if it's stale" | If you cannot find recent evidence, it is stale |
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "Just add it, we'll clean up later" | Later means never | Curate at the point of entry |
+| "This contradicts an existing entry but both seem right" | Ambiguity is debt that undermines trust | Resolve by comparing evidence and context |
+| "The playbook is too long to review" | That is exactly when curation is most needed | Prioritize curation when the playbook grows |
+| "More entries = better playbook" | More noise = worse playbook | Quality over quantity |
+| "Removing entries loses knowledge" | Archiving preserves knowledge while reducing noise | Archive, do not delete |
+| "The duplicate is slightly different" | If the actionable advice is the same, it is a duplicate | Merge into the stronger entry |
+| "I'm not sure if it's stale" | If you cannot find recent evidence, it is stale | Archive and renew only if new evidence appears |
 
 ## Integration
 

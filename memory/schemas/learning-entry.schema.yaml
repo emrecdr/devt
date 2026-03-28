@@ -11,7 +11,17 @@ properties:
     minLength: 20
   category:
     type: string
-    enum: [architecture, testing, performance, security, workflow, tooling, debugging, patterns]
+    enum:
+      [
+        architecture,
+        testing,
+        performance,
+        security,
+        workflow,
+        tooling,
+        debugging,
+        patterns,
+      ]
   importance:
     type: integer
     minimum: 1

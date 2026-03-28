@@ -20,6 +20,14 @@ If ANY check fails: STOP. Tell the user: "This task is too complex for /fast. Us
 Do NOT proceed with a task that fails the scope gate.
 </scope_gate>
 
+<available_agent_types>
+This workflow does NOT use subagents. All steps are executed by the main session.
+</available_agent_types>
+
+<agent_skill_injection>
+Not applicable — this workflow does not dispatch subagents.
+</agent_skill_injection>
+
 ---
 
 <prerequisites>
