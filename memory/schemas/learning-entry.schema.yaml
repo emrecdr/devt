@@ -9,9 +9,10 @@ properties:
   description:
     type: string
     minLength: 20
+    description: Imperative sentence — what to do or not do
   category:
     type: string
-    enum: [architecture, testing, performance, security, workflow, tooling, debugging, patterns]
+    description: Primary category (e.g., architecture, testing, error-handling, performance, security, workflow, tooling, debugging, patterns)
   importance:
     type: integer
     minimum: 1
@@ -23,10 +24,14 @@ properties:
   decay_days:
     type: integer
     default: 90
+    description: Days before re-evaluation (30 = volatile, 365 = stable principle)
   tags:
-    type: array
-    items:
-      type: string
+    type: string
+    description: Comma-separated categories (e.g., "error-handling, reuse"). NOT a YAML array — must be a single-line string for semantic sync compatibility.
   evidence:
     type: string
     minLength: 10
+    description: Concrete example from a real workflow that proved this lesson
+  created_at:
+    type: string
+    description: ISO date string (added by curator during curation, not by retro)

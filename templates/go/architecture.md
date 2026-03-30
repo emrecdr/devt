@@ -73,6 +73,12 @@ pkg/
 - Handler layer maps domain errors to HTTP status codes
 - Use sentinel errors or custom types for known conditions
 
+## Concurrency in Architecture
+
+- Long-running operations accept `context.Context` for cancellation — pass it from handler through service to repository
+- Use `errgroup` at the service layer to coordinate parallel sub-tasks with proper error propagation
+- Keep goroutine ownership clear: the function that starts a goroutine is responsible for its lifecycle
+
 ## Configuration
 
 - Environment variables for runtime config

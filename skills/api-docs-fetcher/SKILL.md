@@ -9,13 +9,15 @@ description: Use when implementing external integrations and need up-to-date lib
 
 External library documentation changes faster than training data. Always fetch current documentation before implementing integrations, instead of relying on potentially outdated knowledge.
 
-## When to Use
+## The Iron Law
 
-- Implementing an integration with a third-party library or service
-- Unsure about the current API for a specific library version
-- Need code examples for a library's recommended patterns
-- Verifying that a remembered API has not changed in a newer version
-- Setting up a new dependency for the first time
+```
+NO LIBRARY CODE FROM MEMORY — ALWAYS FETCH CURRENT DOCS
+```
+
+Documentation changes faster than training data. Code written from memory uses stale APIs, misses breaking changes, and introduces bugs that current docs would have prevented.
+
+Library APIs change between versions and LLM training data contains outdated signatures, deprecated patterns, and removed features. Code written from memory often compiles but uses wrong defaults, misses security patches, or triggers deprecation warnings. Fetching current docs takes seconds and prevents hours of debugging version mismatches.
 
 ## The Process
 
@@ -70,20 +72,17 @@ Documentation examples are generic. Adapt to the project's conventions:
 - [ ] Relevant topic queried with specific query
 - [ ] Patterns extracted and understood
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "I know this library well" — Documentation may have changed. Verify.
-- "The API is straightforward" — Fetch docs anyway. Edge cases hide in documentation.
-- "I'll use the pattern I remember" — Memory is stale. Documentation is current.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "Fetching docs is slow" | Debugging wrong API usage is slower |
-| "I used this library last week" | Libraries release updates frequently |
-| "The docs won't have this specific use case" | Query specifically and you may be surprised |
-| "I'll check docs if my code does not work" | Check first. Do not debug preventable issues. |
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "I know this library well" | Documentation may have changed since your last use | Fetch current docs and verify |
+| "The API is straightforward" | Edge cases hide in documentation you haven't read | Fetch docs anyway |
+| "I'll use the pattern I remember" | Memory is stale. Documentation is current. | Always query current docs |
+| "Fetching docs is slow" | Debugging wrong API usage is slower | Spend 30 seconds fetching, save hours debugging |
+| "I used this library last week" | Libraries release updates frequently | Re-fetch on every integration task |
+| "The docs won't have this specific use case" | Specific queries often surface relevant patterns | Query specifically and you may be surprised |
+| "I'll check docs if my code does not work" | Preventable issues waste debugging time | Check first, code second |
 
 ## Integration
 

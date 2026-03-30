@@ -1,12 +1,12 @@
 {
-  "_comment": "devt project configuration. Copy to .devt.json and customize.",
+  "_comment": "devt project configuration. Copy to .devt/config.json and customize.",
 
-  "model_profile": "balanced",
+  "model_profile": "quality",
   "_model_profile_options": "quality | balanced | budget | inherit",
   "_model_profile_doc": "Controls which Claude model tier each agent uses. quality=all opus, balanced=opus for critical agents, budget=sonnet/haiku, inherit=use parent session model.",
 
   "model_overrides": {
-    "_doc": "Per-agent model overrides. Keys: programmer, tester, code-reviewer, docs-writer, architect, retro, curator. Values: opus, sonnet, haiku, inherit.",
+    "_doc": "Per-agent model overrides. Keys: programmer, tester, code-reviewer, docs-writer, architect, retro, curator, debugger, verifier, researcher. Values: opus, sonnet, haiku, inherit. Invalid keys produce a warning and are ignored.",
     "tester": "opus"
   },
 
@@ -15,7 +15,7 @@
     "_provider_options": "github | bitbucket | gitlab",
     "_provider_doc": "Git hosting provider for PR/MR links and CI integration.",
 
-    "workspace": "emrecamdere",
+    "workspace": "emrecdr",
     "_workspace_doc": "Organization or workspace name on the git provider.",
 
     "slug": "my-project",
@@ -34,5 +34,15 @@
 
     "report_dir": "docs/reports",
     "_report_dir_doc": "Directory where scanner reports are written."
+  },
+
+  "workflow": {
+    "_doc": "Toggle optional workflow steps. Set to false to skip. All default to true.",
+    "docs": true,
+    "retro": true,
+    "verification": true,
+    "autoskill": true,
+    "regression_baseline": true,
+    "_regression_baseline_doc": "Run quality gates before implementation to detect regressions after."
   }
 }

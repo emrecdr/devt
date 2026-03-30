@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Check documentation completeness against .dev-rules/documentation.md.
+# Check documentation completeness against .devt/rules/documentation.md.
 # Extracts required doc paths and section headings, verifies they exist.
 set -uo pipefail
 
-DOC_RULES=".dev-rules/documentation.md"
+DOC_RULES=".devt/rules/documentation.md"
 
 if [[ ! -f "$DOC_RULES" ]]; then
   echo "No documentation rules found at $DOC_RULES"
-  echo "Run 'init-dev-rules.sh' to scaffold .dev-rules/ first."
+  echo "Run /devt:init to scaffold .devt/rules/ first."
   exit 1
 fi
 

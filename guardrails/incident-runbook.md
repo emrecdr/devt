@@ -95,7 +95,7 @@ Without this information, retries are blind and repeat the same mistake.
 
 ## Pattern: State Corruption
 
-**Signal**: Workflow state files in `.devt-state/` are inconsistent, missing, or contain data from a previous workflow run. Agents report unexpected state or the workflow coordinator cannot determine the current phase.
+**Signal**: Workflow state files in `.devt/state/` are inconsistent, missing, or contain data from a previous workflow run. Agents report unexpected state or the workflow orchestrator cannot determine the current phase.
 
 **Response**:
 1. Run the reset script: `scripts/reset-workflow.sh`

@@ -13,26 +13,32 @@ When a quality gate fails, follow this protocol to resolve the issue efficiently
 ## Iteration Thresholds
 
 ### Iteration 1-2: Direct Fix
+
 - Read the error carefully and completely
 - Identify the root cause — not the symptom
 - Apply the most targeted correction
 - Re-run the quality gate
 
 ### Iteration 3: Simplify
+
 - The direct approach is not working. Step back.
 - Simplify the implementation — reduce moving parts
 - Consider whether the approach itself is wrong, not just the details
-- Re-read the relevant `.dev-rules/` file for patterns you may have missed
+- Re-read the relevant `.devt/rules/` file for patterns you may have missed
 - Re-read working examples in the codebase for the same pattern
 
 ### Iteration 4: Alternative Approach
+
 - The current strategy has failed. Try a fundamentally different approach.
 - Look at how similar problems are solved elsewhere in the codebase
 - Consider whether the test or gate expectation is correct (but do NOT skip the gate)
 
+After applying the fix, consider defense-in-depth: see `defense-in-depth.md` for multi-layer validation.
+
 ### Iteration 5: Escalate
+
 - Surface the issue to the user as BLOCKED
-- Document in `.devt-state/impl-summary.md`:
+- Document in `.devt/state/impl-summary.md`:
   - Status: BLOCKED
   - What was tried (all 4 prior attempts, with exact errors)
   - What failed and why
@@ -42,6 +48,7 @@ When a quality gate fails, follow this protocol to resolve the issue efficiently
 ## What to Track
 
 For each iteration, note:
+
 - **Attempt number**: N of 5
 - **What was tried**: Specific change made
 - **Result**: What happened (exact error or behavior)

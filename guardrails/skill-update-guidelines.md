@@ -24,7 +24,7 @@ Proposed updates MUST NOT introduce language, patterns, or references tied to an
 - No framework-specific API calls or library references
 - No language-specific syntax in generic rules
 
-**Test**: Would this update make sense to someone working on a completely different project in a different language? If not, it is project-specific and belongs in `.dev-rules/`, not in the plugin.
+**Test**: Would this update make sense to someone working on a completely different project in a different language? If not, it is project-specific and belongs in `.devt/rules/`, not in the plugin.
 
 ---
 

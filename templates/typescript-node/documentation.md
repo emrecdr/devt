@@ -12,7 +12,7 @@ All exported functions, classes, and interfaces must have doc comments:
  * @returns The user entity, or null if not found
  * @throws {UnauthorizedError} If the caller lacks read permission
  */
-export async function findUserById(id: string): Promise<User | null>
+export async function findUserById(id: string): Promise<User | null>;
 ```
 
 ## Comment Style

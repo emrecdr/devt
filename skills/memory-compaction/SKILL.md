@@ -11,12 +11,15 @@ A learning playbook grows indefinitely without maintenance. Compaction archives 
 
 Archived lessons are not deleted. They move to a separate archive where they remain searchable but do not clutter the active playbook.
 
-## When to Use
+## The Iron Law
 
-- Monthly maintenance cycle
-- When the playbook exceeds 100 active entries
-- When search results consistently include stale or irrelevant entries
-- After a major technology or architecture change that invalidates older lessons
+```
+ALL 3 ARCHIVAL CRITERIA MUST APPLY — NO SINGLE-FACTOR ARCHIVING
+```
+
+Archiving lessons too aggressively loses institutional knowledge that may become relevant again. Requiring all three criteria (age past decay date, low importance score, low confidence) ensures that only entries which are genuinely stale, unimportant, AND uncertain get archived. A lesson can be old but still important, or low-confidence but recent enough to verify — either case should survive compaction.
+
+A lesson is archived only when age exceeds decay_days AND importance < 5 AND confidence < 0.5. Removing lessons by age alone destroys high-value knowledge.
 
 ## The Process
 
@@ -42,17 +45,19 @@ If any answer is yes, renew the lesson (reset decay_days) rather than archiving.
 
 ### Step 3: Run Compaction
 
-Use the compaction script:
+Use the CLI:
 
 ```bash
-python scripts/compact.py
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic compact
 ```
 
-The script:
-1. Reads the active playbook
-2. Identifies entries matching all 3 compaction criteria
-3. Moves them to the archive file
-4. Reports what was archived and what was kept
+Add `--dry-run` to preview without removing entries.
+
+The command:
+
+1. Queries the FTS5 database for entries matching all 3 compaction criteria
+2. Removes archived entries from the database
+3. Reports what was archived and what was kept
 
 ### Step 4: Verify Results
 
@@ -76,23 +81,20 @@ After compaction:
 - [ ] High-importance lessons (>= 7) are never auto-archived regardless of age
 - [ ] Recently referenced lessons are renewed, not archived
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "Archive everything older than X days" — Age alone is not sufficient. Check importance and confidence.
-- "The playbook is small enough, skip compaction" — Compaction is about quality, not just size.
-- "Just delete the old ones" — Archive, do not delete. History has value.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "All lessons are important" | If all lessons are important, none are. Prioritize. |
-| "We might need it later" | That is why we archive (preserve) instead of delete |
-| "Compaction is maintenance busywork" | A cluttered playbook is more busywork than periodic cleanup |
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "Archive everything older than X days" | Age alone is not sufficient criteria | Check all 3 criteria: age, importance, confidence |
+| "The playbook is small enough, skip compaction" | Compaction is about quality, not just size | Review entry quality regardless of count |
+| "Just delete the old ones" | History has value even when stale | Archive, do not delete |
+| "All lessons are important" | If all are important, none are -- priorities become meaningless | Prioritize ruthlessly |
+| "We might need it later" | That is why we archive instead of delete | Archive preserves access while reducing noise |
+| "Compaction is maintenance busywork" | A cluttered playbook is more busywork than periodic cleanup | Schedule regular compaction cycles |
 
 ## Integration
 
 - **Prerequisites**: A learning playbook with entries that have `decay_days` set
-- **Scripts**: `scripts/compact.py` (compaction tool)
+- **CLI**: `devt-tools.cjs semantic compact` (compaction), `devt-tools.cjs semantic compact --dry-run` (preview)
 - **Used by agents**: curator (during maintenance cycles)
 - **Related skills**: lesson-extraction (produces entries with decay_days), playbook-curation (quality gate before compaction)

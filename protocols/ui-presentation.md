@@ -25,11 +25,13 @@ If the phase is executed by the main session: `Running {action}...`
 When the workflow is running autonomously (no user intervention needed between phases):
 
 - **Gate passes (score >= 80)**: Auto-proceed to the next phase. Display:
+
   ```
   Gate passed (score: 87/100). Proceeding to Phase 4/7...
   ```
 
 - **Gate fails (score < 80)**: Pause and display:
+
   ```
   Gate failed (score: 62/100). 3 issues found:
   1. [issue summary]
@@ -39,7 +41,7 @@ When the workflow is running autonomously (no user intervention needed between p
   Entering fix loop...
   ```
 
-- **Gate threshold**: 80 is the default. Projects may override this in `.dev-rules/quality-gates.md`.
+- **Gate threshold**: 80 is the default. Projects may override this in `.devt/rules/quality-gates.md`.
 
 ---
 
@@ -105,7 +107,7 @@ When an error occurs, always include three things:
 ```
 Error in Phase 3/7: Testing
   What failed: Unit test command exited with status 1
-  Why: 2 test failures in test_user_service.py (lines 45, 78)
+  Why: 2 test failures in test_user_service (lines 45, 78)
   Next step: Fix failing assertions, then re-run tests
 ```
 
@@ -124,6 +126,7 @@ programmer: DONE (4 files changed, quality gates passed)
 Format: `{agent_type}: {STATUS} ({summary})`
 
 Status values:
+
 - `DONE` — agent completed successfully
 - `NEEDS_WORK` — agent completed but output needs revision
 - `BLOCKED` — agent could not proceed (requires user input)

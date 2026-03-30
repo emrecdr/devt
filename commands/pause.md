@@ -8,7 +8,7 @@ This workflow uses: Read, Write, Bash
 </tool_restrictions>
 
 <objective>
-Create a structured handoff file (.devt-state/handoff.json + continue-here.md) that enables
+Create a structured handoff file (.devt/state/handoff.json + continue-here.md) that enables
 rich session resumption via /devt:status.
 </objective>
 

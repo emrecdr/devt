@@ -1,14 +1,14 @@
 ---
 name: autoskill
-description: Propose skill and agent updates based on patterns observed in recent sessions
+description: Analyze the current session for patterns and propose skill/agent improvements
 ---
 
 <tool_restrictions>
-This workflow uses: Bash, Read, Write
+This workflow uses: Bash, Read, Write, Edit, Agent, Glob, Grep
 </tool_restrictions>
 
 <objective>
-Analyze recent session patterns, repeated workflows, and manual interventions to propose updates to skills, agents, and automation rules within the devt plugin.
+Scan the current session for repeated corrections, missing capabilities, and workflow friction. Propose targeted improvements to devt skills and agents with evidence (3+ instances required).
 </objective>
 
 <execution_context>
@@ -16,5 +16,5 @@ Analyze recent session patterns, repeated workflows, and manual interventions to
 </execution_context>
 
 <process>
-Execute the autoskill workflow from the referenced file end-to-end. Identifies recurring patterns and proposes concrete skill/agent improvements.
+Execute the autoskill workflow from the referenced file end-to-end.
 </process>

@@ -13,12 +13,15 @@ Reviews are objective. They evaluate code against documented project standards, 
 
 **Precision mandate**: Every finding must name a specific file, line number, and exact violation. If a finding could apply to any codebase, it is too vague to report.
 
-## When to Use
+## The Iron Law
 
-- Before approving any pull request or merge
-- After implementation is complete, before marking done
-- When asked to evaluate code quality
-- During post-incident reviews of code that caused issues
+```
+EVERY VALID FINDING MUST BE REPORTED — NO FILTERING, NO MERCY
+```
+
+An unreported finding is a silently disabled quality gate. If the code violates a documented standard, report it — regardless of origin, perceived severity, or whether the developer "probably knows."
+
+The tendency to filter findings by perceived importance, origin ("pre-existing"), or social comfort ("it's minor") directly undermines the review's value. Users rely on the review to catch what they missed. A finding omitted because it seemed small is a finding the developer never gets to evaluate. The reviewer's job is detection, not triage — the developer decides what to fix.
 
 ## The Process
 
@@ -26,9 +29,9 @@ Reviews are objective. They evaluate code against documented project standards, 
 
 Before reviewing any code, read the project's rules:
 
-1. `.dev-rules/coding-standards.md` — code conventions
-2. `.dev-rules/architecture.md` — structural boundaries
-3. `.dev-rules/quality-gates.md` — pass/fail criteria
+1. `.devt/rules/coding-standards.md` — code conventions
+2. `.devt/rules/architecture.md` — structural boundaries
+3. `.devt/rules/quality-gates.md` — pass/fail criteria
 4. `CLAUDE.md` — project-specific rules
 
 A review without loaded standards is a review against personal opinion. Do not start reviewing until all applicable standards are loaded.
@@ -97,11 +100,11 @@ Evaluate each changed file against these categories:
 
 Every finding gets a severity:
 
-| Severity | Point Deduction | Criteria |
-|----------|----------------|----------|
-| **Critical** | -15 | Security vulnerability, data loss risk, architectural violation, broken functionality |
-| **Important** | -7 | Missing error handling, missing tests, performance issue, inconsistent pattern |
-| **Minor** | -3 | Naming issue, style inconsistency, missing type hint, documentation gap |
+| Severity      | Point Deduction | Criteria                                                                              |
+| ------------- | --------------- | ------------------------------------------------------------------------------------- |
+| **Critical**  | -15             | Security vulnerability, data loss risk, architectural violation, broken functionality |
+| **Important** | -7              | Missing error handling, missing tests, performance issue, inconsistent pattern        |
+| **Minor**     | -3              | Naming issue, style inconsistency, missing type hint, documentation gap               |
 
 ### Step 5: Calculate Score
 
@@ -113,11 +116,11 @@ Minimum: 0
 
 ### Step 6: Determine Verdict
 
-| Score | Verdict | Meaning |
-|-------|---------|---------|
-| >= 90 | **APPROVED** | Ship it. Minor issues can be addressed later. |
-| 80-89 | **APPROVED_WITH_NOTES** | Acceptable but has important findings to address. |
-| < 80 | **NEEDS_WORK** | Must fix critical/important findings before proceeding. |
+| Score | Verdict                 | Meaning                                                 |
+| ----- | ----------------------- | ------------------------------------------------------- |
+| >= 90 | **APPROVED**            | Ship it. Minor issues can be addressed later.           |
+| 80-89 | **APPROVED_WITH_NOTES** | Acceptable but has important findings to address.       |
+| < 80  | **NEEDS_WORK**          | Must fix critical/important findings before proceeding. |
 
 ### Step 7: Write Report
 
@@ -141,15 +144,18 @@ Score: XX/100 — VERDICT
 ### Scoring Examples
 
 **Critical finding (-15)**:
-- PASS: "SQL injection in `users.py:47` -- user input concatenated into query string without parameterization"
+
+- PASS: "SQL injection in `users.ext:47` -- user input concatenated into query string without parameterization"
 - FAIL: "Possible security issue" (too vague -- name the file, line, exact problem)
 
 **Important finding (-7)**:
-- PASS: "Missing error handling in `payment_service.py:89` -- API call to Stripe has no try/except, will crash on network timeout"
+
+- PASS: "Missing error handling in `payment_service.ext:89` -- API call to Stripe has no try/catch, will crash on network timeout"
 - FAIL: "Error handling could be better" (unactionable)
 
 **Minor finding (-3)**:
-- PASS: "Inconsistent naming: `getUserData()` at `api.py:23` but `fetch_user_info()` at `api.py:67` -- pick one convention"
+
+- PASS: "Inconsistent naming: `getUserData()` at `api.ext:23` but `fetch_user_info()` at `api.ext:67` -- pick one convention"
 - FAIL: "Naming is inconsistent" (where? what? be specific)
 
 ## Gate: Honest Scoring
@@ -160,19 +166,19 @@ Score: XX/100 — VERDICT
 
 ## Anti-patterns
 
-| Don't | Why It Fails | Do Instead |
-|-------|-------------|------------|
-| Skip review because "it's simple" | Simple code has simple bugs that reach production | Review everything, even one-liners |
-| Accept "it works" as sufficient | Working code can be insecure, unmaintainable, or wrong | Check quality dimensions, not just functionality |
-| Label findings as "pre-existing" | Origin is irrelevant -- if it's visible, it's your responsibility | Report every finding. No origin column. |
-| Rate "close enough" as APPROVED | Partial compliance becomes full non-compliance over time | Score honestly. 78 is NEEDS_WORK, not 80. |
-| Skip security checks for internal code | Internal code gets promoted to external. Supply chain attacks hit internals. | Full security checklist every time |
-| Say "the tests pass so it's fine" | Passing tests prove tests pass, not that code is correct | Evaluate all 6 categories, not just functionality |
-| Dismiss "it follows the existing pattern" | If the pattern is wrong, it is still a finding | Report it. Consistency with bad patterns is not a defense |
-| Soften scores because "flagging this is harsh" | Accuracy is not harshness | Apply deductions by severity criteria, not by feelings |
+| Don't                                          | Why It Fails                                                                 | Do Instead                                                |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Skip review because "it's simple"              | Simple code has simple bugs that reach production                            | Review everything, even one-liners                        |
+| Accept "it works" as sufficient                | Working code can be insecure, unmaintainable, or wrong                       | Check quality dimensions, not just functionality          |
+| Label findings as "pre-existing"               | Origin is irrelevant -- if it's visible, it's your responsibility            | Report every finding. No origin column.                   |
+| Rate "close enough" as APPROVED                | Partial compliance becomes full non-compliance over time                     | Score honestly. 78 is NEEDS_WORK, not 80.                 |
+| Skip security checks for internal code         | Internal code gets promoted to external. Supply chain attacks hit internals. | Full security checklist every time                        |
+| Say "the tests pass so it's fine"              | Passing tests prove tests pass, not that code is correct                     | Evaluate all 6 categories, not just functionality         |
+| Dismiss "it follows the existing pattern"      | If the pattern is wrong, it is still a finding                               | Report it. Consistency with bad patterns is not a defense |
+| Soften scores because "flagging this is harsh" | Accuracy is not harshness                                                    | Apply deductions by severity criteria, not by feelings    |
 
 ## Integration
 
-- **Prerequisites**: Standards files must exist in `.dev-rules/`
+- **Prerequisites**: Standards files must exist in `.devt/rules/`
 - **Used by agents**: code-reviewer (primary consumer)
 - **Related skills**: codebase-scan (to verify no duplication introduced), architecture-health-scanner (for systemic issues)

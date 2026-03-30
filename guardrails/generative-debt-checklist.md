@@ -8,7 +8,7 @@ Quality gates at three stages of implementation. Generative debt is the technica
 
 Run these checks before writing any implementation code.
 
-- [ ] **Read project rules**: `.dev-rules/` and `CLAUDE.md` loaded and internalized
+- [ ] **Read project rules**: `.devt/rules/` and `CLAUDE.md` loaded and internalized
 - [ ] **Scan codebase**: Searched for existing implementations related to the task
 - [ ] **Verify requirements**: Task specification is clear and unambiguous — no assumptions
 - [ ] **Check conventions**: Naming patterns, file structure, and architectural layers identified from adjacent code

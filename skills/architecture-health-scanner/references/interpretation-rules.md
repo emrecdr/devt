@@ -61,10 +61,10 @@ A finding is a false positive when the scanner is wrong about the code.
 
 ## Anti-Patterns in Classification
 
-| Anti-Pattern | Why It Is Wrong |
-|-------------|-----------------|
-| Classifying everything as "acceptable" | You are rationalizing, not classifying |
-| Dismissing findings in unfamiliar code | If you do not understand the code, you cannot classify the finding |
-| "Pre-existing issue" as a classification | Not a valid classification. True positive, acceptable, or false positive — pick one |
-| Classifying without reading the code | The scanner output is a hint, not a verdict |
-| Using "false positive" to mean "low priority" | False positive means the scanner is wrong. Low priority is still a true positive. |
+| Anti-Pattern                                  | Why It Is Wrong                                                                     |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Classifying everything as "acceptable"        | You are rationalizing, not classifying                                              |
+| Dismissing findings in unfamiliar code        | If you do not understand the code, you cannot classify the finding                  |
+| "Pre-existing issue" as a classification      | Not a valid classification. True positive, acceptable, or false positive — pick one |
+| Classifying without reading the code          | The scanner output is a hint, not a verdict                                         |
+| Using "false positive" to mean "low priority" | False positive means the scanner is wrong. Low priority is still a true positive.   |

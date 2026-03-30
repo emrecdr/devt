@@ -1,6 +1,6 @@
 # Golden Rules
 
-Universal development rules that apply to every project, every language, every framework. These are non-negotiable. Agents and workflows MUST follow these at all times. Project-specific rules in `.dev-rules/` and `CLAUDE.md` extend these but never override them.
+Universal development rules that apply to every project, every language, every framework. These are non-negotiable. Agents and workflows MUST follow these at all times. Project-specific rules in `.devt/rules/` and `CLAUDE.md` extend these but never override them.
 
 ---
 
@@ -126,7 +126,7 @@ Universal development rules that apply to every project, every language, every f
 
 ## Rule 11: Read Project Rules First
 
-**What**: Always read `.dev-rules/` and `CLAUDE.md` before starting any work in a project. These contain the project's specific conventions, constraints, and quality gate commands.
+**What**: Always read `.devt/rules/` and `CLAUDE.md` before starting any work in a project. These contain the project's specific conventions, constraints, and quality gate commands.
 
 **Why**: Every project has its own conventions. Working without reading them produces code that is correct in isolation but wrong for the project. Retrofitting conventions after the fact is expensive and error-prone.
 

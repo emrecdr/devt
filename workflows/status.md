@@ -9,6 +9,14 @@ Show where the current workflow stands and what comes next.
 - `node` is available on PATH
 </prerequisites>
 
+<available_agent_types>
+This workflow does NOT use subagents. All steps are executed by the main session.
+</available_agent_types>
+
+<agent_skill_injection>
+Not applicable — this workflow does not dispatch subagents.
+</agent_skill_injection>
+
 ---
 
 ## Steps
@@ -23,28 +31,28 @@ Read the workflow state:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read
 ```
 
-Also check for `.devt-state/` directory and list available artifacts:
+Also check for `.devt/state/` directory and list available artifacts:
 
 ```bash
-ls -la .devt-state/ 2>/dev/null || echo "NO_ARTIFACTS"
+ls -la .devt/state/ 2>/dev/null || echo "NO_ARTIFACTS"
 ```
 
 Check for stopped_at in workflow context:
 
 ```bash
-cat "${CLAUDE_PLUGIN_ROOT}/state/workflow.yaml" 2>/dev/null || echo "NO_CONTEXT"
+cat .devt/state/workflow.yaml 2>/dev/null || echo "NO_CONTEXT"
 ```
 
 Check for structured handoff from /devt:pause:
 
 ```bash
-cat .devt-state/handoff.json 2>/dev/null || echo "NO_HANDOFF"
+cat .devt/state/handoff.json 2>/dev/null || echo "NO_HANDOFF"
 ```
 
-If `.devt-state/handoff.json` exists:
-  Read it for rich context.
-  Show: task, phase, progress summary, next action, context notes.
-  Also read `.devt-state/continue-here.md` if it exists for human-readable summary.
+If `.devt/state/handoff.json` exists:
+Read it for rich context.
+Show: task, phase, progress summary, next action, context notes.
+Also read `.devt/state/continue-here.md` if it exists for human-readable summary.
 
 </step>
 
@@ -55,6 +63,7 @@ If `.devt-state/handoff.json` exists:
 ### If no active workflow:
 
 Report:
+
 ```
 No active workflow.
 
@@ -63,6 +72,7 @@ Use /devt:fast for trivial changes (3 or fewer files).
 ```
 
 If stopped_at exists from a previous session:
+
 ```
 Previous session stopped at: {stopped_at}
 Resume with /devt:workflow or start fresh with /devt:cancel-workflow.
@@ -70,7 +80,7 @@ Resume with /devt:workflow or start fresh with /devt:cancel-workflow.
 
 ### If active workflow:
 
-Read available artifacts from `.devt-state/` and compose a progress report:
+Read available artifacts from `.devt/state/` and compose a progress report:
 
 ```
 Workflow Status
@@ -89,15 +99,34 @@ Completed Steps:
   {circle}    docs
 
 Artifacts:
-  {checkmark} .devt-state/scan-results.md
-  {checkmark} .devt-state/impl-summary.md
-  {circle}    .devt-state/test-summary.md
-  {circle}    .devt-state/review.md
+  {checkmark} .devt/state/scan-results.md
+  {checkmark} .devt/state/impl-summary.md
+  {circle}    .devt/state/test-summary.md
+  {circle}    .devt/state/review.md
 
 Next: {description of what comes next}
 ```
 
+### Additional Context (if available)
+
+**Decisions** (from `.devt/state/decisions.md` or `handoff.json`):
+- List key decisions made during the workflow with rationale
+
+**Blockers** (from `handoff.json` if paused):
+- Technical blockers with type
+- Human actions pending (API keys, approvals, manual testing)
+
+**Active Threads** (from `.devt/state/threads/`):
+```bash
+ls .devt/state/threads/*.md 2>/dev/null | head -10
+```
+If threads exist, list them with status (OPEN/IN_PROGRESS/RESOLVED) and last-updated date.
+
+**Deviations** (from `impl-summary.md` if it has a Deviations section):
+- List any auto-fixes or deferred items from the current workflow
+
 Use these markers:
+
 - Completed: checkmark symbol
 - In progress: arrow symbol
 - Pending: circle symbol
@@ -112,29 +141,31 @@ Adapt the step list to match the actual workflow type (full workflow has more st
 
 Based on current state, suggest the appropriate next command:
 
-| State | Suggestion |
-|-------|------------|
-| No workflow, no stopped_at | "Start with /devt:workflow, /devt:implement, or /devt:fast" |
-| No workflow, has stopped_at | "Resume with /devt:workflow or start fresh with /devt:cancel-workflow" |
-| Active, phase=implement | "Continue with /devt:workflow to proceed to testing" |
-| Active, phase=test | "Continue with /devt:workflow to proceed to review" |
-| Active, phase=review, verdict=NEEDS_WORK | "Continue with /devt:workflow to iterate on review findings" |
-| Active, phase=complete | "Workflow is done. Use /devt:ship to create a PR" |
-| Active, status=BLOCKED | "Resolve the blocker described above, then continue with /devt:workflow" |
+| State                                    | Suggestion                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:fast"              |
+| No workflow, has stopped_at              | "Resume with /devt:workflow or start fresh with /devt:cancel-workflow"   |
+| Active, phase=implement                  | "Continue with /devt:workflow to proceed to testing"                     |
+| Active, phase=test                       | "Continue with /devt:workflow to proceed to review"                      |
+| Active, phase=review, verdict=NEEDS_WORK | "Continue with /devt:workflow to iterate on review findings"             |
+| Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
+| Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 
 </step>
 
 ---
 
 <deviation_rules>
-1. **No state tool**: If `devt-tools.cjs state read` fails, fall back to reading `.devt-state/` artifacts directly and inferring state from which files exist.
+
+1. **No state tool**: If `devt-tools.cjs state read` fails, fall back to reading `.devt/state/` artifacts directly and inferring state from which files exist.
 2. **Partial state**: If some state fields are missing, report what is available and mark the rest as "unknown".
-3. **Stale state**: If the state file exists but `.devt-state/` is empty, report: "State file exists but no artifacts found. The workflow may be stale. Consider /devt:cancel-workflow."
-</deviation_rules>
+3. **Stale state**: If the state file exists but `.devt/state/` is empty, report: "State file exists but no artifacts found. The workflow may be stale. Consider /devt:cancel-workflow."
+   </deviation_rules>
 
 <success_criteria>
+
 - Workflow state is read (or absence is detected)
 - Progress report is displayed with completed/pending steps and artifacts
 - Next action is suggested based on current state
 - No files are modified (READ-ONLY operation)
-</success_criteria>
+  </success_criteria>

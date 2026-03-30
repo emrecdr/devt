@@ -17,14 +17,14 @@
 
 ## Naming Conventions
 
-| Element       | Convention          | Example                     |
-|---------------|---------------------|-----------------------------|
-| Functions     | camelCase           | `getUserById()`             |
-| Classes       | PascalCase          | `UserService`               |
-| Interfaces    | PascalCase          | `UserRepository`            |
-| Constants     | UPPER_SNAKE_CASE    | `MAX_RETRY_COUNT`           |
-| Files         | kebab-case          | `user-service.ts`           |
-| Enums         | PascalCase          | `UserRole.Admin`            |
+| Element    | Convention       | Example           |
+| ---------- | ---------------- | ----------------- |
+| Functions  | camelCase        | `getUserById()`   |
+| Classes    | PascalCase       | `UserService`     |
+| Interfaces | PascalCase       | `UserRepository`  |
+| Constants  | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT` |
+| Files      | kebab-case       | `user-service.ts` |
+| Enums      | PascalCase       | `UserRole.Admin`  |
 
 - No `I` prefix on interfaces — `UserRepository`, not `IUserRepository`
 - No `Impl` suffix on classes — name by what it IS, not what it implements

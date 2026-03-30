@@ -1,28 +1,31 @@
 ---
 name: architecture-health-scanner
-description: Use when analyzing architecture scanner output to cluster findings, classify true/false positives, and prioritize fixes. Use after running the project scanner configured in .devt.json. Also trigger on 'scanner results', 'architecture health', 'tech debt triage', 'false positives', or when prioritizing findings from any static analysis tool.
+description: Use when analyzing architecture scanner output to cluster findings, classify true/false positives, and prioritize fixes. Use after running the project scanner configured in .devt/config.json. Also trigger on 'scanner results', 'architecture health', 'tech debt triage', 'false positives', or when prioritizing findings from any static analysis tool.
 ---
 
 # Architecture Health Scanner
 
 ## Overview
 
-This skill teaches how to interpret scanner output, not how to run the scanner. The project provides its own scanner tool (configured in `.devt.json` under `arch_scanner.command`). This skill turns raw findings into a prioritized remediation plan.
+This skill teaches how to interpret scanner output, not how to run the scanner. The project provides its own scanner tool (configured in `.devt/config.json` under `arch_scanner.command`). This skill turns raw findings into a prioritized remediation plan.
 
 Raw scanner output is noise. Interpretation converts noise into signal by clustering related findings, identifying root causes, and separating true problems from acceptable trade-offs.
 
-## When to Use
+## The Iron Law
 
-- After the architecture scanner has been run and produced output
-- When reviewing scanner results to decide what to fix
-- When prioritizing technical debt remediation
-- During architecture reviews or health checks
+```
+NO CLASSIFICATION WITHOUT READING THE ACTUAL CODE
+```
+
+Scanner output is claims, not facts. Every finding must be verified by reading the code at the reported location before being classified as true positive or false positive.
+
+Scanner output contains false positives and context-dependent findings that cannot be classified from the report alone. A coupling warning between two modules might be an intentional design decision or a genuine violation — only reading the actual code reveals which. Misclassified findings waste developer time or, worse, dismiss real architectural drift.
 
 ## The Process
 
 ### Step 1: Verify Scanner Was Run
 
-Check that scanner output exists. The scanner command is defined in `.devt.json` under `arch_scanner.command`. If no output exists, the scanner must be run first — this skill does not run it.
+Check that scanner output exists. The scanner command is defined in `.devt/config.json` under `arch_scanner.command`. If no output exists, the scanner must be run first — this skill does not run it.
 
 ### Step 2: Parse Output
 
@@ -107,25 +110,22 @@ Structure the output as:
 - [ ] Related findings are grouped by root cause
 - [ ] Each priority bucket has actionable remediation steps
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "All findings are false positives" — Unlikely. Re-examine your classification criteria.
-- "We'll fix these later" — Later means never. Prioritize and schedule concretely.
-- "The scanner is wrong" — The scanner may be imprecise, but read the code before dismissing.
-- "This is just tech debt" — Tech debt with a remediation plan is managed. Without one, it is rot.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "Too many findings to address" | Cluster by root cause — 50 findings may be 5 fixes |
-| "The scanner flags too much" | That is why you classify — not all findings are equal |
-| "We know about these issues" | Knowing is not fixing. Prioritize and schedule. |
-| "This would require a big refactor" | Big refactors start with small, prioritized steps |
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "All findings are false positives" | Unlikely -- re-examine your classification criteria | Read the actual code before dismissing any finding |
+| "We'll fix these later" | Later means never | Prioritize and schedule concretely |
+| "The scanner is wrong" | The scanner may be imprecise, but the code may still have issues | Read the code before dismissing |
+| "This is just tech debt" | Tech debt without a remediation plan is rot | Create a prioritized remediation plan |
+| "Too many findings to address" | 50 findings often share 5 root causes | Cluster by root cause and fix the roots |
+| "The scanner flags too much" | Not all findings are equal -- that is why you classify | Classify each finding, then prioritize |
+| "We know about these issues" | Knowing is not fixing | Prioritize and schedule |
+| "This would require a big refactor" | Big refactors start with small steps | Break it into prioritized increments |
 
 ## Integration
 
-- **Prerequisites**: Scanner must have been run (check `.devt.json` for `arch_scanner.command`)
+- **Prerequisites**: Scanner must have been run (check `.devt/config.json` for `arch_scanner.command`)
 - **References**: `references/detection-categories.md`, `references/interpretation-rules.md`
-- **Used by agents**: architect (primary consumer), coordinator (for planning)
+- **Used by agents**: architect (primary consumer), workflow orchestrator (for planning)
 - **Related skills**: code-review-guide (for individual file issues), strategic-analysis (for refactor planning)

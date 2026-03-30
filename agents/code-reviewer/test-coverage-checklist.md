@@ -53,10 +53,10 @@ Detailed checklist for evaluating test quality and coverage during code review.
 
 ## Scoring Impact
 
-| Gap | Severity | Rationale |
-|-----|----------|-----------|
-| No tests for new public function | Critical (-15) | Untested code is unverified code |
-| Missing error path tests | Important (-7) | Error paths are where bugs hide |
+| Gap                               | Severity       | Rationale                        |
+| --------------------------------- | -------------- | -------------------------------- |
+| No tests for new public function  | Critical (-15) | Untested code is unverified code |
+| Missing error path tests          | Important (-7) | Error paths are where bugs hide  |
 | Over-mocking hiding real behavior | Important (-7) | Tests pass but code may not work |
-| Missing edge case coverage | Minor (-3) | Boundary bugs are common |
-| Poorly named tests | Minor (-3) | Tests are documentation |
+| Missing edge case coverage        | Minor (-3)     | Boundary bugs are common         |
+| Poorly named tests                | Minor (-3)     | Tests are documentation          |

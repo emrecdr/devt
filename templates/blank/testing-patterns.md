@@ -6,12 +6,12 @@
 ## Test Framework
 
 <!-- Specify which test framework(s) to use. -->
-<!-- Example: pytest, Jest, go test, etc. -->
+<!-- Example: pytest / jest / go test -->
 
 ## File Structure
 
 <!-- Define test file naming and location conventions. -->
-<!-- Example: test_<module>.py colocated with source -->
+<!-- Example: tests/ mirror src/ structure, test files colocated with or mirroring source -->
 
 ## Test Types
 

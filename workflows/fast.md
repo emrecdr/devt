@@ -20,10 +20,18 @@ If ANY check fails: STOP. Tell the user: "This task is too complex for /fast. Us
 Do NOT proceed with a task that fails the scope gate.
 </scope_gate>
 
+<available_agent_types>
+This workflow does NOT use subagents. All steps are executed by the main session.
+</available_agent_types>
+
+<agent_skill_injection>
+Not applicable — this workflow does not dispatch subagents.
+</agent_skill_injection>
+
 ---
 
 <prerequisites>
-- `.dev-rules/` directory exists with project conventions
+- `.devt/rules/` directory exists with project conventions
 - The user has provided a task description as the command argument
 </prerequisites>
 
@@ -34,13 +42,13 @@ Do NOT proceed with a task that fails the scope gate.
 <step name="init" gate="project conventions are loaded">
 
 Read project conventions for context:
-- Read `.dev-rules/coding-standards.md`
-- Read `.dev-rules/quality-gates.md`
+- Read `.devt/rules/coding-standards.md`
+- Read `.devt/rules/quality-gates.md`
 - Read `CLAUDE.md` if it exists
 
-Do NOT initialize workflow state or write to `.devt-state/`. This is a lightweight path.
+Do NOT initialize workflow state or write to `.devt/state/`. This is a lightweight path.
 
-**Gate**: If `.dev-rules/` does not exist, warn the user and proceed with best-effort conventions.
+**Gate**: If `.devt/rules/` does not exist, warn the user and proceed with best-effort conventions.
 </step>
 
 <step name="scope_check" gate="all scope gate checks pass">
@@ -65,14 +73,14 @@ If all checks pass: proceed to execute.
 
 <step name="execute" gate="changes are made">
 
-Make the change directly. No subagents. No `.devt-state/` files.
+Make the change directly. No subagents. No `.devt/state/` files.
 
-Follow `.dev-rules/` conventions (coding standards, naming, patterns).
+Follow `.devt/rules/` conventions (coding standards, naming, patterns).
 </step>
 
 <step name="validate" gate="quality gates pass">
 
-Run quality gate commands from `.dev-rules/quality-gates.md`.
+Run quality gate commands from `.devt/rules/quality-gates.md`.
 
 If quality gates are not defined, run basic checks:
 - Linting (if configured)

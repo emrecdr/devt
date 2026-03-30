@@ -72,12 +72,52 @@ Generic taxonomy of architecture scanner findings. Each category describes what 
 
 **Typical severity**: Important to Critical
 
-**Investigation**: Check if an interface exists in the owning service's `repository_interfaces.py`. If so, the consumer should use the interface via dependency injection. If no interface exists, one should be created in the owning service.
+**Investigation**: Check if an interface exists in the owning service's repository interfaces file. If so, the consumer should use the interface via dependency injection. If no interface exists, one should be created in the owning service.
 
 ## Dead Code
 
-**What**: Unreachable code, unused imports, functions never called, classes never instantiated.
+**What**: Unreachable code, unused imports, functions never called, classes never instantiated. Also includes temporal markers (`_v2`, `(NEW)`, `(UPDATED)`) and test infrastructure leaking into production (`_test_helper`, `reset_for_test`).
 
 **Typical severity**: Minor
 
-**Investigation**: Search for all references to the code. If truly unused, delete it. If used only in tests, verify the tests are testing real behavior. Git history preserves the code if needed later.
+**Investigation**: Search for all references to the code. If truly unused, delete it. If used only in tests, verify the tests are testing real behavior. Git history preserves the code if needed later. For temporal markers: rename to describe WHAT, not WHEN.
+
+## Misplaced Business Logic
+
+**What**: Business rules, conditional logic, or domain decisions placed in the wrong architectural layer — typically in route handlers (too high) or repositories (too low).
+
+**Typical severity**: Important
+
+**Investigation**: Route handlers should be thin dispatchers (<15 lines): parse input, call service, format response. Repositories should be pure data access: CRUD operations, filters, queries. If either contains conditional business rules, pricing logic, permission checks, or orchestration — the logic belongs in the service layer. Check `.devt/rules/architecture.md` for the project's layer definitions.
+
+## Code Complexity
+
+**What**: Excessively complex code structures — deep nesting (4+ levels), large functions (40+ lines), long parameter lists (5+ params), complex boolean expressions.
+
+**Typical severity**: Minor to Important
+
+**Investigation**: Deep nesting signals missing guard clauses or abstraction. Large functions signal mixed responsibilities. Long parameter lists signal a missing configuration object. Check if the project's coding standards define specific thresholds.
+
+## Error Handling Violations
+
+**What**: Exception hierarchy violations — custom errors not extending the project's base error class, generic exception catches swallowing domain-specific errors, empty catch blocks.
+
+**Typical severity**: Important
+
+**Investigation**: Check `.devt/rules/coding-standards.md` for the project's error hierarchy. A generic `catch Exception` above domain-specific errors silently converts business errors into 500s. Every custom exception should be traceable to the project's error base class.
+
+## API Contract Issues
+
+**What**: Internal implementation details exposed through API endpoints — internal database IDs, implementation types, framework-specific error formats, or model fields that should be hidden behind DTOs.
+
+**Typical severity**: Important
+
+**Investigation**: API responses should return DTOs, never raw database models. Internal integer IDs should not appear in API responses (use UUIDs or other external identifiers). Check that response models explicitly define their fields rather than inheriting all model fields.
+
+## Convention Drift
+
+**What**: Code that uses outdated patterns, deprecated APIs, or legacy conventions when the project has established newer standards. Detected by comparing code against `.devt/rules/coding-standards.md` and `.devt/rules/patterns/common-smells.md`.
+
+**Typical severity**: Minor to Important
+
+**Investigation**: Read the project's coding standards and common smells documentation. Scan for patterns they explicitly list as forbidden or deprecated. This is project-specific — the detection commands are defined in `.devt/rules/`, not here. Common examples: deprecated framework APIs, legacy library patterns, outdated DI styles.

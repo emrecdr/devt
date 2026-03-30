@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
-# Cross-platform hook wrapper
-# Works on macOS, Linux, and Windows (via Git Bash bundled with Claude Code)
-[[ $- == *i* ]] && return
+# Backwards-compatibility redirect — run-hook.cmd is now the primary wrapper.
+# This file exists so users with custom hooks referencing run-hook.sh still work.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT_NAME="$1"
-if [[ -z "$SCRIPT_NAME" ]]; then
-  echo '{"error": "No hook script specified"}' >&2
-  exit 1
-fi
-shift
-if [[ ! -f "${SCRIPT_DIR}/${SCRIPT_NAME}" ]]; then
-  echo "{\"error\": \"Hook script not found: ${SCRIPT_NAME}\"}" >&2
-  exit 1
-fi
-exec "${SCRIPT_DIR}/${SCRIPT_NAME}" "$@"
+exec bash "${SCRIPT_DIR}/run-hook.cmd" "$@"

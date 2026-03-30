@@ -9,17 +9,20 @@ agents:
       - scratchpad
       - api-docs-fetcher
       - strategic-analysis
+      - tdd-patterns
+      - verification-patterns
     reads:
-      - .dev-rules/coding-standards.md
-      - .dev-rules/architecture.md
-      - .dev-rules/quality-gates.md
+      - .devt/rules/coding-standards.md
+      - .devt/rules/architecture.md
+      - .devt/rules/quality-gates.md
 
   tester:
     skills:
       - scratchpad
+      - tdd-patterns
     reads:
-      - .dev-rules/testing-patterns.md
-      - .dev-rules/quality-gates.md
+      - .devt/rules/testing-patterns.md
+      - .devt/rules/quality-gates.md
 
   code-reviewer:
     skills:
@@ -27,38 +30,42 @@ agents:
       - codebase-scan
       - scratchpad
     reads:
-      - .dev-rules/coding-standards.md
+      - .devt/rules/coding-standards.md
       - CLAUDE.md
 
   docs-writer:
     skills:
       - scratchpad
     reads:
-      - .dev-rules/documentation.md
+      - .devt/rules/documentation.md
 
   architect:
     skills:
       - codebase-scan
       - architecture-health-scanner
+      - api-docs-fetcher
+      - strategic-analysis
+      - complexity-assessment
     reads:
-      - .dev-rules/architecture.md
+      - .devt/rules/architecture.md
 
   retro:
     skills:
       - lesson-extraction
       - autoskill
     reads:
-      - .devt-state/*.md
+      - .devt/state/*.md
 
   verifier:
     skills:
       - codebase-scan
+      - verification-patterns
     reads:
-      - .dev-rules/quality-gates.md
-      - .devt-state/impl-summary.md
-      - .devt-state/test-summary.md
-      - .devt-state/review.md
-      - .devt-state/plan.md
+      - .devt/rules/quality-gates.md
+      - .devt/state/impl-summary.md
+      - .devt/state/test-summary.md
+      - .devt/state/review.md
+      - .devt/state/plan.md
       - CLAUDE.md
 
   researcher:
@@ -66,18 +73,18 @@ agents:
       - codebase-scan
       - strategic-analysis
     reads:
-      - .dev-rules/coding-standards.md
-      - .dev-rules/architecture.md
+      - .devt/rules/coding-standards.md
+      - .devt/rules/architecture.md
       - CLAUDE.md
-      - .devt-state/decisions.md
+      - .devt/state/decisions.md
 
   debugger:
     skills:
       - codebase-scan
     reads:
-      - .dev-rules/coding-standards.md
-      - .dev-rules/quality-gates.md
-      - .devt-state/debug-context.md
+      - .devt/rules/coding-standards.md
+      - .devt/rules/quality-gates.md
+      - .devt/state/debug-context.md
 
   curator:
     skills:

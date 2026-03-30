@@ -1,14 +1,14 @@
 ---
 name: weekly-report
-description: Generate a weekly contribution report from git history and session logs
+description: Generate a weekly development activity report from git history
 ---
 
 <tool_restrictions>
-This workflow uses: Bash, Read, Write, Agent
+This workflow uses: Bash, Read, Write
 </tool_restrictions>
 
 <objective>
-Generate a structured weekly contribution report summarizing commits, features delivered, bugs fixed, and technical improvements across the past week.
+Generate a weekly development report summarizing commits, contributors, and activity patterns from the git log.
 </objective>
 
 <execution_context>

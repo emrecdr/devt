@@ -6,7 +6,7 @@
 ## Format
 
 <!-- Define documentation format and comment style. -->
-<!-- Example: Docstrings on all public functions, TSDoc, godoc, etc. -->
+<!-- Example: MODULE.md per service / README.md per package / JSDoc -->
 
 ## Required Sections
 

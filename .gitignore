@@ -1,12 +1,28 @@
 # Runtime state (per-project, not committed)
-.devt-state/
+.devt/state/
 
 # Semantic database (generated from playbook)
 memory/semantic/*.db
 
+# IDE/editor history
+.history/
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
+
 # OS files
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Test/build artifacts
+coverage/
+dist/
+build/
+.pytest_cache/
 
 # Node
 node_modules/

@@ -7,4 +7,5 @@ workflow_id: null
 last_session: null
 stopped_at: null
 resume_context: null
-decisions: []
+# Note: decisions are stored in .devt/state/decisions.md (not as YAML array)
+decisions_file: decisions.md

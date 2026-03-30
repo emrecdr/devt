@@ -11,13 +11,15 @@ The devt plugin improves through use. When sessions reveal repeated corrections,
 
 Autoskill does not make changes directly. It detects signals and proposes changes with evidence. The user decides what to implement.
 
-## When to Use
+## The Iron Law
 
-- At the end of a session where the user corrected agent behavior multiple times
-- When a pattern emerges that no existing skill covers
-- When an agent repeatedly needs information that should be in its context
-- When a workflow step is consistently manual but could be automated
-- When the user explicitly asks to improve the plugin based on what happened
+```
+NO PROPOSALS WITHOUT 3+ CONFIDENCE POINTS
+```
+
+Proposals require scored evidence, not guesswork. A single explicit correction with "always/never" (5 points) is sufficient. Three weak approvals (3 points) barely qualify. Without scored evidence, the plugin accumulates speculative rules that constrain more than they help.
+
+The scoring system prevents both extremes: ignoring a strong single correction because it's "only one instance", and acting on three vague approvals that don't form a real pattern.
 
 ## The Process
 
@@ -29,7 +31,7 @@ Review the session for these signal types:
 
 The user corrected the same behavior 2+ times in a session, or the same correction appears across multiple sessions.
 
-**Examples**: "Don't commit without asking", "Always check for duplicates first", "Use UUIDv7 not UUID4"
+**Examples**: "Don't commit without asking", "Always check for duplicates first"
 
 #### New Patterns
 
@@ -49,23 +51,69 @@ A step in a workflow required manual intervention that could be automated or cod
 
 **Examples**: Manual file lookup that could be in context loading, manual score calculation that could follow a rubric
 
-### Step 2: Gather Evidence
+### Step 2: Score Confidence
 
-For each signal, collect at least 3 evidence instances:
+Assign a confidence score to each signal:
 
-- What happened (the specific interaction or event)
-- When it happened (which task or step)
-- What the ideal behavior would have been
+| Signal Type | Points | Example |
+|---|---|---|
+| Explicit correction with "always/never" | 5 | "Never commit without asking" |
+| Repeated pattern (2+ occurrences) | 3 | Same feedback given twice in different contexts |
+| Single correction | 2 | "Use X instead of Y" |
+| Approval / confirmation | 1 | "Yes, keep doing it this way" |
 
-Signals with fewer than 3 instances may be coincidences, not patterns.
+Sum the points per proposal. Only propose changes that score 3+ points total (replaces the hard "3 instances" rule with nuanced scoring — a single explicit "always do X" correction at 5 points is sufficient, while three weak approvals at 3 points barely qualify).
 
-### Step 3: Draft Proposal
+### Step 3: Filter for New Information
+
+Before proposing, ask: is this something the agent would already know without being told?
+
+**Worth capturing** (project-specific knowledge):
+- Project conventions that differ from defaults
+- Custom utility/component locations
+- Team preferences
+- Domain-specific terminology
+- Non-obvious architectural decisions
+- Integration quirks specific to this stack
+
+**NOT worth capturing** (common knowledge):
+- General best practices (DRY, separation of concerns)
+- Language/framework conventions
+- Standard library usage
+- Universal security practices
+- Common accessibility guidelines
+
+If the same advice would apply to any project, it does not belong in a skill or `.devt/rules/`.
+
+### Step 4: Route to Correct Target
+
+Each signal belongs in one of two places:
+
+**Update a skill** (`skills/<name>/SKILL.md`) when:
+- Signal relates to how a specific skill should behave
+- Preference affects skill trigger conditions or outputs
+- Pattern is about a skill's decision-making process
+
+**Update project rules** (`.devt/rules/` or `CLAUDE.md`) when:
+- Signal describes project-wide conventions (naming, structure, architecture)
+- Tool/library preferences that span multiple skills
+- Team style preferences
+- Domain-specific terminology used across the codebase
+
+**Examples**:
+- "Don't add try-catch for internal functions" → skill (how code-reviewer or programmer should behave)
+- "We use UUIDv7 for all entity IDs" → `.devt/rules/coding-standards.md` (project convention)
+- "Auth logic lives in middleware, not handlers" → `.devt/rules/architecture.md` (architecture decision)
+
+### Step 5: Draft Proposal
 
 Structure each proposal as:
 
 ```yaml
-type: skill_update | agent_update | rule_update | workflow_update
-target: skills/codebase-scan/SKILL.md  # or agents/programmer.md, etc.
+type: skill_update | agent_update | dev_rules_update | workflow_update
+target: skills/codebase-scan/SKILL.md  # or .devt/rules/coding-standards.md, agents/programmer.md
+confidence: HIGH (7+) | MEDIUM (3-6)
+score: N points
 change: |
   What specifically should change. Include the exact text to add,
   modify, or remove. Be precise enough that someone could implement
@@ -78,26 +126,45 @@ evidence:
   - "Session Z: user added this as a rule in CLAUDE.md after repeated issues"
 ```
 
-### Step 4: Validate Proposal
+### Step 6: Validate Proposal
 
 Before presenting, verify:
 
 - The change does not contradict existing skills or rules
-- The change is not already covered by an existing skill (search first)
+- The change is not already covered by an existing skill or `.devt/rules/` file (search first)
 - The evidence is from actual sessions, not hypothetical scenarios
 - The change is specific enough to implement without ambiguity
 
-### Step 5: Present to User
+When signals are ambiguous or contradictory, ask the user via AskUserQuestion rather than guessing. Downgrade to MEDIUM confidence and present the ambiguity.
 
-Present all proposals with their evidence. The user decides which to implement. Do not implement proposals without approval.
+### Step 7: Present to User
+
+Present proposals grouped by confidence:
+
+```
+## Autoskill Summary
+
+Detected [N] durable preferences from this session.
+
+### HIGH confidence (score 7+, recommended to apply)
+- [change 1] — Score: X points — Target: [file]
+- [change 2] — Score: X points — Target: [file]
+
+### MEDIUM confidence (score 3-6, review carefully)
+- [change 3] — Score: X points — Target: [file]
+
+Apply high confidence changes? [y/n/selective]
+```
+
+Present `.devt/rules/` changes before skill changes (project context first). Wait for explicit approval before editing any file. Never implement proposals without approval.
 
 ## Gate Functions
 
 ### Gate: Sufficient Evidence
 
-- [ ] Each proposal backed by 3+ evidence instances
+- [ ] Each proposal scores 3+ confidence points
 - [ ] Evidence is from actual sessions (not hypothetical)
-- [ ] Pattern is recurring (not a one-time incident)
+- [ ] Signal passes the "new information" filter (project-specific, not common knowledge)
 
 ### Gate: No Contradictions
 
@@ -111,25 +178,30 @@ Present all proposals with their evidence. The user decides which to implement. 
 - [ ] Target file identified
 - [ ] Exact content change described
 
-## Red Flags — STOP
+## Anti-patterns
 
-- "This seems like it might be useful" — Evidence, not intuition. Show 3 instances.
-- "Let's add this rule just in case" — Rules without evidence are noise.
-- "The agent should know everything" — Agents should know what they need. More is not better.
-- "This happened once, let's codify it" — Once is an incident. Three times is a pattern.
+| Anti-pattern | Why it fails | Instead |
+| --- | --- | --- |
+| "This seems like it might be useful" | Intuition without evidence produces noise | Show 3 concrete instances |
+| "Let's add this rule just in case" | Rules without evidence are noise that slows agents | Prove the need with repeated occurrences |
+| "The agent should know everything" | More context is not better context | Add only what solves real problems |
+| "This happened once, let's codify it" | Once is an incident, not a pattern | Wait for 3 occurrences before proposing |
+| "One strong example is enough" | One example could be an outlier | Patterns require repetition across sessions |
+| "This is obviously needed" | If it were obvious, it would already exist | Prove the need with evidence |
+| "More rules make agents better" | More rules make agents slower | Only add what solves real, recurring problems |
+| "We should be proactive" | Proactive without evidence is speculative | Be reactive to observed patterns |
 
-## Common Rationalizations
+## Change Constraints
 
-| Excuse | Reality |
-|--------|---------|
-| "One strong example is enough" | One example could be an outlier. Patterns require repetition. |
-| "This is obviously needed" | If it were obvious, it would already exist. Prove the need. |
-| "More rules make agents better" | More rules make agents slower. Only add what solves real problems. |
-| "We should be proactive" | Proactive without evidence is speculative. Reactive to patterns is responsive. |
+- Never delete existing rules without explicit user instruction
+- Prefer additive changes over rewrites
+- One concept per change — easy to review and revert independently
+- Preserve existing file structure and tone
+- Commit each change separately when git is available: `chore(autoskill): [brief description]`
 
 ## Integration
 
 - **Prerequisites**: Completed sessions with observable patterns
-- **Feeds into**: Skill files, agent files, rule files, workflow files
+- **Feeds into**: Skill files (agent behavior), `.devt/rules/` (project conventions), agent files, workflow files
 - **Used by agents**: retro (post-session analysis), curator (playbook-to-skill promotion)
 - **Related skills**: lesson-extraction (captures lessons; autoskill captures system improvements)

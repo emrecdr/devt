@@ -13,13 +13,15 @@ The goal is not to find the perfect approach. It is to make the trade-offs visib
 
 **Depth mandate**: If your options are two flavors of the same approach, you haven't analyzed deeply enough.
 
-## When to Use
+## The Iron Law
 
-- When a task has more than one reasonable implementation path
-- When the approach affects API contracts, data models, or system boundaries
-- When the choice is difficult to reverse once implemented
-- When team members disagree on the approach
-- When migrating from an existing system and the new design is not obvious
+```
+NO IMPLEMENTATION WITHOUT AN APPROVED DECISION
+```
+
+Implementation creates momentum — once code is written, the team gravitates toward finishing it rather than reconsidering the approach. Comparing options before coding ensures the chosen approach reflects deliberate evaluation rather than whatever came to mind first. This is especially critical for decisions that are hard to reverse, such as data model choices and integration patterns.
+
+Committing to an approach without explicit comparison and user approval compounds wrong choices. Make trade-offs visible before writing code.
 
 ## The Process
 
@@ -88,11 +90,13 @@ Present the full analysis — options, trade-offs, and recommendation — to the
 ### Option Quality Examples
 
 **PASS -- Genuinely different approaches:**
+
 - Option A: Event-driven architecture (async, decoupled, eventually consistent)
 - Option B: Direct service calls (sync, simple, immediately consistent)
 - WHY: Different trade-offs in consistency, complexity, and coupling
 
 **FAIL -- Cosmetic variations:**
+
 - Option A: Use Redis for caching
 - Option B: Use Memcached for caching
 - WHY: Same architectural pattern, same trade-offs. This is an implementation detail, not a strategic choice.
@@ -105,19 +109,19 @@ Present the full analysis — options, trade-offs, and recommendation — to the
 
 ## Anti-patterns
 
-| Don't | Why It Fails | Do Instead |
-|-------|-------------|------------|
-| "There's only one way to do this" | There is always an alternative | Look harder -- even "defer the decision" is an option |
-| "Let's just go with the obvious approach" | Obvious to whom? Implicit reasoning hides trade-offs | Make it explicit in a comparison table |
-| "We can always change it later" | "Later" has a cost you haven't quantified | Estimate the reversal cost for each option |
-| Implement both and let the user choose | Analysis, not code, is the decision tool | Present trade-offs, not prototypes |
-| "Analysis paralysis -- just pick one" | 15 minutes of comparison prevents days of rework | Time-box the analysis, don't skip it |
-| "I already know which is best" | Then the analysis will be quick and confirm your intuition | Write it down anyway -- intuition is not documentation |
-| Present two flavors of the same approach | Cosmetic variations waste the decision-maker's time | Ensure options have genuinely different trade-offs |
+| Don't                                     | Why It Fails                                               | Do Instead                                             |
+| ----------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------ |
+| "There's only one way to do this"         | There is always an alternative                             | Look harder -- even "defer the decision" is an option  |
+| "Let's just go with the obvious approach" | Obvious to whom? Implicit reasoning hides trade-offs       | Make it explicit in a comparison table                 |
+| "We can always change it later"           | "Later" has a cost you haven't quantified                  | Estimate the reversal cost for each option             |
+| Implement both and let the user choose    | Analysis, not code, is the decision tool                   | Present trade-offs, not prototypes                     |
+| "Analysis paralysis -- just pick one"     | 15 minutes of comparison prevents days of rework           | Time-box the analysis, don't skip it                   |
+| "I already know which is best"            | Then the analysis will be quick and confirm your intuition | Write it down anyway -- intuition is not documentation |
+| Present two flavors of the same approach  | Cosmetic variations waste the decision-maker's time        | Ensure options have genuinely different trade-offs     |
 
 ## Integration
 
 - **Prerequisites**: codebase-scan (to understand what exists), complexity-assessment (to know the task tier)
 - **Feeds into**: Implementation plan, architecture decisions
-- **Used by agents**: architect (primary), coordinator (for workflow planning)
+- **Used by agents**: architect (primary), workflow orchestrator (for workflow planning)
 - **Related skills**: code-review-guide (to evaluate the implemented choice)

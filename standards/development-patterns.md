@@ -1,6 +1,6 @@
 # Development Patterns
 
-Universal development patterns that apply across languages, frameworks, and project types. These are reference patterns, not mandates. Each project chooses which patterns to follow and documents its choices in `.dev-rules/`. Agents should follow whatever patterns the project has adopted, and use this file as a reference when the project's rules reference these concepts.
+Universal development patterns that apply across languages, frameworks, and project types. These are reference patterns, not mandates. Each project chooses which patterns to follow and documents its choices in `.devt/rules/`. Agents should follow whatever patterns the project has adopted, and use this file as a reference when the project's rules reference these concepts.
 
 ---
 
@@ -13,6 +13,7 @@ Separate data access from business logic through an interface.
 **Why**: Testability (mock the interface in unit tests), flexibility (swap storage backends without changing business logic), clarity (each layer has one job).
 
 **Key rules**:
+
 - Services never import database sessions, query builders, or ORM-specific code
 - Repositories never contain business logic, validation, or authorization
 - Repository interfaces live with the domain that owns the data
@@ -29,6 +30,7 @@ Business logic lives in a dedicated service layer, separate from infrastructure 
 **Why**: Business rules are the most valuable code in the system. Isolating them makes them testable, portable, and readable. When business logic leaks into routes or repositories, it becomes scattered and untestable.
 
 **Key rules**:
+
 - Services accept and return domain objects or DTOs, not raw request/response formats
 - Services call repositories through interfaces, never through direct database access
 - One service per bounded context — avoid god services that do everything
@@ -45,6 +47,7 @@ Loose coupling through constructor injection. Components declare what they need;
 **Why**: Testability (inject mocks), flexibility (swap implementations), visibility (dependencies are explicit in the constructor signature, not hidden inside methods).
 
 **Key rules**:
+
 - Dependencies are interfaces/abstractions, not concrete implementations
 - Construction and configuration happen at the composition root (startup/bootstrap), not inside business logic
 - No service locator pattern — dependencies are declared, not looked up at runtime
@@ -61,6 +64,7 @@ Custom error hierarchy with centralized handling.
 **Why**: Consistent error responses across the entire application. No scattered try/catch blocks in every route. New error types automatically get correct handling if they inherit from the base.
 
 **Key rules**:
+
 - All application errors inherit from a project-defined base error class
 - Never raise generic/built-in exceptions from business logic
 - Centralized error handler maps error types to response codes and formats
@@ -77,6 +81,7 @@ Validate inputs early. Return or raise immediately on failure.
 **Why**: Reduces nesting, improves readability, makes failure paths explicit. The reader sees all the ways a function can fail before they see the main logic.
 
 **Key rules**:
+
 - Validate at the function boundary, not deep inside nested logic
 - One check per guard clause — do not combine unrelated validations
 - Guards raise/return immediately — no setting flags for later checking
@@ -93,6 +98,7 @@ Single responsibility. Each function does one thing and does it well.
 **Why**: Small functions are testable (one assertion per test), composable (build complex behavior from simple pieces), and readable (the function name tells you what it does, the body tells you how).
 
 **Key rules**:
+
 - If a function needs a comment explaining what a section does, that section should be a separate function with a descriptive name
 - If a function has more than 2-3 levels of nesting, flatten it with extraction or early returns
 - If a function takes more than 5-6 parameters, it likely needs a parameter object or should be split
@@ -109,6 +115,7 @@ No magic numbers, no magic strings. Every literal value with domain meaning gets
 **Why**: Readability (what does `86400` mean? `SECONDS_PER_DAY` is clear), maintainability (change the value in one place), discoverability (search for the constant name to find all usages).
 
 **Key rules**:
+
 - Constants are defined at module level, not inline
 - Names describe the meaning, not the value: `MAX_RETRY_ATTEMPTS` not `THREE`
 - Group related constants together (in a constants file, enum, or configuration object)
