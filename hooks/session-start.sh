@@ -6,6 +6,15 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# ─── Command Registration ───
+# Symlink commands into ~/.claude/commands/devt/ for proper namespacing (devt:command)
+COMMANDS_DIR="$HOME/.claude/commands/devt"
+if [[ ! -d "$COMMANDS_DIR" ]] || [[ "$(readlink -f "$COMMANDS_DIR" 2>/dev/null)" != "$(readlink -f "$PLUGIN_ROOT/commands" 2>/dev/null)" ]]; then
+  mkdir -p "$HOME/.claude/commands" 2>/dev/null || true
+  rm -rf "$COMMANDS_DIR" 2>/dev/null || true
+  ln -sf "$PLUGIN_ROOT/commands" "$COMMANDS_DIR" 2>/dev/null || true
+fi
+
 # ─── Project Detection ───
 
 HAS_DEV_RULES="false"

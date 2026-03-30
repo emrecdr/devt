@@ -678,19 +678,19 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 
 - **APPROVED** or **APPROVED_WITH_NOTES**: proceed to next step
 - **NEEDS_WORK** — apply the **repair operator** based on iteration count:
-  - **Iteration 1 → RETRY**: go back to **Step 4 (implement)** with review feedback
-    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=2 verdict=NEEDS_WORK repair=RETRY`
+  - **Iteration 1–3 → RETRY**: go back to **Step 4 (implement)** with review feedback
+    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=$((ITER+1)) verdict=NEEDS_WORK repair=RETRY`
     - The programmer agent reads `.devt/state/review.md` as `<review_feedback>` and addresses all findings
-  - **Iteration 2 → DECOMPOSE**: analyze unresolved findings from review.md
+  - **Iteration 4 → DECOMPOSE**: analyze unresolved findings from review.md
     - Classify each finding: is it fixable in isolation, or does it require cross-cutting changes?
     - Re-dispatch programmer with a **focused scope**: only the fixable findings, explicitly deferring cross-cutting ones to `.devt/state/scratchpad.md`
-    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=3 verdict=NEEDS_WORK repair=DECOMPOSE`
-  - **Iteration 3 → PRUNE**: stop iterating
+    - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=5 verdict=NEEDS_WORK repair=DECOMPOSE`
+  - **Iteration 5 → PRUNE**: stop iterating
     - Collect all remaining unresolved findings from review.md
     - Write them to `.devt/state/scratchpad.md` under `## Deferred Review Findings`
     - Proceed with status DONE_WITH_CONCERNS (do not BLOCK)
     - Report: "Review iteration limit reached. N findings deferred to scratchpad. Proceeding with implementation."
-    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=3 verdict=NEEDS_WORK repair=PRUNE`
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=5 verdict=NEEDS_WORK repair=PRUNE`
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status=$STATUS verdict=$VERDICT
@@ -741,14 +741,14 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   "Verification passed with concerns: [extract from verification.md]"
 - **GAPS_FOUND** — apply the **repair operator** based on verify iteration:
   - Track verify iterations separately from review iterations (use VERIFY_ITER counter, starting at 0)
-  - **VERIFY_ITER 0 → RETRY**: go back to **Step 4 (implement)** with gap list as feedback
-    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=1 verdict=GAPS_FOUND repair=RETRY`
+  - **VERIFY_ITER 0–1 → RETRY**: go back to **Step 4 (implement)** with gap list as feedback
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GAPS_FOUND repair=RETRY`
     - The programmer agent reads `.devt/state/verification.md` as additional `<review_feedback>`
-  - **VERIFY_ITER 1 → PRUNE**: stop iterating
+  - **VERIFY_ITER 2 → PRUNE**: stop iterating
     - Write remaining gaps to `.devt/state/scratchpad.md` under `## Deferred Verification Gaps`
     - Proceed with status DONE_WITH_CONCERNS
     - Report: "Verification gap limit reached. N gaps deferred to scratchpad."
-    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=2 verdict=GAPS_FOUND repair=PRUNE`
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=3 verdict=GAPS_FOUND repair=PRUNE`
 - **FAILED**: surface to user as BLOCKED
 
 ```bash

@@ -33,6 +33,8 @@ Not applicable — this workflow does not dispatch subagents.
 <step name="analyze" gate="gray areas identified">
 ## Step 1: Analyze the Task
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
+
 Read the task description and identify:
 
 1. What is clearly specified (no ambiguity)

@@ -2,7 +2,7 @@
 
 **devt** (short for **dev**elopment **t**eam) — a lightweight multi-agent development workflow plugin for Claude Code.
 
-![Version](https://img.shields.io/badge/version-0.1.1-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What It Does
@@ -30,6 +30,8 @@ To avoid typing `--plugin-dir` every time, add a shell alias:
 ```bash
 echo 'alias devt="claude --plugin-dir ~/.devt"' >> ~/.zshrc  # or ~/.bashrc
 ```
+
+On first session start, devt registers commands under `~/.claude/commands/devt/` for autocomplete. All commands are available as `/devt:command-name`.
 
 ## Quick Start
 
@@ -74,8 +76,8 @@ User -> Command (thin) -> Workflow (orchestration) -> Agent (worker)
 
 The execution model has three layers:
 
-- **Commands** (26): Thin entry points. Parse arguments, delegate to a workflow. No business logic.
-- **Workflows** (24): Orchestration files. Determine tier, coordinate agents, manage state transitions.
+- **Commands** (28): Thin entry points. Parse arguments, delegate to a workflow. No business logic.
+- **Workflows** (26): Orchestration files. Determine tier, coordinate agents, manage state transitions.
 - **Agents** (10): Focused workers. Each owns one concern -- programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger.
 - **Skills** (15): Technique libraries injected into agents. Codebase scanning, complexity assessment, semantic search, API docs fetching, and more.
 - **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Managed via Node.js runner with profile control (`DEVT_HOOK_PROFILE=minimal|standard|full`).
@@ -160,7 +162,8 @@ The optional `.devt/config.json` file at your project root configures plugin beh
 
 | Command          | Description                                                                                                          |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `/devt:workflow` | Build, fix, or improve anything — auto-detects complexity and runs the right pipeline. Supports `--autonomous` flag. |
+| `/devt:do`       | Don't know which command? Describe what you want — devt routes to the right one                                      |
+| `/devt:workflow`  | Build, fix, or improve anything — auto-detects complexity and runs the right pipeline. Supports `--autonomous` flag. |
 | `/devt:specify`  | Define a feature through interview and codebase analysis — produces a validated PRD                                  |
 | `/devt:debug`    | Investigate and fix a bug with 4-phase systematic debugging                                                          |
 | `/devt:ship`     | Create PR with auto-generated description from workflow artifacts                                                    |
@@ -182,7 +185,8 @@ The optional `.devt/config.json` file at your project root configures plugin beh
 | `/devt:forensics`       | Post-mortem investigation of failed or stuck workflows      |
 | `/devt:cancel-workflow` | Abort the currently active workflow and reset state         |
 | `/devt:note`            | Zero-friction idea capture — save, list, or promote to task |
-| `/devt:health`          | Diagnose plugin health — checks config, state, hooks        |
+| `/devt:health`          | Diagnose plugin health — checks config, state, hooks. Supports `--repair` |
+| `/devt:session-report`  | Post-session summary — commits, files changed, decisions, outcomes |
 | `/devt:update`          | Check for and install plugin updates from GitHub            |
 
 ### Internal (called by workflows, available for power users)
@@ -246,8 +250,8 @@ devt/
   bin/
     devt-tools.cjs        # CLI entry point
     modules/              # init, state, config, model-profiles, setup, semantic, weekly-report, update
-  commands/               # 26 thin command entry points
-  workflows/              # 24 orchestration files
+  commands/               # 28 thin command entry points
+  workflows/              # 26 orchestration files
   agents/                 # 10 agent definitions
   skills/                 # 15 technique skill directories
   hooks/                  # Lifecycle hooks (hooks.json + scripts)

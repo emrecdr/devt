@@ -42,6 +42,7 @@ Parse the feature idea from user input.
 - If clear: proceed
 
 Load project context:
+- Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively
 - Read `.devt/rules/coding-standards.md` for naming/patterns
 - Read `.devt/rules/architecture.md` for project structure
 - Read `CLAUDE.md` if it exists

@@ -1,5 +1,14 @@
 # Testing Patterns — Python / FastAPI
 
+## Reference Files
+
+| File | Purpose |
+|------|---------|
+| `hurl-test-checklist.md` | Pre-flight checklist — complete BEFORE writing HURL tests |
+| `hurl-reference.md` | Full HURL reference: metadata, variable capture, token flows, debugging |
+| `hurl-registration.md` | Test file registration: naming, metadata.json, execution order |
+| `pytest-reference.md` | pytest patterns: mocking strategy (max 3 mocks), async, fixtures, integration |
+
 ## Test Pyramid
 
 1. **E2E tests** (HURL or similar) — primary validation of API contracts
@@ -154,6 +163,8 @@ async def test_create_item(app):
 ## HURL E2E as Primary Validation
 
 HURL E2E tests are the PRIMARY validation mechanism for API endpoints — they verify the complete HTTP contract including status codes, response shapes, and error handling.
+
+**Before writing any HURL tests**, complete the coverage checklist in `.devt/rules/hurl-test-checklist.md` for each endpoint. The checklist forces analysis of the actual endpoint signature (path params, query params, request body) and ensures one test per scenario.
 
 ### Directory Structure
 

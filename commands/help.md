@@ -11,14 +11,15 @@ Display a comprehensive guide to all devt commands, organized by experience leve
 Print the following guide to the user. Do NOT modify, summarize, or abbreviate it.
 
 ```
-# devt — Command Reference
+# devt — Command Reference (28 commands)
 
 ## Getting Started
 
-/devt:init          Set up devt for your project (creates .devt/rules/, .devt/config.json)
-/devt:help          You're here
-/devt:status        Where am I? What step is the workflow on?
-/devt:health        Is devt working? Check config, hooks, state integrity
+/devt:do "what you want"  Don't know which command? Describe it — devt routes to the right one
+/devt:init                Set up devt for your project (creates .devt/rules/, .devt/config.json)
+/devt:help                You're here
+/devt:status              Where am I? What step is the workflow on?
+/devt:health              Is devt working? Check config, hooks, state integrity. Supports --repair
 
 ## The Main Commands
 
@@ -110,7 +111,7 @@ Standalone code review — READ-ONLY analysis with findings and severity ratings
 Use when: Want a second opinion before committing.
 
 ### /devt:ship
-Create a PR with auto-generated description from workflow artifacts.
+Create a PR with auto-generated description from workflow artifacts. If .devt/rules/api-changelog.md exists, generates a changelog entry automatically.
 
 Use when: Workflow complete, ready to merge.
   /devt:ship → PR created with summary, test plan, review verdict
@@ -119,6 +120,11 @@ Use when: Workflow complete, ready to merge.
 Extract lessons from the current session into the learning playbook.
 
 Use when: After completing a task, capture what went well or poorly.
+
+### /devt:session-report
+Generate a post-session summary — commits, files changed, decisions, outcomes.
+
+Use when: End of session, handoff to team, or personal review.
 
 ## Specialized Tools
 
@@ -140,6 +146,9 @@ Run quality gates — lint, typecheck, tests as defined in .devt/rules/quality-g
 ### /devt:weekly-report
 Generate a weekly development activity report from git history.
 
+### /devt:autoskill
+Analyze the session for patterns and propose skill/agent improvements. Changes are audited in .devt/autoskill-changelog.md.
+
 ### /devt:thread "name"
 Persistent context threads for multi-session investigations.
 
@@ -153,10 +162,16 @@ Post-mortem on failed/stuck workflows — analyzes artifacts, state, git history
 
 Use when: A workflow failed and you want to understand why.
 
+### /devt:health [--repair]
+Diagnose plugin health — 19 checks covering config, state, rules, hooks, agents, versions. --repair auto-fixes safe issues.
+
 ### /devt:update
 Check for and install devt updates from GitHub.
 
 ## Typical Workflows
+
+Don't know which command:
+  /devt:do "fix the login bug"  → routes to /devt:debug
 
 Simple bug fix:
   /devt:implement "fix the 404 on GET /users/:id with UUID format"
@@ -173,7 +188,7 @@ Complex task, unfamiliar area:
 Resuming interrupted work:
   /devt:next
 
-End of day:
-  /devt:pause
+End of session:
+  /devt:session-report → /devt:pause
 ```
 </process>

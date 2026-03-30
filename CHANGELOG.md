@@ -4,7 +4,7 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.1] - 2026-03-30
+## [0.2.0] - 2026-03-30
 
 ### Added
 - `/devt:help` command — full command reference with use cases, organized by experience level
@@ -17,8 +17,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 - Autoskill changelog audit trail (`.devt/autoskill-changelog.md`) — records all autoskill modifications
 - Ship workflow changelog step — conditional API changelog generation when `.devt/rules/api-changelog.md` exists
 - `templates/agent-template.md` and `templates/skill-template.md` — authoring templates for extending devt
-- Explicit agent/skill/command registration in `plugin.json`
+- Command registration via symlink to `~/.claude/commands/devt/` for proper `devt:` namespacing in autocomplete
 - `context-monitor.sh` made async — no longer blocks tool calls
+- Health check W009: agent file validation — verifies all plugin agent files exist on disk
+- Health check W010: workflow `<available_agent_types>` enforcement — prevents post-`/clear` silent fallback to general-purpose
+- `scripts/prompt-injection-scan.sh` — CI security scanner for prompt injection, role manipulation, system boundary injection, base64 obfuscation, and secret detection across all markdown files
+- Repo-local CLI resolution in `run-hook.js` — probes `<projectDir>/.claude/devt/` before global fallback, persists resolved path to temp file for workflow bash blocks
+- `/devt:do` smart router — freeform text dispatched to the right command via intent matching
+- `/devt:session-report` — post-session summary from git log and workflow artifacts
+- `bin/modules/security.cjs` — input validation: path traversal prevention, prompt injection detection, safe JSON parsing, shell argument validation
+- `references/questioning-guide.md` — collaborative questioning philosophy for specify and clarify workflows
 
 ### Fixed
 - Hook exit codes: `workflow-context-injector.sh` and `context-monitor.sh` now exit 0 (not 2) when inactive — prevents blocking prompts and tool calls
@@ -65,7 +73,7 @@ Initial release.
 - **Command -> Workflow -> Agent** three-layer execution model
 - 10 agents: programmer, tester, code-reviewer, architect, docs-writer, verifier, researcher, debugger, retro, curator
 - 15 skills: codebase-scan, complexity-assessment, tdd-patterns, code-review-guide, architecture-health-scanner, and more
-- 26 commands, 24 workflows
+- 28 commands, 26 workflows
 - Complexity-tiered pipeline: TRIVIAL, SIMPLE, STANDARD, COMPLEX
 - Language-agnostic via `.devt/rules/` convention
 

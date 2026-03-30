@@ -9,6 +9,7 @@ How to use devt -- from your first task to shipping a PR.
 ```
 What do you need?
   |
+  |-- "I'll describe it"                  -->  /devt:do (smart router)
   |-- "Build, fix, or improve something"  -->  /devt:workflow
   |-- "Define a feature first"            -->  /devt:specify
   |-- "Fix a bug"                         -->  /devt:debug
@@ -18,7 +19,7 @@ What do you need?
   |-- "What commands are available?"      -->  /devt:help
 ```
 
-Five commands for daily work, two for setup/discovery.
+Six commands for daily work, two for setup/discovery.
 
 ---
 
@@ -195,6 +196,28 @@ Show all devt commands organized by experience level with practical use cases an
 
 ```bash
 /devt:help
+```
+
+---
+
+### `/devt:do` -- Smart router
+
+Describe what you want in plain text. devt matches your intent to the right command and dispatches it. Never does work itself.
+
+```bash
+/devt:do "fix the login bug"          # → routes to /devt:debug
+/devt:do "add pagination to contacts" # → routes to /devt:workflow
+/devt:do "what changed this week"     # → routes to /devt:weekly-report
+```
+
+---
+
+### `/devt:session-report` -- Session summary
+
+Generate a post-session report with commits, files changed, decisions, and outcomes. Reads from git log and `.devt/state/` artifacts.
+
+```bash
+/devt:session-report
 ```
 
 ---

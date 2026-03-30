@@ -31,6 +31,8 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 - **`semantic.cjs`** — FTS5 full-text search on learning playbook. Uses `node:sqlite` (built-in). Sync playbook → DB, query lessons, compact stale entries. Grep fallback when DB doesn't exist.
 - **`weekly-report.cjs`** — Git log parsing and markdown report rendering. Contributor matching via `.devt/config.json` config.
 - **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone).
+- **`health.cjs`** — Project health validation with 19 checks, structured JSON output, `--repair` flag for safe auto-fixes.
+- **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection, safe JSON parsing, shell argument validation.
 
 ### State Flow
 
@@ -72,5 +74,6 @@ There are no build steps, test suites, or linters configured for the plugin itse
 - Atomic file writes throughout: write to `.tmp` then `fs.renameSync()`.
 - Config uses prototype-pollution-safe deep merge with `FORBIDDEN_KEYS` set.
 - Hooks use a Node.js runner (`run-hook.js`) with profile support: `DEVT_HOOK_PROFILE=minimal|standard|full` and `DEVT_DISABLED_HOOKS=hook1,hook2`. The `run-hook.cmd` polyglot delegates to `run-hook.js`.
-- The plugin manifest lives at `.claude-plugin/plugin.json`.
+- The plugin manifest lives at `.claude-plugin/plugin.json`. Agents are listed explicitly; commands and skills are auto-discovered.
+- Commands are symlinked to `~/.claude/commands/devt/` on session start for `devt:` namespaced autocomplete.
 - Version is tracked in both `plugin.json` and `VERSION` file (plugin.json is primary).
