@@ -15,9 +15,10 @@ What do you need?
   |-- "Create a PR"                       -->  /devt:ship
   |-- "Not sure / continue from where I left off"  -->  /devt:next
   |-- "Set up a new project"              -->  /devt:init
+  |-- "What commands are available?"      -->  /devt:help
 ```
 
-Five commands for daily work, one for setup.
+Five commands for daily work, two for setup/discovery.
 
 ---
 
@@ -185,6 +186,16 @@ One-time setup for a new project. Scaffolds `.devt/rules/` with project conventi
 3. Copies template files to `.devt/rules/`
 4. Creates `.devt/config.json`, `.devt/state/`, `.devt/learning-playbook.md`
 5. Adds `.devt/state/` to `.gitignore`
+
+---
+
+### `/devt:help` -- Command reference
+
+Show all devt commands organized by experience level with practical use cases and typical workflows.
+
+```bash
+/devt:help
+```
 
 ---
 

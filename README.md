@@ -2,7 +2,7 @@
 
 **devt** (short for **dev**elopment **t**eam) — a lightweight multi-agent development workflow plugin for Claude Code.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What It Does
@@ -74,11 +74,11 @@ User -> Command (thin) -> Workflow (orchestration) -> Agent (worker)
 
 The execution model has three layers:
 
-- **Commands** (25): Thin entry points. Parse arguments, delegate to a workflow. No business logic.
-- **Workflows** (23): Orchestration files. Determine tier, coordinate agents, manage state transitions.
+- **Commands** (26): Thin entry points. Parse arguments, delegate to a workflow. No business logic.
+- **Workflows** (24): Orchestration files. Determine tier, coordinate agents, manage state transitions.
 - **Agents** (10): Focused workers. Each owns one concern -- programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger.
 - **Skills** (15): Technique libraries injected into agents. Codebase scanning, complexity assessment, semantic search, API docs fetching, and more.
-- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Manage workflow context injection, cleanup, prompt injection guard, and subagent tracking.
+- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Managed via Node.js runner with profile control (`DEVT_HOOK_PROFILE=minimal|standard|full`).
 
 ## The .devt/rules/ Convention
 
@@ -97,6 +97,8 @@ Every project configured with devt gets a `.devt/rules/` directory containing pr
 
 | File                        | Purpose                                                             |
 | --------------------------- | ------------------------------------------------------------------- |
+| `review-checklist.md`       | Language-specific review priorities and security patterns            |
+| `api-changelog.md`          | API changelog format, before/after rules, migration checklist       |
 | `documentation.md`          | Doc style, MODULE.md conventions, what to update                    |
 | `git-workflow.md`           | Branch naming, commit conventions, PR process                       |
 | `golden-rules.md`           | Non-negotiable rules: scan first, no duplicates, verify before done |
@@ -164,11 +166,12 @@ The optional `.devt/config.json` file at your project root configures plugin beh
 | `/devt:ship`     | Create PR with auto-generated description from workflow artifacts                                                    |
 | `/devt:next`     | Auto-detect where you are and run the next logical step                                                              |
 
-### Setup
+### Setup & Help
 
 | Command      | Description                                                                 |
 | ------------ | --------------------------------------------------------------------------- |
 | `/devt:init` | Interactive project setup wizard — scaffolds `.devt/rules/` and `.devt/config.json` |
+| `/devt:help` | Show all commands with use cases — basics to advanced                       |
 
 ### Utilities
 
@@ -243,8 +246,8 @@ devt/
   bin/
     devt-tools.cjs        # CLI entry point
     modules/              # init, state, config, model-profiles, setup, semantic, weekly-report, update
-  commands/               # 25 thin command entry points
-  workflows/              # 23 orchestration files
+  commands/               # 26 thin command entry points
+  workflows/              # 24 orchestration files
   agents/                 # 10 agent definitions
   skills/                 # 15 technique skill directories
   hooks/                  # Lifecycle hooks (hooks.json + scripts)

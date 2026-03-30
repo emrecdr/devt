@@ -20,8 +20,9 @@ Your findings drive improvements. An unreported issue is an unresolved issue. A 
 BEFORE starting the review, load the following in order:
 
 1. Read `.devt/rules/coding-standards.md` — the project's code conventions (your primary reference)
-2. Read `.devt/rules/architecture.md` — structural and boundary rules
-3. Read `.devt/rules/quality-gates.md` — what the code must pass
+2. Read `.devt/rules/review-checklist.md` — language-specific review priorities and security patterns (if exists)
+3. Read `.devt/rules/architecture.md` — structural and boundary rules
+4. Read `.devt/rules/quality-gates.md` — what the code must pass
 4. Read `CLAUDE.md` — project-specific rules and constraints
 5. Read `.devt/state/impl-summary.md` — what was changed and why
 6. Read `.devt/state/test-summary.md` — test coverage context

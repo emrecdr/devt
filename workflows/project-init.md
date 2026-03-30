@@ -117,8 +117,11 @@ options:
 ```
 
 If the user confirms, proceed with auto-detected values. If not, ask follow-up questions for the incorrect fields.
+</step>
 
-Then ask about model profile:
+<step name="select_model_profile" gate="user has selected a model profile">
+
+Ask about model profile via AskUserQuestion:
 
 ```yaml
 question: "Which model profile should devt use for agent dispatch?"

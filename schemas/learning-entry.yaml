@@ -1,0 +1,96 @@
+# Learning Playbook Entry Schema
+#
+# Defines the structure for entries in .devt/learning-playbook.md.
+# Used by: retro agent (extraction), curator agent (validation), semantic.cjs (sync).
+#
+# Entries are YAML blocks separated by --- in the playbook file.
+# Each entry must pass all four filters: specific, generalizable, actionable, evidence-based.
+
+required:
+  - description
+  - category
+  - context
+  - evidence
+  - importance
+  - tags
+
+properties:
+  description:
+    type: string
+    format: imperative sentence
+    description: "What to do — e.g., 'Always check for existing error types before creating new ones'"
+    rules:
+      - Must be an imperative sentence (starts with a verb)
+      - Must be specific enough to act on without further research
+      - Must not be vague advice ("be careful", "think about")
+
+  category:
+    type: string
+    description: "Primary category — free-form string"
+    examples:
+      - testing
+      - architecture
+      - error-handling
+      - performance
+      - security
+      - api-design
+      - database
+      - deployment
+
+  context:
+    type: string
+    description: "When this lesson applies — the trigger condition"
+    examples:
+      - "When creating new error types in a project with existing error hierarchies"
+      - "When writing tests for endpoints with multiple query parameters"
+
+  evidence:
+    type: string
+    description: "What happened in the workflow that proves this lesson"
+    rules:
+      - Must reference a specific event, not a general observation
+      - Must be verifiable from the workflow artifacts
+
+  importance:
+    type: integer
+    range: 1-10
+    scale:
+      9-10: "Prevents data loss, security breaches, or system failures"
+      7-8: "Prevents significant rework or recurring bugs"
+      5-6: "Improves efficiency or catches common mistakes"
+      3-4: "Minor optimization or nice-to-know"
+      1-2: "Edge case awareness"
+
+  confidence:
+    type: float
+    range: 0.0-1.0
+    default: 0.5
+    scale:
+      0.9-1.0: "Observed multiple times across different tasks"
+      0.7-0.8: "Observed clearly with strong evidence"
+      0.5-0.6: "Single observation, plausible"
+      0.3-0.4: "Inferred, needs more evidence"
+
+  decay_days:
+    type: integer
+    default: 180
+    description: "Days until re-evaluation. Stable principles = 365, volatile patterns = 30"
+
+  tags:
+    type: string
+    format: comma-separated
+    description: "Search tags for FTS5 semantic queries"
+    examples:
+      - "testing, regression, coverage"
+      - "error-handling, reuse, existing-types"
+
+# Example entry (valid):
+#
+# - description: "Always check for existing error types before creating new ones"
+#   category: "error-handling"
+#   context: "When adding error handling to a new feature"
+#   evidence: "Created DuplicateEntryError when ConflictError already existed in core, caught in review"
+#   importance: 7
+#   confidence: 0.8
+#   decay_days: 365
+#   tags: "error-handling, reuse"

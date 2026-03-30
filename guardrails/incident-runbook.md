@@ -98,7 +98,7 @@ Without this information, retries are blind and repeat the same mistake.
 **Signal**: Workflow state files in `.devt/state/` are inconsistent, missing, or contain data from a previous workflow run. Agents report unexpected state or the workflow orchestrator cannot determine the current phase.
 
 **Response**:
-1. Run the reset script: `scripts/reset-workflow.sh`
+1. Run `/devt:cancel-workflow` to reset state
 2. Verify the state directory is clean
 3. Restart the workflow from the beginning
 

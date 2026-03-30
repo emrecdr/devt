@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start.sh"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" session-start.sh"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" stop.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" stop.sh",
             "timeout": 5,
             "statusMessage": "Cleaning up workflow state..."
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" subagent-status.sh start",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" subagent-status.sh start",
             "async": true
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" subagent-status.sh stop",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" subagent-status.sh stop",
             "async": true
           }
         ]
@@ -54,8 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" context-monitor.sh",
-            "async": false
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" context-monitor.sh",
+            "async": true
           }
         ]
       }
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" prompt-guard.sh"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-guard.sh"
           }
         ]
       }
@@ -77,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" workflow-context-injector.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" workflow-context-injector.sh",
             "statusMessage": "Loading workflow context..."
           }
         ]

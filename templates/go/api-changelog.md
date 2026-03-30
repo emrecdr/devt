@@ -1,4 +1,4 @@
-# API Changelog — Python / FastAPI
+# API Changelog — Go
 
 The API changelog is the primary reference for frontend and mobile developers consuming the API. Every version gets an entry — detailed for API changes, one-line for internal-only changes.
 

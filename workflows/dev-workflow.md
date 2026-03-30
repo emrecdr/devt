@@ -154,6 +154,8 @@ Store the task description in workflow state for reference by status, forensics,
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true phase=context_init status=DONE "task=${TASK_DESCRIPTION}"
 ```
 
+If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
+
 Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous` flag if present).
 
 Parse the init output JSON:
@@ -999,6 +1001,8 @@ Agents follow Rules 1-4 from the programmer agent's deviation framework (see `ag
 **Attempt limit**: After 3 auto-fix attempts on a single issue within an agent, the agent reports DONE_WITH_CONCERNS. This does not count as a review iteration.
 
 **Scope**: Only auto-fix issues directly caused by the current task. Pre-existing issues are logged to `.devt/state/scratchpad.md` under category `Deferred`.
+
+**Failure recovery**: If a workflow phase is stuck in a fix loop or an agent repeatedly returns BLOCKED, consult `${CLAUDE_PLUGIN_ROOT}/guardrails/incident-runbook.md` for escalation procedures before giving up.
 </deviation_rules>
 
 <success_criteria>

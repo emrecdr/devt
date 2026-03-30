@@ -71,6 +71,9 @@ function main() {
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
         );
         break;
+      case "health":
+        console.log(JSON.stringify(require("./modules/health.cjs").run(args.slice(1), PLUGIN_ROOT)));
+        break;
       case "update":
         update.run(subcommand, args.slice(2), PLUGIN_ROOT).then((result) => {
           console.log(JSON.stringify(result));
@@ -109,6 +112,7 @@ Commands:
   semantic status           Show database, playbook, and entry count
   report window [--weeks N] Compute reporting time window
   report generate [--weeks N] [--output PATH]  Generate contribution report
+  health [--repair]         Validate project config, state, hooks. --repair auto-fixes safe issues
   update check [--force]    Check for newer version on GitHub (--force bypasses cache)
   update status             Combined: install type + dirty tree + version (one call)
   update local-version      Show installed version

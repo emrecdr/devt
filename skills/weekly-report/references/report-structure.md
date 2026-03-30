@@ -17,6 +17,6 @@ Configurable via workflow.
 
 | Source | What It Provides | How to Fetch |
 |--------|-----------------|--------------|
-| git log | Commits, file changes, insertions/deletions | `parse_git_data.py` |
+| git log | Commits, file changes, insertions/deletions | `devt-tools.cjs report generate` |
 | PR API | Pull request activity | Provider-specific (gh, bb_get) |
 | .devt/config.json | Contributor names, git match patterns | `config get` |

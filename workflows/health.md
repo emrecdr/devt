@@ -1,6 +1,6 @@
 # Health — Plugin Diagnostics
 
-Check the integrity of devt configuration, state, and project setup.
+Validate devt project configuration, state, and plugin integrity.
 
 <purpose>
 Catch configuration problems before they cause confusing agent failures.
@@ -21,109 +21,172 @@ Not applicable — this workflow does not dispatch subagents.
 </agent_skill_injection>
 
 <deviation_rules>
-1. **Auto-fix: minor issues** — Fix typos, formatting, and obvious errors inline
-2. **STOP: scope creep** — If the task grows beyond diagnostics into fixing code or workflow issues, suggest the appropriate workflow instead
-3. **STOP: destructive repairs** — Do not auto-fix state issues (e.g., deleting .devt/state/); only report problems and suggest specific fix commands
+1. **Auto-fix: minor issues** — Use `--repair` flag to fix safe issues automatically
+2. **STOP: scope creep** — If the task grows beyond diagnostics, suggest the appropriate workflow instead
+3. **STOP: destructive repairs** — Only auto-repair issues classified as repairable in the error registry
 </deviation_rules>
 
 <process>
 
-<step name="check_config" gate="all checks complete">
-## Check 1: Plugin Configuration
+<step name="run_health_check" gate="health check complete">
 
-- [ ] E001: .devt/config.json exists (or defaults are sufficient)
-- [ ] E002: .devt/rules/ directory exists
-- [ ] E003: Required .devt/rules/ files present (coding-standards.md, testing-patterns.md, quality-gates.md)
-- [ ] W001: .devt/rules/architecture.md exists (recommended)
-- [ ] W002: .devt/rules/documentation.md exists (recommended)
-- [ ] I001: CLAUDE.md exists (informational)
-
-Run: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow "health-check"`
-Parse the output for warnings and missing_rules.
-</step>
-
-<step name="check_state">
-## Check 2: Workflow State
-
-- [ ] E004: .devt/state/ directory exists (if workflow was run)
-- [ ] W003: workflow.yaml is not stale (active: true but no recent activity)
-- [ ] W004: No orphaned .devt/state/ artifacts (files from a different workflow run)
-- [ ] W005: handoff.json exists if workflow was paused
-
-Check workflow.yaml:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read
-```
-
-If active: true but no recent artifacts, warn about stale state.
-</step>
-
-<step name="check_hooks">
-## Check 3: Hook Health
-
-- [ ] W006: All hook scripts are executable
-- [ ] W007: Node.js is available (required for CLI tools)
-- [ ] W008: Quality gate verifier agent hook is configured (recommended)
-- [ ] I002: Python is available (optional, for learning loop)
+Run the health validation CLI:
 
 ```bash
-# Check executability
-for script in "${CLAUDE_PLUGIN_ROOT}"/hooks/*.sh; do
-  test -x "$script" || echo "WARNING: $script is not executable"
-done
-
-# Check Node.js
-which node >/dev/null 2>&1 || echo "ERROR: Node.js not found"
-
-# Check Python (optional)
-which python3 >/dev/null 2>&1 || echo "INFO: Python3 not found (learning loop features unavailable)"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" health
 ```
 
-Check if the quality gate verifier agent hook is configured in the user's settings:
-- Look for a Stop hook with `type: "agent"` in `.claude/settings.json` (project-level) or `~/.claude/settings.json` (user-level)
-- If not found: `W008: Quality gate verifier agent hook not configured. See ${CLAUDE_PLUGIN_ROOT}/hooks/quality-gate-verifier.md for setup instructions.`
-- If found: mark as passing
+Parse the JSON output:
+- `status`: `"healthy"` | `"degraded"` | `"broken"`
+- `version`: Installed plugin version (e.g., `"0.1.1"`)
+- `update`: `{ available, installed, latest }` or `null` if no cache
+- `issues[]`: Each has `code`, `severity`, `message`, `fix`, `repairable`
+- `repairable_count`: Number of auto-fixable issues
+- `project_root`: Resolved project root path
+
 </step>
 
-<step name="check_artifacts">
-## Check 4: Artifact Integrity (if workflow active)
+<step name="format_output" gate="results displayed to user">
 
-If .devt/state/ contains artifacts, verify consistency:
-- impl-summary.md mentions files → do those files exist on disk?
-- review.md has a verdict → is it a valid status enum value?
-- workflow.yaml phase → do expected artifacts for that phase exist?
-</step>
-
-<step name="report">
-## Report
-
-Format results:
+Format and display:
 
 ```
 devt Health Check
 ═════════════════
-Errors (must fix):
-  E001: [description] → FIX: [specific action]
-
-Warnings (should fix):
-  W001: [description] → FIX: [specific action]
-
-Info:
-  I001: [description]
-
-Status: HEALTHY | NEEDS_ATTENTION | BROKEN
+Version: {version}
+Status:  HEALTHY | DEGRADED | BROKEN
 ```
 
-If BROKEN: suggest /devt:cancel-workflow to reset state, consult `${CLAUDE_PLUGIN_ROOT}/guardrails/incident-runbook.md` for recovery procedures
-If NEEDS_ATTENTION: list specific fixes
-If HEALTHY: "All systems operational"
+**If update available:**
+```
+Update:  {installed} → {latest} available. Run /devt:update
+```
+
+**If ahead (development version):**
+```
+Update:  {installed} (dev — ahead of remote {latest})
+```
+
+**If up to date:**
+```
+Update:  {installed} (latest)
+```
+
+**If errors exist:**
+```
+Errors (must fix):
+  E001: .devt/ directory not found
+        → Run /devt:init to set up project, or /devt:health --repair
+```
+
+**If warnings exist:**
+```
+Warnings (should fix):
+  W005: .devt/state/ not in .gitignore
+        → Run /devt:health --repair to add .devt/state/ to .gitignore
+```
+
+**If info exists:**
+```
+Info:
+  I001: CLAUDE.md not found (recommended)
+```
+
+**Footer (if repairable issues exist):**
+```
+{N} issues can be auto-repaired. Run: /devt:health --repair
+```
+
+</step>
+
+<step name="offer_repair" gate="user has decided on repair">
+
+**If repairable issues exist**, ask the user:
+
+```yaml
+question: "Auto-repair the fixable issues?"
+header: "Repair"
+multiSelect: false
+options:
+  - label: "Yes, repair now"
+    description: "Auto-fix {N} safe issues (directories, config, permissions)"
+  - label: "No, I'll fix manually"
+    description: "Just show the fix commands"
+```
+
+**If user says yes**, run:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" health --repair
+```
+
+Parse the result:
+- `repairs[]`: Each has `code`, `action`, `success`
+- `initial_status`: Status before repair
+- `status`: Status after repair (re-checked automatically)
+
+Display repairs performed:
+```
+Repairs:
+  ✓ E005: Created .devt/state/ directory
+  ✓ W005: Added .devt/state/ to .gitignore
+  ✓ W008: Made session-start.sh executable
+
+Status: DEGRADED → HEALTHY
+```
+
 </step>
 
 </process>
 
+<error_codes>
+
+| Code | Severity | Description | Repairable |
+|------|----------|-------------|------------|
+| E001 | error | .devt/ directory not found | Yes — creates it |
+| E002 | error | .devt/config.json not found | Yes — creates with defaults |
+| E003 | error | .devt/config.json invalid JSON | Yes — resets to defaults |
+| E004 | error | .devt/rules/ not found | No — run /devt:init |
+| E005 | error | .devt/state/ not found | Yes — creates it |
+| E006 | error | Node.js not available | No |
+| W001 | warning | coding-standards.md missing | No — run /devt:init --mode update |
+| W002 | warning | testing-patterns.md missing | No — run /devt:init --mode update |
+| W003 | warning | quality-gates.md missing | No — run /devt:init --mode update |
+| W004 | warning | architecture.md missing | No — run /devt:init --mode update |
+| W005 | warning | .devt/state/ not in .gitignore | Yes — appends entry |
+| W006 | warning | Stale workflow (active but stopped >24h ago) | Yes — sets active=false |
+| W007 | warning | VERSION / plugin.json version mismatch | No |
+| W008 | warning | Hook script not executable | Yes — chmod +x |
+| I001 | info | CLAUDE.md not found | No |
+| I002 | info | Learning playbook not found | Yes — creates template |
+| I003 | info | No active workflow | No |
+
+</error_codes>
+
+<repair_actions>
+
+| Action | Effect | Risk |
+|--------|--------|------|
+| Create .devt/ | Creates base directory | None |
+| Create config.json | Creates with default config | None — user can customize after |
+| Create .devt/state/ | Creates state directory | None |
+| Add .gitignore entry | Appends .devt/state/ | None |
+| Clear stale workflow | Sets active=false | Loses "in-progress" marker |
+| Fix permissions | chmod +x on hook scripts | None |
+| Create playbook | Creates learning-playbook.md template | None |
+
+**Not repairable (too risky):**
+- Missing .devt/rules/ — requires template selection (run /devt:init)
+- Missing rule files — requires template (run /devt:init --mode update)
+- Invalid config values — requires user decision
+- Version mismatch — requires manual version bump
+
+</repair_actions>
+
 <success_criteria>
-- All checks executed
-- Clear error/warning/info categorization
+- All checks executed via CLI (deterministic, not agent-interpreted)
+- Clear error/warning/info categorization with codes
 - Every issue has a specific fix suggestion
-- Status reflects actual health
+- Repairable issues listed with risk classification
+- Post-repair verification confirms fixes
 </success_criteria>

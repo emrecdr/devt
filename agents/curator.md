@@ -23,7 +23,8 @@ BEFORE starting curation, load the following:
 2. Read `.devt/learning-playbook.md` if it exists — current playbook state
 3. Read `CLAUDE.md` — project context for evaluating lesson relevance
 4. Read `.devt/rules/` files relevant to the incoming lessons — to validate accuracy
-5. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/contamination-guidelines.md` — the 5-filter quality standard for playbook entries (Specificity, Durability, Non-obviousness, Evidence, Actionability)
+5. Read `${CLAUDE_PLUGIN_ROOT}/schemas/learning-entry.yaml` — the entry format spec
+6. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/contamination-guidelines.md` — the 5-filter quality standard for playbook entries (Specificity, Durability, Non-obviousness, Evidence, Actionability)
 
 Do NOT skip reading the existing playbook. Curation without context produces duplicates and contradictions.
 

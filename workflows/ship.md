@@ -78,6 +78,39 @@ Run these checks in order. If any fails, report the specific issue and STOP.
 
 </step>
 
+<step name="changelog" gate="changelog updated or skipped">
+
+## Changelog (conditional)
+
+Check if the project has a changelog convention:
+
+```bash
+test -f .devt/rules/api-changelog.md && echo "HAS_CHANGELOG_RULES" || echo "NO_CHANGELOG_RULES"
+```
+
+**If `HAS_CHANGELOG_RULES`:**
+
+1. Read `.devt/rules/api-changelog.md` — the project's changelog format and rules
+2. Read the current changelog file (typically `docs/API-CHANGELOG.md` or `CHANGELOG.md` — check the rules file for the path)
+3. Determine version: read `VERSION` file if it exists, or derive from git tags
+4. Scan the diff for API-affecting changes:
+
+   ```bash
+   git diff $(git merge-base HEAD $(git rev-parse --abbrev-ref @{upstream} 2>/dev/null || echo main))..HEAD -- '*.py' '*.ts' '*.go' '*.js' | head -500
+   ```
+
+5. If API-affecting changes are found (new/modified endpoints, request/response changes, status code changes):
+   - Generate a changelog entry following the format in `api-changelog.md`
+   - Include Before/After examples for breaking changes
+   - Include migration checklist
+   - Append the entry to the changelog file
+
+6. If no API-affecting changes: append a one-line "No API changes" entry if the rules require it
+
+**If `NO_CHANGELOG_RULES`:** Skip this step entirely.
+
+</step>
+
 <step name="generate_pr_body" gate="PR body is composed">
 
 ## Generate PR Description

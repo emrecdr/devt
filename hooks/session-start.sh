@@ -14,21 +14,9 @@ HAS_DEV_RULES="false"
 HAS_DEVT_CONFIG="false"
 [[ -f ".devt/config.json" ]] && HAS_DEVT_CONFIG="true"
 
-# ─── Migration Checks ───
-# Structured registry of breaking changes across versions.
-# Each check: lightweight grep/test, emits warning if legacy pattern found.
-# Add new checks per version. Remove checks for versions nobody uses (2+ major releases old).
+# ─── Health Checks ───
 
 MIGRATION_WARNINGS=""
-
-migrate_check() {
-  # Usage: migrate_check "version" "description"
-  local ver="$1" msg="$2"
-  MIGRATION_WARNINGS="${MIGRATION_WARNINGS}
-[${ver}] ${msg}"
-}
-
-# ── General health checks (not version-specific) ──
 
 # .devt/state/ exists but no .devt/rules/ (incomplete setup)
 if [[ -d ".devt/state" && "$HAS_DEV_RULES" == "false" ]]; then
@@ -94,6 +82,7 @@ IMPORTANT — CLI path resolution:
   You MUST substitute the actual path:
     node \"${PLUGIN_ROOT}/bin/devt-tools.cjs\" <command>
   DEVT_BIN: ${PLUGIN_ROOT}/bin/devt-tools.cjs
+  Fallback: cat \"\${TMPDIR:-/tmp}/devt-cache/plugin-root\" to read the resolved path
 
 How devt works:
   /devt:workflow is the main entry point. Give it a task — it auto-detects complexity and runs the right pipeline:

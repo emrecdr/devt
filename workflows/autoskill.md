@@ -92,6 +92,28 @@ Ask user which proposals to accept.
 For accepted proposals, write the changes.
 </step>
 
+<step name="audit" gate="changelog entry appended">
+## Step 5: Record in Autoskill Changelog
+
+For each accepted and applied proposal, append an entry to `.devt/autoskill-changelog.md`.
+
+If the file does not exist, create it from `${CLAUDE_PLUGIN_ROOT}/templates/autoskill-changelog.md`.
+
+Append one entry per accepted proposal:
+
+```yaml
+- date: "YYYY-MM-DDTHH:MM:SSZ"
+  type: skill-update | agent-update | new-skill | new-rule
+  target: "<file path that was modified>"
+  change: "<one-line summary of what was changed>"
+  evidence_count: <number of instances that triggered this>
+  risk: LOW | MEDIUM
+  approved_by: user
+```
+
+This is an append-only audit trail. Never edit or delete existing entries.
+</step>
+
 </process>
 
 <success_criteria>
@@ -99,4 +121,5 @@ For accepted proposals, write the changes.
 - Proposals are specific (name the file, the change, the evidence)
 - No proposals auto-applied without user approval
 - Accepted changes written to the appropriate files
+- Every accepted proposal recorded in `.devt/autoskill-changelog.md`
 </success_criteria>

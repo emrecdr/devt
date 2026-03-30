@@ -1,235 +1,113 @@
 # Weekly Report Workflow
 
-Generate a structured weekly contribution report from git history, PR data, and session logs.
+Generate a structured weekly contribution report from git history and PR data.
 
 ---
 
 <prerequisites>
-- `.devt/config.json` exists in project root with git configuration (provider, workspace, slug)
+- `.devt/config.json` exists with git configuration (provider, workspace, slug)
 - `${CLAUDE_PLUGIN_ROOT}` is set (devt plugin is loaded)
 - `node` is available on PATH
 - Git is available on PATH and the project is a git repository
-- Scripts exist: `${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/`
 </prerequisites>
 
 <available_agent_types>
-This workflow does NOT use subagents. All steps are executed by the main session using scripts and data processing.
-
-Available agent types in the devt system (for reference):
-
-- `devt:programmer` — implementation specialist
-- `devt:tester` — testing specialist
-- `devt:code-reviewer` — code review specialist (READ-ONLY)
-- `devt:architect` — structural review specialist (READ-ONLY)
-- `devt:docs-writer` — documentation specialist
-- `devt:retro` — lesson extraction specialist
-- `devt:curator` — playbook quality maintenance specialist
-  </available_agent_types>
+This workflow does NOT use subagents. All steps are executed by the main session.
+</available_agent_types>
 
 <agent_skill_injection>
 Not applicable — this workflow does not dispatch subagents.
 </agent_skill_injection>
 
+<deviation_rules>
+1. **Auto-fix: API failures** — If PR data fetch fails, continue with git-only data. Do not STOP.
+2. **STOP: not a git repo** — If no `.git/` directory, STOP with BLOCKED.
+3. **STOP: node missing** — If `node` is not available, STOP with BLOCKED.
+</deviation_rules>
+
 ---
 
 ## Steps
 
-<step name="load_config" gate=".devt/config.json is read and git config is extracted">
+<step name="compute_window" gate="report window determined">
 
-Read `.devt/config.json` and extract the git configuration:
-
-```bash
-node -e "
-  const cfg = JSON.parse(require('fs').readFileSync('.devt/config.json', 'utf8'));
-  console.log(JSON.stringify({
-    provider: cfg.git?.provider || 'none',
-    workspace: cfg.git?.workspace || '',
-    slug: cfg.git?.slug || '',
-    branch: cfg.git?.branch || 'main',
-    contributors: cfg.contributors || []
-  }, null, 2));
-"
-```
-
-Extract:
-
-- `provider`: bitbucket | github | gitlab | none
-- `workspace`: organization or workspace name
-- `slug`: repository slug
-- `branch`: default branch name
-- `contributors`: list of contributor usernames to include in the report
-
-**Gate**: If provider is `none` and no contributors are configured, the report will be git-log-only (no PR data). Warn the user but proceed.
-</step>
-
-<step name="compute_window" gate="report window (start date, end date) is determined">
-
-Determine the reporting window. Check `${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/` for a `compute_window.py` script.
-
-If the script exists:
+Compute the reporting window using the CLI:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/compute_window.py"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" report window
 ```
 
-If the script does not exist, compute manually:
+This returns JSON with `start` and `end` dates (ISO 8601). Default: last 7 days.
 
-- End date: today
-- Start date: 7 days ago
-- Format: ISO 8601 (YYYY-MM-DD)
-
-The user can override the window by providing `--from` and `--to` arguments.
+The user can override with `--weeks N` to change the window size.
 
 Store: `$WINDOW_START`, `$WINDOW_END`
 </step>
 
-<step name="fetch_git_data" gate="git log data is captured">
+<step name="generate_report" gate="report is generated">
 
-Fetch git history for the reporting window:
+Generate the full report using the CLI:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" report generate --output .devt/state/weekly-report.md
+```
+
+This command:
+1. Reads `.devt/config.json` for git provider, workspace, slug, contributors
+2. Parses git log for the reporting window
+3. Matches contributors from config
+4. Renders a markdown report with: summary, features, fixes, contributor activity
+
+If the command fails, fall back to manual git log analysis:
 
 ```bash
 git log --since="$WINDOW_START" --until="$WINDOW_END" \
-  --pretty=format:'%H|%an|%ae|%aI|%s' \
-  --no-merges > .devt/state/git-log-raw.txt
+  --pretty=format:'%H|%an|%ae|%aI|%s' --no-merges
 ```
 
-If contributors are configured, also fetch per-contributor stats:
-
-```bash
-for author in $CONTRIBUTORS; do
-  echo "=== $author ==="
-  git log --since="$WINDOW_START" --until="$WINDOW_END" \
-    --author="$author" --pretty=format:'%H|%s' --no-merges
-done > .devt/state/git-contributor-stats.txt
-```
-
-Capture file change stats:
-
-```bash
-git diff --stat $(git log --since="$WINDOW_START" --format=%H | tail -1)..HEAD \
-  2>/dev/null > .devt/state/git-diffstat.txt || echo "NO_DIFF_STAT"
-```
-
+And compose the report inline following the structure in `${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/references/report-structure.md`.
 </step>
 
-<step name="fetch_pr_data" gate="PR data is captured (or skipped if provider is none)">
+<step name="fetch_pr_data" gate="PR data captured or skipped">
 
-**If provider is `none`**: Skip this step.
+Read the provider from `.devt/config.json`.
 
-**If provider is `bitbucket`**:
-Fetch merged PRs for the window using the Bitbucket API (via `bb_get` MCP tool or direct API):
-
-```
-GET /2.0/repositories/{workspace}/{slug}/pullrequests?state=MERGED&q=updated_on>"{WINDOW_START}"
-```
-
-**If provider is `github`**:
-
+**If `github`:**
 ```bash
-gh pr list --repo "{workspace}/{slug}" --state merged \
-  --search "merged:>=$WINDOW_START" --json number,title,author,mergedAt,labels \
-  > .devt/state/pr-data.json 2>/dev/null || echo "[]" > .devt/state/pr-data.json
+gh pr list --state merged --search "merged:>=$WINDOW_START" \
+  --json number,title,author,mergedAt,labels 2>/dev/null
 ```
 
-**If provider is `gitlab`**:
-
+**If `bitbucket`:**
 ```bash
-glab mr list --repo "{workspace}/{slug}" --state merged \
-  --merged-after "$WINDOW_START" > .devt/state/pr-data.json 2>/dev/null || echo "[]" > .devt/state/pr-data.json
+# Bitbucket API via curl or MCP tool
+# GET /2.0/repositories/{workspace}/{slug}/pullrequests?state=MERGED
 ```
 
-If the API call fails, warn the user and continue with git-only data.
+**If `gitlab`:**
+```bash
+glab mr list --state merged --merged-after "$WINDOW_START" 2>/dev/null
+```
+
+**If `none` or API fails:** Continue with git-only data. Warn the user.
+
+If PR data is available, append a "Pull Requests" section to the report.
 </step>
 
-<step name="parse_and_render" gate="report is generated">
-
-Check `${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/` for parsing and rendering scripts.
-
-If `parse_git_data.py` exists:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/parse_git_data.py" \
-  --git-log .devt/state/git-log-raw.txt \
-  --pr-data .devt/state/pr-data.json \
-  --output .devt/state/parsed-data.json
-```
-
-If `render_report.py` exists:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/weekly-report/scripts/render_report.py" \
-  --data .devt/state/parsed-data.json \
-  --from "$WINDOW_START" --to "$WINDOW_END" \
-  --output .devt/state/weekly-report.md
-```
-
-If the scripts do not exist, generate the report directly by analyzing the raw data:
-
-**Report structure**:
-
-```markdown
-# Weekly Report: {WINDOW_START} to {WINDOW_END}
-
-## Summary
-
-- Commits: N
-- Pull Requests merged: N
-- Contributors: N
-- Files changed: N
-
-## Features Delivered
-
-- <feature description> (PR #N)
-
-## Bug Fixes
-
-- <fix description> (PR #N)
-
-## Technical Improvements
-
-- <improvement description> (commit SHA)
-
-## Contributor Activity
-
-| Contributor | Commits | PRs Merged |
-| ----------- | ------- | ---------- |
-| @user1      | N       | N          |
-
-## Notable Changes
-
-- <significant architectural or infrastructure changes>
-```
-
-Write the final report to `.devt/state/weekly-report.md`.
-</step>
-
-<step name="output" gate="report location is communicated to user">
+<step name="output" gate="report delivered to user">
 
 Report to the user:
-
-- The report has been generated at `.devt/state/weekly-report.md`
+- The report is at `.devt/state/weekly-report.md`
 - Quick summary: total commits, PRs merged, contributors active
-- Ask if they want to see the full report or export it to a specific location
+- Ask if they want to see the full report or export to a different location
 
 Final status: **DONE**
 </step>
 
----
-
-<deviation_rules>
-
-1. **Auto-fix: bugs** — If a script fails, fall back to direct analysis of raw git data. Do not STOP.
-2. **Auto-fix: lint** — Not applicable.
-3. **Auto-fix: deps** — If `python3` is not available for scripts, perform all data processing inline using bash and node.
-4. **STOP: architecture** — If the project is not a git repository (no `.git/`), STOP with BLOCKED — git history is required for the report.
-   </deviation_rules>
-
 <success_criteria>
-
-- Reporting window is computed (7-day default or user-specified)
-- Git history is fetched for the window
-- PR data is fetched (if provider is configured)
-- Report is generated with: summary, features, fixes, improvements, contributor activity
-- Report is written to `.devt/state/weekly-report.md`
+- Reporting window computed via CLI
+- Report generated using `devt-tools.cjs report generate`
+- PR data fetched if provider is configured
+- Report written to `.devt/state/weekly-report.md`
 - Final status: **DONE**
-  </success_criteria>
+</success_criteria>

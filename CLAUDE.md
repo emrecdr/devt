@@ -16,7 +16,7 @@ devt is a Claude Code plugin that orchestrates multi-agent development workflows
 
 Supporting layers:
 - **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides.
-- **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via cross-platform `run-hook.sh`/`run-hook.cmd` wrapper.
+- **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`).
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, contamination prevention, generative debt checklist).
 
 ### CLI Tools (`bin/devt-tools.cjs`)
@@ -38,7 +38,7 @@ Workflows write artifacts to `.devt/state/` (gitignored). Each file is written b
 
 ### Templates
 
-Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, blank) provide `.devt/rules/` scaffolding files: `coding-standards.md`, `testing-patterns.md`, `quality-gates.md`, and optional `architecture.md`, `documentation.md`, `git-workflow.md`, `patterns/common-smells.md`.
+Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, blank) provide `.devt/rules/` scaffolding files: `coding-standards.md`, `testing-patterns.md`, `quality-gates.md`, `architecture.md`, `review-checklist.md`, and optional `documentation.md`, `git-workflow.md`, `golden-rules.md`, `api-changelog.md`, `patterns/common-smells.md`. Authoring templates for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
 
 ## Development Commands
 
@@ -59,6 +59,7 @@ node bin/devt-tools.cjs semantic compact [--dry-run]
 node bin/devt-tools.cjs semantic status
 node bin/devt-tools.cjs report window [--weeks N]
 node bin/devt-tools.cjs report generate [--weeks N] [--output PATH]
+node bin/devt-tools.cjs health [--repair]
 node bin/devt-tools.cjs update check [--force]
 node bin/devt-tools.cjs update status
 ```
@@ -70,6 +71,6 @@ There are no build steps, test suites, or linters configured for the plugin itse
 - All Node.js modules use zero dependencies (Node.js stdlib only).
 - Atomic file writes throughout: write to `.tmp` then `fs.renameSync()`.
 - Config uses prototype-pollution-safe deep merge with `FORBIDDEN_KEYS` set.
-- Hooks use a cross-platform wrapper pattern: `run-hook.cmd` dispatches to `run-hook.sh` (Unix) or runs directly (Windows).
+- Hooks use a Node.js runner (`run-hook.js`) with profile support: `DEVT_HOOK_PROFILE=minimal|standard|full` and `DEVT_DISABLED_HOOKS=hook1,hook2`. The `run-hook.cmd` polyglot delegates to `run-hook.js`.
 - The plugin manifest lives at `.claude-plugin/plugin.json`.
 - Version is tracked in both `plugin.json` and `VERSION` file (plugin.json is primary).

@@ -122,4 +122,4 @@ function run(subcommand, args, pluginRoot) {
   }
 }
 
-module.exports = { run };
+module.exports = { run, REQUIRED_DEV_RULES };

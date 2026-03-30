@@ -1,0 +1,322 @@
+"use strict";
+
+/**
+ * Health check — validates devt project configuration, state, and plugin integrity.
+ *
+ * Returns structured JSON with error codes, severity, and repair actions.
+ * Supports --repair flag for auto-fixing safe issues.
+ */
+
+const fs = require("fs");
+const path = require("path");
+const { findProjectRoot, DEFAULTS } = require("./config.cjs");
+const { readState } = require("./state.cjs");
+const { REQUIRED_DEV_RULES } = require("./init.cjs");
+
+const CHECKS = {
+  E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:init to set up project, or /devt:health --repair" },
+  E002: { severity: "error", message: ".devt/config.json not found", repairable: true, fix: "Run /devt:init, or /devt:health --repair to create with defaults" },
+  E003: { severity: "error", message: ".devt/config.json has invalid JSON", repairable: true, fix: "Fix JSON syntax, or /devt:health --repair to reset to defaults" },
+  E004: { severity: "error", message: ".devt/rules/ directory not found", repairable: false, fix: "Run /devt:init to scaffold rules from a template" },
+  E005: { severity: "error", message: ".devt/state/ directory not found", repairable: true, fix: "Run /devt:health --repair to create the directory" },
+  W001: { severity: "warning", message: "coding-standards.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
+  W002: { severity: "warning", message: "testing-patterns.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
+  W003: { severity: "warning", message: "quality-gates.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
+  W004: { severity: "warning", message: "architecture.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
+  W005: { severity: "warning", message: ".devt/state/ not in .gitignore", repairable: true, fix: "Run /devt:health --repair to add .devt/state/ to .gitignore" },
+  W006: { severity: "warning", message: "Stale workflow — active=true with old stopped_at", repairable: true, fix: "Run /devt:health --repair to clear stale state, or /devt:cancel-workflow" },
+  W007: { severity: "warning", message: "VERSION and plugin.json version mismatch", repairable: false, fix: "Update VERSION or plugin.json to match" },
+  W008: { severity: "warning", message: "Hook script not executable", repairable: true, fix: "Run /devt:health --repair to fix permissions, or: chmod +x hooks/<script>" },
+  W009: { severity: "warning", message: "Plugin agent file missing", repairable: false, fix: "Reinstall devt — agent files may be corrupted or incomplete" },
+  W010: { severity: "warning", message: "Workflow missing <available_agent_types> section", repairable: false, fix: "Add <available_agent_types> to the workflow to prevent post-/clear silent fallback to general-purpose" },
+  I001: { severity: "info", message: "CLAUDE.md not found (recommended)", repairable: false, fix: "Create a CLAUDE.md with project-specific guidance for Claude Code" },
+  I002: { severity: "info", message: ".devt/learning-playbook.md not found", repairable: true, fix: "Run /devt:health --repair to create, or /devt:retro to start the learning loop" },
+  I003: { severity: "info", message: "No active workflow", repairable: false, fix: "No action needed — start a workflow with /devt:workflow" },
+};
+
+const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
+
+function runChecks(pluginRoot) {
+  const projectRoot = findProjectRoot();
+  const devtDir = path.join(projectRoot, ".devt");
+  const issues = [];
+
+  function add(code, extra, data) {
+    const check = CHECKS[code];
+    issues.push({
+      code,
+      severity: check.severity,
+      message: extra ? `${check.message}: ${extra}` : check.message,
+      fix: check.fix,
+      repairable: check.repairable,
+      ...(data && { data }),
+    });
+  }
+
+  // Version info (resolve early so all return paths include it)
+  let version = null;
+  if (pluginRoot) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+      version = manifest.version || null;
+    } catch {
+      try { version = fs.readFileSync(path.join(pluginRoot, "VERSION"), "utf8").trim(); } catch { /* skip */ }
+    }
+  }
+
+  // Update check (read cache — non-blocking, no network)
+  let update = null;
+  try {
+    const cachePath = path.join(require("os").tmpdir(), "devt-cache", "update-check.json");
+    const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    if (cached.update_available) {
+      update = { available: true, installed: cached.installed, latest: cached.latest };
+    } else if (cached.ahead) {
+      update = { available: false, ahead: true, installed: cached.installed, latest: cached.latest };
+    } else {
+      update = { available: false, installed: cached.installed, latest: cached.latest };
+    }
+  } catch {
+    // No cache — update check hasn't run yet
+  }
+
+  function buildResult(status) {
+    return { status, version, update, issues, project_root: projectRoot, repairable_count: issues.filter((i) => i.repairable).length };
+  }
+
+  // E001: .devt/ directory
+  if (!fs.existsSync(devtDir)) {
+    add("E001");
+    return buildResult("broken");
+  }
+
+  // E002/E003: .devt/config.json
+  const configPath = path.join(devtDir, "config.json");
+  if (!fs.existsSync(configPath)) {
+    add("E002");
+  } else {
+    try {
+      JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch (e) {
+      add("E003", e.message);
+    }
+  }
+
+  // E004: .devt/rules/ + W001-W004
+  const rulesDir = path.join(devtDir, "rules");
+  if (!fs.existsSync(rulesDir)) {
+    add("E004");
+  } else {
+    for (const file of REQUIRED_DEV_RULES) {
+      if (!fs.existsSync(path.join(rulesDir, file))) {
+        add(RULE_WARNING_CODES[file]);
+      }
+    }
+  }
+
+  // E005: .devt/state/
+  const stateDir = path.join(devtDir, "state");
+  if (!fs.existsSync(stateDir)) {
+    add("E005");
+  }
+
+  // W005: .gitignore
+  const gitignorePath = path.join(projectRoot, ".gitignore");
+  try {
+    const content = fs.readFileSync(gitignorePath, "utf8");
+    if (!content.includes(".devt/state")) {
+      add("W005");
+    }
+  } catch {
+    add("W005");
+  }
+
+  // Read workflow state once for W006 + I003
+  const state = readState();
+
+  // W006: Stale workflow
+  if (state.active && state.stopped_at && state.stopped_at !== "null") {
+    const stoppedAt = new Date(state.stopped_at);
+    const hoursSince = (Date.now() - stoppedAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSince > 24) {
+      add("W006", `stopped ${Math.floor(hoursSince)}h ago`);
+    }
+  }
+
+  // W007: Version consistency
+  if (pluginRoot) {
+    try {
+      const versionFile = fs.readFileSync(path.join(pluginRoot, "VERSION"), "utf8").trim();
+      const pluginJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+      if (versionFile !== pluginJson.version) {
+        add("W007", `VERSION=${versionFile}, plugin.json=${pluginJson.version}`);
+      }
+    } catch {
+      // Can't check — skip
+    }
+  }
+
+  // W008: Hook scripts executable
+  if (pluginRoot) {
+    const hooksDir = path.join(pluginRoot, "hooks");
+    try {
+      for (const script of fs.readdirSync(hooksDir).filter((f) => f.endsWith(".sh"))) {
+        try {
+          fs.accessSync(path.join(hooksDir, script), fs.constants.X_OK);
+        } catch {
+          add("W008", script, { script });
+        }
+      }
+    } catch {
+      // hooks dir not readable
+    }
+  }
+
+  // W009: Agent file validation
+  if (pluginRoot) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+      if (Array.isArray(manifest.agents)) {
+        for (const agentPath of manifest.agents) {
+          const resolved = path.join(pluginRoot, agentPath.replace(/^\.\//, ""));
+          if (!fs.existsSync(resolved)) {
+            add("W009", path.basename(agentPath), { agent: agentPath });
+          }
+        }
+      }
+    } catch {
+      // Can't read manifest — skip
+    }
+  }
+
+  // W010: Workflows dispatching agents must have <available_agent_types>
+  if (pluginRoot) {
+    const workflowsDir = path.join(pluginRoot, "workflows");
+    try {
+      for (const file of fs.readdirSync(workflowsDir).filter((f) => f.endsWith(".md"))) {
+        const content = fs.readFileSync(path.join(workflowsDir, file), "utf8");
+        // Check if workflow dispatches named agents (devt:agent-name pattern)
+        const dispatches = content.match(/devt:(?:programmer|tester|code-reviewer|architect|docs-writer|verifier|debugger|researcher|retro|curator)/g);
+        if (dispatches && dispatches.length > 0 && !content.includes("<available_agent_types>")) {
+          add("W010", file, { workflow: file });
+        }
+      }
+    } catch {
+      // Can't read workflows — skip
+    }
+  }
+
+  // I001: CLAUDE.md
+  if (!fs.existsSync(path.join(projectRoot, "CLAUDE.md"))) {
+    add("I001");
+  }
+
+  // I002: Learning playbook
+  if (!fs.existsSync(path.join(devtDir, "learning-playbook.md"))) {
+    add("I002");
+  }
+
+  // I003: No active workflow
+  if (!state.active) {
+    add("I003");
+  }
+
+  const hasErrors = issues.some((i) => i.severity === "error");
+  const hasWarnings = issues.some((i) => i.severity === "warning");
+  return buildResult(hasErrors ? "broken" : hasWarnings ? "degraded" : "healthy");
+}
+
+function runRepairs(pluginRoot, checkResult) {
+  const result = checkResult || runChecks(pluginRoot);
+  const repairs = [];
+  const devtDir = path.join(result.project_root, ".devt");
+
+  for (const issue of result.issues) {
+    if (!issue.repairable) continue;
+
+    try {
+      switch (issue.code) {
+        case "E001":
+          fs.mkdirSync(devtDir, { recursive: true });
+          repairs.push({ code: issue.code, action: "Created .devt/ directory", success: true });
+          break;
+
+        case "E002":
+        case "E003": {
+          const configPath = path.join(devtDir, "config.json");
+          const tmp = configPath + ".tmp";
+          fs.writeFileSync(tmp, JSON.stringify(DEFAULTS, null, 2) + "\n");
+          fs.renameSync(tmp, configPath);
+          repairs.push({ code: issue.code, action: "Created .devt/config.json with defaults", success: true });
+          break;
+        }
+
+        case "E005":
+          fs.mkdirSync(path.join(devtDir, "state"), { recursive: true });
+          repairs.push({ code: issue.code, action: "Created .devt/state/ directory", success: true });
+          break;
+
+        case "W005": {
+          const gitignorePath = path.join(result.project_root, ".gitignore");
+          try {
+            fs.appendFileSync(gitignorePath, "\n# devt workflow state\n.devt/state/\n");
+          } catch {
+            fs.writeFileSync(gitignorePath, "# devt workflow state\n.devt/state/\n");
+          }
+          repairs.push({ code: issue.code, action: "Added .devt/state/ to .gitignore", success: true });
+          break;
+        }
+
+        case "W006": {
+          const { updateState } = require("./state.cjs");
+          updateState(["active=false"]);
+          repairs.push({ code: issue.code, action: "Set active=false (was stale)", success: true });
+          break;
+        }
+
+        case "W008": {
+          // Use structured data instead of parsing message string
+          const script = issue.data && issue.data.script;
+          if (pluginRoot && script) {
+            fs.chmodSync(path.join(pluginRoot, "hooks", script), 0o755);
+            repairs.push({ code: issue.code, action: `Made ${script} executable`, success: true });
+          }
+          break;
+        }
+
+        case "I002": {
+          const playbookPath = path.join(devtDir, "learning-playbook.md");
+          fs.writeFileSync(playbookPath, [
+            "# Learning Playbook", "",
+            "Lessons extracted from development workflows. Entries are YAML blocks separated by `---`.",
+            "Managed by /devt:retro (extraction) and /devt:curator (curation).", "", "---", "",
+          ].join("\n"));
+          repairs.push({ code: issue.code, action: "Created .devt/learning-playbook.md", success: true });
+          break;
+        }
+      }
+    } catch (e) {
+      repairs.push({ code: issue.code, action: e.message, success: false });
+    }
+  }
+
+  return { repairs, recheck_needed: repairs.length > 0 };
+}
+
+function run(args, pluginRoot) {
+  const repair = args.includes("--repair");
+
+  if (repair) {
+    const initial = runChecks(pluginRoot);
+    if (initial.repairable_count === 0) {
+      return { ...initial, repairs: [], message: "Nothing to repair" };
+    }
+    const { repairs } = runRepairs(pluginRoot, initial);
+    const after = runChecks(pluginRoot);
+    return { ...after, repairs, initial_status: initial.status };
+  }
+
+  return runChecks(pluginRoot);
+}
+
+module.exports = { run };

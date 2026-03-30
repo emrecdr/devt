@@ -158,4 +158,4 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, getMergedConfig, findProjectRoot, deepMerge };
+module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, DEFAULTS };
