@@ -185,7 +185,7 @@ Write `.devt/state/verification.md` with:
 
 ## Status
 
-VERIFIED | GAPS_FOUND | FAILED
+VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS
 
 ## Task
 

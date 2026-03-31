@@ -32,7 +32,7 @@ Before dispatching agents, check `.devt/config.json` for `agent_skills.<agent_ty
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null "task=${TASK_DESCRIPTION}"
 ```
 
 Read `.devt/rules/` for project conventions:
@@ -216,6 +216,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <task>Review this implementation plan for architectural soundness.</task>
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/state/plan.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json agent_skills.architect if available}</agent_skills>
   </context>
   Write review to .devt/state/arch-review.md
 ")

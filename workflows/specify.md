@@ -42,7 +42,7 @@ Parse the feature idea from user input.
 - If clear: proceed
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS "task=${FEATURE_IDEA}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null "task=${FEATURE_IDEA}"
 ```
 
 Load project context:
@@ -173,7 +173,24 @@ Create the spec file at TWO locations:
 - `.devt/state/spec.md` — for workflow consumption by /devt:plan and /devt:workflow
 - `docs/specs/{feature-slug}.md` — for permanent documentation (create `docs/specs/` directory if it does not exist)
 
-Also extract decisions from the PRD's Decisions section into `.devt/state/decisions.md` so the code-reviewer can verify decision compliance.
+Also extract decisions from the PRD's Decisions section into `.devt/state/decisions.md` using the DEC-xxx format so the code-reviewer can verify decision compliance:
+
+```markdown
+# Decisions
+
+## Task
+{feature name}
+
+## DEC-001: {first decision topic}
+**Decision**: {what was decided}
+**Why**: {reasoning from the PRD table}
+**Alternatives**: {other options considered, or "N/A"}
+
+## DEC-002: {next decision topic}
+...
+```
+
+Decision IDs enable traceability — plan.md and impl-summary.md can reference specific decisions by ID (e.g., "Per DEC-003, using repository pattern").
 
 Use the PRD template below. Fill ALL sections with interview answers. Do not leave placeholder
 brackets — every section must contain real content from the interview.

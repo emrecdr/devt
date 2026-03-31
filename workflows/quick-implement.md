@@ -75,7 +75,7 @@ Load project context:
   - If spec exists: use it as the primary requirements source
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE stopped_at=null stopped_phase=null "task=${TASK_DESCRIPTION}"
 ```
 
 **Gate**: If compound init fails, STOP with BLOCKED.
@@ -210,7 +210,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     - Report: "Review returned NEEDS_WORK after 2 iterations. Remaining findings require user input."
     - Status: BLOCKED
 
-_Note: Quick-implement limits review iterations to 2 (vs 3 in full workflow) for speed.
+_Note: Quick-implement limits review iterations to 2 (vs 5 in full workflow which uses RETRY/DECOMPOSE/PRUNE operators) for speed.
 Architectural issues still surface to user via BLOCKED status._
 
 ```bash

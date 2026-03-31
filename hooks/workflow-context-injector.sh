@@ -30,4 +30,5 @@ RESULT=$(node -e "
   process.stdout.write(JSON.stringify(output));
 " "$STATE_JSON" 2>/dev/null) || exit 0
 
-echo "$RESULT"
+[ -n "$RESULT" ] && echo "$RESULT"
+exit 0

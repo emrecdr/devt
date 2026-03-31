@@ -69,7 +69,7 @@ If not configured, omit the block.
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted scans:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=arch_health_scan phase=arch_health_scan status=IN_PROGRESS
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=arch_health_scan phase=arch_health_scan status=IN_PROGRESS stopped_at=null stopped_phase=null
 ```
 
 <step name="check_scanner" gate="scanner configuration is determined">

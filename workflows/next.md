@@ -115,6 +115,18 @@ Plan exists for: {task}. Starting implementation...
 ```
 Execute `/devt:workflow` with the task from plan.md (it will pick up the existing plan).
 
+### No workflow, has impl-summary.md but no review.md
+```
+Implementation exists but no review yet. Starting code review...
+```
+Execute `/devt:review` to review the existing implementation.
+
+### No workflow, has impl-summary.md and review.md with NEEDS_WORK
+```
+Review found issues. Resuming implementation to address feedback...
+```
+Execute `/devt:workflow` to resume at the implement phase with review feedback.
+
 ### No workflow, has impl-summary.md and review.md with APPROVED
 ```
 Implementation complete and approved. Ready to ship.

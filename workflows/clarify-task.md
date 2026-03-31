@@ -34,7 +34,7 @@ Not applicable — this workflow does not dispatch subagents.
 ## Step 1: Analyze the Task
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=clarify phase=context_init status=IN_PROGRESS "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=clarify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null "task=${TASK_DESCRIPTION}"
 ```
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.

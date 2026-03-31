@@ -28,7 +28,7 @@ Before dispatching the debugger agent, check `.devt/config.json` for `agent_skil
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted debug sessions:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null
 ```
 
 <step name="init" gate="project context loaded">
@@ -60,6 +60,7 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
+<agent_skills>{injected from .devt/config.json agent_skills.debugger if available}</agent_skills>
 </context>
 Follow the 4-phase investigation protocol. Write findings to .devt/state/debug-summary.md
 ")
