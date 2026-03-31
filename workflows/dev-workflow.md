@@ -248,7 +248,7 @@ STANDARD:     Everything else
 Record the tier:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=assess tier=$TIER
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=assess status=IN_PROGRESS tier=$TIER
 ```
 
 Report the tier and reasoning to the user before proceeding. The user can override the tier.
@@ -574,7 +574,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect sta
 Initialize iteration tracking:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement iteration=1
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=IN_PROGRESS iteration=1
 ```
 
 Dispatch the programmer agent:
@@ -975,7 +975,7 @@ If scratchpad has content:
 If no scratchpad or empty: skip this step silently.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review_deferred
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review_deferred status=IN_PROGRESS
 ```
 </step>
 

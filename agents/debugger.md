@@ -238,7 +238,7 @@ Write .devt/state/debug-summary.md:
 
 ## Status
 
-FIXED | NEEDS_MORE_INVESTIGATION | BLOCKED
+FIXED | NEEDS_MORE_INVESTIGATION | DONE_WITH_CONCERNS | BLOCKED
 
 ## Root Cause
 
