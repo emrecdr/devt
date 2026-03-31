@@ -63,9 +63,9 @@ Language-specific review priorities. The code-reviewer reads this alongside `cod
 
 ### HIGH: UI/UX Quality Standards
 
-- [ ] **Touch targets**: All interactive elements are at least 44x44px (WCAG 2.2 SC 2.5.8)
+- [ ] **Touch targets**: All interactive elements are at least 24x24px minimum (WCAG 2.2 SC 2.5.8 AA); 44x44px recommended (SC 2.5.5 AAA)
 - [ ] **Cursor pointer**: `cursor: pointer` on all clickable non-link elements (buttons, cards, toggles)
-- [ ] **Focus states**: Visible focus indicators on all interactive elements with 3:1 contrast ratio (WCAG 2.2 SC 2.4.11)
+- [ ] **Focus states**: Visible focus indicators on all interactive elements (WCAG 2.2 SC 2.4.7 AA); 3:1 contrast ratio for enhanced compliance (SC 2.4.13 AAA)
 - [ ] **Hover states**: All interactive elements have hover transitions (150-300ms ease)
 - [ ] **Text contrast**: Normal text ≥ 4.5:1, large text (18pt+) ≥ 3:1 against background (WCAG 2.2 AA)
 - [ ] **Reduced motion**: `@media (prefers-reduced-motion: reduce)` disables non-essential animations
@@ -87,9 +87,9 @@ Language-specific review priorities. The code-reviewer reads this alongside `cod
 Diagnostic:
 ```bash
 # Check for div-as-button anti-pattern
-grep -rn '@click' src/ --include="*.vue" | grep -v '<button' | grep '<div'
+grep -rn '@click' src/ --include="*.vue" | grep -v '<button' | grep '<div' | head -30
 # Check for missing cursor-pointer
-grep -rn 'clickable\|@click' src/ --include="*.vue" | grep -v 'cursor'
+grep -rn 'clickable\|@click' src/ --include="*.vue" | grep -v 'cursor' | head -30
 # Check for hardcoded colors (should use CSS variables or Bootstrap classes)
 grep -rn 'color:\s*#' src/ --include="*.vue" --include="*.scss" | head -20
 ```

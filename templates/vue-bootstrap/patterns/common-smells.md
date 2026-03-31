@@ -72,7 +72,8 @@ const adminNames = computed(() => activeAdmins.value.map(i => i.name).join(', ')
 
 **Why it's bad**: Creates coupling between feature modules. Changes to auth break settings.
 
-**How to detect**: `grep -rn "from '@/components/" --include="*.js" --include="*.vue" src/components/ | grep -v "from '@/components/$(basename $(dirname $file))"`
+**How to detect**: `grep -rn "from '@/components/" --include="*.js" --include="*.vue" src/components/`
+Then manually check: any result importing from a feature *other than* its own feature directory is a violation.
 
 **Fix**: Move shared logic to `shared/stores/`, `shared/composables/`, or `shared/services/`. Feature modules import from `shared/`, never from each other.
 

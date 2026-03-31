@@ -42,7 +42,7 @@ Parse the feature idea from user input.
 - If clear: proceed
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null "task=${FEATURE_IDEA}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${FEATURE_IDEA}"
 ```
 
 Load project context:

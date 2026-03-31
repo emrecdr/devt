@@ -32,7 +32,7 @@ Before dispatching agents, check `.devt/config.json` for `agent_skills.<agent_ty
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
 Read `.devt/rules/` for project conventions:

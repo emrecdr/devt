@@ -28,7 +28,7 @@ Before dispatching the debugger agent, check `.devt/config.json` for `agent_skil
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted debug sessions:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null
 ```
 
 <step name="init" gate="project context loaded">
