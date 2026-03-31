@@ -33,8 +33,8 @@ All devt agents use these status values in their output artifacts:
 | -------------------------- | ---------------------------------------------------- |
 | `FIXED`                    | Bug identified and fixed                             |
 | `NEEDS_MORE_INVESTIGATION` | Partial findings, needs another round                |
-| `DONE_WITH_CONCERNS`       | Hit 3-attempt limit — partial fix, needs manual work |
-| `BLOCKED`                  | Likely architectural — needs user decision            |
+| `DONE_WITH_CONCERNS`       | Debugger hit its internal 3-fix-attempt limit on a single issue — partial fix applied but issue not fully resolved. Needs manual intervention or architectural review |
+| `BLOCKED`                  | Root cause is architectural — needs user decision     |
 
 ## Workflow Phase Status (workflow state tracking)
 
@@ -50,15 +50,15 @@ Every .devt/state/ artifact MUST include a Status field as the first line after 
 
 How agent-specific statuses map to workflow actions:
 
-### Code Review → Workflow (Repair Operator)
+### Code Review → Workflow (Repair Operator — max 5 iterations)
 
 When review returns `NEEDS_WORK`, the workflow applies an escalating **repair operator**:
 
 | Iteration | Repair Action | Behavior |
 | --------- | ------------- | -------- |
-| 1         | `RETRY`       | Re-dispatch programmer with full review feedback — address all findings |
-| 2         | `DECOMPOSE`   | Classify findings: fix isolated issues, defer cross-cutting ones to scratchpad |
-| 3         | `PRUNE`       | Stop iterating — defer remaining findings, proceed with DONE_WITH_CONCERNS |
+| 1–3       | `RETRY`       | Re-dispatch programmer with full review feedback — address all findings |
+| 4         | `DECOMPOSE`   | Classify findings: fix isolated issues, defer cross-cutting ones to scratchpad |
+| 5         | `PRUNE`       | Stop iterating — defer remaining findings, proceed with DONE_WITH_CONCERNS |
 
 | Review Verdict        | Workflow Action                                                       |
 | --------------------- | --------------------------------------------------------------------- |
@@ -66,12 +66,12 @@ When review returns `NEEDS_WORK`, the workflow applies an escalating **repair op
 | `APPROVED_WITH_NOTES` | Proceed to next phase, surface notes to user                          |
 | `NEEDS_WORK`          | Apply repair operator (RETRY → DECOMPOSE → PRUNE)                    |
 
-### Verification → Workflow (Repair Operator)
+### Verification → Workflow (Repair Operator — max 3 iterations)
 
 | Verify Iteration | Repair Action | Behavior |
 | ---------------- | ------------- | -------- |
-| 0                | `RETRY`       | Re-dispatch programmer with gap list |
-| 1                | `PRUNE`       | Defer remaining gaps to scratchpad, proceed with DONE_WITH_CONCERNS |
+| 0–1              | `RETRY`       | Re-dispatch programmer with gap list |
+| 2                | `PRUNE`       | Defer remaining gaps to scratchpad, proceed with DONE_WITH_CONCERNS |
 
 | Verifier Status | Iteration 0                                          | Iteration 1                             |
 | --------------- | ---------------------------------------------------- | --------------------------------------- |
@@ -79,13 +79,19 @@ When review returns `NEEDS_WORK`, the workflow applies an escalating **repair op
 | `GAPS_FOUND`    | RETRY — re-dispatch programmer with gap list         | PRUNE — defer gaps, proceed with concerns |
 | `FAILED`        | Re-dispatch programmer with failure details           | STOP workflow, surface to user           |
 
-### Debug → Workflow
+### Debug → Workflow (two separate limits)
 
-| Debug Status                | Workflow Action                                              |
-| --------------------------- | ------------------------------------------------------------ |
-| `FIXED`                     | Run quality gates to verify fix, then DONE                   |
-| `NEEDS_MORE_INVESTIGATION`  | Re-dispatch debugger with accumulated context (max 3 rounds) |
-| `BLOCKED`                   | Surface to user with findings so far                         |
+The debugger has TWO independent limits — don't confuse them:
+
+- **Internal fix limit (3 attempts)**: Within a single debug session, the debugger tries up to 3 fixes on the same issue. After 3 failed attempts → `DONE_WITH_CONCERNS` (not BLOCKED — reserve BLOCKED for architectural issues).
+- **Workflow re-dispatch limit (3 rounds)**: The debug.md workflow can re-dispatch the debugger up to 3 times when it returns `NEEDS_MORE_INVESTIGATION`. Each round is a fresh debugger session with accumulated context.
+
+| Debug Status                | Workflow Action                                                        |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `FIXED`                     | Run quality gates to verify fix, then DONE                             |
+| `NEEDS_MORE_INVESTIGATION`  | Re-dispatch debugger with accumulated context (max 3 workflow rounds)  |
+| `DONE_WITH_CONCERNS`        | Report attempts and remaining issues, suggest manual fix or arch review |
+| `BLOCKED`                   | Surface root cause analysis, suggest architectural review              |
 
 ### General Agent → Workflow
 
