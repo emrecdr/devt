@@ -169,7 +169,7 @@ Read `.devt/state/curation-summary.md` and report to the user:
 Final status: **DONE**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=DONE
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=DONE active=false
 ```
 </step>
 

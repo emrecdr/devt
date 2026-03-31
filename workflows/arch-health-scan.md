@@ -306,7 +306,7 @@ Report: "Saved to $REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md"
 Final status: **DONE**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_scan status=DONE
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_scan status=DONE active=false
 ```
 </step>
 

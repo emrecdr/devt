@@ -25,14 +25,14 @@ Before dispatching the debugger agent, check `.devt/config.json` for `agent_skil
 
 <process>
 
-<step name="init" gate="project context loaded">
-## Step 1: Initialize
-
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted debug sessions:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true phase=debug status=IN_PROGRESS
 ```
+
+<step name="init" gate="project context loaded">
+## Step 1: Initialize
 
 Read `.devt/rules/coding-standards.md` and `.devt/rules/quality-gates.md` for context.
 Read `CLAUDE.md` if it exists.
@@ -75,7 +75,7 @@ Read `.devt/state/debug-summary.md`:
 - **BLOCKED**: surface root cause analysis, suggest architectural review
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=DONE
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=DONE active=false
 ```
 </step>
 

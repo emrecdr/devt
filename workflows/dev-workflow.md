@@ -638,7 +638,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 
 **Gate check**: Read `.devt/state/test-summary.md` and check status:
 
-- DONE or DONE_WITH_CONCERNS: proceed to review
+- DONE or DONE_WITH_CONCERNS: proceed to **simplify** (STANDARD/COMPLEX) or **review** (TRIVIAL/SIMPLE)
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
 
@@ -675,12 +675,12 @@ if [[ -f "$GATES_FILE" ]]; then
 fi
 ```
 
-**Gate check**:
+**Gate check** — set `STATUS` based on outcome:
 
-- Quality gates pass: proceed to review
-- Quality gates fail: attempt to fix the failing gates (same approach as the implement phase fix loop — run the failing command, read the error, fix it). Re-run quality gates after fix.
-  - If gates pass after fix: proceed to review
-  - If gates still fail: revert all simplification changes (`git checkout -- <broken_files>`) and proceed to review with the pre-simplify code. The original code was already tested and passing — safe to fall back.
+- Quality gates pass → `STATUS=DONE`, proceed to review
+- Quality gates fail → attempt to fix (run failing command, read error, fix). Re-run gates.
+  - Gates pass after fix → `STATUS=DONE`, proceed to review
+  - Gates still fail → revert simplification changes (`git checkout -- <broken_files>`), `STATUS=REVERTED`, proceed to review with pre-simplify code. The original code was already tested and passing — safe to fall back.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify status=$STATUS
