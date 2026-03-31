@@ -68,6 +68,23 @@ Ask via AskUserQuestion:
 - "Define a feature" → ask for feature idea, then run `/devt:specify`
 - "Fix a bug" → ask for bug description, then run `/devt:debug`
 
+### No workflow, has stopped_phase (interrupted session)
+Read `stopped_phase` and `workflow_type` from state. Route to the correct workflow:
+
+| `workflow_type` | Resume command |
+|-----------------|----------------|
+| `dev` | `/devt:workflow` with the original task |
+| `debug` | `/devt:debug` with accumulated context from `.devt/state/debug-context.md` |
+| `retro` | `/devt:retro` |
+| `arch_health_scan` | `/devt:arch-health` |
+| `code_review` | `/devt:review` |
+| missing/unknown | Ask the user which workflow to resume |
+
+```
+Previous session stopped at phase: {stopped_phase}.
+Resuming {workflow_type} workflow...
+```
+
 ### No workflow, has handoff.json (paused)
 Read handoff for task, phase, and next_action.
 ```
@@ -79,7 +96,7 @@ Delete handoff.json after reading — it is a one-shot artifact:
 ```bash
 rm -f .devt/state/handoff.json .devt/state/continue-here.md
 ```
-Execute `/devt:workflow` with the original task to resume.
+Execute the appropriate workflow based on `workflow_type` from state (default: `/devt:workflow`).
 
 ### No workflow, has spec.md but no plan.md
 ```
@@ -101,9 +118,15 @@ Ask: "Create PR now?" → if yes, execute `/devt:ship`.
 
 ### Active workflow, phase known
 ```
-Workflow active at phase: {phase}. Continuing...
+Workflow active at phase: {phase} (type: {workflow_type}). Continuing...
 ```
-Execute `/devt:workflow` to resume from current phase.
+Route based on `workflow_type`:
+- `dev` → Execute `/devt:workflow` to resume from current phase
+- `debug` → Execute `/devt:debug` to continue debugging
+- `retro` → Execute `/devt:retro` to continue lesson extraction
+- `arch_health_scan` → Execute `/devt:arch-health` to continue scan
+- `code_review` → Execute `/devt:review` to continue review
+- missing/unknown → Execute `/devt:workflow` (default)
 
 ### Active workflow, status BLOCKED
 Read the blocking reason from the latest artifact.

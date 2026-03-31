@@ -82,6 +82,7 @@ const KNOWN_STATE_KEYS = {
   iteration: "number",
   task: "string",
   workflow_id: "string",
+  workflow_type: "string",
   last_session: "string",
   stopped_at: "string",
   stopped_phase: "string",

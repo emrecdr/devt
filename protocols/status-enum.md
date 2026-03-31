@@ -29,11 +29,20 @@ All devt agents use these status values in their output artifacts:
 
 ## Debug Status (debugger only)
 
-| Status                     | Meaning                                    |
-| -------------------------- | ------------------------------------------ |
-| `FIXED`                    | Bug identified and fixed                   |
-| `NEEDS_MORE_INVESTIGATION` | Partial findings, needs another round      |
-| `BLOCKED`                  | Likely architectural — needs user decision |
+| Status                     | Meaning                                              |
+| -------------------------- | ---------------------------------------------------- |
+| `FIXED`                    | Bug identified and fixed                             |
+| `NEEDS_MORE_INVESTIGATION` | Partial findings, needs another round                |
+| `DONE_WITH_CONCERNS`       | Hit 3-attempt limit — partial fix, needs manual work |
+| `BLOCKED`                  | Likely architectural — needs user decision            |
+
+## Workflow Phase Status (workflow state tracking)
+
+| Status          | Meaning                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `IN_PROGRESS`   | Phase is currently executing                               |
+| `DONE`          | Phase completed successfully                               |
+| `REVERTED`      | Simplify phase changes were rolled back (quality gates failed after fix attempt) |
 
 Every .devt/state/ artifact MUST include a Status field as the first line after the title.
 

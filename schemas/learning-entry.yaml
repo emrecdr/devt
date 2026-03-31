@@ -9,10 +9,15 @@
 required:
   - description
   - category
-  - context
   - evidence
   - importance
   - tags
+
+# Note: 'context' is required in the intermediate lessons.yaml (retro agent output)
+# but is merged into 'description' by the curator agent before writing to the playbook.
+# The FTS5 database (semantic.cjs) indexes description, not context separately.
+optional_intermediate:
+  - context
 
 properties:
   description:
@@ -39,7 +44,8 @@ properties:
 
   context:
     type: string
-    description: "When this lesson applies — the trigger condition"
+    description: "When this lesson applies — the trigger condition. Required in lessons.yaml (retro output). The curator merges this into description before writing to the playbook, so it does NOT appear as a separate field in the final learning-playbook.md entries."
+    lifecycle: "lessons.yaml → curator merges into description → playbook (no context field)"
     examples:
       - "When creating new error types in a project with existing error hierarchies"
       - "When writing tests for endpoints with multiple query parameters"

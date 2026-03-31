@@ -58,7 +58,7 @@ If not configured, omit the block.
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted retros:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true phase=retro status=IN_PROGRESS
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=retro phase=retro status=IN_PROGRESS
 ```
 
 <step name="gather_context" gate="artifacts are identified and accessible">

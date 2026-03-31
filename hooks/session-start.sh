@@ -36,15 +36,17 @@ fi
 # ─── Workflow State Detection ───
 
 STOPPED_AT=""
+STOPPED_PHASE=""
+WORKFLOW_TYPE=""
 if [[ -f ".devt/state/workflow.yaml" ]]; then
-  STOPPED_AT=$(node -e "
+  IFS=$'\n' read -r STOPPED_AT STOPPED_PHASE WORKFLOW_TYPE <<< "$(node -e "
     const fs = require('fs');
     try {
       const content = fs.readFileSync('.devt/state/workflow.yaml', 'utf8');
-      const match = content.match(/^stopped_at:\s*(.+)$/m);
-      if (match && match[1] !== 'null') process.stdout.write(match[1].trim());
-    } catch(e) {}
-  " 2>/dev/null || true)
+      const get = (key) => { const m = content.match(new RegExp('^' + key + ':\\\\s*(.+)$', 'm')); return (m && m[1].trim() !== 'null') ? m[1].trim() : ''; };
+      [get('stopped_at'), get('stopped_phase'), get('workflow_type')].forEach(v => process.stdout.write(v + '\n'));
+    } catch(e) { process.stdout.write('\n\n\n'); }
+  " 2>/dev/null || printf '\n\n\n')"
 fi
 
 HANDOFF_INFO=""
@@ -128,9 +130,12 @@ Paused workflow detected:
   ${HANDOFF_INFO}
 Run /devt:next to resume or /devt:cancel-workflow to start fresh."
 elif [[ -n "$STOPPED_AT" ]]; then
+  RESUME_DETAIL="Previous session stopped at: ${STOPPED_AT}."
+  [[ -n "$STOPPED_PHASE" ]] && RESUME_DETAIL="${RESUME_DETAIL} Phase: ${STOPPED_PHASE}."
+  [[ -n "$WORKFLOW_TYPE" ]] && RESUME_DETAIL="${RESUME_DETAIL} Workflow: ${WORKFLOW_TYPE}."
   CONTEXT="${CONTEXT}
 
-Previous session stopped at: ${STOPPED_AT}. State in .devt/state/.
+${RESUME_DETAIL} State in .devt/state/.
 Run /devt:next to resume or /devt:cancel-workflow to start fresh."
 fi
 

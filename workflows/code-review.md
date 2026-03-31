@@ -69,7 +69,7 @@ Load project context:
 - Read `CLAUDE.md` if it exists
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=code_review phase=context_init status=DONE
 ```
 
 **Gate**: If compound init fails, STOP with BLOCKED.

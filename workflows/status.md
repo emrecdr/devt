@@ -144,10 +144,20 @@ Based on current state, suggest the appropriate next command:
 | State                                    | Suggestion                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------ |
 | No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:fast"              |
-| No workflow, has stopped_at              | "Resume with /devt:workflow or start fresh with /devt:cancel-workflow"   |
+| No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:cancel-workflow"       |
+| Active, phase=scan                       | "Continue with /devt:workflow to proceed to implementation"              |
 | Active, phase=implement                  | "Continue with /devt:workflow to proceed to testing"                     |
-| Active, phase=test                       | "Continue with /devt:workflow to proceed to review"                      |
+| Active, phase=test                       | "Continue with /devt:workflow to proceed to simplify/review"             |
+| Active, phase=simplify                   | "Continue with /devt:workflow to proceed to review"                      |
 | Active, phase=review, verdict=NEEDS_WORK | "Continue with /devt:workflow to iterate on review findings"             |
+| Active, phase=verify                     | "Continue with /devt:workflow to proceed to docs"                        |
+| Active, phase=docs                       | "Continue with /devt:workflow to proceed to retro"                       |
+| Active, phase=retro                      | "Continue with /devt:workflow to finalize"                               |
+| Active, phase=curate                     | "Continue with /devt:workflow to finalize"                               |
+| Active, phase=autoskill                  | "Continue with /devt:workflow to finalize"                               |
+| Active, phase=review_deferred            | "Continue with /devt:workflow to finalize"                               |
+| Active, phase=debug                      | "Continue with /devt:debug to resume investigation"                      |
+| Active, phase=arch_health_scan           | "Continue with /devt:arch-health to resume scan"                         |
 | Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
 | Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 
