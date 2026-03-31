@@ -308,4 +308,7 @@ module.exports = {
   checkWorkflowLock,
   getStateDir,
   ensureStateDir,
+  VALID_PHASES,
+  VALID_WORKFLOW_TYPES,
+  VALID_TIERS,
 };

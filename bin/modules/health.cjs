@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const { findProjectRoot, DEFAULTS } = require("./config.cjs");
-const { readState } = require("./state.cjs");
+const { readState, VALID_PHASES, VALID_WORKFLOW_TYPES, VALID_TIERS } = require("./state.cjs");
 const { REQUIRED_DEV_RULES } = require("./init.cjs");
 
 const CHECKS = {
@@ -32,6 +32,8 @@ const CHECKS = {
   I001: { severity: "info", message: "CLAUDE.md not found (recommended)", repairable: false, fix: "Create a CLAUDE.md with project-specific guidance for Claude Code" },
   I002: { severity: "info", message: ".devt/learning-playbook.md not found", repairable: true, fix: "Run /devt:health --repair to create, or /devt:retro to start the learning loop" },
   I003: { severity: "info", message: "No active workflow", repairable: false, fix: "No action needed — start a workflow with /devt:workflow" },
+  W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:health --repair to clear invalid state, or /devt:cancel-workflow" },
+  W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
 };
 
 const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
@@ -206,6 +208,43 @@ function runChecks(pluginRoot) {
     }
   }
 
+  // W011: Validate active workflow state fields
+  if (state.active) {
+    if (state.workflow_type && !VALID_WORKFLOW_TYPES.has(state.workflow_type)) {
+      add("W011", `workflow_type="${state.workflow_type}" is not in VALID_WORKFLOW_TYPES`, { field: "workflow_type", value: state.workflow_type });
+    }
+    if (state.phase && !VALID_PHASES.has(state.phase)) {
+      add("W011", `phase="${state.phase}" is not in VALID_PHASES`, { field: "phase", value: state.phase });
+    }
+    if (state.tier && !VALID_TIERS.has(state.tier)) {
+      add("W011", `tier="${state.tier}" is not in VALID_TIERS`, { field: "tier", value: state.tier });
+    }
+  }
+
+  // W012: Hook scripts referenced in hooks.json exist
+  if (pluginRoot) {
+    const hooksJsonPath = path.join(pluginRoot, "hooks", "hooks.json");
+    try {
+      const hooksConfig = JSON.parse(fs.readFileSync(hooksJsonPath, "utf8"));
+      const referenced = new Set();
+      for (const eventHooks of Object.values(hooksConfig.hooks || {})) {
+        for (const entry of eventHooks) {
+          for (const hook of entry.hooks || []) {
+            const m = (hook.command || "").match(/run-hook\.js[" ]+(\S+)/);
+            if (m) referenced.add(m[1]);
+          }
+        }
+      }
+      for (const script of referenced) {
+        if (!fs.existsSync(path.join(pluginRoot, "hooks", script))) {
+          add("W012", script, { script });
+        }
+      }
+    } catch {
+      // hooks.json not readable — skip
+    }
+  }
+
   // I001: CLAUDE.md
   if (!fs.existsSync(path.join(projectRoot, "CLAUDE.md"))) {
     add("I001");
@@ -280,6 +319,16 @@ function runRepairs(pluginRoot, checkResult) {
           if (pluginRoot && script) {
             fs.chmodSync(path.join(pluginRoot, "hooks", script), 0o755);
             repairs.push({ code: issue.code, action: `Made ${script} executable`, success: true });
+          }
+          break;
+        }
+
+        case "W011": {
+          const { updateState } = require("./state.cjs");
+          const field = issue.data && issue.data.field;
+          if (field) {
+            updateState([`${field}=null`]);
+            repairs.push({ code: issue.code, action: `Cleared invalid ${field}`, success: true });
           }
           break;
         }
