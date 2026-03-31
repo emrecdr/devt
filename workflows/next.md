@@ -74,10 +74,15 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `workflow_type` | Resume command |
 |-----------------|----------------|
 | `dev` | `/devt:workflow` with the original task |
+| `quick_implement` | `/devt:implement` with the original task |
 | `debug` | `/devt:debug` with accumulated context from `.devt/state/debug-context.md` |
 | `retro` | `/devt:retro` |
 | `arch_health_scan` | `/devt:arch-health` |
 | `code_review` | `/devt:review` |
+| `research` | `/devt:research` with the original task |
+| `plan` | `/devt:plan` with the original task |
+| `specify` | `/devt:specify` with the original task |
+| `clarify` | `/devt:clarify` with the original task |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```
@@ -122,10 +127,15 @@ Workflow active at phase: {phase} (type: {workflow_type}). Continuing...
 ```
 Route based on `workflow_type`:
 - `dev` → Execute `/devt:workflow` to resume from current phase
+- `quick_implement` → Execute `/devt:implement` to resume quick pipeline
 - `debug` → Execute `/devt:debug` to continue debugging
 - `retro` → Execute `/devt:retro` to continue lesson extraction
 - `arch_health_scan` → Execute `/devt:arch-health` to continue scan
 - `code_review` → Execute `/devt:review` to continue review
+- `research` → Execute `/devt:research` to continue investigation
+- `plan` → Execute `/devt:plan` to continue planning
+- `specify` → Execute `/devt:specify` to continue spec generation
+- `clarify` → Execute `/devt:clarify` to continue decision capture
 - missing/unknown → Execute `/devt:workflow` (default)
 
 ### Active workflow, status BLOCKED

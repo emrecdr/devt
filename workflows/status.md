@@ -144,7 +144,7 @@ Based on current state, suggest the appropriate next command:
 | State                                    | Suggestion                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------ |
 | No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:fast"              |
-| No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:cancel-workflow"       |
+| No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:cancel-workflow" (mention the workflow_type if available, e.g., "Interrupted research workflow") |
 | Active, phase=scan                       | "Continue with /devt:workflow to proceed to implementation"              |
 | Active, phase=implement                  | "Continue with /devt:workflow to proceed to testing"                     |
 | Active, phase=test                       | "Continue with /devt:workflow to proceed to simplify/review"             |
@@ -158,6 +158,11 @@ Based on current state, suggest the appropriate next command:
 | Active, phase=review_deferred            | "Continue with /devt:workflow to finalize"                               |
 | Active, phase=debug                      | "Continue with /devt:debug to resume investigation"                      |
 | Active, phase=arch_health_scan           | "Continue with /devt:arch-health to resume scan"                         |
+| Active, workflow_type=quick_implement    | "Continue with /devt:implement to resume quick pipeline"                 |
+| Active, workflow_type=research           | "Continue with /devt:research to resume investigation"                   |
+| Active, workflow_type=plan               | "Continue with /devt:plan to resume planning"                            |
+| Active, workflow_type=specify            | "Continue with /devt:specify to resume spec generation"                  |
+| Active, workflow_type=clarify            | "Continue with /devt:clarify to resume decision capture"                 |
 | Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
 | Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 

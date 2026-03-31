@@ -41,6 +41,10 @@ Parse the feature idea from user input.
 - If empty or too vague: ask for a one-sentence description via AskUserQuestion
 - If clear: proceed
 
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS "task=${FEATURE_IDEA}"
+```
+
 Load project context:
 - Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively
 - Read `.devt/rules/coding-standards.md` for naming/patterns
@@ -350,6 +354,10 @@ options:
 
 If the user selects an action, execute the corresponding command with the feature description as the argument.
 If "Done for now", report the file paths and stop.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=complete status=DONE
+```
 </step>
 
 </process>

@@ -30,6 +30,7 @@ Before dispatching the researcher agent, check `.devt/config.json` for `agent_sk
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=research phase=context_init status=IN_PROGRESS "task=${TASK_DESCRIPTION}"
 ```
 
 Read .devt/rules/ for project conventions.
@@ -95,7 +96,11 @@ Based on research completeness:
 - If approach is clear: "Research complete. Run /devt:plan to create an implementation plan, or /devt:workflow to start implementing."
 - If concerns flagged: "Research has concerns. Review .devt/state/research.md before proceeding."
 - If user provided answers to open questions: update research.md and suggest proceeding.
-  </step>
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=complete status=DONE
+```
+</step>
 
 </process>
 

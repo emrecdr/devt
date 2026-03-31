@@ -32,6 +32,7 @@ Before dispatching agents, check `.devt/config.json` for `agent_skills.<agent_ty
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS "task=${TASK_DESCRIPTION}"
 ```
 
 Read `.devt/rules/` for project conventions:
@@ -259,6 +260,10 @@ options:
 If the user selects implementation, execute `/devt:workflow` with the task description.
 If the user requests changes, revise the plan and re-present.
 If "Done for now", report the plan location (`.devt/state/plan.md`) and stop.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=complete status=DONE
+```
 </step>
 
 </process>

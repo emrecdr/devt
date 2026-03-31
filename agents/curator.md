@@ -106,7 +106,7 @@ created_at: "2026-03-29"
 - `evidence` (REQUIRED): Concrete example from the workflow that proved this lesson
 - `importance` (REQUIRED): Integer 1-10
 - `confidence` (REQUIRED): Float 0.0-1.0
-- `decay_days` (OPTIONAL): Integer, default 90. How many days before re-evaluation
+- `decay_days` (OPTIONAL): Integer, default 180. How many days before re-evaluation
 - `created_at` (OPTIONAL): ISO date string
 
 **When creating a new playbook:** Start with a header line `# Learning Playbook` followed by entries.

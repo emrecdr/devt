@@ -37,7 +37,26 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 
 ### State Flow
 
-Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` for resume routing), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger scratchpad, within-session only). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows.
+Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` for resume routing), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger scratchpad, within-session only). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
+
+#### `workflow_type` Registry
+
+The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:next`. Valid values (validated by `state.cjs`):
+
+| `workflow_type` | Set by | Resume command |
+|-----------------|--------|----------------|
+| `dev` | `dev-workflow.md` | `/devt:workflow` |
+| `quick_implement` | `quick-implement.md` | `/devt:implement` |
+| `debug` | `debug.md` | `/devt:debug` |
+| `retro` | `lesson-extraction.md` | `/devt:retro` |
+| `code_review` | `code-review.md` | `/devt:review` |
+| `arch_health_scan` | `arch-health-scan.md` | `/devt:arch-health` |
+| `research` | `research-task.md` | `/devt:research` |
+| `plan` | `create-plan.md` | `/devt:plan` |
+| `specify` | `specify.md` | `/devt:specify` |
+| `clarify` | `clarify-task.md` | `/devt:clarify` |
+
+When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` and routing entries in `workflows/next.md`.
 
 ### Templates
 

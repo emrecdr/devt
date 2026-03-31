@@ -106,6 +106,11 @@ const VALID_PHASES = new Set([
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
+const VALID_WORKFLOW_TYPES = new Set([
+  "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
+  "research", "plan", "specify", "clarify", null,
+]);
+
 function warnState(msg) {
   process.stderr.write(JSON.stringify({ state_warning: msg }) + "\n");
 }
@@ -122,6 +127,12 @@ function validateStateEntry(key, value) {
   }
   if ((key === "tier" || key === "complexity") && !VALID_TIERS.has(value)) {
     warnState(`Unknown tier "${value}"`);
+  }
+  if (key === "workflow_type" && !VALID_WORKFLOW_TYPES.has(value)) {
+    warnState(`Unknown workflow_type "${value}"`);
+  }
+  if (key === "complexity") {
+    warnState(`"complexity" is deprecated — use "tier" instead`);
   }
 }
 

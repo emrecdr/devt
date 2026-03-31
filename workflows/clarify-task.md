@@ -33,6 +33,10 @@ Not applicable — this workflow does not dispatch subagents.
 <step name="analyze" gate="gray areas identified">
 ## Step 1: Analyze the Task
 
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=clarify phase=context_init status=IN_PROGRESS "task=${TASK_DESCRIPTION}"
+```
+
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
 
 Read the task description and identify:
@@ -98,6 +102,10 @@ Decision IDs enable traceability — plan.md and impl-summary.md can reference s
 ```
 
 This document feeds into the programmer agent's context.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=complete status=DONE
+```
 </step>
 
 </process>

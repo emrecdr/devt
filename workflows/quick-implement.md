@@ -75,7 +75,7 @@ Load project context:
   - If spec exists: use it as the primary requirements source
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init tier=SIMPLE status=DONE "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE "task=${TASK_DESCRIPTION}"
 ```
 
 **Gate**: If compound init fails, STOP with BLOCKED.
