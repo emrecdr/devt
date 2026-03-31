@@ -616,6 +616,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 
 <step name="test" gate="test-summary.md is written with status DONE or DONE_WITH_CONCERNS">
 
+_Skip this step if `test` is listed in `skipped_phases` from workflow state._
+
 Dispatch the tester agent:
 
 ```
@@ -655,6 +657,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 <step name="simplify" gate="code is cleaned up and quality gates still pass">
 
 _Only applies if complexity tier is STANDARD or COMPLEX. Skip for TRIVIAL and SIMPLE._
+_Skip this step if `simplify` is listed in `skipped_phases` from workflow state._
 
 After tests pass, run a simplification pass on the changed code before it goes to review. This catches generative debt (redundancy, over-engineering, missed reuse) that the programmer's self-review may have missed.
 
@@ -694,6 +697,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify stat
 
 <step name="review" gate="review.md is written with verdict APPROVED or APPROVED_WITH_NOTES">
 
+_Skip this step if `review` is listed in `skipped_phases` from workflow state._
+
 Dispatch the code-reviewer agent:
 
 ```
@@ -714,8 +719,9 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 ")
 ```
 
-**Gate check**: Read `.devt/state/review.md` and check verdict:
+**Gate check**: Read `.devt/state/review.md` and check verdict and score:
 
+- **Score < 50 in autonomous mode**: pause and surface findings to the user even if autonomous — likely an architectural issue that automated retries won't resolve
 - **APPROVED** or **APPROVED_WITH_NOTES**: proceed to next step
 - **NEEDS_WORK** — apply the **repair operator** based on iteration count:
   - **Iteration 1–3 → RETRY**: go back to **Step 4 (implement)** with review feedback
@@ -746,6 +752,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.verification` is `false`._
+_Skip this step if `verify` is listed in `skipped_phases` from workflow state._
 
 Dispatch the verifier agent:
 
@@ -805,6 +812,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status
 
 _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.docs` is `false`._
+_Skip this step if `docs` is listed in `skipped_phases` from workflow state._
 
 **Pre-dispatch check**: Read `.devt/state/impl-summary.md` status.
 
@@ -846,6 +854,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=docs status=D
 
 _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.retro` is `false`._
+_Skip this step if `retro` is listed in `skipped_phases` from workflow state._
 
 Dispatch the retro agent:
 
@@ -932,6 +941,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=curate status
 
 _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.autoskill` is `false`._
+_Skip this step if `autoskill` is listed in `skipped_phases` from workflow state._
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/autoskill/` for the autoskill protocol.
 
