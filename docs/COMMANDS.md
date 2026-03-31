@@ -415,6 +415,7 @@ programmer  --> impl-summary.md  --> tester, reviewer, verifier, docs-writer, re
 tester      --> test-summary.md  --> reviewer, verifier, docs-writer, retro
 reviewer    --> review.md        --> programmer (if NEEDS_WORK), verifier, retro
 verifier    --> verification.md  --> programmer (if GAPS_FOUND)
+scan        --> scan-results.md  --> programmer, architect
 baseline    --> baseline-gates.md --> verifier (regression detection)
 architect   --> arch-review.md   --> programmer
 retro       --> lessons.yaml     --> curator

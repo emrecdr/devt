@@ -719,17 +719,18 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 ")
 ```
 
-**Gate check**: Read `.devt/state/review.md` and check verdict and score:
+**Gate check**: Read `.devt/state/review.md` and check verdict and score. Also read the current `iteration` value from workflow state (`node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read` → `iteration` field) to determine which repair operator applies:
 
 - **Score < 50 in autonomous mode**: pause and surface findings to the user even if autonomous — likely an architectural issue that automated retries won't resolve
 - **APPROVED** or **APPROVED_WITH_NOTES**: proceed to next step
-- **NEEDS_WORK** — apply the **repair operator** based on iteration count:
+- **NEEDS_WORK** — apply the **repair operator** based on the current `iteration` value from state:
   - **Iteration 1–3 → RETRY**: go back to **Step 4 (implement)** with review feedback
     - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=$((ITER+1)) verdict=NEEDS_WORK repair=RETRY`
     - The programmer agent reads `.devt/state/review.md` as `<review_feedback>` and addresses all findings
   - **Iteration 4 → DECOMPOSE**: analyze unresolved findings from review.md
     - Classify each finding: is it fixable in isolation, or does it require cross-cutting changes?
-    - Re-dispatch programmer with a **focused scope**: only the fixable findings, explicitly deferring cross-cutting ones to `.devt/state/scratchpad.md`
+    - Write cross-cutting findings to `.devt/state/scratchpad.md` under `## Deferred Review Findings` BEFORE re-dispatching programmer
+    - Re-dispatch programmer with a **focused scope**: include only the fixable findings in `<review_feedback>`, not the full review.md. Prepend: "DECOMPOSE pass — fix ONLY the findings listed below. Cross-cutting issues have been deferred."
     - Increment iteration: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review iteration=5 verdict=NEEDS_WORK repair=DECOMPOSE`
   - **Iteration 5 → PRUNE**: stop iterating
     - Collect all remaining unresolved findings from review.md
