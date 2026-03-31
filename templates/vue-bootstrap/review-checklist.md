@@ -61,6 +61,39 @@ Language-specific review priorities. The code-reviewer reads this alongside `cod
 - [ ] **Missing responsive breakpoints**: fixed widths instead of responsive grid
 - [ ] **Accessibility**: missing ARIA labels on interactive elements
 
+### HIGH: UI/UX Quality Standards
+
+- [ ] **Touch targets**: All interactive elements are at least 44x44px (WCAG 2.2 SC 2.5.8)
+- [ ] **Cursor pointer**: `cursor: pointer` on all clickable non-link elements (buttons, cards, toggles)
+- [ ] **Focus states**: Visible focus indicators on all interactive elements with 3:1 contrast ratio (WCAG 2.2 SC 2.4.11)
+- [ ] **Hover states**: All interactive elements have hover transitions (150-300ms ease)
+- [ ] **Text contrast**: Normal text ≥ 4.5:1, large text (18pt+) ≥ 3:1 against background (WCAG 2.2 AA)
+- [ ] **Reduced motion**: `@media (prefers-reduced-motion: reduce)` disables non-essential animations
+- [ ] **Loading states**: Buttons show loading indicator and are disabled during async operations
+- [ ] **Error feedback**: Form errors appear inline next to the field, not only as toast/alert
+- [ ] **Empty states**: Lists/tables show meaningful empty state, not blank space
+- [ ] **Semantic HTML**: Use `<button>` not `<div @click>`, `<nav>` not `<div class="nav">`, `<main>` for primary content
+- [ ] **ARIA bindings**: Dynamic ARIA attributes bound to component state (`aria-expanded`, `aria-selected`, `aria-busy`)
+- [ ] **Keyboard navigation**: All interactive workflows completable via keyboard (Tab, Enter, Escape)
+
+### MEDIUM: Responsive Design
+
+- [ ] **Breakpoints**: Tested at Bootstrap breakpoints — 576px (sm), 768px (md), 992px (lg), 1200px (xl), 1400px (xxl)
+- [ ] **Mobile-first**: Smallest viewport designed first, enhanced for larger screens
+- [ ] **No horizontal scroll**: No content overflow at any supported breakpoint
+- [ ] **Content width**: Text blocks max 65-75 characters wide for readability
+- [ ] **Icons**: SVG icons (Bootstrap Icons, Lucide) — no emoji as functional icons
+
+Diagnostic:
+```bash
+# Check for div-as-button anti-pattern
+grep -rn '@click' src/ --include="*.vue" | grep -v '<button' | grep '<div'
+# Check for missing cursor-pointer
+grep -rn 'clickable\|@click' src/ --include="*.vue" | grep -v 'cursor'
+# Check for hardcoded colors (should use CSS variables or Bootstrap classes)
+grep -rn 'color:\s*#' src/ --include="*.vue" --include="*.scss" | head -20
+```
+
 ## MEDIUM — Testing Gaps
 
 - [ ] New component without test

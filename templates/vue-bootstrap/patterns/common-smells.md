@@ -211,3 +211,78 @@ verifiedUser: async ({ apiClient }, use) => {
 **How to detect**: `grep -A5 "path:" src/router/index.js | grep -B5 "component:" | grep -v "requiresAuth"`
 
 **Fix**: Add `meta: { requiresAuth: true }` to every route that requires authentication.
+
+## Div-as-button anti-pattern
+
+**Smell**: `<div @click="...">` or `<span @click="...">` instead of `<button>`.
+
+**Why it's bad**: Breaks keyboard navigation, screen readers, and focus management. Users cannot Tab to the element or activate it with Enter/Space.
+
+**How to detect**: `grep -rn "@click=" --include="*.vue" src/ | grep -E "<(div|span|li|td)" | grep -v "<button\|<a "`
+
+**Fix**: Use `<button>` for actions, `<a>` for navigation. If a non-button element must be clickable, add `role="button" tabindex="0" @keydown.enter="handler" @keydown.space.prevent="handler"`.
+
+## Missing Loading States on Async Buttons
+
+**Smell**: `<button @click="save">Save</button>` without `:disabled` or loading indicator during async operations.
+
+**Why it's bad**: Users double-click, causing duplicate submissions. No feedback that the action is processing.
+
+**How to detect**: `grep -rn "@click=" --include="*.vue" src/ | grep "<button" | grep -v ":disabled"`
+
+**Fix**: Track async state and disable during execution:
+```javascript
+const saving = ref(false)
+const save = async () => {
+  saving.value = true
+  try { await api.save(form.value) }
+  finally { saving.value = false }
+}
+```
+Template: `<button :disabled="saving" @click="save">{{ saving ? 'Saving...' : 'Save' }}</button>`
+
+## Permission Check as Setup-Time Constant
+
+**Smell**: `const canEdit = hasAccess(['edit'])` (not wrapped in `computed()`).
+
+**Why it's bad**: If permissions change during the session (role switch, token refresh), the UI shows stale access state.
+
+**How to detect**: `grep -rn "hasAccess\|hasPermission\|hasRole" --include="*.vue" --include="*.js" src/ | grep "const\|let\|var" | grep -v "computed"`
+
+**Fix**: `const canEdit = computed(() => authStore.hasAccess(['edit']))` — stays reactive with the auth store.
+
+## Empty State Not Handled
+
+**Smell**: `<DataTable :items="items">` with no `v-if="items.length === 0"` fallback.
+
+**Why it's bad**: Users see a blank table with no guidance. Confusing — is it loading? Empty? Broken?
+
+**How to detect**: Look for list/table components that render `items` without a sibling empty-state block.
+
+**Fix**: Always provide an empty state: `<div v-if="!loading && items.length === 0" class="text-center text-muted py-4">No records found.</div>`
+
+## Hardcoded Transition Durations
+
+**Smell**: `transition: all 0.5s` or `transition: color 1s` in component styles.
+
+**Why it's bad**: Inconsistent animation timing across the app. Durations over 300ms feel sluggish; under 100ms feel jarring. Not respecting `prefers-reduced-motion`.
+
+**How to detect**: `grep -rn "transition:" --include="*.vue" --include="*.css" --include="*.scss" src/`
+
+**Fix**: Use consistent timing (150-300ms) and respect motion preferences:
+```css
+.interactive { transition: all 200ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .interactive { transition: none; }
+}
+```
+
+## Direct Toast Library Calls
+
+**Smell**: `import { toast } from 'vue3-toastify'` in a component file (not in a composable).
+
+**Why it's bad**: Tight coupling to the toast library. Swapping libraries requires changing every consumer. Inconsistent defaults across components.
+
+**How to detect**: `grep -rn "from 'vue3-toastify'\|from 'vue-toastification'" --include="*.vue" --include="*.js" src/ | grep -v "composables/"`
+
+**Fix**: Always use the project composable: `const { success, error } = useToast()`. The composable wraps the library with consistent defaults.

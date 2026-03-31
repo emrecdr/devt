@@ -132,6 +132,8 @@ export default defineComponent({
 
 **`<script setup>` is the ONLY accepted pattern.** It's shorter, has better TypeScript inference, and eliminates the boilerplate of `defineComponent` + `return`.
 
+**Legacy exception**: Some existing shared components (app-header, app-sidebar) may use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt from the initial build. When you touch these files, convert them to `<script setup>` (Boy Scout Rule). Never write new components using Options API or hybrid patterns.
+
 ---
 
 ## Rule 6: Feature Module Structure
@@ -217,6 +219,8 @@ items.value[0].name = 'new'   // Won't trigger reactivity with shallowRef!
 **Why:** `shallowRef` avoids deep reactive proxying on large arrays — better performance. But it means you MUST replace the entire array to trigger reactivity. Direct mutations (`.push()`, property assignment) are silently ignored.
 
 Use `ref()` for single values, booleans, and small objects.
+
+**When `ref()` arrays are acceptable**: Small bounded collections (under ~20 items) where you frequently mutate individual item properties (e.g., `item.selected = true`), short-lived component state not in Pinia stores, and form builder arrays with nested configurations. For Pinia stores and API response data, always use `shallowRef`.
 
 ---
 
@@ -315,6 +319,12 @@ npm run build
 ```
 
 All three must pass. Copy the terminal output as evidence. "I believe it builds" is not verification — "Here is the output showing build succeeded" is.
+
+- All interactive elements have visible focus states and hover transitions
+- Touch targets are at least 44x44px
+- Text contrast meets WCAG AA (4.5:1 normal, 3:1 large)
+- `@media (prefers-reduced-motion: reduce)` is respected for animations
+- No `<div @click>` — use semantic `<button>` or `<a>` elements
 
 For Playwright tests (when applicable):
 ```bash

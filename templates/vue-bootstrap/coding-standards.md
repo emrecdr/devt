@@ -17,6 +17,8 @@
 
 **All components MUST use `<script setup>` syntax.** No Options API. No `defineComponent()`.
 
+**Legacy Options API**: Some existing shared components (headers, sidebars) use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt — convert to `<script setup>` when touching these files (Boy Scout Rule). Do not write new components using Options API.
+
 ```vue
 <script setup>
 import { ref, computed } from 'vue'
@@ -90,6 +92,71 @@ items.value = items.value.filter(i => i.id !== id)
 
 Use `ref()` for single values, booleans, and small objects.
 
+**When `ref()` (deep reactive) arrays are acceptable:**
+- Small bounded collections (under ~20 items) where individual property mutations are frequent (e.g., toggling `item.selected`)
+- Short-lived component state not in Pinia stores
+- Form builder arrays with complex nested field configurations
+
+**shallowRef is the right default for:**
+- Pinia store collections (can grow unbounded)
+- API response data (fetched, displayed, replaced on re-fetch)
+- Lists of 50+ items
+
+### Form Handling
+
+Use `ref()` with object for form data and a separate `ref()` for field errors. `ref()` allows clean full-object reset; `reactive()` cannot be reassigned.
+
+```javascript
+const form = ref({ name: '', email: '', role_id: null })
+const errors = ref({ name: null, email: null, role_id: null })
+
+const clearError = (field) => { errors.value[field] = null }
+
+const resetForm = () => {
+  form.value = { name: '', email: '', role_id: null }
+  errors.value = { name: null, email: null, role_id: null }
+}
+```
+
+Template binding: `@focus="clearError('name')"` on inputs, `v-if="errors.name"` for error display.
+
+Use `v-model` modifiers: `.trim` for text, `.number` for numeric, `.lazy` for blur-triggered updates.
+
+### Permission-Based Rendering
+
+Use `computed()` wrapping `authStore.hasAccess()` — not a setup-time constant — so changes to user permissions are reactive:
+
+```javascript
+import { computed } from 'vue'
+import { useAuthStore } from '@/shared/stores/useAuthStore'
+
+const authStore = useAuthStore()
+const canUpdate = computed(() => authStore.hasAccess(['users.update']))
+const canDelete = computed(() => authStore.hasAccess(['users.delete']))
+```
+
+Use in templates: `v-if="canUpdate"` on action buttons, `:disabled="!canUpdate"` on forms.
+
+### Toast Notifications
+
+Wrap the toast library (`vue3-toastify`) in a project composable to decouple consumers from the library:
+
+```javascript
+// shared/composables/useToast.js
+import { toast } from 'vue3-toastify'
+
+export function useToast() {
+  return {
+    success: (msg) => toast.success(msg, { position: toast.POSITION.TOP_RIGHT }),
+    error: (msg) => toast.error(msg, { position: toast.POSITION.TOP_RIGHT }),
+    warning: (msg) => toast.warning(msg),
+    info: (msg) => toast.info(msg),
+  }
+}
+```
+
+Never call `toast.*` directly from components — always go through `useToast()`.
+
 ## Props & Events
 
 - **Define props with types and defaults**: `defineProps({ name: { type: String, required: true } })`
@@ -152,6 +219,10 @@ For operations without retry (file uploads): `createApiWithoutRetry()`
 - All retry settings in `src/shared/constants/retry.js`
 
 **Never hardcode endpoint URLs, storage keys, or magic strings.**
+
+### Environment Configuration
+
+Maintain separate environment files: `.env.development`, `.env.production`, `.env.qa`, `.env.staging`, `.env.test`. All variables MUST use `VITE_` prefix. Never hardcode environment-specific values.
 
 ## Import Order
 

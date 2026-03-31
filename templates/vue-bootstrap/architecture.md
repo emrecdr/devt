@@ -69,6 +69,19 @@ Backend
 
 **Dependency direction**: Views → Stores → Services → API Client (never reverse)
 
+### Constants Organization
+
+Cross-cutting constants live in `shared/constants/` with dedicated files by concern:
+
+| File | Contents | Example |
+|------|----------|---------|
+| `api.js` | API endpoints, base URL | `API_ENDPOINTS.USERS`, `API_BASE_URL` |
+| `storage.js` | localStorage/sessionStorage keys | `STORAGE_KEYS.ACCESS_TOKEN` |
+| `app.js` | App-wide config, supported languages | `APP_CONFIG.DEFAULT_LOCALE` |
+| `retry.js` | HTTP retry configuration | `RETRY_CONFIG.MAX_RETRIES` |
+
+Feature-specific constants (column definitions, status enums) may live within the feature module. Only cross-cutting constants belong in `shared/constants/`.
+
 **Violations:**
 - Views must NOT call API client directly — go through stores or services
 - Stores must NOT import from other feature stores (use shared stores for cross-feature state)
@@ -136,6 +149,18 @@ export const useFeatureStore = defineStore('feature', () => {
 })
 ```
 
+### API Client Architecture
+
+The centralized API client (`shared/services/api.js`) handles:
+
+- **JWT auto-attach**: Request interceptor adds `Bearer ${accessToken}` to all requests
+- **Token refresh**: Response interceptor catches 401, refreshes token (single-flight guard prevents parallel refresh loops), retries original request
+- **Retry logic**: `axios-retry` with exponential backoff for transient failures (configurable via `RETRY_CONFIG`)
+- **Error notification**: Failed requests surface via `useToast()` composable
+- **Logging**: All requests/responses logged via `useLogger()` in development
+
+Never create standalone Axios instances. All HTTP traffic flows through the shared API client.
+
 ## Authentication Flow
 
 - JWT-based with access/refresh tokens in localStorage
@@ -160,3 +185,13 @@ All prefixed with `VITE_`:
 - `VITE_APP_NAME` — Application display name
 
 Files: `.env.development`, `.env.production`, `.env.qa`, `.env.test`
+
+## Theme & Layout System
+
+A global Pinia `switcher` store manages visual settings via HTML `data-*` attributes:
+
+- `data-theme-mode`: light / dark
+- `data-nav-layout`: vertical / horizontal
+- `data-page-style`: regular / classic
+
+CSS variables (`--primary-rgb`, `--body-bg-rgb`) respond to these attributes. Components read theme state from the switcher store, never from DOM attributes directly.
