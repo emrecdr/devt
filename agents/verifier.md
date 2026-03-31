@@ -2,6 +2,7 @@
 name: verifier
 model: inherit
 color: cyan
+effort: high
 maxTurns: 25
 description: |
   Use after code review passes to verify the implementation actually achieves the task goal.

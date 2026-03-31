@@ -2,6 +2,7 @@
 name: code-reviewer
 model: inherit
 color: cyan
+effort: high
 maxTurns: 25
 description: |
   Code review specialist. Triggered when code needs quality review before approval.

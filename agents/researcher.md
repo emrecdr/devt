@@ -2,6 +2,7 @@
 name: researcher
 model: inherit
 color: blue
+effort: medium
 maxTurns: 30
 description: |
   Technical investigation specialist. Use before planning or implementing unfamiliar features.

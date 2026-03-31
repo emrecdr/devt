@@ -139,9 +139,16 @@ function main() {
     timeout: 30000,
   });
 
+  if (result.error) {
+    // Spawn failed (ENOENT, EACCES) or process killed (timeout/signal)
+    const reason = result.signal ? `killed by ${result.signal}` : result.error.message;
+    process.stderr.write(JSON.stringify({ error: `Hook ${scriptName} failed: ${reason}` }) + "\n");
+    process.exit(1);
+  }
+
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
-  process.exit(result.status || 0);
+  process.exit(result.status ?? 0);
 }
 
 main();

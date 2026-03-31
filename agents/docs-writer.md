@@ -2,6 +2,7 @@
 name: docs-writer
 model: inherit
 color: magenta
+effort: medium
 maxTurns: 30
 description: |
   Documentation specialist. Triggered when module documentation needs to be created

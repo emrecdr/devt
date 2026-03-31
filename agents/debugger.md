@@ -2,6 +2,7 @@
 name: debugger
 model: inherit
 color: red
+effort: high
 maxTurns: 40
 description: |
   Systematic debugging specialist. Use when encountering bugs, test failures, or unexpected behavior.

@@ -12,7 +12,14 @@ const fs = require("fs");
 const path = require("path");
 
 function getDatabaseSync() {
-  return require("node:sqlite").DatabaseSync;
+  try {
+    return require("node:sqlite").DatabaseSync;
+  } catch {
+    throw new Error(
+      `node:sqlite requires Node.js 22.5+, current: ${process.version}. ` +
+      `The "query" subcommand works without it (grep fallback), but "sync" and "compact" need it.`
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

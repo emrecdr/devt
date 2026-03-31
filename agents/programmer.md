@@ -2,6 +2,7 @@
 name: programmer
 model: inherit
 color: green
+effort: high
 maxTurns: 50
 description: |
   Implementation specialist. Triggered when the workflow requires writing new code,

@@ -2,6 +2,7 @@
 name: curator
 model: inherit
 color: magenta
+effort: medium
 maxTurns: 20
 description: |
   Playbook quality maintenance specialist. Triggered when lessons need to be integrated

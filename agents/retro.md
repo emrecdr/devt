@@ -2,6 +2,7 @@
 name: retro
 model: inherit
 color: yellow
+effort: medium
 maxTurns: 20
 description: |
   Lesson extraction specialist. Triggered after a workflow completes to capture what

@@ -2,6 +2,7 @@
 name: architect
 model: inherit
 color: blue
+effort: high
 maxTurns: 20
 description: |
   Structural review specialist. Triggered when code needs architectural assessment

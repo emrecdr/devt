@@ -13,6 +13,7 @@ const path = require("path");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
 const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
+const { sanitizeForPrompt, scanForInjection } = require("./security.cjs");
 
 const REQUIRED_DEV_RULES = [
   "coding-standards.md",
@@ -69,8 +70,19 @@ function initWorkflow(task, pluginRoot) {
     warnings.push(".devt/config.json not found. Run /devt:init to configure project.");
   }
 
+  // Sanitize task text before it flows into agent prompts
+  let sanitizedTask = task || null;
+  const injectionWarning = [];
+  if (sanitizedTask) {
+    const scan = scanForInjection(sanitizedTask);
+    if (!scan.clean) {
+      injectionWarning.push(`Task text contains suspicious patterns: ${scan.findings.join("; ")}`);
+      sanitizedTask = sanitizeForPrompt(sanitizedTask);
+    }
+  }
+
   return {
-    task: task || null,
+    task: sanitizedTask,
     project_root: projectRoot,
     plugin_root: pluginRoot,
     config,
@@ -86,7 +98,7 @@ function initWorkflow(task, pluginRoot) {
     claude_md_exists: claudeMdExists,
     config_exists: configExists,
     state_dir: path.join(projectRoot, ".devt", "state"),
-    warnings,
+    warnings: warnings.concat(injectionWarning),
   };
 }
 

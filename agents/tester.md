@@ -2,6 +2,7 @@
 name: tester
 model: inherit
 color: yellow
+effort: high
 maxTurns: 40
 description: |
   Testing specialist. Triggered when the workflow requires writing, updating, or validating
