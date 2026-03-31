@@ -16,7 +16,8 @@ RESULT=$(node -e "
   if (!state.active) {
     process.exit(0);
   }
-  const context = 'Active workflow: phase=' + (state.phase || 'none') +
+  const context = 'Active workflow: type=' + (state.workflow_type || 'none') +
+    ', phase=' + (state.phase || 'none') +
     ', tier=' + (state.tier || 'none') +
     ', iteration=' + (state.iteration || 0) +
     ', task=' + (state.task || 'none');

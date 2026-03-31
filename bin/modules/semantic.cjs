@@ -134,7 +134,7 @@ function syncEntries(db, entries) {
         e.evidence || "",
         String(e.importance || "5"),
         String(e.confidence || "0.5"),
-        String(e.decay_days || "90"),
+        String(e.decay_days || "180"),
         e.created_at || ""
       );
       inserted++;
@@ -271,7 +271,7 @@ function compact(pluginRoot, options) {
 
     for (const row of candidates) {
       const created = row.created_at ? new Date(row.created_at).getTime() : 0;
-      const decayMs = (parseInt(row.decay_days, 10) || 90) * 86400000;
+      const decayMs = (parseInt(row.decay_days, 10) || 180) * 86400000;
       if (created && (now - created) > decayMs) {
         toArchive.push({
           rowid: row.rowid,

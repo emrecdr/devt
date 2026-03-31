@@ -59,8 +59,4 @@ if [[ "$IS_WORKFLOW_ACTIVE" == "true" && "$IS_COMPLETE" == "false" ]]; then
 fi
 
 # Workflow is complete or inactive — clean exit
-if [[ "$IS_WORKFLOW_ACTIVE" == "true" ]]; then
-  node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state update "stopped_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "stopped_phase=${PHASE}" active=false >/dev/null 2>&1 || true
-fi
-
 echo '{"stopReason": "Workflow stopped. State preserved in .devt/state/"}'
