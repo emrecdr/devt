@@ -103,6 +103,13 @@ Every entry MUST pass all 4 filters before being accepted:
 | 90-180   | Framework patterns, architectural lessons (stable but evolving) |
 | 365+     | Fundamental principles (rarely change)                          |
 
+**Calibration examples:**
+
+- **30 days** — Tool quirk: "`pytest --no-header` suppresses the version line but also hides the rootdir — use `--no-header -rN` to keep rootdir visible"
+- **90 days** — Testing pattern: "Use real database for repository integration tests, mocks for service-layer unit tests — mixing the two causes false green tests"
+- **180 days** — Architecture decision: "Event-driven communication between bounded contexts prevents cascading failures; synchronous calls between services couple deployment schedules"
+- **365 days** — Fundamental principle: "Never mutate shared state across concurrent operations — always copy-on-write or use immutable data structures"
+
 ### Step 5: Write to Playbook
 
 Append the validated entries to the learning playbook file. If the playbook does not exist, create it.
@@ -125,6 +132,15 @@ If any filter fails, rewrite the entry or discard it.
 - [ ] Importance reflects actual impact, not perceived effort
 - [ ] Confidence reflects evidence strength, not gut feeling
 - [ ] Decay days match the lesson's expected shelf life
+
+## When NOT to Use
+
+Skip for sessions with no implementation, no bugs, and no surprises — not every session produces lessons. If the work was routine application of known patterns with no unexpected outcomes, there is nothing to extract. Forcing extraction on uneventful sessions produces low-quality entries that clutter the playbook.
+
+## Time Budget
+
+- **Extraction** (Steps 1-2): 2-3 minutes
+- **Quality filtering and score calibration** (Steps 3-4): 1-2 minutes
 
 ## Anti-patterns
 

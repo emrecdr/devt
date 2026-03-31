@@ -11,6 +11,15 @@ Search before you build. Every new implementation must be preceded by a thorough
 
 Skipping this step is the single most common cause of duplicate code, inconsistent patterns, and wasted effort. A 5-minute scan prevents hours of rework.
 
+## When NOT to Use
+
+Skip when the task explicitly names all files to modify and no discovery is needed.
+
+## Time Budget
+
+- **Focused scan** (known area): 1-2 minutes
+- **Broad exploration** (unfamiliar codebase): 3-5 minutes
+
 ## The Iron Law
 
 ```
@@ -107,6 +116,19 @@ If the scan found existing code:
 | "I searched and found nothing"              | Searched by name only, not by concept or pattern   | Run all 4 search steps before declaring "nothing found" |
 | "The existing one is in a different module" | Cross-module reuse is the entire point of scanning | Import from the owning module                           |
 | "The existing implementation is bad"        | Two bad versions is worse than one fixed version   | Fix the existing code. Do not fork it.                  |
+
+## Regex Cheat Sheet
+
+Common search patterns for codebase scanning:
+
+| Pattern | Matches |
+| --- | --- |
+| `function\s+\w+` | Function declarations |
+| `class\s+\w+` | Class declarations |
+| `export\s+(default\|const)` | ES module exports |
+| `import.*from` | ES module imports |
+| `def\s+\w+` | Python function definitions |
+| `interface\s+\w+` | Interface declarations |
 
 ## Integration
 

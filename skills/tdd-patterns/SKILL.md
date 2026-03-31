@@ -150,6 +150,18 @@ Can't check all boxes? You skipped TDD. Start over.
 | Test passes immediately | Feature already exists OR test is wrong. Investigate before proceeding. |
 | GREEN fails after 3 attempts | Report BLOCKED — specification may be unclear. |
 
+## Property-Based Testing
+
+For functions with mathematical properties (commutative, idempotent, reversible), consider property-based tests alongside example-based TDD. Libraries: fast-check (JS), hypothesis (Python), rapid (Go).
+
+## When NOT to Use
+
+Skip for pure UI changes (styling, layout) where visual testing is more appropriate, or for configuration-only changes.
+
+## Time Budget
+
+One RED-GREEN-REFACTOR cycle: 3-5 minutes. Full TDD for a feature: scales with complexity.
+
 ## Debugging Integration
 
 When you encounter a bug during development:

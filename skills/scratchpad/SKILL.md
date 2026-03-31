@@ -82,6 +82,19 @@ The scratchpad is cleared at the start of each new workflow. Do not rely on scra
 | Writing only errors, not decisions | Later agents can't understand WHY choices were made | Record decisions with brief rationale |
 | Skipping timestamps | Entries can't be ordered or correlated with other artifacts | Always include [HH:MM] prefix |
 
+## Multi-Agent Handoff Example
+
+When a workflow dispatches multiple agents, the scratchpad serves as cross-agent memory. The programmer writes "Observation: API returns paginated results, need to handle cursor" and the tester reads it to know what edge cases to cover.
+
+## When NOT to Use
+
+Skip for single-step tasks or trivial fixes where there's nothing worth recording.
+
+## Time Budget
+
+- Per entry: seconds
+- Reading scratchpad: 30 seconds
+
 ## Integration
 
 - **Location**: `.devt/state/scratchpad.md`

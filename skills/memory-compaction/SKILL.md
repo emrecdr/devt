@@ -33,6 +33,11 @@ A lesson is a compaction candidate when ALL of the following are true:
 
 Lessons that meet only 1-2 criteria may still be valid. All 3 must apply.
 
+**Example — archive vs renew:**
+
+- **Archive**: Entry about a deprecated API workaround (age: 210 days, decay_days: 180, importance: 3, confidence: 0.4) — all 3 criteria met (age > decay, importance < 5, confidence < 0.5) → archive.
+- **Renew**: Entry about a testing pattern for async handlers (age: 200 days, decay_days: 90, importance: 7, confidence: 0.3) — age and confidence qualify, but importance is too high (>= 5) → keep, but flag for review to gather stronger evidence and raise confidence.
+
 ### Step 2: Review Candidates
 
 Before archiving, review each candidate:
@@ -80,6 +85,15 @@ After compaction:
 - [ ] Each archived entry reviewed before archival
 - [ ] High-importance lessons (>= 7) are never auto-archived regardless of age
 - [ ] Recently referenced lessons are renewed, not archived
+
+## When NOT to Use
+
+Skip when the playbook has fewer than 20 entries — compaction adds overhead without benefit on small playbooks. At that size, manual review during curation is sufficient to keep quality high.
+
+## Time Budget
+
+- **Quick scan** (identify candidates, check criteria): 1-2 minutes
+- **Full compaction with archival** (review, run CLI, verify results): 3-5 minutes
 
 ## Anti-patterns
 

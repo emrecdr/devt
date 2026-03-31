@@ -91,6 +91,12 @@ When two entries give opposite advice for the same situation:
 
 Never leave contradictory entries unresolved. They undermine trust in the entire playbook.
 
+**Concrete example:**
+
+- **Entry A**: "Always mock external APIs in tests" (importance: 7, confidence: 0.8)
+- **Entry B**: "Use real API calls for integration tests" (importance: 8, confidence: 0.9)
+- **Resolution**: Both are valid — Entry A applies to unit tests, Entry B to integration tests. Edit both to specify their scope: Entry A becomes "Always mock external APIs in **unit** tests to isolate logic", Entry B becomes "Use real API calls in **integration** tests to verify contract compliance". No deletion needed, just scope clarification.
+
 ### Step 4: Prune Low-Value Entries
 
 Periodically review entries with:
@@ -117,6 +123,15 @@ For each, decide: renew (reset decay), archive, or delete.
 
 - [ ] No entry accepted that fails quality filters
 - [ ] Scores are calibrated (not all 10/1.0, not all 1/0.1)
+
+## When NOT to Use
+
+Skip when only adding new entries — lesson-extraction handles that. Use this skill for maintenance and cleanup: deduplication, contradiction resolution, score recalibration, and pruning. If the playbook was just created or has only a handful of entries with no overlaps, curation adds no value yet.
+
+## Time Budget
+
+- **Quick review** (check new entries against existing, spot duplicates): 2-3 minutes
+- **Full curation with dedup** (review all entries, resolve contradictions, prune stale): 5-8 minutes
 
 ## Anti-patterns
 

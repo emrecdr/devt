@@ -1,6 +1,6 @@
 ---
 name: architecture-health-scanner
-description: Use when analyzing architecture scanner output to cluster findings, classify true/false positives, and prioritize fixes. Use after running the project scanner configured in .devt/config.json. Also trigger on 'scanner results', 'architecture health', 'tech debt triage', 'false positives', or when prioritizing findings from any static analysis tool.
+description: Use when analyzing architecture scanner output to cluster findings, classify true/false positives, and prioritize fixes. Use after running the project scanner configured in .devt/config.json. Use whenever touching code across 3+ files, refactoring, or reviewing PRs with structural changes. Also trigger on 'scanner results', 'architecture health', 'tech debt triage', 'false positives', or when prioritizing findings from any static analysis tool.
 ---
 
 # Architecture Health Scanner
@@ -10,6 +10,14 @@ description: Use when analyzing architecture scanner output to cluster findings,
 This skill teaches how to interpret scanner output, not how to run the scanner. The project provides its own scanner tool (configured in `.devt/config.json` under `arch_scanner.command`). This skill turns raw findings into a prioritized remediation plan.
 
 Raw scanner output is noise. Interpretation converts noise into signal by clustering related findings, identifying root causes, and separating true problems from acceptable trade-offs.
+
+## When NOT to Use
+
+Skip for single-file changes or bug fixes that don't touch module boundaries. If the change is isolated to one module with no cross-boundary imports, this skill adds overhead without value.
+
+## Time Budget
+
+Quick scan: **2-3 minutes**. Full scan with triage: **5-10 minutes**.
 
 ## The Iron Law
 

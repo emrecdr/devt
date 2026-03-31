@@ -1,6 +1,6 @@
 ---
 name: weekly-report
-description: Use when the user says 'generate report', 'weekly report', 'contribution report', 'what did we ship', or 'sprint summary'. Produces a team contribution report from git data. Requires .devt/config.json git config. Also use at end of sprint or before retrospectives.
+description: Use when the user says 'generate report', 'weekly report', 'contribution report', 'what did we ship', or 'sprint summary'. Produces a team contribution report from git data. Requires .devt/config.json git config. Also use at end of sprint or before retrospectives. Use when generating any development activity summary, sprint review material, or stakeholder update based on git history.
 ---
 
 # Weekly Report
@@ -137,6 +137,14 @@ Highlights should be written in plain language for non-technical stakeholders. T
 | "Only merged PRs matter" | In-progress work provides context for next week | Include open PRs and active branches |
 | "Statistics are vanity metrics" | Trends in statistics reveal process issues | Track trends over time, not just single-week numbers |
 | "The report is just bureaucracy" | A data-driven summary saves 30 minutes of standup updates | Let the data speak -- automate the busywork |
+
+## When NOT to Use
+
+Skip mid-sprint — reports are designed for end-of-week or end-of-sprint summaries.
+
+## Time Budget
+
+Data collection: 1-2 minutes. Report rendering: 30 seconds.
 
 ## Integration
 

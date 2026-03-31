@@ -9,6 +9,18 @@ description: Use when implementing external integrations and need up-to-date lib
 
 External library documentation changes faster than training data. Always fetch current documentation before implementing integrations, instead of relying on potentially outdated knowledge.
 
+## When NOT to Use
+
+Skip this skill for internal project code, first-party modules, or APIs already documented in CLAUDE.md. This skill is exclusively for **external/third-party** libraries where documentation lives outside the repo.
+
+## Time Budget
+
+Typical fetch + extract: **1-2 minutes per library**.
+
+## Common Libraries Quick Reference
+
+These library names frequently appear in projects and should trigger this skill: `axios`, `vue-router`, `pinia`, `dayjs`, `bootstrap`, `playwright`, `express`, `fastapi`, `react-query`, `zod`, `prisma`, `tailwindcss`, `lodash`, `next`, `nuxt`.
+
 ## The Iron Law
 
 ```

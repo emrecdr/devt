@@ -101,6 +101,23 @@ Present the full analysis — options, trade-offs, and recommendation — to the
 - Option B: Use Memcached for caching
 - WHY: Same architectural pattern, same trade-offs. This is an implementation detail, not a strategic choice.
 
+## When NOT to Use
+
+Skip when there's only one viable approach, or when the user has already decided and just wants implementation. Analysis paralysis is worse than picking any reasonable option.
+
+## Too Many Options
+
+If you identify more than 4 options, narrow to the top 3 before evaluating. More than 4 options usually means some are cosmetic variations that should be merged.
+
+## Self-Test
+
+After recommending, ask: "Would I bet my own project on this recommendation?" If not, your analysis is incomplete.
+
+## Time Budget
+
+- Quick comparison (2 options): 2-3 minutes
+- Full analysis (3-4 options): 5-8 minutes
+
 ## Gate: Decision Before Implementation
 
 - [ ] Recommendation presented with reasoning

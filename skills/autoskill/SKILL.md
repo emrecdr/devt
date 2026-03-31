@@ -11,6 +11,14 @@ The devt plugin improves through use. When sessions reveal repeated corrections,
 
 Autoskill does not make changes directly. It detects signals and proposes changes with evidence. The user decides what to implement.
 
+## When NOT to Use
+
+Skip for one-off fixes, debugging sessions, or tasks that don't reveal reusable patterns. If the session was a straightforward bug fix with no corrections or novel techniques, there is nothing for autoskill to capture.
+
+## Time Budget
+
+Analysis: **1-2 minutes**. Proposal generation: **1-3 minutes**.
+
 ## The Iron Law
 
 ```
@@ -124,6 +132,39 @@ evidence:
   - "Session X: user corrected agent to check for duplicates before creating"
   - "Session Y: duplicate interface created because scan was skipped"
   - "Session Z: user added this as a rule in CLAUDE.md after repeated issues"
+```
+
+#### Example: Accepted Proposal (score 5+)
+
+```yaml
+type: dev_rules_update
+target: .devt/rules/coding-standards.md
+confidence: HIGH
+score: 5 points
+change: |
+  Add rule: "Never use default exports in TypeScript files — always use named exports."
+reasoning: |
+  User gave explicit "always/never" correction: "Never use default exports."
+evidence:
+  - "Session 12: user corrected 'use named exports, never default' (5 pts — explicit always/never)"
+```
+
+#### Example: Rejected Proposal (score below threshold)
+
+```yaml
+type: skill_update
+target: skills/code-review-guide/SKILL.md
+confidence: REJECTED
+score: 2 points  # Below 3-point threshold — do not propose
+change: |
+  Add guidance: "Prefer early returns over nested if-else chains."
+reasoning: |
+  Single correction without "always/never" language. This is also a general
+  best practice, not project-specific knowledge. Fails both the score threshold
+  and the "new information" filter.
+evidence:
+  - "Session 8: user said 'use an early return here' (2 pts — single correction)"
+# VERDICT: Do not propose. Wait for more evidence or stronger signal.
 ```
 
 ### Step 6: Validate Proposal

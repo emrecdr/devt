@@ -13,6 +13,15 @@ Reviews are objective. They evaluate code against documented project standards, 
 
 **Precision mandate**: Every finding must name a specific file, line number, and exact violation. If a finding could apply to any codebase, it is too vague to report.
 
+## When NOT to Use
+
+Skip for self-review during implementation — this is for the formal review phase.
+
+## Time Budget
+
+- **Quick review** (1-3 files): 2-3 minutes
+- **Full review** (5+ files): 5-10 minutes
+
 ## The Iron Law
 
 ```
@@ -86,6 +95,16 @@ Evaluate each changed file against these categories:
 - Edge cases covered (empty input, null, boundary values)
 - Tests are independent and deterministic
 - Test names describe behavior, not implementation
+
+#### UI/UX Quality (weight: medium, frontend projects only)
+
+For Vue/frontend projects, also check:
+
+- Focus states present and visible on interactive elements
+- Touch targets meet minimum size (24x24px min)
+- Text contrast ratio meets WCAG AA (4.5:1 for normal text)
+- Semantic HTML used (`<nav>`, `<main>`, `<button>` vs generic `<div>`)
+- `prefers-reduced-motion` respected for animations
 
 #### Code Quality (weight: medium)
 

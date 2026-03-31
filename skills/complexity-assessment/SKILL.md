@@ -1,6 +1,6 @@
 ---
 name: complexity-assessment
-description: Use when receiving a new task to determine its complexity tier (SIMPLE/STANDARD/COMPLEX) before choosing a workflow. Trigger whenever the user asks 'how complex is this', 'is this a big change', 'how should we approach this', 'do we need a plan', or when a task mentions multiple services, migrations, or API changes.
+description: Use at the START of any non-trivial task, before planning or implementation, to determine its complexity tier (SIMPLE/STANDARD/COMPLEX) before choosing a workflow. Trigger whenever the user asks 'how complex is this', 'is this a big change', 'how should we approach this', 'do we need a plan', or when a task mentions multiple services, migrations, or API changes.
 ---
 
 # Complexity Assessment
@@ -10,6 +10,10 @@ description: Use when receiving a new task to determine its complexity tier (SIM
 Every task has a complexity tier that determines how much planning, review, and testing it requires. Assess complexity before starting work, not after discovering it mid-implementation.
 
 Underestimating complexity causes missed edge cases, incomplete implementations, and rework. Overestimating causes over-engineering. This skill provides an objective scoring method.
+
+## When NOT to Use
+
+Skip for tasks the user has already scoped (e.g., "just fix this typo") or when the tier is explicitly set.
 
 ## The Iron Law
 
@@ -126,6 +130,10 @@ The selected workflow must match the tier:
 - [ ] SIMPLE tasks do not trigger full architecture reviews
 - [ ] COMPLEX tasks do not skip strategic analysis
 - [ ] STANDARD tasks include review but not necessarily multi-phase planning
+
+## Self-test
+
+After scoring, verify: Could a junior developer understand the scope from your tier label? If not, re-evaluate. The tier should communicate enough about the task's weight that someone unfamiliar with the codebase can anticipate the level of effort involved.
 
 ## Anti-patterns
 

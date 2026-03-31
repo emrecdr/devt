@@ -106,6 +106,20 @@ config = {}                              // missing real config
 
 The language syntax varies, but the pattern is the same: a function that exists but does no real work.
 
+### Vue Stub Detection
+
+```
+// STUB: template-only component with no logic
+<template><div>TODO</div></template>
+<script setup></script>
+
+// STUB: composable returning empty object
+export function useFeature() { return {} }
+
+// STUB: Pinia store with no state or actions
+export const useFeatureStore = defineStore('feature', () => ({ }))
+```
+
 ## Anti-patterns
 
 | Don't                              | Why It Fails                                        | Do Instead                                               |
@@ -116,6 +130,14 @@ The language syntax varies, but the pattern is the same: a function that exists 
 | "It should work"                   | "Should" is not evidence                            | Run it. Show output. Evidence before claims.             |
 | "It compiles"                      | Compiles does not mean Functional                   | Compilation catches syntax, not logic. Test behavior.    |
 | "The function is defined"          | Defined does not mean Called                        | Grep for call sites. If zero, it is dead code.           |
+
+## When NOT to Use
+
+Skip for documentation-only changes or configuration updates where "wired and functional" doesn't apply.
+
+## Time Budget
+
+Level 1-2 (Exists + Substantive): 1 minute. Level 3-4 (Wired + Functional): 3-5 minutes.
 
 ## Integration
 

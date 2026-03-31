@@ -64,6 +64,14 @@ For each result:
 
 If the FTS5 database does not exist yet (no `/devt:retro` has run), the CLI automatically falls back to keyword matching on .devt/learning-playbook.md. No manual intervention needed.
 
+Concrete example — if you searched for "pagination cursor offset" via FTS5, the grep fallback equivalent is:
+
+```bash
+grep -i 'pagination\|cursor\|offset' .devt/learning-playbook.md
+```
+
+The CLI handles this translation automatically; you do not need to run grep yourself.
+
 ## Gate Functions
 
 ### Gate: Search Performed
@@ -82,6 +90,16 @@ If the FTS5 database does not exist yet (no `/devt:retro` has run), the CLI auto
 | "Searching takes too long" | A 10-second search beats a 2-hour debugging session | Run the query before writing code |
 | "The playbook is too small to be useful" | Even one relevant lesson justifies the search | Search regardless of playbook size |
 | "I'll search if I get stuck" | By then you have already wasted time | Search before starting, not after failing |
+
+## When NOT to Use
+
+Skip when the task is completely new territory with no prior lessons (e.g., first time using a new framework). If the playbook has zero entries in the relevant domain, a search adds no value -- just proceed and capture lessons afterward via `/devt:retro`.
+
+## Time Budget
+
+- FTS5 query: instant
+- Grep fallback: 1-2 seconds
+- Evaluation: 30 seconds
 
 ## Integration
 
