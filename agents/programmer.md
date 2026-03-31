@@ -30,7 +30,8 @@ BEFORE starting any work, load the following in order:
 8. Consult `${CLAUDE_PLUGIN_ROOT}/standards/development-patterns.md` when `.devt/rules/` references patterns like Repository, Service Layer, or Guard Clause
 9. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules that apply to ALL implementations (scan before implementing, no duplicates, no backward compat code, no TODOs)
 10. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/engineering-principles.md` — SOLID, DRY, KISS, SoC principles that govern all design decisions
-11. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant lessons from past workflows. Apply them to avoid repeating known mistakes.
+11. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/generative-debt-checklist.md` — BEFORE/DURING/AFTER coding gates to prevent AI-introduced technical debt (duplicates, over-engineering, incomplete implementations)
+12. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant lessons from past workflows. Apply them to avoid repeating known mistakes.
 
 Do NOT skip any of these. Missing context causes implementation errors that waste everyone's time.
 </context_loading>
@@ -155,14 +156,21 @@ The summary must contain EVIDENCE, not claims:
 </self_check>
 
 <self_review>
-After self-check passes, review your work with fresh eyes:
+After self-check passes, review your work with fresh eyes. This is your simplification pass — deliver clean code, not first-draft code.
 
 **Completeness**: Did I implement EVERYTHING in the spec? Any requirements skipped?
 **Quality**: Are names clear? Is this my best work, or am I rushing?
 **Discipline**: Did I only build what was requested? No scope creep? Followed existing patterns?
 **Testing**: Do tests verify behavior (not mock behavior)? Could I remove a production line and have a test fail?
 
-If you find issues during self-review, fix them NOW before writing the summary.
+**Simplification** (check the generative-debt-checklist you loaded):
+- **Reuse**: Search for functions/utilities similar to what you just wrote. If something exists, replace your code with it.
+- **Redundancy**: Any near-duplicate blocks in your changes? Unify them.
+- **Over-engineering**: Did you add abstractions, helpers, or configuration for a single use case? Remove them.
+- **Dead code**: Any unused imports, variables, or unreachable branches you left behind? Delete them.
+- **Unnecessary comments**: Comments that describe WHAT the code does (the code already says that)? Remove them. Keep only WHY comments for non-obvious constraints.
+
+If you find issues, fix them and re-run quality gates before writing the summary. The code-reviewer should see clean, production-ready code — not a rough draft that needs cleanup.
 </self_review>
 
 <step name="summarize">

@@ -24,14 +24,15 @@ BEFORE starting the review, load the following in order:
 2. Read `.devt/rules/review-checklist.md` — language-specific review priorities and security patterns (if exists)
 3. Read `.devt/rules/architecture.md` — structural and boundary rules
 4. Read `.devt/rules/quality-gates.md` — what the code must pass
-4. Read `CLAUDE.md` — project-specific rules and constraints
-5. Read `.devt/state/impl-summary.md` — what was changed and why
-6. Read `.devt/state/test-summary.md` — test coverage context
-7. Read all files listed in the impl-summary as modified or created
-8. Read adjacent code in the same module to understand context
-9. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/generative-debt-checklist.md` — check for over-engineering, dead code, unnecessary abstractions introduced by AI
-10. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/engineering-principles.md` — evaluate code against SOLID, DRY, KISS, SoC principles
-11. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant quality/review lessons from past workflows. Check whether current code repeats known issues.
+5. Read `CLAUDE.md` — project-specific rules and constraints
+6. Read `.devt/state/impl-summary.md` — what was changed and why
+7. Read `.devt/state/test-summary.md` — test coverage context
+8. Read all files listed in the impl-summary as modified or created
+9. Read adjacent code in the same module to understand context
+10. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules the code must follow (scan before implementing, no duplicates, no backward compat code, no TODOs)
+11. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/generative-debt-checklist.md` — check for over-engineering, dead code, unnecessary abstractions introduced by AI
+12. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/engineering-principles.md` — evaluate code against SOLID, DRY, KISS, SoC principles
+13. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant quality/review lessons from past workflows. Check whether current code repeats known issues.
 
 **DISTRUST PRINCIPLE**: Read impl-summary.md for ORIENTATION only — what files were touched,
 what the programmer claims. Then VERIFY every claim by reading the actual code.

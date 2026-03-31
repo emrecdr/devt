@@ -50,11 +50,11 @@ TRIVIAL   (typo, config change)     -->  executes inline, no subagents
   |
 SIMPLE    (1-2 files, known pattern) -->  implement --> test --> review
   |
-STANDARD  (multiple files)           -->  scan --> implement --> test --> review
-  |                                       --> verify --> docs --> retro
+STANDARD  (multiple files)           -->  scan --> implement --> test --> simplify
+  |                                       --> review --> verify --> docs --> retro
 COMPLEX   (new patterns, multi-svc)  -->  auto-research --> auto-plan --> scan
                                           --> architect --> implement --> test
-                                          --> review --> verify --> docs --> retro
+                                          --> simplify --> review --> verify --> docs --> retro
 ```
 
 You never choose a tier. devt detects it using:

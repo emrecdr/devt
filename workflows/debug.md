@@ -28,6 +28,12 @@ Before dispatching the debugger agent, check `.devt/config.json` for `agent_skil
 <step name="init" gate="project context loaded">
 ## Step 1: Initialize
 
+Track state so `/devt:status` and `/devt:next` can detect and resume interrupted debug sessions:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true phase=debug status=IN_PROGRESS
+```
+
 Read `.devt/rules/coding-standards.md` and `.devt/rules/quality-gates.md` for context.
 Read `CLAUDE.md` if it exists.
 </step>
@@ -67,6 +73,10 @@ Read `.devt/state/debug-summary.md`:
 - **FIXED**: report fix, run quality gates to verify. Confirm that `debug-knowledge-base.md` was updated with the root cause (the debugger agent does this automatically).
 - **NEEDS_MORE_INVESTIGATION**: show what was discovered, offer to re-run /devt:debug with accumulated context
 - **BLOCKED**: surface root cause analysis, suggest architectural review
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=DONE
+```
 </step>
 
 </process>

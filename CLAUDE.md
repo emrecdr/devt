@@ -17,7 +17,8 @@ devt is a Claude Code plugin that orchestrates multi-agent development workflows
 Supporting layers:
 - **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides.
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`).
-- **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, contamination prevention, generative debt checklist).
+- **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist).
+- **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management.
 
 ### CLI Tools (`bin/devt-tools.cjs`)
 

@@ -12,16 +12,6 @@ Run the project's quality gates (linting, type checking, tests) and report pass/
 
 <available_agent_types>
 This workflow does NOT use subagents. All steps are executed by the main session.
-
-Available agent types in the devt system (for reference):
-
-- `devt:programmer` — implementation specialist
-- `devt:tester` — testing specialist
-- `devt:code-reviewer` — code review specialist (READ-ONLY)
-- `devt:architect` — structural review specialist (READ-ONLY)
-- `devt:docs-writer` — documentation specialist
-- `devt:retro` — lesson extraction specialist
-- `devt:curator` — playbook quality maintenance specialist
   </available_agent_types>
 
 <agent_skill_injection>

@@ -28,7 +28,8 @@ BEFORE starting any work, load the following in order:
 6. Read the source files listed in the impl-summary — understand the actual implementation
 7. Read existing tests in the same module — follow established patterns
 8. Read files listed in `<files_to_read>` block from the task prompt
-9. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant testing lessons from past workflows. Apply them to avoid repeating known gaps.
+9. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules: scan before implementing (applies to test utilities too), no duplicates, no backward compat code
+10. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant testing lessons from past workflows. Apply them to avoid repeating known gaps.
 
 Do NOT skip any of these. Writing tests without reading the implementation leads to tautological tests that verify nothing.
 </context_loading>

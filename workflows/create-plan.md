@@ -271,3 +271,12 @@ If "Done for now", report the plan location (`.devt/state/plan.md`) and stop.
 - Architecture reviewed (if multi-module)
 - User has approved the plan
   </success_criteria>
+
+<deviation_rules>
+
+1. **Researcher returns BLOCKED**: The research topic may be too broad or require external access. Narrow the scope to codebase-observable facts and retry. If still blocked, proceed to planning with available context and note the gap.
+2. **Architect returns BLOCKED**: Architectural constraints may conflict with the task requirements. Surface the conflict to the user before proceeding — the plan must not include steps that violate architecture rules.
+3. **Validation fails repeatedly**: If the plan fails validation after 2 revision attempts, present the validation failures to the user and ask for guidance rather than continuing to iterate.
+4. **User abandons plan at review**: If the user says "stop" or "cancel" during review, save the current plan state to `.devt/state/plan.md` with a `status: DRAFT` header so it can be resumed later.
+
+</deviation_rules>

@@ -97,10 +97,10 @@ const KNOWN_STATE_KEYS = {
 
 const VALID_PHASES = new Set([
   "context_init", "flow_deviation", "assess", "risk_warning",
-  "scan", "regression_baseline", "arch_health", "plan",
-  "architect", "implement", "test", "review", "verify",
+  "scan", "regression_baseline", "arch_health", "arch_health_scan", "plan",
+  "architect", "implement", "test", "simplify", "review", "verify",
   "docs", "retro", "curate", "autoskill", "review_deferred",
-  "identify_scope", "complete", "finalize", null,
+  "identify_scope", "debug", "complete", "finalize", null,
 ]);
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);

@@ -14,10 +14,12 @@ Propose targeted improvements to skills and agents with evidence (3+ instances r
 </prerequisites>
 
 <available_agent_types>
-The following agent types can be dispatched via Task():
+The following agent types may be dispatched for applying accepted proposals:
 
 - `devt:programmer` — implementation specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:curator` — playbook quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep)
+
+Note: This workflow applies most changes directly. Agents are dispatched only when proposals require complex implementation that benefits from a focused agent context.
 </available_agent_types>
 
 <agent_skill_injection>

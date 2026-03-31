@@ -56,8 +56,8 @@ On first session start, devt registers commands under `~/.claude/commands/devt/`
 
 - **Trivial** (typo, config) → executes inline, no subagents
 - **Simple** (one file, known pattern) → implement → test → review
-- **Standard** (multiple files) → scan → implement → test → review → verify → docs → retro → autoskill
-- **Complex** (new patterns, multi-service) → auto-research → auto-plan → scan → architect → full pipeline
+- **Standard** (multiple files) → scan → implement → test → simplify → review → verify → docs → retro → autoskill
+- **Complex** (new patterns, multi-service) → auto-research → auto-plan → scan → architect → implement → test → simplify → full pipeline
 
 **Task format**: Use imperative verb + specific outcome:
 

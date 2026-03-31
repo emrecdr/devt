@@ -66,6 +66,12 @@ If not configured, omit the block.
 
 ## Steps
 
+Track state so `/devt:status` and `/devt:next` can detect and resume interrupted scans:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true phase=arch_health_scan status=IN_PROGRESS
+```
+
 <step name="check_scanner" gate="scanner configuration is determined">
 
 Check if `.devt/config.json` has an `arch_scanner.command` configured:
@@ -298,6 +304,10 @@ cp .devt/state/arch-review.md "$REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md"
 Report: "Saved to $REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md"
 
 Final status: **DONE**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_scan status=DONE
+```
 </step>
 
 ---

@@ -20,14 +20,14 @@ fi
 AGENT_NAME="unknown"
 if [[ -n "$INPUT" ]]; then
   AGENT_NAME=$(node -e "
-    const d = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+    const d = JSON.parse(process.argv[1]);
     let name = String(d.agentName || d.name || 'unknown');
     // Sanitize: alphanumeric, hyphens, underscores only; max 64 chars
     name = name.replace(/[^a-zA-Z0-9\-_]/g, '_').slice(0, 64);
     // Guard against prototype pollution keys
     if (['__proto__', 'constructor', 'prototype'].includes(name)) name = '_' + name;
     process.stdout.write(name);
-  " <<< "$INPUT" 2>/dev/null) || AGENT_NAME="unknown"
+  " "$INPUT" 2>/dev/null) || AGENT_NAME="unknown"
 fi
 
 STATUS="running"
@@ -46,5 +46,7 @@ node -e "
   try { agents = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch {}
   if (!agents.agents) agents = { agents: {} };
   agents.agents[process.argv[1]] = { status: process.argv[2], timestamp: process.argv[3] };
-  fs.writeFileSync(statusFile, JSON.stringify(agents, null, 2) + '\n');
+  const tmp = statusFile + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(agents, null, 2) + '\n');
+  fs.renameSync(tmp, statusFile);
 " "$AGENT_NAME" "$STATUS" "$TIMESTAMP"

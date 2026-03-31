@@ -242,8 +242,8 @@ STANDARD:     Everything else
 | ------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | **TRIVIAL**  | Typo fix, config change, <=3 files, no decisions needed             | execute inline, validate quality gates (no subagents)                                       |
 | **SIMPLE**   | Single file/function, well-known pattern, no cross-cutting concerns | implement, test, review (3 steps)                                                           |
-| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting      | scan, implement, test, review, verify, docs, retro, autoskill (8 steps)                     |
-| **COMPLEX**  | New patterns, cross-service, architectural decisions needed         | research, plan, scan, [arch-health?], architect, implement, test, review, verify, docs, retro, curate (11-12 steps) |
+| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting      | scan, implement, test, simplify, review, verify, docs, retro, autoskill (9 steps)           |
+| **COMPLEX**  | New patterns, cross-service, architectural decisions needed         | research, plan, scan, [arch-health?], architect, implement, test, simplify, review, verify, docs, retro, curate (12-13 steps) |
 
 Record the tier:
 
@@ -644,6 +644,46 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$STATUS
+```
+
+</step>
+
+---
+
+## Step 5.5: Simplify (STANDARD + COMPLEX)
+
+<step name="simplify" gate="code is cleaned up and quality gates still pass">
+
+_Only applies if complexity tier is STANDARD or COMPLEX. Skip for TRIVIAL and SIMPLE._
+
+After tests pass, run a simplification pass on the changed code before it goes to review. This catches generative debt (redundancy, over-engineering, missed reuse) that the programmer's self-review may have missed.
+
+Invoke the built-in `/simplify` skill, which spawns 3 parallel review agents (reuse, quality, efficiency) and applies fixes:
+
+```
+Skill(skill="simplify")
+```
+
+After simplify completes, **re-run quality gates** to ensure simplification didn't break anything:
+
+```bash
+# Read quality gate commands from project rules and execute
+GATES_FILE=".devt/rules/quality-gates.md"
+if [[ -f "$GATES_FILE" ]]; then
+  echo "Re-running quality gates after simplification..."
+  bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-quality-gates.sh"
+fi
+```
+
+**Gate check**:
+
+- Quality gates pass: proceed to review
+- Quality gates fail: attempt to fix the failing gates (same approach as the implement phase fix loop — run the failing command, read the error, fix it). Re-run quality gates after fix.
+  - If gates pass after fix: proceed to review
+  - If gates still fail: revert all simplification changes (`git checkout -- <broken_files>`) and proceed to review with the pre-simplify code. The original code was already tested and passing — safe to fall back.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify status=$STATUS
 ```
 
 </step>
