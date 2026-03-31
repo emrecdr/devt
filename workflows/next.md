@@ -123,15 +123,21 @@ Execute `/devt:review` to review the existing implementation.
 
 ### No workflow, has impl-summary.md and review.md with NEEDS_WORK
 ```
-Review found issues. Resuming implementation to address feedback...
+Review found issues. Restarting workflow to address feedback...
 ```
-Execute `/devt:workflow` to resume at the implement phase with review feedback.
+Execute `/devt:workflow` with the original task — the workflow restarts from context_init and proceeds through to the implement phase, where the programmer reads `.devt/state/review.md` as `<review_feedback>` and addresses the findings. **Do not delete review.md** before invoking.
 
-### No workflow, has impl-summary.md and review.md with APPROVED
+### No workflow, has impl-summary.md and review.md with APPROVED or APPROVED_WITH_NOTES
 ```
 Implementation complete and approved. Ready to ship.
 ```
 Ask: "Create PR now?" → if yes, execute `/devt:ship`.
+
+### No workflow, has impl-summary.md and review.md but verdict unreadable
+```
+Review file exists but verdict is missing or unrecognized (possible interrupted review).
+```
+Ask: "Re-run the review from scratch, or cancel and start over?" → if re-run, execute `/devt:review`; if cancel, execute `/devt:cancel-workflow`.
 
 ### Active workflow, phase known
 ```

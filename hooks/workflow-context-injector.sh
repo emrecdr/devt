@@ -30,5 +30,6 @@ RESULT=$(node -e "
   process.stdout.write(JSON.stringify(output));
 " "$STATE_JSON" 2>/dev/null) || exit 0
 
-[ -n "$RESULT" ] && echo "$RESULT"
+# printf avoids echo's flag interpretation (-n, -e) regardless of JSON content
+[ -n "$RESULT" ] && printf '%s\n' "$RESULT"
 exit 0

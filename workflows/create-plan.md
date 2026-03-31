@@ -216,7 +216,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <task>Review this implementation plan for architectural soundness.</task>
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/state/plan.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json agent_skills.architect if available}</agent_skills>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write review to .devt/state/arch-review.md
 ")

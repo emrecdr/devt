@@ -60,7 +60,7 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
-<agent_skills>{injected from .devt/config.json agent_skills.debugger if available}</agent_skills>
+<agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>
 Follow the 4-phase investigation protocol. Write findings to .devt/state/debug-summary.md
 ")
