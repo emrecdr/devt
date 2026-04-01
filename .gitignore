@@ -23,6 +23,7 @@ coverage/
 dist/
 build/
 .pytest_cache/
+skills-workspace/
 
 # Node
 node_modules/

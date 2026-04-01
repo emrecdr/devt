@@ -4,7 +4,15 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-04-01
+
+### Added
+- **Vue-bootstrap template**: form handling (ref + error object), permission-based rendering (computed + authStore), toast composable wrapper, shallowRef vs ref guidance, multi-env config, legacy Options API migration note
+- **Vue-bootstrap template**: UI/UX quality standards (WCAG 2.2 AA: touch targets, focus states, contrast ratios, reduced-motion), responsive design checklist, diagnostic grep commands
+- **Vue-bootstrap template**: 6 new code smells (div-as-button, missing loading states, stale permission checks, empty states, hardcoded transitions, direct toast calls)
+- **Vue-bootstrap template**: architecture additions (constants 4-file pattern, API client architecture, theme/layout system)
+- **All 15 skills**: "When NOT to Use" sections, time budget hints, concrete examples for edge cases
+- **All 15 skills**: optimized descriptions for triggering accuracy with explicit trigger phrases and negative boundaries
 
 ### Fixed
 - **UserPromptSubmit hook error**: `workflow-context-injector.sh` emitted empty line when no workflow was active, causing Claude Code to fail JSON parsing — now outputs nothing when idle
