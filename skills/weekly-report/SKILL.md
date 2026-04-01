@@ -1,6 +1,6 @@
 ---
 name: weekly-report
-description: Use when the user says 'generate report', 'weekly report', 'contribution report', 'what did we ship', or 'sprint summary'. Produces a team contribution report from git data. Requires .devt/config.json git config. Also use at end of sprint or before retrospectives. Use when generating any development activity summary, sprint review material, or stakeholder update based on git history.
+description: Use when the user wants a team development report generated from git history — commits, merged PRs, contributor activity, and statistics. Trigger on 'weekly report', 'what did we ship', 'sprint summary', 'contribution report', 'git activity summary', 'team contributions', 'generate report from git', 'development activity report', 'what did the team ship', 'stakeholder update from git data', 'sprint review summary', 'show commits by author', 'merged PRs this week', or any request for a data-driven summary of team development progress over a time window. Requires .devt/config.json git configuration. This is for GIT-BASED team activity reports, NOT for session summaries, NOT for Jira/ticket reports, NOT for postmortems or incident reports, NOT for code review reports, NOT for architecture health reports, and NOT for progress updates sourced from non-git data.
 ---
 
 # Weekly Report

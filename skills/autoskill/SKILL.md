@@ -1,6 +1,6 @@
 ---
 name: autoskill
-description: Use when the user asks to improve the plugin, when repeated corrections suggest a skill gap, or at the end of sessions with multiple course corrections. Requires 3+ evidence instances. Also trigger on 'improve the plugin', 'add a rule for this', 'we keep making this mistake', 'this should be a skill', or 'automate this pattern'.
+description: Detect recurring correction patterns and propose concrete improvements to the devt plugin system — updating skills, agents, .devt/rules/, or workflows. Use when the user has corrected the same behavior multiple times and wants to codify it as a permanent rule or skill update. Trigger on 'improve the plugin', 'add a rule for this', 'we keep making this mistake', 'this should be a skill', 'automate this pattern', 'this should be automated', 'capture this as a system improvement', 'propose a skill update', 'codify this pattern', 'the agent keeps forgetting to X', 'every session has the same problem', 'analyze this session for corrections', 'suggest improvements to the plugin', or when repeated course corrections reveal a skill gap. Also trigger when the user says 'this should be a rule', 'make this permanent', or asks to update how agents behave based on observed patterns. This is about improving the plugin SYSTEM (rules, skills, agents, workflows) — NOT about recording lessons to the learning playbook (use lesson-extraction for that) and NOT about pruning/archiving playbook entries (use memory-compaction for that).
 ---
 
 # Autoskill

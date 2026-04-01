@@ -1,6 +1,16 @@
 ---
 name: codebase-scan
-description: Use when about to implement a new feature or fix a bug — scan for existing code, patterns, and duplicates before writing anything. Also use when investigating unfamiliar parts of the codebase. Trigger whenever the user says 'create', 'add', 'implement', 'build', or 'new' for any code artifact, or 'investigate', 'explore', 'find where', 'how does X work'.
+description: >-
+  MANDATORY before writing any new code. Scan the codebase for existing implementations, reusable utilities,
+  and established patterns to prevent duplication. Use whenever the user says "check if similar exists",
+  "before I build/create/add/implement", "search for existing", "look for reusable code", "find what we
+  already have", "is there already a", "don't want to duplicate", "explore the codebase", "what utilities
+  exist", "scan for patterns", "any existing code for", "check utils/shared/helpers", "extend instead of
+  building from scratch", "look around first", "see if we already have", or any variant of "before I start,
+  find what exists." Also triggers on "investigate how X works", "find where X is used", "what conventions
+  does the project follow." This is about DISCOVERING existing code before creating new code — not about
+  reviewing code quality (use code-review-guide), not about verifying completeness of finished work (use
+  verification-patterns), and not about assessing task size (use complexity-assessment).
 ---
 
 # Codebase Scan

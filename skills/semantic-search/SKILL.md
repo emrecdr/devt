@@ -1,6 +1,6 @@
 ---
 name: semantic-search
-description: Use before starting new work to load relevant historical lessons from the learning playbook. Also use when hitting a familiar problem pattern. Trigger on 'have we seen this before', 'check lessons', 'search the playbook', 'this feels familiar', or before implementing anything in a domain where past lessons might apply.
+description: Use to search the learning playbook for past lessons before starting implementation or when a problem feels familiar. Queries the FTS5 database (or grep fallback) for historical insights. Trigger on 'have we seen this before', 'check past lessons', 'search the playbook', 'this feels familiar', 'query lessons', 'check the playbook before implementing', 'search for lessons about X', 'any past lessons on X', 'look up prior experience with X', 'check if we have recorded lessons about X', or whenever an agent is about to work in a domain where past mistakes or solutions may exist. Always use BEFORE implementing, not after failing. This is for READING/QUERYING existing lessons, NOT for adding new lessons (use lesson-extraction), NOT for deduplicating or cleaning up the playbook (use playbook-curation), and NOT for recording ephemeral notes (use scratchpad).
 ---
 
 # Semantic Search
