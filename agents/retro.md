@@ -170,6 +170,11 @@ total_extracted: N
 passed_filters: N
 discarded: N
 conflicts_with_existing: N
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

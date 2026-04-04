@@ -270,6 +270,11 @@ FIXED | NEEDS_MORE_INVESTIGATION | DONE_WITH_CONCERNS | BLOCKED
 - Current understanding: {what you know vs what you don't}
 - Hypotheses remaining: {untested theories}
 - Recommended next step: {what to try next}
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

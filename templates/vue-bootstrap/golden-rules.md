@@ -321,7 +321,7 @@ npm run build
 All three must pass. Copy the terminal output as evidence. "I believe it builds" is not verification — "Here is the output showing build succeeded" is.
 
 - All interactive elements have visible focus states and hover transitions
-- Touch targets are at least 44x44px
+- Touch targets are at least 24x24px (WCAG 2.2 SC 2.5.8 AA); 44x44px recommended (SC 2.5.5 AAA)
 - Text contrast meets WCAG AA (4.5:1 normal, 3:1 large)
 - `@media (prefers-reduced-motion: reduce)` is respected for animations
 - No `<div @click>` — use semantic `<button>` or `<a>` elements

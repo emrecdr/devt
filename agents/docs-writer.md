@@ -22,11 +22,12 @@ BEFORE starting any work, load the following in order:
 
 1. Read `.devt/rules/documentation.md` — documentation format, naming, and structural rules
 2. Read `CLAUDE.md` — project-specific documentation requirements
-3. Read `.devt/state/impl-summary.md` — what changed
-4. Read `.devt/state/test-summary.md` — test coverage context
-5. Read `.devt/state/review.md` if available — quality context
-6. Read existing module documentation files to understand current state
-7. Read files listed in `<files_to_read>` block from the task prompt
+3. Read `guardrails/golden-rules.md`
+4. Read `.devt/state/impl-summary.md` — what changed
+5. Read `.devt/state/test-summary.md` — test coverage context
+6. Read `.devt/state/review.md` if available — quality context
+7. Read existing module documentation files to understand current state
+8. Read files listed in `<files_to_read>` block from the task prompt
 
 Do NOT skip any of these. Writing docs without understanding the implementation produces fiction, not documentation.
 </context_loading>
@@ -152,6 +153,11 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 - <any documentation gaps that could not be filled>
 - <any ambiguities in the implementation that need clarification>
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

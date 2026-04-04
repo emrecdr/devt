@@ -185,7 +185,7 @@ function validateConsistency() {
     "scan", "regression_baseline", "arch_health", "arch_health_scan",
     "plan", "architect", "implement", "test", "simplify", "review",
     "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
-    "debug", "complete", "finalize",
+    "identify_scope", "debug", "complete", "finalize",
   ];
 
   const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);

@@ -68,6 +68,17 @@ Actually works when invoked:
 - Quality gates pass
 - Manual smoke test succeeds (if applicable)
 
+### Level 5 — Scope Completeness
+
+Did the implementation cover ALL requirements, or was scope silently reduced?
+
+1. Extract every discrete requirement from spec/plan/task description
+2. For each requirement, look for implementation evidence in the codebase
+3. Requirements with NO evidence → `SCOPE_REDUCED` finding
+4. Any scope reduction forces GAPS_FOUND verdict — silent omissions are now visible
+
+This level is automatically applied by the verifier agent when spec.md or plan.md exists. It catches the dangerous case where an agent implements 3 of 5 requirements and claims DONE.
+
 ## Gate Function
 
 Before reporting ANY completion status, follow this flow exactly:

@@ -17,7 +17,7 @@ devt is a Claude Code plugin that orchestrates multi-agent development workflows
 Supporting layers:
 - **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides.
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`).
-- **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist).
+- **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
 - **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management.
 
 ### CLI Tools (`bin/devt-tools.cjs`)
@@ -32,12 +32,12 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 - **`semantic.cjs`** — FTS5 full-text search on learning playbook. Uses `node:sqlite` (built-in). Sync playbook → DB, query lessons, compact stale entries. Grep fallback when DB doesn't exist.
 - **`weekly-report.cjs`** — Git log parsing and markdown report rendering. Contributor matching via `.devt/config.json` config.
 - **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone).
-- **`health.cjs`** — Project health validation with 19 checks, structured JSON output, `--repair` flag for safe auto-fixes.
+- **`health.cjs`** — Project health validation with 21 checks, structured JSON output, `--repair` flag for safe auto-fixes.
 - **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection, safe JSON parsing, shell argument validation. Wired into `init.cjs` to sanitize task descriptions entering the system.
 
 ### State Flow
 
-Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` for resume routing), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger scratchpad, within-session only). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
+Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger scratchpad, within-session only), `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`, consumed by `/devt:next`), `continue-here.md` (from `/devt:pause`). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
 
 #### `workflow_type` Registry
 
@@ -71,6 +71,7 @@ node bin/devt-tools.cjs init review "task"
 node bin/devt-tools.cjs state read
 node bin/devt-tools.cjs state update key=value
 node bin/devt-tools.cjs state reset
+node bin/devt-tools.cjs state validate          # Check state/artifact consistency
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>
@@ -97,3 +98,6 @@ There are no build steps, test suites, or linters configured for the plugin itse
 - The plugin manifest lives at `.claude-plugin/plugin.json`. Agents are listed explicitly; commands and skills are auto-discovered.
 - Commands are symlinked to `~/.claude/commands/devt/` on session start for `devt:` namespaced autocomplete.
 - Version is tracked in both `plugin.json` and `VERSION` file (plugin.json is primary).
+- Agent artifacts include provenance sections (agent name, timestamp, workflow context) for traceability across the pipeline.
+- The `autonomous_chain` field in `workflow.yaml` enables cross-workflow autonomous chaining (e.g., implement -> test -> review without manual `/devt:next` invocations).
+- `state validate` subcommand checks artifact consistency: verifies expected files exist for the current workflow phase, flags orphaned artifacts, and detects state/artifact mismatches.

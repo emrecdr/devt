@@ -34,6 +34,8 @@ BEFORE verifying, load the following in order:
 7. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:clarify`)
 8. Read `.devt/rules/quality-gates.md` — quality gate definitions
 9. Read `CLAUDE.md` if it exists — project-specific constraints
+10. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
+11. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
 
 Do NOT skip any of these. Verification without understanding the goal is just another code review.
 </context_loading>

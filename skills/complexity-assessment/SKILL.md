@@ -93,12 +93,13 @@ What breaks if this goes wrong?
 
 ### Step 2: Calculate Total Score
 
-Sum all 5 dimensions (range: 5-15).
+Sum all 5 dimensions (range: 5-15). Tasks scoring below 5 are TRIVIAL (1-4 indicates at least one dimension was scored 0 by the assessor for non-applicability, e.g., zero risk, zero dependencies).
 
 ### Step 3: Determine Tier
 
 | Total | Tier         | Workflow Implications                                                                |
 | ----- | ------------ | ------------------------------------------------------------------------------------ |
+| 1-4   | **TRIVIAL**  | Single-file change, no integration, no tests needed. Inline execution, no subagents. |
 | 5-7   | **SIMPLE**   | Direct implementation. Minimal review. Unit tests sufficient.                        |
 | 8-12  | **STANDARD** | Plan before implementing. Full review. Unit + integration tests.                     |
 | 13-15 | **COMPLEX**  | Strategic analysis required. Multi-phase plan. All test levels. Architecture review. |
@@ -160,6 +161,6 @@ After scoring, verify: Could a junior developer understand the scope from your t
 ## Integration
 
 - **Prerequisites**: codebase-scan (scan results inform scope and dependency scores)
-- **Feeds into**: Workflow selection (SIMPLE/STANDARD/COMPLEX determines agent involvement)
+- **Feeds into**: Workflow selection (TRIVIAL/SIMPLE/STANDARD/COMPLEX determines agent involvement)
 - **Used by agents**: workflow orchestrator (to plan workflows), architect (to validate scope)
 - **Assets**: `assets/keywords.yaml` — signal words by dimension

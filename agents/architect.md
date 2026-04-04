@@ -164,6 +164,11 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 ## Assessment
 
 <Overall architectural health summary. What is solid, what needs attention.>
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

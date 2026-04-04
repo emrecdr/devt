@@ -156,4 +156,9 @@ Write .devt/state/research.md with these sections:
 - **Confidence**: overall HIGH/MEDIUM/LOW with reasoning
 
 Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 </output_format>

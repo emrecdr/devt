@@ -205,6 +205,11 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 - <any unresolved contradictions>
 - <any entries needing external validation>
+
+## Provenance
+- Agent: {agent_type}
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>
