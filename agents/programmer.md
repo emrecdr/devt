@@ -366,6 +366,11 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 - <anything the next agent should know>
 - <any edge cases that need test coverage>
+
+## Provenance
+- Agent: programmer
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

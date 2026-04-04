@@ -91,6 +91,7 @@ const KNOWN_STATE_KEYS = {
   decisions_file: "string",
   status: "string",
   autonomous: "boolean",
+  autonomous_chain: "string",
   verdict: "string",
   repair: "string",
   verify_iteration: "number",
@@ -147,6 +148,67 @@ function readState() {
     parsed.tier = parsed.complexity;
   }
   return parsed;
+}
+
+/**
+ * Validate consistency between workflow phases and expected artifacts.
+ * For each phase that has been "passed through" (i.e., phase is beyond it),
+ * check that the expected artifact file exists in .devt/state/.
+ *
+ * Returns { consistent: true/false, mismatches: [{phase, expected_artifact, exists}] }
+ */
+function validateConsistency() {
+  const state = readState();
+  const stateDir = getStateDir();
+
+  // Phase→artifact mapping
+  const PHASE_ARTIFACTS = {
+    implement: "impl-summary.md",
+    test: "test-summary.md",
+    review: "review.md",
+    verify: "verification.md",
+  };
+
+  // Conditional mappings based on workflow_type
+  if (state.workflow_type === "plan") {
+    PHASE_ARTIFACTS.plan = "plan.md";
+  }
+  if (state.workflow_type === "debug") {
+    PHASE_ARTIFACTS.debug = "debug-summary.md";
+  }
+  // Retro always maps to lessons.yaml
+  PHASE_ARTIFACTS.retro = "lessons.yaml";
+
+  // Ordered phases to determine which have been "passed through"
+  const PHASE_ORDER = [
+    "context_init", "flow_deviation", "assess", "risk_warning",
+    "scan", "regression_baseline", "arch_health", "arch_health_scan",
+    "plan", "architect", "implement", "test", "simplify", "review",
+    "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
+    "debug", "complete", "finalize",
+  ];
+
+  const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
+  if (currentPhaseIndex === -1) {
+    // Unknown phase or no phase — return consistent (nothing to validate)
+    return { consistent: true, mismatches: [] };
+  }
+
+  const mismatches = [];
+  for (const [phase, artifact] of Object.entries(PHASE_ARTIFACTS)) {
+    const phaseIndex = PHASE_ORDER.indexOf(phase);
+    if (phaseIndex === -1) continue;
+    // Only check phases that have been passed through (current phase is beyond them)
+    if (currentPhaseIndex > phaseIndex) {
+      const artifactPath = path.join(stateDir, artifact);
+      const exists = fs.existsSync(artifactPath);
+      if (!exists) {
+        mismatches.push({ phase, expected_artifact: artifact, exists: false });
+      }
+    }
+  }
+
+  return { consistent: mismatches.length === 0, mismatches };
 }
 
 function sleepSync(ms) {
@@ -293,9 +355,11 @@ function run(subcommand, args) {
       return updateState(args);
     case "reset":
       return resetState();
+    case "validate":
+      return validateConsistency();
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, update, reset`,
+        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate`,
       );
   }
 }
@@ -306,6 +370,7 @@ module.exports = {
   updateState,
   resetState,
   checkWorkflowLock,
+  validateConsistency,
   getStateDir,
   ensureStateDir,
   VALID_PHASES,

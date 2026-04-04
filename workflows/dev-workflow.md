@@ -337,6 +337,26 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 
 If research.md already exists: skip, use existing findings.
 
+**Open Questions gate** (applies when `.devt/state/research.md` exists with status DONE or DONE_WITH_CONCERNS):
+- Scan for a `## Open Questions` section in research.md
+- If any items are listed and NOT marked with ~~strikethrough~~, [RESOLVED], or [DEFERRED]:
+  - Present the unresolved questions to the user via AskUserQuestion:
+    ```yaml
+    question: "These questions from research are unresolved. Resolve, defer, or proceed anyway?"
+    header: "Unresolved Research Questions"
+    multiSelect: false
+    options:
+      - label: "Resolve now"
+        description: "Provide answers to the open questions before planning"
+      - label: "Defer all"
+        description: "Mark questions as [DEFERRED] in research.md and proceed"
+      - label: "Proceed anyway"
+        description: "Continue despite unresolved questions — risk of incomplete plan"
+    ```
+  - If user defers: mark each unresolved question as [DEFERRED] in research.md and proceed
+  - If user resolves: update research.md with the answers and proceed
+  - If user says proceed anyway: note the risk in plan.md and continue
+
 **Auto-Plan**: If no `.devt/state/plan.md` exists, create one inline using the planning logic from `${CLAUDE_PLUGIN_ROOT}/workflows/create-plan.md` (Steps 3-5: analyze, plan, validate). Do NOT dispatch a separate subagent for planning — the main session creates the plan.
 
 ```bash
@@ -591,6 +611,13 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>
     <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
     <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
+    <scope_requirements>
+      Extract every discrete requirement from the best available source (spec.md, plan.md, or task description) and list them numbered:
+      R1: {requirement}
+      R2: {requirement}
+      ...
+      The verifier will cross-reference this list against impl-summary.md to detect scope reduction. Every numbered requirement must have corresponding implementation evidence.
+    </scope_requirements>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/learning-playbook.md, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -807,21 +834,23 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status
 
 ---
 
-## Step 7: Documentation (STANDARD + COMPLEX)
+## Step 7+8: Documentation and Retrospective (parallel, STANDARD + COMPLEX)
 
-<step name="docs" gate="docs-summary.md is written to .devt/state/">
+<step name="docs_retro_parallel" gate="docs-summary.md and lessons.yaml are written to .devt/state/">
 
-_Skip this step if complexity is SIMPLE._
-_Skip this step if `config.workflow.docs` is `false`._
-_Skip this step if `docs` is listed in `skipped_phases` from workflow state._
+These two agents are independent — dispatch both simultaneously to reduce wall-clock time.
 
 **Pre-dispatch check**: Read `.devt/state/impl-summary.md` status.
 
-- If DONE or DONE_WITH_CONCERNS: dispatch docs-writer
-- If BLOCKED: skip docs step (nothing to document)
-- If file missing: skip docs step with warning "No implementation summary found"
+- If DONE or DONE_WITH_CONCERNS: dispatch both agents below
+- If BLOCKED: skip both steps (nothing to document or learn from)
+- If file missing: skip both steps with warning "No implementation summary found"
 
-Dispatch the docs-writer agent:
+**Skip conditions** (evaluated independently for each agent):
+- _Skip docs-writer if complexity is SIMPLE, `config.workflow.docs` is `false`, or `docs` is listed in `skipped_phases`._
+- _Skip retro if complexity is SIMPLE, `config.workflow.retro` is `false`, or `retro` is listed in `skipped_phases`._
+
+Dispatch both agents in parallel:
 
 ```
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
@@ -839,27 +868,7 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   </context>
   Write summary to .devt/state/docs-summary.md
 ")
-```
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=docs status=DONE
-```
-
-</step>
-
----
-
-## Step 8: Retrospective (STANDARD + COMPLEX)
-
-<step name="retro" gate="lessons.yaml is written to .devt/state/">
-
-_Skip this step if complexity is SIMPLE._
-_Skip this step if `config.workflow.retro` is `false`._
-_Skip this step if `retro` is listed in `skipped_phases` from workflow state._
-
-Dispatch the retro agent:
-
-```
 Task(subagent_type="devt:retro", model="{models.retro}", prompt="
   <task>
     Review all workflow artifacts and extract lessons learned.
@@ -883,6 +892,8 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
   Write lessons to .devt/state/lessons.yaml
 ")
 ```
+
+Wait for both to complete before proceeding to Step 9 (curation).
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=DONE
@@ -997,6 +1008,13 @@ Summarize the workflow results:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
 ```
+
+If `autonomous=true` in workflow state:
+- After setting `active=false phase=complete`, also run:
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=ship
+  ```
+- This tells `/devt:next` to auto-proceed to `/devt:ship` without prompting the user.
 
 Report to the user:
 

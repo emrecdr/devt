@@ -90,6 +90,26 @@ Check if research is needed before planning:
    Gate: Read `.devt/state/research.md` — if DONE or DONE_WITH_CONCERNS, proceed. If NEEDS_CONTEXT, ask user and re-dispatch.
 
 5. **If research skipped:** proceed to Step 3 without research context.
+
+6. **Open Questions gate** (applies when `.devt/state/research.md` exists with status DONE or DONE_WITH_CONCERNS):
+   - Scan for a `## Open Questions` section in research.md
+   - If any items are listed and NOT marked with ~~strikethrough~~, [RESOLVED], or [DEFERRED]:
+     - Present the unresolved questions to the user via AskUserQuestion:
+       ```yaml
+       question: "These questions from research are unresolved. Resolve, defer, or proceed anyway?"
+       header: "Unresolved Research Questions"
+       multiSelect: false
+       options:
+         - label: "Resolve now"
+           description: "Provide answers to the open questions before planning"
+         - label: "Defer all"
+           description: "Mark questions as [DEFERRED] in research.md and proceed with planning"
+         - label: "Proceed anyway"
+           description: "Continue planning despite unresolved questions — risk of incomplete plan"
+       ```
+     - If user defers: mark each unresolved question as [DEFERRED] in research.md and proceed
+     - If user resolves: update research.md with the answers and proceed
+     - If user says proceed anyway: note the risk in plan.md and continue
 </step>
 
 <step name="analyze" gate="task is fully understood">

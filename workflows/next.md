@@ -52,6 +52,12 @@ Build a picture of where things stand:
 - Are there artifacts from prior steps (spec, research, decisions, plan)?
 - Are there uncommitted changes?
 - What was the last thing that happened?
+
+**Stale autonomous_chain cleanup**: If the user did NOT invoke this via `--autonomous` and `autonomous_chain` exists in state, clear it to prevent unintended auto-shipping from a previous autonomous run:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=null
+```
 </step>
 
 <step name="route" gate="next action is determined and executed">
@@ -131,7 +137,8 @@ Execute `/devt:workflow` with the original task — the workflow restarts from c
 ```
 Implementation complete and approved. Ready to ship.
 ```
-Ask: "Create PR now?" → if yes, execute `/devt:ship`.
+If state has `autonomous_chain=ship`: execute `/devt:ship` directly (no prompt — autonomous pipeline continuation).
+Otherwise: Ask "Create PR now?" → if yes, execute `/devt:ship`.
 
 ### No workflow, has impl-summary.md and review.md but verdict unreadable
 ```

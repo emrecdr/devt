@@ -95,6 +95,18 @@ For each acceptance criterion, trace through the codebase using the 4-level veri
 - Pre-existing failures (already failing in baseline) are NOT regressions — ignore them
 
 Everything must reach Level 3 minimum. Level 4 for critical paths. Level 4.5 when baseline exists.
+
+**Level 5 — Scope Completeness**: Did the implementation cover ALL requirements, or was scope silently reduced?
+
+Compare the requirements from the original task/spec/plan against what was actually implemented:
+
+1. Extract every discrete requirement from: spec.md (User Stories, Success Criteria, Tasks), plan.md (Ordered Tasks), or the original task description
+2. For each requirement, look for corresponding evidence in impl-summary.md and the actual codebase
+3. Any requirement with NO corresponding evidence is flagged as:
+   `SCOPE_REDUCED: Requirement "{requirement}" has no implementation evidence`
+4. If ANY scope reduction is detected, the verdict CANNOT be VERIFIED — it must be GAPS_FOUND with the specific omissions listed
+
+Level 5 is mandatory whenever spec.md or plan.md exists. For tasks without spec/plan, apply best-effort scope tracing from the task description.
 </step>
 
 <step name="run_verification">
@@ -147,6 +159,10 @@ Level 4 is required for critical paths (auth, data mutation, payment, etc.).
 
 **NEEDS_HUMAN**: Mark an acceptance criterion as `NEEDS_HUMAN` when it requires visual, subjective, or external-system verification that you cannot perform with your tools (Read, Bash, Glob, Grep). Examples: UI rendering correctness, UX flow feel, third-party webhook delivery, mobile device behavior. Do not force these into Met/Not Met — be honest about what you cannot verify programmatically.
 </verification_levels>
+
+<provenance_rule>
+**Provenance rule**: Claims in artifacts with provenance tags are agent-reported, not independently verified. When an artifact says "Tests: PASS" and provenance shows `Agent: programmer`, this is a self-reported claim — verify it independently by running the actual test command. Never trust an artifact's claims about its own quality without independent evidence. The provenance section tells you WHO made the claim — use that to calibrate your trust level.
+</provenance_rule>
 
 <red_flags>
 Thoughts that mean STOP and dig deeper:

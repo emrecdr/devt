@@ -265,6 +265,11 @@ N / 100
 ## Verdict Reasoning
 
 <Why this score and verdict. Reference specific findings.>
+
+## Provenance
+- Agent: code-reviewer
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>

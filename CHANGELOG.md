@@ -12,6 +12,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 - **Vue-bootstrap template**: 6 new code smells (div-as-button, missing loading states, stale permission checks, empty states, hardcoded transitions, direct toast calls)
 - **Vue-bootstrap template**: architecture additions (constants 4-file pattern, API client architecture, theme/layout system)
 - **All 15 skills**: "When NOT to Use" sections, time budget hints, concrete examples for edge cases
+- **State validate/sync**: `devt-tools state validate` cross-references state claims against actual artifact files — detects drift when sessions drop mid-workflow (W013 health check)
+- **Research gate**: planning blocks when research has unresolved open questions — presents them for resolve/defer/proceed decision
+- **Scope reduction detection**: verifier Level 5 extracts every requirement from spec/plan, flags omissions as SCOPE_REDUCED forcing GAPS_FOUND verdict
+- **Claim provenance tagging**: programmer, tester, code-reviewer artifacts now include Agent/Model/Timestamp provenance — verifier treats provenance-tagged claims as self-reported
+- **Autonomous chain flag**: `--autonomous` workflows auto-advance to `/devt:ship` after completion; stale flag cleared on manual invocation
+- **Parallel docs + retro**: docs-writer and retro agents now dispatch simultaneously (independent outputs), saving ~30-60s per STANDARD workflow
 - **All 15 skills**: optimized descriptions for triggering accuracy with explicit trigger phrases and negative boundaries
 
 ### Fixed

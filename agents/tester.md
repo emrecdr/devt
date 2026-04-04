@@ -307,6 +307,11 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - <any scenarios that could not be tested and why>
 - <any flaky behavior observed>
 - <recommendations for integration test coverage>
+
+## Provenance
+- Agent: tester
+- Model: {model_used}
+- Timestamp: {ISO 8601}
 ```
 
 </output_format>
