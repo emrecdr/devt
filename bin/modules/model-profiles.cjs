@@ -89,6 +89,18 @@ function getModels(profileName, overrides) {
   return { ...profile };
 }
 
+function formatAsTable(agentModelMap) {
+  const agents = Object.keys(agentModelMap);
+  const agentWidth = Math.max(5, ...agents.map((a) => a.length));
+  const modelWidth = Math.max(5, ...Object.values(agentModelMap).map((m) => m.length));
+  const sep = "─".repeat(agentWidth + 2) + "┼" + "─".repeat(modelWidth + 2);
+  let table = " " + "Agent".padEnd(agentWidth) + " │ " + "Model".padEnd(modelWidth) + "\n" + sep + "\n";
+  for (const [agent, model] of Object.entries(agentModelMap)) {
+    table += " " + agent.padEnd(agentWidth) + " │ " + model.padEnd(modelWidth) + "\n";
+  }
+  return table;
+}
+
 function run(subcommand, args) {
   switch (subcommand) {
     case "get": {
@@ -100,11 +112,15 @@ function run(subcommand, args) {
         profiles: Object.keys(PROFILES),
         agents: Object.keys(PROFILES.balanced),
       };
+    case "table": {
+      const profileName = args[0] || "quality";
+      return { table: formatAsTable(getModels(profileName)) };
+    }
     default:
       throw new Error(
-        `Unknown models subcommand: ${subcommand}. Use: get, list`,
+        `Unknown models subcommand: ${subcommand}. Use: get, list, table`,
       );
   }
 }
 
-module.exports = { run, getModels, PROFILES };
+module.exports = { run, getModels, formatAsTable, PROFILES };
