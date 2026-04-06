@@ -109,6 +109,15 @@ Compare the requirements from the original task/spec/plan against what was actua
 4. If ANY scope reduction is detected, the verdict CANNOT be VERIFIED — it must be GAPS_FOUND with the specific omissions listed
 
 Level 5 is mandatory whenever spec.md or plan.md exists. For tasks without spec/plan, apply best-effort scope tracing from the task description.
+
+**Level 5.5 — Later-Phase Awareness**: If the workflow has defined later phases (visible in the plan or spec), filter out gaps that are explicitly addressed in a later phase:
+
+1. Check `.devt/state/plan.md` or the task description for mentions of phased delivery, follow-up tasks, or "Phase 2" / "later" / "out of scope for this phase" language
+2. If a gap matches a requirement explicitly deferred to a later phase, annotate the individual finding as `[DEFERRED]` instead of counting it as a gap
+3. `[DEFERRED]` annotations do NOT downgrade the verdict — they are per-item informational tags, not verdict-level statuses
+4. Include deferred items in the report under a separate "## Deferred to Later Phases" section so they remain visible
+
+This prevents false positives on multi-phase work where Phase 1 intentionally omits Phase 2 scope.
 </step>
 
 <step name="run_verification">
@@ -237,6 +246,10 @@ VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS
 ## Failures (if FAILED)
 
 1. {what is broken}: {error output or evidence}
+
+## Deferred to Later Phases (if any)
+
+1. {requirement}: deferred to {phase/task} — {evidence from plan or spec}
 
 ## Summary
 

@@ -12,6 +12,69 @@ const fs = require("fs");
 const path = require("path");
 
 /**
+ * Calculate Shannon entropy (bits per character) for a text string.
+ * High entropy (>4.5) in long segments suggests encoded/obfuscated payloads.
+ */
+function shannonEntropy(text) {
+  if (!text || text.length === 0) return 0;
+  const freq = {};
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    freq[ch] = (freq[ch] || 0) + 1;
+  }
+  let entropy = 0;
+  const len = text.length;
+  for (const ch in freq) {
+    const p = freq[ch] / len;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+/**
+ * Decode URL-encoded (%XX) sequences in text.
+ * Returns the decoded string for re-scanning.
+ */
+function decodeUrlEncoding(text) {
+  if (!text || typeof text !== "string") return text;
+  return text.replace(/%([0-9a-fA-F]{2})/g, function (_, hex) {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+}
+
+/**
+ * Decode common HTML entities in text.
+ * Handles named entities (&lt; &gt; &amp; &quot; &apos;) and
+ * numeric entities (&#xNN; &#NNN;).
+ */
+const HTML_NAMED_ENTITIES = {
+  "&lt;": "<",
+  "&gt;": ">",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&apos;": "'",
+};
+
+function decodeHtmlEntities(text) {
+  if (!text || typeof text !== "string") return text;
+  let result = text;
+  for (const entity in HTML_NAMED_ENTITIES) {
+    result = result.replaceAll(entity, HTML_NAMED_ENTITIES[entity]);
+  }
+  // Hex numeric entities: &#xNN;
+  result = result.replace(/&#x([0-9a-fA-F]+);/g, function (_, hex) {
+    const cp = parseInt(hex, 16);
+    return cp > 0x10FFFF ? "" : String.fromCodePoint(cp);
+  });
+  // Decimal numeric entities: &#NNN;
+  result = result.replace(/&#(\d+);/g, function (_, dec) {
+    const cp = parseInt(dec, 10);
+    return cp > 0x10FFFF ? "" : String.fromCodePoint(cp);
+  });
+  return result;
+}
+
+/**
  * Validate that a file path resolves within an allowed base directory.
  * Prevents path traversal attacks via ../ sequences, symlinks, or absolute paths.
  */
@@ -112,6 +175,40 @@ function scanForInjection(text, opts) {
     if (normalizedLength > 50000) {
       findings.push(`Suspicious text length: ${normalizedLength} chars (potential prompt stuffing)`);
     }
+
+    // Shannon entropy analysis — detect encoded/obfuscated payloads
+    // Split on whitespace and check segments >200 chars
+    const segments = text.split(/\s+/);
+    for (const seg of segments) {
+      if (seg.length > 200) {
+        const ent = shannonEntropy(seg);
+        if (ent > 4.5) {
+          findings.push(`High-entropy segment detected (${ent.toFixed(1)} bits/char): potential encoded payload`);
+          break; // one finding is enough
+        }
+      }
+    }
+
+    // Scan decoded text for injection patterns hidden by encoding
+    function scanDecoded(decoded, label) {
+      if (decoded === text) return;
+      for (const pattern of INJECTION_PATTERNS) {
+        if (!pattern.test(text) && pattern.test(decoded)) {
+          findings.push(`${label} detected: decoded text matches ${pattern.source}`);
+        }
+      }
+    }
+
+    // URL-encoded injection — decode %XX sequences and re-scan
+    // NOTE: parallel implementation in scripts/prompt-injection-scan.sh (category 7)
+    if (/%[0-9a-fA-F]{2}/.test(text)) {
+      scanDecoded(decodeUrlEncoding(text), "URL-encoded injection");
+    }
+
+    // HTML entity injection — decode entities and re-scan
+    if (/&(?:#x?[0-9a-fA-F]+|[a-z]+);/i.test(text)) {
+      scanDecoded(decodeHtmlEntities(text), "HTML-entity injection");
+    }
   }
   return { clean: findings.length === 0, findings };
 }
@@ -167,5 +264,8 @@ module.exports = {
   sanitizeForPrompt,
   sanitizeForDisplay,
   validateShellArg,
+  shannonEntropy,
+  decodeUrlEncoding,
+  decodeHtmlEntities,
   INJECTION_PATTERNS,
 };

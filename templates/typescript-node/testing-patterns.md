@@ -48,12 +48,74 @@
 - Test the full request/response cycle for API endpoints
 - Verify database state after mutations
 
-## E2E Test Patterns
+## E2E Test Patterns (Playwright)
 
-- Test complete user workflows
-- Use realistic test data
+- Test complete user workflows end-to-end
+- Use realistic test data via API fixtures (not UI-created)
 - Run against a deployed (or locally running) instance
 - Isolate from other tests — each E2E test is independent
+
+### Playwright Setup
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test'
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 60_000,
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,
+  use: {
+    baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+})
+```
+
+### Locator Strategy (Priority)
+
+1. `getByRole('button', { name: 'Submit' })` — accessibility-first
+2. `locator('[data-testid="submit"]')` — when role unavailable
+3. `locator('.btn-primary')` — last resort, document why
+
+### Visual Regression
+
+```javascript
+test('renders correctly', async ({ page }) => {
+  await page.goto('/feature')
+  await page.waitForLoadState('networkidle')
+  await expect(page).toHaveScreenshot('feature.png', {
+    maxDiffPixelRatio: 0.01,
+    animations: 'disabled',
+  })
+})
+```
+
+### Network Verification
+
+```javascript
+test('submits form to correct endpoint', async ({ page }) => {
+  const apiPromise = page.waitForRequest(req =>
+    req.url().includes('/api/submit') && req.method() === 'POST'
+  )
+  await page.getByRole('button', { name: 'Submit' }).click()
+  const request = await apiPromise
+  const body = request.postData()
+  expect(body).toBeTruthy()
+  expect(body).toContain('"status":"active"')
+})
+```
+
+### Anti-Patterns
+
+| Anti-Pattern | Do Instead |
+|---|---|
+| `page.waitForTimeout(2000)` | Web-first assertions or `waitForURL` |
+| `page.$()` for assertions | `expect(locator).toBeVisible()` |
+| Shared state between tests | Each test creates/cleans own data |
+| Testing in execution order | Independent self-contained tests |
 
 ## What NOT to Test
 

@@ -2,7 +2,7 @@
 
 **devt** (short for **dev**elopment **t**eam) — a lightweight multi-agent development workflow plugin for Claude Code.
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What It Does
@@ -249,7 +249,7 @@ devt/
     plugin.json           # Plugin manifest
   bin/
     devt-tools.cjs        # CLI entry point
-    modules/              # init, state, config, model-profiles, setup, semantic, weekly-report, update
+    modules/              # init, state, config, model-profiles, setup, semantic, security, health, weekly-report, update
   commands/               # 28 thin command entry points
   workflows/              # 26 orchestration files
   agents/                 # 10 agent definitions
@@ -258,6 +258,8 @@ devt/
   guardrails/             # Protective guidelines
   protocols/              # Interaction protocols
   standards/              # Development pattern standards
+  references/             # Technique libraries for agent workflows (questioning guide, domain probes)
+  scripts/                # Utility scripts (quality gates, prompt injection scanning)
   templates/              # Project templates (python-fastapi, go, typescript-node, vue-bootstrap, blank)
   memory/                 # Memory schemas and semantic index
   skill-index.yaml        # Agent-to-skill mapping

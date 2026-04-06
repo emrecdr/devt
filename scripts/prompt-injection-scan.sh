@@ -81,6 +81,32 @@ scan_file() {
     fi
   fi
 
+  # 7. URL-encoded injection — decode %XX sequences and check for injection patterns
+  # NOTE: parallel implementation in bin/modules/security.cjs (scanForInjection strict mode)
+  if grep -qoE '%[0-9a-fA-F]{2}' "$file" 2>/dev/null; then
+    local decoded
+    decoded=$(python3 -c "
+import re, sys
+content = open(sys.argv[1]).read()
+print(re.sub(r'%([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), content))
+" "$file" 2>/dev/null || true)
+    if [[ -n "$decoded" ]] && echo "$decoded" | grep -qiE "ignore (all |any )?(previous |prior |above )?instructions|you are now|pretend to be|from now on you|<system>|</system>|\[SYSTEM\]|\[INST\]"; then
+      echo "INJECTION: $relpath — URL-encoded injection (decoded text matches injection pattern)"
+      found=1
+    fi
+  fi
+
+  # 8. Homoglyph/lookalike detection — Cyrillic characters mixed with ASCII Latin
+  # Cyrillic lookalikes: а(U+0430) е(U+0435) о(U+043E) р(U+0440) с(U+0441) х(U+0445) у(U+0443)
+  # Uses literal UTF-8 characters for portability (works with BSD and GNU grep)
+  if grep -q '[аеорсху]' "$file" 2>/dev/null; then
+    # Verify it is mixed with ASCII Latin (not a pure Cyrillic text file)
+    if grep -q '[a-zA-Z]' "$file" 2>/dev/null; then
+      echo "SUSPICIOUS: $relpath — Cyrillic lookalike characters mixed with ASCII Latin (potential homoglyph attack)"
+      found=1
+    fi
+  fi
+
   if [[ "$found" -gt 0 ]]; then
     FINDINGS=$((FINDINGS + found))
   fi

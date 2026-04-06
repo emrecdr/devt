@@ -47,6 +47,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 
 Load project context:
 - Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively
+- Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — domain-specific probing techniques for uncovering unknowns and edge cases
 - Read `.devt/rules/coding-standards.md` for naming/patterns
 - Read `.devt/rules/architecture.md` for project structure
 - Read `CLAUDE.md` if it exists

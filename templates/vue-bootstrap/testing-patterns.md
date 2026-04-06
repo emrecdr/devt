@@ -291,6 +291,129 @@ export function uniqueSuffix() {
 | Long test files (100+ lines per test) | Split into focused describe blocks |
 | Testing third-party library behavior | Test YOUR code's behavior |
 
+## Visual Regression & Screenshot Testing
+
+Use Playwright's built-in visual comparison for catching unintended UI changes:
+
+```javascript
+test('dashboard renders correctly', async ({ authenticatedPage }) => {
+  await authenticatedPage.goto('/dashboard')
+  await authenticatedPage.waitForLoadState('networkidle')
+  await expect(authenticatedPage).toHaveScreenshot('dashboard.png', {
+    maxDiffPixelRatio: 0.01,  // Allow 1% pixel difference
+    animations: 'disabled',   // Freeze CSS animations
+  })
+})
+
+test('empty state shows placeholder', async ({ authenticatedPage }) => {
+  await authenticatedPage.goto('/projects')
+  await expect(authenticatedPage.locator('.empty-state')).toHaveScreenshot('empty-projects.png')
+})
+```
+
+**Rules:**
+- Baseline screenshots committed to `e2e/tests/__snapshots__/`
+- Update baselines explicitly: `npx playwright test --update-snapshots`
+- Disable animations for deterministic screenshots
+- Use `maxDiffPixelRatio` not `maxDiffPixels` — resolution-independent
+- Compare component screenshots (not full-page) when testing specific features
+
+## Accessibility Testing
+
+Playwright exposes an accessibility snapshot for every page:
+
+```javascript
+test('login form is accessible', async ({ signinPage }) => {
+  await signinPage.goto()
+
+  // Role-based locators verify accessibility — if getByRole finds it, the element is accessible
+  const emailInput = signinPage.page.getByRole('textbox', { name: /email/i })
+  await expect(emailInput).toBeVisible()
+
+  const passwordInput = signinPage.page.getByRole('textbox', { name: /password/i })
+  await expect(passwordInput).toBeVisible()
+
+  const submitBtn = signinPage.page.getByRole('button', { name: /sign in/i })
+  await expect(submitBtn).toBeVisible()
+})
+
+// For structured ARIA verification (Playwright v1.49+):
+test('login form matches ARIA snapshot', async ({ signinPage }) => {
+  await signinPage.goto()
+  await expect(signinPage.page.locator('.form-signin')).toMatchAriaSnapshot(`
+    - textbox "Email"
+    - textbox "Password"
+    - button "Sign In"
+  `)
+})
+```
+
+**Accessibility conventions:**
+- Every interactive element must have an accessible name (from label, aria-label, or text content)
+- Form inputs need associated `<label>` elements or `aria-label`
+- Use `getByRole()` locators — if you can't find an element by role, it's an a11y issue
+- Test keyboard navigation for critical flows (Tab order, Enter to submit)
+
+## Network Inspection Patterns
+
+Validate API calls during E2E flows:
+
+```javascript
+test('login sends correct API request', async ({ page, signinPage, verifiedUser }) => {
+  const apiPromise = page.waitForRequest(req =>
+    req.url().includes('/api/auth/login') && req.method() === 'POST'
+  )
+  await signinPage.goto()
+  await signinPage.login(verifiedUser.email, verifiedUser.password)
+  const request = await apiPromise
+  const body = request.postData()
+  expect(body).toBeTruthy()
+  expect(JSON.parse(body)).toMatchObject({
+    email: verifiedUser.email,
+  })
+})
+
+test('dashboard loads data from API', async ({ authenticatedPage }) => {
+  const responsePromise = authenticatedPage.waitForResponse(
+    res => res.url().includes('/api/dashboard') && res.status() === 200
+  )
+  await authenticatedPage.goto('/dashboard')
+  const response = await responsePromise
+  const data = await response.json()
+  expect(data).toHaveProperty('widgets')
+})
+```
+
+**Rules:**
+- Set up request/response watchers BEFORE triggering the action
+- Assert on request shape (method, URL, body) not just success
+- Use `waitForResponse` to verify API contracts between frontend and backend
+- Never rely on network timing — use explicit waits, not timeouts
+
+## Playwright MCP Integration (Agent Verification)
+
+When the Playwright MCP server is available, agents can use browser tools for automated UI verification during the verification phase. This enables programmatic checks that would otherwise require human review.
+
+**Available MCP tools** (when `plugin:playwright` is configured):
+- `browser_navigate` — Load a URL
+- `browser_snapshot` — Get accessibility snapshot (structured DOM tree)
+- `browser_take_screenshot` — Capture visual screenshot
+- `browser_click` / `browser_fill_form` — Interact with elements
+- `browser_console_messages` — Read console errors/warnings
+- `browser_network_requests` — Inspect network activity
+
+**Verification workflow for agents:**
+1. Start the dev server (if not already running)
+2. Navigate to the implemented feature URL
+3. Take an accessibility snapshot — verify key elements exist
+4. Take a screenshot — save to `.devt/state/` for human review
+5. Check console for errors/warnings — no uncaught exceptions
+6. Verify network requests — expected API calls made
+
+**When to use MCP vs. Playwright tests:**
+- **Playwright tests** (`.spec.js`): Automated, repeatable, run in CI. For regression testing.
+- **MCP verification**: One-shot agent checks during development. For "does the feature look right?"
+
 ## Running Tests
 
 ```bash

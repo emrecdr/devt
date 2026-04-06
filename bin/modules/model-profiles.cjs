@@ -7,6 +7,25 @@
  * Per-agent overrides via .devt/config.json "model_overrides" key.
  */
 
+/**
+ * Maps short aliases to current Anthropic model IDs.
+ * Update this constant when Anthropic releases new model versions.
+ */
+const MODEL_ALIAS_MAP = {
+  opus: "claude-opus-4-6",
+  sonnet: "claude-sonnet-4-6",
+  haiku: "claude-haiku-4-5",
+};
+
+/**
+ * Resolve a model alias to its full Anthropic model ID.
+ * Returns the alias unchanged if it is "inherit" or already a full model ID.
+ */
+function resolveModelId(alias) {
+  if (!alias || alias === "inherit") return alias;
+  return MODEL_ALIAS_MAP[alias] || alias;
+}
+
 const PROFILES = {
   quality: {
     programmer: "opus",
@@ -89,6 +108,17 @@ function getModels(profileName, overrides) {
   return { ...profile };
 }
 
+/**
+ * Resolve all aliases in an agent-model map to full model IDs.
+ */
+function resolveAll(agentModelMap) {
+  const resolved = {};
+  for (const [agent, alias] of Object.entries(agentModelMap)) {
+    resolved[agent] = resolveModelId(alias);
+  }
+  return resolved;
+}
+
 function formatAsTable(agentModelMap) {
   const agents = Object.keys(agentModelMap);
   const agentWidth = Math.max(5, ...agents.map((a) => a.length));
@@ -107,6 +137,10 @@ function run(subcommand, args) {
       const profileName = args[0] || "quality";
       return getModels(profileName);
     }
+    case "resolve": {
+      const profileName = args[0] || "quality";
+      return resolveAll(getModels(profileName));
+    }
     case "list":
       return {
         profiles: Object.keys(PROFILES),
@@ -118,9 +152,9 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown models subcommand: ${subcommand}. Use: get, list, table`,
+        `Unknown models subcommand: ${subcommand}. Use: get, resolve, list, table`,
       );
   }
 }
 
-module.exports = { run, getModels, formatAsTable, PROFILES };
+module.exports = { run, getModels, resolveModelId, resolveAll, formatAsTable, PROFILES, MODEL_ALIAS_MAP };

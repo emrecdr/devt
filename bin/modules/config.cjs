@@ -60,10 +60,60 @@ function findProjectRoot() {
   return _cachedProjectRoot;
 }
 
+/**
+ * Strip JSONC comments (// and /* ... * /) from a string before parsing.
+ * Preserves strings containing // (e.g., URLs) by tracking quote state.
+ */
+function stripJsonComments(text) {
+  let result = "";
+  let i = 0;
+  let inString = false;
+  let escape = false;
+
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (escape) {
+      result += ch;
+      escape = false;
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      result += ch;
+      i++;
+      continue;
+    }
+
+    // Outside string — check for comments
+    if (ch === '"') {
+      inString = true;
+      result += ch;
+      i++;
+    } else if (ch === "/" && i + 1 < text.length && text[i + 1] === "/") {
+      // Single-line comment — skip to end of line
+      while (i < text.length && text[i] !== "\n") i++;
+    } else if (ch === "/" && i + 1 < text.length && text[i + 1] === "*") {
+      // Multi-line comment — skip to closing */
+      i += 2;
+      while (i + 1 < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2; // skip past */
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+  return result;
+}
+
 function readJsonSafe(filePath) {
   try {
     const content = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(content);
+    const stripped = stripJsonComments(content);
+    return JSON.parse(stripped);
   } catch (e) {
     if (e.code === "ENOENT") return {}; // File not found — expected
     if (e instanceof SyntaxError) {
@@ -172,4 +222,4 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, DEFAULTS };
+module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, readJsonSafe, DEFAULTS };

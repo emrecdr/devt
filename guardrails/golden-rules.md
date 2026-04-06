@@ -2,9 +2,11 @@
 
 Universal development rules that apply to every project, every language, every framework. These are non-negotiable. Agents and workflows MUST follow these at all times. Project-specific rules in `.devt/rules/` and `CLAUDE.md` extend these but never override them.
 
+**Severity levels**: `[CRITICAL]` — prevents real bugs, wasted work, or false claims; violating blocks workflow. `[WARNING]` — code quality and maintenance risk; fix when feasible. `[STYLE]` — code cleanliness; nice-to-have, deprioritize under turn pressure.
+
 ---
 
-## Rule 1: Scan Before Implementing
+## Rule 1: Scan Before Implementing `[CRITICAL]`
 
 **What**: Always search the codebase for existing code before writing anything new. Never duplicate what already exists.
 
@@ -16,7 +18,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 2: No Backward Compatibility Code
+## Rule 2: No Backward Compatibility Code `[WARNING]`
 
 **What**: Delete obsolete code immediately when models change. Do not maintain parallel implementations, shims, or compatibility layers.
 
@@ -28,7 +30,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 3: No Commented-Out Code
+## Rule 3: No Commented-Out Code `[STYLE]`
 
 **What**: Code is either active or deleted. There is no in-between state.
 
@@ -40,7 +42,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 4: No TODO Comments
+## Rule 4: No TODO Comments `[STYLE]`
 
 **What**: All code must be complete and functional. No stub functions, empty classes, placeholder return values, or TODO markers.
 
@@ -52,7 +54,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 5: Boy Scout Rule
+## Rule 5: Boy Scout Rule `[WARNING]`
 
 **What**: Leave code better than you found it, within the scope of the current task.
 
@@ -64,7 +66,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 6: Bug Protocol
+## Rule 6: Bug Protocol `[CRITICAL]`
 
 **What**: Found a bug? Fix it now. Do not track it, defer it, label it "pre-existing," or file it for later.
 
@@ -76,7 +78,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 7: Validate Before Implementing
+## Rule 7: Validate Before Implementing `[CRITICAL]`
 
 **What**: Verify that the problem actually exists before fixing it. Check assumptions against the actual codebase.
 
@@ -88,7 +90,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 8: Complexity/Benefit Evaluation
+## Rule 8: Complexity/Benefit Evaluation `[WARNING]`
 
 **What**: Evaluate whether a change is worth the complexity it introduces. Not every improvement improves the codebase.
 
@@ -100,7 +102,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 9: One Obvious Way
+## Rule 9: One Obvious Way `[WARNING]`
 
 **What**: Do not add multiple ways to accomplish the same thing. One canonical pattern per operation.
 
@@ -112,7 +114,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 10: Evidence Before Claims
+## Rule 10: Evidence Before Claims `[CRITICAL]`
 
 **What**: Run verification commands before claiming success. Never report that something works without proof.
 
@@ -124,7 +126,7 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 11: Read Project Rules First
+## Rule 11: Read Project Rules First `[CRITICAL]`
 
 **What**: Always read `.devt/rules/` and `CLAUDE.md` before starting any work in a project. These contain the project's specific conventions, constraints, and quality gate commands.
 

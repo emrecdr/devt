@@ -39,6 +39,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — structured probes for discovering domain unknowns, constraints, and edge cases. Use selectively based on the task's domain complexity.
+
 Read the task description and identify:
 
 1. What is clearly specified (no ambiguity)

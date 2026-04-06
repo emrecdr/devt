@@ -28,6 +28,35 @@ When the task description contains `--autonomous`, the workflow operates in auto
 ```
 --- Phase 3/7: Testing --- tester: DONE (4 tests, all passing). Proceeding...
 ```
+
+### Granular Phase Control Flags
+
+These flags provide fine-grained control over which phases execute. They are parsed from the task description string alongside `--autonomous` and stripped before passing the task to agents.
+
+**`--to <phase>`** — Run phases up to and including the named phase, then stop.
+- Example: `--to test` runs context_init, scan, plan, implement, test — then stops before review.
+- Store `stop_at_phase=<phase>` in workflow state.
+- At each phase transition, check: if the just-completed phase matches `stop_at_phase`, stop the workflow gracefully (set `active=false`, report progress, do NOT proceed to the next phase).
+- Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete.
+
+**`--only <phase>`** — Run only the named phase in isolation.
+- Example: `--only review` runs only the review phase (skipping implement, test, etc.).
+- Store `only_phase=<phase>` in workflow state.
+- Skip all phases except `context_init` (always required for setup) and the named phase.
+- At each phase transition, check: if the current phase is not `context_init` and not `only_phase`, skip it silently.
+- Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete.
+
+**`--chain`** — After completing the workflow, auto-invoke the next logical workflow step.
+- Store `autonomous_chain=next` in workflow state (this field is a string enum, not boolean).
+- Enables cross-workflow chaining (e.g., discuss -> plan -> implement) without manual `/devt:next` invocations.
+- The next workflow step is determined by `/devt:next` routing logic.
+
+**Detection and stripping:** Parse all flags from the task description string using the same pattern as `--autonomous`:
+1. Check for `--to <phase>` — extract the phase name, validate against valid phases, strip from task description.
+2. Check for `--only <phase>` — extract the phase name, validate against valid phases, strip from task description.
+3. Check for `--chain` — strip from task description.
+4. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
+5. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
 </autonomous_mode>
 
 <prerequisites>
@@ -156,7 +185,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
 
-Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous` flag if present).
+If `--to <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update stop_at_phase=<phase>`
+
+If `--only <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update only_phase=<phase>`
+
+If `--chain` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=next`
+
+Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, and `--chain` flags if present).
 
 Parse the init output JSON:
 

@@ -18,6 +18,7 @@ Supporting layers:
 - **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides.
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`).
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
+- **References** (`references/`) — Technique libraries for agent workflows. Static guidance documents read by workflows during specify/clarify phases (questioning guide, domain probes).
 - **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management.
 
 ### CLI Tools (`bin/devt-tools.cjs`)
@@ -33,7 +34,7 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 - **`weekly-report.cjs`** — Git log parsing and markdown report rendering. Contributor matching via `.devt/config.json` config.
 - **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone).
 - **`health.cjs`** — Project health validation with 21 checks, structured JSON output, `--repair` flag for safe auto-fixes.
-- **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection, safe JSON parsing, shell argument validation. Wired into `init.cjs` to sanitize task descriptions entering the system.
+- **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection (with `strict` mode: Shannon entropy analysis, URL/HTML entity decoding, zero-width character detection), safe JSON parsing, shell argument validation, `sanitizeForDisplay`. Wired into `init.cjs` to sanitize task descriptions entering the system.
 
 ### State Flow
 
@@ -72,9 +73,13 @@ node bin/devt-tools.cjs state read
 node bin/devt-tools.cjs state update key=value
 node bin/devt-tools.cjs state reset
 node bin/devt-tools.cjs state validate          # Check state/artifact consistency
+node bin/devt-tools.cjs state sync              # Reconstruct workflow.yaml from artifacts
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>
+node bin/devt-tools.cjs models resolve <profile>  # Get with aliases resolved to model IDs
+node bin/devt-tools.cjs models list              # List available profiles
+node bin/devt-tools.cjs models table <profile>   # Formatted table output
 node bin/devt-tools.cjs setup --template <name> [--mode create|update|reinit] [--detect]
 node bin/devt-tools.cjs semantic sync
 node bin/devt-tools.cjs semantic query <search terms>

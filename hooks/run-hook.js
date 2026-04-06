@@ -32,6 +32,7 @@ const HOOK_PROFILES = {
   "subagent-status.sh": ["standard", "full"],
   "context-monitor.sh": ["full"],
   "prompt-guard.sh": ["full"],
+  "read-before-edit-guard.sh": ["standard", "full"],
 };
 
 function getProfile() {

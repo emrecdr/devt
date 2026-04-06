@@ -69,6 +69,17 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-guard.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" read-before-edit-guard.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

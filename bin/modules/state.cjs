@@ -92,18 +92,38 @@ const KNOWN_STATE_KEYS = {
   status: "string",
   autonomous: "boolean",
   autonomous_chain: "string",
+  stop_at_phase: "string",
+  only_phase: "string",
   verdict: "string",
   repair: "string",
   verify_iteration: "number",
 };
 
-const VALID_PHASES = new Set([
+const PHASE_ORDER = [
   "context_init", "flow_deviation", "assess", "risk_warning",
-  "scan", "regression_baseline", "arch_health", "arch_health_scan", "plan",
-  "architect", "implement", "test", "simplify", "review", "verify",
-  "docs", "retro", "curate", "autoskill", "review_deferred",
-  "identify_scope", "debug", "complete", "finalize", null,
-]);
+  "scan", "regression_baseline", "arch_health", "arch_health_scan",
+  "plan", "architect", "implement", "test", "simplify", "review",
+  "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
+  "identify_scope", "debug", "complete", "finalize",
+];
+
+const VALID_PHASES = new Set([...PHASE_ORDER, null]);
+
+// Canonical phase→artifact mapping. Used by validateConsistency (forward) and syncState (inverse).
+const PHASE_ARTIFACT_MAP = {
+  implement: "impl-summary.md",
+  test: "test-summary.md",
+  review: "review.md",
+  verify: "verification.md",
+  plan: "plan.md",
+  debug: "debug-summary.md",
+  retro: "lessons.yaml",
+  scan: "scan-results.md",
+  arch_health: "arch-health-scan.md",
+  architect: "arch-review.md",
+  docs: "docs-summary.md",
+  curate: "curation-summary.md",
+};
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
@@ -161,32 +181,11 @@ function validateConsistency() {
   const state = readState();
   const stateDir = getStateDir();
 
-  // Phase→artifact mapping
-  const PHASE_ARTIFACTS = {
-    implement: "impl-summary.md",
-    test: "test-summary.md",
-    review: "review.md",
-    verify: "verification.md",
-  };
-
-  // Conditional mappings based on workflow_type
-  if (state.workflow_type === "plan") {
-    PHASE_ARTIFACTS.plan = "plan.md";
-  }
-  if (state.workflow_type === "debug") {
-    PHASE_ARTIFACTS.debug = "debug-summary.md";
-  }
-  // Retro always maps to lessons.yaml
-  PHASE_ARTIFACTS.retro = "lessons.yaml";
-
-  // Ordered phases to determine which have been "passed through"
-  const PHASE_ORDER = [
-    "context_init", "flow_deviation", "assess", "risk_warning",
-    "scan", "regression_baseline", "arch_health", "arch_health_scan",
-    "plan", "architect", "implement", "test", "simplify", "review",
-    "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
-    "identify_scope", "debug", "complete", "finalize",
-  ];
+  // Build phase→artifact map for this workflow type from the canonical map
+  const PHASE_ARTIFACTS = { ...PHASE_ARTIFACT_MAP };
+  // Only include plan/debug artifacts when the workflow_type matches (reduces false positives)
+  if (state.workflow_type !== "plan") delete PHASE_ARTIFACTS.plan;
+  if (state.workflow_type !== "debug") delete PHASE_ARTIFACTS.debug;
 
   const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
   if (currentPhaseIndex === -1) {
@@ -347,6 +346,84 @@ function checkWorkflowLock(preReadState) {
   return { locked: false };
 }
 
+/**
+ * Reconstruct workflow.yaml from existing artifacts in .devt/state/.
+ * Recovery mechanism for corrupted or missing workflow state.
+ * Infers the latest completed phase from artifact presence.
+ */
+function syncState() {
+  // Build artifact→phase map from canonical source (inverse of PHASE_ARTIFACT_MAP)
+  const ARTIFACT_TO_PHASE = {};
+  for (const [phase, artifact] of Object.entries(PHASE_ARTIFACT_MAP)) {
+    ARTIFACT_TO_PHASE[artifact] = phase;
+  }
+
+  // ensureStateDir handles creation if missing; lock prevents TOCTOU race with concurrent writers
+  const stateDir = getStateDir();
+  ensureStateDir();
+  const lockFile = acquireLock();
+  try {
+    // Read existing workflow.yaml if present (preserve fields we can't infer)
+    const existing = readState();
+
+    // Find all artifacts present on disk
+    const foundArtifacts = [];
+    const foundSet = new Set();
+    let latestPhaseIndex = -1;
+
+    for (const [artifact, phase] of Object.entries(ARTIFACT_TO_PHASE)) {
+      if (fs.existsSync(path.join(stateDir, artifact))) {
+        foundArtifacts.push({ artifact, phase });
+        foundSet.add(artifact);
+        const idx = PHASE_ORDER.indexOf(phase);
+        if (idx > latestPhaseIndex) {
+          latestPhaseIndex = idx;
+        }
+      }
+    }
+
+    if (foundArtifacts.length === 0) {
+      return { ok: true, synced: false, message: "No artifacts found — state is empty", state: existing };
+    }
+
+    // Infer workflow_type from artifacts — reuse foundSet to avoid redundant existsSync
+    let inferredType = existing.workflow_type || null;
+    if (!inferredType) {
+      if (foundSet.has("debug-summary.md")) inferredType = "debug";
+      else if (fs.existsSync(path.join(stateDir, "spec.md"))) inferredType = "specify";
+      else if (fs.existsSync(path.join(stateDir, "research.md")) && !foundSet.has("impl-summary.md")) inferredType = "research";
+      else if (foundSet.has("impl-summary.md")) inferredType = "dev";
+    }
+
+    const inferredPhase = PHASE_ORDER[latestPhaseIndex] || existing.phase || null;
+
+    // Build reconstructed state — preserve existing fields, override inferred ones
+    const reconstructed = {
+      ...existing,
+      active: existing.active !== undefined ? existing.active : false,
+      phase: inferredPhase,
+      iteration: existing.iteration || 0,
+    };
+    if (inferredType) reconstructed.workflow_type = inferredType;
+
+    // Atomic write
+    const tmpFile = getWorkflowPath() + ".tmp";
+    fs.writeFileSync(tmpFile, serializeSimpleYaml(reconstructed));
+    fs.renameSync(tmpFile, getWorkflowPath());
+
+    return {
+      ok: true,
+      synced: true,
+      inferred_phase: inferredPhase,
+      inferred_type: inferredType,
+      artifacts_found: foundArtifacts.map((a) => a.artifact),
+      state: reconstructed,
+    };
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
 function run(subcommand, args) {
   switch (subcommand) {
     case "read":
@@ -357,9 +434,11 @@ function run(subcommand, args) {
       return resetState();
     case "validate":
       return validateConsistency();
+    case "sync":
+      return syncState();
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate`,
+        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate, sync`,
       );
   }
 }
@@ -369,10 +448,13 @@ module.exports = {
   readState,
   updateState,
   resetState,
+  syncState,
   checkWorkflowLock,
   validateConsistency,
   getStateDir,
   ensureStateDir,
+  PHASE_ORDER,
+  PHASE_ARTIFACT_MAP,
   VALID_PHASES,
   VALID_WORKFLOW_TYPES,
   VALID_TIERS,

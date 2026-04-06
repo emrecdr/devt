@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: Build, fix, or improve anything — auto-detects complexity and runs the right pipeline
-argument-hint: "<task description> [--autonomous]"
+argument-hint: "<task description> [--autonomous] [--to <phase>] [--only <phase>] [--chain]"
 ---
 
 <tool_restrictions>
@@ -24,4 +24,11 @@ If the argument contains `--autonomous`, enable autonomous mode:
 - Auto-proceed when quality gates pass
 - Still pause for: review score < 50, critical errors, max iteration limits, architectural decisions
 - Display status reports at each phase for visibility
+
+Additional autonomous mode flags:
+- `--to <phase>` — Run phases up to and including the named phase, then stop (e.g., `--to test` stops after testing)
+- `--only <phase>` — Run only the named phase in isolation (e.g., `--only review` runs only review)
+- `--chain` — After completing, auto-invoke the next logical workflow step (enables discuss->plan->implement chaining via autonomous_chain in state)
+
+Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete
 </process>

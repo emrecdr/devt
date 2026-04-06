@@ -115,7 +115,8 @@ ${CLAUDE_PLUGIN_ROOT}/templates/research-template.md
 2. **Codebase-first** — existing patterns trump theoretical best practices
 3. **Training data is hypothesis** — verify every assumption against actual code
 4. **Confidence tagging** — HIGH (verified in codebase), MEDIUM (consistent with patterns), LOW (inferred)
-5. **Pitfalls are gold** — one documented pitfall prevents hours of debugging
+5. **Source provenance** — every claim must cite its source: `[codebase: file:line]` for codebase findings, `[docs: URL or name]` for external documentation, `[inference]` for training-data knowledge. Claims without provenance tags are unverifiable
+6. **Pitfalls are gold** — one documented pitfall prevents hours of debugging
    </research_principles>
 
 <red_flags>
@@ -146,14 +147,34 @@ Never let a turn limit expire silently. Partial output > no output.
 <output_format>
 Write .devt/state/research.md with these sections:
 
-- **Summary**: 2-3 sentences — the recommended approach
-- **Existing Patterns**: what the codebase already does (with file:line refs)
-- **Recommended Approach**: prescriptive — "Do X because Y"
-- **Alternatives Considered**: comparison table (if multiple viable approaches)
-- **Don't Hand-Roll**: existing utilities/libraries to reuse
-- **Pitfalls**: common mistakes to avoid
-- **Open Questions**: unresolved items needing user input
-- **Confidence**: overall HIGH/MEDIUM/LOW with reasoning
+Every claim must include a provenance tag (see Principle 5 above for tag formats).
+
+```markdown
+# Research Report
+
+## Summary
+2-3 sentences — the recommended approach
+
+## Existing Patterns
+What the codebase already does (with file:line refs and provenance tags)
+
+## Recommended Approach
+Prescriptive — "Do X because Y"
+
+## Alternatives Considered
+| Approach | Pros | Cons | Complexity | Recommendation |
+
+## Don't Hand-Roll
+Existing utilities/libraries to reuse
+
+## Pitfalls
+Common mistakes to avoid
+
+## Open Questions
+Unresolved items needing user input
+
+## Confidence
+Overall HIGH/MEDIUM/LOW with reasoning
 
 Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
@@ -161,4 +182,6 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - Agent: {agent_type}
 - Model: {model_used}
 - Timestamp: {ISO 8601}
+```
+
 </output_format>
