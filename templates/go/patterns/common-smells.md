@@ -135,3 +135,54 @@ Anti-patterns to detect and fix during code review and development.
 **Why it's bad**: Violates layer separation. SQL changes require touching business logic.
 
 **Fix**: Put all data access in repository structs. Services call repository methods.
+
+## time.After Leak in Select
+
+**Smell**: `time.After()` inside a `for/select` loop.
+
+**Why it's bad**: Each iteration creates a new timer that cannot be garbage collected until it fires. In tight loops, this leaks memory rapidly.
+
+**How to detect**: `grep -rn "time.After" --include="*.go" . | grep -v "_test.go"`
+
+```go
+// WRONG — leaks a timer on every iteration
+for {
+    select {
+    case msg := <-ch:
+        process(msg)
+    case <-time.After(5 * time.Second):
+        return
+    }
+}
+
+// CORRECT — reuse timer
+timer := time.NewTimer(5 * time.Second)
+defer timer.Stop()
+for {
+    timer.Reset(5 * time.Second)
+    select {
+    case msg := <-ch:
+        process(msg)
+    case <-timer.C:
+        return
+    }
+}
+```
+
+## Nil Slice JSON Marshaling
+
+**Smell**: Returning `var results []T` from API handlers.
+
+**Why it's bad**: `nil` slice marshals to JSON `null`, not `[]`. Frontend code expecting an array gets null, causing crashes.
+
+**How to detect**: Check API handlers that return slices — ensure empty results use `[]T{}` not `var []T`.
+
+```go
+// WRONG — JSON response: {"users": null}
+var users []User
+return json.NewEncoder(w).Encode(users)
+
+// CORRECT — JSON response: {"users": []}
+users := []User{}
+return json.NewEncoder(w).Encode(users)
+```

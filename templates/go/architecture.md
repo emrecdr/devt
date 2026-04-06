@@ -84,3 +84,68 @@ pkg/
 - Environment variables for runtime config
 - Struct-based config with validation at startup
 - Fail fast on invalid configuration — don't start with bad config
+
+### Graceful Shutdown
+
+Every Go service needs graceful shutdown for clean container deployments:
+
+```go
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
+
+    srv := &http.Server{Addr: ":8080", Handler: router}
+
+    go func() {
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            slog.Error("server error", "error", err)
+        }
+    }()
+
+    <-ctx.Done()
+    slog.Info("shutting down")
+
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    srv.Shutdown(shutdownCtx)
+}
+```
+
+Without this, SIGTERM kills in-flight requests during Kubernetes rolling deploys.
+
+### Health Endpoints
+
+```go
+mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+    w.WriteHeader(http.StatusOK)
+})
+mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+    if err := db.PingContext(r.Context()); err != nil {
+        http.Error(w, "not ready", http.StatusServiceUnavailable)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+})
+```
+
+- `/healthz` — liveness: is the process alive? Always return 200.
+- `/readyz` — readiness: can it serve traffic? Check dependencies (DB, cache).
+
+### HTTP Middleware Pattern
+
+Standard middleware signature for composability:
+
+```go
+func RequestID(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        id := uuid.NewString()
+        ctx := context.WithValue(r.Context(), requestIDKey, id)
+        w.Header().Set("X-Request-ID", id)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+// Chain: handler := RequestID(Logging(Recovery(router)))
+```
+
+Common middleware: request ID, structured logging, panic recovery, auth, CORS, timeout.

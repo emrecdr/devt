@@ -59,6 +59,10 @@ Language-specific review priorities. The code-reviewer reads this alongside `cod
 - [ ] **Package naming**: short, lowercase, no underscores
 - [ ] **Struct tags**: JSON/DB tags present and correct on exported structs
 - [ ] **`fmt.Println`/`log.Println`** in production code — use structured logger
+- [ ] **`log/slog`**: use `slog.Info`/`slog.Error` with key-value pairs, not `log.Println` or `fmt.Printf`
+- [ ] **Pointer vs value receivers**: consistent within type; pointer if any method mutates
+- [ ] **Nil slice in JSON**: return `[]T{}` not `var []T` for empty collections in API responses
+- [ ] **`time.After` in select loop**: use `time.NewTimer` with `Reset()` instead
 
 ## MEDIUM — Testing Gaps
 

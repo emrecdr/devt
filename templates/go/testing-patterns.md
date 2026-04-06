@@ -74,3 +74,48 @@ func TestParseToken(t *testing.T) {
 - Standard library behavior
 - Generated code (protobuf, wire, etc.)
 - Trivial struct constructors with no logic
+
+### Fuzz Testing
+
+Native fuzzing finds bugs table-driven tests miss — especially in parsers, validators, and serialization.
+
+```go
+func FuzzParseToken(f *testing.F) {
+    // Seed corpus
+    f.Add("valid.token.here")
+    f.Add("")
+    f.Add("malformed")
+
+    f.Fuzz(func(t *testing.T, input string) {
+        token, err := ParseToken(input)
+        if err != nil {
+            return // invalid input is expected
+        }
+        // Round-trip: parse then serialize should be stable
+        serialized := token.String()
+        reparsed, err := ParseToken(serialized)
+        require.NoError(t, err)
+        assert.Equal(t, token, reparsed)
+    })
+}
+```
+
+Run: `go test -fuzz=FuzzParseToken -fuzztime=30s`
+
+**When to fuzz:** Any function that processes external input (HTTP bodies, file formats, query parameters, config parsing).
+
+### Benchmark Tests
+
+```go
+func BenchmarkParseToken(b *testing.B) {
+    input := "valid.token.here"
+    b.ReportAllocs()
+    for b.Loop() {
+        ParseToken(input)
+    }
+}
+```
+
+Run: `go test -bench=BenchmarkParseToken -benchmem`
+
+Use benchmarks when optimizing hot paths. Compare before/after with `benchstat`.

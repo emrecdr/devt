@@ -67,3 +67,42 @@
 - Early returns to reduce nesting
 - Limit line length to ~100 characters for readability
 - Group related declarations with `const` / `var` blocks
+
+### Structured Logging (slog)
+
+```go
+// CORRECT — use log/slog (stdlib since Go 1.21)
+slog.Info("user created", "user_id", user.ID, "email", user.Email)
+slog.Error("failed to create user", "error", err, "email", email)
+
+// WRONG — unstructured logging
+log.Printf("user created: %s", user.ID)
+fmt.Println("error:", err)
+```
+
+- `log/slog` is the standard structured logger — use it before third-party loggers (zap, zerolog)
+- Key-value pairs, not format strings: `slog.Info("msg", "key", value)`
+- Pass logger via context or struct field, not package-level global
+- Use `slog.With("request_id", reqID)` for request-scoped fields
+
+### Modern Standard Library (Go 1.22+)
+
+- `net/http` method routing: `mux.HandleFunc("GET /api/users/{id}", handler)` — no need for chi/gorilla for basic routing
+- `slices` package: `slices.Contains`, `slices.SortFunc`, `slices.Compact` — don't hand-roll
+- `maps` package: `maps.Keys`, `maps.Clone` — don't iterate manually
+- Range-over-func (Go 1.23): use `iter.Seq` / `iter.Seq2` for custom iterators instead of channels or callbacks
+
+### Receiver Types
+
+```go
+// Pointer receiver — mutates state, large struct, or consistency within type
+func (s *Service) UpdateUser(ctx context.Context, u User) error { ... }
+
+// Value receiver — no mutation, small struct (< 3 fields), read-only
+func (p Point) Distance(other Point) float64 { ... }
+```
+
+Rules:
+- If ANY method on a type needs a pointer receiver, ALL methods should use pointer receivers (consistency)
+- Pointer receivers for structs with mutex fields (copying a mutex is a bug)
+- Value receivers for small immutable types (Point, Color, Money)
