@@ -100,6 +100,20 @@ function getMergedConfig() {
   const globalConfig = readJsonSafe(globalPath);
   const projectConfig = readJsonSafe(projectPath);
 
+  // Warn about unknown top-level keys in project config (catches typos like "agent_skils")
+  const knownKeys = new Set(Object.keys(DEFAULTS));
+  // Also allow common extension keys that aren't in DEFAULTS
+  knownKeys.add("model_overrides");
+  knownKeys.add("agent_skills");
+  const unknownKeys = Object.keys(projectConfig).filter((k) => !knownKeys.has(k));
+  if (unknownKeys.length > 0) {
+    process.stderr.write(
+      JSON.stringify({
+        warning: `Unknown config key(s) in .devt/config.json: ${unknownKeys.join(", ")} — these will be ignored. Valid keys: ${[...knownKeys].sort().join(", ")}`,
+      }) + "\n",
+    );
+  }
+
   return deepMerge(deepMerge(DEFAULTS, globalConfig), projectConfig);
 }
 

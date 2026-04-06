@@ -212,8 +212,8 @@ function validateConsistency() {
 }
 
 function sleepSync(ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { /* spin */ }
+  // Atomics.wait blocks the thread without CPU spin (Node 16+)
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function acquireLock() {

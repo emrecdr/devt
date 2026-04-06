@@ -61,28 +61,56 @@ function safeJsonParse(text, label) {
 }
 
 const INJECTION_PATTERNS = [
+  // Direct instruction override attempts
   /ignore\s+(all\s+)?previous\s+instructions/i,
   /ignore\s+(all\s+)?above\s+instructions/i,
   /disregard\s+(all\s+)?previous/i,
+  /forget\s+(all\s+)?(your\s+)?instructions/i,
   /override\s+(system|previous)\s+(prompt|instructions)/i,
+
+  // Role/identity manipulation
   /you\s+are\s+now\s+(?:a|an|the)\s+/i,
+  /act\s+as\s+(?:a|an|the)\s+(?!workflow|agent|tier)/i,
   /pretend\s+(?:you(?:'re| are)\s+|to\s+be\s+)/i,
   /from\s+now\s+on,?\s+you\s+(?:are|will|should|must)/i,
+
+  // System prompt extraction
+  /(?:print|output|reveal|show|display|repeat)\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions)/i,
+  /what\s+(?:are|is)\s+your\s+(?:system\s+)?(?:prompt|instructions)/i,
+
+  // Hidden instruction markers (XML/HTML tags that mimic system messages)
   /<\/?(?:system|assistant|human)>/i,
   /\[SYSTEM\]/i,
   /\[INST\]/i,
+  /<<\s*SYS\s*>>/i,
+
+  // Exfiltration attempts
+  /(?:send|post|fetch|curl|wget)\s+(?:to|from)\s+https?:\/\//i,
+  /(?:base64|btoa|encode)\s+(?:and\s+)?(?:send|exfiltrate|output)/i,
+
+  // Tool manipulation
+  /(?:run|execute|call|invoke)\s+(?:the\s+)?(?:bash|shell|exec|spawn)\s+(?:tool|command)/i,
 ];
 
 /**
  * Scan text for prompt injection patterns.
  * Returns { clean: boolean, findings: string[] }
  */
-function scanForInjection(text) {
+function scanForInjection(text, opts) {
   if (!text || typeof text !== "string") return { clean: true, findings: [] };
   const findings = [];
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(text)) {
       findings.push(`Matched: ${pattern.source}`);
+    }
+  }
+  if (opts && opts.strict) {
+    if (/[\u200B-\u200F\u2028-\u202F\uFEFF\u00AD]/.test(text)) {
+      findings.push("Contains suspicious zero-width or invisible Unicode characters");
+    }
+    const normalizedLength = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").length;
+    if (normalizedLength > 50000) {
+      findings.push(`Suspicious text length: ${normalizedLength} chars (potential prompt stuffing)`);
     }
   }
   return { clean: findings.length === 0, findings };
@@ -100,6 +128,19 @@ function sanitizeForPrompt(text) {
   // Neutralize system boundary tags
   s = s.replace(/<(\/?)(?:system|assistant|human)>/gi, "[$1system-text]");
   s = s.replace(/\[(SYSTEM|INST)\]/gi, "[$1-TEXT]");
+  s = s.replace(/<<\s*SYS\s*>>/gi, "«SYS-TEXT»");
+  return s;
+}
+
+/**
+ * Sanitize text for display back to the user.
+ * Removes protocol-like leak markers that should never surface in output.
+ */
+function sanitizeForDisplay(text) {
+  if (!text || typeof text !== "string") return text;
+  let s = sanitizeForPrompt(text);
+  s = s.replace(/^\s*(?:assistant|user|system)\s+to=[^:\s]+:[^\n]+$/gim, "");
+  s = s.replace(/^\s*<\|(?:assistant|user|system)[^|]*\|>\s*$/gim, "");
   return s;
 }
 
@@ -124,6 +165,7 @@ module.exports = {
   safeJsonParse,
   scanForInjection,
   sanitizeForPrompt,
+  sanitizeForDisplay,
   validateShellArg,
   INJECTION_PATTERNS,
 };
