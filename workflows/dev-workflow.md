@@ -59,8 +59,7 @@ These flags provide fine-grained control over which phases execute. They are par
 **`--dry-run`** — Preview the workflow pipeline without executing any agents.
 - Runs `context_init` and `assess` (complexity assessment) normally.
 - After assessment: prints the planned pipeline steps, agent assignments, and model tiers.
-- STOPS without executing — no agents dispatched, no state written beyond `context_init`.
-- Does NOT write `active=true` — the workflow is not considered started.
+- STOPS without executing — no agents dispatched. Resets state on exit so the workflow is not left locked.
 - Useful for understanding what devt will do before committing to a full run.
 
 **Detection and stripping:** Parse all flags from the task description string using the same pattern as `--autonomous`:
@@ -207,7 +206,7 @@ If `--chain` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-too
 
 If `--tdd` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update tdd_mode=true`
 
-Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, `--chain`, and `--tdd` flags if present).
+Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, `--chain`, `--tdd`, and `--dry-run` flags if present).
 
 Parse the init output JSON:
 
@@ -304,7 +303,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=assess status
 
 Report the tier and reasoning to the user before proceeding. The user can override the tier.
 
-**Dry-run exit**: If `--dry-run` was detected, display the planned pipeline and STOP:
+**Dry-run exit**: If `--dry-run` was detected, display the planned pipeline, reset state, and STOP:
 
 ```
 --- DRY RUN ---
@@ -317,7 +316,13 @@ Estimated phases: {count}
 No agents dispatched. Remove --dry-run to execute.
 ```
 
-Do NOT write `active=true` to state. Do NOT proceed to any subsequent step. The dry run is complete.
+Reset the workflow state so it is not left in a locked state:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset
+```
+
+Do NOT proceed to any subsequent step. The dry run is complete.
 </step>
 
 ---
@@ -659,7 +664,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect sta
 
 **TDD Mode Check**: If `tdd_mode=true` in workflow state, SKIP this step for now — proceed directly to Step 5 (Testing) first. The tester will write failing tests based on the spec/task. After Step 5 completes, return here to implement code that makes the tests pass.
 
-**Acceptance Criteria Gate** (STANDARD + COMPLEX only):
+**Acceptance Criteria Gate**:
 
 _Skip this gate if tier is TRIVIAL or SIMPLE._
 
@@ -706,12 +711,14 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <task>{task_description}</task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
-    <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse. If this file doesn't exist, the task was assessed as SIMPLE and no scan was performed.</scan_results>
-    <arch_review>COMPLEX only: Read .devt/state/arch-review.md (if it exists). Skip for SIMPLE/STANDARD tiers.</arch_review>
     <spec>Read .devt/state/spec.md (if it exists — from /devt:specify). This is the primary requirements source with user stories, API design, and detailed acceptance criteria.</spec>
+    <!-- STANDARD+: include scan_results and plan -->
+    <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
-    <research>COMPLEX only: Read .devt/state/research.md (if it exists — from /devt:research). Skip for SIMPLE/STANDARD tiers.</research>
-    <decisions>STANDARD+: Read .devt/state/decisions.md (if it exists — from /devt:clarify). Skip for SIMPLE tier.</decisions>
+    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
+    <!-- COMPLEX only: include arch_review and research -->
+    <arch_review>Read .devt/state/arch-review.md (if it exists)</arch_review>
+    <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>
     <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
     <scope_requirements>
       Extract every discrete requirement from the best available source (spec.md, plan.md, or task description) and list them numbered:

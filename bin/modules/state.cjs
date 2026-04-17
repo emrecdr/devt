@@ -128,8 +128,11 @@ const PHASE_ARTIFACT_MAP = {
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
-// Input artifacts created by upstream workflows (specify, plan, clarify, pause) — always preserved by prune
+// Always preserved by prune — may originate from upstream workflows
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
+
+// Always preserved by prune — cross-cutting artifacts not tied to a single phase
+const PERSISTENT_ARTIFACTS = ["scratchpad.md", "baseline-gates.md", "debug-context.md", "debug-investigation.md"];
 
 const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
@@ -439,14 +442,15 @@ function pruneState(dryRun) {
     return { ok: true, pruned: [], message: "State directory does not exist" };
   }
 
-  const lockFile = acquireLock();
+  const lockFile = dryRun ? null : acquireLock();
   try {
     const state = readState();
     const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
 
-    // Build set of expected files: workflow.yaml + artifacts for completed phases + lock
-    const expectedFiles = new Set(["workflow.yaml", ".lock"]);
+    // Build set of expected files: workflow.yaml + artifacts for completed/current phases
+    const expectedFiles = new Set(["workflow.yaml"]);
     for (const f of INPUT_ARTIFACTS) expectedFiles.add(f);
+    for (const f of PERSISTENT_ARTIFACTS) expectedFiles.add(f);
 
     // Keep artifacts for phases that have been completed (phase index <= current)
     for (const [phase, artifact] of Object.entries(PHASE_ARTIFACT_MAP)) {
@@ -455,13 +459,12 @@ function pruneState(dryRun) {
         expectedFiles.add(artifact);
       }
     }
-    expectedFiles.add("scratchpad.md");
-    expectedFiles.add("baseline-gates.md");
 
     // Find orphans
     const pruned = [];
     const entries = fs.readdirSync(stateDir);
     for (const entry of entries) {
+      if (entry === ".lock") continue;
       if (!expectedFiles.has(entry)) {
         const fullPath = path.join(stateDir, entry);
         if (dryRun) {
@@ -477,9 +480,9 @@ function pruneState(dryRun) {
       }
     }
 
-    return { ok: true, dry_run: dryRun, pruned, kept: [...expectedFiles].filter(f => f !== ".lock") };
+    return { ok: true, dry_run: dryRun, pruned, kept: [...expectedFiles] };
   } finally {
-    releaseLock(lockFile);
+    if (lockFile) releaseLock(lockFile);
   }
 }
 
@@ -521,4 +524,5 @@ module.exports = {
   VALID_WORKFLOW_TYPES,
   VALID_TIERS,
   INPUT_ARTIFACTS,
+  PERSISTENT_ARTIFACTS,
 };
