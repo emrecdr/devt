@@ -56,13 +56,21 @@ These flags provide fine-grained control over which phases execute. They are par
 - Store `tdd_mode=true` in workflow state.
 - Auto-injects `tdd-patterns` skill into both programmer and tester agents (regardless of `agent_skills` config).
 
+**`--dry-run`** — Preview the workflow pipeline without executing any agents.
+- Runs `context_init` and `assess` (complexity assessment) normally.
+- After assessment: prints the planned pipeline steps, agent assignments, and model tiers.
+- STOPS without executing — no agents dispatched, no state written beyond `context_init`.
+- Does NOT write `active=true` — the workflow is not considered started.
+- Useful for understanding what devt will do before committing to a full run.
+
 **Detection and stripping:** Parse all flags from the task description string using the same pattern as `--autonomous`:
 1. Check for `--to <phase>` — extract the phase name, validate against valid phases, strip from task description.
 2. Check for `--only <phase>` — extract the phase name, validate against valid phases, strip from task description.
 3. Check for `--chain` — strip from task description.
 4. Check for `--tdd` — strip from task description.
-5. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
-6. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
+5. Check for `--dry-run` — strip from task description.
+6. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
+7. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
 </autonomous_mode>
 
 <prerequisites>
@@ -295,6 +303,21 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=assess status
 ```
 
 Report the tier and reasoning to the user before proceeding. The user can override the tier.
+
+**Dry-run exit**: If `--dry-run` was detected, display the planned pipeline and STOP:
+
+```
+--- DRY RUN ---
+Task: {task_description}
+Tier: {TIER}
+Pipeline: {list of steps for this tier from the Tier→Steps table}
+Agents: {list of agents that would be dispatched, with their model assignments from init JSON}
+Estimated phases: {count}
+---
+No agents dispatched. Remove --dry-run to execute.
+```
+
+Do NOT write `active=true` to state. Do NOT proceed to any subsequent step. The dry run is complete.
 </step>
 
 ---
@@ -636,11 +659,45 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect sta
 
 **TDD Mode Check**: If `tdd_mode=true` in workflow state, SKIP this step for now — proceed directly to Step 5 (Testing) first. The tester will write failing tests based on the spec/task. After Step 5 completes, return here to implement code that makes the tests pass.
 
+**Acceptance Criteria Gate** (STANDARD + COMPLEX only):
+
+_Skip this gate if tier is TRIVIAL or SIMPLE._
+
+Before dispatching the programmer, verify that acceptance criteria exist:
+
+1. Check if `.devt/state/spec.md` exists AND contains a section matching `## Acceptance Criteria` or `## Success Criteria`
+2. If YES: proceed — spec provides clear acceptance criteria for the verifier.
+3. If NO: present options via AskUserQuestion (even in autonomous mode — scope clarity is not skippable):
+
+```yaml
+question: "No acceptance criteria found. The verifier needs criteria to validate against."
+header: "Acceptance Criteria Missing"
+multiSelect: false
+options:
+  - label: "Define criteria now (Recommended)"
+    description: "I'll create a brief spec.md with acceptance criteria before coding starts"
+  - label: "Derive from task description"
+    description: "Auto-extract criteria from the task text — less precise but faster"
+  - label: "Skip verification"
+    description: "Proceed without criteria — verification step will be skipped"
+```
+
+- If **"Define criteria now"**: Pause. Create `.devt/state/spec.md` with a template containing acceptance criteria derived from the task. Present to user for review/edit. Resume after user confirms.
+- If **"Derive from task description"**: Extract 3-5 verifiable criteria from the task description. Write to `.devt/state/spec.md`. Note in state: `acceptance_criteria_source=derived`.
+- If **"Skip verification"**: Store `skipped_phases` to include `verify`. Note: this means the verifier will not run.
+
 Initialize iteration tracking:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=IN_PROGRESS iteration=1
 ```
+
+**Context loading by tier**: To manage context window usage, only load state artifacts relevant to the current tier:
+- **SIMPLE**: `spec.md` (if exists), `review.md` (if fix iteration). Skip `scan-results.md`, `arch-review.md`, `research.md`, `decisions.md`.
+- **STANDARD**: Add `scan-results.md`, `plan.md`, `decisions.md`. Skip `arch-review.md`, `research.md`.
+- **COMPLEX**: Load all artifacts (current behavior).
+
+When building the programmer's prompt, omit the `<arch_review>` and `<research>` XML elements entirely for SIMPLE/STANDARD — don't include them with "skip" instructions, as that wastes tokens on instructions about what NOT to read.
 
 Dispatch the programmer agent:
 
@@ -650,11 +707,11 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse. If this file doesn't exist, the task was assessed as SIMPLE and no scan was performed.</scan_results>
-    <arch_review>Read .devt/state/arch-review.md (if it exists)</arch_review>
+    <arch_review>COMPLEX only: Read .devt/state/arch-review.md (if it exists). Skip for SIMPLE/STANDARD tiers.</arch_review>
     <spec>Read .devt/state/spec.md (if it exists — from /devt:specify). This is the primary requirements source with user stories, API design, and detailed acceptance criteria.</spec>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
-    <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>
-    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
+    <research>COMPLEX only: Read .devt/state/research.md (if it exists — from /devt:research). Skip for SIMPLE/STANDARD tiers.</research>
+    <decisions>STANDARD+: Read .devt/state/decisions.md (if it exists — from /devt:clarify). Skip for SIMPLE tier.</decisions>
     <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
     <scope_requirements>
       Extract every discrete requirement from the best available source (spec.md, plan.md, or task description) and list them numbered:
