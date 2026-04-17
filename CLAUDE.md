@@ -74,6 +74,7 @@ node bin/devt-tools.cjs state update key=value
 node bin/devt-tools.cjs state reset
 node bin/devt-tools.cjs state validate          # Check state/artifact consistency
 node bin/devt-tools.cjs state sync              # Reconstruct workflow.yaml from artifacts
+node bin/devt-tools.cjs state prune [--dry-run]  # Remove orphaned artifacts
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>

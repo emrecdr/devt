@@ -425,6 +425,59 @@ function syncState() {
   }
 }
 
+/**
+ * Remove orphaned artifacts from .devt/state/ that don't belong to the current workflow.
+ * Uses PHASE_ARTIFACT_MAP to determine which artifacts are expected.
+ * Returns list of removed files. Supports dry-run mode.
+ */
+function pruneState(dryRun) {
+  const stateDir = getStateDir();
+  if (!fs.existsSync(stateDir)) {
+    return { ok: true, pruned: [], message: "State directory does not exist" };
+  }
+
+  const state = readState();
+  const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
+
+  // Build set of expected files: workflow.yaml + artifacts for completed phases + lock
+  const expectedFiles = new Set(["workflow.yaml", ".lock"]);
+  // Always keep input artifacts and persistent files
+  const inputArtifacts = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
+  for (const f of inputArtifacts) expectedFiles.add(f);
+
+  // Keep artifacts for phases that have been completed (phase index <= current)
+  for (const [phase, artifact] of Object.entries(PHASE_ARTIFACT_MAP)) {
+    const phaseIndex = PHASE_ORDER.indexOf(phase);
+    if (phaseIndex !== -1 && phaseIndex <= currentPhaseIndex) {
+      expectedFiles.add(artifact);
+    }
+  }
+  // Also keep scratchpad and baseline
+  expectedFiles.add("scratchpad.md");
+  expectedFiles.add("baseline-gates.md");
+
+  // Find orphans
+  const pruned = [];
+  const entries = fs.readdirSync(stateDir);
+  for (const entry of entries) {
+    if (!expectedFiles.has(entry)) {
+      const fullPath = path.join(stateDir, entry);
+      if (dryRun) {
+        pruned.push({ file: entry, action: "would_remove" });
+      } else {
+        try {
+          fs.unlinkSync(fullPath);
+          pruned.push({ file: entry, action: "removed" });
+        } catch (e) {
+          pruned.push({ file: entry, action: "failed", error: e.message });
+        }
+      }
+    }
+  }
+
+  return { ok: true, dry_run: dryRun, pruned, kept: [...expectedFiles].filter(f => f !== ".lock") };
+}
+
 function run(subcommand, args) {
   switch (subcommand) {
     case "read":
@@ -437,9 +490,11 @@ function run(subcommand, args) {
       return validateConsistency();
     case "sync":
       return syncState();
+    case "prune":
+      return pruneState(args.includes("--dry-run"));
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate, sync`,
+        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate, sync, prune`,
       );
   }
 }
@@ -450,6 +505,7 @@ module.exports = {
   updateState,
   resetState,
   syncState,
+  pruneState,
   checkWorkflowLock,
   validateConsistency,
   getStateDir,
