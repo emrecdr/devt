@@ -51,12 +51,18 @@ These flags provide fine-grained control over which phases execute. They are par
 - Enables cross-workflow chaining (e.g., discuss -> plan -> implement) without manual `/devt:next` invocations.
 - The next workflow step is determined by `/devt:next` routing logic.
 
+**`--tdd`** — Enable test-driven development mode: tests are written BEFORE implementation.
+- Reverses Step 4 (implement) and Step 5 (test): tester runs first with spec/task, programmer receives failing tests as context.
+- Store `tdd_mode=true` in workflow state.
+- Auto-injects `tdd-patterns` skill into both programmer and tester agents (regardless of `agent_skills` config).
+
 **Detection and stripping:** Parse all flags from the task description string using the same pattern as `--autonomous`:
 1. Check for `--to <phase>` — extract the phase name, validate against valid phases, strip from task description.
 2. Check for `--only <phase>` — extract the phase name, validate against valid phases, strip from task description.
 3. Check for `--chain` — strip from task description.
-4. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
-5. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
+4. Check for `--tdd` — strip from task description.
+5. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
+6. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
 </autonomous_mode>
 
 <prerequisites>
@@ -191,7 +197,9 @@ If `--only <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/d
 
 If `--chain` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=next`
 
-Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, and `--chain` flags if present).
+If `--tdd` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update tdd_mode=true`
+
+Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, `--chain`, and `--tdd` flags if present).
 
 Parse the init output JSON:
 
@@ -626,6 +634,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect sta
 
 <step name="implement" gate="impl-summary.md is written with status DONE or DONE_WITH_CONCERNS">
 
+**TDD Mode Check**: If `tdd_mode=true` in workflow state, SKIP this step for now — proceed directly to Step 5 (Testing) first. The tester will write failing tests based on the spec/task. After Step 5 completes, return here to implement code that makes the tests pass.
+
 Initialize iteration tracking:
 
 ```bash
@@ -679,6 +689,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 <step name="test" gate="test-summary.md is written with status DONE or DONE_WITH_CONCERNS">
 
 _Skip this step if `test` is listed in `skipped_phases` from workflow state._
+
+**TDD Mode**: If `tdd_mode=true` in workflow state AND this is the FIRST pass (no `impl-summary.md` exists yet):
+- Change the tester's task prompt to: "Write failing tests that define the expected behavior for: {task_description}. Do NOT implement any production code. Tests should fail because the production code does not exist yet."
+- Add to the tester's context: `<tdd_skill>Read ${CLAUDE_PLUGIN_ROOT}/skills/tdd-patterns/SKILL.md — follow the RED phase protocol.</tdd_skill>`
+- After tester completes: return to Step 4 (Implementation). Add to the programmer's context:
+  - `<failing_tests>Read .devt/state/test-summary.md — these are the RED tests you must make pass.</failing_tests>`
+  - `<tdd_skill>Read ${CLAUDE_PLUGIN_ROOT}/skills/tdd-patterns/SKILL.md — follow the GREEN phase protocol. Write MINIMAL code to pass each test.</tdd_skill>`
+- After programmer completes: proceed to Step 5 again for additional test coverage (edge cases, error paths). This second tester pass follows normal (non-TDD) behavior.
 
 Dispatch the tester agent:
 

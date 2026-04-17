@@ -98,6 +98,7 @@ function initWorkflow(task, pluginRoot) {
     claude_md_exists: claudeMdExists,
     config_exists: configExists,
     state_dir: path.join(projectRoot, ".devt", "state"),
+    tdd_mode: state.tdd_mode || false,
     warnings: warnings.concat(injectionWarning),
   };
 }

@@ -97,6 +97,7 @@ const KNOWN_STATE_KEYS = {
   verdict: "string",
   repair: "string",
   verify_iteration: "number",
+  tdd_mode: "boolean",
 };
 
 const PHASE_ORDER = [
