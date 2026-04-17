@@ -128,6 +128,9 @@ const PHASE_ARTIFACT_MAP = {
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
+// Input artifacts created by upstream workflows (specify, plan, clarify, pause) — always preserved by prune
+const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
+
 const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
   "research", "plan", "specify", "clarify", null,
@@ -436,46 +439,48 @@ function pruneState(dryRun) {
     return { ok: true, pruned: [], message: "State directory does not exist" };
   }
 
-  const state = readState();
-  const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
+  const lockFile = acquireLock();
+  try {
+    const state = readState();
+    const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
 
-  // Build set of expected files: workflow.yaml + artifacts for completed phases + lock
-  const expectedFiles = new Set(["workflow.yaml", ".lock"]);
-  // Always keep input artifacts and persistent files
-  const inputArtifacts = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
-  for (const f of inputArtifacts) expectedFiles.add(f);
+    // Build set of expected files: workflow.yaml + artifacts for completed phases + lock
+    const expectedFiles = new Set(["workflow.yaml", ".lock"]);
+    for (const f of INPUT_ARTIFACTS) expectedFiles.add(f);
 
-  // Keep artifacts for phases that have been completed (phase index <= current)
-  for (const [phase, artifact] of Object.entries(PHASE_ARTIFACT_MAP)) {
-    const phaseIndex = PHASE_ORDER.indexOf(phase);
-    if (phaseIndex !== -1 && phaseIndex <= currentPhaseIndex) {
-      expectedFiles.add(artifact);
+    // Keep artifacts for phases that have been completed (phase index <= current)
+    for (const [phase, artifact] of Object.entries(PHASE_ARTIFACT_MAP)) {
+      const phaseIndex = PHASE_ORDER.indexOf(phase);
+      if (phaseIndex !== -1 && phaseIndex <= currentPhaseIndex) {
+        expectedFiles.add(artifact);
+      }
     }
-  }
-  // Also keep scratchpad and baseline
-  expectedFiles.add("scratchpad.md");
-  expectedFiles.add("baseline-gates.md");
+    expectedFiles.add("scratchpad.md");
+    expectedFiles.add("baseline-gates.md");
 
-  // Find orphans
-  const pruned = [];
-  const entries = fs.readdirSync(stateDir);
-  for (const entry of entries) {
-    if (!expectedFiles.has(entry)) {
-      const fullPath = path.join(stateDir, entry);
-      if (dryRun) {
-        pruned.push({ file: entry, action: "would_remove" });
-      } else {
-        try {
-          fs.unlinkSync(fullPath);
-          pruned.push({ file: entry, action: "removed" });
-        } catch (e) {
-          pruned.push({ file: entry, action: "failed", error: e.message });
+    // Find orphans
+    const pruned = [];
+    const entries = fs.readdirSync(stateDir);
+    for (const entry of entries) {
+      if (!expectedFiles.has(entry)) {
+        const fullPath = path.join(stateDir, entry);
+        if (dryRun) {
+          pruned.push({ file: entry, action: "would_remove" });
+        } else {
+          try {
+            fs.unlinkSync(fullPath);
+            pruned.push({ file: entry, action: "removed" });
+          } catch (e) {
+            pruned.push({ file: entry, action: "failed", error: e.message });
+          }
         }
       }
     }
-  }
 
-  return { ok: true, dry_run: dryRun, pruned, kept: [...expectedFiles].filter(f => f !== ".lock") };
+    return { ok: true, dry_run: dryRun, pruned, kept: [...expectedFiles].filter(f => f !== ".lock") };
+  } finally {
+    releaseLock(lockFile);
+  }
 }
 
 function run(subcommand, args) {
@@ -515,4 +520,5 @@ module.exports = {
   VALID_PHASES,
   VALID_WORKFLOW_TYPES,
   VALID_TIERS,
+  INPUT_ARTIFACTS,
 };
