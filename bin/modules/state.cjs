@@ -111,6 +111,8 @@ const PHASE_ORDER = [
 const VALID_PHASES = new Set([...PHASE_ORDER, null]);
 
 // Canonical phase→artifact mapping. Used by validateConsistency (forward) and syncState (inverse).
+// Only covers artifacts tied to phases in PHASE_ORDER. Standalone workflow outputs
+// (spec.md from /devt:specify, research.md from /devt:research) live in INPUT_ARTIFACTS.
 const PHASE_ARTIFACT_MAP = {
   implement: "impl-summary.md",
   test: "test-summary.md",
@@ -128,7 +130,7 @@ const PHASE_ARTIFACT_MAP = {
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
-// Always preserved by prune — may originate from upstream workflows
+// Always preserved by prune — cross-workflow inputs not tied to a single phase.
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
 
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase
@@ -301,7 +303,10 @@ function updateState(keyValues) {
     const current = readState();
     for (const kv of keyValues) {
       const eqIndex = kv.indexOf("=");
-      if (eqIndex === -1) continue;
+      if (eqIndex === -1) {
+        warnState(`Skipped invalid key=value pair (no '='): "${kv}"`);
+        continue;
+      }
       const key = kv.slice(0, eqIndex);
       let value = kv.slice(eqIndex + 1);
       if (value === "true") value = true;
@@ -394,16 +399,23 @@ function syncState() {
       }
     }
 
-    if (foundArtifacts.length === 0) {
+    // Also scan INPUT_ARTIFACTS into foundSet so workflow_type inference uses one path
+    for (const artifact of INPUT_ARTIFACTS) {
+      if (fs.existsSync(path.join(stateDir, artifact))) {
+        foundSet.add(artifact);
+      }
+    }
+
+    if (foundSet.size === 0) {
       return { ok: true, synced: false, message: "No artifacts found — state is empty", state: existing };
     }
 
-    // Infer workflow_type from artifacts — reuse foundSet to avoid redundant existsSync
+    // Infer workflow_type from artifacts — all checks go through foundSet
     let inferredType = existing.workflow_type || null;
     if (!inferredType) {
       if (foundSet.has("debug-summary.md")) inferredType = "debug";
-      else if (fs.existsSync(path.join(stateDir, "spec.md"))) inferredType = "specify";
-      else if (fs.existsSync(path.join(stateDir, "research.md")) && !foundSet.has("impl-summary.md")) inferredType = "research";
+      else if (foundSet.has("spec.md")) inferredType = "specify";
+      else if (foundSet.has("research.md") && !foundSet.has("impl-summary.md")) inferredType = "research";
       else if (foundSet.has("impl-summary.md")) inferredType = "dev";
     }
 

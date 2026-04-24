@@ -284,7 +284,8 @@ function compact(pluginRoot, options) {
 
     if (!dryRun && toArchive.length > 0) {
       const rowids = toArchive.map((r) => r.rowid);
-      db.exec(`DELETE FROM lessons WHERE rowid IN (${rowids.join(",")})`);
+      const placeholders = rowids.map(() => "?").join(",");
+      db.prepare(`DELETE FROM lessons WHERE rowid IN (${placeholders})`).run(...rowids);
     }
 
     return {

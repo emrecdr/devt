@@ -35,6 +35,7 @@ const CHECKS = {
   W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:health --repair to clear invalid state, or /devt:cancel-workflow" },
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
   W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Expected artifact missing for a completed phase — re-run the phase or /devt:cancel-workflow to reset" },
+  W014: { severity: "warning", message: "next.md missing routing for workflow_type", repairable: false, fix: "Add the missing workflow_type to the routing table in workflows/next.md" },
 };
 
 const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
@@ -253,6 +254,22 @@ function runChecks(pluginRoot) {
       for (const m of consistency.mismatches) {
         add("W013", `phase "${m.phase}" completed but ${m.expected_artifact} is missing`, { phase: m.phase, artifact: m.expected_artifact });
       }
+    }
+  }
+
+  // W014: next.md routing completeness — every VALID_WORKFLOW_TYPE must have a routing entry
+  if (pluginRoot) {
+    const nextMdPath = path.join(pluginRoot, "workflows", "next.md");
+    try {
+      const nextContent = fs.readFileSync(nextMdPath, "utf8");
+      for (const wfType of VALID_WORKFLOW_TYPES) {
+        if (wfType === null) continue;
+        if (!nextContent.includes(`\`${wfType}\``)) {
+          add("W014", `"${wfType}"`, { workflow_type: wfType });
+        }
+      }
+    } catch {
+      // Can't read next.md — skip
     }
   }
 

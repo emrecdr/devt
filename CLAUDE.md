@@ -33,7 +33,7 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 - **`semantic.cjs`** — FTS5 full-text search on learning playbook. Uses `node:sqlite` (built-in). Sync playbook → DB, query lessons, compact stale entries. Grep fallback when DB doesn't exist.
 - **`weekly-report.cjs`** — Git log parsing and markdown report rendering. Contributor matching via `.devt/config.json` config.
 - **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone).
-- **`health.cjs`** — Project health validation with 21 checks, structured JSON output, `--repair` flag for safe auto-fixes.
+- **`health.cjs`** — Project health validation with 22 checks, structured JSON output, `--repair` flag for safe auto-fixes.
 - **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection (with `strict` mode: Shannon entropy analysis, URL/HTML entity decoding, zero-width character detection), safe JSON parsing, shell argument validation, `sanitizeForDisplay`. Wired into `init.cjs` to sanitize task descriptions entering the system.
 
 ### State Flow
