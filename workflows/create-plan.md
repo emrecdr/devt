@@ -42,6 +42,7 @@ Read `.devt/rules/` for project conventions:
 - Read `.devt/rules/quality-gates.md`
 - Read `.devt/rules/testing-patterns.md`
 - Read `CLAUDE.md` if it exists
+- Read `.devt/state/decisions.md` if it exists (from `/devt:clarify` or `/devt:specify`) — decisions constrain the plan and must be respected. Reference DEC-xxx IDs when tasks implement specific decisions.
 
 Search for relevant lessons: check `.devt/learning-playbook.md` for entries tagged with keywords from the task description.
 </step>

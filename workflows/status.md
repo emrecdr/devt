@@ -107,6 +107,25 @@ Artifacts:
 Next: {description of what comes next}
 ```
 
+### Artifact Consistency Check
+
+Run the consistency validator to check for missing artifacts:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state validate
+```
+
+If `consistent` is `false`, report each mismatch as a warning:
+
+```
+Consistency Issues:
+  ⚠ {phase} phase completed but {expected_artifact} is missing
+```
+
+This catches cases where a phase transitioned to the next step without writing its expected output (e.g., review returned BLOCKED but the workflow advanced anyway).
+
+If `consistent` is `true` or the workflow is inactive, skip this section silently.
+
 ### Additional Context (if available)
 
 **Decisions** (from `.devt/state/decisions.md` or `handoff.json`):

@@ -132,7 +132,12 @@ const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
 
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase
-const PERSISTENT_ARTIFACTS = ["scratchpad.md", "baseline-gates.md", "debug-context.md", "debug-investigation.md"];
+const PERSISTENT_ARTIFACTS = [
+  "scratchpad.md", "baseline-gates.md",
+  "debug-context.md", "debug-investigation.md",
+  "review-scope.md", "session-report.md", "autoskill-proposals.md",
+  "arch-baseline.json", "arch-triage.json", "scanner-output.txt", "scan-delta.md",
+];
 
 const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",

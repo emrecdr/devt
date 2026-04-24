@@ -899,7 +899,18 @@ _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.verification` is `false`._
 _Skip this step if `verify` is listed in `skipped_phases` from workflow state._
 
-Dispatch the verifier agent:
+**Artifact pre-gate**: Before dispatching the verifier, confirm required context artifacts exist:
+
+- Check that `.devt/state/impl-summary.md` exists
+- Check that `.devt/state/test-summary.md` exists
+- Check that `.devt/state/review.md` exists
+
+If ANY of these are missing: **STOP with BLOCKED**. Report to the user:
+"Verification cannot proceed — missing artifacts: {list the missing files}. The upstream phase may have failed silently or returned BLOCKED without writing its output. Check /devt:status for details."
+
+Do NOT dispatch the verifier with incomplete context — it will waste a subagent turn and produce unreliable results.
+
+If all three exist, dispatch the verifier agent:
 
 ```
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="

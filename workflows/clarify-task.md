@@ -34,12 +34,17 @@ Not applicable — this workflow does not dispatch subagents.
 ## Step 1: Analyze the Task
 
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=clarify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — structured probes for discovering domain unknowns, constraints, and edge cases. Use selectively based on the task's domain complexity.
+
+Load prior workflow artifacts (focus clarification on what's still ambiguous):
+- Read `.devt/state/research.md` if it exists (from `/devt:research`) — research findings inform which areas are already settled and which still need clarification. Do NOT re-ask about technical approaches that research already recommended.
+- Read `.devt/state/spec.md` if it exists (from `/devt:specify`) — focus gray area identification on what the spec left ambiguous or underspecified, not on topics the spec already covers in detail.
 
 Read the task description and identify:
 

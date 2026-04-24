@@ -42,6 +42,7 @@ Parse the feature idea from user input.
 - If clear: proceed
 
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${FEATURE_IDEA}"
 ```
 
@@ -51,6 +52,10 @@ Load project context:
 - Read `.devt/rules/coding-standards.md` for naming/patterns
 - Read `.devt/rules/architecture.md` for project structure
 - Read `CLAUDE.md` if it exists
+
+Load prior workflow artifacts (skip questions already answered by upstream workflows):
+- Read `.devt/state/research.md` if it exists (from `/devt:research`) — technical approaches and codebase patterns are already investigated. Treat research recommendations as settled context, not open questions.
+- Read `.devt/state/decisions.md` if it exists (from `/devt:clarify`) — decisions with DEC-xxx IDs are already captured. Do NOT re-ask about these choices during the interview.
 </step>
 
 <step name="analyze" gate="codebase analysis complete">
@@ -93,7 +98,12 @@ Write a brief analysis summary (internal, not written to file yet):
 
 Use AskUserQuestion to cover ALL categories below. Continue until requirements are clear.
 
-**Ask NON-OBVIOUS questions only.** Skip anything the feature description already answers.
+**Prior findings check**: Before asking each question, check if the answer is already in prior artifacts loaded during init:
+- `research.md` — technical approach recommendations and codebase pattern findings
+- `decisions.md` — design choices captured with DEC-xxx IDs
+If a question's answer is already captured, reference the finding instead of re-asking: "Based on prior research, {finding} — I'll incorporate this into the spec." This avoids redundant questions when `/devt:research` or `/devt:clarify` ran before `/devt:specify`.
+
+**Ask NON-OBVIOUS questions only.** Skip anything the feature description or prior artifacts already answer.
 The goal is to resolve ambiguity, not to confirm the obvious. If the user said "add email
 notifications," do not ask "Should this feature send emails?" — ask "Should emails be sent
 synchronously during the request or queued for background delivery?"
