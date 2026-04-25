@@ -32,13 +32,13 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 - **`setup.cjs`** — Scaffolds `.devt/rules/` from templates, creates `.devt/config.json`. Supports create/update/reinit modes. Auto-detects stack via marker files and git remote.
 - **`semantic.cjs`** — FTS5 full-text search on learning playbook. Uses `node:sqlite` (built-in). Sync playbook → DB, query lessons, compact stale entries. Grep fallback when DB doesn't exist.
 - **`weekly-report.cjs`** — Git log parsing and markdown report rendering. Contributor matching via `.devt/config.json` config.
-- **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone).
+- **`update.cjs`** — Version check against GitHub. Caches results (4hr TTL). Detects install type (plugin system vs git clone). Also provides dirty-tree detection, cache management, and changelog fetching.
 - **`health.cjs`** — Project health validation with 22 checks, structured JSON output, `--repair` flag for safe auto-fixes.
 - **`security.cjs`** — Input validation: path traversal prevention, prompt injection detection (with `strict` mode: Shannon entropy analysis, URL/HTML entity decoding, zero-width character detection), safe JSON parsing, shell argument validation, `sanitizeForDisplay`. Wired into `init.cjs` to sanitize task descriptions entering the system.
 
 ### State Flow
 
-Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger scratchpad, within-session only), `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`, consumed by `/devt:next`), `continue-here.md` (from `/devt:pause`), `review-scope.md` (code-review file list), `session-report.md`, `autoskill-proposals.md`, `arch-baseline.json` (arch-health prior scan), `arch-triage.json` (arch-health triage decisions), `scanner-output.txt` (arch-health raw output), `scan-delta.md` (arch-health delta summary). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
+Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger investigation log, within-session only), `scratchpad.md` (cross-workflow deferred findings and scope reduction notes), `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`, consumed by `/devt:next`), `continue-here.md` (from `/devt:pause`), `review-scope.md` (code-review file list), `session-report.md`, `autoskill-proposals.md`, `arch-baseline.json` (arch-health prior scan), `arch-triage.json` (arch-health triage decisions), `scanner-output.txt` (arch-health raw output), `scan-delta.md` (arch-health delta summary). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
 
 #### `workflow_type` Registry
 
@@ -91,6 +91,11 @@ node bin/devt-tools.cjs report generate [--weeks N] [--output PATH]
 node bin/devt-tools.cjs health [--repair]
 node bin/devt-tools.cjs update check [--force]
 node bin/devt-tools.cjs update status
+node bin/devt-tools.cjs update local-version
+node bin/devt-tools.cjs update install-type
+node bin/devt-tools.cjs update dirty
+node bin/devt-tools.cjs update clear-cache
+node bin/devt-tools.cjs update changelog
 ```
 
 There are no build steps, test suites, or linters configured for the plugin itself. The codebase is all CommonJS Node.js (`.cjs`) for the tooling and Markdown for prompts/workflows/agents.
