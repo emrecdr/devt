@@ -4,6 +4,11 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-04-25
+
+### Fixed
+- **CLAUDE.md docs audit**: Added missing `scratchpad.md` artifact to state flow documentation, added 5 undocumented `update` subcommands (local-version, install-type, dirty, clear-cache, changelog), expanded `update.cjs` module description
+
 ## [0.8.1] - 2026-04-24
 
 ### Fixed
