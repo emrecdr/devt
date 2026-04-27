@@ -133,6 +133,21 @@ const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 // Always preserved by prune — cross-workflow inputs not tied to a single phase.
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
 
+// Allowed `## Status` values per artifact. Used by validateConsistency to detect
+// invalid status values that pass file-existence checks but would mislead downstream agents.
+// Artifacts without a stable status enum (plan.md, lessons.yaml, scan-results.md) are omitted.
+const ARTIFACT_SCHEMA = {
+  "impl-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
+  "verification.md": ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"],
+  "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
+  "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "curation-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "research.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+};
+
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase
 const PERSISTENT_ARTIFACTS = [
   "scratchpad.md", "baseline-gates.md",
@@ -185,11 +200,35 @@ function readState() {
 }
 
 /**
+ * Extract the `## Status` value from an artifact's first 50 lines.
+ * Looks for either `## Status\n\nVALUE` or `## Status: VALUE` patterns.
+ * Returns null if no status line is found.
+ */
+function extractStatus(content) {
+  const lines = content.split("\n").slice(0, 50);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    // Inline form: `## Status: VALUE`
+    const inlineMatch = line.match(/^##\s+Status\s*:\s*(.+)$/i);
+    if (inlineMatch) return inlineMatch[1].trim().split(/\s+/)[0];
+    // Block form: `## Status` followed by a value line
+    if (/^##\s+Status\s*$/i.test(line)) {
+      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        const v = lines[j].trim();
+        if (v && !v.startsWith("#")) return v.split(/\s+/)[0];
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Validate consistency between workflow phases and expected artifacts.
- * For each phase that has been "passed through" (i.e., phase is beyond it),
- * check that the expected artifact file exists in .devt/state/.
+ * Two checks per artifact:
+ *   1. Existence: file present for phases passed through
+ *   2. Content schema: `## Status` value is in the allowed enum (if defined in ARTIFACT_SCHEMA)
  *
- * Returns { consistent: true/false, mismatches: [{phase, expected_artifact, exists}] }
+ * Returns { consistent: true/false, mismatches: [{phase, expected_artifact, reason, ...}] }
  */
 function validateConsistency() {
   const state = readState();
@@ -216,7 +255,24 @@ function validateConsistency() {
       const artifactPath = path.join(stateDir, artifact);
       const exists = fs.existsSync(artifactPath);
       if (!exists) {
-        mismatches.push({ phase, expected_artifact: artifact, exists: false });
+        mismatches.push({ phase, expected_artifact: artifact, reason: "missing", exists: false });
+        continue;
+      }
+      // Existence passed — check content schema if one is defined
+      const allowedStatuses = ARTIFACT_SCHEMA[artifact];
+      if (!allowedStatuses) continue;
+      let content;
+      try {
+        content = fs.readFileSync(artifactPath, "utf8");
+      } catch (e) {
+        mismatches.push({ phase, expected_artifact: artifact, reason: "unreadable", error: e.message });
+        continue;
+      }
+      const status = extractStatus(content);
+      if (status === null) {
+        mismatches.push({ phase, expected_artifact: artifact, reason: "no_status_line", allowed: allowedStatuses });
+      } else if (!allowedStatuses.includes(status)) {
+        mismatches.push({ phase, expected_artifact: artifact, reason: "invalid_status", actual: status, allowed: allowedStatuses });
       }
     }
   }
@@ -542,4 +598,5 @@ module.exports = {
   VALID_TIERS,
   INPUT_ARTIFACTS,
   PERSISTENT_ARTIFACTS,
+  ARTIFACT_SCHEMA,
 };
