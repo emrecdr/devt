@@ -1,0 +1,63 @@
+name: CI
+
+# Workflow uses no untrusted github.event.* inputs (no issue/PR/comment data
+# flows into run: blocks). Triggered by push/pull_request on the repo only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: CLI smoke tests
+        run: bash scripts/smoke-test.sh
+
+  manifest-version-coherence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify VERSION matches plugin.json and README badge
+        run: |
+          VFILE=$(cat VERSION | tr -d '[:space:]')
+          VPLUGIN=$(node -e "console.log(require('./.claude-plugin/plugin.json').version)")
+          VBADGE=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
+          echo "VERSION=$VFILE  plugin.json=$VPLUGIN  README badge=$VBADGE"
+          if [ "$VFILE" != "$VPLUGIN" ] || [ "$VFILE" != "$VBADGE" ]; then
+            echo "Version drift: VERSION/plugin.json/README must agree"
+            exit 1
+          fi
+
+  workflow-type-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify VALID_WORKFLOW_TYPES has resume routing
+        run: |
+          node -e "
+            const { VALID_WORKFLOW_TYPES } = require('./bin/modules/state.cjs');
+            const next = require('fs').readFileSync('workflows/next.md', 'utf8');
+            const missing = [];
+            for (const t of VALID_WORKFLOW_TYPES) {
+              if (t === null) continue;
+              if (!next.includes(t)) missing.push(t);
+            }
+            if (missing.length) { console.error('Missing in next.md:', missing); process.exit(1); }
+            console.log('All', [...VALID_WORKFLOW_TYPES].filter(Boolean).length, 'workflow types have resume routing');
+          "
