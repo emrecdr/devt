@@ -387,9 +387,6 @@ options:
 If the user picks "Refine", loop back to Step 3 (interview) targeting only the dimensions that lost points.
 If the user picks "Proceed", record the accepted score in the PRD's Assumptions table:
 `| Spec scored {N}/10 ({lost_dimensions}) | Implementer makes interpretation calls | Accepted |`
-
-The score is informational, not blocking — the user always has the final say. The gate exists to make
-implicit ambiguity explicit before it becomes implementation rework.
 </step>
 
 <step name="report" gate="user informed of output">
