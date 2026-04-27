@@ -146,7 +146,24 @@ const MISMATCH_REASONS = Object.freeze({
 
 // Allowed `## Status` values per artifact. Used by validateConsistency to detect
 // invalid status values that pass file-existence checks but would mislead downstream agents.
-// Artifacts without a stable status enum (plan.md, lessons.yaml, scan-results.md) are omitted.
+//
+// Scope (intentional): only markdown artifacts with a `## Status:` line that drives
+// workflow routing decisions. The schema is deliberately narrow.
+//
+// Excluded by design:
+//   - YAML/JSON state files (workflow.yaml, handoff.json, arch-baseline.json,
+//     arch-triage.json, lessons.yaml) — validated structurally elsewhere or have
+//     no Status convention.
+//   - Persistent cross-phase artifacts in PERSISTENT_ARTIFACTS (scratchpad.md,
+//     baseline-gates.md, debug-context.md, debug-investigation.md, review-scope.md,
+//     session-report.md, autoskill-proposals.md, scanner-output.txt, scan-delta.md)
+//     — content varies, no status enum.
+//   - Free-form artifacts (plan.md, decisions.md, spec.md, scan-results.md,
+//     continue-here.md, docs-summary.md, autoskill-proposals.md) — no status enum.
+//
+// TODO (post-1.0): Consider DEVT_VALIDATE_ENFORCE=1 to upgrade shadow warnings
+// into hard failures. Today validateConsistency only warns on mismatch and
+// persists validation_status to workflow.yaml; enforce mode would block writes.
 const ARTIFACT_SCHEMA = {
   "impl-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],

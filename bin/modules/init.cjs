@@ -13,7 +13,7 @@ const path = require("path");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
 const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
-const { sanitizeForPrompt, scanForInjection } = require("./security.cjs");
+const { sanitizeForPrompt, scanForInjection, validatePath } = require("./security.cjs");
 
 const REQUIRED_DEV_RULES = [
   "coding-standards.md",
@@ -21,6 +21,8 @@ const REQUIRED_DEV_RULES = [
   "quality-gates.md",
   "architecture.md",
 ];
+
+const MAX_TASK_LENGTH = 50_000;
 
 function initWorkflow(task, pluginRoot) {
   const projectRoot = findProjectRoot();
@@ -74,6 +76,12 @@ function initWorkflow(task, pluginRoot) {
   let sanitizedTask = task || null;
   const injectionWarning = [];
   if (sanitizedTask) {
+    if (sanitizedTask.length > MAX_TASK_LENGTH) {
+      throw new Error(
+        `Task description exceeds ${MAX_TASK_LENGTH} bytes (got ${sanitizedTask.length}). ` +
+        `Trim the task or pass details via .devt/state/ artifacts instead.`,
+      );
+    }
     const scan = scanForInjection(sanitizedTask);
     if (!scan.clean) {
       injectionWarning.push(`Task text contains suspicious patterns: ${scan.findings.join("; ")}`);
@@ -103,16 +111,29 @@ function initWorkflow(task, pluginRoot) {
   };
 }
 
-function scanDevRules(dir, prefix) {
+function scanDevRules(dir, prefix, rootDir) {
   const files = [];
   prefix = prefix || "";
+  rootDir = rootDir || dir;
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
+      // Reject names that could break out of rootDir; skip symlinks entirely.
+      if (entry.name.includes("/") || entry.name.includes("\\") ||
+          entry.name === "." || entry.name === ".." ||
+          entry.isSymbolicLink()) {
+        continue;
+      }
+      // validatePath enforces confinement under rootDir; reject anything that escapes.
+      const check = validatePath(entry.name, dir);
+      if (!check.safe) continue;
+      const rootCheck = validatePath(check.resolved, rootDir);
+      if (!rootCheck.safe) continue;
+
       const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        files.push(...scanDevRules(path.join(dir, entry.name), relPath));
-      } else {
+        files.push(...scanDevRules(check.resolved, relPath, rootDir));
+      } else if (entry.isFile()) {
         files.push(relPath);
       }
     }

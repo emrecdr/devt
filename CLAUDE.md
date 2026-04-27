@@ -15,11 +15,27 @@ devt is a Claude Code plugin that orchestrates multi-agent development workflows
 3. **Agents** (`agents/*.md`) — Focused workers. Each owns one concern: programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger.
 
 Supporting layers:
-- **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides.
-- **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`).
+- **Skills** (`skills/*/`) — Technique libraries injected into agents based on `skill-index.yaml` or `.devt/config.json` overrides. Trigger-evaluation fixtures live in `skills-workspace/` (gitignored, used by autoskill).
+- **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`, default `standard`). `hooks/quality-gate-verifier.md` is an opt-in template that projects wire into their own `.claude/settings.json` — not auto-registered.
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
 - **References** (`references/`) — Technique libraries for agent workflows. Static guidance documents read by workflows during specify/clarify phases (questioning guide, domain probes).
 - **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management.
+
+#### Hook Profiles
+
+The `DEVT_HOOK_PROFILE` env var (default `standard`) controls which hooks fire:
+
+| Hook script | minimal | standard | full |
+|---|:---:|:---:|:---:|
+| `session-start.sh` | ✓ | ✓ | ✓ |
+| `stop.sh` | ✓ | ✓ | ✓ |
+| `workflow-context-injector.sh` | – | ✓ | ✓ |
+| `subagent-status.sh` | – | ✓ | ✓ |
+| `read-before-edit-guard.sh` | – | ✓ | ✓ |
+| `context-monitor.sh` | – | – | ✓ |
+| `prompt-guard.sh` | – | – | ✓ |
+
+Use `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh` to selectively disable individual hooks regardless of profile.
 
 ### CLI Tools (`bin/devt-tools.cjs`)
 
