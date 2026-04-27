@@ -1,7 +1,7 @@
 {
   "name": "devt",
   "description": "Lightweight multi-agent development workflow plugin. Language-agnostic -- adapts to any project via .devt/rules/ convention. Commands -> Workflows -> Agents architecture with learning loops.",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "author": {
     "name": "Emre Camdere",
     "url": "https://github.com/emrecdr"
