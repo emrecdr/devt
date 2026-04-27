@@ -54,6 +54,14 @@ else
   fail "50KB cap should reject 60KB task — got: ${CAP_OUT:0:100}"
 fi
 
+echo "== Concurrent locking =="
+# Run from $TMP-independent dir; the test creates its own temp project.
+if (cd "$ROOT" && node "$ROOT/scripts/test-locking.cjs" >/dev/null 2>&1); then
+  pass "20 concurrent state writes serialize without loss"
+else
+  fail "concurrent locking test (run scripts/test-locking.cjs for details)"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

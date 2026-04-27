@@ -1,6 +1,17 @@
 # Skill Index — maps agents to their relevant technique skills
 # Skills are auto-discovered by Claude via descriptions, but this
 # provides explicit guidance for the workflow orchestrator.
+#
+# Memory boundary (do not blur these):
+#   - scratchpad        → EPHEMERAL within-workflow notes. Resets between
+#                         workflows. Cross-agent handoff inside one run only.
+#                         File: .devt/state/scratchpad.md
+#   - lesson-extraction → PERMANENT cross-workflow knowledge. Curated, scored,
+#                         decay-tracked. Promoted from scratchpad when a finding
+#                         is generalizable + actionable + evidence-based.
+#                         File: .devt/learning-playbook.md
+# If a finding only matters to the next agent in this workflow → scratchpad.
+# If it would help a future workflow avoid the same mistake → lesson-extraction.
 
 agents:
   programmer:
