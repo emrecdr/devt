@@ -42,6 +42,14 @@ run_json "config get"      node "$CLI" config get
 run_json "models list"     node "$CLI" models list
 run_json "models get"      node "$CLI" models get quality
 run_json "update local-version" node "$CLI" update local-version
+run_json "health"          node "$CLI" health
+run_json "semantic status" node "$CLI" semantic status
+run_json "report window"   node "$CLI" report window
+
+# setup mutates the project — give it its own subdir so it starts clean
+SETUP_TMP="$TMP/setup-test"
+mkdir -p "$SETUP_TMP"
+run_json "setup --template blank" sh -c "cd '$SETUP_TMP' && node '$CLI' setup --template blank"
 
 echo "== Length cap rejection =="
 LONG=$(node -e "process.stdout.write('x'.repeat(60000))")
@@ -60,6 +68,26 @@ if (cd "$ROOT" && node "$ROOT/scripts/test-locking.cjs" >/dev/null 2>&1); then
   pass "20 concurrent state writes serialize without loss"
 else
   fail "concurrent locking test (run scripts/test-locking.cjs for details)"
+fi
+
+echo "== Agent size budget =="
+# Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500
+# leaves room to grow but blocks bloat. Bump deliberately if a future
+# agent legitimately needs more.
+MAX_AGENT_LINES=500
+OVER_BUDGET=()
+for agent_file in "$ROOT"/agents/*.md; do
+  agent_lines=$(wc -l < "$agent_file")
+  if [ "$agent_lines" -gt "$MAX_AGENT_LINES" ]; then
+    OVER_BUDGET+=("$(basename "$agent_file"): ${agent_lines} lines")
+  fi
+done
+if [ ${#OVER_BUDGET[@]} -eq 0 ]; then
+  pass "all agents within $MAX_AGENT_LINES-line budget"
+else
+  for entry in "${OVER_BUDGET[@]}"; do
+    fail "agent over budget — $entry (limit $MAX_AGENT_LINES)"
+  done
 fi
 
 echo
