@@ -86,9 +86,10 @@ Use when you have a feature idea but not clear requirements. Produces a structur
 
 1. Analyzes your codebase for context (existing patterns, modules, conventions)
 2. Interviews you systematically -- only non-obvious questions
-3. Generates a PRD with: user stories, scope, decisions, API design, test scenarios, task breakdown
-4. Saves to `.devt/state/spec.md` (for pipeline) and `docs/specs/` (permanent)
-5. Asks what you want to do next:
+3. Scores the draft on 5 dimensions (placeholder scan, internal consistency, scope focus, ambiguity, completeness), 0-2 each. Total <8/10 triggers a soft-gate: you choose between refining (walk through the deductions) or accepting the score and proceeding
+4. Generates a PRD with: user stories, scope, decisions, API design, test scenarios, task breakdown
+5. Saves to `.devt/state/spec.md` (for pipeline) and `docs/specs/` (permanent)
+6. Asks what you want to do next:
    - **Create an implementation plan** --> chains to `/devt:plan`
    - **Start implementation now** --> chains to `/devt:workflow`
    - **Clarify decisions first** --> chains to `/devt:clarify`
