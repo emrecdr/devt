@@ -376,6 +376,34 @@ function updateState(keyValues) {
     const tmpFile = getWorkflowPath() + ".tmp";
     fs.writeFileSync(tmpFile, serializeSimpleYaml(current));
     fs.renameSync(tmpFile, getWorkflowPath());
+
+    // P1.3 Shadow validation: warn-only after every state mutation.
+    // Filters out `missing` (pre-existing over-flagging from PHASE_ORDER vs actual workflow paths)
+    // and surfaces only the precise content-schema mismatches added in P1.2.
+    // Disable with DEVT_VALIDATE_SHADOW=0. Failures are swallowed — shadow mode never blocks updates.
+    if (process.env.DEVT_VALIDATE_SHADOW !== "0") {
+      try {
+        const validation = validateConsistency();
+        const precise = (validation.mismatches || []).filter(
+          (m) => m.reason && m.reason !== "missing",
+        );
+        if (precise.length > 0) {
+          current._validation = { consistent: false, mismatches: precise };
+          process.stderr.write(
+            `[devt:shadow] ${precise.length} consistency warning(s) after state update\n`,
+          );
+          for (const m of precise.slice(0, 5)) {
+            const detail = m.actual ? ` actual="${m.actual}"` : "";
+            process.stderr.write(
+              `  - ${m.expected_artifact} (${m.reason})${detail}\n`,
+            );
+          }
+        }
+      } catch (e) {
+        process.stderr.write(`[devt:shadow] validation skipped: ${e.message}\n`);
+      }
+    }
+
     return current;
   } finally {
     releaseLock(lockFile);
