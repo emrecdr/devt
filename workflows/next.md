@@ -163,6 +163,19 @@ Route based on `workflow_type`:
 - `clarify` → Execute `/devt:clarify` to continue decision capture
 - missing/unknown → Execute `/devt:workflow` (default)
 
+### Active workflow, validation_status="warned"
+If `validation_status` is `warned` in state, a prior phase's artifact has an invalid `## Status` value (P1.3 enforcement flag, set by `bin/modules/state.cjs`). Surface this to the user before routing further:
+```
+Validation flag set: {validation_warnings} consistency warning(s) from a prior phase.
+The artifact passed file existence but its status value is not in the allowed enum.
+```
+Read `.devt/state/workflow.yaml` and the most recent artifact (impl-summary.md, review.md, verification.md, etc.) to identify the offending file. Then ask via AskUserQuestion:
+- "Re-run the prior phase" → execute the workflow command for the failing phase (e.g., `/devt:review` if review.md, `/devt:debug` if verification.md flagged)
+- "Mark as DONE_WITH_CONCERNS and proceed" → manually fix the artifact's `## Status` line to the canonical concerns variant, then re-run `/devt:next` (the flag clears automatically on the next state update with valid statuses)
+- "Investigate" → execute `/devt:forensics` to inspect the artifact
+
+Do NOT silently advance past a `validation_status="warned"` flag — the gate exists to make ambiguity explicit.
+
 ### Active workflow, status BLOCKED
 Read the blocking reason from the latest artifact.
 ```

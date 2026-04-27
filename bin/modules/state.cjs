@@ -98,6 +98,8 @@ const KNOWN_STATE_KEYS = {
   repair: "string",
   verify_iteration: "number",
   tdd_mode: "boolean",
+  validation_status: "string",
+  validation_warnings: "number",
 };
 
 const PHASE_ORDER = [
@@ -230,8 +232,8 @@ function extractStatus(content) {
  *
  * Returns { consistent: true/false, mismatches: [{phase, expected_artifact, reason, ...}] }
  */
-function validateConsistency() {
-  const state = readState();
+function validateConsistency(stateOverride = null) {
+  const state = stateOverride || readState();
   const stateDir = getStateDir();
 
   // Build phase→artifact map for this workflow type from the canonical map
@@ -372,35 +374,52 @@ function updateState(keyValues) {
       validateStateEntry(key, value);
       current[key] = value;
     }
-    // Atomic write: temp file + rename
+    // P1.3 Validation: runs before write so the persisted state reflects the verdict.
+    // Filters out `missing` (pre-existing PHASE_ORDER over-flagging) and surfaces only
+    // the precise content-schema mismatches added in P1.2. Disable with DEVT_VALIDATE_SHADOW=0.
+    let validationFlag = null;
+    let validationCount = 0;
+    let preciseMismatches = [];
+    if (process.env.DEVT_VALIDATE_SHADOW !== "0") {
+      try {
+        const validation = validateConsistency(current);
+        preciseMismatches = (validation.mismatches || []).filter(
+          (m) => m.reason && m.reason !== "missing",
+        );
+        if (preciseMismatches.length > 0) {
+          validationFlag = "warned";
+          validationCount = preciseMismatches.length;
+        }
+      } catch (e) {
+        process.stderr.write(`[devt:shadow] validation skipped: ${e.message}\n`);
+      }
+    }
+    // Persist the flag in workflow.yaml so /devt:next and downstream consumers can route on it.
+    // Clear stale flags actively when validation passes so warnings don't linger forever.
+    if (validationFlag) {
+      current.validation_status = validationFlag;
+      current.validation_warnings = validationCount;
+    } else if (current.validation_status) {
+      current.validation_status = null;
+      current.validation_warnings = null;
+    }
+
+    // Atomic write: temp file + rename (single write, includes validation flag)
     const tmpFile = getWorkflowPath() + ".tmp";
     fs.writeFileSync(tmpFile, serializeSimpleYaml(current));
     fs.renameSync(tmpFile, getWorkflowPath());
 
-    // P1.3 Shadow validation: warn-only after every state mutation.
-    // Filters out `missing` (pre-existing over-flagging from PHASE_ORDER vs actual workflow paths)
-    // and surfaces only the precise content-schema mismatches added in P1.2.
-    // Disable with DEVT_VALIDATE_SHADOW=0. Failures are swallowed — shadow mode never blocks updates.
-    if (process.env.DEVT_VALIDATE_SHADOW !== "0") {
-      try {
-        const validation = validateConsistency();
-        const precise = (validation.mismatches || []).filter(
-          (m) => m.reason && m.reason !== "missing",
+    // Stderr emission and _validation echo for visibility (non-blocking)
+    if (preciseMismatches.length > 0) {
+      current._validation = { consistent: false, mismatches: preciseMismatches };
+      process.stderr.write(
+        `[devt:shadow] ${preciseMismatches.length} consistency warning(s) after state update\n`,
+      );
+      for (const m of preciseMismatches.slice(0, 5)) {
+        const detail = m.actual ? ` actual="${m.actual}"` : "";
+        process.stderr.write(
+          `  - ${m.expected_artifact} (${m.reason})${detail}\n`,
         );
-        if (precise.length > 0) {
-          current._validation = { consistent: false, mismatches: precise };
-          process.stderr.write(
-            `[devt:shadow] ${precise.length} consistency warning(s) after state update\n`,
-          );
-          for (const m of precise.slice(0, 5)) {
-            const detail = m.actual ? ` actual="${m.actual}"` : "";
-            process.stderr.write(
-              `  - ${m.expected_artifact} (${m.reason})${detail}\n`,
-            );
-          }
-        }
-      } catch (e) {
-        process.stderr.write(`[devt:shadow] validation skipped: ${e.message}\n`);
       }
     }
 
