@@ -5,15 +5,10 @@
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# Use parent PID (the Claude Code process) so the counter persists across hook invocations
-# Use XDG_RUNTIME_DIR (user-private) or fall back to TMPDIR with random suffix for safety
+# Counter keyed by Claude Code's PID (PPID from this hook's perspective) so it persists
+# across hook invocations within a session. Use XDG_RUNTIME_DIR (user-private) or TMPDIR.
 _DEVT_COUNTER_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
-COUNTER_FILE="${_DEVT_COUNTER_DIR}/devt-tool-count-${PPID}-$$"
-# Reuse existing counter if one exists for this parent PID (glob match)
-_EXISTING=$(ls "${_DEVT_COUNTER_DIR}"/devt-tool-count-"${PPID}"-* 2>/dev/null | head -1 || true)
-if [[ -n "$_EXISTING" ]]; then
-  COUNTER_FILE="$_EXISTING"
-fi
+COUNTER_FILE="${_DEVT_COUNTER_DIR}/devt-tool-count-${PPID}"
 # No trap — file persists for the session. Claude Code's process exit cleans up via OS.
 
 # Read and increment counter
