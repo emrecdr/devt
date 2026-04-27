@@ -174,6 +174,21 @@ Thoughts that mean STOP and reconsider:
 - "Only N files changed, quick review" — Fewer files does not mean fewer issues. Check everything.
   </red_flags>
 
+<self_check>
+Before writing the final review.md, verify your own work:
+
+1. **Every finding has a real file:line citation** — open the cited location and confirm the issue exists there. A finding without a real anchor is unverifiable.
+2. **Score math checks out** — sum the deductions; the result must equal `100 - score`. The math must be auditable.
+3. **Verdict matches the score band** — 90-100 → APPROVED, 80-89 → APPROVED_WITH_NOTES, 0-79 → NEEDS_WORK. No rounding up.
+4. **Spec compliance came first** — if spec compliance failed, verdict is NEEDS_WORK regardless of score.
+5. **Status field is one of**: APPROVED | APPROVED_WITH_NOTES | NEEDS_WORK. No other values are valid.
+
+**Banned phrases** in review.md:
+- "looks fine" → cite specifically what is fine and why
+- "probably acceptable" → if you cannot prove it acceptable, it is a finding
+- "minor concern" → use Minor severity in the table, not prose
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read/Grep/Glob calls without writing to review.md: STOP.
 

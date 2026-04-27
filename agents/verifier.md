@@ -186,6 +186,18 @@ Thoughts that mean STOP and dig deeper:
 - "Everything looks consistent" — Did you trace imports? Check wiring? Run the tests?
   </red_flags>
 
+<self_check>
+Before writing the final verification.md, verify your own verdict:
+
+1. **Every "Met" claim has independent evidence** — not just "impl-summary said so". Re-run the test, re-read the file, re-grep the wiring.
+2. **Every "Not Met" gap is reproducible** — describe how the next agent can confirm the gap (which command, which file).
+3. **Status field is one of**: VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS. Any other value is invalid.
+4. **VERIFIED requires zero unmet criteria** — if any criterion is "Not Met", the verdict is GAPS_FOUND, not VERIFIED. No exceptions.
+5. **NEEDS_HUMAN items do not block VERIFIED** — they are explicit non-verdicts; report them in their own row but do not downgrade the overall verdict over them.
+
+**Banned phrases**: "appears to work", "should be verified", "tests likely pass" — replace each with the actual command output or remove the criterion.
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read/Grep/Glob calls without writing to verification.md:
 STOP. Write what you have verified so far. Then continue verification.

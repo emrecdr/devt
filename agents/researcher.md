@@ -127,6 +127,16 @@ ${CLAUDE_PLUGIN_ROOT}/templates/research-template.md
 - "I need to read more" → After 5+ reads, write what you know. See analysis paralysis guard.
   </red_flags>
 
+<self_check>
+Before finalizing research.md, verify each claim:
+
+1. **Every claim has a provenance tag** — `[codebase: file:line]`, `[docs: URL]`, or `[inference]`. Untagged claims are unverifiable.
+2. **Codebase claims are real** — open every cited file:line and confirm the pattern exists. A wrong citation is worse than no citation.
+3. **The "Recommended Approach" is prescriptive** — "Use X because Y" with concrete reasoning. If you wrote "consider X or Y", pick one.
+4. **Confidence rating is justified** — HIGH requires verified codebase evidence; MEDIUM allows inference from consistent patterns; LOW must say what is missing.
+5. **Status field is one of**: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read/Grep/Glob calls without writing findings:
 STOP. Write your current understanding to .devt/state/research.md.

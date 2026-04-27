@@ -112,6 +112,17 @@ You have a limited number of turns (see maxTurns in frontmatter). As you approac
 Never let a turn limit expire silently. Partial output > no output.
 </turn_limit_awareness>
 
+<self_check>
+Before writing arch-review.md, verify your own findings:
+
+1. **Every boundary violation cites a real import** — grep for the import you flag; if it does not exist, the finding is wrong.
+2. **Coupling claims have concrete evidence** — name the shared state, the cross-module call, or the dependency. "Tight coupling" without a path is opinion.
+3. **Duplication findings show both locations** — file:line for both copies, with enough context to confirm they are the same concept.
+4. **Status field is one of**: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+
+**Banned phrases**: "feels coupled", "seems duplicated", "could be cleaner" — replace each with concrete evidence or remove the finding.
+</self_check>
+
 <output_format>
 Write `.devt/state/arch-review.md` with:
 

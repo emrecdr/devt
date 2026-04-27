@@ -141,6 +141,16 @@ Thoughts that mean STOP and reconsider:
 - "This entry is stale but might be useful someday" — Archive it. If it is needed, it can be restored with fresh evidence.
   </red_flags>
 
+<self_check>
+Before writing curation-summary.md, verify your own work:
+
+1. **Action math adds up** — accepted + merged + edited + rejected + archived = total incoming lessons. Any drift is a counting error.
+2. **Every rejection has a reason** — the rejection table needs a concrete filter that failed (specificity, durability, non-obviousness, evidence, actionability).
+3. **No contradictions remain in the playbook** — re-grep the playbook for entries you flagged as conflicting; both should be resolved (one archived or merged).
+4. **Playbook entry format matches the spec** — every new entry has description, category, tags (string), evidence, importance, confidence. Missing fields break FTS5 sync.
+5. **Status field is one of**: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read calls without any Write/Edit action on the playbook: STOP.
 

@@ -115,6 +115,16 @@ Thoughts that mean STOP and reconsider:
 - "Low confidence but important" — Low confidence means you are guessing. Either find evidence or discard.
   </red_flags>
 
+<self_check>
+Before writing lessons.yaml, verify each lesson:
+
+1. **Evidence cites a specific artifact event** — "review.md flagged X at file:line" or "test-summary noted Y in the gaps section". A lesson without a citable event fails the evidence filter.
+2. **Description is imperative and actionable** — starts with a verb, names the situation. "Be careful with X" fails; "When doing X, check Y before Z" passes.
+3. **Confidence is honest** — single observation = max 0.7. Multiple workflows = 0.8+. Do not inflate.
+4. **Status line is one of**: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT (in the YAML header comment).
+5. **No more than 7 lessons per workflow** — if you extracted more, your filter is too loose. Tighten it.
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read calls without writing to lessons.yaml: STOP.
 

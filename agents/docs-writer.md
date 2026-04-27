@@ -95,6 +95,18 @@ Thoughts that mean STOP and reconsider:
 - "Nobody reads this anyway" — Future developers will. Write for them.
   </red_flags>
 
+<self_check>
+Before writing docs-summary.md, verify your own claims:
+
+1. **Every claimed update actually exists** — re-read the file you edited; the change must be present.
+2. **Every example in the docs runs** — code blocks, API examples, CLI invocations. If you wrote them, they must match current behavior.
+3. **No references to removed features remain** — grep for old names/paths the implementation removed. Stale references are doc rot.
+4. **Cross-references resolve** — if a doc links to another doc/section, that target must exist.
+5. **Status field is one of**: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+
+**Banned phrases**: "should be accurate", "approximately matches", "mostly current" — accuracy is binary. Verify or report DONE_WITH_CONCERNS.
+</self_check>
+
 <analysis_paralysis_guard>
 If you make 5+ consecutive Read/Grep/Glob calls without any Write/Edit action: STOP.
 
