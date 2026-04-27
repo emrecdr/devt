@@ -135,6 +135,15 @@ const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 // Always preserved by prune — cross-workflow inputs not tied to a single phase.
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
 
+// Mismatch reason codes emitted by validateConsistency() and consumed by
+// describeMismatch() and updateState()'s shadow-validation filter.
+const MISMATCH_REASONS = Object.freeze({
+  MISSING: "missing",
+  NO_STATUS_LINE: "no_status_line",
+  UNREADABLE: "unreadable",
+  INVALID_STATUS: "invalid_status",
+});
+
 // Allowed `## Status` values per artifact. Used by validateConsistency to detect
 // invalid status values that pass file-existence checks but would mislead downstream agents.
 // Artifacts without a stable status enum (plan.md, lessons.yaml, scan-results.md) are omitted.
@@ -257,7 +266,7 @@ function validateConsistency(stateOverride = null) {
       const artifactPath = path.join(stateDir, artifact);
       const exists = fs.existsSync(artifactPath);
       if (!exists) {
-        mismatches.push({ phase, expected_artifact: artifact, reason: "missing", exists: false });
+        mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.MISSING, exists: false });
         continue;
       }
       // Existence passed — check content schema if one is defined
@@ -267,19 +276,29 @@ function validateConsistency(stateOverride = null) {
       try {
         content = fs.readFileSync(artifactPath, "utf8");
       } catch (e) {
-        mismatches.push({ phase, expected_artifact: artifact, reason: "unreadable", error: e.message });
+        mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.UNREADABLE, error: e.message });
         continue;
       }
       const status = extractStatus(content);
       if (status === null) {
-        mismatches.push({ phase, expected_artifact: artifact, reason: "no_status_line", allowed: allowedStatuses });
+        mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.NO_STATUS_LINE, allowed: allowedStatuses });
       } else if (!allowedStatuses.includes(status)) {
-        mismatches.push({ phase, expected_artifact: artifact, reason: "invalid_status", actual: status, allowed: allowedStatuses });
+        mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.INVALID_STATUS, actual: status, allowed: allowedStatuses });
       }
     }
   }
 
   return { consistent: mismatches.length === 0, mismatches };
+}
+
+function describeMismatch(m) {
+  switch (m.reason) {
+    case MISMATCH_REASONS.MISSING: return "is missing";
+    case MISMATCH_REASONS.NO_STATUS_LINE: return "has no `## Status` line";
+    case MISMATCH_REASONS.UNREADABLE: return "is unreadable";
+    case MISMATCH_REASONS.INVALID_STATUS: return `has invalid status "${m.actual}" (allowed: ${(m.allowed || []).join(", ")})`;
+    default: return `failed validation (${m.reason || "unknown"})`;
+  }
 }
 
 function sleepSync(ms) {
@@ -374,37 +393,31 @@ function updateState(keyValues) {
       validateStateEntry(key, value);
       current[key] = value;
     }
-    // P1.3 Validation: runs before write so the persisted state reflects the verdict.
-    // Filters out `missing` (pre-existing PHASE_ORDER over-flagging) and surfaces only
-    // the precise content-schema mismatches added in P1.2. Disable with DEVT_VALIDATE_SHADOW=0.
-    let validationFlag = null;
-    let validationCount = 0;
+    // Run before write so the validation verdict and the data hit disk in a single atomic write —
+    // a crash between two writes would leave the flag desynced from the state it describes.
+    // `missing` mismatches are filtered: PHASE_ORDER assumes linear progression but TRIVIAL/SIMPLE
+    // tiers legitimately skip phases, so absent artifacts aren't reliable violations. Content-schema
+    // mismatches only fire when the artifact exists, so they're the actionable signal.
     let preciseMismatches = [];
     if (process.env.DEVT_VALIDATE_SHADOW !== "0") {
       try {
         const validation = validateConsistency(current);
         preciseMismatches = (validation.mismatches || []).filter(
-          (m) => m.reason && m.reason !== "missing",
+          (m) => m.reason && m.reason !== MISMATCH_REASONS.MISSING,
         );
-        if (preciseMismatches.length > 0) {
-          validationFlag = "warned";
-          validationCount = preciseMismatches.length;
-        }
       } catch (e) {
         process.stderr.write(`[devt:shadow] validation skipped: ${e.message}\n`);
       }
     }
-    // Persist the flag in workflow.yaml so /devt:next and downstream consumers can route on it.
-    // Clear stale flags actively when validation passes so warnings don't linger forever.
-    if (validationFlag) {
-      current.validation_status = validationFlag;
-      current.validation_warnings = validationCount;
+    if (preciseMismatches.length > 0) {
+      current.validation_status = "warned";
+      current.validation_warnings = preciseMismatches.length;
     } else if (current.validation_status) {
-      current.validation_status = null;
-      current.validation_warnings = null;
+      // Delete (rather than set to null) so cleared flags don't linger as `validation_status: null`
+      delete current.validation_status;
+      delete current.validation_warnings;
     }
 
-    // Atomic write: temp file + rename (single write, includes validation flag)
     const tmpFile = getWorkflowPath() + ".tmp";
     fs.writeFileSync(tmpFile, serializeSimpleYaml(current));
     fs.renameSync(tmpFile, getWorkflowPath());
@@ -416,10 +429,7 @@ function updateState(keyValues) {
         `[devt:shadow] ${preciseMismatches.length} consistency warning(s) after state update\n`,
       );
       for (const m of preciseMismatches.slice(0, 5)) {
-        const detail = m.actual ? ` actual="${m.actual}"` : "";
-        process.stderr.write(
-          `  - ${m.expected_artifact} (${m.reason})${detail}\n`,
-        );
+        process.stderr.write(`  - ${m.expected_artifact} ${describeMismatch(m)}\n`);
       }
     }
 
@@ -636,6 +646,7 @@ module.exports = {
   pruneState,
   checkWorkflowLock,
   validateConsistency,
+  describeMismatch,
   getStateDir,
   ensureStateDir,
   PHASE_ORDER,
@@ -645,5 +656,5 @@ module.exports = {
   VALID_TIERS,
   INPUT_ARTIFACTS,
   PERSISTENT_ARTIFACTS,
-  ARTIFACT_SCHEMA,
+  MISMATCH_REASONS,
 };

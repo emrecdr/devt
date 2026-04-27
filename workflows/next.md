@@ -164,7 +164,7 @@ Route based on `workflow_type`:
 - missing/unknown → Execute `/devt:workflow` (default)
 
 ### Active workflow, validation_status="warned"
-If `validation_status` is `warned` in state, a prior phase's artifact has an invalid `## Status` value (P1.3 enforcement flag, set by `bin/modules/state.cjs`). Surface this to the user before routing further:
+If `validation_status` is `warned` in state, a prior phase's artifact has an invalid `## Status` value. Surface this to the user before routing further:
 ```
 Validation flag set: {validation_warnings} consistency warning(s) from a prior phase.
 The artifact passed file existence but its status value is not in the allowed enum.
