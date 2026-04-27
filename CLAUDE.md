@@ -19,7 +19,7 @@ Supporting layers:
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`, default `standard`). `hooks/quality-gate-verifier.md` is an opt-in template that projects wire into their own `.claude/settings.json` — not auto-registered.
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
 - **References** (`references/`) — Technique libraries for agent workflows. Static guidance documents read by workflows during specify/clarify phases (questioning guide, domain probes).
-- **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management.
+- **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management, and CI verification (`smoke-test.sh`, `test-locking.cjs`).
 
 #### Hook Profiles
 
@@ -54,7 +54,7 @@ Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. 
 
 ### State Flow
 
-Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining, plus `validation_status`/`validation_warnings` set by shadow-mode content-schema checks), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger investigation log, within-session only), `scratchpad.md` (cross-workflow deferred findings and scope reduction notes), `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`, consumed by `/devt:next`), `continue-here.md` (from `/devt:pause`), `review-scope.md` (code-review file list), `session-report.md`, `autoskill-proposals.md`, `arch-baseline.json` (arch-health prior scan), `arch-triage.json` (arch-health triage decisions), `scanner-output.txt` (arch-health raw output), `scan-delta.md` (arch-health delta summary). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
+Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining, plus `validation_status`/`validation_warnings` set by shadow-mode content-schema checks), `impl-summary.md`, `test-summary.md`, `review.md`, `verification.md`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml`, `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md` (debugger investigation log, within-session only), `scratchpad.md` (ephemeral within-workflow notes for cross-agent handoff; reset between workflows), `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`, consumed by `/devt:next`), `continue-here.md` (from `/devt:pause`), `review-scope.md` (code-review file list), `session-report.md`, `autoskill-proposals.md`, `arch-baseline.json` (arch-health prior scan), `arch-triage.json` (arch-health triage decisions), `scanner-output.txt` (arch-health raw output), `scan-delta.md` (arch-health delta summary). The learning playbook (`.devt/learning-playbook.md`) and FTS5 database (`memory/semantic/lessons.db`) persist across workflows. `debug-knowledge-base.md` lives at the **project root** (not `.devt/state/`) because it is persistent cross-workflow knowledge, not per-workflow state.
 
 #### `workflow_type` Registry
 
@@ -114,7 +114,16 @@ node bin/devt-tools.cjs update clear-cache
 node bin/devt-tools.cjs update changelog
 ```
 
-There are no build steps, test suites, or linters configured for the plugin itself. The codebase is all CommonJS Node.js (`.cjs`) for the tooling and Markdown for prompts/workflows/agents.
+There are no build steps or linters configured for the plugin itself. The codebase is all CommonJS Node.js (`.cjs`) for the tooling and Markdown for prompts/workflows/agents.
+
+CI runs two test scripts on every push (`.github/workflows/ci.yml`):
+
+```bash
+bash scripts/smoke-test.sh       # 11 CLI smoke checks (manifest parses, init/state/config/models/update return JSON, 50 KB cap rejection, concurrent locking)
+node scripts/test-locking.cjs    # 20-worker concurrent state-write test — asserts no lost updates, no orphaned .lock
+```
+
+Run both locally before committing changes to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ## Key Conventions
 

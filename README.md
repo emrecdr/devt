@@ -430,7 +430,10 @@ devt/
   protocols/              # Interaction protocols (checkpoint, status enum, UI presentation)
   standards/              # Development pattern standards
   references/             # Technique libraries (questioning guide, domain probes)
-  scripts/                # Utility scripts (quality gates, prompt injection scanning)
+  scripts/                # Utility scripts (quality gates, prompt injection
+                          # scanning, CI smoke + concurrent locking tests)
+  .github/workflows/      # CI: smoke-test on Node 22/24, version coherence,
+                          # workflow_type registry coverage
   templates/              # Project templates (python-fastapi, go, typescript-node,
                           # vue-bootstrap, blank)
   memory/                 # Memory schemas and semantic index
