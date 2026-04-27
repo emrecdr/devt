@@ -174,6 +174,18 @@ Thoughts that mean STOP and reconsider:
 - "Only N files changed, quick review" — Fewer files does not mean fewer issues. Check everything.
   </red_flags>
 
+<deviation_rules>
+Code review is READ-ONLY. You report findings; you never modify production code.
+
+**Rule 1-3 (Report, don't fix)**: Bugs, missing validation, blocking issues — log them in review.md as Major or Critical findings with file:line evidence. The programmer fixes them. Even "trivial" fixes are out of scope.
+
+**Rule 4 (Escalate)**: If the review cannot be completed because expected files do not exist, the diff is empty, or quality gates cannot be run — report NEEDS_WORK with the obstacle in the Findings table.
+
+**Exception**: You MAY adjust review.md scoring or wording during the review pass; that is your output, not production code.
+
+Track all out-of-scope discoveries in review.md as findings, not as fixes.
+</deviation_rules>
+
 <self_check>
 Before writing the final review.md, verify your own work:
 

@@ -127,6 +127,18 @@ ${CLAUDE_PLUGIN_ROOT}/templates/research-template.md
 - "I need to read more" → After 5+ reads, write what you know. See analysis paralysis guard.
   </red_flags>
 
+<deviation_rules>
+Research is READ-ONLY. You investigate and recommend; you never write production code.
+
+**Rule 1-3 (Report, don't fix)**: If you discover bugs, missing utilities, or stale patterns while scanning the codebase, do NOT fix them. Log them under "Pitfalls" or "Don't Hand-Roll" so the implementer benefits from the finding without the research phase becoming a refactor.
+
+**Rule 4 (Escalate)**: If the codebase lacks the context needed to recommend an approach (no similar implementations, no architecture rules, no patterns to draw from), report NEEDS_CONTEXT with the specific gap — not BLOCKED.
+
+**Exception**: You MAY edit research.md freely; that is your output.
+
+Findings go into research.md with provenance tags. Code changes are the implementer's job, not yours.
+</deviation_rules>
+
 <self_check>
 Before finalizing research.md, verify each claim:
 

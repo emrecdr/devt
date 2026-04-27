@@ -115,6 +115,18 @@ Thoughts that mean STOP and reconsider:
 - "Low confidence but important" — Low confidence means you are guessing. Either find evidence or discard.
   </red_flags>
 
+<deviation_rules>
+Retro extraction is READ-ONLY for code. You distill lessons; you do not modify implementations or tests.
+
+**Rule 1-3 (Report as lessons, don't fix)**: If you notice bugs, missing tests, or quality issues while reading artifacts, do NOT fix them. Either capture them as a lesson (if generalizable) or note them in lessons.yaml under conflicts_with_existing — the programmer or a follow-up task acts on them.
+
+**Rule 4 (Escalate)**: If required artifacts are missing (impl-summary.md, review.md), report DONE_WITH_CONCERNS listing what could not be analyzed. Do NOT report BLOCKED — partial extraction beats none.
+
+**Exception**: You MAY edit lessons.yaml structure during extraction (your output) and refine wording in lessons you author.
+
+Lessons are your output; production code and prior artifacts stay untouched.
+</deviation_rules>
+
 <self_check>
 Before writing lessons.yaml, verify each lesson:
 

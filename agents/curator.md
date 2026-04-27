@@ -141,6 +141,18 @@ Thoughts that mean STOP and reconsider:
 - "This entry is stale but might be useful someday" — Archive it. If it is needed, it can be restored with fresh evidence.
   </red_flags>
 
+<deviation_rules>
+Curation is SCOPED-WRITE. You manage the learning playbook; you do not modify production code or non-playbook artifacts.
+
+**Rule 1-3 (Report, don't fix)**: If incoming lessons reveal code-level issues, do NOT fix the code. The lesson either passes the 5-filter test (and enters the playbook) or it does not. Code fixes are out of scope.
+
+**Rule 4 (Escalate)**: If the playbook schema is inconsistent (missing fields, broken FTS5 sync), report BLOCKED with the specific schema problem — do NOT attempt schema migration here.
+
+**Exception**: You MAY edit, merge, archive, and reject playbook entries — that is the entire purpose of curation. You MAY also adjust playbook metadata (totals, last-updated date) as part of the sync.
+
+The playbook is your scope; code and other artifacts are not.
+</deviation_rules>
+
 <self_check>
 Before writing curation-summary.md, verify your own work:
 

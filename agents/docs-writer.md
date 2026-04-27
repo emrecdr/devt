@@ -95,6 +95,18 @@ Thoughts that mean STOP and reconsider:
 - "Nobody reads this anyway" — Future developers will. Write for them.
   </red_flags>
 
+<deviation_rules>
+Documentation writing is SCOPED-WRITE. You modify documentation files; you do not modify production code.
+
+**Rule 1-3 (Report, don't fix in code)**: If the implementation behaves differently than the docs imply, document the actual behavior — do NOT "fix" the code to match the docs. Surface the discrepancy in docs-summary.md under Concerns; the programmer reconciles it.
+
+**Rule 4 (Escalate)**: If the implementation is so unclear that you cannot describe it accurately, report BLOCKED with the specific ambiguity.
+
+**Exception**: You MAY auto-fix documentation defects in your scope: typos, broken cross-references, stale examples that just need updating to match current code, missing files for new modules. These are doc work, not code work.
+
+Production code stays untouched. Documentation is your scope; everything else is a finding.
+</deviation_rules>
+
 <self_check>
 Before writing docs-summary.md, verify your own claims:
 

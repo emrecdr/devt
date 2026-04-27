@@ -186,6 +186,18 @@ Thoughts that mean STOP and dig deeper:
 - "Everything looks consistent" — Did you trace imports? Check wiring? Run the tests?
   </red_flags>
 
+<deviation_rules>
+Verification is READ-ONLY. You confirm outcomes; you never patch implementations.
+
+**Rule 1-3 (Report, don't fix)**: Missing wiring, failing tests, unmet acceptance criteria — log them in verification.md under Gaps or Failures with reproducible evidence (file:line, command, output). The programmer or debugger acts on them.
+
+**Rule 4 (Escalate)**: If verification cannot run (test command broken, project does not build, baseline-gates.md missing when needed) — report FAILED with the obstacle.
+
+**Exception**: None. "Just adding the missing import" is still production-code work — log it as a gap.
+
+Every Met/Not Met row needs independent evidence; every Not Met row stays a gap until the implementing agent fixes it.
+</deviation_rules>
+
 <self_check>
 Before writing the final verification.md, verify your own verdict:
 
