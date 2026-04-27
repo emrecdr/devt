@@ -323,35 +323,73 @@ Atomic, dependency-ordered implementation tasks:
 ```
 </step>
 
-<step name="validate_spec" gate="spec passes self-review">
+<step name="validate_spec" gate="spec passes self-review with score >= 8 OR user accepted lower score">
 ## Step 5: Spec Validation
 
-Before presenting to the user, self-review the generated PRD against these checks:
+Self-review the generated PRD against five dimensions. Each scores 0-2, summed to a 0-10 ambiguity score.
+Fix issues inline first, then score what remains. Do not ask the user about fixable issues — just fix them.
 
-**1. Placeholder scan**: Search for unfilled template brackets `{`, `[`, `TBD`, `TODO`, or empty sections.
-- If found: fill them from interview answers or remove the section if not applicable.
+### Scoring Dimensions (0 = broken, 1 = partial, 2 = clean)
 
-**2. Internal consistency**: Check for contradictions between sections.
+**1. Placeholder scan** — search for unfilled template brackets `{`, `[`, `TBD`, `TODO`, or empty sections.
+- 2: zero placeholders remain
+- 1: ≤2 placeholders, all in non-critical sections
+- 0: ≥3 placeholders or any in critical sections (Summary, Decisions, Tasks)
+
+**2. Internal consistency** — check for contradictions between sections.
 - Does the API design match the data model?
 - Do test scenarios cover the features listed in scope?
 - Do tasks align with the implementation phases?
+- 2: no contradictions
+- 1: one minor contradiction (e.g., naming drift between sections)
+- 0: ≥2 contradictions or any contradiction in API/data/scope
 
-**3. Scope check**: Is the spec focused enough for a single workflow run?
-- If the spec describes multiple independent features, flag it: "This spec covers N independent features. Consider splitting into separate specs."
+**3. Scope focus** — is the spec focused enough for a single workflow run?
+- 2: one coherent feature with clear boundary
+- 1: one feature with optional sub-features that could be deferred
+- 0: multiple independent features bundled together — flag for splitting
 
-**4. Ambiguity check**: Could any requirement be interpreted two different ways?
+**4. Ambiguity** — could any requirement be interpreted two different ways?
 - Vague terms without definition ("fast", "secure", "user-friendly") → make them measurable
 - Missing error behavior → add what happens on failure for each API endpoint
+- 2: every requirement is measurable; every API endpoint has defined error behavior
+- 1: 1-2 vague terms remain or 1 endpoint missing error behavior
+- 0: ≥3 vague terms or multiple endpoints missing error behavior
 
-**5. Completeness check**: Are critical sections filled?
+**5. Completeness** — are critical sections filled with real content?
 - Summary: present and specific (not generic)?
 - Scope In/Out: both defined?
 - Decisions: at least one decision with reasoning?
 - Test scenarios: at least happy path + 1 error case?
 - Tasks: at least 2 ordered tasks?
+- 2: all five critical sections filled
+- 1: one critical section thin or missing
+- 0: ≥2 critical sections thin or missing
 
-If validation finds issues, fix them inline. Do not ask the user about fixable issues — just fix them.
-If a section is genuinely not applicable, remove it rather than leaving it empty.
+### Score and Soft-Gate
+
+Total = sum of all five dimensions (0-10).
+
+- **Score ≥ 8**: proceed silently to step 6.
+- **Score < 8**: surface the deductions to the user via AskUserQuestion before proceeding:
+
+```yaml
+question: "The spec scored {N}/10 on ambiguity check. Lower scores mean more interpretation is left to the implementer. Proceed anyway, or refine first?"
+header: "Spec Quality Gate"
+multiSelect: false
+options:
+  - label: "Refine the spec (recommended)"
+    description: "Walk through the deductions and fix them — usually 2-5 minutes of follow-up questions"
+  - label: "Proceed with this score"
+    description: "Accept the ambiguity; the implementer will need to make {N} interpretation decisions"
+```
+
+If the user picks "Refine", loop back to Step 3 (interview) targeting only the dimensions that lost points.
+If the user picks "Proceed", record the accepted score in the PRD's Assumptions table:
+`| Spec scored {N}/10 ({lost_dimensions}) | Implementer makes interpretation calls | Accepted |`
+
+The score is informational, not blocking — the user always has the final say. The gate exists to make
+implicit ambiguity explicit before it becomes implementation rework.
 </step>
 
 <step name="report" gate="user informed of output">
