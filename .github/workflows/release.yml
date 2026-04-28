@@ -47,7 +47,21 @@ jobs:
             exit 1
           fi
 
+      - name: Skip if release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping (likely backfilled manually)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract changelog section
+        if: steps.existing.outputs.skip != 'true'
         id: notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -60,6 +74,7 @@ jobs:
           echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
+        if: steps.existing.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
