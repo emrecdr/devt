@@ -28,13 +28,18 @@ The plugin adapts to any project -- Python, Go, TypeScript, or anything else -- 
 
 ## Installation
 
-### Via Claude Code plugin system
+### Via Claude Code plugin marketplace (recommended)
 
-```bash
-claude plugin add https://github.com/emrecdr/devt
+Inside any Claude Code session, register the marketplace and install the plugin:
+
+```text
+/plugin marketplace add emrecdr/devt
+/plugin install devt
 ```
 
-### Via git clone
+The marketplace lives at the repository root (`.claude-plugin/marketplace.json`), so this single command pair fetches the plugin straight from GitHub and keeps it updatable via `/plugin update devt`. All commands become available as `/devt:command-name`.
+
+### Via git clone (development / pre-marketplace use)
 
 ```bash
 git clone https://github.com/emrecdr/devt.git ~/.devt
@@ -51,6 +56,8 @@ To avoid typing `--plugin-dir` every time, add a shell alias:
 ```bash
 echo 'alias devt="claude --plugin-dir ~/.devt"' >> ~/.zshrc  # or ~/.bashrc
 ```
+
+The `--plugin-dir` path is the canonical development install — used internally to test changes against the live plugin. Plugin agents (`devt:programmer`, `devt:retro`, etc.) only register when devt is loaded via the marketplace install or the `--plugin-dir` flag; running `claude` from a project directory without either path discovers commands and skills via cwd auto-discovery but agents will not appear in `claude agents`.
 
 On first session start, devt registers commands under `~/.claude/commands/devt/` for autocomplete. All commands are available as `/devt:command-name`.
 

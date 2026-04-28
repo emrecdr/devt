@@ -1,0 +1,30 @@
+{
+  "name": "devt-dev",
+  "description": "Single-plugin marketplace for the devt multi-agent development workflow plugin",
+  "owner": {
+    "name": "Emre Camdere",
+    "url": "https://github.com/emrecdr"
+  },
+  "plugins": [
+    {
+      "name": "devt",
+      "description": "Lightweight multi-agent development workflow plugin. Language-agnostic — adapts to any project via .devt/rules/ convention. Commands -> Workflows -> Agents architecture with learning loops.",
+      "version": "0.10.0",
+      "source": "./",
+      "author": {
+        "name": "Emre Camdere",
+        "url": "https://github.com/emrecdr"
+      },
+      "homepage": "https://github.com/emrecdr/devt",
+      "repository": "https://github.com/emrecdr/devt",
+      "license": "MIT",
+      "keywords": [
+        "claude-code",
+        "claude-code-plugin",
+        "ai-agents",
+        "multi-agent",
+        "development-workflow"
+      ]
+    }
+  ]
+}
