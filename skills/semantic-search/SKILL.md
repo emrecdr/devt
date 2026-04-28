@@ -44,6 +44,27 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic query "your search quer
 
 This uses FTS5 (full-text search) on the playbook database. Results are ranked by relevance and include the full lesson entry with scores. If no database exists, falls back to keyword matching on .devt/learning-playbook.md.
 
+FTS5 default semantics treat space-separated terms as AND. For broader recall, join terms with `OR`: `"pagination OR cursor OR offset"`.
+
+#### Filter Flags
+
+When the playbook is large or the task is well-scoped, narrow the result set with filters. Filters are applied *after* FTS5 ranking, so match quality is preserved.
+
+| Flag | Effect | Example |
+|---|---|---|
+| `--limit=N` | Cap the number of results (default 10) | `--limit=5` |
+| `--min-importance=N` | Drop rows with importance < N (1-10 scale) | `--min-importance=7` |
+| `--min-confidence=F` | Drop rows with confidence < F (0.0-1.0) | `--min-confidence=0.7` |
+| `--category=NAME` | Exact category match (case-insensitive) | `--category=security` |
+| `--tags=a,b,c` | Match if ANY listed tag is present | `--tags=repository,boundaries` |
+
+Combine flags freely. A short, high-signal context window for an architecture refactor:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic query "repository boundaries" \
+  --category=architecture --min-importance=7 --limit=5
+```
+
 ### Step 3: Evaluate Results
 
 For each result:

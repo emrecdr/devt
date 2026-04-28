@@ -1,28 +1,47 @@
 # Quality Gates — Python / FastAPI
 
-## Gate 1: Linting & Formatting
+> **About `parallel`**: gates tagged ``` ```bash parallel ``` are run concurrently
+> by `scripts/run-quality-gates.sh`. Consecutive parallel-tagged blocks form one
+> batch and finish when the slowest member finishes. Sequential blocks (no tag)
+> run one at a time and force a flush of any pending parallel batch first.
+> Use `parallel` only for read-only checks. Tools that mutate code (e.g.
+> `ruff --fix`, `ruff format` without `--check`) belong in a fix-helper script,
+> not a quality gate.
 
-```bash
-uv run ruff check --fix . && uv run ruff format --check .
+## Gate 1: Lint (read-only)
+
+```bash parallel
+uv run ruff check .
 ```
 
-Enforces consistent style, catches common errors, auto-fixes where possible. Formatting check ensures consistent code style without `black`/`isort`.
+Catches lint errors. Read-only — does not modify files. Auto-fix is intentionally
+NOT part of the gate (gates report, fix-helpers fix). Run `uv run ruff check --fix .`
+manually when you want auto-fixes applied.
 
-## Gate 2: Type Checking
+## Gate 2: Format check (read-only)
 
-```bash
+```bash parallel
+uv run ruff format --check .
+```
+
+Asserts every file matches the formatter's expected output. Read-only.
+
+## Gate 3: Type checking (read-only)
+
+```bash parallel
 uv run mypy .
 ```
 
-Type errors are blocking. All code must pass strict type checking. Alternative: `uv run pyright` if the project uses pyright.
+Type errors are blocking. Read-only. Alternative: `uv run pyright`.
 
-## Gate 3: Unit Tests
+## Gate 4: Unit tests
 
 ```bash
 uv run pytest tests/unit/ -x
 ```
 
-Runs unit tests, stops on first failure. All tests must pass.
+Runs unit tests, stops on first failure. Sequential — runs after the parallel
+read-only batch above.
 
 ## Pass Criteria
 
@@ -31,14 +50,6 @@ Runs unit tests, stops on first failure. All tests must pass.
 - Run all gates before pushing code
 - CI pipeline enforces these same gates on every PR
 
-## Quick Reference
-
-Run all gates sequentially:
-
-```bash
-uv run ruff check --fix . && uv run ruff format --check . && uv run mypy . && uv run pytest tests/unit/ -x
-```
-
 ## Optional: Full Validation
 
 For thorough pre-push validation including integration and E2E tests:
@@ -46,3 +57,10 @@ For thorough pre-push validation including integration and E2E tests:
 ```bash
 uv run pytest tests/ -x
 ```
+
+## Fix Helpers (NOT gates)
+
+These mutate code. Run manually, never as part of `/devt:quality`:
+
+- `uv run ruff check --fix .` — apply auto-fixable lint suggestions
+- `uv run ruff format .` — reformat files in place

@@ -38,9 +38,11 @@ npx vitest run
 
 ## Quick Reference
 
-Run all gates sequentially:
+Run all gates sequentially (copy-paste for manual runs — `/devt:quality` runs each
+gate above as its own block; the runner's security validator rejects shell
+chaining operators inside fenced bash blocks, so this aggregator is `text`):
 
-```bash
+```text
 npx eslint . && npx tsc --noEmit && npx jest --ci
 ```
 

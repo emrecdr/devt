@@ -29,11 +29,11 @@
   },
 
   "arch_scanner": {
-    "command": "uv run python scripts/arch_scanner.py",
-    "_command_doc": "Shell command to run the architecture health scanner. Set to null to disable.",
+    "command": null,
+    "_command_doc": "Shell command to run YOUR architecture scanner. devt does not ship one — set this to whatever fits your stack: 'make arch-scan', 'uv run python scripts/arch_scanner.py', 'npx ts-arch', etc. Output is captured to .devt/state/scanner-output.txt and interpreted by the architect agent. Leave null to skip the scanner step (architect falls back to manual Grep/Glob analysis).",
 
     "report_dir": "docs/reports",
-    "_report_dir_doc": "Directory where scanner reports are written."
+    "_report_dir_doc": "Directory where scanner reports are written (only used if command is set)."
   },
 
   "workflow": {

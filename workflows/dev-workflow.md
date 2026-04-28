@@ -164,8 +164,9 @@ Then load project context:
 - Read `CLAUDE.md` if it exists
 - Search for relevant lessons: if `.devt/learning-playbook.md` exists, query it for entries relevant to the task:
   ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic query "{task_keywords}"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic query "{task_keywords}" --min-importance=6 --limit=8
   ```
+  Tighten the filters when the task is well-scoped — e.g., `--category=architecture` for a refactor, `--tags=testing,fixtures` when the task is test-focused, or `--min-importance=8` for a brief context window. Drop the filters entirely on broad tasks. Supported flags: `--limit=N`, `--min-importance=N` (1-10), `--min-confidence=F` (0-1), `--category=NAME`, `--tags=a,b,c`.
   Parse the JSON output. If `count > 0`, format results as a readable `learning_context` string for agent dispatches. Each result has `description` and `evidence` fields — format as a bulleted list:
     ```
     Relevant lessons from past workflows:

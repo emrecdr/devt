@@ -44,12 +44,150 @@ run_json "models get"      node "$CLI" models get quality
 run_json "update local-version" node "$CLI" update local-version
 run_json "health"          node "$CLI" health
 run_json "semantic status" node "$CLI" semantic status
+run_json "semantic query (no playbook)"  node "$CLI" semantic query "smoke" --min-importance=5 --limit=3
 run_json "report window"   node "$CLI" report window
+
+echo "== semantic query rejects unknown flag =="
+BAD_FLAG_OUT=$(node "$CLI" semantic query "x" --bogus 2>&1 || true)
+if echo "$BAD_FLAG_OUT" | grep -q "Unknown flag"; then
+  echo "PASS: unknown flag rejected"
+else
+  echo "FAIL: unknown flag was accepted"
+  echo "$BAD_FLAG_OUT"
+  exit 1
+fi
+
+echo "== semantic query rejects out-of-range value =="
+BAD_VAL_OUT=$(node "$CLI" semantic query "x" --min-importance=99 2>&1 || true)
+if echo "$BAD_VAL_OUT" | grep -q "must be 1-10"; then
+  echo "PASS: out-of-range importance rejected"
+else
+  echo "FAIL: out-of-range importance was accepted"
+  echo "$BAD_VAL_OUT"
+  exit 1
+fi
+
+echo "== parsePlaybook accepts both flat and YAML-list entry forms =="
+PARSER_TMP="$TMP/parser-test"
+mkdir -p "$PARSER_TMP/.devt"
+cat > "$PARSER_TMP/.devt/learning-playbook.md" <<'EOF_PB'
+- description: YAML-list form (matches schema example)
+  category: testing
+  importance: 7
+  tags: "testing"
+
+---
+
+description: Flat form
+category: architecture
+importance: 8
+tags: "architecture"
+EOF_PB
+PARSER_OUT=$(cd "$PARSER_TMP" && node "$CLI" semantic sync 2>&1)
+SYNCED=$(echo "$PARSER_OUT" | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).synced))" 2>/dev/null || echo 0)
+if [[ "$SYNCED" == "2" ]]; then
+  pass "parser handles both '- key: val' and 'key: val' forms (synced 2/2)"
+else
+  fail "parser regression — synced=$SYNCED, expected 2; output: $PARSER_OUT"
+fi
+# Clean the DB the test populated, otherwise it pollutes other smoke runs.
+rm -rf "$ROOT/memory/semantic/lessons.db" 2>/dev/null
+
+echo "== run-quality-gates.sh: rejection reasons are precise =="
+RQG_TMP="$TMP/reject-test"
+mkdir -p "$RQG_TMP/.devt/rules"
+cat > "$RQG_TMP/.devt/rules/quality-gates.md" <<'EOF_QG'
+```bash
+echo "first" && echo "second"
+```
+
+```bash
+forbidden_tool --doit
+```
+EOF_QG
+RQG_OUT=$(cd "$RQG_TMP" && bash "$ROOT/scripts/run-quality-gates.sh" 2>&1) || true
+if echo "$RQG_OUT" | grep -q "shell metacharacter" && echo "$RQG_OUT" | grep -q "not in ALLOWED_PREFIXES"; then
+  pass "rejection reasons distinguish metacharacter vs allowlist"
+else
+  fail "rejection messages did not surface both reasons. Output:"
+  echo "$RQG_OUT"
+fi
+
 
 # setup mutates the project — give it its own subdir so it starts clean
 SETUP_TMP="$TMP/setup-test"
 mkdir -p "$SETUP_TMP"
 run_json "setup --template blank" sh -c "cd '$SETUP_TMP' && node '$CLI' setup --template blank"
+
+echo "== run-quality-gates.sh: parallel batch runs concurrently and reports failures =="
+QG_TMP="$TMP/qg-test"
+mkdir -p "$QG_TMP/.devt/rules"
+# Use python3 with single-arg scripts (no `;` — those are blocked by the security
+# validator). Build sleep helper + always-fail helper as standalone files.
+cat > "$QG_TMP/qg_sleep.py" <<'EOF_QG'
+import sys, time
+time.sleep(float(sys.argv[1]))
+print(sys.argv[2])
+EOF_QG
+cat > "$QG_TMP/qg_fail.py" <<'EOF_QG'
+import sys
+sys.exit(int(sys.argv[1]))
+EOF_QG
+cat > "$QG_TMP/.devt/rules/quality-gates.md" <<'EOF_QG'
+# Test gates
+
+```bash parallel
+python3 qg_sleep.py 0.4 par1
+```
+
+```bash parallel
+python3 qg_sleep.py 0.4 par2
+```
+
+```bash parallel
+python3 qg_sleep.py 0.4 par3
+```
+
+```bash
+python3 qg_fail.py 0
+```
+EOF_QG
+QG_START=$(date +%s)
+QG_OUT=$(cd "$QG_TMP" && bash "$ROOT/scripts/run-quality-gates.sh" 2>&1) || true
+QG_END=$(date +%s)
+QG_ELAPSED=$((QG_END - QG_START))
+# 3 parallel sleeps of 0.4s + 1 sequential exit-0 = ~0.4s parallel, total <2s.
+# Sequential would be 1.2s+. Allow up to 2s slop for CI.
+if echo "$QG_OUT" | grep -q "Quality Gates: 4/4 passed" && [[ "$QG_ELAPSED" -le 2 ]]; then
+  pass "parallel batch (3 gates) ran concurrently in ${QG_ELAPSED}s"
+else
+  fail "parallel runner regression — elapsed=${QG_ELAPSED}s, output below"
+  echo "$QG_OUT"
+fi
+
+# Failure propagation in a parallel batch
+cat > "$QG_TMP/.devt/rules/quality-gates.md" <<'EOF_QG'
+# Test gates
+
+```bash parallel
+python3 qg_fail.py 0
+```
+
+```bash parallel
+python3 qg_fail.py 1
+```
+
+```bash parallel
+python3 qg_fail.py 0
+```
+EOF_QG
+QG_FAIL_OUT=$(cd "$QG_TMP" && bash "$ROOT/scripts/run-quality-gates.sh" 2>&1) || QG_FAIL_EC=$?
+if [[ "${QG_FAIL_EC:-0}" -ne 0 ]] && echo "$QG_FAIL_OUT" | grep -q "Quality Gates: 2/3 passed"; then
+  pass "parallel batch surfaces 1 failure of 3"
+else
+  fail "parallel failure propagation regression"
+  echo "$QG_FAIL_OUT"
+fi
 
 echo "== Length cap rejection =="
 LONG=$(node -e "process.stdout.write('x'.repeat(60000))")

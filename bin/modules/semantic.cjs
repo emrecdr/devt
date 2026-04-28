@@ -63,7 +63,12 @@ function parsePlaybook(playbookPath) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) continue;
 
-      const m = line.match(/^(\w+):\s*(.+)$/);
+      // Accept both flat `key: value` and YAML-list `- key: value` forms.
+      // The schema example in schemas/learning-entry.yaml uses the dash form,
+      // so any retro/curator output following the schema literally would have
+      // been silently dropped without this strip.
+      const cleanLine = line.replace(/^-\s+/, "");
+      const m = cleanLine.match(/^(\w+):\s*(.+)$/);
       if (m) {
         let val = m[2].trim();
         // Strip surrounding quotes
@@ -147,37 +152,86 @@ function syncEntries(db, entries) {
   return { inserted, skipped, firstError };
 }
 
+// ---------------------------------------------------------------------------
+// Filters (shared by FTS5 and grep paths)
+// ---------------------------------------------------------------------------
+
 /**
- * FTS5 full-text query. Returns structured results sorted by relevance.
+ * Apply post-query filters to a row. Returns true if the row passes.
+ * Operates on UNINDEXED FTS5 columns and string fields, never on rank.
  */
-function queryFts(db, terms, limit) {
+function passesFilters(row, opts) {
+  if (opts.minImportance != null) {
+    const imp = parseInt(row.importance, 10);
+    if (!Number.isFinite(imp) || imp < opts.minImportance) return false;
+  }
+  if (opts.minConfidence != null) {
+    const conf = parseFloat(row.confidence);
+    if (!Number.isFinite(conf) || conf < opts.minConfidence) return false;
+  }
+  if (opts.category) {
+    if ((row.category || "").toLowerCase() !== opts.category.toLowerCase()) return false;
+  }
+  if (opts.tags && opts.tags.length > 0) {
+    const rowTags = (row.tags || "")
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    const wanted = opts.tags.map((t) => t.toLowerCase());
+    if (!wanted.some((w) => rowTags.includes(w))) return false;
+  }
+  return true;
+}
+
+function hasAnyFilter(opts) {
+  return (
+    opts.minImportance != null ||
+    opts.minConfidence != null ||
+    !!opts.category ||
+    (opts.tags && opts.tags.length > 0)
+  );
+}
+
+/**
+ * FTS5 full-text query. Rows come back FTS5-ranked, then post-filtered in Node.
+ * When filters are active we over-fetch (capped at 200) so we still hit `limit`
+ * after filtering — preserves match quality while honoring the cap.
+ */
+function queryFts(db, terms, limit, opts) {
+  const fetch = hasAnyFilter(opts) ? Math.min(Math.max(limit * 5, 50), 200) : limit;
+
   const stmt = db.prepare(
     `SELECT description, category, tags, evidence, importance, confidence, decay_days, created_at
      FROM lessons WHERE lessons MATCH ? ORDER BY rank LIMIT ?`
   );
 
+  let rows;
   try {
-    return stmt.all(terms, limit);
+    rows = stmt.all(terms, fetch);
   } catch (_) {
     return null; // Table doesn't exist or query syntax error
   }
+
+  if (!hasAnyFilter(opts)) return rows;
+  return rows.filter((r) => passesFilters(r, opts)).slice(0, limit);
 }
 
 /**
  * Grep-based fallback when no FTS database exists.
  * Parses playbook entries and keyword-scores them, returning the same shape as FTS5.
  */
-function fallbackGrep(playbookPath, terms, limit) {
+function fallbackGrep(playbookPath, terms, limit, opts) {
   const entries = parsePlaybook(playbookPath);
   if (entries.length === 0) return [];
 
-  const keywords = terms.toLowerCase().split(/\s+/);
+  const keywords = terms.toLowerCase().split(/\s+/).filter(Boolean);
 
   const scored = [];
   for (const entry of entries) {
+    if (!passesFilters(entry, opts)) continue;
     const text = Object.values(entry).join(" ").toLowerCase();
     const score = keywords.reduce((s, kw) => s + (text.includes(kw) ? 1 : 0), 0);
-    if (score > 0) {
+    if (score > 0 || keywords.length === 0) {
       scored.push({ entry, score });
     }
   }
@@ -216,19 +270,46 @@ function sync(pluginRoot) {
 
 /**
  * Query for relevant lessons. Uses FTS5 if available, grep fallback otherwise.
+ *
+ * @param {string} terms - FTS5 query expression or space-separated keywords.
+ * @param {string} pluginRoot - CLAUDE_PLUGIN_ROOT (for db path resolution).
+ * @param {object|number} [opts] - Filter/pagination options. Number is treated
+ *                                 as legacy `limit` for backward compatibility.
+ * @param {number} [opts.limit=10]       - Max rows returned.
+ * @param {number} [opts.minImportance]  - Drop rows where importance < N (1-10).
+ * @param {number} [opts.minConfidence]  - Drop rows where confidence < F (0-1).
+ * @param {string} [opts.category]       - Exact (case-insensitive) category match.
+ * @param {string[]} [opts.tags]         - Match if ANY listed tag is present.
  */
-function query(terms, pluginRoot, limit) {
-  const lim = limit || 10;
+function query(terms, pluginRoot, opts) {
+  // Backward compat: callers passing a bare limit number still work.
+  const o = typeof opts === "number" ? { limit: opts } : (opts || {});
+  const lim = o.limit || 10;
+  const filterOpts = {
+    minImportance: o.minImportance,
+    minConfidence: o.minConfidence,
+    category: o.category,
+    tags: o.tags,
+  };
   const dbPath = getDbPath(pluginRoot);
   const playbook = getPlaybookPath();
+
+  const filtersApplied = {};
+  if (o.minImportance != null) filtersApplied.min_importance = o.minImportance;
+  if (o.minConfidence != null) filtersApplied.min_confidence = o.minConfidence;
+  if (o.category) filtersApplied.category = o.category;
+  if (o.tags && o.tags.length > 0) filtersApplied.tags = o.tags;
+  const hasFilters = Object.keys(filtersApplied).length > 0;
 
   // Try FTS5 first
   if (fs.existsSync(dbPath)) {
     try {
       const ftsResult = withDb(dbPath, (db) => {
-        const results = queryFts(db, terms, lim);
+        const results = queryFts(db, terms, lim, filterOpts);
         if (results !== null) {
-          return { source: "fts5", query: terms, count: results.length, results };
+          const out = { source: "fts5", query: terms, count: results.length, results };
+          if (hasFilters) out.filters = filtersApplied;
+          return out;
         }
         return null;
       });
@@ -239,8 +320,10 @@ function query(terms, pluginRoot, limit) {
   }
 
   // Grep fallback
-  const results = fallbackGrep(playbook, terms, lim);
-  return { source: "grep_fallback", query: terms, count: results.length, results };
+  const results = fallbackGrep(playbook, terms, lim, filterOpts);
+  const out = { source: "grep_fallback", query: terms, count: results.length, results };
+  if (hasFilters) out.filters = filtersApplied;
+  return out;
 }
 
 /**
@@ -297,6 +380,89 @@ function compact(pluginRoot, options) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// CLI argument parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Split args into positional terms and known flags.
+ * Supports `--flag=value` and `--flag value` forms. Throws on unknown flags or
+ * malformed values.
+ *
+ * Recognized flags:
+ *   --limit=N            max results (default 10)
+ *   --min-importance=N   drop rows with importance < N (1-10)
+ *   --min-confidence=F   drop rows with confidence < F (0-1)
+ *   --category=NAME      exact (case-insensitive) category match
+ *   --tags=a,b,c         match if any tag is present
+ */
+function parseQueryFlags(args) {
+  const opts = {};
+  const positional = [];
+
+  const consumeValue = (i, name) => {
+    const next = args[i + 1];
+    if (next === undefined || next.startsWith("--")) {
+      throw new Error(`Flag ${name} requires a value`);
+    }
+    return [next, i + 1];
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith("--")) { positional.push(a); continue; }
+
+    let name, value;
+    const eq = a.indexOf("=");
+    if (eq > 0) {
+      name = a.slice(0, eq);
+      value = a.slice(eq + 1);
+    } else {
+      name = a;
+    }
+
+    switch (name) {
+      case "--limit": {
+        if (value === undefined) [value, i] = consumeValue(i, name);
+        const n = parseInt(value, 10);
+        if (!Number.isFinite(n) || n <= 0) throw new Error(`--limit must be a positive integer, got ${value}`);
+        opts.limit = n;
+        break;
+      }
+      case "--min-importance": {
+        if (value === undefined) [value, i] = consumeValue(i, name);
+        const n = parseInt(value, 10);
+        if (!Number.isFinite(n) || n < 1 || n > 10) throw new Error(`--min-importance must be 1-10, got ${value}`);
+        opts.minImportance = n;
+        break;
+      }
+      case "--min-confidence": {
+        if (value === undefined) [value, i] = consumeValue(i, name);
+        const f = parseFloat(value);
+        if (!Number.isFinite(f) || f < 0 || f > 1) throw new Error(`--min-confidence must be 0.0-1.0, got ${value}`);
+        opts.minConfidence = f;
+        break;
+      }
+      case "--category": {
+        if (value === undefined) [value, i] = consumeValue(i, name);
+        if (!value) throw new Error(`--category requires a non-empty value`);
+        opts.category = value;
+        break;
+      }
+      case "--tags": {
+        if (value === undefined) [value, i] = consumeValue(i, name);
+        opts.tags = value.split(",").map((t) => t.trim()).filter(Boolean);
+        if (opts.tags.length === 0) throw new Error(`--tags requires at least one tag`);
+        break;
+      }
+      default:
+        throw new Error(`Unknown flag: ${name}. Supported: --limit, --min-importance, --min-confidence, --category, --tags`);
+    }
+  }
+
+  return { opts, positional };
+}
+
 /**
  * CLI entry point.
  */
@@ -306,11 +472,17 @@ function run(subcommand, args, pluginRoot) {
       return sync(pluginRoot);
 
     case "query": {
-      const terms = args.join(" ");
-      if (!terms) {
-        return { error: "Usage: semantic query <search terms>" };
+      let parsed;
+      try {
+        parsed = parseQueryFlags(args);
+      } catch (e) {
+        return { error: e.message };
       }
-      return query(terms, pluginRoot);
+      const terms = parsed.positional.join(" ");
+      if (!terms) {
+        return { error: "Usage: semantic query <search terms> [--limit=N] [--min-importance=N] [--min-confidence=F] [--category=NAME] [--tags=a,b,c]" };
+      }
+      return query(terms, pluginRoot, parsed.opts);
     }
 
     case "compact": {
@@ -341,4 +513,4 @@ function run(subcommand, args, pluginRoot) {
   }
 }
 
-module.exports = { run, sync, query, compact };
+module.exports = { run, sync, query, compact, parseQueryFlags };
