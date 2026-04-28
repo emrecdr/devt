@@ -93,6 +93,44 @@ fi
 # Clean the DB the test populated, otherwise it pollutes other smoke runs.
 rm -rf "$ROOT/memory/semantic/lessons.db" 2>/dev/null
 
+echo "== python-fastapi reference arch-scan: clean project produces zero findings =="
+SCAN_TMP="$TMP/arch-scan-clean"
+mkdir -p "$SCAN_TMP/app/services/clean/domain"
+cat > "$SCAN_TMP/app/services/clean/domain/entities.py" <<'EOF_PY'
+class CleanEntity:
+    pass
+EOF_PY
+SCAN_OUT=$(cd "$SCAN_TMP" && python3 "$ROOT/templates/python-fastapi/arch-scan.py" --json 2>/dev/null) || SCAN_EC=$?
+SCAN_FINDINGS=$(echo "$SCAN_OUT" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['findings']))" 2>/dev/null || echo "INVALID")
+if [[ "${SCAN_EC:-0}" -eq 0 ]] && [[ "$SCAN_FINDINGS" == "0" ]]; then
+  pass "arch-scan on clean project: 0 findings, exit 0"
+else
+  fail "arch-scan regression: exit=${SCAN_EC:-0}, findings=$SCAN_FINDINGS"
+  echo "$SCAN_OUT"
+fi
+
+echo "== python-fastapi reference arch-scan: violations detected and exit non-zero =="
+SCAN_TMP2="$TMP/arch-scan-dirty"
+mkdir -p "$SCAN_TMP2/app/services/photos/domain"
+mkdir -p "$SCAN_TMP2/app/services/photos/application"
+cat > "$SCAN_TMP2/app/services/photos/domain/models.py" <<'EOF_PY'
+from app.services.photos.infrastructure.repositories import PhotoRepository
+class Photo: pass
+EOF_PY
+cat > "$SCAN_TMP2/app/services/photos/application/service.py" <<'EOF_PY'
+from sqlalchemy.orm import Session
+class PhotoService: pass
+EOF_PY
+SCAN_OUT2=$(cd "$SCAN_TMP2" && python3 "$ROOT/templates/python-fastapi/arch-scan.py" --json 2>/dev/null) || SCAN_EC2=$?
+CRIT=$(echo "$SCAN_OUT2" | python3 -c "import json,sys; print(sum(1 for f in json.load(sys.stdin)['findings'] if f['severity']=='critical'))" 2>/dev/null || echo "0")
+HIGH=$(echo "$SCAN_OUT2" | python3 -c "import json,sys; print(sum(1 for f in json.load(sys.stdin)['findings'] if f['severity']=='high'))" 2>/dev/null || echo "0")
+if [[ "${SCAN_EC2:-0}" -eq 1 ]] && [[ "$CRIT" -ge "1" ]] && [[ "$HIGH" -ge "1" ]]; then
+  pass "arch-scan on dirty project: $CRIT critical + $HIGH high finding(s), exit 1"
+else
+  fail "arch-scan dirty regression: exit=${SCAN_EC2:-0}, critical=$CRIT, high=$HIGH"
+  echo "$SCAN_OUT2"
+fi
+
 echo "== run-quality-gates.sh: rejection reasons are precise =="
 RQG_TMP="$TMP/reject-test"
 mkdir -p "$RQG_TMP/.devt/rules"

@@ -30,7 +30,8 @@
 
   "arch_scanner": {
     "command": null,
-    "_command_doc": "Shell command to run YOUR architecture scanner. devt does not ship one — set this to whatever fits your stack: 'make arch-scan', 'uv run python scripts/arch_scanner.py', 'npx ts-arch', etc. Output is captured to .devt/state/scanner-output.txt and interpreted by the architect agent. Leave null to skip the scanner step (architect falls back to manual Grep/Glob analysis).",
+    "_command_doc": "Shell command to run an architecture scanner. devt does not ship a built-in scanner; set this to whatever fits your stack. Output is captured to .devt/state/scanner-output.txt and interpreted by the architect agent. Leave null to skip the scanner step (architect falls back to manual Grep/Glob analysis).",
+    "_command_examples": "Reference scanner shipped with the python-fastapi template (deploys to .devt/rules/arch-scan.py via /devt:init): 'python3 .devt/rules/arch-scan.py --json'. Other examples: 'make arch-scan', 'npx ts-arch'.",
 
     "report_dir": "docs/reports",
     "_report_dir_doc": "Directory where scanner reports are written (only used if command is set)."

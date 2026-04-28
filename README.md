@@ -244,7 +244,7 @@ The optional `.devt/config.json` file at your project root configures plugin beh
 | `git.primary_branch`           | Default branch name                                                 | `main`               |
 | `git.contributors`             | List of contributor usernames                                       | `[]`                 |
 | `agent_skills`                 | Per-agent skill list overrides                                      | See `skill-index.yaml` |
-| `arch_scanner`                 | Object with `command` and `report_dir`. devt does not ship a built-in scanner — set `command` to your own (e.g. `make arch-scan`, `uv run python scripts/arch_scanner.py`). When `null`, the architect agent falls back to manual Grep/Glob analysis. | `command: null`, `report_dir: docs/reports` |
+| `arch_scanner`                 | Object with `command` and `report_dir`. devt does not ship a built-in scanner core, but the `python-fastapi` template includes a reference scanner at `.devt/rules/arch-scan.py` (Clean-Architecture audits, stdlib-only). Set `command` to invoke it (`python3 .devt/rules/arch-scan.py --json`) or to your own. When `null`, the architect agent falls back to manual Grep/Glob analysis. | `command: null`, `report_dir: docs/reports` |
 | `workflow.docs`                | Toggle documentation step                                           | `true`               |
 | `workflow.retro`               | Toggle retrospective step                                           | `true`               |
 | `workflow.verification`        | Toggle verification step                                            | `true`               |
