@@ -1,7 +1,7 @@
 ---
 name: playbook-curation
 description: Use when the user wants to clean up, deduplicate, or improve the quality of the learning playbook. Trigger on any mention of playbook maintenance — 'deduplicate playbook', 'merge similar entries', 'resolve contradictions', 'playbook quality', 'cleanup lessons', 'validate new entries against existing', 'fix categorization', 'recalibrate scores', 'the playbook is getting long', 'entries overlap', 'opposite advice', 'miscalibrated importance', 'prune vague entries', 'sharpen lessons', or 'full curation pass'. Also trigger after lesson-extraction when the user wants to validate newly added entries for duplicates or conflicts. Actions — accept, merge, edit, reject, archive. This skill is for playbook QUALITY maintenance (dedup, contradictions, scores, categories), NOT for adding new lessons (use lesson-extraction), NOT for searching lessons (use semantic-search), and NOT for bulk archival of expired entries.
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Playbook Curation

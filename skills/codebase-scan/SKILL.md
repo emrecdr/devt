@@ -11,7 +11,7 @@ description: >-
   does the project follow." This is about DISCOVERING existing code before creating new code — not about
   reviewing code quality (use code-review-guide), not about verifying completeness of finished work (use
   verification-patterns), and not about assessing task size (use complexity-assessment).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Codebase Scan

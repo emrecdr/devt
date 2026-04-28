@@ -11,7 +11,7 @@ description: >-
   to understand the size", "how should we approach this." This is about SIZING a task before starting —
   not about choosing between implementation approaches (use strategic-analysis), not about reviewing
   finished code (use code-review-guide), and not about scanning for existing code (use codebase-scan).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Complexity Assessment

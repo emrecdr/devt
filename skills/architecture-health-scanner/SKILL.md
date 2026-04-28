@@ -1,7 +1,7 @@
 ---
 name: architecture-health-scanner
 description: Interpret and triage architecture scanner output — cluster findings by module and root cause, classify true positives vs false positives vs acceptable design, and produce a prioritized remediation plan (Fix Now / Fix Soon / Document / Ignore). Use after the scanner has been run when there are findings to analyze. Trigger on 'scanner results', 'scanner findings', 'scanner output', 'triage findings', 'classify findings', 'coupling violations', 'cross-service imports', 'duplicate model definitions', 'architectural violations', 'tech debt triage', 'false positives from scanner', 'prioritize scanner output', 'architecture health scan', 'structural drift', 'remediation plan from scan', or when a refactor touched 3+ files/modules and you want to check for new violations. Also trigger on 'present architecture health metrics' or grouping findings into priority buckets. Do NOT use for single-file bug fixes, code review, fetching library docs, ESLint/linter config, project health checks (hooks/state/config validation), or writing new endpoints.
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Architecture Health Scanner

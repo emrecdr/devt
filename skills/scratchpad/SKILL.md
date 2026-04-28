@@ -1,7 +1,7 @@
 ---
 name: scratchpad
 description: Use when any agent needs to write down a decision, observation, error, blocker, or intermediate result during a multi-step workflow so that later agents can read it. This is the cross-agent memory for the current workflow. Trigger on 'note this for later', 'record decision', 'pass context to next agent', 'log observation', 'jot this down', 'write to scratchpad', 'the tester needs to know this', 'subsequent agents need this', 'write down that we chose X', 'log this error for the next step', or any time a discovery, choice, or failure should be visible to downstream workflow steps. Persists in .devt/state/scratchpad.md (append-only, reset between workflows). This is for EPHEMERAL within-workflow notes, NOT for permanent lessons (use lesson-extraction for those), NOT for searching past knowledge (use semantic-search), and NOT for playbook maintenance (use playbook-curation).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Scratchpad

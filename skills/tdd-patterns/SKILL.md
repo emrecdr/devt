@@ -1,7 +1,7 @@
 ---
 name: tdd-patterns
 description: Use when the user wants to write code using test-driven development — writing the failing test BEFORE any production code. Enforces the RED-GREEN-REFACTOR cycle with mandatory verification gates. Trigger on 'TDD', 'test first', 'test-first', 'write the test before the code', 'failing test first', 'red-green-refactor', 'start with a red test', 'write a failing test that reproduces the bug before fixing', 'let us TDD this', 'test-driven', or when implementing critical business logic where specification correctness matters. This is for writing NEW tests BEFORE new code (test-first workflow), NOT for debugging existing failing tests, NOT for adding test coverage after the fact, NOT for reviewing or fixing existing test files, NOT for running test suites, and NOT for writing tests after implementation (test-after is not TDD).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 paths:
   - "**/test_*.py"
   - "**/*_test.py"

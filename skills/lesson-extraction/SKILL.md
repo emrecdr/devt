@@ -1,7 +1,7 @@
 ---
 name: lesson-extraction
 description: Capture lessons from completed work — what went wrong, what worked, non-obvious discoveries, and patterns worth remembering. Produces structured LEARN entries with importance/confidence/decay scoring for the learning playbook. Trigger on 'what did we learn', 'record this', 'remember this for next time', 'that was a mistake', 'capture this lesson', 'write this down', 'before we close out, capture that...', 'extract the lessons from this session', 'key takeaway', 'big discovery today', 'that debugging session taught us', 'we need to remember this pattern', or any end-of-session reflection on what happened and why. Also trigger when the user describes a specific incident or bug root cause and wants it preserved for future reference — e.g. 'the real fix was X not Y', 'this is a landmine worth recording', 'that gave us false greens'. This skill writes knowledge TO the playbook — it does NOT search/query the playbook (use semantic search), does NOT prune/archive stale entries (use memory-compaction), and does NOT improve the plugin system itself (use autoskill for rule/skill/agent changes).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Lesson Extraction

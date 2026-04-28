@@ -1,7 +1,7 @@
 ---
 name: api-docs-fetcher
 description: Fetch current documentation for any external/third-party library before writing code that uses it. ALWAYS use this skill when about to call a library API, even if you think you know it — training data is stale. Trigger on any mention of a third-party library (axios, vue-router, pinia, dayjs, zod, prisma, tailwind, playwright, express, fastapi, stripe, luxon, etc.), questions like 'how do I use X', 'what's the API/syntax for Y', 'check the current docs for Z', 'fetch docs for library', 'what replaced deprecated method', 'did the config change in version N', or when implementing integrations, webhooks, SDK calls, or middleware from external packages. Also trigger when a user says 'can you pull the latest docs', 'check if the API changed', or references a specific library version. Do NOT use for internal project code, first-party modules, code review, architecture scanning, or APIs documented in CLAUDE.md.
-allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # API Docs Fetcher

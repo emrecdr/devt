@@ -12,7 +12,7 @@ description: >-
   analysis — not about sizing task complexity (use complexity-assessment), not about reviewing code quality
   (use code-review-guide), not about creating implementation plans, and not about searching for existing
   code (use codebase-scan).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Strategic Analysis

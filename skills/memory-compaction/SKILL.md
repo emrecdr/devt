@@ -1,7 +1,7 @@
 ---
 name: memory-compaction
 description: Archive stale, low-value lessons from the learning playbook to reduce clutter and keep active entries high-signal. Identifies entries that have expired past their decay_days AND have low importance AND low confidence, then archives them (never deletes). Trigger on 'prune the playbook', 'archive old lessons', 'too many entries', 'stale lessons', 'cleanup playbook', 'compact the playbook', 'run compaction', 'run semantic compact', 'periodic maintenance on learning memory', 'playbook is too long', 'expired entries', 'entries past their decay date', 'technology change invalidated old lessons', 'switched from X to Y so old lessons are obsolete', 'dry-run compaction', 'what would get archived', or 'clean up before the new sprint'. Also trigger when the user mentions the playbook has grown large (100+ entries) or that search results are cluttered by old entries. Do NOT use for deduplicating/merging entries (use playbook-curation), adding new lessons (use lesson-extraction), searching the playbook (use semantic search), improving plugin rules/skills (use autoskill), or when the playbook is small (under 20 entries).
-allowed-tools: Bash Read Write Edit Grep Glob
+allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
 # Memory Compaction
