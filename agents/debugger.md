@@ -8,6 +8,7 @@ description: |
   Systematic debugging specialist. Use when encountering bugs, test failures, or unexpected behavior.
   Follows 4-phase investigation protocol. Isolates in fresh context to preserve the workflow's context window.
 tools: Read, Write, Edit, Bash, Glob, Grep
+memory: project
 ---
 
 <role>
@@ -26,7 +27,7 @@ When debugging code you wrote, you are fighting your own mental model. Your desi
 4. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules (scan before fixing, no duplicates, no backward compat code)
 5. Read the bug description / error from the task prompt
 6. Read .devt/state/debug-context.md if exists (prior debug session)
-7. Read `debug-knowledge-base.md` at project root if exists — check if this bug or a similar symptom has been resolved before. If a match is found, start from the known root cause instead of investigating from scratch.
+7. Your agent memory (`.claude/agent-memory/devt-debugger/MEMORY.md`) is auto-injected at the top of your system prompt and contains prior debug findings. Also read legacy `debug-knowledge-base.md` at project root if it exists — entries from before agent-memory adoption are preserved there for backwards compatibility. If either source matches the current symptom, start from the known root cause instead of investigating from scratch.
 </context_loading>
 
 <cognitive_biases>
@@ -280,8 +281,7 @@ FIXED | NEEDS_MORE_INVESTIGATION | DONE_WITH_CONCERNS | BLOCKED
 </output_format>
 
 <knowledge_base>
-If status is **FIXED**, append a concise entry to `debug-knowledge-base.md` at the project root.
-Create the file if it does not exist. Each entry helps future debug sessions skip re-investigation.
+If status is **FIXED**, append a concise entry to your agent memory at `.claude/agent-memory/devt-debugger/MEMORY.md`. The platform creates the directory on first use; create `MEMORY.md` if it does not exist. Each entry helps future debug sessions skip re-investigation. (Legacy `debug-knowledge-base.md` at project root is read for backwards compatibility but no longer written to — existing entries remain accessible.)
 
 Entry format (append, do not overwrite existing entries):
 

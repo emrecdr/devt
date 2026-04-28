@@ -9,6 +9,7 @@ description: |
   was learned. Examples: "extract lessons from this implementation", "run a retro on
   the workflow", "what should we remember from this task".
 tools: Read, Write, Bash, Glob, Grep
+memory: project
 ---
 
 <role>

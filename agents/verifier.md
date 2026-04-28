@@ -9,6 +9,8 @@ description: |
   Goal-backward verification — starts from what was requested, traces to what was built.
   Catches: working code that solves the wrong problem, incomplete implementations, unwired features.
 tools: Read, Bash, Glob, Grep
+skills:
+  - devt:verification-patterns
 ---
 
 <role>

@@ -123,7 +123,7 @@ Systematic 4-phase debugging. No guessing, no "try this and see."
    - **Phase 2**: Pattern analysis (find working example, compare line-by-line)
    - **Phase 3**: Hypothesis (falsifiable, one variable at a time)
    - **Phase 4**: Fix (minimal change + tests + defense-in-depth)
-3. If FIXED: appends root cause to `debug-knowledge-base.md` (future debug sessions skip re-investigation)
+3. If FIXED: appends root cause to its agent memory at `.claude/agent-memory/devt-debugger/MEMORY.md` (future debug sessions skip re-investigation; legacy `debug-knowledge-base.md` at project root is still read for backwards compatibility but no longer written to)
 4. If needs more investigation: offers to re-run with accumulated context
 
 ---
@@ -350,7 +350,7 @@ devt: Capturing symptoms...
                              causing unique index to fail on empty strings"
       Phase 4 (Fix): Added NOT NULL constraint, created regression test
 
-      FIXED. Root cause saved to debug-knowledge-base.md.
+      FIXED. Root cause saved to .claude/agent-memory/devt-debugger/MEMORY.md.
       Quality gates: PASS
 ```
 
@@ -422,7 +422,7 @@ architect   --> arch-review.md   --> programmer
 retro       --> lessons.yaml     --> curator
 curator     --> .devt/learning-playbook.md --> semantic sync --> lessons.db (FTS5)
                                     --> future workflows (queried in context_init, injected as <learning_context>)
-debugger    --> debug-summary.md + debug-knowledge-base.md --> future debug sessions
+debugger    --> debug-summary.md + .claude/agent-memory/devt-debugger/MEMORY.md --> future debug sessions
 ```
 
 Each agent gets a **fresh context window** -- no accumulated garbage from prior steps. The workflow reads each artifact, checks the status gate, and decides what happens next.

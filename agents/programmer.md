@@ -9,6 +9,8 @@ description: |
   modifying existing code, or fixing issues. Examples: "implement the user service",
   "add validation to the payment endpoint", "fix the broken date parsing logic".
 tools: Read, Write, Edit, Bash, Glob, Grep
+skills:
+  - devt:codebase-scan
 ---
 
 <role>

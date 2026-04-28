@@ -9,6 +9,7 @@ description: |
   into the learning playbook, or when the playbook needs pruning. Examples: "integrate
   new lessons into the playbook", "prune stale entries", "review playbook quality".
 tools: Read, Write, Edit, Bash, Glob, Grep
+memory: project
 ---
 
 <role>

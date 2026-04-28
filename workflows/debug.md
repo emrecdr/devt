@@ -71,7 +71,7 @@ Follow the 4-phase investigation protocol. Write findings to .devt/state/debug-s
 
 Read `.devt/state/debug-summary.md`:
 
-- **FIXED**: report fix, run quality gates to verify. Confirm that `debug-knowledge-base.md` was updated with the root cause (the debugger agent does this automatically).
+- **FIXED**: report fix, run quality gates to verify. Confirm that the debugger agent appended an entry to its persistent memory at `.claude/agent-memory/devt-debugger/MEMORY.md` (the agent does this automatically).
 - **NEEDS_MORE_INVESTIGATION**: show what was discovered, offer to re-run /devt:debug with accumulated context
 - **DONE_WITH_CONCERNS**: debugger hit the 3-attempt limit on a fix. Report what was tried, what remains, and suggest next steps (manual fix or architectural review via `/devt:arch-health`)
 - **BLOCKED**: surface root cause analysis, suggest architectural review

@@ -9,6 +9,9 @@ description: |
   READ-ONLY — inspects but never modifies code. Examples: "review the payment service
   changes", "check the new API endpoints for issues", "review this PR for quality".
 tools: Read, Bash, Glob, Grep
+memory: project
+skills:
+  - devt:code-review-guide
 ---
 
 <role>
