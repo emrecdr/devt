@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Changed
 - **Permissive `allowed-tools` extended**: all 15 skills now also pre-allow `WebFetch`, `WebSearch`, `Skill`, and `Task` on top of the prior `Bash Read Write Edit Grep Glob` baseline. Lets skills cross-invoke each other, spawn subagents, and fetch web content without per-call permission prompts while the skill is active. Defense-in-depth for users whose project `.claude/settings.json` is more restrictive than the permissive default scaffolded by `setup.cjs`.
+- **`setup.cjs` path-traversal hardening**: `copyDirRecursive` and `copyMissingFiles` now reject suspicious entry names (separators, traversal markers, null bytes, symlinks) and validate each filesystem entry through `validatePath` from `security.cjs` before any `fs.copyFileSync` or recursive descent. `setupProject` additionally validates the resolved templateDir stays within `pluginRoot/templates` as defense-in-depth even though `templateName` is allowlisted upstream. Same hardening pattern that was applied to `scanDevRules` in v0.9.1, extended to the template-copy machinery. Reduces semgrep CWE-22 findings on this file from 12 to 3 (remaining flags are on hardcoded infrastructure paths where inputs are not externally controllable).
 
 ## [0.11.0] - 2026-04-28
 

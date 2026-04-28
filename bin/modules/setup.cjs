@@ -17,6 +17,25 @@
 const fs = require("fs");
 const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
+const { validatePath } = require("./security.cjs");
+
+/**
+ * Reject filesystem entry names that could break out of their parent directory.
+ * Mirrors the guard in init.cjs scanDevRules — separators, traversal markers,
+ * null bytes, and symlinks are dropped before any path.join.
+ */
+function isUnsafeEntryName(name, isSymlink) {
+  return (
+    !name ||
+    typeof name !== "string" ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("\0") ||
+    name === "." ||
+    name === ".." ||
+    isSymlink === true
+  );
+}
 
 const AVAILABLE_TEMPLATES = [
   "python-fastapi",
@@ -98,7 +117,18 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   const rulesDir = path.join(devtDir, "rules");
   const stateDir = path.join(devtDir, "state");
   const configPath = path.join(devtDir, "config.json");
-  const templateDir = path.join(pluginRoot, "templates", templateName);
+
+  // Defense-in-depth: even though templateName is allowlisted above, confirm the
+  // resolved templateDir stays within pluginRoot/templates so a future regression
+  // in AVAILABLE_TEMPLATES cannot escalate to a path-traversal write.
+  const templatesBase = path.join(pluginRoot, "templates");
+  const templateCheck = validatePath(templateName, templatesBase);
+  if (!templateCheck.safe) {
+    throw new Error(
+      `Template path escapes templates directory: ${templateName} (${templateCheck.error})`,
+    );
+  }
+  const templateDir = templateCheck.resolved;
   const mode = (options && options.mode) || "create"; // create | update | reinit
 
   const results = {
@@ -278,12 +308,15 @@ function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
+    if (isUnsafeEntryName(entry.name, entry.isSymbolicLink())) continue;
+    const srcCheck = validatePath(entry.name, src);
+    if (!srcCheck.safe) continue;
+    const destCheck = validatePath(entry.name, dest);
+    if (!destCheck.safe) continue;
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
+      copyDirRecursive(srcCheck.resolved, destCheck.resolved);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcCheck.resolved, destCheck.resolved);
     }
   }
 }
@@ -293,19 +326,22 @@ function copyMissingFiles(src, dest, prefix) {
   if (!fs.existsSync(src)) return added;
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
+    if (isUnsafeEntryName(entry.name, entry.isSymbolicLink())) continue;
+    const srcCheck = validatePath(entry.name, src);
+    if (!srcCheck.safe) continue;
+    const destCheck = validatePath(entry.name, dest);
+    if (!destCheck.safe) continue;
     const relPath = prefix ? prefix + "/" + entry.name : entry.name;
     if (entry.isDirectory()) {
-      if (!fs.existsSync(destPath)) {
-        copyDirRecursive(srcPath, destPath);
+      if (!fs.existsSync(destCheck.resolved)) {
+        copyDirRecursive(srcCheck.resolved, destCheck.resolved);
         added.push(relPath + "/");
       } else {
-        added.push(...copyMissingFiles(srcPath, destPath, relPath));
+        added.push(...copyMissingFiles(srcCheck.resolved, destCheck.resolved, relPath));
       }
-    } else {
-      if (!fs.existsSync(destPath)) {
-        fs.copyFileSync(srcPath, destPath);
+    } else if (entry.isFile()) {
+      if (!fs.existsSync(destCheck.resolved)) {
+        fs.copyFileSync(srcCheck.resolved, destCheck.resolved);
         added.push(relPath);
       }
     }
