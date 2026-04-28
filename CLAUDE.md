@@ -19,7 +19,7 @@ Supporting layers:
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support (`DEVT_HOOK_PROFILE=minimal|standard|full`, default `standard`). `hooks/quality-gate-verifier.md` is an opt-in template that projects wire into their own `.claude/settings.json` — not auto-registered.
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
 - **References** (`references/`) — Technique libraries for agent workflows. Static guidance documents read by workflows during specify/clarify phases (questioning guide, domain probes).
-- **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management, and CI verification (`smoke-test.sh`, `test-locking.cjs`).
+- **Scripts** (`scripts/`) — Utility scripts for quality gates, documentation checks, prompt injection scanning, workflow management, CI verification (`smoke-test.sh`, `test-locking.cjs`), and release tooling (`extract-changelog.sh` pulls a single version's section out of `CHANGELOG.md` for use as GitHub release notes).
 
 #### Hook Profiles
 
@@ -119,11 +119,28 @@ There are no build steps or linters configured for the plugin itself. The codeba
 CI runs two test scripts on every push (`.github/workflows/ci.yml`):
 
 ```bash
-bash scripts/smoke-test.sh       # 11 CLI smoke checks (manifest parses, init/state/config/models/update return JSON, 50 KB cap rejection, concurrent locking)
+bash scripts/smoke-test.sh       # 16 CLI smoke checks across all 9 subcommands (manifest parses, init/state/config/models/update/health/semantic/report/setup return JSON, 50 KB cap rejection, concurrent locking, agent 500-line budget)
 node scripts/test-locking.cjs    # 20-worker concurrent state-write test — asserts no lost updates, no orphaned .lock
 ```
 
-Run both locally before committing changes to `bin/`, `hooks/`, or `.claude-plugin/`.
+Run both locally before committing changes to `bin/`, `hooks/`, or `.claude-plugin/`. The CI workflow also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage (every VERSION must have a matching `## [X.Y.Z]` section), and `workflow_type` registry coverage (every entry in `VALID_WORKFLOW_TYPES` must have routing in `next.md`).
+
+### Releasing
+
+The release flow is tag-driven via `.github/workflows/release.yml`:
+
+```bash
+# 1. Bump VERSION, plugin.json version, and write the new CHANGELOG section
+# 2. Commit (CI verifies coherence + CHANGELOG coverage on push to main)
+git commit -m "chore(release): vX.Y.Z — short headline"
+git push
+
+# 3. Tag and push — the release workflow fires on the tag-push event
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via `scripts/extract-changelog.sh` and creates a GitHub release with those notes. It is idempotent — if a release already exists for the tag, it exits cleanly. Tags containing `-` (e.g. `v1.0.0-rc1`) are flagged as prereleases. All step-output values are passed through `env:` rather than direct `${{ }}` shell interpolation, so a maliciously named tag cannot inject shell.
 
 ## Key Conventions
 

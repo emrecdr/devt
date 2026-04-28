@@ -436,7 +436,8 @@ devt/
   scripts/                # Utility scripts (quality gates, prompt injection
                           # scanning, CI smoke + concurrent locking tests)
   .github/workflows/      # CI: smoke-test on Node 22/24, version coherence,
-                          # workflow_type registry coverage
+                          # CHANGELOG coverage, workflow_type registry coverage,
+                          # tag-driven GitHub releases
   templates/              # Project templates (python-fastapi, go, typescript-node,
                           # vue-bootstrap, blank)
   memory/                 # Memory schemas and semantic index
@@ -459,6 +460,12 @@ cd ~/.devt && git pull origin main
 ```
 
 Restart your Claude Code session after updating.
+
+## Releases
+
+Releases are published on GitHub at [emrecdr/devt/releases](https://github.com/emrecdr/devt/releases). Each version follows [Semantic Versioning](https://semver.org/) and has a matching `## [X.Y.Z]` section in [`CHANGELOG.md`](CHANGELOG.md), formatted per [Keep a Changelog](https://keepachangelog.com/).
+
+The release flow is tag-driven: pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which extracts the changelog section via `scripts/extract-changelog.sh` and creates the GitHub release automatically. CI enforces that `VERSION`, `plugin.json` version, and the changelog all stay in lock-step — a version bump without a matching changelog entry fails the build.
 
 ## Troubleshooting
 
