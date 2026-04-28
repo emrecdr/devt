@@ -83,7 +83,10 @@ category: architecture
 importance: 8
 tags: "architecture"
 EOF_PB
-PARSER_OUT=$(cd "$PARSER_TMP" && node "$CLI" semantic sync 2>&1)
+# Drop stderr — Node 22 emits "ExperimentalWarning: SQLite is an experimental
+# feature" on first node:sqlite require, which would otherwise pollute the
+# JSON capture. Local dev may not see this; CI runners do.
+PARSER_OUT=$(cd "$PARSER_TMP" && node "$CLI" semantic sync 2>/dev/null)
 SYNCED=$(echo "$PARSER_OUT" | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).synced))" 2>/dev/null || echo 0)
 if [[ "$SYNCED" == "2" ]]; then
   pass "parser handles both '- key: val' and 'key: val' forms (synced 2/2)"
