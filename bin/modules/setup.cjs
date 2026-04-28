@@ -245,6 +245,8 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
           "Glob",
           "WebFetch",
           "WebSearch",
+          "Skill",
+          "Task",
         ],
         ask: [
           "Bash(rm -rf:*)",
