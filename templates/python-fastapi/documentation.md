@@ -2,7 +2,10 @@
 
 ## MODULE.md (Required per Service)
 
-Every service module must maintain a `MODULE.md` at its root directory.
+Every service module must maintain a `MODULE.md` at its root directory. Use
+[`module-template.md`](./module-template.md) as the scaffold when creating a new service —
+it encodes the canonical section order, base-class conventions, and `AppError` HTTP-status
+mapping expected by every greenfield service.
 
 ### Location
 
