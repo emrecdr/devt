@@ -30,14 +30,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify VERSION matches plugin.json and README badge
+      - name: Verify VERSION matches plugin.json
         run: |
           VFILE=$(cat VERSION | tr -d '[:space:]')
           VPLUGIN=$(node -e "console.log(require('./.claude-plugin/plugin.json').version)")
-          VBADGE=$(grep -oE 'version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/version-//')
-          echo "VERSION=$VFILE  plugin.json=$VPLUGIN  README badge=$VBADGE"
-          if [ "$VFILE" != "$VPLUGIN" ] || [ "$VFILE" != "$VBADGE" ]; then
-            echo "Version drift: VERSION/plugin.json/README must agree"
+          echo "VERSION=$VFILE  plugin.json=$VPLUGIN"
+          if [ "$VFILE" != "$VPLUGIN" ]; then
+            echo "Version drift: VERSION and plugin.json must agree"
+            exit 1
+          fi
+      - name: Verify CHANGELOG has section for current VERSION
+        run: |
+          VFILE=$(cat VERSION | tr -d '[:space:]')
+          if ! bash scripts/extract-changelog.sh "$VFILE" >/dev/null; then
+            echo "CHANGELOG.md is missing a section for version $VFILE"
             exit 1
           fi
 

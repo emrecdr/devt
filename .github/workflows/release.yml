@@ -1,0 +1,76 @@
+name: Release
+
+# Triggered when a v* tag is pushed. Extracts the matching CHANGELOG.md section
+# and publishes a GitHub release with those notes. Tag format: vX.Y.Z (semver).
+# Pre-release tags (containing '-', e.g. v1.0.0-rc1) are flagged as prereleases.
+#
+# All step-output values are passed through env: rather than direct ${{ }}
+# interpolation in run: blocks. Tag names are user-controllable and could
+# otherwise be a shell-injection vector. See:
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify tag matches VERSION file
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          VFILE=$(tr -d '[:space:]' < VERSION)
+          if [ "$VFILE" != "$VERSION" ]; then
+            echo "Tag $TAG does not match VERSION file ($VFILE)"
+            exit 1
+          fi
+
+      - name: Extract changelog section
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          NOTES_FILE="$(mktemp)"
+          if ! bash scripts/extract-changelog.sh "$VERSION" > "$NOTES_FILE"; then
+            echo "No CHANGELOG.md section for $VERSION"
+            exit 1
+          fi
+          echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "$PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE" \
+            $PRERELEASE_FLAG
