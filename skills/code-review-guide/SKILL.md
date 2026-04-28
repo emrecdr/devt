@@ -12,6 +12,7 @@ description: >-
   quality with structured findings and scoring — not about verifying stubs or wiring (use
   verification-patterns), not about searching for existing code (use codebase-scan), and not about
   assessing task complexity (use complexity-assessment).
+allowed-tools: Bash Read Write Edit Grep Glob
 ---
 
 # Code Review Guide

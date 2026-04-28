@@ -12,6 +12,7 @@ description: >-
   about checking if COMPLETED work is genuine and connected — not about scanning for existing code before
   building (use codebase-scan), not about scoring code quality or finding security issues (use
   code-review-guide), and not about writing tests (just write them).
+allowed-tools: Bash Read Write Edit Grep Glob
 ---
 
 # Verification Patterns
