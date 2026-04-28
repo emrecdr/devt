@@ -6,6 +6,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-28
+
+### Added
+
+- **Native subagent frontmatter adoption**: devt now uses the platform-native `memory:`, `skills:`, and `allowed-tools:` fields documented at code.claude.com instead of prose-driven knowledge management.
+  - `memory: project` on `code-reviewer`, `debugger`, `retro`, `curator` — each agent writes to `.claude/agent-memory/devt-<agent>/MEMORY.md` (auto-injected at startup, gitignored). Persistent across sessions, scoped per project.
+  - `skills:` preload on `programmer` (devt:codebase-scan), `code-reviewer` (devt:code-review-guide), `verifier` (devt:verification-patterns) — the full skill body is injected into the agent's system prompt at spawn, eliminating the "agent forgot to invoke its primary skill" failure mode. Empirically validated via signature-phrase probe.
+  - `allowed-tools: Bash Read Write Edit Grep Glob` on all 15 skills (api-docs-fetcher also gets `WebFetch WebSearch`). Eliminates per-invocation permission prompts for routine dev operations while a skill is active.
+  - `paths:` glob on `tdd-patterns` so the platform auto-activates the skill when Claude touches test files (Python `test_*.py` / `*_test.py`, JS/TS `*.test.*` / `*.spec.*`, Go `*_test.go`, and `test/spec` directories).
+
+- **Single-plugin marketplace** (`.claude-plugin/marketplace.json`): turns this repo into a self-hosting marketplace so end-users can install with `/plugin marketplace add emrecdr/devt && /plugin install devt`. Marketplace points at the same repo via `source: "./"`; version stays in lock-step with `plugin.json`. Before: install required `git clone` + `claude --plugin-dir ~/.devt` and the agents would not register without the flag. After: `/plugin install` registers all 10 plugin agents under the `devt:` namespace and supports `/plugin update`.
+
+- **`.claude/settings.json` scaffolding in `setup.cjs`**: project init now writes a permissive starter at `.claude/settings.json` (only when absent — never overwrites). Pre-allows `Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`, `WebFetch`, `WebSearch`; gates only genuinely destructive operations (`rm -rf`, `git push --force`, `git reset --hard`, `npm publish`, `yarn publish`, `pip install`) behind `permissions.ask`.
+
+### Changed
+
+- **Debugger knowledge base location**: persistent debug findings now write to `.claude/agent-memory/devt-debugger/MEMORY.md` (the native agent-memory path) instead of `debug-knowledge-base.md` at project root. Before: the project-root file was the only persistence layer and required prose instructions in the agent body to read/write it. After: the platform auto-injects the first 200 lines of `MEMORY.md` into the debugger's system prompt at startup, and the agent has Read/Write auto-enabled on its own memory directory. Legacy `debug-knowledge-base.md` is still read for backwards compatibility — pre-migration entries remain accessible — but new writes go to the native location only. Touchpoints updated: `agents/debugger.md`, `workflows/debug.md`, `docs/COMMANDS.md`, `CLAUDE.md`.
+
+- **`setup.cjs` gitignore handling**: now adds `.claude/agent-memory/` alongside `.devt/state/` when initialising a project. Per-project agent memories should never be committed regardless of the project's prior gitignore state.
+
+### Documented
+
+- **`CLAUDE.md` — Plugin loading invariants**: three non-obvious platform behaviours documented inline so future Claude sessions understand the architecture before debugging "missing agent" symptoms:
+  - Plugin agents register only when devt is loaded via `claude --plugin-dir <path>` or installed through the plugin system. Sessions that rely solely on cwd-auto-discovery see commands and skills but `devt:<agent>` subagents will not appear in `claude agents`.
+  - Agent persistent memory writes to `.claude/agent-memory/devt-<agent>/MEMORY.md` (hyphen replaces colon for filesystem safety).
+  - Agent `skills:` preload requires the `devt:` namespace prefix (`skills: [devt:codebase-scan]`); the plain skill name silently fails to inject. Plugin agents also do not honour `permissionMode`, `hooks`, or `mcpServers` (security restriction — silently ignored by the platform).
+
+- **README install section rewrite**: marketplace install promoted to "recommended" path with explicit `/plugin marketplace add` + `/plugin install` flow. Git-clone + `--plugin-dir` retained as the development path with notes about why agent registration depends on the loading mechanism.
+
 ## [0.10.0] - 2026-04-28
 
 ### Added
