@@ -302,7 +302,11 @@ def detect_god_class(
 
 
 def iter_python_files(root: Path) -> Iterable[Path]:
-    skip_dirs = {".venv", "venv", ".tox", "__pycache__", ".git", "node_modules", "build", "dist"}
+    # Skip non-source trees plus `.devt/` itself — when this scanner is
+    # deployed at .devt/rules/arch-scan.py via /devt:init, scanning .devt
+    # would have it audit itself plus playbook examples masquerading as
+    # Python files. .devt is plugin scaffolding, not project source.
+    skip_dirs = {".venv", "venv", ".tox", "__pycache__", ".git", "node_modules", "build", "dist", ".devt"}
     for path in root.rglob("*.py"):
         if any(part in skip_dirs for part in path.parts):
             continue

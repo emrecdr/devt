@@ -157,6 +157,20 @@ SETUP_TMP="$TMP/setup-test"
 mkdir -p "$SETUP_TMP"
 run_json "setup --template blank" sh -c "cd '$SETUP_TMP' && node '$CLI' setup --template blank"
 
+# python-fastapi includes a .py file (arch-scan.py) alongside the .md rules,
+# exercising a code path that --template blank doesn't (mixed-extension copy).
+# Use an ISOLATED temp dir outside $TMP so findProjectRoot doesn't walk up
+# into the .devt/ created earlier by init-workflow.
+SETUP_TMP_PY=$(mktemp -d)
+( cd "$SETUP_TMP_PY" && node "$CLI" setup --template python-fastapi >/dev/null 2>&1 )
+if [[ -f "$SETUP_TMP_PY/.devt/rules/arch-scan.py" ]] && [[ -f "$SETUP_TMP_PY/.devt/rules/coding-standards.md" ]]; then
+  pass "setup --template python-fastapi deploys both arch-scan.py and rules/*.md"
+else
+  fail "setup --template python-fastapi did not deploy expected files"
+  ls "$SETUP_TMP_PY/.devt/rules/" 2>&1 | head
+fi
+rm -rf "$SETUP_TMP_PY"
+
 echo "== run-quality-gates.sh: parallel batch runs concurrently and reports failures =="
 QG_TMP="$TMP/qg-test"
 mkdir -p "$QG_TMP/.devt/rules"
