@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-28
+
 ### Added
 - **arch-scan.py skips `.devt/` directory**: when deployed at `.devt/rules/arch-scan.py`, the scanner would have audited itself plus `.devt/` scaffolding. Added `.devt` to the skip list (alongside existing `.venv`, `__pycache__`, `node_modules`, etc.) so the scanner only audits real project source. Also fixes inline-import detection inside class methods (visit_ClassDef now recurses into method bodies — previously `def` children of classes were skipped, so inline imports inside repository methods were missed)
 - **Smoke check for `setup --template python-fastapi`**: existing check only exercised `--template blank`. The new check uses an isolated temp dir (so the smoke's earlier `init workflow` doesn't pollute the project-root walk) and asserts BOTH `.devt/rules/arch-scan.py` AND `.devt/rules/coding-standards.md` are present after setup, exercising the mixed-extension copy path. Suite now 24 checks
