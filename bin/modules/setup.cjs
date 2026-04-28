@@ -198,19 +198,66 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.warnings.push(".devt/config.json already exists — skipping");
   }
 
-  // Gitignore .devt/state/
+  // Gitignore .devt/state/ and .claude/agent-memory/
   const gitignorePath = path.join(projectRoot, ".gitignore");
+  const requiredIgnores = [
+    { path: ".devt/state/", header: "# devt workflow state" },
+    { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
+  ];
   try {
-    const content = fs.readFileSync(gitignorePath, "utf8");
-    if (!content.includes(".devt/state")) {
-      fs.appendFileSync(gitignorePath, "\n# devt workflow state\n.devt/state/\n");
-      results.files_updated.push(".gitignore (appended .devt/state/)");
+    let content = fs.readFileSync(gitignorePath, "utf8");
+    const appended = [];
+    for (const { path: ignorePath, header } of requiredIgnores) {
+      if (!content.includes(ignorePath)) {
+        const block = `\n${header}\n${ignorePath}\n`;
+        fs.appendFileSync(gitignorePath, block);
+        content += block;
+        appended.push(ignorePath);
+      }
+    }
+    if (appended.length > 0) {
+      results.files_updated.push(`.gitignore (appended ${appended.join(", ")})`);
     }
   } catch (err) {
     if (err.code === "ENOENT") {
-      fs.writeFileSync(gitignorePath, "# devt workflow state\n.devt/state/\n");
+      const lines = requiredIgnores.flatMap(({ path, header }) => [header, path, ""]);
+      fs.writeFileSync(gitignorePath, lines.join("\n"));
       results.files_created.push(".gitignore");
     }
+  }
+
+  // Scaffold .claude/settings.json with permissive defaults (only if absent — never overwrites)
+  const claudeDir = path.join(projectRoot, ".claude");
+  const settingsPath = path.join(claudeDir, "settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    if (!fs.existsSync(claudeDir)) {
+      fs.mkdirSync(claudeDir, { recursive: true });
+    }
+    const defaultSettings = {
+      $schema: "https://json.schemastore.org/claude-code-settings.json",
+      permissions: {
+        allow: [
+          "Bash",
+          "Read",
+          "Write",
+          "Edit",
+          "Grep",
+          "Glob",
+          "WebFetch",
+          "WebSearch",
+        ],
+        ask: [
+          "Bash(rm -rf:*)",
+          "Bash(git push --force:*)",
+          "Bash(git reset --hard:*)",
+          "Bash(npm publish:*)",
+          "Bash(yarn publish:*)",
+          "Bash(pip install:*)",
+        ],
+      },
+    };
+    atomicWriteJson(settingsPath, defaultSettings);
+    results.files_created.push(".claude/settings.json");
   }
 
   return results;
