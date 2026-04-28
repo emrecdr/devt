@@ -10,6 +10,9 @@ memory/semantic/*.db
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 
+# Claude Code per-agent persistent memory (project-scope, written by subagents at runtime)
+.claude/agent-memory/
+
 # OS files
 .DS_Store
 Thumbs.db
