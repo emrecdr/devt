@@ -266,6 +266,38 @@ Aborts the active workflow and clears `.devt/state/`. Clean slate.
 /devt:note --list
 ```
 
+### `/devt:council` -- Pressure-test a decision
+
+Run a high-stakes engineering decision through 5 advisors who think from fundamentally different angles, peer-review each other anonymously, then a chairman synthesizes the verdict. Adapted from Karpathy's LLM Council, retuned for engineering trade-offs.
+
+```bash
+/devt:council "rewrite the legacy state module or strangle it incrementally?"
+/devt:council "REST or event-driven for the new ingestion pipeline?"
+/devt:council --mixed-models "drop SQLite FTS5 for an external search index?"
+```
+
+You can also trigger by phrase: `council this: ...`, `pressure-test this`, `red team this`, `second opinion on this`, `devil's advocate`.
+
+The five advisors:
+
+| Advisor | Lens |
+|---|---|
+| Contrarian | What breaks in prod? Failure modes, edge cases, fatal flaws. |
+| First Principles | Are we solving the right problem? Strip assumptions and rebuild. |
+| Generalizer | What reusable abstraction is hiding? What does this enable downstream? |
+| Newcomer | The on-call engineer at 3am with zero context. Curse-of-knowledge check. |
+| Pragmatist | What's the smallest first commit? Monday-morning execution. |
+
+These five create three natural tensions (Contrarian ⇄ Generalizer, First Principles ⇄ Pragmatist, Newcomer holding everyone honest), which is why all five always convene — reducing the count breaks the protocol.
+
+**Optional model diversity** (`--mixed-models`): dispatches advisors across opus/sonnet/haiku for genuinely different reasoning patterns (closer to Karpathy's original which used GPT-5.1, Gemini-3, Claude, and Grok). Default is single-model dispatch to control cost; opt in when the decision is high-stakes enough.
+
+**Output**: a chairman verdict in chat (5 sections — agreement, clashes, blind spots, recommendation, the one thing to do first) plus a full transcript at `.devt/state/council-{slug}-{timestamp}.md` with all advisor responses and peer reviews.
+
+**Skip the council for**: factual lookups, syntax fixes, single-line bugs, or validation-seeking when you've already decided. The council tells you what you don't want to hear — that's the feature.
+
+Distinct from `/devt:clarify` (resolves ambiguity through interview) and the `strategic-analysis` skill (produces a trade-off table for two named options). The council adds adversarial peer review and synthesis specifically for cases where one perspective feels untrustworthy.
+
 ### `/devt:health` -- Plugin diagnostics
 
 ```bash

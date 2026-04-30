@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-30
+
+### Added
+- **`/devt:council` slash command + `council` skill (Karpathy LLM Council adapted for engineering)**: pressure-test high-stakes engineering decisions through 5 advisors with distinct thinking styles (Contrarian / First Principles / Generalizer / Newcomer / Pragmatist) that analyze in parallel, peer-review each other anonymously, and pass to a chairman for synthesis. Adapted from [@tenfoldmarc's LLM Council skill](https://github.com/tenfoldmarc/llm-council-skill); methodology by [Karpathy](https://github.com/karpathy/llm-council). Retuned for engineering trade-offs (architecture choices, refactor strategies, API design, contentious code-review feedback) and integrated with devt conventions: auto-pulls `.devt/rules/{architecture,coding-standards,golden-rules}.md` for context, writes markdown transcripts to `.devt/state/council-{slug}-{timestamp}.md` (no HTML — engineering tooling, integrates with `/devt:plan` and `/devt:clarify` downstream), expands trigger phrases with engineering-specific cues (`red team this`, `audit this approach`, `devil's advocate`, `second opinion`), and adds an opt-in `--mixed-models` flag that dispatches advisors across opus/sonnet/haiku via the Task tool's `model` parameter for genuine reasoning diversity (closer to Karpathy's original cross-vendor design). Chairman synthesis uses `model: opus` when available — chairman quality dominates the verdict per Karpathy's principle. Anonymization order is randomized every session to remove positional bias on top of identity bias. Skill total: 16 directories (was 15); commands: 29 entry points (was 28).
+
 ## [0.12.0] - 2026-04-28
 
 ### Changed

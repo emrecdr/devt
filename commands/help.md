@@ -11,7 +11,7 @@ Display a comprehensive guide to all devt commands, organized by experience leve
 Print the following guide to the user. Do NOT modify, summarize, or abbreviate it.
 
 ```
-# devt — Command Reference (28 commands)
+# devt — Command Reference (29 commands)
 
 ## Getting Started
 
@@ -148,6 +148,18 @@ Generate a weekly development activity report from git history.
 
 ### /devt:autoskill
 Analyze the session for patterns and propose skill/agent improvements. Changes are audited in .devt/autoskill-changelog.md.
+
+### /devt:council "question"
+Pressure-test a high-stakes engineering decision through 5 advisors with adversarial peer review (Karpathy LLM Council methodology). Five thinking styles (Contrarian / First Principles / Generalizer / Newcomer / Pragmatist) analyze in parallel, peer-review each other anonymously, then a chairman synthesizes the verdict. Add `--mixed-models` to dispatch advisors across opus/sonnet/haiku for higher reasoning diversity at extra cost. Transcript saved to .devt/state/council-*.md.
+
+Use cases:
+  /devt:council "rewrite the state module or strangle it incrementally?"
+  /devt:council "REST or events for the new ingestion pipeline?"
+  /devt:council --mixed-models "drop SQLite FTS5 for an external index?"
+
+Phrase triggers (no slash command needed): "council this: ...", "pressure-test this", "red team this", "second opinion on this", "devil's advocate".
+
+Skip the council for: factual lookups, syntax fixes, validation-seeking when you've already decided.
 
 ### /devt:thread "name"
 Persistent context threads for multi-session investigations.

@@ -302,6 +302,7 @@ Configuration merges in 3 layers (later overrides earlier):
 | `/devt:update`          | Check for and install plugin updates from GitHub                 |
 | `/devt:thread`          | Persistent context threads for cross-session investigations      |
 | `/devt:weekly-report`   | Generate a weekly contribution report from git history           |
+| `/devt:council`         | Pressure-test a decision through 5 advisors with peer review (Karpathy LLM Council). `--mixed-models` for cross-tier dispatch |
 
 ### Internal (called by workflows, available for power users)
 
@@ -431,10 +432,10 @@ devt/
     devt-tools.cjs        # CLI entry point
     modules/              # init, state, config, model-profiles, setup, semantic,
                           # security, health, weekly-report, update
-  commands/               # 28 command entry points
+  commands/               # 29 command entry points
   workflows/              # 26 orchestration files
   agents/                 # 10 agent definitions
-  skills/                 # 15 skill directories
+  skills/                 # 16 skill directories
   hooks/                  # Lifecycle hooks (hooks.json + scripts)
   guardrails/             # Protective guidelines
   protocols/              # Interaction protocols (checkpoint, status enum, UI presentation)
