@@ -489,3 +489,12 @@ Next step: /devt:plan to create the implementation plan
 - Assumptions are explicitly called out with impact assessment
 - No placeholder brackets remain in the generated PRD
 </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+While generating the PRD's `## Decisions` section, run `node bin/devt-tools.cjs memory query
+<feature-domain>` for each architectural choice and auto-cite related ADRs in the decision
+narrative. Pre-reject any approach matching a REJ tombstone. After PRD generation, offer
+"Promote spec decisions to permanent ADRs?" via AskUserQuestion (delegates to
+workflows/memory-promote.md). The PRD format gains an optional `## Memory Layer References`
+section listing ADR/CON/FLOW IDs the spec depends on.

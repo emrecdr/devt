@@ -140,3 +140,12 @@ Structure the output as:
 - **References**: `references/detection-categories.md`, `references/interpretation-rules.md`
 - **Used by agents**: architect (primary consumer), workflow orchestrator (for planning)
 - **Related skills**: code-review-guide (for individual file issues), strategic-analysis (for refactor planning)
+
+## Memory + Graphify integration (v0.17.0+)
+
+When Graphify is enabled, use it for symbol-anchored boundary checks alongside the
+existing path-based scanner — `node bin/devt-tools.cjs graphify neighbors <symbol>`
+detects cross-boundary calls Graphify resolved at the AST level. Detect **Stale ADRs**:
+for each active ADR in `.devt/memory/decisions/`, verify its `affects_paths` resolve to
+existing files and (when Graphify enabled) its `affects_symbols` exist. Surface stale
+ADRs in `arch-review.md` with severity Important so curator can supersede or update them.

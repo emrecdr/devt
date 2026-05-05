@@ -649,6 +649,156 @@ function listDocs(docType) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2 helpers — backlinks, orphans, stale-links, affects-symbol
+// ---------------------------------------------------------------------------
+
+/**
+ * Find all docs that link TO the given doc_id. Load-bearing for safe ADR
+ * supersession: before retiring ADR-007, see what depends on it.
+ */
+function getBacklinks(docId) {
+  return withDb(db => db.prepare(`
+    SELECT l.source_id, l.link_type, d.title AS source_title, d.doc_type AS source_type, d.status AS source_status, d.file_path
+    FROM links l JOIN documents d ON d.id = l.source_id
+    WHERE l.target_id = ?
+    ORDER BY d.doc_type, d.id
+  `).all(docId));
+}
+
+/**
+ * Detect docs that have NO incoming links AND no outgoing links — possibly stale,
+ * surface for curator review.
+ */
+function findOrphans() {
+  return withDb(db => db.prepare(`
+    SELECT d.id, d.title, d.doc_type, d.status, d.file_path
+    FROM documents d
+    WHERE NOT EXISTS (SELECT 1 FROM links WHERE source_id = d.id)
+      AND NOT EXISTS (SELECT 1 FROM links WHERE target_id = d.id)
+      AND d.status IN ('active', 'candidate')
+    ORDER BY d.doc_type, d.id
+  `).all());
+}
+
+/**
+ * Detect links pointing to non-existent target docs (forward refs that never got
+ * created, OR refs to docs that were deleted).
+ */
+function findStaleLinks() {
+  return withDb(db => db.prepare(`
+    SELECT l.source_id, l.target_id, l.link_type,
+           d.title AS source_title, d.file_path AS source_path
+    FROM links l
+    JOIN documents d ON d.id = l.source_id
+    LEFT JOIN documents t ON t.id = l.target_id
+    WHERE t.id IS NULL
+    ORDER BY l.source_id, l.target_id
+  `).all());
+}
+
+/**
+ * Symbol-anchored docs lookup. Routes through graphify.cjs when available;
+ * otherwise returns a payload with degraded=true so callers fall back to grep.
+ */
+/**
+ * Phase 2 consolidation helper: imports lessons from the legacy
+ * `memory/semantic/lessons.db` into the unified `.devt/memory/index.db`
+ * with doc_class='lesson'. Read-only on the source DB. Idempotent — safe
+ * to run repeatedly. Phase 3 will make this automatic; for now it's
+ * an explicit subcommand so users opt in.
+ *
+ * Returns: { imported: N, skipped_duplicates: N, errors: [...] }
+ */
+function migrateLessons() {
+  const Database = getDatabaseSync();
+  const lessonsDbCandidates = [
+    process.env.CLAUDE_PLUGIN_DATA && path.join(process.env.CLAUDE_PLUGIN_DATA, "semantic", "lessons.db"),
+    path.join(findProjectRoot(), "memory", "semantic", "lessons.db"),
+  ].filter(Boolean);
+
+  const lessonsDb = lessonsDbCandidates.find(p => fs.existsSync(p));
+  if (!lessonsDb) {
+    return { imported: 0, skipped_duplicates: 0, errors: ["lessons.db not found at any expected path"] };
+  }
+
+  const src = new Database(lessonsDb);
+  let lessons;
+  try {
+    lessons = src.prepare("SELECT * FROM lessons").all();
+  } catch (e) {
+    src.close();
+    return { imported: 0, skipped_duplicates: 0, errors: [`failed to read lessons.db: ${e.message}`] };
+  }
+  src.close();
+
+  if (lessons.length === 0) {
+    return { imported: 0, skipped_duplicates: 0, errors: [] };
+  }
+
+  const dest = ensureDb();
+  let imported = 0;
+  let skipped = 0;
+  const errors = [];
+  try {
+    dest.prepare("BEGIN").run();
+    const insert = dest.prepare(
+      `INSERT OR IGNORE INTO documents (id, doc_type, doc_class, status, confidence, domain, title, summary, file_path, created_at, created_by, schema_version)
+       VALUES (?, ?, 'lesson', 'active', ?, ?, ?, ?, ?, ?, 'retro', 1)`
+    );
+    const insertFts = dest.prepare(
+      `INSERT INTO documents_fts (id, title, summary, file_path, doc_type, doc_class, status)
+       VALUES (?, ?, ?, ?, 'lesson', 'lesson', 'active')`
+    );
+
+    let idx = 0;
+    for (const l of lessons) {
+      // Synthesize a stable lesson id from description hash. Lessons.db has no id column.
+      idx++;
+      const id = `LES-${String(idx).padStart(4, "0")}`;
+      const title = (l.description || "").slice(0, 80);
+      const summary = (l.description || "").slice(0, 200);
+      const conf = l.confidence || "0.5";
+      const domain = l.category || null;
+      try {
+        const result = insert.run(id, "lesson", String(conf), domain, title, summary, "(from lessons.db)", l.created_at || null);
+        if (result.changes > 0) {
+          insertFts.run(id, title, summary, "(from lessons.db)");
+          imported++;
+        } else {
+          skipped++;
+        }
+      } catch (e) {
+        errors.push(`${id}: ${e.message}`);
+      }
+    }
+    dest.prepare("COMMIT").run();
+  } catch (e) {
+    try { dest.prepare("ROLLBACK").run(); } catch { /* swallow */ }
+    errors.push(`transaction failed: ${e.message}`);
+  }
+  dest.close();
+
+  return { imported, skipped_duplicates: skipped, errors, source: lessonsDb };
+}
+
+function affectsSymbol(symbol) {
+  const dbResults = getBySymbol(symbol);
+  let graphifyState = null;
+  try {
+    const graphify = require("./graphify.cjs");
+    graphifyState = graphify.status();
+  } catch {
+    graphifyState = { state: "module_unavailable" };
+  }
+  return {
+    symbol,
+    docs: dbResults,
+    graphify_state: graphifyState && graphifyState.state ? graphifyState.state : "disabled",
+    degraded: !graphifyState || graphifyState.state !== "ready",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Validate (Phase 1: path-only — no Graphify yet)
 // ---------------------------------------------------------------------------
 
@@ -810,10 +960,60 @@ function run(subcommand, args) {
       json(validate());
       return 0;
     }
+    case "backlinks": {
+      if (!args[0]) { process.stderr.write("Usage: memory backlinks <doc-id>\n"); return 2; }
+      json({ doc_id: args[0], backlinks: getBacklinks(args[0]) });
+      return 0;
+    }
+    case "orphans": {
+      json({ orphans: findOrphans() });
+      return 0;
+    }
+    case "stale-links": {
+      json({ stale: findStaleLinks() });
+      return 0;
+    }
+    case "affects-symbol": {
+      if (!args[0]) { process.stderr.write("Usage: memory affects-symbol <symbol>\n"); return 2; }
+      json(affectsSymbol(args[0]));
+      return 0;
+    }
+    case "migrate-lessons": {
+      json(migrateLessons());
+      return 0;
+    }
+    case "suggest": {
+      // Discovery engine — harvests claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE + DEC-xxx
+      // entries into _suggestions.md for curator review. NEVER writes permanent doc files.
+      const discovery = require("./discovery.cjs");
+      const result = discovery.harvest({});
+      const suggestionsPath = discovery.writeSuggestionsReport(result);
+      json({
+        ...result,
+        suggestions_path: path.relative(findProjectRoot(), suggestionsPath),
+      });
+      return 0;
+    }
+    case "promote":
+    case "reject": {
+      // These subcommands are routed to curator via workflows/memory-promote.md and
+      // workflows/memory-reject.md. The CLI itself does NOT write permanent files —
+      // curator agent dispatches AskUserQuestion approval flow. Surface a hint.
+      process.stderr.write(
+        `\n${subcommand} is curator-gated. Run via the slash command:\n` +
+        `  /devt:memory ${subcommand} ${args.join(" ")}\n` +
+        `which routes through workflows/memory-${subcommand}.md and dispatches the curator agent\n` +
+        `with the memory-curation skill. The curator presents AskUserQuestion proposals; only on\n` +
+        `your approval does the markdown file get written. NEVER auto-promotes.\n`
+      );
+      return 2;
+    }
     default:
       process.stderr.write(
         `Unknown memory subcommand: ${subcommand}\n` +
-        `Valid: init | index | query | get | affects | list | links | active | rejected-keywords | validate\n`
+        `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
+        `       validate | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
+        `       promote (via /devt:memory) | reject (via /devt:memory)\n`
       );
       return 2;
   }
@@ -839,6 +1039,12 @@ module.exports = {
   getMemoryRoot,
   getDbPath,
   getSubdirPath,
+  // Phase 2 additions
+  getBacklinks,
+  findOrphans,
+  findStaleLinks,
+  affectsSymbol,
+  migrateLessons,
   DOC_TYPES,
   STATUS_VALUES,
   CONFIDENCE_VALUES,

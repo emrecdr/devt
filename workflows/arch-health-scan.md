@@ -329,3 +329,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_s
 - No code was modified (READ-ONLY)
 - Final status: **DONE**
   </success_criteria>
+
+## Memory layer integration (v0.17.0+) — Stale ADR detection
+
+Arch-health gains a new finding type: **Stale ADR**. For each active ADR in
+`.devt/memory/decisions/`, verify:
+1. `affects_paths` resolve to existing files (path-based — always available)
+2. `affects_symbols` exist in the codebase (Graphify-anchored when enabled)
+A stale ADR is flagged in arch-review.md with severity Important — curator can either
+update its `affects_*` fields or supersede the ADR with a new one. This catches the
+common drift where a refactor renames a class but the ADR still references the old name
+(the "Symbol Decay" failure mode the memory layer was designed to prevent).

@@ -72,6 +72,18 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "graphify": {
+        // graphify subcommand — optional; degrades gracefully when graphify.enabled=false
+        const code = require("./modules/graphify.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
+      case "discovery": {
+        // discovery subcommand — claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
+        const code = require("./modules/discovery.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
@@ -126,6 +138,24 @@ Commands:
   memory active [domain]    All status:active docs, optionally domain-filtered
   memory rejected-keywords  All REJ tombstones with their AI-suppression keywords
   memory validate           Frontmatter + path-resolution + broken-link checks
+  memory backlinks <id>     What links TO this doc (load-bearing for safe ADR supersession)
+  memory orphans            Docs with no incoming or outgoing links (possibly stale)
+  memory stale-links        Links pointing to non-existent target docs
+  memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
+  memory suggest            Run discovery: claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
+                            Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
+  memory migrate-lessons    Import legacy lessons.db rows into the unified .devt/memory/index.db
+  graphify status           Probe whether Graphify is enabled + binary present + graph.json exists
+  graphify freshness        Compare graph.json built_at_commit to current HEAD
+  graphify warm-cache       Return preferred warm-cache path (wiki/index.md OR GRAPH_REPORT.md)
+  graphify query <text>     Search the Graphify knowledge graph (degrades to empty when disabled)
+  graphify node <id>        Fetch a single node's definition + references
+  graphify neighbors <sym>  Connected concepts (--direction=in|out|both, --depth=N)
+  graphify path <a> <b>     Shortest path between two symbols
+  graphify blast-radius <s> Effect-size estimate for editing a symbol (small|medium|large)
+  discovery harvest         Same as 'memory suggest' — full discovery sweep
+  discovery wiki-links      Just the wiki-link enrichment proposals
+  discovery claude-mem-status  Whether claude-mem CLI is installed and reachable
   report window [--weeks N] Compute reporting time window
   report generate [--weeks N] [--output PATH]  Generate contribution report
   health [--repair]         Validate project config, state, hooks. --repair auto-fixes safe issues

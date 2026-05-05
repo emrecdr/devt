@@ -146,3 +146,15 @@ Common search patterns for codebase scanning:
 - **Prerequisites**: None — this is the first skill in any implementation workflow
 - **Feeds into**: complexity-assessment (scan results inform scope), strategic-analysis (findings shape options)
 - **Used by agents**: programmer, architect, code-reviewer (to verify no duplication was introduced)
+
+## Memory + Graphify integration (v0.17.0+)
+
+When `graphify.enabled: true` (config knob in `.devt/config.json`), prefer Graphify queries
+over grep — `node bin/devt-tools.cjs graphify query "<text>"` for symbol lookups, with the
+4-trigger fallback to grep (empty / error / not setup / under min_results_threshold).
+See `skills/graphify-helpers/SKILL.md` for the canonical decision tree. Token-cost target:
+~10× reduction on symbol queries vs. raw grep.
+
+Also consult the memory layer BEFORE proposing duplicates — `node bin/devt-tools.cjs memory
+query <topic>` and `memory affects <path>` surface ADRs/CONs/FLOWs that govern the area.
+Skipping this is how AI-introduced patterns conflict with existing architectural rules.

@@ -129,3 +129,12 @@ Skip when the task is completely new territory with no prior lessons (e.g., firs
 - **CLI**: `devt-tools.cjs semantic query` (FTS5 search), `devt-tools.cjs semantic sync` (sync playbook to DB), `devt-tools.cjs semantic compact` (archive stale entries)
 - **Used by agents**: All agents (before starting work)
 - **Related skills**: lesson-extraction (populates the playbook), playbook-curation (maintains quality)
+
+## Memory + Graphify integration (v0.17.0+)
+
+Dual-search: query the unified `.devt/memory/index.db` FTS5 index AND Graphify's graph
+when available. `node bin/devt-tools.cjs memory query <terms>` returns ADR/CON/FLOW/REJ
+matches; `node bin/devt-tools.cjs graphify query <terms>` returns symbol-anchored code
+nodes; merge results with dedup. Lessons (legacy `lessons.db`) consolidate into the
+unified index via `memory migrate-lessons` — Phase 2 still keeps the old DB readable
+for backward compat; Phase 3 deprecates it.

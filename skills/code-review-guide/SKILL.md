@@ -213,3 +213,12 @@ Score: XX/100 — VERDICT
 - **Prerequisites**: Standards files must exist in `.devt/rules/`
 - **Used by agents**: code-reviewer (primary consumer)
 - **Related skills**: codebase-scan (to verify no duplication introduced), architecture-health-scanner (for systemic issues)
+
+## Memory + Graphify integration (v0.17.0+)
+
+Reviews must include an "ADR Compliance" section. For each diff hunk:
+1. `node bin/devt-tools.cjs memory affects <changed-file>` — enumerate governing docs
+2. Verify diff respects active ADRs (treat violations as Critical findings)
+3. `node bin/devt-tools.cjs memory rejected-keywords` — flag any diff text matching a REJ tombstone
+4. When Graphify enabled, enumerate affected callers via `graphify neighbors <symbol> --direction=in`
+   (uses `skills/graphify-helpers/SKILL.md` protocol — falls back to grep when disabled).

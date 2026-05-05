@@ -192,3 +192,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 - Expired and low-confidence entries are pruned
 - Final status: **DONE**
   </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+Retro extracts BOTH operational lessons (existing flow → curator → playbook) AND architectural
+candidates (NEW → curator → memory-curation skill → AskUserQuestion). The 4-filter still gates
+lesson candidates. Architectural candidates use the memory-curation 5-filter (Specificity,
+Durability, Non-obviousness, Evidence, Actionability). After retro, the curator agent runs
+both promotion paths: lessons.yaml → playbook, AND _suggestions.md (from discovery harvest)
+→ memory layer.

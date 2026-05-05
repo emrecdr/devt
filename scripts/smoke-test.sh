@@ -402,6 +402,171 @@ fi
 cd "$SAVED_CWD"
 rm -rf "$MEMTMP"
 
+echo "== Memory layer Phase 2 (v0.17.0) =="
+# Phase 2 surfaces: graphify wrapper, discovery engine, new memory subcommands,
+# memory-curation + graphify-helpers skills, memory-promote/memory-reject workflows.
+
+# graphify.cjs degrades cleanly when disabled (default)
+GRAPHIFY_STATE=$(node "$CLI" graphify status 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.state)")
+if [ "$GRAPHIFY_STATE" = "disabled" ]; then
+  pass "graphify.cjs reports state=disabled when graphify.enabled=false (default)"
+else
+  fail "graphify.cjs unexpected state: $GRAPHIFY_STATE"
+fi
+
+# graphify queryGraph returns grep-fallback payload when disabled
+GRAPHIFY_QUERY_SOURCE=$(node "$CLI" graphify query "AuthService" 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.source)")
+if [ "$GRAPHIFY_QUERY_SOURCE" = "grep" ]; then
+  pass "graphify query returns source=grep with degraded=true when disabled"
+else
+  fail "graphify query expected source=grep, got $GRAPHIFY_QUERY_SOURCE"
+fi
+
+# graphify warm-cache returns null when graphify-out absent
+WARM_CACHE=$(node "$CLI" graphify warm-cache 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.path)")
+if [ "$WARM_CACHE" = "null" ]; then
+  pass "graphify warm-cache returns null when no graphify-out/wiki/ or GRAPH_REPORT.md exists"
+else
+  fail "graphify warm-cache unexpected path: $WARM_CACHE"
+fi
+
+# discovery.cjs detects claude-mem availability
+CLAUDEMEM_AVAIL=$(node "$CLI" discovery claude-mem-status 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.available)")
+if [ "$CLAUDEMEM_AVAIL" = "true" ] || [ "$CLAUDEMEM_AVAIL" = "false" ]; then
+  pass "discovery claude-mem-status returns boolean (available: $CLAUDEMEM_AVAIL)"
+else
+  fail "discovery claude-mem-status unexpected: $CLAUDEMEM_AVAIL"
+fi
+
+# Memory backlinks/orphans/stale-links/affects-symbol all wired
+MEMTMP2=$(mktemp -d)
+mkdir -p "$MEMTMP2/.git" "$MEMTMP2/.devt"
+SAVED2=$(pwd)
+cd "$MEMTMP2"
+node "$CLI" memory init >/dev/null 2>&1
+
+# Drop two ADRs with a link between them, plus an orphan
+cat > .devt/memory/decisions/ADR-001-source.md <<'EOF1'
+---
+id: ADR-001
+title: Source decision
+doc_type: decision
+domain: test
+status: active
+confidence: explicit
+summary: Source ADR with depends_on link to ADR-002
+links:
+  - id: ADR-002
+    type: depends_on
+---
+EOF1
+
+cat > .devt/memory/decisions/ADR-002-target.md <<'EOF2'
+---
+id: ADR-002
+title: Target decision
+doc_type: decision
+domain: test
+status: active
+confidence: explicit
+summary: Target ADR — should appear in backlinks for ADR-001
+---
+EOF2
+
+cat > .devt/memory/decisions/ADR-003-orphan.md <<'EOF3'
+---
+id: ADR-003
+title: Orphan decision
+doc_type: decision
+domain: test
+status: active
+confidence: explicit
+summary: ADR with no incoming or outgoing links
+---
+EOF3
+
+# Add a stale link target
+cat > .devt/memory/decisions/ADR-004-stale.md <<'EOF4'
+---
+id: ADR-004
+title: Stale-link source
+doc_type: decision
+domain: test
+status: active
+confidence: explicit
+summary: Points to a non-existent ADR
+links:
+  - id: ADR-999
+    type: relates_to
+---
+EOF4
+
+node "$CLI" memory index >/dev/null 2>&1
+
+BACKLINKS=$(node "$CLI" memory backlinks ADR-002 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.backlinks.length)")
+if [ "$BACKLINKS" = "1" ]; then
+  pass "memory backlinks: ADR-002 has 1 incoming link from ADR-001"
+else
+  fail "memory backlinks: expected 1 backlink to ADR-002, got $BACKLINKS"
+fi
+
+ORPHANS=$(node "$CLI" memory orphans 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.orphans.length)")
+if [ "$ORPHANS" = "1" ]; then
+  pass "memory orphans: ADR-003 surfaces as the only orphan (no in/out links)"
+else
+  fail "memory orphans: expected 1 orphan, got $ORPHANS"
+fi
+
+STALE=$(node "$CLI" memory stale-links 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.stale.length)")
+if [ "$STALE" = "1" ]; then
+  pass "memory stale-links: ADR-004 → ADR-999 surfaces as stale (target doesn't exist)"
+else
+  fail "memory stale-links: expected 1 stale link, got $STALE"
+fi
+
+AFFECTS_SYM_DEGRADED=$(node "$CLI" memory affects-symbol AuthService 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.degraded)")
+if [ "$AFFECTS_SYM_DEGRADED" = "true" ]; then
+  pass "memory affects-symbol: degraded=true when graphify disabled"
+else
+  fail "memory affects-symbol: expected degraded=true, got $AFFECTS_SYM_DEGRADED"
+fi
+
+cd "$SAVED2"
+rm -rf "$MEMTMP2"
+
+# Phase 2 file presence (use $ROOT — script's cwd is the smoke-test tmp dir)
+[ -f "$ROOT/bin/modules/graphify.cjs" ] && pass "bin/modules/graphify.cjs exists" || fail "bin/modules/graphify.cjs missing"
+[ -f "$ROOT/bin/modules/discovery.cjs" ] && pass "bin/modules/discovery.cjs exists" || fail "bin/modules/discovery.cjs missing"
+[ -f "$ROOT/skills/memory-curation/SKILL.md" ] && pass "skills/memory-curation/SKILL.md exists" || fail "skills/memory-curation/SKILL.md missing"
+[ -f "$ROOT/skills/graphify-helpers/SKILL.md" ] && pass "skills/graphify-helpers/SKILL.md exists" || fail "skills/graphify-helpers/SKILL.md missing"
+[ -f "$ROOT/workflows/memory-promote.md" ] && pass "workflows/memory-promote.md exists" || fail "workflows/memory-promote.md missing"
+[ -f "$ROOT/workflows/memory-reject.md" ] && pass "workflows/memory-reject.md exists" || fail "workflows/memory-reject.md missing"
+
+# Curator agent has memory-curation skill preloaded
+if grep -q "devt:memory-curation" "$ROOT/agents/curator.md"; then
+  pass "agents/curator.md preloads devt:memory-curation skill"
+else
+  fail "agents/curator.md missing memory-curation skill preload"
+fi
+
+# Existing skills got the memory + graphify integration sections
+for skill in codebase-scan code-review-guide lesson-extraction playbook-curation architecture-health-scanner autoskill strategic-analysis tdd-patterns verification-patterns complexity-assessment semantic-search; do
+  if grep -q "Memory + Graphify integration\|Memory layer integration\|REJ tombstone consultation\|Sister skill: memory-curation" "$ROOT/skills/$skill/SKILL.md" 2>/dev/null; then
+    pass "skills/$skill/SKILL.md has Phase 2 integration section"
+  else
+    fail "skills/$skill/SKILL.md missing Phase 2 integration"
+  fi
+done
+
+# Existing workflows got memory layer integration sections
+for wf in clarify-task specify research-task lesson-extraction debug code-review autoskill arch-health-scan; do
+  if grep -q "Memory layer integration\|REJ tombstone consultation\|Stale ADR detection" "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    pass "workflows/$wf.md has Phase 2 memory integration section"
+  else
+    fail "workflows/$wf.md missing Phase 2 integration"
+  fi
+done
+
 echo "== Council structured-output contract =="
 # Council advisor template must enforce Options + Validated Reasoning structure.
 # Free-form advisor output is the regression this guards against.

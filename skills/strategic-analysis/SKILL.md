@@ -154,3 +154,12 @@ After recommending, ask: "Would I bet my own project on this recommendation?" If
 - **Feeds into**: Implementation plan, architecture decisions
 - **Used by agents**: architect (primary), workflow orchestrator (for workflow planning)
 - **Related skills**: code-review-guide (to evaluate the implemented choice)
+
+## Memory + Graphify integration (v0.17.0+)
+
+Trade-off tables now cite governing ADRs and REJ tombstones — `node bin/devt-tools.cjs
+memory query <topic>` surfaces relevant docs. When an option matches a REJ tombstone,
+mark it pre-rejected with the REJ-id rather than presenting it as a viable alternative.
+When Graphify is enabled, populate the table with dependency counts via
+`graphify blast-radius <subject-symbols>` ("Option A touches 14 callers; Option B touches 3").
+This gives concrete blast-radius numbers instead of hand-wavy "Option A is bigger".

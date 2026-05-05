@@ -247,3 +247,14 @@ Present `.devt/rules/` changes before skill changes (project context first). Wai
 - **Feeds into**: Skill files (agent behavior), `.devt/rules/` (project conventions), agent files, workflow files
 - **Used by agents**: retro (post-session analysis), curator (playbook-to-skill promotion)
 - **Related skills**: lesson-extraction (captures lessons; autoskill captures system improvements)
+
+## REJ tombstone consultation (v0.17.0+) — HARD RULE
+
+Before generating ANY proposal, query the rejected-keywords list:
+`node bin/devt-tools.cjs memory rejected-keywords` (or via the unified MCP query layer
+in Phase 3). For each candidate proposal, scan the proposal text against every keyword
+in the result set. If any match (case-insensitive substring), SUPPRESS the proposal
+silently — do NOT surface it to the user. This is the tombstone mechanism: rejected
+ideas should never resurface, regardless of how the AI rephrases them. Under-coverage
+of search_keywords is a curator problem (skills/memory-curation/SKILL.md) — your job is
+to honor the existing list without exception.

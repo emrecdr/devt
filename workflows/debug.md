@@ -98,3 +98,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=
 - Quality gates pass after fix (if status is FIXED)
 - Summary includes root cause, not just the fix
 </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+Debugger consults REJ tombstones BEFORE proposing fixes via `node bin/devt-tools.cjs memory
+rejected-keywords`. Proposed fixes matching tombstone search_keywords are silently filtered —
+DO NOT surface "but Redis would solve this" when REJ-001 already rejected Redis. When debug
+findings reveal a recovery flow worth documenting, tag `#KNOWLEDGE-CANDIDATE: [type=flow]
+<summary>` so curator can promote to FLOW-xxx. Debug knowledge persistent memory continues to
+write to `.claude/agent-memory/devt-debugger/MEMORY.md` (existing surface).

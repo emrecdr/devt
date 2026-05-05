@@ -152,3 +152,11 @@ Skip when only adding new entries — lesson-extraction handles that. Use this s
 - **Feeds into**: semantic-search (curated playbook is the search corpus)
 - **Used by agents**: curator (primary), retro (post-extraction curation)
 - **Related skills**: lesson-extraction (produces raw entries), memory-compaction (bulk archival of stale entries)
+
+## Sister skill: memory-curation (v0.17.0+)
+
+This skill maintains operational lessons in `.devt/learning-playbook.md`. Architectural
+rules live at a different surface (`.devt/memory/`) and are gatekept by
+`skills/memory-curation/SKILL.md`. Same 5-filter discipline; different write authority.
+When a lesson candidate looks constitutional rather than situational ("we always do X"
+rather than "when X fails, check Y"), route it to memory-curation instead.

@@ -174,3 +174,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete stat
 - No code was modified (READ-ONLY)
 - Final status: **DONE**
   </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+Code review now produces an "ADR Compliance" section in `.devt/state/review.md` (Critical
+severity for violations). For each diff hunk:
+1. `node bin/devt-tools.cjs memory affects <changed-file>` enumerates governing ADRs/CONs/FLOWs
+2. Verify diff respects each (treat violations as Critical)
+3. `node bin/devt-tools.cjs memory rejected-keywords` — flag any diff text matching a REJ
+4. When Graphify enabled, enumerate affected callers via graphify-helpers and verify caller behavior is preserved
+ADRs are constitutional — same severity as security findings.

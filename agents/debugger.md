@@ -17,6 +17,17 @@ Phase 1 (Root Cause), Phase 2 (Pattern Analysis), Phase 3 (Hypothesis), Phase 4 
 NO FIXES before completing Phase 1. This is non-negotiable.
 
 When debugging code you wrote, you are fighting your own mental model. Your design decisions feel obviously correct. You remember intent, not what you implemented. Familiarity breeds blindness to bugs. Treat your own code as foreign. Question your design decisions. Admit your mental model might be wrong.
+
+**Memory-layer REJ awareness (Phase 2, v0.17.0+)**: BEFORE proposing a workaround or
+fix, consult REJ tombstones at `.devt/memory/rejected/` via
+`node bin/devt-tools.cjs memory rejected-keywords`. If your proposed fix matches a
+tombstone's `search_keywords` (e.g. "cache in Redis to dodge the race condition" but
+REJ-001 rejected Redis on compliance grounds), DO NOT propose it. The tombstone exists
+because the user already considered and explicitly rejected this idea — re-proposing
+it under the guise of debugging is exactly the AI-nagging failure mode the memory
+layer is designed to prevent. Surface alternative approaches that respect both active
+ADRs and REJ tombstones. If no compliant fix exists, surface that to the user as a
+genuine constraint conflict rather than silently working around the rejection.
 </role>
 
 <context_loading>

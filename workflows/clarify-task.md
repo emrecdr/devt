@@ -159,3 +159,13 @@ Otherwise, use default interview mode.
 - Decisions captured in .devt/state/decisions.md with DEC-xxx IDs
 - No unresolved ambiguity remains
   </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+At end of clarify, before writing decisions.md, run `node bin/devt-tools.cjs memory rejected-keywords`
+and pre-reject any DEC matching a REJ tombstone (silently — surface only that the rejection
+applied). After decisions.md is written, offer the user via AskUserQuestion: "Promote any
+of these DECs to permanent ADRs?" (delegates to workflows/memory-promote.md → curator with
+memory-curation skill). DECs not promoted stay ephemeral (existing behavior). The council
+offramp's verdict capture (references/council-offramp.md) integrates here — chairman verdicts
+matching the threshold can also seed ADR promotions.

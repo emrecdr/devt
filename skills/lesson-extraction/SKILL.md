@@ -161,3 +161,12 @@ Skip for sessions with no implementation, no bugs, and no surprises — not ever
 - **Feeds into**: playbook-curation (entries are curated for quality), semantic-search (entries become queryable)
 - **Used by agents**: retro (primary extraction agent), all agents (can extract lessons from their work)
 - **Related skills**: playbook-curation (maintains lesson quality), memory-compaction (archives stale lessons)
+
+## Memory + Graphify integration (v0.17.0+)
+
+Alongside operational lessons (the existing 4-filter), watch for **architectural candidates** —
+constitutional statements ("we always do X" / "we never do Y") tied to specific reasons. Tag
+them inline with `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <summary>` so
+the discovery engine (`node bin/devt-tools.cjs discovery harvest`) can surface them to the
+curator for AskUserQuestion-gated promotion to `.devt/memory/`. Lesson schema gains an
+optional `references:` field — populate with related ADR/CON/FLOW IDs when applicable.

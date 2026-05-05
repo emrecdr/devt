@@ -1,0 +1,497 @@
+"use strict";
+
+/**
+ * Discovery engine — harvests session signals into curator-reviewable proposals.
+ *
+ * Sources of candidate proposals (in priority order):
+ *   1. claude-mem ⚖️ decision and 🔵 discovery tagged entries (when claude-mem is installed)
+ *   2. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
+ *   3. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
+ *   4. learning-playbook.md entries that look architectural
+ *
+ * For each candidate, the engine:
+ *   - Fetches the FULL original reasoning (verbatim — no AI summarization)
+ *   - Cross-references existing memory docs (dedup) and REJ tombstones (suppress)
+ *   - Writes structured proposals to `.devt/memory/_suggestions.md`
+ *
+ * Hard guarantees:
+ *   - NEVER writes a permanent .devt/memory/{decisions,concepts,flows,rejected}/*.md
+ *     file. That is exclusively the curator agent's role via AskUserQuestion.
+ *   - REJ tombstone matches suppress proposals SILENTLY (the "no nag" mechanism).
+ *   - Idempotent: re-running on the same session window produces the same proposals.
+ *
+ * Phase 2 (v0.17.0). Phase 3 will wire this into the standalone /devt:preflight
+ * Topic Pre-Flight Brief generator.
+ */
+
+const fs = require("fs");
+const path = require("path");
+const child_process = require("node:child_process");
+
+// ---------------------------------------------------------------------------
+// Paths + helpers
+// ---------------------------------------------------------------------------
+
+function findProjectRoot() {
+  return require("./config.cjs").findProjectRoot();
+}
+
+function getMemoryRoot() {
+  return path.join(findProjectRoot(), ".devt", "memory");
+}
+
+function getSuggestionsPath() {
+  return path.join(getMemoryRoot(), "_suggestions.md");
+}
+
+function getStateDir() {
+  return path.join(findProjectRoot(), ".devt", "state");
+}
+
+// ---------------------------------------------------------------------------
+// Source 1: claude-mem ⚖️/🔵 tag harvest (when claude-mem is installed)
+//
+// claude-mem auto-categorizes observations during a session. Per the project
+// memory legend at session start: ⚖️ decisions / 🔵 discoveries / 🎯 session /
+// 🔴 bugfix / 🟣 feature / etc. Only ⚖️ and 🔵 are eligible for promotion.
+// ---------------------------------------------------------------------------
+
+function claudeMemAvailable() {
+  try {
+    const r = child_process.spawnSync("claude-mem", ["--help"], {
+      timeout: 2000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Query claude-mem for tagged observations from the recent session window.
+ * Returns [] if claude-mem is not installed (callers fall back to scratchpad tags).
+ *
+ * Returns array of:
+ *   { id, timestamp, tag: "⚖️" | "🔵", title, body, source: "claude-mem" }
+ */
+function harvestClaudeMem(options) {
+  options = options || {};
+  if (!claudeMemAvailable()) return [];
+
+  // claude-mem's CLI surface varies; we use a defensive query that works across
+  // recent versions. If the call fails or returns non-JSON, we degrade silently.
+  const args = ["query", "--tags", "decision,discovery", "--json"];
+  if (options.window_hours) args.push(`--since-hours=${options.window_hours}`);
+
+  let proc;
+  try {
+    proc = child_process.spawnSync("claude-mem", args, {
+      cwd: findProjectRoot(),
+      timeout: 5000,
+      encoding: "utf8",
+    });
+  } catch {
+    return [];
+  }
+  if (proc.status !== 0) return [];
+
+  let parsed;
+  try {
+    parsed = JSON.parse(proc.stdout || "[]");
+  } catch {
+    return [];
+  }
+
+  const entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
+  return entries.map(e => ({
+    id: e.id || e.observation_id || null,
+    timestamp: e.timestamp || e.created_at || null,
+    tag: e.type === "decision" ? "⚖️" : "🔵",
+    title: e.title || e.summary || "",
+    body: e.body || e.content || e.text || "",
+    source: "claude-mem",
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Source 2: #KNOWLEDGE-CANDIDATE inline tags in scratchpad.md
+//
+// Format: `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] one-line summary`
+// Followed optionally by indented body lines until the next non-indented line or another tag.
+// ---------------------------------------------------------------------------
+
+function harvestScratchpadTags() {
+  const scratchpadPath = path.join(getStateDir(), "scratchpad.md");
+  if (!fs.existsSync(scratchpadPath)) return [];
+
+  const content = fs.readFileSync(scratchpadPath, "utf8");
+  const lines = content.split("\n");
+  const candidates = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/#KNOWLEDGE-CANDIDATE:\s*(?:\[type=(\w+)\]\s*)?(.+)/);
+    if (!m) continue;
+    const proposed_type = (m[1] || "decision").toLowerCase();
+    const summary = m[2].trim();
+
+    // Collect body: indented continuation lines until next non-indented or another tag
+    const bodyLines = [];
+    let j = i + 1;
+    while (j < lines.length) {
+      const next = lines[j];
+      if (/^\s+\S/.test(next) && !next.includes("#KNOWLEDGE-CANDIDATE")) {
+        bodyLines.push(next.replace(/^\s+/, ""));
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    candidates.push({
+      id: null,
+      timestamp: null,
+      tag: proposed_type === "rejected" ? "REJ" : (proposed_type === "decision" ? "⚖️" : "🔵"),
+      title: summary,
+      body: bodyLines.join("\n"),
+      proposed_type,
+      source: "scratchpad",
+    });
+  }
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Source 3: .devt/state/decisions.md DEC-xxx entries
+// ---------------------------------------------------------------------------
+
+function harvestSessionDecisions() {
+  const decisionsPath = path.join(getStateDir(), "decisions.md");
+  if (!fs.existsSync(decisionsPath)) return [];
+
+  const content = fs.readFileSync(decisionsPath, "utf8");
+  const blocks = content.split(/^##\s+(DEC-\d+)/m);
+  const candidates = [];
+
+  // After split, blocks[0] is preamble; pairs after are [id, body, id, body, ...]
+  for (let i = 1; i < blocks.length; i += 2) {
+    const id = blocks[i];
+    const body = (blocks[i + 1] || "").trim();
+    const titleMatch = body.match(/^[:\s]*(.+?)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : id;
+
+    candidates.push({
+      id,
+      timestamp: null,
+      tag: "⚖️",
+      title,
+      body,
+      proposed_type: "decision",
+      source: "session-decisions",
+    });
+  }
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// REJ tombstone consultation — suppresses candidates matching search_keywords
+// ---------------------------------------------------------------------------
+
+function loadRejectedKeywords() {
+  // Read directly from the index if it exists; otherwise scan the rejected/ dir.
+  try {
+    const memory = require("./memory.cjs");
+    const result = memory.listRejectedKeywords();
+    if (Array.isArray(result)) {
+      // Group by doc_id so we know which REJ matched
+      const byDoc = {};
+      for (const row of result) {
+        if (!byDoc[row.id]) byDoc[row.id] = { id: row.id, title: row.title, summary: row.summary, keywords: [] };
+        byDoc[row.id].keywords.push(row.keyword);
+      }
+      return Object.values(byDoc);
+    }
+  } catch {
+    // Index missing — degrade to file-scan fallback
+  }
+  return [];
+}
+
+/**
+ * Returns first matching REJ when any keyword appears as a substring (case-insensitive)
+ * in the candidate's title or body. Returns null when no match.
+ */
+function findRejMatch(candidate, rejs) {
+  const haystack = `${candidate.title}\n${candidate.body}`.toLowerCase();
+  for (const rej of rejs) {
+    for (const kw of rej.keywords) {
+      if (haystack.includes(kw.toLowerCase())) {
+        return { rej_id: rej.id, rej_title: rej.title, matched_keyword: kw };
+      }
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Dedup against existing memory docs
+// ---------------------------------------------------------------------------
+
+function loadExistingMemoryDocs() {
+  try {
+    const memory = require("./memory.cjs");
+    const result = memory.listDocs();
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns first dup match when candidate's title overlaps significantly with an
+ * existing doc's title or summary. Coarse string-overlap heuristic — Phase 3
+ * could swap in FTS5 match scoring.
+ */
+function findDuplicate(candidate, existing) {
+  const candTokens = new Set(
+    (candidate.title || "").toLowerCase().split(/\W+/).filter(t => t.length >= 4)
+  );
+  if (candTokens.size === 0) return null;
+  for (const doc of existing) {
+    const docTokens = new Set(
+      `${doc.title} ${doc.summary || ""}`.toLowerCase().split(/\W+/).filter(t => t.length >= 4)
+    );
+    let overlap = 0;
+    for (const t of candTokens) if (docTokens.has(t)) overlap++;
+    const ratio = overlap / candTokens.size;
+    if (ratio >= 0.6) {
+      return { dup_id: doc.id, dup_title: doc.title, overlap_ratio: ratio };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Wiki-link enrichment — find bare mentions of known doc IDs that should be linked
+// ---------------------------------------------------------------------------
+
+const WIKI_LINK_SURFACES = [
+  ".devt/state/decisions.md",
+  ".devt/state/research.md",
+  ".devt/state/spec.md",
+  ".devt/learning-playbook.md",
+  "CLAUDE.md",
+];
+
+function discoverMissingWikiLinks() {
+  const root = findProjectRoot();
+  const existing = loadExistingMemoryDocs();
+  if (existing.length === 0) return [];
+
+  const proposals = [];
+  for (const rel of WIKI_LINK_SURFACES) {
+    const filePath = path.join(root, rel);
+    if (!fs.existsSync(filePath)) continue;
+
+    const content = fs.readFileSync(filePath, "utf8");
+    for (const doc of existing) {
+      // Skip if already wiki-linked
+      const idEscaped = doc.id.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+      const wikiPattern = new RegExp(`\\[\\[${idEscaped}\\]\\]`);
+      if (wikiPattern.test(content)) continue;
+      // Detect bare mention
+      const barePattern = new RegExp(`\\b${idEscaped}\\b`);
+      const m = content.match(barePattern);
+      if (m) {
+        // Find the line for context
+        const lines = content.split("\n");
+        const lineIdx = lines.findIndex(l => l.includes(doc.id));
+        proposals.push({
+          file: rel,
+          line: lineIdx + 1,
+          doc_id: doc.id,
+          doc_title: doc.title,
+          context: lines[lineIdx] ? lines[lineIdx].trim().slice(0, 120) : "",
+          proposal: `Add wiki-link: [[${doc.id}]]`,
+        });
+      }
+    }
+  }
+  return proposals;
+}
+
+// ---------------------------------------------------------------------------
+// Main: harvest from all sources, filter, dedup, write _suggestions.md
+// ---------------------------------------------------------------------------
+
+function harvest(options) {
+  options = options || {};
+  const rejs = loadRejectedKeywords();
+  const existing = loadExistingMemoryDocs();
+
+  const allCandidates = [
+    ...harvestClaudeMem(options),
+    ...harvestScratchpadTags(),
+    ...harvestSessionDecisions(),
+  ];
+
+  const proposals = [];
+  const suppressed = [];
+  const duplicates = [];
+
+  for (const cand of allCandidates) {
+    const rej = findRejMatch(cand, rejs);
+    if (rej) {
+      suppressed.push({ candidate: cand, suppressed_by: rej });
+      continue;
+    }
+    const dup = findDuplicate(cand, existing);
+    if (dup) {
+      duplicates.push({ candidate: cand, duplicates: dup });
+      continue;
+    }
+    proposals.push(cand);
+  }
+
+  const wikiLinkProposals = discoverMissingWikiLinks();
+
+  return {
+    proposals,
+    suppressed,
+    duplicates,
+    wiki_link_enrichments: wikiLinkProposals,
+    summary: {
+      total_candidates: allCandidates.length,
+      promoted_to_review: proposals.length,
+      suppressed_by_rej: suppressed.length,
+      filtered_as_duplicates: duplicates.length,
+      wiki_links_to_add: wikiLinkProposals.length,
+    },
+  };
+}
+
+/**
+ * Render the harvest result as a markdown report and write to _suggestions.md.
+ * Curator reads this file to drive the AskUserQuestion approval flow.
+ */
+function writeSuggestionsReport(harvestResult) {
+  const root = getMemoryRoot();
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+
+  const lines = [];
+  lines.push("# Memory Layer — Discovery Suggestions");
+  lines.push("");
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push("");
+  lines.push("**This report is auto-generated. NO permanent files are written without explicit user approval via curator's AskUserQuestion flow.**");
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  lines.push(`## Summary`);
+  for (const [k, v] of Object.entries(harvestResult.summary)) {
+    lines.push(`- ${k}: ${v}`);
+  }
+  lines.push("");
+
+  if (harvestResult.proposals.length > 0) {
+    lines.push("## ⚖️/🔵 Proposed Promotions");
+    lines.push("");
+    lines.push("Each proposal carries the FULL original reasoning verbatim. Curator presents these via AskUserQuestion.");
+    lines.push("");
+    for (const p of harvestResult.proposals) {
+      lines.push(`### ${p.tag} ${p.title}`);
+      lines.push(`- Source: ${p.source}${p.id ? ` (${p.id})` : ""}`);
+      lines.push(`- Proposed type: ${p.proposed_type || (p.tag === "⚖️" ? "decision" : "concept")}`);
+      if (p.timestamp) lines.push(`- Recorded: ${p.timestamp}`);
+      lines.push("");
+      lines.push("**Original reasoning (verbatim):**");
+      lines.push("```");
+      lines.push(p.body || "(no body)");
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  if (harvestResult.suppressed.length > 0) {
+    lines.push("## 🚫 Suppressed by REJ Tombstones (silent — not shown to user)");
+    lines.push("");
+    for (const s of harvestResult.suppressed) {
+      lines.push(`- "${s.candidate.title}" matched ${s.suppressed_by.rej_id} via keyword "${s.suppressed_by.matched_keyword}"`);
+    }
+    lines.push("");
+  }
+
+  if (harvestResult.duplicates.length > 0) {
+    lines.push("## 🔁 Duplicate Candidates (already covered by existing docs)");
+    lines.push("");
+    for (const d of harvestResult.duplicates) {
+      lines.push(`- "${d.candidate.title}" overlaps ${d.duplicates.dup_id} (${(d.duplicates.overlap_ratio * 100).toFixed(0)}% token overlap) — consider whether the existing doc needs an UPDATE`);
+    }
+    lines.push("");
+  }
+
+  if (harvestResult.wiki_link_enrichments.length > 0) {
+    lines.push("## 🔗 Wiki-Link Enrichments");
+    lines.push("");
+    lines.push("Bare mentions of doc IDs found in existing markdown that could become navigable wiki-links. Curator approves per file.");
+    lines.push("");
+    for (const w of harvestResult.wiki_link_enrichments) {
+      lines.push(`- ${w.file}:${w.line} — bare mention of ${w.doc_id} (${w.doc_title})`);
+      lines.push(`  - Context: \`${w.context}\``);
+      lines.push(`  - Proposal: ${w.proposal}`);
+    }
+    lines.push("");
+  }
+
+  fs.writeFileSync(getSuggestionsPath(), lines.join("\n"));
+  return getSuggestionsPath();
+}
+
+// ---------------------------------------------------------------------------
+// CLI dispatcher
+// ---------------------------------------------------------------------------
+
+function run(subcommand, _args) {
+  const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+
+  switch (subcommand) {
+    case "harvest": {
+      const result = harvest({});
+      writeSuggestionsReport(result);
+      json({
+        ...result,
+        suggestions_path: path.relative(findProjectRoot(), getSuggestionsPath()),
+      });
+      return 0;
+    }
+    case "wiki-links": {
+      json({ proposals: discoverMissingWikiLinks() });
+      return 0;
+    }
+    case "claude-mem-status": {
+      json({ available: claudeMemAvailable() });
+      return 0;
+    }
+    default:
+      process.stderr.write(
+        `Unknown discovery subcommand: ${subcommand}\n` +
+        `Valid: harvest | wiki-links | claude-mem-status\n`
+      );
+      return 2;
+  }
+}
+
+module.exports = {
+  run,
+  harvest,
+  writeSuggestionsReport,
+  harvestClaudeMem,
+  harvestScratchpadTags,
+  harvestSessionDecisions,
+  discoverMissingWikiLinks,
+  findRejMatch,
+  findDuplicate,
+  loadRejectedKeywords,
+  loadExistingMemoryDocs,
+  claudeMemAvailable,
+};

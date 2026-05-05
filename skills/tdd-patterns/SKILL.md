@@ -189,3 +189,12 @@ Bug fixes without tests are patches, not fixes. The test is the proof.
 **Used by**: programmer agent (when TDD mode enabled), tester agent
 **Related skills**: verification-patterns (verify after TDD), code-review-guide (review the result)
 **Feeds into**: .devt/state/impl-summary.md and .devt/state/test-summary.md
+
+## Memory + Graphify integration (v0.17.0+)
+
+When scaffolding tests, find nearest existing test patterns via Graphify:
+`node bin/devt-tools.cjs graphify neighbors <subject-symbol> --direction=in` filtered to
+test files in the result set, OR `graphify query "describe <domain>"` for similar describe
+blocks. Falls back to grep when disabled (see `skills/graphify-helpers/SKILL.md`). Tests
+should reference the FLOW docs they verify when applicable —
+`node bin/devt-tools.cjs memory list flow` enumerates them.

@@ -123,3 +123,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=
 - All open questions resolved (or explicitly deferred)
 - User has reviewed summary
   </success_criteria>
+
+## Memory layer integration (v0.17.0+)
+
+Researcher consults `.devt/memory/concepts/` and `.devt/memory/decisions/` BEFORE recommending
+an approach — `node bin/devt-tools.cjs memory query <topic>` and `memory affects <relevant-path>`
+surface governing rules. Recommendations matching active REJ tombstones are pre-filtered. When
+research findings stabilize into a reusable Concept ("here's the auth domain model"), the
+researcher tags `#KNOWLEDGE-CANDIDATE: [type=concept] <summary>` for curator promotion.
+research.md's `links:` field is now populated with related ADR/CON IDs.

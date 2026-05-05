@@ -125,3 +125,13 @@ This is an append-only audit trail. Never edit or delete existing entries.
 - Accepted changes written to the appropriate files
 - Every accepted proposal recorded in `.devt/autoskill-changelog.md`
 </success_criteria>
+
+## Memory layer integration (v0.17.0+) — REJ tombstone consultation (HARD RULE)
+
+BEFORE generating any proposal, autoskill MUST query `node bin/devt-tools.cjs memory
+rejected-keywords` and suppress every candidate proposal whose text contains any keyword
+(case-insensitive substring). Suppressed proposals never reach the user. This is the
+tombstone mechanism — rejected ideas don't resurface in autoskill output regardless of
+how the AI rephrases them. Logging in `.devt/state/autoskill-proposals.md` includes a
+"Suppressed by REJ" section listing what was filtered (for transparency) but those
+proposals are NOT user-facing.

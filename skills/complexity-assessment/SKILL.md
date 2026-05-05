@@ -165,3 +165,12 @@ After scoring, verify: Could a junior developer understand the scope from your t
 - **Feeds into**: Workflow selection (TRIVIAL/SIMPLE/STANDARD/COMPLEX determines agent involvement)
 - **Used by agents**: workflow orchestrator (to plan workflows), architect (to validate scope)
 - **Assets**: `assets/keywords.yaml` — signal words by dimension
+
+## Memory + Graphify integration (v0.17.0+)
+
+Effect-size from Graphify's blast-radius is a PRIMARY input for tier selection alongside
+file count: `node bin/devt-tools.cjs graphify blast-radius <subject-symbols>` returns
+small | medium | large. LARGE → COMPLEX tier (council offramp recommended). MEDIUM →
+STANDARD. SMALL → SIMPLE. Without Graphify, fall back to file count + module spread
+heuristics (see `skills/graphify-helpers/SKILL.md` for the protocol). Pre-Flight Brief
+(Phase 3) carries the effect_size estimate forward to plan/implement workflows.
