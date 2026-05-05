@@ -292,7 +292,11 @@ These five create three natural tensions (Contrarian ⇄ Generalizer, First Prin
 
 **Optional model diversity** (`--mixed-models`): dispatches advisors across opus/sonnet/haiku for genuinely different reasoning patterns (closer to Karpathy's original which used GPT-5.1, Gemini-3, Claude, and Grok). Default is single-model dispatch to control cost; opt in when the decision is high-stakes enough.
 
-**Output**: a chairman verdict in chat (5 sections — agreement, clashes, blind spots, recommendation, the one thing to do first) plus a full transcript at `.devt/state/council-{slug}-{timestamp}.md` with all advisor responses and peer reviews.
+**Structured advisor output**: each advisor responds in a fixed format — `## Options Considered`, `## Recommendation`, `## Validated Reasoning` (numbered claims with `Evidence:` citations to specific files / rules / research findings), and an optional `## Unvalidated Concerns` (claims they suspect but cannot ground in available material, marked `[speculation]`). Free-form prose is a regression — the advisor is re-dispatched if it skips the structure. Peer review then explicitly scores evidence quality across the five anonymized responses, and the chairman synthesis weights Validated Reasoning over Unvalidated Concerns when adjudicating disagreement.
+
+**Output**: a chairman verdict in chat (7 sections — agreement, clashes, blind spots, what grounded the verdict, where the council speculates, recommendation, the one thing to do first) plus a full transcript at `.devt/state/council-{slug}-{timestamp}.md` with all advisor responses and peer reviews.
+
+**Offramp integration with brainstorming workflows**: `/devt:clarify`, `/devt:research`, and `/devt:specify` will offer `/devt:council` as one of the resolution options when a gray area trips a 3-condition threshold (multiple viable approaches AND hard to reverse AND high stakes). The threshold and offramp template live in `references/council-offramp.md`. Soft cap of 1 council per workflow invocation; verdict is captured back into the calling workflow's primary artifact (DEC-xxx in `decisions.md` for clarify, "Council Verdict" section in `research.md` for research, PRD Decisions entry for specify). Offer-only — never auto-invoked.
 
 **Skip the council for**: factual lookups, syntax fixes, single-line bugs, or validation-seeking when you've already decided. The council tells you what you don't want to hear — that's the feature.
 

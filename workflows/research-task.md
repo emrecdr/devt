@@ -36,6 +36,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 Read .devt/rules/ for project conventions.
 Read CLAUDE.md if it exists.
 Read .devt/state/decisions.md if it exists (from /devt:clarify).
+Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when researcher findings are inconclusive or contested enough to warrant offering `/devt:council` as a resolution path (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:research`).
 </step>
 
 <step name="scope_check" gate="research scope determined">
@@ -85,7 +86,12 @@ Show the user:
 - **Open questions**: anything that needs user decision
 
 If open questions exist, ask the user via AskUserQuestion.
-Append answers to .devt/state/research.md.
+
+**Council offramp**: When the researcher returned `DONE_WITH_CONCERNS`, OR an open question trips the threshold in `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §1, use the offramp template from §2 — include the "Run /devt:council" option in the AskUserQuestion list. Council is especially valuable here because the researcher already laid the factual groundwork the advisors need, and `.devt/state/research.md` becomes the primary anchor for the council's `validation_material`. Soft cap: at most 1 council invocation per `/devt:research` session.
+
+When the user picks the council option, follow `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §3 to invoke and resume. After the council returns, capture the verdict per §3.2 (research caller appends a `## Council Verdict on {decision}` section to `.devt/state/research.md`).
+
+Append answers (and the council verdict link, if applicable) to .devt/state/research.md.
 </step>
 
 <step name="next">
@@ -108,7 +114,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=
 1. **STOP: scope creep** — If the research reveals the task is actually multiple independent tasks, report this to the user and suggest decomposition. Do not try to research everything.
 2. **STOP: insufficient codebase** — If the codebase doesn't have enough context to make a recommendation (e.g., greenfield with no existing patterns), say so explicitly rather than guessing.
 3. **Auto-fix: blocked researcher** — If the researcher agent returns BLOCKED or NEEDS_CONTEXT, provide the missing context from .devt/rules/ or CLAUDE.md and retry once. If still blocked, escalate to user.
-4. **STOP: research inconclusive** — If no clear recommendation emerges after scanning, present the trade-offs honestly rather than forcing a pick. Let the user decide.
+4. **STOP: research inconclusive** — If no clear recommendation emerges after scanning, present the trade-offs honestly rather than forcing a pick. Use the council offramp (`${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §2) to give the user a structured resolution path beyond binary "pick A or B" — council is especially valuable here because the researcher already laid the factual groundwork the advisors need to ground their reasoning.
 </deviation_rules>
 
 <success_criteria>

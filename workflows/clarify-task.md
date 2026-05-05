@@ -42,6 +42,8 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — structured probes for discovering domain unknowns, constraints, and edge cases. Use selectively based on the task's domain complexity.
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when a gray area is contentious enough to warrant offering `/devt:council` as a resolution path (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:clarify`).
+
 Load prior workflow artifacts (focus clarification on what's still ambiguous):
 - Read `.devt/state/research.md` if it exists (from `/devt:research`) — research findings inform which areas are already settled and which still need clarification. Do NOT re-ask about technical approaches that research already recommended.
 - Read `.devt/state/spec.md` if it exists (from `/devt:specify`) — focus gray area identification on what the spec left ambiguous or underspecified, not on topics the spec already covers in detail.
@@ -63,13 +65,19 @@ Focus on decisions the user CARES about — not technical trivia. Ask about:
 <step name="discuss" gate="all gray areas have decisions">
 ## Step 2: Present Gray Areas
 
-For each gray area, present:
+For each gray area:
 
-- The decision to make (one sentence)
-- Option A vs Option B (with trade-offs)
-- Your recommendation with reasoning
+1. **Evaluate against the council threshold** in `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §1. The gray area trips the threshold when ALL three conditions hold: multiple viable approaches with material trade-offs, hard to reverse, high stakes.
 
-Use AskUserQuestion for each decision. One question at a time.
+2. **If the threshold trips**, present the question via `AskUserQuestion` using the offramp template from §2 — list Option A and Option B with trade-offs AND include the "Run /devt:council" option AND the "Defer" option. **Soft cap**: at most 1 council invocation per `/devt:clarify` session. If multiple gray areas trip the threshold, surface that explicitly and ask the user to pick the highest-stakes one to council.
+
+3. **If the threshold does not trip**, present the standard decision via `AskUserQuestion`:
+   - The decision to make (one sentence)
+   - Option A vs Option B (with trade-offs)
+   - Your recommendation with reasoning
+   - One question at a time
+
+4. **When the user picks the council option**, follow `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §3 to invoke and resume. After the council returns, capture the verdict per §3.2 (clarify caller writes a new `DEC-xxx` entry in `.devt/state/decisions.md` referencing the transcript).
 
 **Scope guardrail**: If the user suggests adding features beyond the task scope, acknowledge the idea and suggest capturing it as a follow-up. Do NOT expand the current task scope.
 </step>

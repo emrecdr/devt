@@ -115,6 +115,15 @@ seconds here. In a devt project, prioritize:
 - Files relevant to the specific decision (for an API design question, scan existing
   handler patterns; for a data-model question, scan existing schema)
 
+**Caller-passed validation material**: when the council is invoked from inside another
+workflow (e.g. via `references/council-offramp.md` from `/devt:clarify`, `/devt:research`,
+or `/devt:specify`), the caller may pass a `validation_material` array of file paths.
+Treat that list as the authoritative validation surface for the decision. For each path,
+check existence and tag it `EXISTS` or `MISSING` — pass the annotated list verbatim into
+the advisor prompt's "Validation material available" block (Stage 2). Do not skip this:
+advisors must know which artifacts they can ground claims in, and which gaps require
+flagging speculation explicitly.
+
 **B. Frame the question.** Reframe the user's input + workspace context into a neutral
 prompt that all five advisors will receive. Include:
 
@@ -148,12 +157,71 @@ The council has been asked:
 [framed question]
 ---
 
-Respond purely from your assigned perspective. Be direct and specific to this codebase
-and these constraints. Do not hedge, do not try to be balanced — the other advisors
-cover the angles you don't. If you see a fatal flaw, name it concretely. If you see
-overlooked upside, name it concretely.
+Validation material available to ground your reasoning:
+[annotated list of file paths with EXISTS/MISSING tags, e.g.:
+- .devt/rules/architecture.md   [EXISTS]
+- .devt/rules/coding-standards.md   [EXISTS]
+- .devt/rules/golden-rules.md   [EXISTS]
+- .devt/state/research.md   [EXISTS]   (only when caller is /devt:research or downstream)
+- .devt/state/decisions.md   [MISSING]
+- .devt/state/spec.md   [EXISTS]   (only when caller is /devt:specify or downstream)
+- {any inline context blocks from the framer}
+]
 
-Length: 150-300 words. No preamble. Start directly with your analysis.
+Investigation expected:
+You have Read, Grep, and Glob tools available. Before forming claims, **actively
+investigate** — open the validation material above AND scan adjacent codebase areas
+relevant to your assigned perspective. Your Validated Reasoning section presents the
+**outcomes** of those investigations (what you actually found at specific file:line
+locations), not generic engineering takes filtered through a persona lens. Suggested
+investigation patterns by perspective (adapt as the question requires):
+
+- **Contrarian** — Grep for prior bug reports / TODOs / FIXME markers in the area; Read
+  error-handling patterns and edge-case tests; check git history (`git log -- {path}`)
+  for prior incidents on the affected modules
+- **First Principles Thinker** — Read the existing public API / contract surface to
+  understand what is actually required vs assumed; Grep for the domain term across
+  the codebase to map what already exists
+- **Generalizer** — Glob for similar modules / handlers / repositories to find reuse
+  opportunities; identify abstractions that could be shared across N call sites
+- **Newcomer** — Read entry points (main, app init, route registration) and onboarding
+  docs (README, MODULE.md) to assess what's discoverable; flag terms used without
+  definition
+- **Pragmatist** — Glob for the smallest existing change that resembles the proposed
+  work; Read recent commits in the area to gauge typical PR size and review tempo
+
+Skipping investigation collapses your output into opinion. The whole point of the
+council is grounded analysis — investigate, then reason, then cite.
+
+Respond from your assigned perspective using this exact structure:
+
+## Options Considered
+List 2-4 concrete options (not opinions). For each:
+- **{Option name}**: one-sentence summary
+- **Trade-off profile**: who/what wins, who/what loses
+
+## Recommendation
+One option from the list above (or "no recommendation — see Reasoning"), no hedging.
+
+## Validated Reasoning
+3-6 numbered points. Each point must cite the evidence that validates it:
+1. {claim} — Evidence: {file:line, rule name, research finding, codebase pattern, or
+   explicit "no evidence available — speculation flagged below"}
+2. ...
+
+## Unvalidated Concerns (optional)
+Anything you suspect but cannot ground in available material. Mark each with
+"[speculation]" so the chairman can weight it appropriately.
+
+Rules:
+- A claim without evidence belongs in "Unvalidated Concerns," NOT "Validated Reasoning."
+- If validation material doesn't support your perspective, say so — don't invent evidence
+  to defend your role's stance. Honest perspective-fit beats forced confidence.
+- Stay in your assigned thinking style: the Contrarian still hunts failure modes, the
+  Newcomer still reads with no context, etc. The structured format constrains *output
+  shape*, not *perspective*.
+- Length: 250-400 words. Structure costs words; that's fine.
+- No preamble. Start directly with `## Options Considered`.
 ```
 
 **Optional: model diversity (`--mixed-models`).** When the user opts in, dispatch
@@ -205,13 +273,16 @@ Their anonymized responses:
 **Response E:**
 [response]
 
-Answer these three questions. Be specific. Reference responses by letter.
+Answer these four questions. Be specific. Reference responses by letter.
 
 1. Which response is the strongest? Why? (Pick exactly one.)
 2. Which response has the biggest blind spot? Name what it is missing.
-3. What did ALL five responses miss that the council should consider?
+3. Which response has the **strongest evidence anchoring** in its Validated Reasoning
+   section, and which has the **weakest** (most claims that should have been in
+   Unvalidated Concerns but were stated as if validated)?
+4. What did ALL five responses miss that the council should consider?
 
-Length: ≤200 words. Be direct.
+Length: ≤250 words. Be direct.
 ```
 
 **Why anonymize:** if reviewers know which advisor said what, they defer to their
@@ -259,7 +330,10 @@ D=[advisor], E=[advisor]):
 Produce the verdict using this exact structure:
 
 ## Where the Council Agrees
-[Points multiple advisors converged on independently. High-confidence signals.]
+[Points multiple advisors converged on independently. High-confidence signals. When the
+convergence is anchored in shared cited evidence (the same .devt/rule, the same research
+finding, the same codebase pattern), say so explicitly — convergence on evidence is a
+stronger signal than convergence on opinion.]
 
 ## Where the Council Clashes
 [Genuine disagreements. Present both sides. Explain why reasonable advisors disagree.]
@@ -267,10 +341,23 @@ Produce the verdict using this exact structure:
 ## Blind Spots the Council Caught
 [Things that emerged through peer review only — what individuals missed that others flagged.]
 
+## What Grounded the Verdict
+[Short list of the specific evidence (file paths, rule names, research findings, codebase
+patterns) cited across multiple advisors that backs the recommendation. If the
+recommendation rests primarily on speculation rather than validated reasoning, say so
+here in plain language — the user must know whether the council is anchored in artifacts
+or improvising.]
+
+## Where the Council Speculates
+[Short list of the most consequential Unvalidated Concerns that emerged. For each, name
+the artifact or check that would convert it from speculation to validated reasoning. The
+user should know what to investigate next if they want to firm up the verdict.]
+
 ## The Recommendation
 [A clear, actionable recommendation. Not "it depends." Real guidance with reasoning.
 You may disagree with the majority if the dissent's reasoning is strongest — name it
-and explain why.]
+and explain why. Lean on Validated Reasoning over Unvalidated Concerns when adjudicating
+disagreement.]
 
 ## The One Thing to Do First
 [Single concrete next step. Not a list. One commit-sized action.]
@@ -312,8 +399,21 @@ individual advisor responses or re-run the council against a previous transcript
 - **Chairman can dissent from the majority.** If 4 of 5 advisors converge but the 1
   dissenter's reasoning is strongest, the chairman should side with the dissenter and
   explain why. Best reasoning beats majority count.
-- **Length budgets matter.** 150-300 words per advisor, ≤200 per peer review. Without
+- **Length budgets matter.** 250-400 words per advisor (structured output is denser than
+  free-form), ≤250 per peer review (one extra evidence-quality question added). Without
   caps, advisors hedge and reviewers wander.
+- **Structured output is mandatory, not stylistic.** Every advisor response must contain
+  the four sections (Options Considered, Recommendation, Validated Reasoning, optional
+  Unvalidated Concerns). Free-form takes that skip the structure are a regression — if
+  an advisor returns prose, re-dispatch with the template emphasized.
+- **Evidence over opinion.** A claim in Validated Reasoning without a citation is the
+  highest-priority defect. Peer review explicitly flags this in question 3, and the
+  chairman explicitly weights Validated > Unvalidated Concerns in adjudication.
+- **Research over assertion.** Advisors are expected to *use* Read/Grep/Glob to
+  investigate before forming claims, not just consult what the framer passed. The
+  Validated Reasoning section presents the **outcome** of that investigation — what was
+  actually found, where. An advisor who answers without investigating produces opinion
+  dressed as analysis; the structured format makes the gap visible.
 - **Don't council trivial questions.** If the answer is one Stack Overflow query away,
   answer directly. The council is for genuine uncertainty with stakes.
 

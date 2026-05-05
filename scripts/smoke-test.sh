@@ -263,6 +263,40 @@ else
   fail "concurrent locking test (run scripts/test-locking.cjs for details)"
 fi
 
+echo "== Council structured-output contract =="
+# Council advisor template must enforce Options + Validated Reasoning structure.
+# Free-form advisor output is the regression this guards against.
+if grep -q "## Validated Reasoning" "$ROOT/skills/council/SKILL.md" \
+   && grep -q "## Options Considered" "$ROOT/skills/council/SKILL.md" \
+   && grep -q "Evidence:" "$ROOT/skills/council/SKILL.md"; then
+  pass "council SKILL.md enforces structured advisor output (Options + Validated Reasoning + Evidence citations)"
+else
+  fail "council SKILL.md missing structured-output contract — advisors will return free-form prose"
+fi
+
+echo "== Council offramp wired into clarify/research/specify =="
+# Path 1 integration: each of the three brainstorming workflows must reference
+# the offramp helper. Locks the integration so a future workflow edit can't
+# silently drop the council option.
+OFFRAMP_REF="references/council-offramp.md"
+if [ -f "$ROOT/$OFFRAMP_REF" ]; then
+  pass "$OFFRAMP_REF exists"
+else
+  fail "$OFFRAMP_REF missing — Path 1 integration broken"
+fi
+for wf in clarify-task.md research-task.md specify.md; do
+  if grep -q "council-offramp.md" "$ROOT/workflows/$wf"; then
+    pass "workflows/$wf references council-offramp.md"
+  else
+    fail "workflows/$wf does not reference council-offramp.md"
+  fi
+done
+if grep -q "/devt:council" "$ROOT/workflows/specify.md"; then
+  pass "workflows/specify.md Step 6 next-steps list includes /devt:council option"
+else
+  fail "workflows/specify.md Step 6 missing /devt:council option"
+fi
+
 echo "== Agent size budget =="
 # Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500
 # leaves room to grow but blocks bloat. Bump deliberately if a future

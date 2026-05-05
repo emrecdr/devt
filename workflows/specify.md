@@ -49,6 +49,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 Load project context:
 - Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively
 - Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — domain-specific probing techniques for uncovering unknowns and edge cases
+- Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when to offer `/devt:council` as a resolution path on high-stakes interview questions (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:specify`)
 - Read `.devt/rules/coding-standards.md` for naming/patterns
 - Read `.devt/rules/architecture.md` for project structure
 - Read `CLAUDE.md` if it exists
@@ -160,6 +161,7 @@ under-testing (missing critical paths).
 - Include your recommendation with "(Recommended)" suffix and reasoning
 - One question at a time — do not overwhelm
 - Reference codebase findings: "I found X in the codebase, so I recommend Y"
+- **Council offramp**: For interview questions where the threshold in `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §1 trips (architecture, data model, security model, public API contract are common candidates), use the offramp template from §2 — list options A/B/... AND include the "Run /devt:council" option. Soft cap: at most 1 council invocation per `/devt:specify` session — if multiple questions trip the threshold, prompt the user to pick the highest-stakes one to council and capture the rest as deferred decisions.
 
 ### Example AskUserQuestion
 
@@ -411,6 +413,8 @@ options:
     description: "Jump straight to the full development pipeline — the spec will be used as the primary requirements source"
   - label: "Clarify decisions first (/devt:clarify)"
     description: "Discuss remaining gray areas with more depth before planning"
+  - label: "Pressure-test the spec's biggest decision (/devt:council)"
+    description: "Pick the highest-stakes decision in the PRD and run it through 5 advisors with peer review before committing to /devt:plan — best when a load-bearing decision feels under-examined"
   - label: "Done for now"
     description: "Save the spec and come back later"
 ```
