@@ -147,6 +147,7 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 - All Node.js modules use zero dependencies (Node.js stdlib only).
 - Atomic file writes throughout: write to `.tmp` then `fs.renameSync()`.
 - Config uses prototype-pollution-safe deep merge with `FORBIDDEN_KEYS` set.
+- `scope_mode` (default `"surgical"`) controls how agents handle unrelated findings — `"surgical"` routes them through the Find-Surface-Decide protocol in `golden-rules.md` Rule 5 (ask the user before fixing); `"boyscout"` grants blanket authority for small mechanical in-file cleanups (dead imports, lint warnings, formatting) without asking. Declarative only — no enforcement code reads it; agents self-regulate based on the rule body and the resolved value in the `init` payload.
 - Hooks use a Node.js runner (`run-hook.js`) with profile support: `DEVT_HOOK_PROFILE=minimal|standard|full` and `DEVT_DISABLED_HOOKS=hook1,hook2`. The `run-hook.cmd` polyglot delegates to `run-hook.js`.
 - State validation is shadow-mode by default: `state update` runs `validateConsistency()` on every call, warns on stderr, and persists `validation_status="warned"` + `validation_warnings=N` to `workflow.yaml`. Disable with `DEVT_VALIDATE_SHADOW=0`. `next.md` routes on the persisted flag so resume-after-pause surfaces drift.
 - The plugin manifest lives at `.claude-plugin/plugin.json`. Agents are listed explicitly; commands and skills are auto-discovered.

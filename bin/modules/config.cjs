@@ -17,6 +17,7 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const DEFAULTS = {
   model_profile: "quality",
+  scope_mode: "surgical",
   git: {
     provider: null,
     workspace: null,

@@ -17,7 +17,7 @@
 
 **All components MUST use `<script setup>` syntax.** No Options API. No `defineComponent()`.
 
-**Legacy Options API**: Some existing shared components (headers, sidebars) use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt — convert to `<script setup>` when touching these files (Boy Scout Rule). Do not write new components using Options API.
+**Legacy Options API**: Some existing shared components (headers, sidebars) use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt — convert to `<script setup>` when touching these files (project-level pre-approved cleanup, see golden-rules Rule 4). Do not write new components using Options API.
 
 ```vue
 <script setup>

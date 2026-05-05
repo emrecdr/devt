@@ -9,7 +9,7 @@
 | 1. Deep Analysis | Scan ALL related code BEFORE implementing |
 | 2. No Duplicates | NEVER reimplement existing components, composables, or utilities |
 | 3. No Backward Compat | Update callers directly — no compatibility shims |
-| 4. Boy Scout | Leave code CLEANER than you found it |
+| 4. Surgical Changes | Modify only what the task needs; surface unrelated findings instead of silently fixing |
 | 5. Composition API Only | `<script setup>` exclusively — no Options API, no `defineComponent()` |
 | 6. Feature Module Structure | Every feature in `components/<feature>/` with services/stores/views |
 | 7. Centralized API Client | ALL HTTP calls through `shared/services/api.js` — no standalone Axios |
@@ -87,15 +87,22 @@ Just change the code. Update all usages. Delete the old path.
 
 ---
 
-## Rule 4: Boy Scout Rule
+## Rule 4: Surgical Changes
 
-Every commit leaves the codebase cleaner:
+Touch only what the task requires. Clean up orphans **your own** changes create — not pre-existing ones.
 
-- Remove unused imports and components you encounter
-- Fix ESLint warnings in files you touch
-- Convert any Options API code you encounter to `<script setup>`
-- Replace `var` with `const`/`let` in files you modify
-- Simplify overly complex template expressions into computed properties
+When you spot unrelated improvements or bugs (unused imports, ESLint warnings, `var` usage, complex template expressions that should be computed properties), do NOT silently fix them. Use the **Find-Surface-Decide protocol**:
+
+1. **Find**: note the file path and a one-line description of the issue
+2. **Surface**: present it to the user as a side-finding
+3. **Decide**: ask whether to (a) fix now in this task, (b) split into a follow-up task, or (c) just record in the session summary
+4. Act on the user's choice — never assume
+
+**Project-level pre-approved cleanup**: Converting Options API code to `<script setup>` is explicitly pre-approved by this project's coding standards (see Rule 5 below). When you touch a file using Options API, convert it without needing to ask. This is a documented exception — not a license for general drive-by edits.
+
+### Boy Scout Mode (opt-in)
+
+`scope_mode` in `.devt/config.json` defaults to `"surgical"`. Set it to `"boyscout"` to grant agents permission to auto-fix small mechanical issues — unused imports, ESLint warnings, `var` → `const`/`let`, typos in template comments — within files they are already editing, without asking. Anything larger (refactors, behavior changes, cross-component cleanups) still goes through Find-Surface-Decide regardless of mode.
 
 ---
 
@@ -132,7 +139,7 @@ export default defineComponent({
 
 **`<script setup>` is the ONLY accepted pattern.** It's shorter, has better TypeScript inference, and eliminates the boilerplate of `defineComponent` + `return`.
 
-**Legacy exception**: Some existing shared components (app-header, app-sidebar) may use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt from the initial build. When you touch these files, convert them to `<script setup>` (Boy Scout Rule). Never write new components using Options API or hybrid patterns.
+**Legacy exception**: Some existing shared components (app-header, app-sidebar) may use a hybrid pattern with `setup()` + `data()`/`methods()`. This is technical debt from the initial build. When you touch these files, convert them to `<script setup>` — this is a project-level pre-approved cleanup (see Rule 4). Never write new components using Options API or hybrid patterns.
 
 ---
 

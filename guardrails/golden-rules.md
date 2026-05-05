@@ -54,15 +54,26 @@ Universal development rules that apply to every project, every language, every f
 
 ---
 
-## Rule 5: Boy Scout Rule `[WARNING]`
+## Rule 5: Surgical Changes `[WARNING]`
 
-**What**: Leave code better than you found it, within the scope of the current task.
+**What**: Touch only what the task requires. Clean up orphans your own changes create — not pre-existing ones.
 
-**Why**: Incremental improvement prevents decay. Small cleanups during normal work keep the codebase healthy without requiring dedicated refactoring sprints.
+**Why**: LLM agents tend to over-improve adjacent code, conflating "I noticed it" with "I should fix it." Drive-by edits create review noise, conflict with parallel work, and obscure the real change. Every modified line should trace directly to the user's request.
 
-**Common violation**: Touching a file and ignoring the obvious style violation on the next line. Adding a function to a module with a broken import at the top. Working in a file that has a clearly wrong constant value and leaving it.
+**Common violation**: "Improving" comments or formatting in code you happened to read. Refactoring a function next to the one you were asked to change. Renaming a variable mid-task because the existing name is awkward. Deleting pre-existing dead code that predates your task.
 
-**Practice**: If you touch a file and see something clearly wrong — a typo, a dead import, a misnamed variable — fix it. Do not scope-creep into unrelated refactors, but do not walk past obvious problems either.
+**Practice**: Modify only what is necessary to complete the task. If your changes leave dangling imports or unused symbols, remove those — they are your mess.
+
+When you spot unrelated improvements or bugs (typos, dead code, stale comments, latent bugs, refactor opportunities, security smells), do NOT silently fix them. Instead, follow the **Find-Surface-Decide protocol**:
+
+1. **Find**: Note the issue briefly — file path, one-line description, severity guess
+2. **Surface**: Present it to the user as a side-finding, not a fait accompli
+3. **Decide**: Ask whether to (a) fix now within this task, (b) split into a separate follow-up task, or (c) just record in the session summary and move on
+4. **Act on the user's choice** — never assume which path applies
+
+Match existing style even if you would write it differently. The Boy Scout instinct ("I noticed it, I should fix it") applies only with explicit user approval. Silent in-scope creep is the failure mode this rule guards against.
+
+**Boy Scout mode (opt-in)**: Projects can grant blanket cleanup authority by setting `scope_mode: "boyscout"` in `.devt/config.json` (default is `"surgical"`). When `boyscout` mode is active, agents may auto-fix small mechanical issues — dead imports, lint warnings, typos in comments, formatting — within files they are already editing, without invoking Find-Surface-Decide. Anything larger (refactors, behavior changes, cross-file cleanups) still requires the protocol regardless of mode.
 
 ---
 
@@ -135,3 +146,27 @@ Universal development rules that apply to every project, every language, every f
 **Common violation**: Starting to write code immediately and discovering the project's naming convention halfway through. Using a pattern that the project explicitly forbids. Running the wrong test command because the project uses a non-standard setup.
 
 **Practice**: First action in any session: read the project's rule files. Internalize the conventions before touching any code. This takes 30 seconds and prevents hours of rework.
+
+---
+
+## Rule 12: Surface Assumptions Before Implementing `[CRITICAL]`
+
+**What**: State assumptions explicitly before acting on them. When the task is ambiguous, present interpretations rather than picking one silently.
+
+**Why**: Silent assumption is the most expensive failure mode in AI-assisted coding — agents pick a plausible interpretation, run with it, and produce code that solves the wrong problem. Surfacing the ambiguity costs one message; building the wrong thing costs hours.
+
+**Common violation**: Reading "add validation" and silently choosing client-side over server-side. Reading "fix the bug" without verifying which behavior is correct. Inferring requirements from variable names instead of asking. Picking a library or pattern without confirming it fits the project's conventions.
+
+**Practice**: Before implementing, explicitly list non-trivial assumptions. If two or more interpretations of the task are plausible, name them and ask the user to choose. If something is unclear, stop and ask — do not guess and run. Push back when a simpler approach exists or when the requested approach has a flaw.
+
+---
+
+## Rule 13: Minimum Viable Implementation `[WARNING]`
+
+**What**: Write the minimum code that solves the stated problem. Nothing speculative, nothing for hypothetical future needs.
+
+**Why**: Speculative features and pre-emptive abstractions add maintenance cost without users. "We might need this later" plumbing is almost always wrong about what later actually requires. Code that was not asked for is code that does not need to ship.
+
+**Common violation**: Adding configuration options nobody requested. Building a generic abstraction layer for code with one caller. Adding new public methods alongside the requested change. Implementing 200 lines when 50 would meet the requirement.
+
+**Practice**: Implement exactly what was asked. Resist adding flexibility, configurability, or hooks that were not requested. If you finish the task and notice the code could be 4x shorter, rewrite it. The senior-engineer test: would a careful reviewer say this is overcomplicated? If yes, simplify.

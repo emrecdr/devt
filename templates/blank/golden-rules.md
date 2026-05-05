@@ -9,7 +9,7 @@
 | 1. Deep Analysis | Scan ALL related code BEFORE implementing |
 | 2. No Duplicates | NEVER reimplement existing features or utilities |
 | 3. No Backward Compat | Don't add legacy shims — update callers directly |
-| 4. Boy Scout | Leave code CLEANER than you found it |
+| 4. Surgical Changes | Modify only what the task needs; surface unrelated findings instead of silently fixing |
 | 5. No TODOs/Markers | Complete code only — no placeholders |
 | 6. Verify Before Done | No completion claims without test evidence |
 
@@ -55,14 +55,22 @@ Change the code, update all callers, delete the old path. If the project has ext
 
 ---
 
-## Rule 4: Boy Scout Rule
+## Rule 4: Surgical Changes
 
-Every commit leaves the codebase cleaner:
+Touch only what the task requires. Clean up orphans **your own** changes create — not pre-existing ones.
 
-- Remove dead code you encounter
-- Fix linter warnings in files you touch
-- Simplify overly complex conditions in code you read
-- Update stale comments in functions you modify
+When you spot unrelated improvements or bugs (typos, dead code, stale comments, latent bugs, refactor opportunities), do NOT silently fix them. Use the **Find-Surface-Decide protocol**:
+
+1. **Find**: note the file path and a one-line description of the issue
+2. **Surface**: present it to the user as a side-finding
+3. **Decide**: ask whether to (a) fix now in this task, (b) split into a follow-up task, or (c) just record in the session summary
+4. Act on the user's choice — never assume
+
+Match existing style even if you would write it differently. Silent in-scope creep is the failure mode this rule guards against.
+
+### Boy Scout Mode (opt-in)
+
+`scope_mode` in `.devt/config.json` defaults to `"surgical"` (the protocol above). Set it to `"boyscout"` to grant agents permission to auto-fix small mechanical issues — dead imports, lint warnings, typos in comments, formatting — within files they are already editing, without asking. Anything larger (refactors, behavior changes, cross-file cleanups) still goes through Find-Surface-Decide regardless of mode.
 
 ---
 

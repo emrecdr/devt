@@ -9,7 +9,7 @@
 | 1. Deep Analysis | Scan ALL related code BEFORE implementing |
 | 2. No Duplicates | NEVER reimplement existing features OR create method aliases |
 | 3. No Backward Compat | Update callers directly — no compatibility shims |
-| 4. Boy Scout | Leave code CLEANER than you found it |
+| 4. Surgical Changes | Modify only what task needs; surface unrelated findings instead of silently fixing |
 | 5. Read MODULE.md | Check documentation BEFORE implementing |
 | 6. Base Entity Classes | Entities extend CORRECT base class (UUID/Int + SD) |
 | 7. Scope Validation | Validate user scope in ALL repository methods |
@@ -173,38 +173,43 @@ Keeping both a `V1PhotoResponse` and `V2PhotoResponse` "for clients that haven't
 
 ---
 
-## Rule 4: Boy Scout Rule
+## Rule 4: Surgical Changes
 
-**Always leave code CLEANER than you found it.**
+**Touch only what the task requires. Clean up orphans your own changes create — not pre-existing ones.**
 
 ### Why It Matters
 
-Small incremental improvements prevent technical debt accumulation. Code quality improves naturally over time rather than requiring dedicated cleanup sprints.
+LLM agents tend to over-improve adjacent code, conflating "I noticed it" with "I should fix it." Drive-by edits create review noise, conflict with parallel work, and obscure the real change. Every modified line should trace directly to the user's request.
 
 ### What This Means
 
 When working on ANY code:
-- Fix small issues you notice (typos, formatting, unclear names)
-- Remove dead code paths
-- Improve unclear variable names
-- Add missing type hints
-- Remove unnecessary comments
-- Simplify overly complex logic
+- Modify only what is necessary to complete the task
+- Remove imports/symbols/dead branches that **your changes** orphaned — they are your mess
+- Match existing project conventions even if you would write it differently
+- Do NOT silently fix unrelated issues you happen to notice
 
-### Scope Limitations
+### Find-Surface-Decide Protocol
 
-- Only improve code you're already touching
-- Don't refactor unrelated modules
-- Keep improvements proportional to your main task
-- Document significant cleanups in commit messages
+When you spot unrelated improvements or bugs (typos, dead code, stale comments, missing type hints, latent bugs, refactor opportunities, security smells):
+
+1. **Find**: note the file path and a one-line description of the issue
+2. **Surface**: present it to the user as a side-finding, not a fait accompli
+3. **Decide**: ask whether to (a) fix now in this task, (b) split into a follow-up task, or (c) just record in the session summary
+4. Act on the user's choice — never assume
+
+### Boy Scout Mode (opt-in)
+
+`scope_mode` in `.devt/config.json` defaults to `"surgical"` (Find-Surface-Decide above). Set it to `"boyscout"` to grant agents permission to auto-fix small mechanical issues — unused imports, ruff/black warnings, missing type hints on touched signatures, typos in docstrings, formatting — within files they are already editing, without asking. Anything larger (refactors, behavior changes, cross-module cleanups) still goes through Find-Surface-Decide regardless of mode.
 
 ### Violation Example
 
-Seeing a function with `user_data: Any` return type while modifying the same file, and not fixing it to the proper type hint.
+Seeing a function with `user_data: Any` return type while modifying the same file, and silently changing it to `dict[str, str]` instead of surfacing the type-hint gap to the user as a side-finding.
 
 ### Enforcement
 
-- **Reviewer** checks for improvement opportunities in modified files
+- **Reviewer** rejects diffs containing changes outside the stated task scope when `scope_mode = "surgical"`
+- **Reviewer** allows in-file mechanical cleanups when `scope_mode = "boyscout"` is set
 
 ---
 

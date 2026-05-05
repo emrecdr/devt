@@ -9,7 +9,7 @@
 | 1. Deep Analysis | Scan ALL related code BEFORE implementing |
 | 2. No Duplicates | NEVER reimplement existing features or utilities |
 | 3. No Backward Compat | Update callers directly — no compatibility shims |
-| 4. Boy Scout | Leave code CLEANER than you found it |
+| 4. Surgical Changes | Modify only what the task needs; surface unrelated findings instead of silently fixing |
 | 5. Strict TypeScript | No `any`, no `@ts-ignore`, no `as unknown as` |
 | 6. Error Types | Every thrown error extends AppError with a code |
 | 7. Dependency Injection | No global singletons — inject everything via constructor |
@@ -69,14 +69,22 @@ Just change the code. Update all callers. Delete the old path.
 
 ---
 
-## Rule 4: Boy Scout Rule
+## Rule 4: Surgical Changes
 
-Every commit leaves the codebase cleaner:
+Touch only what the task requires. Clean up orphans **your own** changes create — not pre-existing ones.
 
-- Remove dead code you encounter (unused imports, unreachable branches)
-- Fix ESLint warnings in files you touch
-- Simplify overly complex conditions
-- Update stale comments in functions you modify
+When you spot unrelated improvements or bugs (unused imports, ESLint warnings, dead branches, stale comments, `any` escape hatches), do NOT silently fix them. Use the **Find-Surface-Decide protocol**:
+
+1. **Find**: note the file path and a one-line description of the issue
+2. **Surface**: present it to the user as a side-finding
+3. **Decide**: ask whether to (a) fix now in this task, (b) split into a follow-up task, or (c) just record in the session summary
+4. Act on the user's choice — never assume
+
+Match existing project conventions even if you would write it differently.
+
+### Boy Scout Mode (opt-in)
+
+`scope_mode` in `.devt/config.json` defaults to `"surgical"`. Set it to `"boyscout"` to grant agents permission to auto-fix small mechanical issues — unused imports, ESLint warnings, typos in comments, formatting — within files they are already editing, without asking. Anything larger (refactors, behavior changes, cross-module cleanups) still goes through Find-Surface-Decide regardless of mode.
 
 ---
 

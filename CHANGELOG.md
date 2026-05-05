@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-05
+
+### Changed
+- **Golden Rule 5 reframed: Boy Scout Rule → Surgical Changes**, with explicit Find-Surface-Decide protocol for unrelated findings. The old rule told agents to "leave code cleaner than you found it" which gave them license for silent drive-by edits — a known LLM failure mode that bloats diffs and obscures the real change. The reframed rule scopes cleanup to orphans the agent's own changes create, and routes any unrelated improvements through a 4-step protocol: **Find** (note the file + one-line description), **Surface** (present as a side-finding, not a fait accompli), **Decide** (ask the user whether to fix-now / split-into-follow-up / record-in-summary), then act on the choice. Failure mode named explicitly: "I noticed it, I should fix it" is now an opt-in behavior, not a default. Adapted from [Andrej Karpathy's observations on LLM coding pitfalls](https://x.com/karpathy/status/2015883857489522876) via [@forrestchang's andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills).
+- **All 5 project templates updated**: `templates/{blank,go,python-fastapi,typescript-node,vue-bootstrap}/golden-rules.md` Rule 4 (the project-scoped twin of plugin Rule 5) now mirrors the Surgical Changes framing with stack-specific examples (ESLint/golangci-lint/ruff/etc.). `templates/vue-bootstrap/coding-standards.md` parenthetical updated. The vue-bootstrap legacy Options API → `<script setup>` conversion remains explicitly pre-approved at the project level — that's a documented exception, not a license for general drive-by edits.
+
+### Added
+- **`scope_mode` config knob (`bin/modules/config.cjs`)**: defaults to `"surgical"` (Find-Surface-Decide for any unrelated finding). Project owners can set `scope_mode: "boyscout"` in `.devt/config.json` to grant blanket cleanup authority for small mechanical issues — dead imports, lint warnings, typos in comments, formatting — within files agents are already editing, without invoking the protocol. Anything larger (refactors, behavior changes, cross-file cleanups) still goes through Find-Surface-Decide regardless of mode. Resolved through the existing 3-level merge (defaults ← `~/.devt/defaults.json` ← `.devt/config.json`); surfaced to agents via the standard `init` payload — no enforcement code, declarative-only like the rest of devt's config surface.
+- **Golden Rule 12 — Surface Assumptions Before Implementing `[CRITICAL]`**: agents must state non-trivial assumptions explicitly and present interpretations rather than picking one silently when a task is ambiguous. Targets the most expensive failure mode in AI-assisted coding: silent assumption + plausible-looking output for the wrong problem.
+- **Golden Rule 13 — Minimum Viable Implementation `[WARNING]`**: complement to existing Rule 8 (Complexity/Benefit Evaluation). Where Rule 8 targets defensive over-engineering (try/catch, redundant validation), Rule 13 targets scope creep and speculative features (unrequested config knobs, generic abstractions for one caller, "we might need this later" plumbing). The senior-engineer test: would a careful reviewer say this is overcomplicated? If yes, simplify.
+
+### Documented
+- **`CLAUDE.md` — `scope_mode` config field**: noted under Key Conventions so future contributors discover the field without reading the rule body.
+
 ## [0.13.0] - 2026-04-30
 
 ### Added
