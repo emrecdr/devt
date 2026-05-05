@@ -107,14 +107,21 @@ function validatePath(filePath, baseDir) {
 
 /**
  * Safely parse JSON with size limits and error handling.
+ *
+ * @param {string} text - Raw JSON text.
+ * @param {string} [label] - Context label for error messages.
+ * @param {number} [maxSize] - Maximum byte length (default 1MB). Bump for
+ *   trusted-but-large inputs (memory bundles, Graphify graph caches).
  */
-function safeJsonParse(text, label) {
+function safeJsonParse(text, label, maxSize) {
   label = label || "JSON";
+  const limit = (typeof maxSize === "number" && maxSize > 0) ? maxSize : 1048576;
   if (!text || typeof text !== "string") {
     return { ok: false, error: `${label}: empty or invalid input` };
   }
-  if (text.length > 1048576) {
-    return { ok: false, error: `${label}: exceeds 1MB size limit` };
+  if (text.length > limit) {
+    const limitMb = (limit / 1048576).toFixed(1);
+    return { ok: false, error: `${label}: exceeds ${limitMb}MB size limit` };
   }
   try {
     return { ok: true, value: JSON.parse(text) };

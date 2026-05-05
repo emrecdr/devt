@@ -39,3 +39,5 @@ echo "WARN: Test gate not configured. Edit .devt/rules/quality-gates.md"
 - Any non-zero exit code = gate failure
 - Run all gates before pushing code
 - Placeholder gates above pass with warnings — replace them with real commands
+
+> **ADR alignment gate** (v0.20.0+): before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.

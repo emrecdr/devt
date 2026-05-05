@@ -35,3 +35,5 @@ src/
 
 <!-- Define how dependencies are wired together. -->
 <!-- Example: Constructor injection, DI container, composition root -->
+
+> **Architecture decisions**: permanent architectural choices live in `.devt/memory/decisions/` (ADR-xxx). Concepts in `.devt/memory/concepts/` (CON-xxx) define mental models. Flows in `.devt/memory/flows/` (FLOW-xxx) document named sequences. Query via `node bin/devt-tools.cjs memory affects <path>` to see what governs a given file.

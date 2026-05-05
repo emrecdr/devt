@@ -149,3 +149,5 @@ func RequestID(next http.Handler) http.Handler {
 ```
 
 Common middleware: request ID, structured logging, panic recovery, auth, CORS, timeout.
+
+> **Architecture decisions**: permanent architectural choices live in `.devt/memory/decisions/` (ADR-xxx). Concepts in `.devt/memory/concepts/` (CON-xxx) define mental models. Flows in `.devt/memory/flows/` (FLOW-xxx) document named sequences. Query via `node bin/devt-tools.cjs memory affects <path>` to see what governs a given file.

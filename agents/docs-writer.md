@@ -9,6 +9,8 @@ description: |
   or updated after code changes. Examples: "update the module docs after the refactor",
   "document the new payment service", "update docs for the API changes".
 tools: Read, Write, Edit, Bash, Glob, Grep
+skills:
+  - devt:memory-pre-flight
 ---
 
 <role>

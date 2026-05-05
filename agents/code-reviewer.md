@@ -11,6 +11,7 @@ description: |
 tools: Read, Bash, Glob, Grep
 memory: project
 skills:
+  - devt:memory-pre-flight
   - devt:code-review-guide
 ---
 

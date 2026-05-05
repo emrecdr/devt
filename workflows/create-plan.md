@@ -33,7 +33,10 @@ Before dispatching agents, check `.devt/config.json` for `agent_skills.<agent_ty
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=plan phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
+
+The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the planning subject. Output goes to `.devt/state/preflight-brief.md`. The architect/planner agent reads it before drafting plan.md so the plan honors all governing ADRs and acknowledges any REJ tombstones in scope. Skip silently on failure (legacy fallback to `.devt/rules/` only).
 
 Read `.devt/rules/` for project conventions:
 

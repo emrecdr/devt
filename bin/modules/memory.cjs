@@ -20,6 +20,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { safeJsonParse } = require("./security.cjs");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -56,20 +57,79 @@ function findProjectRoot() {
 }
 
 function getMemoryRoot() {
+  // Project-local root — destination for curator writes and `memory init`.
+  // Always exists in the resolved roots list (auto-appended by getMemoryRoots).
   return path.join(findProjectRoot(), ".devt", "memory");
 }
 
+/**
+ * Resolve the configured list of memory roots (v0.22.0+).
+ * Returns absolute paths in scan order. Project-local (.devt/memory) is always
+ * the LAST entry so it wins ID collisions per the last-wins precedence rule.
+ *
+ * Each path is validated:
+ *   - relative paths resolve against the project root
+ *   - `..` segments after normalization are allowed (shared dirs are often siblings)
+ *     BUT the resolved path must still be a real existing directory
+ *   - null bytes rejected
+ *   - duplicates collapsed (preserving first occurrence to keep precedence stable)
+ */
+function getMemoryRoots() {
+  let configured = null;
+  try {
+    const cfg = require("./config.cjs").getMergedConfig();
+    configured = cfg && cfg.memory ? cfg.memory.paths : null;
+  } catch { /* config unreadable — fall through to single-root default */ }
+
+  const projectRoot = findProjectRoot();
+  const localRoot = getMemoryRoot();
+
+  if (!Array.isArray(configured) || configured.length === 0) {
+    return [localRoot];
+  }
+
+  const resolved = [];
+  const seen = new Set();
+  for (const raw of configured) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 4096) continue;
+    if (raw.includes("\0")) continue;
+    const abs = path.isAbsolute(raw) ? path.normalize(raw) : path.normalize(path.join(projectRoot, raw));
+    // Force project-local to end regardless of user-supplied position. Without this,
+    // a user listing `.devt/memory` first followed by shared roots would silently
+    // make shared override local — violating the "project-local always wins" invariant.
+    // Skip here; we re-append at the end.
+    if (abs === localRoot) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    resolved.push(abs);
+  }
+  // Project-local root is ALWAYS the last entry (highest precedence — last-wins).
+  resolved.push(localRoot);
+  return resolved;
+}
+
 function getDbPath() {
+  // Index DB always lives in the project-local root, regardless of how many
+  // shared roots are configured. The DB indexes the union of all roots but
+  // the file itself is per-project (gitignored, regenerable).
   return path.join(getMemoryRoot(), "index.db");
 }
 
 function getSubdirPath(docType) {
-  // docType is whitelisted via DOC_TYPES; SUBDIR_BY_TYPE is a hardcoded map.
-  // No path traversal risk: even malicious docType values would yield `undefined`
-  // and the join would produce a non-resolvable path, not escape getMemoryRoot().
+  // Project-local subdir — used for curator writes and the legacy
+  // single-root path. For multi-root scanning, see getSubdirPathFor(root, docType).
   const subdir = SUBDIR_BY_TYPE[docType];
   if (!subdir) throw new Error(`unknown doc_type: ${docType}`);
   return path.join(getMemoryRoot(), subdir);
+}
+
+function getSubdirPathFor(memoryRoot, docType) {
+  // Resolve a docType subdir under an explicit memory root (not necessarily local).
+  // memoryRoot must be an absolute path (caller's responsibility — validated upstream
+  // by getMemoryRoots). docType is whitelist-checked against SUBDIR_BY_TYPE.
+  const subdir = SUBDIR_BY_TYPE[docType];
+  if (!subdir) throw new Error(`unknown doc_type: ${docType}`);
+  return path.join(memoryRoot, subdir);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,33 +333,61 @@ function validateFrontmatter(fm, filePath) {
 // ---------------------------------------------------------------------------
 
 function scanDocs() {
-  const root = getMemoryRoot();
-  if (!fs.existsSync(root)) return [];
-
+  const roots = getMemoryRoots();
+  const projectRoot = findProjectRoot();
   const docs = [];
-  for (const docType of DOC_TYPES) {
-    const subdir = getSubdirPath(docType);
-    if (!fs.existsSync(subdir)) continue;
+  const conflicts = []; // { id, source_roots: [...] } when same id appears in 2+ roots
 
-    for (const entry of fs.readdirSync(subdir)) {
-      if (entry.startsWith("_")) continue;
-      if (!entry.endsWith(".md")) continue;
+  // Track first-seen id-to-source so we can detect collisions. Iteration order
+  // matters: we walk roots in configured order, so the LAST occurrence wins
+  // (later writes shadow earlier ones — see config doc for memory.paths).
+  const idToIndex = new Map(); // id -> index into docs[]
 
-      const filePath = path.join(subdir, entry);
-      const content = fs.readFileSync(filePath, "utf8");
-      const fm = parseFrontmatter(content);
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const docType of DOC_TYPES) {
+      const subdir = getSubdirPathFor(root, docType);
+      if (!fs.existsSync(subdir)) continue;
+      for (const entry of fs.readdirSync(subdir)) {
+        if (entry.startsWith("_")) continue;
+        if (!entry.endsWith(".md")) continue;
 
-      if (fm && typeof fm.id === "string" && /-000$/.test(fm.id)) continue;
+        const filePath = path.join(subdir, entry);
+        const content = fs.readFileSync(filePath, "utf8");
+        const fm = parseFrontmatter(content);
+        if (fm && typeof fm.id === "string" && /-000$/.test(fm.id)) continue;
 
-      docs.push({
-        filePath,
-        relativePath: path.relative(findProjectRoot(), filePath),
-        frontmatter: fm,
-        body: content.replace(/^---[\s\S]*?\n---\n?/, ""),
-      });
+        const doc = {
+          filePath,
+          // relativePath is from project root for the local files (preserves legacy)
+          // and absolute for shared roots so file_path stays unambiguous in queries
+          relativePath: filePath.startsWith(projectRoot + path.sep)
+            ? path.relative(projectRoot, filePath)
+            : filePath,
+          frontmatter: fm,
+          body: content.replace(/^---[\s\S]*?\n---\n?/, ""),
+          source_root: root,
+        };
+
+        const id = fm && typeof fm.id === "string" ? fm.id : null;
+        if (id && idToIndex.has(id)) {
+          // Collision: track which roots had this id; replace previous entry
+          // (last-wins per memory.paths precedence rule).
+          const prevIdx = idToIndex.get(id);
+          const prev = docs[prevIdx];
+          conflicts.push({ id, prev_source: prev.source_root, prev_path: prev.relativePath, new_source: root, new_path: doc.relativePath });
+          docs[prevIdx] = doc; // overwrite — last-wins
+        } else {
+          if (id) idToIndex.set(id, docs.length);
+          docs.push(doc);
+        }
+      }
     }
   }
 
+  // Stash conflicts on the array itself for rebuildIndex to surface in its return value.
+  // Non-enumerable so JSON.stringify on a stray docs array doesn't leak it.
+  Object.defineProperty(docs, "_conflicts", { value: conflicts, enumerable: false });
   return docs;
 }
 
@@ -322,6 +410,7 @@ const SCHEMA_DDL = `
     title           TEXT NOT NULL,
     summary         TEXT NOT NULL,
     file_path       TEXT NOT NULL,
+    source_root     TEXT,
     created_at      TEXT,
     created_by      TEXT,
     schema_version  INTEGER NOT NULL DEFAULT 1
@@ -411,8 +500,8 @@ function rebuildIndex() {
 
     const insertDoc = db.prepare(
       `INSERT INTO documents
-        (id, doc_type, doc_class, status, confidence, domain, title, summary, file_path, created_at, created_by, schema_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, doc_type, doc_class, status, confidence, domain, title, summary, file_path, source_root, created_at, created_by, schema_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertFts = db.prepare(
       `INSERT INTO documents_fts (id, title, summary, file_path, doc_type, doc_class, status)
@@ -443,6 +532,7 @@ function rebuildIndex() {
         fm.title,
         fm.summary,
         doc.relativePath,
+        doc.source_root || null,
         fm.created_at || null,
         fm.created_by || null,
         SCHEMA_VERSION
@@ -482,12 +572,17 @@ function rebuildIndex() {
   }
   db.close();
 
+  const conflicts = (docs && docs._conflicts) || [];
+  const roots = getMemoryRoots();
   return {
     inserted,
     skipped: validationErrors.length,
     errors: validationErrors,
     last_built_at: new Date().toISOString(),
     schema_version: SCHEMA_VERSION,
+    memory_roots: roots,
+    conflicts,
+    conflict_count: conflicts.length,
   };
 }
 
@@ -642,9 +737,9 @@ function getLinks(docId, depth) {
 function listDocs(docType) {
   return withDb(db => {
     if (docType) {
-      return db.prepare("SELECT id, title, status, confidence, domain, file_path FROM documents WHERE doc_type = ? ORDER BY id").all(docType);
+      return db.prepare("SELECT id, title, status, confidence, domain, file_path, source_root FROM documents WHERE doc_type = ? ORDER BY id").all(docType);
     }
-    return db.prepare("SELECT id, title, doc_type, status, confidence, domain, file_path FROM documents ORDER BY doc_type, id").all();
+    return db.prepare("SELECT id, title, doc_type, status, confidence, domain, file_path, source_root FROM documents ORDER BY doc_type, id").all();
   });
 }
 
@@ -709,6 +804,281 @@ function findStaleLinks() {
  *
  * Returns: { imported: N, skipped_duplicates: N, errors: [...] }
  */
+// ---------------------------------------------------------------------------
+// Portable bundle export / import (v0.20.0+)
+//
+// Bundle format (JSON, schema_version=1):
+//   {
+//     schema_version: 1,
+//     exported_at: ISO,
+//     exported_from: <source project root>,
+//     doc_count: N,
+//     docs: [{ id, doc_type, frontmatter, body }, ...]
+//   }
+//
+// Export reads markdown files, parses frontmatter + body, emits JSON. Import
+// reverses: regenerates markdown from the bundle. Conflict policy on import:
+//   default: skip if id exists
+//   --overwrite: replace existing file
+//   --prefix=X-: remap every id to X-ORIGINAL_ID (multi-source bundling)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a user-supplied --out= path. Rules:
+ *   - relative paths: resolved against project root, MUST stay inside project root
+ *   - absolute paths: allowed (user explicitly chose external destination)
+ *   - reject `..` segments after normalization on relative paths
+ *   - reject null bytes
+ */
+function resolveExportPath(p) {
+  if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
+    throw new Error("--out path is invalid (empty or too long)");
+  }
+  if (p.includes("\0")) throw new Error("--out path contains null bytes");
+  if (path.isAbsolute(p)) return path.normalize(p);
+  const root = findProjectRoot();
+  const joined = path.normalize(path.join(root, p));
+  // Containment check — joined must remain inside (or equal to) the project root
+  const rel = path.relative(root, joined);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("--out path resolves outside project root after normalization");
+  }
+  return joined;
+}
+
+/**
+ * Resolve a user-supplied bundle path for import.
+ *   - relative resolved against cwd
+ *   - absolute allowed
+ *   - reject null bytes; reject if file doesn't exist
+ */
+function resolveImportPath(p) {
+  if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
+    throw new Error("import path is invalid (empty or too long)");
+  }
+  if (p.includes("\0")) throw new Error("import path contains null bytes");
+  const resolved = path.isAbsolute(p) ? path.normalize(p) : path.normalize(path.join(process.cwd(), p));
+  if (!fs.existsSync(resolved)) throw new Error(`bundle file not found: ${resolved}`);
+  return resolved;
+}
+
+function readDocFile(filePath) {
+  const content = fs.readFileSync(filePath, "utf8");
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fmMatch) return null;
+  const fm = parseYamlSubset(fmMatch[1]);
+  const body = fmMatch[2];
+  return { frontmatter: fm, body };
+}
+
+function exportBundle(opts) {
+  opts = opts || {};
+  const includeTypes = opts.includeTypes || DOC_TYPES.slice();
+  // v0.22.0+: by default, bundle ONLY the project-local root. Shared roots are
+  // typically maintained as their own repos with their own bundling — exporting
+  // them here would be a copy that drifts from upstream. Pass allRoots:true to
+  // bundle the union (last-wins-deduped) for multi-root archival use cases.
+  const allRoots = !!opts.allRoots;
+  const roots = allRoots ? getMemoryRoots() : [getMemoryRoot()];
+  const docsById = new Map();
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const docType of includeTypes) {
+      const subdir = getSubdirPathFor(root, docType);
+      if (!fs.existsSync(subdir)) continue;
+      for (const entry of fs.readdirSync(subdir)) {
+        if (entry.startsWith("_")) continue;
+        if (!entry.endsWith(".md")) continue;
+        const full = path.join(subdir, entry);
+        const parsed = readDocFile(full);
+        if (!parsed || !parsed.frontmatter || !parsed.frontmatter.id) continue;
+        // Last-wins: later root in the list overwrites earlier. Project-local
+        // is always last (per getMemoryRoots), so it wins.
+        docsById.set(parsed.frontmatter.id, {
+          id: parsed.frontmatter.id,
+          doc_type: docType,
+          filename: entry,
+          source_root: root,
+          frontmatter: parsed.frontmatter,
+          body: parsed.body,
+        });
+      }
+    }
+  }
+  const docs = Array.from(docsById.values()).sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    schema_version: SCHEMA_VERSION,
+    exported_at: new Date().toISOString(),
+    exported_from: findProjectRoot(),
+    exported_roots: roots,
+    all_roots_mode: allRoots,
+    doc_count: docs.length,
+    include_types: includeTypes,
+    docs,
+  };
+}
+
+function serializeFrontmatter(fm) {
+  // Subset YAML emitter — handles strings, numbers, booleans, arrays of scalars,
+  // arrays of objects (one level deep). Mirrors the parser's capabilities exactly.
+  const lines = [];
+  for (const [key, value] of Object.entries(fm)) {
+    if (value === null || value === undefined) continue;
+    if (Array.isArray(value)) {
+      if (value.length === 0) { lines.push(`${key}: []`); continue; }
+      lines.push(`${key}:`);
+      for (const item of value) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const keys = Object.keys(item);
+          if (keys.length === 0) continue;
+          lines.push(`  - ${keys[0]}: ${serializeScalar(item[keys[0]])}`);
+          for (let i = 1; i < keys.length; i++) {
+            lines.push(`    ${keys[i]}: ${serializeScalar(item[keys[i]])}`);
+          }
+        } else {
+          lines.push(`  - ${serializeScalar(item)}`);
+        }
+      }
+    } else {
+      lines.push(`${key}: ${serializeScalar(value)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function serializeScalar(v) {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  // Strings: quote if contains : # or starts with - or has leading/trailing whitespace
+  const s = String(v);
+  if (/[:#]|^-|^\s|\s$/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
+  return s;
+}
+
+function importBundle(bundlePath, opts) {
+  opts = opts || {};
+  const overwrite = !!opts.overwrite;
+  const prefix = opts.prefix || null;
+
+  let bundle;
+  let raw;
+  try {
+    raw = fs.readFileSync(bundlePath, "utf8");
+  } catch (e) {
+    throw new Error(`bundle file unreadable: ${e.message}`);
+  }
+  // 50MB cap — legitimate bundles can aggregate hundreds of ADR docs.
+  const parseResult = safeJsonParse(raw, "bundle file", 50 * 1024 * 1024);
+  if (!parseResult.ok) {
+    throw new Error(`bundle file unreadable: ${parseResult.error}`);
+  }
+  bundle = parseResult.value;
+  if (!bundle || !Array.isArray(bundle.docs)) {
+    throw new Error("bundle missing required `docs` array");
+  }
+  if (bundle.schema_version && bundle.schema_version !== SCHEMA_VERSION) {
+    throw new Error(`bundle schema_version=${bundle.schema_version} does not match current SCHEMA_VERSION=${SCHEMA_VERSION}`);
+  }
+  // Validate prefix shape: alphanumeric + dash, ≤16 chars, ends with -
+  if (prefix !== null) {
+    if (!/^[A-Z][A-Z0-9]{0,14}-$/.test(prefix)) {
+      throw new Error("--prefix must match /^[A-Z][A-Z0-9]{0,14}-$/ (e.g. 'TEAM-' or 'OSS-')");
+    }
+  }
+
+  const created = [];
+  const skipped = [];
+  const overwritten = [];
+  const errors = [];
+
+  for (const doc of bundle.docs) {
+    try {
+      if (!doc || !doc.id || !doc.doc_type || !doc.frontmatter || typeof doc.body !== "string") {
+        errors.push({ id: (doc && doc.id) || "(unknown)", reason: "doc missing required fields" });
+        continue;
+      }
+      if (!DOC_TYPES.includes(doc.doc_type)) {
+        errors.push({ id: doc.id, reason: `unknown doc_type: ${doc.doc_type}` });
+        continue;
+      }
+
+      // Compute the new id (with optional prefix remap) and corresponding filename
+      const originalId = doc.id;
+      const newId = prefix ? `${prefix}${originalId}` : originalId;
+      const fm = { ...doc.frontmatter, id: newId };
+      // Validate the resulting frontmatter. validateFrontmatter returns an array of
+      // {filePath, error} entries (truthy when invalid). When a prefix is applied,
+      // the ID pattern check is relaxed because the prefix is by design a namespace
+      // marker that breaks the canonical ADR-NNN / CON-NNN / FLOW-NNN / REJ-NNN shape.
+      const validationErrors = validateFrontmatter(fm, "(bundle import)");
+      const filteredErrors = prefix
+        ? validationErrors.filter(e => !/does not match pattern/.test(e.error || ""))
+        : validationErrors;
+      if (filteredErrors.length > 0) {
+        errors.push({ id: newId, reason: "frontmatter invalid: " + filteredErrors.map(e => e.error || String(e)).join("; ") });
+        continue;
+      }
+
+      const subdir = getSubdirPath(doc.doc_type);
+      if (!fs.existsSync(subdir)) fs.mkdirSync(subdir, { recursive: true });
+
+      // Filename: derive from original or use newId-slug (lowercase, dashes)
+      const baseName = (doc.filename && !prefix) ? doc.filename : `${newId}.md`;
+      // Reject filenames with separators (defense against bundle-supplied paths)
+      if (baseName.includes("/") || baseName.includes("\\") || baseName.includes("..")) {
+        errors.push({ id: newId, reason: `unsafe filename in bundle: ${baseName}` });
+        continue;
+      }
+      const filePath = path.join(subdir, baseName);
+
+      if (fs.existsSync(filePath)) {
+        if (!overwrite) {
+          skipped.push({ id: newId, file: filePath, reason: "exists; pass --overwrite to replace" });
+          continue;
+        }
+        overwritten.push({ id: newId, file: filePath });
+      } else {
+        created.push({ id: newId, file: filePath });
+      }
+
+      const fmYaml = serializeFrontmatter(fm);
+      const body = doc.body.startsWith("\n") ? doc.body : "\n" + doc.body;
+      const md = `---\n${fmYaml}\n---${body}`;
+      const tmp = filePath + ".tmp";
+      fs.writeFileSync(tmp, md, "utf8");
+      fs.renameSync(tmp, filePath);
+    } catch (e) {
+      errors.push({ id: (doc && doc.id) || "(unknown)", reason: e.message });
+    }
+  }
+
+  // Rebuild index after any successful writes
+  if (created.length + overwritten.length > 0) {
+    try { rebuildIndex(); } catch (e) {
+      errors.push({ id: "(index rebuild)", reason: e.message });
+    }
+  }
+
+  return {
+    bundle_from: bundle.exported_from || null,
+    bundle_exported_at: bundle.exported_at || null,
+    schema_version: bundle.schema_version || null,
+    prefix_applied: prefix,
+    overwrite_mode: overwrite,
+    counts: {
+      created: created.length,
+      overwritten: overwritten.length,
+      skipped: skipped.length,
+      errors: errors.length,
+    },
+    created,
+    overwritten,
+    skipped,
+    errors,
+  };
+}
+
 function migrateLessons() {
   const Database = getDatabaseSync();
   const lessonsDbCandidates = [
@@ -982,6 +1352,126 @@ function run(subcommand, args) {
       json(migrateLessons());
       return 0;
     }
+    case "paths": {
+      // memory paths [--validate] — echo resolved memory roots in scan order.
+      // --validate flag: stat each root and surface missing dirs as errors.
+      const validate = args.includes("--validate");
+      const roots = getMemoryRoots();
+      const result = roots.map(p => {
+        const exists = fs.existsSync(p);
+        const r = { path: p, exists };
+        if (validate && !exists) {
+          r.error = "MEM_PATH_UNREACHABLE";
+          r.hint = "directory does not exist; check git submodule init / NFS mount / sibling clone";
+        }
+        return r;
+      });
+      const errorCount = validate ? result.filter(r => !r.exists).length : 0;
+      json({
+        roots: result,
+        count: roots.length,
+        project_local: roots[roots.length - 1],
+        validation: validate ? { errors: errorCount } : null,
+      });
+      return errorCount > 0 ? 1 : 0;
+    }
+    case "diff": {
+      // memory diff <root-a> <root-b> — surface added/removed/changed docs between two roots.
+      // Both arguments are absolute paths or paths relative to project root. Useful for
+      // reviewing what a `git pull` in a shared root just brought in.
+      if (!args[0] || !args[1]) {
+        process.stderr.write("Usage: memory diff <root-a> <root-b>\n");
+        return 2;
+      }
+      const root = require("./config.cjs").findProjectRoot();
+      const resolveRoot = p => {
+        if (typeof p !== "string" || p.length === 0 || p.length > 4096 || p.includes("\0")) {
+          throw new Error(`invalid root: ${p}`);
+        }
+        return path.isAbsolute(p) ? path.normalize(p) : path.normalize(path.join(root, p));
+      };
+      const rootA = resolveRoot(args[0]);
+      const rootB = resolveRoot(args[1]);
+      const scanRoot = (r) => {
+        const docs = new Map();
+        if (!fs.existsSync(r)) return docs;
+        for (const docType of DOC_TYPES) {
+          const subdir = path.join(r, SUBDIR_BY_TYPE[docType]);
+          if (!fs.existsSync(subdir)) continue;
+          for (const entry of fs.readdirSync(subdir)) {
+            if (entry.startsWith("_")) continue;
+            if (!entry.endsWith(".md")) continue;
+            const full = path.join(subdir, entry);
+            const parsed = readDocFile(full);
+            if (!parsed || !parsed.frontmatter || !parsed.frontmatter.id) continue;
+            // Hash the body+frontmatter for change detection
+            const crypto = require("crypto");
+            const fp = crypto.createHash("sha256")
+              .update(JSON.stringify(parsed.frontmatter) + "\n" + parsed.body)
+              .digest("hex").slice(0, 16);
+            docs.set(parsed.frontmatter.id, { id: parsed.frontmatter.id, doc_type: docType, file: full, fingerprint: fp });
+          }
+        }
+        return docs;
+      };
+      const a = scanRoot(rootA);
+      const b = scanRoot(rootB);
+      const added = []; const removed = []; const changed = []; const unchanged = [];
+      for (const [id, docB] of b) {
+        const docA = a.get(id);
+        if (!docA) added.push({ id, doc_type: docB.doc_type, file: docB.file });
+        else if (docA.fingerprint !== docB.fingerprint) {
+          changed.push({ id, doc_type: docB.doc_type, file_a: docA.file, file_b: docB.file });
+        } else {
+          unchanged.push(id);
+        }
+      }
+      for (const [id, docA] of a) {
+        if (!b.has(id)) removed.push({ id, doc_type: docA.doc_type, file: docA.file });
+      }
+      json({
+        root_a: rootA, root_b: rootB,
+        a_count: a.size, b_count: b.size,
+        added, removed, changed,
+        unchanged_count: unchanged.length,
+      });
+      return 0;
+    }
+    case "export": {
+      // memory export [--out=PATH] [--include=decision,concept,flow,rejected] [--all-roots]
+      // Writes a portable JSON bundle of selected docs (frontmatter + body).
+      // Default output: .devt/memory/export-<ISO>.json. Default include: all four types.
+      // Default scope: project-local root only (shared roots typically have their own
+      // bundling pipeline). --all-roots includes every configured root, last-wins-deduped.
+      const outArg = args.find(a => a.startsWith("--out="));
+      const incArg = args.find(a => a.startsWith("--include="));
+      const allRoots = args.includes("--all-roots");
+      const includeTypes = incArg
+        ? incArg.split("=")[1].split(",").filter(t => DOC_TYPES.includes(t))
+        : DOC_TYPES.slice();
+      const result = exportBundle({ includeTypes, allRoots });
+      const defaultName = `export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      const requestedOut = outArg ? outArg.split("=")[1] : path.join(getMemoryRoot(), defaultName);
+      const resolved = resolveExportPath(requestedOut);
+      const tmp = resolved + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(result, null, 2) + "\n", "utf8");
+      fs.renameSync(tmp, resolved);
+      json({ exported_to: resolved, doc_count: result.docs.length, exported_at: result.exported_at });
+      return 0;
+    }
+    case "import": {
+      // memory import <bundle.json> [--overwrite] [--prefix=NEW-]
+      // Default: skip docs whose id already exists. --overwrite replaces; --prefix=X-
+      // remaps every id to X-ORIGINAL (avoids collisions when bundling from multiple sources).
+      if (!args[0]) { process.stderr.write("Usage: memory import <bundle.json> [--overwrite] [--prefix=NEW-]\n"); return 2; }
+      const bundlePath = resolveImportPath(args[0]);
+      const overwrite = args.includes("--overwrite");
+      const prefixArg = args.find(a => a.startsWith("--prefix="));
+      const prefix = prefixArg ? prefixArg.split("=")[1] : null;
+      const result = importBundle(bundlePath, { overwrite, prefix });
+      json(result);
+      return 0;
+    }
     case "suggest": {
       // Discovery engine — harvests claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE + DEC-xxx
       // entries into _suggestions.md for curator review. NEVER writes permanent doc files.
@@ -1037,6 +1527,8 @@ module.exports = {
   validateFrontmatter,
   matchesGlob,
   getMemoryRoot,
+  getMemoryRoots,
+  getSubdirPathFor,
   getDbPath,
   getSubdirPath,
   // Phase 2 additions

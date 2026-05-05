@@ -170,3 +170,23 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **Common violation**: Adding configuration options nobody requested. Building a generic abstraction layer for code with one caller. Adding new public methods alongside the requested change. Implementing 200 lines when 50 would meet the requirement.
 
 **Practice**: Implement exactly what was asked. Resist adding flexibility, configurability, or hooks that were not requested. If you finish the task and notice the code could be 4x shorter, rewrite it. The senior-engineer test: would a careful reviewer say this is overcomplicated? If yes, simplify.
+
+## Rule 14: Pre-Flight Protocol `[CRITICAL]`
+
+**What**: Before any non-trivial change, the **Two-Tier Pre-Flight Protocol** must run. Tier 1 (Topic Pre-Flight) — `/devt:preflight "<task>"` produces `.devt/state/preflight-brief.md` listing every governing ADR/Concept/Flow, all relevant REJ tombstones, related lessons, and (when Graphify is enabled) blast radius. Tier 2 (File Pre-Flight) — before each `Edit/Write`, append a `PREFLIGHT <ts> <action> <file> :: <governing IDs>` line to `.devt/state/scratchpad.md`. The PreToolUse `pre-flight-guard` hook checks for this line and warns (Phase 3 default) or blocks (Phase 4 default) the edit when missing.
+
+**Why**: Without pre-flight, agents either miss prior architectural decisions (silent ADR violations), propose approaches the team has explicitly rejected (REJ tombstone hits), or burn tokens re-discovering the same context per agent. Pre-flight is a five-second discipline that catches the kinds of governance drift that compound into incidents over months.
+
+**Common violation**: Editing a file because "I know what it does" without reading the Brief. Proposing Redis caching when REJ-001 explicitly tombstoned that. Writing the PREFLIGHT scratchpad line AFTER the edit instead of before (defeats the hook's purpose). Treating a STALE Brief as if it were authoritative (it isn't — STALE means coverage is incomplete).
+
+**Practice**: Dev workflows auto-fire `/devt:preflight` at context_init — read `.devt/state/preflight-brief.md` FIRST. For each edit, write the PREFLIGHT line first, then call Edit/Write. If the file isn't in the Brief's scope, run the 5-Lane File Pre-Flight (`memory affects` + `memory query` + `memory active` + Graphify symbol/wiki where applicable), append findings to scratchpad, then `node bin/devt-tools.cjs preflight mark-stale "scope expanded to <file>"` so the next agent knows. See `skills/memory-pre-flight/SKILL.md` for the full protocol.
+
+## Rule 15: Memory Maintenance Protocol `[CRITICAL]`
+
+**What**: After editing any `.devt/memory/**.md` file, the FTS5 unified index must be rebuilt — `node bin/devt-tools.cjs memory index`. Before proposing any new ADR/Concept/Flow/REJ candidate (via `discovery suggest` or curator), the `rejected/` folder MUST be consulted for matching `search_keywords` — if a tombstone matches, the candidate is suppressed silently. The PostToolUse `memory-auto-index` hook handles the rebuild automatically when `auto_index_on_change: true` (the default); manual `memory index` is the fallback when the hook is disabled.
+
+**Why**: A stale FTS5 index makes Pre-Flight queries return wrong results — agents proceed thinking governance has been read when it hasn't. REJ tombstones exist precisely so the team doesn't keep re-litigating the same rejected approach; bypassing tombstone checks reanimates settled debates.
+
+**Common violation**: Editing an ADR markdown but skipping `memory index`, leaving the index stale until the next `/devt:memory init`. Proposing an approach that matches a REJ's `search_keywords` because the suggestion path didn't query the rejected folder. Bulk-editing memory files without re-running validate.
+
+**Practice**: Trust the PostToolUse hook for routine edits — it's idempotent. After bulk operations or when hooks are disabled, run `node bin/devt-tools.cjs memory index && node bin/devt-tools.cjs memory validate`. When generating proposals via `discovery suggest`, the tooling already filters against `rejected_keywords` — never bypass that filter manually. When curator promotes a DEC → ADR, it must check for matching REJs first; the curator skill body documents this filter.

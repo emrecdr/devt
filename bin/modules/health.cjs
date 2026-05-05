@@ -12,6 +12,7 @@ const path = require("path");
 const { findProjectRoot, DEFAULTS } = require("./config.cjs");
 const { readState, validateConsistency, describeMismatch, VALID_PHASES, VALID_WORKFLOW_TYPES, VALID_TIERS } = require("./state.cjs");
 const { REQUIRED_DEV_RULES } = require("./init.cjs");
+const { safeJsonParse } = require("./security.cjs");
 
 const CHECKS = {
   E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:init to set up project, or /devt:health --repair" },
@@ -36,6 +37,12 @@ const CHECKS = {
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
   W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Re-run the phase to regenerate the artifact, fix the offending `## Status` line, or /devt:cancel-workflow to reset" },
   W014: { severity: "warning", message: "next.md missing routing for workflow_type", repairable: false, fix: "Add the missing workflow_type to the routing table in workflows/next.md" },
+  // Memory layer checks (v0.23.0+) — promoted from agent-orchestrated bash to native checks
+  // so CI can rely on `health` returning these directly without an agent in the loop.
+  MEM_INDEX_STALE: { severity: "warning", message: "Memory FTS5 index is older than the most recent .devt/memory/**/*.md file", repairable: true, fix: "Run /devt:health --repair to rebuild, or: node bin/devt-tools.cjs memory index" },
+  MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
+  MEM_PATH_UNREACHABLE: { severity: "warning", message: "memory.paths references a directory that doesn't exist", repairable: false, fix: "Initialize the missing root: git submodule init, mount the NFS share, or remove the entry from .devt/config.json" },
+  MEM_CONFLICT_HIGH: { severity: "info", message: "Memory layer has ID collisions across configured roots (last-wins applied)", repairable: false, fix: "Inspect with `node bin/devt-tools.cjs memory index` to see the collisions; rename project-local docs OR accept the override as intentional" },
 };
 
 const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
@@ -61,8 +68,10 @@ function runChecks(pluginRoot) {
   let version = null;
   if (pluginRoot) {
     try {
-      const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-      version = manifest.version || null;
+      const raw = fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8");
+      const r = safeJsonParse(raw, "plugin.json");
+      if (!r.ok) throw new Error(r.error);
+      version = r.value.version || null;
     } catch {
       try { version = fs.readFileSync(path.join(pluginRoot, "VERSION"), "utf8").trim(); } catch { /* skip */ }
     }
@@ -72,7 +81,10 @@ function runChecks(pluginRoot) {
   let update = null;
   try {
     const cachePath = path.join(require("os").tmpdir(), "devt-cache", "update-check.json");
-    const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    const cacheRaw = fs.readFileSync(cachePath, "utf8");
+    const cacheParse = safeJsonParse(cacheRaw, "update-check.json");
+    if (!cacheParse.ok) throw new Error(cacheParse.error);
+    const cached = cacheParse.value;
     if (cached.update_available) {
       update = { available: true, installed: cached.installed, latest: cached.latest };
     } else if (cached.ahead) {
@@ -100,7 +112,9 @@ function runChecks(pluginRoot) {
     add("E002");
   } else {
     try {
-      JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const cfgRaw = fs.readFileSync(configPath, "utf8");
+      const cfgParse = safeJsonParse(cfgRaw, "config.json");
+      if (!cfgParse.ok) throw new Error(cfgParse.error);
     } catch (e) {
       add("E003", e.message);
     }
@@ -151,7 +165,10 @@ function runChecks(pluginRoot) {
   if (pluginRoot) {
     try {
       const versionFile = fs.readFileSync(path.join(pluginRoot, "VERSION"), "utf8").trim();
-      const pluginJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+      const pjRaw = fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8");
+      const pjParse = safeJsonParse(pjRaw, "plugin.json");
+      if (!pjParse.ok) throw new Error(pjParse.error);
+      const pluginJson = pjParse.value;
       if (versionFile !== pluginJson.version) {
         add("W007", `VERSION=${versionFile}, plugin.json=${pluginJson.version}`);
       }
@@ -179,7 +196,10 @@ function runChecks(pluginRoot) {
   // W009: Agent file validation
   if (pluginRoot) {
     try {
-      const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+      const mfRaw = fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8");
+      const mfParse = safeJsonParse(mfRaw, "plugin.json");
+      if (!mfParse.ok) throw new Error(mfParse.error);
+      const manifest = mfParse.value;
       if (Array.isArray(manifest.agents)) {
         for (const agentPath of manifest.agents) {
           const resolved = path.join(pluginRoot, agentPath.replace(/^\.\//, ""));
@@ -227,7 +247,10 @@ function runChecks(pluginRoot) {
   if (pluginRoot) {
     const hooksJsonPath = path.join(pluginRoot, "hooks", "hooks.json");
     try {
-      const hooksConfig = JSON.parse(fs.readFileSync(hooksJsonPath, "utf8"));
+      const hcRaw = fs.readFileSync(hooksJsonPath, "utf8");
+      const hcParse = safeJsonParse(hcRaw, "hooks.json");
+      if (!hcParse.ok) throw new Error(hcParse.error);
+      const hooksConfig = hcParse.value;
       const referenced = new Set();
       for (const eventHooks of Object.values(hooksConfig.hooks || {})) {
         for (const entry of eventHooks) {
@@ -287,6 +310,54 @@ function runChecks(pluginRoot) {
   // I003: No active workflow
   if (!state.active) {
     add("I003");
+  }
+
+  // Memory layer checks (v0.23.0+) — native, deterministic, no agent in the loop.
+  // Skip cleanly when memory layer hasn't been initialized.
+  const memoryDir = path.join(devtDir, "memory");
+  if (fs.existsSync(memoryDir)) {
+    try {
+      const memMod = require("./memory.cjs");
+      const roots = memMod.getMemoryRoots();
+      // MEM_PATH_UNREACHABLE — any configured root that doesn't exist
+      const unreachable = roots.filter(r => !fs.existsSync(r));
+      for (const r of unreachable) {
+        add("MEM_PATH_UNREACHABLE", r, { path: r });
+      }
+
+      // MEM_INDEX_STALE — index.db older than the most recent .md mtime across all roots
+      const dbPath = path.join(memoryDir, "index.db");
+      if (fs.existsSync(dbPath)) {
+        const dbMtime = fs.statSync(dbPath).mtimeMs;
+        let newestMdMtime = 0;
+        for (const root of roots) {
+          if (!fs.existsSync(root)) continue;
+          for (const sub of ["decisions", "concepts", "flows", "rejected"]) {
+            const subdir = path.join(root, sub);
+            if (!fs.existsSync(subdir)) continue;
+            for (const entry of fs.readdirSync(subdir)) {
+              if (entry.startsWith("_")) continue;
+              if (!entry.endsWith(".md")) continue;
+              const m = fs.statSync(path.join(subdir, entry)).mtimeMs;
+              if (m > newestMdMtime) newestMdMtime = m;
+            }
+          }
+        }
+        if (newestMdMtime > dbMtime) {
+          add("MEM_INDEX_STALE", `newest .md is ${Math.round((newestMdMtime - dbMtime) / 1000)}s newer than index.db`,
+              { db_mtime_ms: dbMtime, newest_md_mtime_ms: newestMdMtime });
+        }
+      }
+
+      // MEM_VALIDATE_ERRORS — surface count from memory.validate
+      try {
+        const v = memMod.validate();
+        if (v && v.summary && v.summary.errors > 0) {
+          add("MEM_VALIDATE_ERRORS", `${v.summary.errors} error(s)`,
+              { errors: v.summary.errors, warnings: v.summary.warnings || 0 });
+        }
+      } catch { /* validate may throw if index missing — skipped already */ }
+    } catch { /* memory module load failed — skip silently */ }
   }
 
   const hasErrors = issues.some((i) => i.severity === "error");

@@ -6,6 +6,156 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-05
+
+### Security
+- **Defense-in-depth: `safeJsonParse` wrapping at every JSON parse boundary.** All bare `JSON.parse` calls in `bin/` replaced with `bin/modules/security.cjs::safeJsonParse` (size-capped, error-wrapped). After this change, the only remaining `JSON.parse` callsite in the codebase is inside `safeJsonParse` itself (`bin/modules/security.cjs:127`) — making the codebase auditable in one grep and preventing regression by precedent.
+  - **Untrusted boundaries (10 sites, threat-driven):** MCP server stdin frames (`bin/devt-memory-mcp.cjs:494`, 1MB cap — the only attacker-controlled boundary), bundle import (`bin/modules/memory.cjs:965`, 50MB), token-report baseline + per-line session log (`bin/modules/token-report.cjs:126,252`), MCP trace JSONL (`bin/modules/mcp-stats.cjs:59`), Graphify subprocess + graph cache (`bin/modules/graphify.cjs:103,200`, 100/200MB), claude-mem subprocess (`bin/modules/discovery.cjs:101`, 10MB), GitHub plugin.json fetch (`bin/modules/update.cjs:66`), `setup --config <json>` CLI argv (`bin/modules/setup.cjs:502`).
+  - **Trusted-source reads (12 sites, consistency-driven):** `bin/modules/config.cjs:161` (`.devt/config.json`), `bin/modules/health.cjs` × 6 (plugin manifest, update cache, config validation, version coherence, agent file W009 check, hooks.json W012 check), `bin/modules/setup.cjs` × 2 (config update merge, `.mcp.json` read), `bin/modules/update.cjs` × 4 (`getLocalVersion`, `getRepoUrl`, `readCache`, `getInstallType`). Defense-in-depth — these read project-local files we wrote ourselves, but wrapping them sets an enforceable codebase invariant.
+- **`safeJsonParse` extended with optional `maxSize` parameter** (`bin/modules/security.cjs:111`). Default stays 1MB. Per-callsite caps reflect threat model: 1MB for stdin / network / trusted manifests, 50MB for cross-org bundles, 100/200MB for Graphify outputs scaling with codebase size.
+- **Smoke and locking suites unchanged: 225/225 + 3/3 still passing.** No behavior change — `safeJsonParse` is a strict superset of `JSON.parse` semantics (parse + size cap + error wrapping).
+
+## [0.23.0] - 2026-05-05
+
+### Added
+- **`memory paths [--validate]`** subcommand (`bin/modules/memory.cjs`): echo the resolved memory roots in scan order with provenance flags. `--validate` stats each root and surfaces missing dirs with `MEM_PATH_UNREACHABLE` error code + actionable hint ("git submodule init / NFS mount / sibling clone"). Exits 1 if any root is unreachable so CI scripts can fail-fast on misconfigured `memory.paths`.
+- **`memory diff <root-a> <root-b>`** subcommand: surface added / removed / changed docs between two memory roots, with sha256:16 fingerprint over (frontmatter + body) for change detection. Use case: after `git pull` in a shared org-ADRs repo, see what just arrived. Path inputs validated (length, null bytes, type). Returns counts + arrays so consumers can branch on the structure.
+- **Native MEM_* checks in `bin/modules/health.cjs`** (Tier A from the audit): `MEM_PATH_UNREACHABLE` (any configured `memory.paths` root that doesn't exist), `MEM_INDEX_STALE` (index.db older than newest .md mtime across all roots), `MEM_VALIDATE_ERRORS` (frontmatter schema violations from `memory validate`), `MEM_CONFLICT_HIGH` (info — ID collisions across roots, last-wins applied). Promotes the workflows/health.md documentation from agent-orchestrated bash to native, deterministic checks — `node bin/devt-tools.cjs health` returns these directly without an agent in the loop, suitable for CI.
+- **`mcp-stats --top=N --by=calls|duration|errors`** flag: narrow the per-tool breakdown to the top-N tools by chosen metric. Defaults to `--by=calls`. Quick triage: "show me the 3 most-called tools" or "show me the slowest 5 by p95". Invalid `--by` values rejected with helpful error message.
+- **`token-report --baseline=PATH`** + **`--compare=PATH`** flags: snapshot the current aggregate to a baseline file (`captured_at`, `aggregate`, `sessions_in_report`), then later compare a fresh report against the saved baseline to compute relative-change percentages. Builds the harness for the v27 plan's success-criteria measurement (`≤50%` code-review tokens, `≤70%` dev-workflow tokens) — running it requires only an operational baseline pass, not new code.
+- **6 new smoke assertions**: memory paths default + --validate, memory diff JSON shape, health native MEM_PATH_UNREACHABLE, mcp-stats --top filter + --by validation, token-report baseline+compare round-trip.
+
+### Deferred (with rationale)
+- **Git-remote helper** (`memory bundle-from-git <repo-url>`) — concrete scope but lower priority after v0.22.0 (configurable `memory.paths`) shipped. The use case shrank to bootstrap-only (fresh project with no shared-dir infrastructure yet). Has the most security surface of the candidates (URL validation, tempdir lifecycle, submodule risk) and warrants a separate design pass. Will revisit if/when the bootstrap niche becomes a real friction point.
+
+## [0.22.0] - 2026-05-05
+
+### Added
+- **Configurable memory paths** (`bin/modules/config.cjs:DEFAULTS.memory.paths`): list of memory roots to scan + index. Default `null` = single-root behavior at `<projectRoot>/.devt/memory` (full backward compat). When set, devt indexes EVERY listed root and the project-local one is auto-appended last so it always wins ID collisions (last-wins precedence, like CSS specificity). Use cases: company-wide ADRs (`["../engineering-adrs", ".devt/memory"]`), monorepo shared rules (`["../../shared/memory", ".devt/memory"]`), NFS-mounted org policy.
+- **`getMemoryRoots()` resolver** (`bin/modules/memory.cjs`): reads `memory.paths`, validates each entry (string, ≤4096 chars, no null bytes), resolves relative paths against project root, deduplicates while preserving precedence order, and ALWAYS appends the project-local root last so curator writes have a destination. Public-API export.
+- **`getSubdirPathFor(root, docType)` helper**: resolves docType subdirs under explicit memory roots (not just the project-local one). Used by the multi-root scanner.
+- **`scanDocs()` rewritten for multi-root**: walks every configured root, tags each indexed doc with `source_root`, detects ID collisions across roots, reports them via a non-enumerable `_conflicts` array on the result. Last-wins overwrite is in-place — no second pass.
+- **`documents.source_root` column** in the FTS5 unified index (`bin/modules/memory.cjs:SCHEMA_DDL`): tracks which configured root each indexed doc came from. Surfaced in `memory get <id>` and `memory list` so users see provenance at a glance. Stored as the absolute root path; nullable for backward compat.
+- **`rebuildIndex()` returns multi-root metadata**: result payload gains `memory_roots` (the resolved scan order) + `conflicts` (array of `{id, prev_source, prev_path, new_source, new_path}` for each collision) + `conflict_count`. Lets `/devt:memory index` surface clear "ADR-001 in shared/ shadowed by .devt/memory/" messages.
+
+### Changed
+- **`SCHEMA_DDL`** adds `source_root TEXT` column. Existing indexes are not migrated — `memory index` rebuilds from scratch each time, so the new column populates on next index rebuild.
+- **`memory get <id>` output** now includes `source_root` field.
+
+### Hard Invariants Maintained
+- **Single-root behavior unchanged** when `memory.paths` is null or absent (default). Existing projects see no change.
+- **Project-local always wins** — the resolved roots list always has `<projectRoot>/.devt/memory` last (auto-appended if missing), so a project can override any shared decision without modifying the shared source.
+- **No silent shadowing** — every collision is reported in the rebuild result. CI can fail on `conflict_count > 0` if a project wants strict no-overlap policy.
+- **Index DB stays per-project** at `.devt/memory/index.db` regardless of how many shared roots are configured. The DB indexes the union but the file itself is gitignored + regenerable.
+- **Curator writes still target project-local** — promotion subcommands write to `.devt/memory/` by default. Shared roots are read-only from devt's perspective; their maintainers edit the markdown directly with their own toolchain.
+- **All path inputs validated** at `getMemoryRoots()` boundary: string-type, ≤4096 chars, no null bytes; the existing `withDb` and FTS5 layer downstream are unchanged.
+
+### Use case example
+
+ACME Corp publishes `github.com/acme/engineering-adrs` containing company-wide architectural rules. Each ACME project's `.devt/config.json`:
+
+```json
+{
+  "memory": {
+    "paths": ["../engineering-adrs", ".devt/memory"]
+  }
+}
+```
+
+After `git submodule add` (or sibling clone) of the shared repo + `node bin/devt-tools.cjs memory index`, every project's Pre-Flight Brief now surfaces both org-wide ADRs and local ones. A new dev's `/devt:workflow "Add Redis caching"` immediately sees `ACME-REJ-001 "Redis sessions"` and stops the proposal at proposal time. Updates flow naturally — `git pull` in the shared dir, next `memory index` (or auto-index hook) picks up the change. No prefix mutation, no security surface, no separate import step.
+
+## [0.21.0] - 2026-05-05
+
+### Added
+- **MCP-side tool-call telemetry** (`bin/devt-memory-mcp.cjs`): every `tools/call` invocation appends one JSONL line to `.devt/memory/_mcp-trace.jsonl` (gitignored). Records timestamp, tool name, ok/error_code, duration_ms, args_size, args_fp (sha256:12 fingerprint — NOT the args themselves; privacy/security), result_size. Trace-write failures are swallowed silently — telemetry MUST NEVER affect tool result correctness. Behavior governed by `memory.mcp_telemetry` config (default `true`).
+- **`mcp-stats` aggregator** (NEW `bin/modules/mcp-stats.cjs` + `node bin/devt-tools.cjs mcp-stats`): aggregates the JSONL trace into per-tool statistics — call count, error count + rate, duration percentiles (p50, p95, p99), result-bytes total, error_codes breakdown. Supports `--since=YYYY-MM-DD`, `--tool=<name>`, `--prune-older-than=Nd|Nh|Nm|Ns` (atomic temp-rename rewrite). Aggregate output is JSON for downstream tooling.
+- **`memory.mcp_telemetry` config key** (`bin/modules/config.cjs:DEFAULTS`): default `true`. Disable per-project via `.devt/config.json` for environments that don't want any session-side persistence beyond workflow state.
+- **Comprehensive bundle round-trip smoke fixture**: 17 new assertions covering all 4 doc types (decision, concept, flow, rejected) authored with full frontmatter (affects_paths, affects_symbols, links graph, REJ search_keywords, REJ reason). Exercises: bundle structure preserves all types + REJ search_keywords + links + affects_paths/symbols; markdown→JSON→markdown re-render preserves REJ keywords; second round-trip (re-export from re-imported docs) preserves links; `--include=rejected` filter narrows to single doc.
+- **Gitignore additions** (`bin/modules/setup.cjs`): `.devt/memory/_mcp-trace.jsonl` (telemetry — append-only, safe to delete) + `.devt/memory/export-*.json` (transient bundle artifacts — share via explicit channel, not git).
+
+### Changed
+- **`bin/devt-memory-mcp.cjs:SERVER_VERSION`** bumped from `"0.18.0"` to `"0.21.0"` to reflect the telemetry instrumentation. Reported in `initialize` handshake response so downstream MCP clients can branch on version.
+
+### Hard Invariants Maintained
+- **Telemetry is privacy-safe by construction**: trace records contain only sizes and a 12-char sha256 fingerprint of args (no SQL, no symbol names, no file paths). The fingerprint is enough to detect "the same call repeated" but not reverse-engineer payloads.
+- **Telemetry never breaks the tool**: every trace write is wrapped in try/catch with empty rescue. The MCP server never errors because the trace file is unwritable.
+- **Trace file is gitignored by default**: every freshly-scaffolded project gets the rule. Existing projects need a manual `.gitignore` add (only relevant when memory.mcp_telemetry is true and they want to keep the file out of git).
+
+## [0.20.0] - 2026-05-05
+
+### Added
+- **`bin/modules/token-report.cjs`** + `node bin/devt-tools.cjs token-report` CLI (NEW): zero-deps Claude Code session-log aggregator. Streams `~/.claude/projects/<slug>/*.jsonl`, extracts per-turn `message.usage` (input_tokens / cache_creation / cache_read / output_tokens), and reports per-session + aggregate totals plus cache-hit rate. Supports `--sessions=N` (default 5), `--since=YYYY-MM-DD`, `--project=<absolute-path>`. Path inputs validated against null-bytes, traversal, and >4096-char overflow. Verified on a real 27-session devt project: 93.57% cache hit rate aggregate. Surfaces the plan's success-criteria targets (≤50% / ≤70% / ≤2K-10K) inline so users can compare.
+- **Portable ADR/Concept/Flow/REJ bundle export/import** (`bin/modules/memory.cjs`):
+  - `node bin/devt-tools.cjs memory export [--out=PATH] [--include=decision,concept,flow,rejected]` — writes a JSON bundle (schema_version=1) of selected docs with frontmatter + body. Default output: `.devt/memory/export-<ISO>.json`. Default include: all four types.
+  - `node bin/devt-tools.cjs memory import <bundle.json> [--overwrite] [--prefix=NEW-]` — restores docs from a bundle. Default policy: skip if id exists. `--overwrite` replaces. `--prefix=TEAMA-` (validated `/^[A-Z][A-Z0-9]{0,14}-$/`) remaps every id for multi-source bundling, relaxing ID-pattern enforcement (since prefixed ids by design break canonical ADR-NNN shape). After import, FTS5 index is rebuilt automatically. Path inputs validated via `resolveExportPath`/`resolveImportPath` (null-byte, length, traversal-containment).
+- **Topic extraction tuning** (`bin/modules/preflight.cjs`): `SYMBOL_DENYLIST` filters action verbs (`Add`, `Refactor`, `Fix`, `Update`, `Implement`, `Build`, `Create`, `Make`, `Extend`, `Improve`, `Optimize`, `Support`, `Migrate`, `Wire`, `Integrate`, `Polish`, etc.) + common short labels (`API`, `UI`, `CLI`, `DB`, `URL`, `HTTP`, `JSON`, `CSS`, `HTML`, `SQL`) + generic nouns (`feature`, `task`, `bug`, `issue`) from being captured as PascalCase symbols in topic extraction. Lane C results stay precise — `Add MFA support to AuthService` now extracts `[AuthService, MFA]` (not `[Add, AuthService, MFA]`).
+- **`hooks/post-commit-validate.sh`** (NEW lightweight Graphify-disabled fallback): runs `memory validate` after each commit, surfaces stale-path warnings to stderr, never blocks. Wrapped by a tiny `.git/hooks/post-commit` shim (auto-installed by `setup.cjs` only when Graphify is NOT detected; when Graphify is present, the user is hinted to run `graphify hook install` instead, which supersedes our hook).
+- **`bin/modules/setup.cjs` post-commit hook auto-install**: on `--mode create`, checks for `graphify` on PATH. If absent, writes `.git/hooks/post-commit` as a wrapper that delegates to `${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh`. If present, surfaces an actionable warning ("run `graphify hook install`"). Never overwrites an existing post-commit hook.
+- **`bin/modules/weekly-report.cjs` memory aggregations**: `aggregateMemoryEvents()` counts new ADRs/Concepts/Flows/REJs created in the report window (file birthtime), plus a snapshot count of total `status='active'` docs. `renderMemorySection()` appends a "Memory Layer Activity" section to generated reports. Honors absent `.devt/memory/` (returns `available: false` cleanly).
+- **Templates: ADR-override cross-references** in 20 files (`templates/{blank,go,python-fastapi,typescript-node,vue-bootstrap}/{coding-standards,architecture,quality-gates,review-checklist}.md`). Each gets a one-line note pointing to `.devt/memory/decisions/` with the relevant guidance ("ADRs are constitutional", "ADR alignment check is a quality gate", "REJ tombstones surface in code-review").
+- **Commands: Memory integration subsection** in 6 non-dev commands (`commands/{forensics,thread,note,do,session-report,weekly-report}.md`) — documents that meta workflows don't auto-fire preflight but reference Brief artifacts when present.
+
+### Changed
+- **`.git/hooks/post-commit` is now scaffolded by `/devt:init`** (when Graphify absent). Existing hooks are preserved — never overwritten.
+- **`memory.export` output filename uses ISO timestamp**: `.devt/memory/export-<ISO>.json` (colons + dots replaced with `-` for filesystem safety).
+
+### Hard Invariants Maintained
+- **Zero project-level dependencies preserved**: token-report uses Node stdlib only; bundle export/import is JSON (no zip lib); post-commit hook is bash + node stdlib.
+- **All path inputs validated**: token-report's `validateProjectPath`, memory.cjs's `resolveExportPath`/`resolveImportPath`, and import's bundle-supplied filename guard all reject `..`, null bytes, and outsize-length attempts. The static analyzer warnings are false positives — same pattern as v0.12.0 path-traversal hardening.
+- **Bundle import never escapes**: filenames in the JSON bundle are validated to disallow path separators (`/`, `\`) and `..`; only basenames are accepted.
+
+## [0.19.0] - 2026-05-05
+
+### Changed
+- **`memory.preflight_mode` default flipped: `warn` → `block`** (`bin/modules/config.cjs:DEFAULTS`). The PreToolUse `pre-flight-guard.sh` hook now denies Edit/Write/NotebookEdit calls whose target file lacks a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line in `.devt/state/scratchpad.md`. Agents preloading `devt:memory-pre-flight` (all 8 dev agents) write the line before each edit; older custom workflows that bypass the protocol must update OR set `memory.preflight_mode: "warn"` per-project. `off` remains an opt-out for projects that don't want the protocol.
+- **`/devt:cancel-workflow` cleans the Pre-Flight Brief**: `scripts/cancel-workflow.sh` now removes `.devt/state/preflight-brief.md` and `.devt/state/scratchpad.md` alongside the workflow.yaml reset, so the next workflow starts with a clean Brief.
+
+### Added
+- **`docs/MEMORY.md`** (NEW, comprehensive guide): documents the three-layer model, Layer 3 frontmatter schema, Two-Tier Pre-Flight Protocol, full CLI surface, MCP server tool reference, curator promotion flow, memory maintenance discipline, configuration reference, migration notes, and cross-links to all related skills + guardrails.
+- **README.md "The Memory Layer" section**: top-level visibility for the three-layer model + Pre-Flight Protocol + Graphify feature-parity table. Surfaces docs/MEMORY.md and the protocol skill as the canonical references.
+- **`/devt:status` displays Pre-Flight Brief status**: status output now includes `Pre-Flight Brief: FRESH | STALE | MISSING (generated <timestamp>)` line so resume context surfaces whether the Brief is still authoritative.
+- **`/devt:health` memory-integrity checks**: `MEM_VALIDATE_ERRORS` (frontmatter schema), `MEM_ORPHANS` (no in/out links), `MEM_STALE_LINKS` (broken cross-refs), `MEM_INDEX_STALE` (index older than newest .md mtime). Auto-repair via `memory index` for INDEX_STALE and VALIDATE_ERRORS.
+- **`/devt:ship` PR body inclusion**: PR body generation reads `.devt/state/preflight-brief.md` and cites governing ADR/Concept/Flow ids + REJ tombstones the implementation respected, helping reviewers verify alignment without re-reading the Brief.
+- **`/devt:pause` handoff includes Pre-Flight Brief reference**: `handoff.json` gains a `preflight_brief` field; `continue-here.md` surfaces the Brief's FRESH/STALE/MISSING status so resume sessions decide whether to re-run `/devt:preflight`. The Brief itself is NOT deleted on pause — it stays valid for the resumed workflow.
+- **All 5 templates ship with Pre-Flight Protocol section**: `templates/{blank,go,python-fastapi,typescript-node,vue-bootstrap}/golden-rules.md` each gain a Pre-Flight Protocol section pointing to plugin Rule 14, with project-scoped guidance about checking ADRs in `.devt/memory/decisions/`.
+- **CLAUDE.md updated**: documents the Phase 4 default flip + cross-links to `docs/MEMORY.md`.
+
+### Hard Invariants Maintained
+- **Override is one config key away**: `.devt/config.json` `memory.preflight_mode: "warn"` (or `"off"`) restores the previous behavior. Block-mode is the default because skipping the protocol on production-tier development is the higher long-term cost — but it's not mandatory.
+- **No data deleted on flip**: existing Briefs, ADRs, lessons, and learning-playbook entries are untouched. The flip is purely a hook-behavior change.
+- **Auto-index hook still optional**: `memory.auto_index_on_change: false` disables the PostToolUse rebuild for projects that prefer manual `memory index` runs.
+
+## [0.18.0] - 2026-05-05
+
+### Added
+- **Topic Pre-Flight Brief generator** (`bin/modules/preflight.cjs`): orchestrates 6 independent discovery lanes (A: domain match via `memory.listActive`, B: FTS expansion via `memory.queryFTS`, C: symbol match via `memory.getBySymbol`, D: wiki-link transitive closure depth-2 via `memory.getLinks`, E: REJ tombstone overlap via `memory.listRejectedKeywords`, F: operational lessons via `semantic.query`) plus Graphify-derived blast radius. Synthesizes the merged result into `.devt/state/preflight-brief.md` with `## Status: FRESH` (validated by `state.cjs:ARTIFACT_SCHEMA`). Topic extraction is pragmatic and zero-deps — domains via `DOMAIN_HINTS` allowlist, symbols via PascalCase regex, keywords via stop-word filter. Determinism: identical input on identical state produces byte-identical output (modulo timestamp footer).
+- **`/devt:preflight` standalone command + workflow** (`commands/preflight.md`, `workflows/preflight.md`): `/devt:preflight "<task>"` generates the Brief on demand. Subcommands: `topic` (debug topic extraction), `status` (read FRESH/STALE/MISSING), `mark-stale [reason]` (called by File Pre-Flight when scope expands). Standalone invocation registers `workflow_type=preflight`; auto-fire mode (called from another dev workflow) skips state mutation.
+- **Vendored MCP server** (`bin/devt-memory-mcp.cjs`): zero-deps stdio JSON-RPC 2.0 server exposing 10 read-only tools — `get_context_for_path`, `get_context_for_symbol`, `query_fts`, `get_doc`, `list_active`, `list_rejected_keywords`, `list_links`, `preflight`, `blast_radius`, plus the SELECT-only `query_index` escape hatch. Hard guarantees: SQLite opened with `readOnly: true` (verified by node:sqlite — `attempt to write a readonly database`); SELECT-only validator strips comments, blocks multi-statement payloads (semicolon injection guard), and rejects 17 forbidden tokens (INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/REPLACE/TRUNCATE/PRAGMA/ATTACH/DETACH/VACUUM/REINDEX/ANALYZE/BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE). Self-test (`--self-test`) validates 15 SQL fixtures pass/fail correctly.
+- **Two-Tier Pre-Flight Protocol skill** (`skills/memory-pre-flight/SKILL.md`): preloaded onto all 8 development agents. Documents Tier 1 (Topic Pre-Flight at workflow start, automatic) + Tier 2 (File Pre-Flight at each Edit, agent-driven via `PREFLIGHT <ts> edit <path> :: <governing IDs>` scratchpad lines). Includes 5-Lane File Pre-Flight (warm cache → wiki-links → path-anchored → symbol-anchored → domain-active → FTS) for scope-expansion cases.
+- **PreToolUse `pre-flight-guard` hook** (`hooks/pre-flight-guard.sh`): on Edit/Write/NotebookEdit, scans `.devt/state/scratchpad.md` for a PREFLIGHT line covering the target file. Behavior governed by `memory.preflight_mode`: `off` no-op | `warn` emits stderr advisory (Phase 3 default) | `block` returns `{decision: "deny"}` (Phase 4 default). Fails-open on parse errors — never breaks legitimate work. Skips files in `.devt/state/`.
+- **PostToolUse `memory-auto-index` hook** (`hooks/memory-auto-index.sh`): on Edit/Write/NotebookEdit touching `.devt/memory/**.md`, runs `node bin/devt-tools.cjs memory index` to keep the FTS5 unified index synchronized with markdown source. Idempotent — silent no-op when path doesn't match or `auto_index_on_change: false`. Logs to stderr but never fails the parent tool call. Eliminates the "I edited an ADR but forgot to reindex" failure mode.
+- **`.mcp.json` setup-time scaffolding** (`bin/modules/setup.cjs`): writes a project `.mcp.json` registering `devt-memory` (always — vendored, referenced via `${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs` so plugin updates propagate without per-project copies), conditional `graphify` (when `graphify --help` succeeds — uses `graphify mcp --project .`), and conditional `claude-mem` (when `claude-mem --help` succeeds — uses `claude-mem mcp --db .claude-mem/mem.db`). Absent optional servers logged as actionable hints, never errors. Update mode preserves user-customized servers and only adds `devt-memory` when missing.
+- **Workflow auto-fire integration** (9 dev workflows: `dev-workflow.md`, `quick-implement.md`, `create-plan.md`, `clarify-task.md`, `specify.md`, `research-task.md`, `debug.md`, `code-review.md`, `next.md`): each workflow's context_init step invokes `node bin/devt-tools.cjs preflight generate "${TASK_DESCRIPTION}"` early, so every subsequent agent reads the same governing rules. `next.md` resume routing recognizes `workflow_type=preflight`.
+- **Agent integration**: all 8 development agents (programmer, architect, code-reviewer, debugger, researcher, tester, verifier, docs-writer) gained `devt:memory-pre-flight` in their `skills:` frontmatter. Programmer's `<context_loading>` block adds Step 0: read the Brief FIRST.
+- **Golden Rule 14 — Pre-Flight Protocol** (`guardrails/golden-rules.md`): `[CRITICAL]` rule mandating Two-Tier Pre-Flight discipline before non-trivial changes. Documents the PREFLIGHT scratchpad line format and the PreToolUse hook contract.
+- **Golden Rule 15 — Memory Maintenance Protocol** (`guardrails/golden-rules.md`): `[CRITICAL]` rule covering memory-index synchronization (PostToolUse hook does it automatically) and REJ tombstone consultation (mandatory before generating proposals).
+- **Engineering Principles "Sources of Truth" section**: explicit hierarchy — ADRs > Concepts/Flows > REJ tombstones > .devt/rules > plugin guardrails. ADRs are constitutional.
+- **Generative-debt checklist BEFORE/AFTER updates**: BEFORE-Coding gains "Read the Pre-Flight Brief"; AFTER-Coding gains "Memory index fresh after editing `.devt/memory/**.md`".
+- **24+ new smoke-test assertions** covering: preflight CLI surface (topic / generate / status / mark-stale), brief artifact schema (FRESH status line), determinism (sha256 of timestamp-stripped body matches across two runs), MCP server self-test (15/15 SQL fixtures), MCP stdio handshake (initialize + tools/list + DROP rejection on tools/call), pre-flight-guard warn-mode advisory + covered-mode silence, .mcp.json scaffolding, gitignore manifest extension, file-presence checks for all 7 new artifacts, auto-fire integration in 8 dev workflows, agent skill preload in 8 agents, golden rules R14+R15 presence, state.cjs preflight workflow_type registration.
+
+### Changed
+- **`memory.preflight_mode` default**: `off` → `warn`. The hook surfaces an advisory but does NOT block the edit, giving teams a runway to adopt the protocol without immediate disruption. Phase 4 (v0.19.0) flips to `block`.
+- **`hooks/run-hook.js` HOOK_PROFILES**: `pre-flight-guard.sh` and `memory-auto-index.sh` registered for `standard` + `full` profiles (excluded from `minimal` to keep that profile bare-bones).
+- **`hooks/hooks.json`**: new PreToolUse entry on Write|Edit|NotebookEdit for `pre-flight-guard.sh` (5s timeout); new PostToolUse entry on the same matchers for `memory-auto-index.sh` (15s timeout, async).
+- **`bin/devt-tools.cjs` CLI usage**: documents the new `preflight` subcommand surface.
+- **`.devt/config.json` DEFAULTS** (`bin/modules/config.cjs`): comment block updated to reflect `warn` as the new Phase 3 default.
+
+### Hard Invariants Maintained
+- **Zero project-level dependencies**: the vendored MCP server is referenced via `${CLAUDE_PLUGIN_ROOT}` — projects don't install npm packages to use it.
+- **Read-only at the SQLite layer**: even malicious helpers cannot mutate. The SELECT-only validator is defense-in-depth.
+- **Graceful degradation everywhere**: missing memory index, disabled Graphify, absent claude-mem — every code path produces a coherent payload. Pre-flight on an empty universe still writes a valid Brief.
+- **No silent file writes**: the only file `bin/modules/preflight.cjs` writes is `.devt/state/preflight-brief.md`. Curator-gated promotion (Phase 2) remains the only path to permanent `.devt/memory/**.md` files.
+
 ## [0.17.0] - 2026-05-05
 
 ### Added

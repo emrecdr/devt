@@ -104,8 +104,12 @@ Artifacts:
   {circle}    .devt/state/test-summary.md
   {circle}    .devt/state/review.md
 
+Pre-Flight Brief: {FRESH | STALE | MISSING}  (generated {timestamp})
+
 Next: {description of what comes next}
 ```
+
+**Pre-Flight Brief inclusion** (Phase 4 v0.19.0+): if `.devt/state/preflight-brief.md` exists, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight status` to get its FRESH/STALE/MISSING status + generated_at, and surface that line in the status output. STALE is a soft warning — suggest re-running `/devt:preflight` if the workflow's scope feels different from the Brief's task.
 
 ### Artifact Consistency Check
 

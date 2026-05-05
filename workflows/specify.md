@@ -44,7 +44,10 @@ Parse the feature idea from user input.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=specify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${FEATURE_IDEA}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${FEATURE_IDEA}"
 ```
+
+The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the feature topic. Surfaces governing ADRs/Concepts/Flows so the PRD aligns with permanent architectural truth, AND surfaces REJ tombstones so the spec doesn't propose pre-rejected approaches (e.g. spec asking for Redis sessions when REJ-001 tombstoned that). The Brief lives at `.devt/state/preflight-brief.md`. Skip silently on failure.
 
 Load project context:
 - Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively

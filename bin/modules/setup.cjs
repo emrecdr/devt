@@ -17,7 +17,7 @@
 const fs = require("fs");
 const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
-const { validatePath } = require("./security.cjs");
+const { validatePath, safeJsonParse } = require("./security.cjs");
 
 /**
  * Reject filesystem entry names that could break out of their parent directory.
@@ -232,7 +232,10 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     atomicWriteJson(configPath, finalConfig);
     results.files_created.push(".devt/config.json");
   } else if (mode === "update" && extraConfig) {
-    const existing = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const existingRaw = fs.readFileSync(configPath, "utf8");
+    const existingParse = safeJsonParse(existingRaw, ".devt/config.json");
+    if (!existingParse.ok) throw new Error(existingParse.error);
+    const existing = existingParse.value;
     const merged = deepMerge(existing, extraConfig);
     atomicWriteJson(configPath, merged);
     results.files_updated.push(".devt/config.json (merged)");
@@ -240,15 +243,32 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.warnings.push(".devt/config.json already exists — skipping");
   }
 
-  // Gitignore .devt/state/, .claude/agent-memory/, .devt/memory/index.db
-  // (the FTS5 index is regenerable from markdown — never commit it).
-  // ADR/CON/FLOW/REJ markdown files in .devt/memory/{decisions,concepts,flows,rejected}/
-  // ARE intentionally committed — they are team-shared architectural truth.
+  // Gitignore manifest (Phase 3 v0.18.0):
+  //   ALWAYS-GITIGNORE — derived/ephemeral state, regenerable from canonical sources:
+  //     .devt/state/                  (per-workflow scratch + preflight-brief.md)
+  //     .claude/agent-memory/         (per-agent persistent memory)
+  //     .devt/memory/index.db         (FTS5 index — rebuild from .md)
+  //     graphify-out/cache/           (Graphify ephemeral cache)
+  //     graphify-out/manifest.json    (Graphify per-machine manifest)
+  //     .claude-mem/mem.db            (claude-mem session DB — local only)
+  //
+  //   ALWAYS-COMMIT (NOT in this list — kept by default):
+  //     .devt/memory/{decisions,concepts,flows,rejected}/*.md   team-shared truth
+  //     graphify-out/graph.json                                 team-shared graph
+  //     GRAPH_REPORT.md                                         curated overview
+  //
+  //   USER-DECIDES (commented hints — not auto-added):
+  //     .devt/memory/_suggestions.md  (some teams commit for review history)
   const gitignorePath = path.join(projectRoot, ".gitignore");
   const requiredIgnores = [
     { path: ".devt/state/", header: "# devt workflow state" },
     { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
     { path: ".devt/memory/index.db", header: "# devt memory FTS5 index (regenerable from markdown)" },
+    { path: ".devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace (v0.21.0+, append-only telemetry; safe to delete)" },
+    { path: ".devt/memory/export-*.json", header: "# devt memory export bundles (transient — share via explicit channel)" },
+    { path: "graphify-out/cache/", header: "# Graphify ephemeral cache" },
+    { path: "graphify-out/manifest.json", header: "# Graphify per-machine manifest" },
+    { path: ".claude-mem/mem.db", header: "# claude-mem local session DB" },
   ];
   try {
     let content = fs.readFileSync(gitignorePath, "utf8");
@@ -270,6 +290,115 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
       fs.writeFileSync(gitignorePath, lines.join("\n"));
       results.files_created.push(".gitignore");
     }
+  }
+
+  // Scaffold project .mcp.json (Phase 3 v0.18.0) — registers devt-memory-mcp + conditional graphify + claude-mem.
+  // The vendored devt-memory-mcp server is referenced via ${CLAUDE_PLUGIN_ROOT} so plugin updates propagate
+  // automatically — no per-project copy of the server script. Other MCP entries are conditional on detected
+  // tooling; absence is logged as a hint, never an error.
+  const mcpJsonPath = path.join(projectRoot, ".mcp.json");
+  const mcpHints = [];
+  if (!fs.existsSync(mcpJsonPath)) {
+    const mcpServers = {
+      "devt-memory": {
+        command: "node",
+        args: ["${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"],
+        env: {},
+      },
+    };
+    // Probe Graphify
+    try {
+      const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
+      if (probe && probe.status === 0) {
+        mcpServers["graphify"] = {
+          command: "graphify",
+          args: ["mcp", "--project", "."],
+          env: {},
+        };
+      } else {
+        mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
+      }
+    } catch {
+      mcpHints.push("graphify probe failed — Graphify MCP not registered.");
+    }
+    // Probe claude-mem
+    try {
+      const probe = require("child_process").spawnSync("claude-mem", ["--help"], { timeout: 1500, stdio: "ignore" });
+      if (probe && probe.status === 0) {
+        mcpServers["claude-mem"] = {
+          command: "claude-mem",
+          args: ["mcp", "--db", ".claude-mem/mem.db"],
+          env: {},
+        };
+      } else {
+        mcpHints.push("claude-mem not detected — install for richer mid-session capture.");
+      }
+    } catch {
+      mcpHints.push("claude-mem probe failed — claude-mem MCP not registered.");
+    }
+    atomicWriteJson(mcpJsonPath, { mcpServers });
+    results.files_created.push(".mcp.json");
+  } else {
+    // Only ADD devt-memory if missing — never modify existing servers (user may have customized)
+    try {
+      const mcpRaw = fs.readFileSync(mcpJsonPath, "utf8");
+      const mcpParse = safeJsonParse(mcpRaw, ".mcp.json");
+      if (!mcpParse.ok) throw new Error(mcpParse.error);
+      const existing = mcpParse.value;
+      if (!existing.mcpServers) existing.mcpServers = {};
+      if (!existing.mcpServers["devt-memory"]) {
+        existing.mcpServers["devt-memory"] = {
+          command: "node",
+          args: ["${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"],
+          env: {},
+        };
+        atomicWriteJson(mcpJsonPath, existing);
+        results.files_updated.push(".mcp.json (added devt-memory entry)");
+      }
+    } catch (e) {
+      results.warnings.push(`.mcp.json present but unreadable: ${e.message}`);
+    }
+  }
+  if (mcpHints.length > 0) {
+    results.warnings.push(...mcpHints);
+  }
+
+  // Post-commit hook installation (Phase 5 v0.20.0+).
+  // Two paths based on whether Graphify is enabled:
+  //   GRAPHIFY ENABLED + binary present:
+  //     We do NOT install our hook. We surface a hint suggesting `graphify hook install`,
+  //     which registers Graphify's own post-commit hook (covers stale symbols + graph rebuild).
+  //   GRAPHIFY DISABLED OR ABSENT:
+  //     Install hooks/post-commit-validate.sh as the project's .git/hooks/post-commit.
+  //     Lightweight: runs `memory validate` after each commit, surfaces stale-path warnings.
+  // Either path is opt-in (mode=create only); we never overwrite an existing post-commit hook.
+  try {
+    const gitDir = path.join(projectRoot, ".git");
+    const hooksDir = path.join(gitDir, "hooks");
+    const postCommitPath = path.join(hooksDir, "post-commit");
+    if (fs.existsSync(gitDir) && mode === "create" && !fs.existsSync(postCommitPath)) {
+      // Detect Graphify
+      let graphifyAvailable = false;
+      try {
+        const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
+        graphifyAvailable = probe && probe.status === 0;
+      } catch { /* fall through */ }
+
+      if (graphifyAvailable) {
+        results.warnings.push(
+          "Graphify detected — for post-commit graph refresh + stale-symbol checks, run `graphify hook install` once. devt's lightweight post-commit-validate.sh is NOT installed (Graphify's own hook supersedes it)."
+        );
+      } else {
+        if (!fs.existsSync(hooksDir)) fs.mkdirSync(hooksDir, { recursive: true });
+        // Wrapper script delegates to plugin's post-commit-validate.sh — keeps the source-of-truth
+        // hook script in the plugin, plugin updates propagate without per-project rewrites.
+        const wrapper = `#!/usr/bin/env bash\n# devt post-commit hook (v0.20.0+) — delegates to plugin script.\nif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh" ]; then\n  bash "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh"\nfi\nexit 0\n`;
+        fs.writeFileSync(postCommitPath, wrapper, { mode: 0o755 });
+        results.files_created.push(".git/hooks/post-commit (devt memory-validate wrapper)");
+      }
+    }
+  } catch (e) {
+    results.warnings.push(`post-commit hook install skipped: ${e.message}`);
   }
 
   // Scaffold .claude/settings.json with permissive defaults (only if absent — never overwrites)
@@ -375,11 +504,11 @@ function run(args, pluginRoot) {
       templateName = args[i + 1];
       i++;
     } else if (args[i] === "--config" && args[i + 1]) {
-      try {
-        extraConfig = JSON.parse(args[i + 1]);
-      } catch {
-        throw new Error("--config value must be valid JSON");
+      const result = safeJsonParse(args[i + 1], "--config value");
+      if (!result.ok) {
+        throw new Error(`--config value must be valid JSON: ${result.error}`);
       }
+      extraConfig = result.value;
       i++;
     } else if (args[i] === "--mode" && args[i + 1]) {
       mode = args[i + 1];

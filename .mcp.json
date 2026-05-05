@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "devt-memory": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"
+      ],
+      "env": {}
+    }
+  }
+}

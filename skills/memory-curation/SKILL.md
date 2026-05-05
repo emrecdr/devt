@@ -156,7 +156,15 @@ Run: <timestamp>
 4. **No bulk auto-approve flag.** Even for batches, present one AskUserQuestion per
    candidate (UI may render them in sequence). Bulk-approve buttons are how rules end
    up in the memory layer that nobody actually agreed to.
-5. **Always run `memory index` after a write.** The FTS5 unified index must mirror the
+5. **Multi-root awareness (v0.22.0+).** When `memory.paths` is configured (a project that
+   indexes shared org-wide ADRs alongside project-local), writes ALWAYS target the
+   project-local root (`.devt/memory/`) — never a shared root. Shared roots are read-only
+   from the curator's perspective; their maintainers edit those markdown files via their
+   own toolchain (e.g., a PR to the shared org-ADR repo). When a candidate's content
+   matches an existing shared-root ADR, surface that to the user via AskUserQuestion
+   ("ADR-007 already exists in shared root `../org-adrs/` — promote a project-local
+   override OR defer?") so the precedence choice is intentional, not silent.
+6. **Always run `memory index` after a write.** The FTS5 unified index must mirror the
    markdown source; stale index = stale agent context.
 
 ## Anti-patterns

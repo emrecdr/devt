@@ -197,6 +197,14 @@ Store the task description in workflow state for reference by status, forensics,
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
+**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0, Tier 1 of the Two-Tier Pre-Flight Protocol):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
+```
+
+This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn (Phase 3) or block (Phase 4) edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
+
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
 
 If `--to <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update stop_at_phase=<phase>`

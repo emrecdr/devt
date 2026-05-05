@@ -69,8 +69,11 @@ Load project context:
 - Read `CLAUDE.md` if it exists
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=code_review phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=code_review phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${REVIEW_SCOPE}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${REVIEW_SCOPE}"
 ```
+
+The second call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
 
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>

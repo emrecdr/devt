@@ -106,3 +106,5 @@ Rules:
 - If ANY method on a type needs a pointer receiver, ALL methods should use pointer receivers (consistency)
 - Pointer receivers for structs with mutex fields (copying a mutex is a bug)
 - Value receivers for small immutable types (Point, Color, Money)
+
+> **ADR override note** (v0.20.0+): if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

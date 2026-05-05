@@ -195,3 +195,5 @@ A global Pinia `switcher` store manages visual settings via HTML `data-*` attrib
 - `data-page-style`: regular / classic
 
 CSS variables (`--primary-rgb`, `--body-bg-rgb`) respond to these attributes. Components read theme state from the switcher store, never from DOM attributes directly.
+
+> **Architecture decisions**: permanent architectural choices live in `.devt/memory/decisions/` (ADR-xxx). Concepts in `.devt/memory/concepts/` (CON-xxx) define mental models. Flows in `.devt/memory/flows/` (FLOW-xxx) document named sequences. Query via `node bin/devt-tools.cjs memory affects <path>` to see what governs a given file.

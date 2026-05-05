@@ -9,6 +9,8 @@ description: |
   tests. Examples: "write tests for the payment service", "add edge case coverage for
   date parsing", "verify the registration flow handles duplicate emails".
 tools: Read, Write, Edit, Bash, Glob, Grep
+skills:
+  - devt:memory-pre-flight
 ---
 
 <role>

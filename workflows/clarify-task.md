@@ -36,7 +36,10 @@ Not applicable — this workflow does not dispatch subagents.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=clarify phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
+
+The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — surfacing existing ADRs/Concepts/REJ tombstones for the topic. This is especially load-bearing for `/devt:clarify`: gray areas that match an active REJ tombstone do NOT need to be re-clarified — the team already decided. The Brief at `.devt/state/preflight-brief.md` is the first thing the agent should consult before listing gray areas.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
 

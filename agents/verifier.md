@@ -10,6 +10,7 @@ description: |
   Catches: working code that solves the wrong problem, incomplete implementations, unwired features.
 tools: Read, Bash, Glob, Grep
 skills:
+  - devt:memory-pre-flight
   - devt:verification-patterns
 ---
 

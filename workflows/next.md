@@ -89,6 +89,8 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `plan` | `/devt:plan` with the original task |
 | `specify` | `/devt:specify` with the original task |
 | `clarify` | `/devt:clarify` with the original task |
+| `preflight` | `/devt:preflight` with the original task (or just `cat .devt/state/preflight-brief.md` if the Brief is FRESH) |
+| `memory_init` / `memory_index` / `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```
@@ -157,6 +159,7 @@ Route based on `workflow_type`:
 - `retro` → Execute `/devt:retro` to continue lesson extraction
 - `arch_health_scan` → Execute `/devt:arch-health` to continue scan
 - `code_review` → Execute `/devt:review` to continue review
+- `preflight` → Brief at `.devt/state/preflight-brief.md`. If `## Status: FRESH`, just `cat` it; if `## Status: STALE`, re-run `/devt:preflight` with the refined task. (Standalone preflight workflows complete in one shot — usually no resume needed.)
 - `research` → Execute `/devt:research` to continue investigation
 - `plan` → Execute `/devt:plan` to continue planning
 - `specify` → Execute `/devt:specify` to continue spec generation

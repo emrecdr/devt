@@ -611,3 +611,14 @@ NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.
 
 **Enforcement**: ALL agents. Verifier agent specifically checks this.
 
+
+---
+
+## Pre-Flight Protocol (v0.18.0+)
+
+Before any non-trivial change, the **Two-Tier Pre-Flight Protocol** applies (see `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` Rule 14):
+
+- **Tier 1 (Topic)**: dev workflows auto-fire `/devt:preflight "<task>"` at context_init, writing `.devt/state/preflight-brief.md`. Read the Brief FIRST — it lists every governing ADR/Concept/Flow + REJ tombstones for your task.
+- **Tier 2 (File)**: before each Edit/Write, append a `PREFLIGHT <ts> edit <file> :: <governing IDs or 'no governance'>` line to `.devt/state/scratchpad.md`. The PreToolUse `pre-flight-guard` hook checks this — `memory.preflight_mode: block` (default v0.19.0+) denies the edit otherwise.
+
+Project ADRs in `.devt/memory/decisions/` are **constitutional** — they override generic principles. Check `node bin/devt-tools.cjs memory affects <file>` if your edit isn't covered by the current Brief; run `/devt:preflight` again on scope expansion.

@@ -146,6 +146,10 @@ Structure the output as:
 When Graphify is enabled, use it for symbol-anchored boundary checks alongside the
 existing path-based scanner — `node bin/devt-tools.cjs graphify neighbors <symbol>`
 detects cross-boundary calls Graphify resolved at the AST level. Detect **Stale ADRs**:
-for each active ADR in `.devt/memory/decisions/`, verify its `affects_paths` resolve to
-existing files and (when Graphify enabled) its `affects_symbols` exist. Surface stale
-ADRs in `arch-review.md` with severity Important so curator can supersede or update them.
+for each active ADR returned by `memory list decision` (which spans all configured
+memory roots — project-local + any shared roots when `memory.paths` is set; v0.22.0+),
+verify its `affects_paths` resolve to existing files and (when Graphify enabled) its
+`affects_symbols` exist. Note: shared-root ADRs may legitimately reference paths that
+exist in some consumer projects but not this one — surface those as informational
+(not stale-ADR errors). Surface project-local stale ADRs in `arch-review.md` with
+severity Important so curator can supersede or update them.

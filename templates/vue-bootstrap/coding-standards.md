@@ -269,3 +269,5 @@ document.getElementById('closeBtn').click()
 - All user-visible strings must use translation keys
 - Locale files: `src/assets/locales/*.json`
 - Supported locales: en, es, fr, de, it, nl, tr
+
+> **ADR override note** (v0.20.0+): if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

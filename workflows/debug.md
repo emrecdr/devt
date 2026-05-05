@@ -28,8 +28,16 @@ Before dispatching the debugger agent, check `.devt/config.json` for `agent_skil
 Track state so `/devt:status` and `/devt:next` can detect and resume interrupted debug sessions:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${BUG_DESCRIPTION}"
 ```
+
+**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0 — surfaces ADRs/Concepts/REJ tombstones for the bug area before debugging):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${BUG_DESCRIPTION}"
+```
+
+This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails.
 
 <step name="init" gate="project context loaded">
 ## Step 1: Initialize

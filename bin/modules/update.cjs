@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const os = require("os");
+const { safeJsonParse } = require("./security.cjs");
 
 const CACHE_DIR = path.join(os.tmpdir(), "devt-cache");
 const CACHE_FILE = path.join(CACHE_DIR, "update-check.json");
@@ -19,10 +20,10 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 function getLocalVersion(pluginRoot) {
   // Primary: plugin.json manifest
   try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
-    );
-    if (manifest.version) return manifest.version;
+    const raw = fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8");
+    const r = safeJsonParse(raw, "plugin.json");
+    if (!r.ok) throw new Error(r.error);
+    if (r.value.version) return r.value.version;
   } catch {
     // Fall through to VERSION file
   }
@@ -36,9 +37,10 @@ function getLocalVersion(pluginRoot) {
 
 function getRepoUrl(pluginRoot) {
   try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
-    );
+    const raw = fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8");
+    const r = safeJsonParse(raw, "plugin.json");
+    if (!r.ok) throw new Error(r.error);
+    const manifest = r.value;
     const repo = manifest.repository || "";
     // Extract owner/repo from URL or direct value
     const match = repo.match(/github\.com\/([^/]+\/[^/]+)/);
@@ -62,12 +64,13 @@ function fetchRemoteVersion(repo) {
           reject(new Error(`HTTP ${res.statusCode}`));
           return;
         }
-        try {
-          const manifest = JSON.parse(data);
-          resolve(manifest.version || "0.0.0");
-        } catch (e) {
-          reject(e);
+        // 1MB cap is plenty for plugin.json; protects against malicious server / MITM payload.
+        const result = safeJsonParse(data, "GitHub plugin.json");
+        if (!result.ok) {
+          reject(new Error(result.error));
+          return;
         }
+        resolve(result.value.version || "0.0.0");
       });
     });
     req.on("error", reject);
@@ -118,7 +121,10 @@ function compareVersions(a, b) {
 
 function readCache() {
   try {
-    const content = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    const raw = fs.readFileSync(CACHE_FILE, "utf8");
+    const r = safeJsonParse(raw, "update cache");
+    if (!r.ok) throw new Error(r.error);
+    const content = r.value;
     if (Date.now() - content.checked < CACHE_TTL_MS) {
       return content;
     }
@@ -266,12 +272,13 @@ function detectInstallType(pluginRoot) {
   if (resolved.startsWith(cacheDir)) {
     // Check installed_plugins.json for the entry
     try {
-      const installed = JSON.parse(
-        fs.readFileSync(
-          path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json"),
-          "utf8",
-        ),
+      const raw = fs.readFileSync(
+        path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json"),
+        "utf8",
       );
+      const r = safeJsonParse(raw, "installed_plugins.json");
+      if (!r.ok) throw new Error(r.error);
+      const installed = r.value;
       for (const [key, entries] of Object.entries(installed.plugins || {})) {
         for (const entry of entries) {
           try {

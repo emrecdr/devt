@@ -30,3 +30,21 @@ skills-workspace/
 
 # Node
 node_modules/
+
+# devt memory FTS5 index (regenerable from markdown)
+.devt/memory/index.db
+
+# devt MCP tool-call trace (v0.21.0+, append-only telemetry; safe to delete)
+.devt/memory/_mcp-trace.jsonl
+
+# devt memory export bundles (transient — share via explicit channel)
+.devt/memory/export-*.json
+
+# Graphify ephemeral cache
+graphify-out/cache/
+
+# Graphify per-machine manifest
+graphify-out/manifest.json
+
+# claude-mem local session DB
+.claude-mem/mem.db

@@ -369,6 +369,43 @@ REJ docs additionally carry `reason` (user_preference | performance | security |
 
 Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between workflows) and `/devt:retro` (operational lessons to playbook). Use `/devt:memory` for **permanent architectural rules** that should govern future agent decisions across sessions.
 
+**Phase 5+ subcommands** (v0.20.0+):
+
+```bash
+/devt:memory export [--out=PATH] [--include=decision,concept,flow,rejected] [--all-roots]
+                                        # write portable JSON bundle (frontmatter + body)
+                                        # default: project-local only
+                                        # --all-roots: union of every configured memory root
+/devt:memory import <bundle.json> [--prefix=ORG-] [--overwrite]
+                                        # restore from a bundle; default skip if id exists
+                                        # --prefix=ORG- remaps every id (ORG-ADR-001) to avoid collisions
+/devt:memory suggest                    # discovery engine harvest into _suggestions.md
+                                        # (curator-gated; never auto-writes permanent files)
+```
+
+**Multi-root memory** (v0.22.0+): set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones — `["../engineering-adrs", ".devt/memory"]`. Project-local is always appended last (highest precedence — last-wins). `memory list`/`get` expose `source_root` for provenance. `memory index` returns `conflicts[]` + `conflict_count` so collisions are explicit. See `docs/MEMORY.md` for the full guide.
+
+### `/devt:preflight` -- Topic Pre-Flight Brief (v0.18.0+)
+
+```bash
+/devt:preflight "<task description>"
+```
+
+Generates `.devt/state/preflight-brief.md` — a single document listing every governing ADR/Concept/Flow, all REJ tombstones, related operational lessons, and (with Graphify enabled) blast radius for the task. Auto-fired by every dev workflow at context_init; standalone invocation also supported.
+
+The Brief drives Tier 1 of the Two-Tier Pre-Flight Protocol. Tier 2 = `hooks/pre-flight-guard.sh` (PreToolUse on Edit/Write) checks `.devt/state/scratchpad.md` for a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line written by the agent. Behavior governed by `memory.preflight_mode`: `off` no-op | `warn` advisory | `block` denies (default v0.19.0+).
+
+Subcommands:
+
+```bash
+/devt:preflight generate "<task>"   # default — runs Lanes A-F + blast radius
+/devt:preflight topic "<task>"      # debug topic extraction (domains/symbols/keywords)
+/devt:preflight status              # FRESH | STALE | MISSING + generated_at
+/devt:preflight mark-stale [reason] # called by File Pre-Flight on scope expansion
+```
+
+The Brief surfaces 6 lanes: A (domain match), B (FTS expansion), C (symbol match), D (wiki-link transitive closure depth-2), E (REJ tombstone overlap), F (operational lessons). When `memory.paths` is set, all lanes span every configured root.
+
 ---
 
 ## Typical Flows
@@ -495,6 +532,27 @@ These are called automatically by workflows. You can invoke them directly for fi
 | `/devt:autoskill` | Propose plugin improvements from session patterns | Standalone or workflow autoskill step |
 | `/devt:weekly-report` | Git-based contribution report | Standalone utility |
 | `/devt:thread` | Cross-session context threads | Standalone utility |
+| `/devt:memory` | ADR/Concept/Flow/REJ permanent layer (v0.16.0+) | All dev agents at context_loading; curator at promote/reject |
+| `/devt:preflight` | Topic Pre-Flight Brief generator (v0.18.0+) | Auto-fired by every dev workflow at context_init |
+
+### Telemetry CLI (v0.20.0+ / v0.21.0+)
+
+These subcommands have no slash-command alias — they are read-only diagnostics:
+
+```bash
+node bin/devt-tools.cjs token-report [--sessions=N] [--since=DATE] [--project=PATH]
+                                        # aggregate Claude Code session token usage
+                                        # streams ~/.claude/projects/<slug>/*.jsonl
+                                        # reports cache hit rate + per-session totals
+                                        # validates user-supplied paths (null bytes, traversal)
+node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME]
+                                        # aggregate MCP tool-call traces from .devt/memory/_mcp-trace.jsonl
+                                        # per-tool: call count, error rate, p50/p95/p99 latency
+node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
+                                        # compact the trace JSONL by dropping entries older than cutoff
+```
+
+The MCP server (`bin/devt-memory-mcp.cjs`) appends one JSONL line per tool call when `memory.mcp_telemetry: true` (default). Records are privacy-safe: timestamp, tool name, ok/error_code, duration_ms, args_size, args_fp (sha256:12 fingerprint — NOT the raw args), result_size. Trace file is gitignored.
 
 ---
 

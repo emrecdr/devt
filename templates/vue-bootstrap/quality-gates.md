@@ -49,3 +49,5 @@ npm run lint && npx prettier --check src/ && npm run build
 - **Before completing any implementation task**: Gates 1-3 mandatory
 - **Before shipping/PR**: All 4 gates mandatory
 - **After modifying test infrastructure**: Gate 4 mandatory
+
+> **ADR alignment gate** (v0.20.0+): before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.

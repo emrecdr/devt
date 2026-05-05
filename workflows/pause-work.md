@@ -127,7 +127,10 @@ Field reference:
 2. `.devt/state/continue-here.md` (human-readable):
    A markdown summary of where things stand and what to do next.
 
-**Lifecycle**: On successful resume, delete `handoff.json` to prevent stale reuse. The handoff is a one-shot artifact.
+3. **Pre-Flight Brief reference** (Phase 4 v0.19.0+):
+   If `.devt/state/preflight-brief.md` exists, copy its `## Status` and `Generated <timestamp>` lines into both `handoff.json` (`preflight_brief` field) and `continue-here.md` (a "Pre-Flight Brief: FRESH/STALE/MISSING (generated ...)" line). On resume, the next session reads this and decides whether to re-run `/devt:preflight` (if STALE) or proceed with the existing Brief (if FRESH and the task is unchanged).
+
+**Lifecycle**: On successful resume, delete `handoff.json` to prevent stale reuse. The handoff is a one-shot artifact. The Brief itself is NOT deleted on resume — it stays valid for the resumed workflow.
 </step>
 
 </process>

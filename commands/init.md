@@ -17,4 +17,9 @@ Run the interactive project setup wizard to configure devt for the current proje
 
 <process>
 Execute the project initialization workflow from the referenced file end-to-end.
+
+In addition to scaffolding `.devt/rules/`, the wizard sets up the memory layer (`/devt:memory init`) creating `.devt/memory/{decisions,concepts,flows,rejected}/` and writes `.mcp.json` registering the vendored read-only MCP server. Optional configuration:
+- `memory.paths` (v0.22.0+) — multi-root memory: index company-wide ADRs alongside project-local ones via `["../engineering-adrs", ".devt/memory"]`. Project-local always wins on ID collisions. See `docs/MEMORY.md`.
+- `memory.preflight_mode` (v0.19.0+) — default `block`; PreToolUse hook denies edits without a `PREFLIGHT` scratchpad line. Set to `warn` for advisory mode during onboarding.
+- `graphify.enabled` (v0.17.0+) — opt-in AST symbol anchoring + ~10× lower token cost on code-search ops.
 </process>

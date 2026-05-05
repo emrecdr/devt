@@ -84,6 +84,24 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "preflight": {
+        // preflight subcommand — Topic Pre-Flight Brief (Phase 3)
+        const code = require("./modules/preflight.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
+      case "token-report": {
+        // token-report — aggregate Claude Code session token usage (v0.20.0+)
+        const code = require("./modules/token-report.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
+      case "mcp-stats": {
+        // mcp-stats — aggregate MCP tool-call traces (v0.21.0+)
+        const code = require("./modules/mcp-stats.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
@@ -156,6 +174,15 @@ Commands:
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
   discovery claude-mem-status  Whether claude-mem CLI is installed and reachable
+  preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md
+  preflight topic <task>    Just extract domains/symbols/keywords from a task description
+  preflight status          Read current brief metadata (FRESH/STALE/MISSING + timestamp)
+  preflight mark-stale [r]  Mark current brief STALE (called by File Pre-Flight on scope expansion)
+  token-report              Aggregate Claude Code session token usage (cache hit rate, percentiles)
+  mcp-stats                 Aggregate MCP tool-call traces (call counts, p95/p99 latency, error rate)
+  mcp-stats --prune-older-than=30d  Compact the trace JSONL by dropping entries older than cutoff
+  memory export [--out=PATH]      Export ADR/CON/FLOW/REJ docs to a portable JSON bundle
+  memory import <bundle> [--prefix=ORG-] [--overwrite]  Restore docs from a bundle
   report window [--weeks N] Compute reporting time window
   report generate [--weeks N] [--output PATH]  Generate contribution report
   health [--repair]         Validate project config, state, hooks. --repair auto-fixes safe issues

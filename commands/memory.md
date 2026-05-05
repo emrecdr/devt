@@ -48,13 +48,15 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory <subcommand> [args...]
 ```
 
 The CLI returns JSON. Render it to the user as a readable summary, surfacing:
-- For `init`/`index`: created paths, inserted doc count, schema_version, last_built_at
+- For `init`/`index`: created paths, inserted doc count, schema_version, last_built_at, **`memory_roots`** (the resolved scan order — v0.22.0+), **`conflict_count` + `conflicts[]`** when same id appears in multiple configured roots
 - For `query`: ranked hits with id/title/summary/file_path/doc_type
-- For `get`: full doc record including affects_paths/affects_symbols/links/search_keywords (rejected-only)
+- For `get`: full doc record including affects_paths/affects_symbols/links/search_keywords (rejected-only) and **`source_root`** (which configured memory root the doc came from — v0.22.0+)
 - For `affects`: matching docs ordered by id
-- For `list`: tabular summary
+- For `list`: tabular summary including **`source_root`** for provenance
 - For `links`: tree showing depth, target_exists status, link_type
 - For `validate`: errors first, warnings second, with file paths and reasons
+
+**Multi-root behavior** (v0.22.0+): when `memory.paths` is set in `.devt/config.json`, all subcommands operate over the union of configured roots. `index` rebuilds the unified FTS5 from all roots. `get`/`list`/`active`/`affects`/`query` return docs from any root, with last-wins precedence on ID collisions (project-local always wins). Surface `source_root` to the user so they can see which root governs a hit. See `docs/MEMORY.md` "Multi-Root Memory" for setup.
 
 If the user passes no subcommand or an unknown one, surface the table above.
 

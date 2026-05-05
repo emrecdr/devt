@@ -180,6 +180,17 @@ Diagnose plugin health — 19 checks covering config, state, rules, hooks, agent
 ### /devt:update
 Check for and install devt updates from GitHub.
 
+### /devt:memory <subcommand>
+Permanent ADR/Concept/Flow/REJ knowledge layer (v0.16.0+).
+Subcommands: init | index | query | get | affects | list | links | active | rejected-keywords | validate | backlinks | orphans | stale-links | suggest | export | import | promote | reject.
+v0.22.0+ supports multi-root indexing via `memory.paths` config — index company-wide ADRs alongside project-local ones with last-wins precedence.
+Use when: working with permanent architectural rules. See `docs/MEMORY.md`.
+
+### /devt:preflight "<task>"
+Generate a Topic Pre-Flight Brief (v0.18.0+) listing every governing ADR/Concept/Flow + REJ tombstones + lessons + (with Graphify) blast radius.
+Auto-fired by every dev workflow at context_init; standalone for ad-hoc Brief generation.
+The Brief drives Tier 1 of the Two-Tier Pre-Flight Protocol; Tier 2 is a PreToolUse hook that warns/blocks edits without a `PREFLIGHT` scratchpad line.
+
 ## Typical Workflows
 
 Don't know which command:

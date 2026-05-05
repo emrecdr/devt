@@ -33,6 +33,14 @@ const HOOK_PROFILES = {
   "context-monitor.sh": ["full"],
   "prompt-guard.sh": ["full"],
   "read-before-edit-guard.sh": ["standard", "full"],
+  // Phase 3 (v0.18.0) — Two-Tier Pre-Flight enforcement.
+  // pre-flight-guard.sh: PreToolUse on Edit/Write — verifies scratchpad has a
+  //   PREFLIGHT line covering the target file. memory.preflight_mode controls
+  //   warn vs block (off = no-op).
+  // memory-auto-index.sh: PostToolUse on Edit/Write — rebuilds the FTS5 index
+  //   when an .devt/memory/**.md file is touched, so subsequent queries are fresh.
+  "pre-flight-guard.sh": ["standard", "full"],
+  "memory-auto-index.sh": ["standard", "full"],
 };
 
 function getProfile() {

@@ -77,3 +77,5 @@
 - Audit before adding — prefer standard library / small focused packages
 - Pin versions in `package-lock.json` or equivalent
 - No circular dependencies between modules
+
+> **ADR override note** (v0.20.0+): if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

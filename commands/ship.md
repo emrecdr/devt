@@ -8,7 +8,7 @@ This workflow uses: Bash, Read, Glob, Grep
 </tool_restrictions>
 
 <objective>
-Create a pull request with a rich, auto-generated description composed from the completed workflow's .devt/state/ artifacts (impl-summary.md, test-summary.md, review.md, decisions.md).
+Create a pull request with a rich, auto-generated description composed from the completed workflow's .devt/state/ artifacts (impl-summary.md, test-summary.md, review.md, decisions.md, preflight-brief.md). The PR body cites governing ADR/Concept/Flow ids consulted during the work and any REJ tombstones the implementation deliberately respected — reviewers can verify alignment without re-reading the Brief themselves.
 </objective>
 
 <execution_context>

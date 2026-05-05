@@ -26,6 +26,7 @@
 const fs = require("fs");
 const path = require("path");
 const child_process = require("node:child_process");
+const { safeJsonParse } = require("./security.cjs");
 
 // ---------------------------------------------------------------------------
 // Config + binary discovery
@@ -100,8 +101,12 @@ function freshness() {
   let builtAt = null;
   try {
     const raw = fs.readFileSync(s.graph_path, "utf8");
-    const graph = JSON.parse(raw);
-    builtAt = graph.built_at_commit || null;
+    // 200MB cap — Graphify graph caches scale with codebase size; raise above default.
+    const result = safeJsonParse(raw, "graph cache", 200 * 1024 * 1024);
+    if (!result.ok) {
+      return { state: "ready", fresh: false, built_at: null, head: null, error: `graph.json unreadable: ${result.error}` };
+    }
+    builtAt = result.value.built_at_commit || null;
   } catch {
     return { state: "ready", fresh: false, built_at: null, head: null, error: "graph.json unreadable" };
   }
@@ -195,10 +200,9 @@ function callGraphify(subargs, options) {
     };
   }
 
-  let parsed = null;
-  try {
-    parsed = JSON.parse(proc.stdout || "[]");
-  } catch (e) {
+  // 100MB cap — Graphify subprocess output for blast-radius can be large on big graphs.
+  const parseResult = safeJsonParse(proc.stdout || "[]", "graphify subprocess", 100 * 1024 * 1024);
+  if (!parseResult.ok) {
     // Graphify CLI sometimes emits human-readable text — return raw stdout
     return {
       source: "graphify",
@@ -210,6 +214,7 @@ function callGraphify(subargs, options) {
     };
   }
 
+  const parsed = parseResult.value;
   const results = Array.isArray(parsed) ? parsed : (parsed.results || parsed.nodes || []);
 
   if (results.length === 0) {

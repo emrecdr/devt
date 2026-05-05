@@ -163,6 +163,79 @@ function renderMarkdown(stats, title) {
   return lines.join("\n");
 }
 
+/**
+ * Memory layer event aggregations (v0.20.0+) — counts new ADRs/Concepts/Flows/REJ
+ * created in the reporting window by reading file mtimes (cheap, no git log diff).
+ *
+ * Returns { adrs_added, concepts_added, flows_added, rejected_added,
+ *           total_active_adrs, briefs_invoked }.
+ *
+ * "Briefs invoked" is approximated from the existence of `.devt/state/preflight-brief.md`
+ * — a precise count would require parsing session logs (see bin/modules/token-report.cjs
+ * for a related telemetry pattern). Future work.
+ */
+function aggregateMemoryEvents(projectRoot, fromMs, toMs) {
+  const path = require("path");
+  const fs = require("fs");
+  const memDir = path.join(projectRoot, ".devt", "memory");
+  if (!fs.existsSync(memDir)) {
+    return { available: false, reason: ".devt/memory/ not present" };
+  }
+  const counts = { adrs_added: 0, concepts_added: 0, flows_added: 0, rejected_added: 0 };
+  const subdirs = [
+    { dir: "decisions", key: "adrs_added" },
+    { dir: "concepts", key: "concepts_added" },
+    { dir: "flows", key: "flows_added" },
+    { dir: "rejected", key: "rejected_added" },
+  ];
+  for (const { dir, key } of subdirs) {
+    const full = path.join(memDir, dir);
+    if (!fs.existsSync(full)) continue;
+    const entries = fs.readdirSync(full);
+    for (const f of entries) {
+      if (f.startsWith("_")) continue;
+      if (!f.endsWith(".md")) continue;
+      const stat = fs.statSync(path.join(full, f));
+      if (stat.birthtimeMs >= fromMs && stat.birthtimeMs <= toMs) counts[key]++;
+    }
+  }
+  // Total active count (snapshot, not window-scoped)
+  let totalActive = 0;
+  try {
+    const dbPath = path.join(memDir, "index.db");
+    if (fs.existsSync(dbPath)) {
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        const row = db.prepare("SELECT COUNT(*) AS n FROM documents WHERE status='active'").get();
+        totalActive = (row && row.n) || 0;
+      } finally {
+        db.close();
+      }
+    }
+  } catch { /* swallow */ }
+
+  return {
+    available: true,
+    window: { from_ms: fromMs, to_ms: toMs },
+    ...counts,
+    total_active_docs: totalActive,
+  };
+}
+
+function renderMemorySection(memoryEvents) {
+  if (!memoryEvents || !memoryEvents.available) return "";
+  const m = memoryEvents;
+  const lines = ["## Memory Layer Activity", ""];
+  lines.push(`- New ADRs (decisions): ${m.adrs_added}`);
+  lines.push(`- New Concepts: ${m.concepts_added}`);
+  lines.push(`- New Flows: ${m.flows_added}`);
+  lines.push(`- New REJ tombstones: ${m.rejected_added}`);
+  lines.push(`- Total active docs (snapshot): ${m.total_active_docs}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
@@ -185,16 +258,21 @@ function run(subcommand, args) {
       const contributors = loadContributors();
       const stats = parseGitLog(window.from, window.to, contributors);
       const title = `Contribution Report: ${window.from} to ${window.to}`;
-      const report = renderMarkdown(stats, title);
+
+      const projectRoot = require("./config.cjs").findProjectRoot();
+      const fromMs = new Date(window.from).getTime();
+      const toMs = new Date(window.to).getTime() + 24 * 3600 * 1000;
+      const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);
+      const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents);
 
       if (outputPath) {
         const tmp = outputPath + ".tmp";
         fs.writeFileSync(tmp, report);
         fs.renameSync(tmp, outputPath);
-        return { output: outputPath, window, authors: Object.keys(stats).length };
+        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents };
       }
 
-      return { report, window, authors: Object.keys(stats).length };
+      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents };
     }
 
     default:
@@ -202,4 +280,4 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, computeWindow, parseGitLog, renderMarkdown };
+module.exports = { run, computeWindow, parseGitLog, renderMarkdown, aggregateMemoryEvents, renderMemorySection };

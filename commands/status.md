@@ -17,4 +17,6 @@ Display the current workflow's progress: completed steps, pending steps, availab
 
 <process>
 Execute the status workflow from the referenced file end-to-end. Reads workflow state and artifacts, then reports progress.
+
+The status output also surfaces the Pre-Flight Brief state (FRESH | STALE | MISSING with generated_at timestamp) when `.devt/state/preflight-brief.md` exists — see `workflows/status.md` for the integration point. STALE means a prior File Pre-Flight detected scope expansion; re-run `/devt:preflight "<refined task>"` to refresh.
 </process>

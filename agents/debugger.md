@@ -9,6 +9,8 @@ description: |
   Follows 4-phase investigation protocol. Isolates in fresh context to preserve the workflow's context window.
 tools: Read, Write, Edit, Bash, Glob, Grep
 memory: project
+skills:
+  - devt:memory-pre-flight
 ---
 
 <role>

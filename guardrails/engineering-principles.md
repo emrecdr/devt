@@ -2,6 +2,18 @@
 
 > Universal design principles that all devt agents MUST follow regardless of language, framework, or task type. These are not suggestions — they are the foundation of maintainable software.
 
+## Sources of Truth (Hierarchy)
+
+When two sources disagree, the higher-priority source wins. Always.
+
+1. **Permanent ADRs** in `.devt/memory/decisions/` — architectural law for the project. Status `active` is binding; `superseded` is historical context. (Phase 3 v0.18.0+)
+2. **Permanent Concepts/Flows** in `.devt/memory/concepts/` and `.devt/memory/flows/` — durable mental models and named sequences. Cited by ADRs.
+3. **REJ Tombstones** in `.devt/memory/rejected/` — explicit "we already said no". Suppress matching proposals before generating them.
+4. **Project rules** in `.devt/rules/*.md` — coding standards, architecture conventions, quality gates. Override defaults but defer to ADRs.
+5. **Plugin guardrails** (this file + `golden-rules.md` + others) — universal defaults that ADRs and `.devt/rules/` can override per-project.
+
+When an ADR or REJ contradicts general principle, **the ADR/REJ wins** — it represents an explicit decision the team made for their context.
+
 ## SOLID Principles
 
 ### S — Single Responsibility Principle (SRP)

@@ -115,3 +115,5 @@ npx playwright test             # E2E tests
 - **Approve**: No CRITICAL or HIGH issues
 - **Request changes**: Any CRITICAL or HIGH issue found
 - **Note**: MEDIUM issues are advisory — mention but don't block
+
+> **ADR/REJ alignment** (v0.20.0+): before approving a change, confirm: (a) no governing ADR is silently violated; (b) no proposed approach matches a REJ tombstone in `.devt/memory/rejected/`. The Pre-Flight Brief surfaces both.

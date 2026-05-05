@@ -78,6 +78,14 @@ Load project context:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
+**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0 — lighter version: same lanes A-F but expect smaller blast radius for SIMPLE-tier work):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
+```
+
+Produces `.devt/state/preflight-brief.md`. The programmer agent reads it before edits. Skip silently if the call fails.
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 

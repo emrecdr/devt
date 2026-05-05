@@ -8,6 +8,7 @@ Quality gates at three stages of implementation. Generative debt is the technica
 
 Run these checks before writing any implementation code.
 
+- [ ] **Read the Pre-Flight Brief**: `.devt/state/preflight-brief.md` is FRESH and consulted (Phase 3 v0.18.0). If MISSING and this is a development workflow, run `/devt:preflight "<task>"` first. If STALE, refresh or accept that governance coverage may be incomplete.
 - [ ] **Read project rules**: `.devt/rules/` and `CLAUDE.md` loaded and internalized
 - [ ] **Scan codebase**: Searched for existing implementations related to the task
 - [ ] **Verify requirements**: Task specification is clear and unambiguous — no assumptions
@@ -54,6 +55,7 @@ Run these checks after implementation is complete, before reporting done.
 - [ ] **No orphaned code**: If you renamed or moved something, all references are updated
 - [ ] **No dead imports**: Every import is used; no unused imports remain
 - [ ] **Documentation updated**: Module docs, API docs, and changelogs reflect the changes
+- [ ] **Memory index fresh**: If you edited any `.devt/memory/**.md` file, the FTS5 index is rebuilt (`node bin/devt-tools.cjs memory index`). The PostToolUse `memory-auto-index` hook handles this automatically when enabled; verify with `memory validate`.
 - [ ] **Evidence captured**: Actual command output from quality gates is available — not just "I ran it"
 
 **Gate**: "Done" means verified. Report the actual output of quality gates, not your expectation of what they would produce.

@@ -318,6 +318,49 @@ Configuration merges in 3 layers (later overrides earlier):
 | `/devt:retro`       | Extract lessons learned into persistent memory                                        |
 | `/devt:arch-health` | Architecture health scan with baseline diffing                                        |
 | `/devt:autoskill`   | Propose skill and agent updates based on observed patterns                            |
+| `/devt:memory`      | Permanent ADR/Concept/Flow/REJ knowledge layer (v0.16.0+) — multi-root via `memory.paths` (v0.22.0+) |
+| `/devt:preflight`   | Generate Topic Pre-Flight Brief (v0.18.0+) — auto-fired by every dev workflow at context_init |
+
+## The Memory Layer
+
+devt persists structured knowledge across **three distinct layers**, each with a different lifetime and write authority:
+
+```
+.devt/state/                    LAYER 1 — ephemeral (per-workflow)
+├── decisions.md                    DEC-xxx — clarify/specify/research scratch
+├── preflight-brief.md              Topic Pre-Flight Brief (auto-fired)
+└── ...                             reset on /devt:cancel-workflow
+
+.devt/learning-playbook.md      LAYER 2 — permanent (operational lessons)
+                                    LES-xxx — "when X fails, check Y first"
+
+.devt/memory/                   LAYER 3 — permanent (architectural truth)
+├── decisions/                      ADR-xxx — constitutional decisions
+├── concepts/                       CON-xxx — durable mental models
+├── flows/                          FLOW-xxx — named sequences
+└── rejected/                       REJ-xxx — tombstones (we said no)
+```
+
+**Two-Tier Pre-Flight Protocol** (v0.18.0+):
+
+- **Tier 1 (Topic, automatic)**: dev workflows auto-fire `/devt:preflight "<task>"` to write `.devt/state/preflight-brief.md` listing every governing ADR/Concept/Flow + REJ tombstones for the topic. All 8 dev agents read it first.
+- **Tier 2 (File, agent-driven)**: before each Edit/Write, agents append a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line to scratchpad.md. The PreToolUse `pre-flight-guard.sh` hook checks the line — `memory.preflight_mode: block` (v0.19.0+) denies otherwise.
+
+**Vendored MCP server**: `bin/devt-memory-mcp.cjs` is registered in project `.mcp.json` (auto-scaffolded at `/devt:init`). Read-only, SELECT-only `query_index`, 10 helper tools — agents query memory via MCP rather than re-grepping markdown.
+
+**Multi-root memory** (v0.22.0+): set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones. Last-wins precedence (project always overrides shared). Use case: `memory.paths: ["../engineering-adrs", ".devt/memory"]` → every ACME project inherits the org's architectural truth via git submodule or sibling clone. Conflicts are explicit (never silent), `source_root` traces provenance, curator writes always go project-local. See `docs/MEMORY.md`.
+
+**Graphify integration** (optional, `pip install graphifyy[mcp]`): when enabled, AST symbol anchoring + ~10× lower token cost on code-search ops. Setup wizard pitches it as "strongly recommended" but the system stays fully functional without it via grep fallback. Same for `claude-mem` (mid-session capture).
+
+| Feature | Without Graphify | With Graphify |
+|---|---|---|
+| ADR symbol validation | Stored as authored | AST-validated; AMBIGUOUS bindings flagged |
+| Topic Pre-Flight blast radius | Path-glob heuristic | AST-derived dependents/effect_size |
+| File Pre-Flight Lane 0/3 | Skipped | Active (warm cache + symbol-anchored) |
+| `architecture-health-scanner` | Path-based boundaries | Symbol-anchored boundaries |
+| Code-search token cost | Baseline | ~10× reduction on symbol queries |
+
+See `docs/MEMORY.md` for the comprehensive guide, `guardrails/golden-rules.md` Rules 14+15, and `skills/memory-pre-flight/SKILL.md` for the protocol skill.
 
 ## Learning Loop
 

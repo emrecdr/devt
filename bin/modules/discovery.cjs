@@ -27,6 +27,7 @@
 const fs = require("fs");
 const path = require("path");
 const child_process = require("node:child_process");
+const { safeJsonParse } = require("./security.cjs");
 
 // ---------------------------------------------------------------------------
 // Paths + helpers
@@ -96,12 +97,10 @@ function harvestClaudeMem(options) {
   }
   if (proc.status !== 0) return [];
 
-  let parsed;
-  try {
-    parsed = JSON.parse(proc.stdout || "[]");
-  } catch {
-    return [];
-  }
+  // 10MB cap — claude-mem outputs are bounded by N (max ~50) ⚖️/🔵 entries.
+  const result = safeJsonParse(proc.stdout || "[]", "claude-mem output", 10 * 1024 * 1024);
+  if (!result.ok) return [];
+  const parsed = result.value;
 
   const entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
   return entries.map(e => ({
