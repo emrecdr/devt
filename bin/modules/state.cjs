@@ -174,6 +174,10 @@ const ARTIFACT_SCHEMA = {
   "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "curation-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "research.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  // Phase 1 (v0.16.0) — Pre-Flight Brief artifact. FRESH = generated this session,
+  // STALE = brief exists but workflow scope expanded beyond it (caught by Tier-2
+  // File Pre-Flight in Phase 3), MISSING = brief never generated for this workflow.
+  "preflight-brief.md": ["FRESH", "STALE", "MISSING"],
 };
 
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase
@@ -186,7 +190,15 @@ const PERSISTENT_ARTIFACTS = [
 
 const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
-  "research", "plan", "specify", "clarify", null,
+  "research", "plan", "specify", "clarify",
+  // Memory layer workflow types (v0.16.0+) — see workflows/memory-*.md.
+  // memory_init: scaffolds .devt/memory/ + first index pass (Phase 1).
+  // memory_index: rebuilds the FTS5 unified index from markdown (Phase 1).
+  // memory_promote: curator promotes ephemeral DEC -> permanent ADR (Phase 2).
+  // memory_reject: curator creates a REJ tombstone with search_keywords (Phase 2).
+  // preflight: standalone Topic Pre-Flight Brief generation (Phase 3).
+  "memory_init", "memory_index", "memory_promote", "memory_reject", "preflight",
+  null,
 ]);
 
 function warnState(msg) {

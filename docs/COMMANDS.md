@@ -310,6 +310,65 @@ Distinct from `/devt:clarify` (resolves ambiguity through interview) and the `st
 
 Checks: config valid, state directory exists, hooks registered, required files present.
 
+### `/devt:memory` -- Permanent knowledge layer
+
+The memory layer is the third tier of devt's knowledge persistence — distinct from per-workflow ephemeral state (`.devt/state/decisions.md`) and operational lessons (`.devt/learning-playbook.md`). It holds **architectural rules that govern future decisions**: ADR-xxx (decisions), CON-xxx (concepts/domain models), FLOW-xxx (business processes), REJ-xxx (rejected ideas / tombstones).
+
+Phase 1 (v0.16.0) ships the data layer — file format, FTS5 unified index, query CLI. Agent integrations (Topic Pre-Flight Brief auto-fired from dev workflows, curator-gated promotion of session DECs to permanent ADRs, Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence, claude-mem ⚖️ decision and 🔵 discovery tag harvest, vendored MCP query layer for read-only agent access, PreToolUse pre-flight enforcement) land in Phases 2-4 (v0.17.0 → v0.19.0).
+
+```bash
+/devt:memory init                       # scaffold .devt/memory/{decisions,concepts,flows,rejected}/ + first FTS5 index
+/devt:memory index                      # atomic drop+rebuild of the unified index (transaction-wrapped)
+/devt:memory query "argon hashing"      # full-text search; prefix-matched, AND-combined tokens
+/devt:memory get ADR-007                # fetch one doc by id with affects/links/keywords
+/devt:memory affects src/auth/service.ts  # which active/candidate docs govern this file (glob-aware)
+/devt:memory list decision              # list all docs of a type (or all types if omitted)
+/devt:memory links ADR-007 --depth=3    # transitive link traversal — load-bearing for safe ADR supersession
+/devt:memory active security            # all status:active docs in a domain
+/devt:memory rejected-keywords          # all REJ tombstones with their AI-suppression search_keywords
+/devt:memory validate                   # frontmatter + path-resolution + broken-link checks
+```
+
+**Frontmatter schema** (strict — `bin/modules/memory.cjs:validateFrontmatter` enforces):
+
+```yaml
+---
+id: ADR-007                    # required; pattern enforced per doc_type (ADR-/CON-/FLOW-/REJ-)
+title: "Argon2 password hashing"
+doc_type: decision             # decision | concept | flow | rejected
+domain: security               # optional, free-form
+status: active                 # candidate | active | superseded | rejected
+confidence: explicit           # verified | explicit | inferred | observed | speculative
+summary: "..."                 # ≤ 200 chars; FTS5-indexed surface for high-speed search
+affects_paths:                 # optional, POSIX glob patterns
+  - "src/auth/**"
+affects_symbols:               # optional; bare strings OR objects with binding_confidence (Graphify Phase 2+)
+  - AuthService
+  - symbol: SessionManager
+    binding_confidence: EXTRACTED   # EXTRACTED | INFERRED | AMBIGUOUS
+links:                         # optional; typed cross-references
+  - id: ADR-001
+    type: depends_on           # supersedes | depends_on | implements | relates_to
+created_at: "2026-05-05T10:00:00Z"
+created_by: user               # user | curator | retro | council | manual
+schema_version: 1
+---
+```
+
+REJ docs additionally carry `reason` (user_preference | performance | security | maintainability | compliance | complexity) and `search_keywords` — phrases that suppress AI re-proposal of the rejected idea (the tombstone mechanism; consumed by autoskill in Phase 2).
+
+**Index location**: `.devt/memory/index.db` (gitignored — regenerable from markdown via `memory index`). Uses `node:sqlite` FTS5 (built-in since Node 22.5+). The four `.devt/memory/{decisions,concepts,flows,rejected}/` subdirs ARE intentionally committed — they are team-shared architectural truth.
+
+**Hard invariants**:
+- Files prefixed with `_` (e.g. `_suggestions.md`) are NEVER indexed as first-class docs (they are auto-generated reports — Phase 2 introduces `_suggestions.md` for curator promotion proposals).
+- Templates with id ending in `-000` are skipped during indexing (avoids polluting the index with scaffolding).
+- Atomic rebuild: drop+re-insert wrapped in a single SQLite transaction. Failure mid-rebuild rolls back to the prior index state.
+- `links.target_id` has NO foreign key constraint — forward references to not-yet-created docs are valid; broken links surface as warnings via `memory validate`, not errors.
+
+**Templates**: `templates/memory/{ADR,CON,FLOW,REJ}-template.md` — copy + edit + drop into the appropriate subdir. Never commit a template scaffold (id `-000` would be skipped anyway, but it bloats history).
+
+Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between workflows) and `/devt:retro` (operational lessons to playbook). Use `/devt:memory` for **permanent architectural rules** that should govern future agent decisions across sessions.
+
 ---
 
 ## Typical Flows

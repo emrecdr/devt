@@ -18,6 +18,22 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const DEFAULTS = {
   model_profile: "quality",
   scope_mode: "surgical",
+  // Memory layer (v0.16.0+) — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
+  // preflight_mode: "off" (Phase 1) | "warn" (Phase 3) | "block" (Phase 4 default).
+  // auto_index_on_change: when true, a future PostToolUse hook (Phase 3) will rebuild
+  // the FTS5 unified index after Edit/Write on .devt/memory/**.md files.
+  memory: {
+    enabled: true,
+    preflight_mode: "off",
+    auto_index_on_change: true,
+  },
+  // Graphify integration (v0.17.0+) — optional AST symbol anchoring + MCP query layer.
+  // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and
+  // `graphify install --platform claude`. See plan: graceful degradation when absent.
+  graphify: {
+    enabled: false,
+    command: "graphify",
+  },
   git: {
     provider: null,
     workspace: null,

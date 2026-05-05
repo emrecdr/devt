@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-05
+
+### Added
+- **Memory layer foundation (`.devt/memory/`)**: permanent knowledge store for architectural decisions (ADRs), concepts (CONs), flows (FLOWs), and rejected proposals (REJ tombstones). Each doc carries strict frontmatter (`id`, `title`, `doc_type`, `status`, `confidence`, `summary`, optional `affects_paths`, `affects_symbols`, `links`, `created_at`, `created_by`, `schema_version`); REJ docs additionally carry `reason` and `search_keywords` (for future AI suppression in autoskill). Three-layer separation: `.devt/state/decisions.md` stays per-workflow ephemeral; `.devt/learning-playbook.md` stays for operational lessons; `.devt/memory/{decisions,concepts,flows,rejected}/*.md` is the new permanent architectural layer. This is Phase 1 of the multi-release Cognitive Coding Architecture v27.0 integration plan; Phase 2 (v0.17.0) wires Graphify symbol anchoring + curator-gated promotion + claude-mem ⚖️/🔵 tag harvest, Phase 3 (v0.18.0) ships the Topic Pre-Flight Brief + vendored MCP query layer, Phase 4 (v0.19.0) flips block-mode + wide-surface integration polish.
+- **`bin/modules/memory.cjs`** (847 lines): pure-Node FTS5 unified index via `node:sqlite`. Atomic drop+rebuild within a single SQLite transaction (failure rolls back to prior index state). Frontmatter YAML-subset parser (handles scalars, list-of-scalars, list-of-objects). Strict per-doc-type schema validator with id-pattern enforcement (`ADR-\d{3,}` / `CON-` / `FLOW-` / `REJ-`). Query helpers: `getDoc`, `getByPath` (glob-aware), `getBySymbol`, `listActive`, `listRejectedKeywords`, `queryFTS` (prefix-matched + AND-combined tokens), `getLinks` (transitive depth-2 by default), `listDocs`, `validate` (frontmatter + path resolution + broken-link detection). Files prefixed with `_` are NEVER indexed (auto-generated reports like future `_suggestions.md`). Templates with id ending in `-000` are skipped during indexing. `links.target_id` has no FK constraint — forward references to not-yet-created docs are valid; broken links surface as warnings via `memory validate`.
+- **`/devt:memory` slash command** with subcommands: `init`, `index`, `query`, `get`, `affects`, `list`, `links`, `active`, `rejected-keywords`, `validate`. Phase 2 will add `suggest`, `promote`, `reject`, `backlinks`, `orphans`, `stale-links`, `affects-symbol`. The command routes through `workflows/memory-init.md` (subcommand dispatcher, no agent dispatch).
+- **`schemas/memory-doc.yaml`**: JSON Schema documentation for the four doc types. Used by `validateFrontmatter()` in `memory.cjs`, by curator agent during Phase 2 promotions, and by the discovery engine during Phase 2 wiki-link enrichment.
+- **`templates/memory/{ADR,CON,FLOW,REJ}-template.md`**: scaffolding templates with the strict frontmatter and section structure. Templates are skipped during indexing (id ends in `-000`).
+- **`bin/modules/state.cjs:ARTIFACT_SCHEMA`** entry for `preflight-brief.md` (status enum: `FRESH | STALE | MISSING`). Populated in Phase 3.
+- **`bin/modules/state.cjs:VALID_WORKFLOW_TYPES`** additions: `memory_init`, `memory_index`, `memory_promote`, `memory_reject`, `preflight`. Routing in `workflows/next.md` will follow as Phase 2/3 ship.
+- **`bin/modules/config.cjs:DEFAULTS`** new blocks: `memory: { enabled: true, preflight_mode: "off", auto_index_on_change: true }` and `graphify: { enabled: false, command: "graphify" }`. Phase 1 keeps `preflight_mode: "off"` since hooks haven't shipped; Phase 3 default flips to `"warn"`, Phase 4 to `"block"`.
+- **`bin/modules/setup.cjs`**: `/devt:init` now scaffolds `.devt/memory/{decisions,concepts,flows,rejected}/` and gitignores `.devt/memory/index.db` (regenerable from markdown — never commit). The four ADR/CON/FLOW/REJ subdirs ARE intentionally committed (team-shared architectural truth).
+- **13 new smoke-test assertions** covering: scaffolding, atomic rebuild, `_*` skip behavior, FTS5 prefix matching, glob-based affects, REJ tombstone keywords, validation errors on missing required fields, deterministic retrieval (rebuild on unchanged state produces identical doc set).
+
+### Changed
+- Smoke-test count: 30 → 43 passing.
+
+### Documentation
+- **`docs/COMMANDS.md`**: new `/devt:memory` section with full subcommand reference.
+- **`CLAUDE.md`** Key Conventions: documents the three-layer memory architecture (state/playbook/memory) and notes that Phase 1 is data-layer-only (no agent integrations yet — those land in Phase 2+).
+
 ## [0.15.0] - 2026-05-05
 
 ### Changed

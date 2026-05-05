@@ -175,6 +175,18 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.files_created.push(".devt/state/");
   }
 
+  // Create .devt/memory/{decisions,concepts,flows,rejected}/ directories.
+  // Phase 1 (v0.16.0): scaffolding only — no template seeding. Project owners
+  // create their first ADR via /devt:memory promote or by hand.
+  const memoryDir = path.join(devtDir, "memory");
+  for (const subdir of ["decisions", "concepts", "flows", "rejected"]) {
+    const target = path.join(memoryDir, subdir);
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+      results.files_created.push(`.devt/memory/${subdir}/`);
+    }
+  }
+
   // Create .devt/learning-playbook.md if it doesn't exist
   const playbookPath = path.join(devtDir, "learning-playbook.md");
   if (!fs.existsSync(playbookPath)) {
@@ -228,11 +240,15 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.warnings.push(".devt/config.json already exists — skipping");
   }
 
-  // Gitignore .devt/state/ and .claude/agent-memory/
+  // Gitignore .devt/state/, .claude/agent-memory/, .devt/memory/index.db
+  // (the FTS5 index is regenerable from markdown — never commit it).
+  // ADR/CON/FLOW/REJ markdown files in .devt/memory/{decisions,concepts,flows,rejected}/
+  // ARE intentionally committed — they are team-shared architectural truth.
   const gitignorePath = path.join(projectRoot, ".gitignore");
   const requiredIgnores = [
     { path: ".devt/state/", header: "# devt workflow state" },
     { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
+    { path: ".devt/memory/index.db", header: "# devt memory FTS5 index (regenerable from markdown)" },
   ];
   try {
     let content = fs.readFileSync(gitignorePath, "utf8");

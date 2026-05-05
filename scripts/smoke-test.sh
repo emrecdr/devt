@@ -263,6 +263,145 @@ else
   fail "concurrent locking test (run scripts/test-locking.cjs for details)"
 fi
 
+echo "== Memory layer (Phase 1, v0.16.0) =="
+# Memory layer roundtrip in an isolated tmp project. NOTE: no subshell — `pass()`/`fail()`
+# need to update the parent shell's PASS/FAIL counters. Use cd + trap-restored cwd.
+MEMTMP=$(mktemp -d)
+mkdir -p "$MEMTMP/.git" "$MEMTMP/.devt"
+SAVED_CWD=$(pwd)
+cd "$MEMTMP"
+if node "$CLI" memory init >/dev/null 2>&1; then
+  pass "memory init scaffolds .devt/memory/{decisions,concepts,flows,rejected}"
+else
+  fail "memory init failed"
+fi
+
+for sub in decisions concepts flows rejected; do
+  if [ -d ".devt/memory/$sub" ]; then
+    pass "memory init created .devt/memory/$sub/"
+  else
+    fail "memory init missed .devt/memory/$sub/"
+  fi
+done
+
+# Drop a valid ADR + REJ + an auto-generated _suggestions.md that MUST be skipped.
+cat > .devt/memory/decisions/ADR-001-test.md <<'ADR_EOF'
+---
+id: ADR-001
+title: Argon2 password hashing
+doc_type: decision
+domain: security
+status: active
+confidence: explicit
+summary: Use argon2 for password hashing for audit compliance
+affects_paths:
+  - src/auth/**
+affects_symbols:
+  - AuthService
+created_at: 2026-05-05T10:00:00Z
+created_by: user
+---
+# ADR-001
+Body.
+ADR_EOF
+
+  cat > .devt/memory/rejected/REJ-001-redis.md <<'REJ_EOF'
+---
+id: REJ-001
+title: Redis sessions
+doc_type: rejected
+domain: security
+status: rejected
+confidence: explicit
+summary: Redis sessions rejected for compliance audit
+reason: compliance
+search_keywords:
+  - Redis caching
+  - in-memory session
+---
+# REJ-001
+Body.
+REJ_EOF
+
+  echo "auto-generated, must not be indexed" > .devt/memory/decisions/_suggestions.md
+
+  if node "$CLI" memory index >/dev/null 2>&1; then
+    pass "memory index reindexes after adding fixtures"
+  else
+    fail "memory index failed"
+  fi
+
+  # Verify the _suggestions.md file was skipped — only 2 docs should be indexed
+  IDX_COUNT=$(node "$CLI" memory list 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.docs.length)")
+  if [ "$IDX_COUNT" = "2" ]; then
+    pass "memory index skips _-prefixed files (auto-generated reports)"
+  else
+    fail "memory index indexed $IDX_COUNT docs (expected 2 — _suggestions.md should be skipped)"
+  fi
+
+  # FTS prefix matching: "argon" should hit "Argon2"
+  FTS_HITS=$(node "$CLI" memory query argon 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.results.length)")
+  if [ "$FTS_HITS" = "1" ]; then
+    pass "memory query: prefix match (\"argon\" finds \"Argon2\")"
+  else
+    fail "memory query: expected 1 hit for \"argon\", got $FTS_HITS"
+  fi
+
+  # Glob-based affects matching
+  AFFECTS_HITS=$(node "$CLI" memory affects src/auth/service.ts 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.matches.length)")
+  if [ "$AFFECTS_HITS" = "1" ]; then
+    pass "memory affects: glob src/auth/** matches src/auth/service.ts"
+  else
+    fail "memory affects: expected 1 match, got $AFFECTS_HITS"
+  fi
+
+  # REJ tombstone keywords
+  REJ_KW=$(node "$CLI" memory rejected-keywords 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.entries.length)")
+  if [ "$REJ_KW" = "2" ]; then
+    pass "memory rejected-keywords: REJ-001 has 2 search_keywords for AI suppression"
+  else
+    fail "memory rejected-keywords: expected 2 entries, got $REJ_KW"
+  fi
+
+  # Validate clean fixture
+  VALID_ERRORS=$(node "$CLI" memory validate 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.summary.errors)")
+  if [ "$VALID_ERRORS" = "0" ]; then
+    pass "memory validate: clean fixture produces 0 errors"
+  else
+    fail "memory validate: expected 0 errors, got $VALID_ERRORS"
+  fi
+
+  # Determinism: two index runs against unchanged state produce identical doc list
+  RUN1=$(node "$CLI" memory list 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(JSON.stringify(d.docs.map(x=>x.id)))")
+  node "$CLI" memory index >/dev/null 2>&1
+  RUN2=$(node "$CLI" memory list 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(JSON.stringify(d.docs.map(x=>x.id)))")
+  if [ "$RUN1" = "$RUN2" ]; then
+    pass "memory index: deterministic (rebuild on same state produces same doc set)"
+  else
+    fail "memory index: non-deterministic ($RUN1 vs $RUN2)"
+  fi
+
+  # Frontmatter validation: missing required field is caught
+  cat > .devt/memory/decisions/ADR-999-broken.md <<'BAD_EOF'
+---
+id: ADR-999
+doc_type: decision
+status: active
+confidence: explicit
+---
+Missing title and summary.
+BAD_EOF
+
+BROKEN_ERRORS=$(node "$CLI" memory validate 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.summary.errors)")
+if [ "$BROKEN_ERRORS" -ge "2" ]; then
+  pass "memory validate: missing required fields produce errors (got $BROKEN_ERRORS)"
+else
+  fail "memory validate: expected ≥2 errors for missing title+summary, got $BROKEN_ERRORS"
+fi
+
+cd "$SAVED_CWD"
+rm -rf "$MEMTMP"
+
 echo "== Council structured-output contract =="
 # Council advisor template must enforce Options + Validated Reasoning structure.
 # Free-form advisor output is the regression this guards against.

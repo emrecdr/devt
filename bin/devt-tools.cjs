@@ -66,6 +66,12 @@ function main() {
           JSON.stringify(require("./modules/semantic.cjs").run(subcommand, args.slice(2), PLUGIN_ROOT)),
         );
         break;
+      case "memory": {
+        // memory subcommand prints its own JSON via process.stdout.write — don't double-encode here.
+        const code = require("./modules/memory.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
@@ -110,6 +116,16 @@ Commands:
   semantic query <terms>    Query lessons by keyword (FTS5 or grep fallback)
   semantic compact          Archive stale lessons (--dry-run to preview)
   semantic status           Show database, playbook, and entry count
+  memory init               Scaffold .devt/memory/ + first FTS5 index pass
+  memory index              Atomic drop+rebuild of the unified memory FTS5 index
+  memory query <terms>      Full-text search across ADR/CON/FLOW/REJ docs
+  memory get <doc-id>       Fetch a single doc by id (e.g. ADR-007)
+  memory affects <path>     Which active/candidate docs govern this file? (glob-aware)
+  memory list [doc_type]    List all docs (decision|concept|flow|rejected)
+  memory links <id> [--depth=N]  Transitive link traversal (default depth 2)
+  memory active [domain]    All status:active docs, optionally domain-filtered
+  memory rejected-keywords  All REJ tombstones with their AI-suppression keywords
+  memory validate           Frontmatter + path-resolution + broken-link checks
   report window [--weeks N] Compute reporting time window
   report generate [--weeks N] [--output PATH]  Generate contribution report
   health [--repair]         Validate project config, state, hooks. --repair auto-fixes safe issues

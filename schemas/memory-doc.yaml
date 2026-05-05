@@ -1,0 +1,199 @@
+# Memory Document Schema
+#
+# Defines the strict frontmatter structure for documents in `.devt/memory/{decisions,concepts,flows,rejected}/`.
+# Used by: bin/modules/memory.cjs (validation), curator agent (promotion), discovery engine (proposal).
+#
+# Files prefixed with `_` (e.g. _suggestions.md, _index.md) are NOT first-class docs and bypass this schema.
+# Templates with id ending in `-000` are scaffolding and are skipped during indexing.
+
+doc_types:
+  - decision   # ADR-xxx — architectural decisions
+  - concept    # CON-xxx — domain models, terminology, structural logic
+  - flow       # FLOW-xxx — business processes, data lifecycles, multi-step interactions
+  - rejected   # REJ-xxx — tombstones for ideas the user has explicitly rejected
+
+# ---------------------------------------------------------------------------
+# Required fields (all doc_types)
+# ---------------------------------------------------------------------------
+
+required_common:
+  - id
+  - title
+  - doc_type
+  - status
+  - confidence
+  - summary
+
+# Rejected docs additionally require a reason.
+required_rejected:
+  - reason
+
+# ---------------------------------------------------------------------------
+# Field specifications
+# ---------------------------------------------------------------------------
+
+properties:
+  id:
+    type: string
+    pattern_by_doc_type:
+      decision: "^ADR-\\d{3,}$"
+      concept: "^CON-\\d{3,}$"
+      flow: "^FLOW-\\d{3,}$"
+      rejected: "^REJ-\\d{3,}$"
+    description: "Unique across all four doc_types. The discriminator prefix matches doc_type."
+    examples: [ADR-007, CON-003, FLOW-002, REJ-001]
+
+  title:
+    type: string
+    description: "Short title for the doc — shown in indexes and CLI list output."
+    rules:
+      - Must be ≤ 80 chars (display constraint)
+      - Imperative or noun-phrase form (e.g. "Switch to Argon2", "Auth domain model")
+
+  doc_type:
+    type: string
+    enum: [decision, concept, flow, rejected]
+    description: "Discriminator. Determines which subdir the file lives in."
+
+  status:
+    type: string
+    enum: [candidate, active, superseded, rejected]
+    description: |
+      candidate  — proposed; not yet active. Most AI-authored docs start here.
+      active     — accepted and currently governing. Promotion to this requires user approval.
+      superseded — replaced by a newer doc; kept for history. Linked from successor via `links.type: supersedes`.
+      rejected   — for REJ tombstones; pre-set when REJ is created.
+
+  confidence:
+    type: string
+    enum: [verified, explicit, inferred, observed, speculative]
+    description: |
+      How the rule was AUTHORED:
+        verified    — automated verification (e.g., test passes, build succeeds)
+        explicit    — user explicitly stated the rule (highest trust for AI-extracted)
+        inferred    — AI deduced from context with reasonable confidence
+        observed    — pattern detected (e.g., applied in 4/5 services)
+        speculative — guess; flag for review.
+      NOTE: this is doc-LEVEL confidence (provenance). Distinct from per-symbol
+      `binding_confidence` (Graphify AST resolution quality) inside affects_symbols.
+
+  summary:
+    type: string
+    max_length: 200
+    description: |
+      Single-sentence summary, ≤200 chars. Used as the FTS5 indexed surface for
+      high-speed search. Quality of this field directly impacts pre-flight signal.
+
+  domain:
+    type: string
+    description: "Free-form domain tag (security, payment, auth, billing, etc.). Optional."
+
+  affects_paths:
+    type: array
+    items: string
+    description: "Glob patterns identifying files governed by this doc."
+    examples: ["src/auth/**", "src/middleware/auth.ts"]
+    rules:
+      - Patterns are POSIX-style, project-relative
+      - Validated by `memory validate` against existing files (non-glob entries)
+
+  affects_symbols:
+    type: array
+    items:
+      oneOf:
+        - type: string
+          description: "Bare symbol name (no Graphify validation)."
+        - type: object
+          properties:
+            symbol:
+              type: string
+            binding_confidence:
+              type: string
+              enum: [EXTRACTED, INFERRED, AMBIGUOUS]
+              description: "From Graphify's AST resolution. AMBIGUOUS bindings need human review."
+    description: |
+      AST-anchored symbol bindings. When Graphify is enabled and `memory validate` runs,
+      symbols are resolved against the graph. AMBIGUOUS bindings are surfaced for review.
+
+  links:
+    type: array
+    items:
+      type: object
+      required: [id, type]
+      properties:
+        id:
+          type: string
+          description: "Target doc id (forward references to not-yet-created docs are allowed)"
+        type:
+          type: string
+          enum: [supersedes, depends_on, implements, relates_to]
+    description: "Typed cross-references. Discovery engine follows these for transitive closure."
+
+  created_at:
+    type: string
+    format: ISO-8601 datetime
+    description: "Provenance timestamp. Set by curator on promotion."
+
+  created_by:
+    type: string
+    enum: [user, curator, retro, council, manual]
+    description: "Who authored this doc. AI-authored docs always require user approval to set status=active."
+
+  schema_version:
+    type: integer
+    default: 1
+    description: "Frontmatter schema version. Bump when schema changes; old docs read via migration."
+
+# ---------------------------------------------------------------------------
+# Rejected-doc-specific fields
+# ---------------------------------------------------------------------------
+
+rejected_specific:
+  reason:
+    type: string
+    enum: [user_preference, performance, security, maintainability, compliance, complexity]
+    description: "Why the idea was rejected. Used to weight similar future suggestions."
+
+  search_keywords:
+    type: array
+    items: string
+    description: |
+      Phrases that, if matched in agent reasoning or claude-mem observations, suppress
+      re-proposal of this rejected idea. Discovery engine and autoskill query this list
+      before generating suggestions. Critical for the tombstone mechanism — without
+      keywords, REJ docs cannot suppress AI re-proposals.
+    examples: ["Redis caching", "in-memory KV", "magic link auth"]
+
+# ---------------------------------------------------------------------------
+# Validation rules (enforced by bin/modules/memory.cjs:validateFrontmatter)
+# ---------------------------------------------------------------------------
+
+validation:
+  - All required_common fields must be present and non-empty.
+  - Rejected docs must additionally have `reason`.
+  - id pattern must match the doc_type.
+  - status, confidence, link.type values must be from their enums.
+  - summary must be ≤ 200 chars.
+  - links entries must have both id and type.
+  - affects_symbols entries: bare strings OK; objects must have `symbol`; binding_confidence (if present) must be EXTRACTED|INFERRED|AMBIGUOUS.
+
+# ---------------------------------------------------------------------------
+# Anti-patterns (rejected by validator OR flagged by curator)
+# ---------------------------------------------------------------------------
+
+anti_patterns:
+  - id: doc-without-summary
+    severity: error
+    description: "Empty or missing summary field — FTS5 search becomes useless"
+  - id: stale-affects-paths
+    severity: warning
+    description: "affects_paths entry resolves to a non-existent file (refactor without doc update)"
+  - id: ambiguous-symbol-binding
+    severity: warning
+    description: "affects_symbols includes an AMBIGUOUS binding — needs human verification per Graphify guidance"
+  - id: orphaned-doc
+    severity: info
+    description: "Doc has no incoming or outgoing links — possibly stale; surface to curator"
+  - id: superseded-without-replacement
+    severity: warning
+    description: "status=superseded but no link with type=supersedes points TO it from another doc"
