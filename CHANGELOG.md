@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-06
+
+### Added
+- **Symbol-name case-insensitivity** (`bin/modules/memory.cjs`): `affects.symbol` index uses `COLLATE NOCASE`; `getBySymbol()` query adds `COLLATE NOCASE`. Authors writing `affects_symbols: [UserService]` in one doc no longer fail to match a query for `userService`. Original casing still preserved in storage for display. Closes the symbol normalization gap from CCA v21.0 §5/B3 — implemented via SQLite primitive instead of double-storage.
+- **Self-link detection in `memory validate`** (`bin/modules/memory.cjs:1226-1240`): catches docs that link to themselves (`source_id = target_id`) — almost always an authoring slip from copy-pasting an ID into the wrong field. Surfaces as `category: "self-link"` warning.
+- **4 SQL views adapted from CCA v21.0 §10** (`bin/modules/memory.cjs:SCHEMA_DDL`):
+  - `pending_review` — all `status='candidate'` docs ordered by confidence (verified → speculative) then most-recent. Stable ordering for triage workflows.
+  - `speculative_candidates` — all docs at `confidence='speculative'` regardless of status. Surfaces low-confidence material that needs verification or downgrade.
+  - `constraint_chains` — per-doc link degree (incoming/outgoing). Spot hub docs (high incoming) and leaves (zero outgoing). v21 wanted hierarchical traversal — we expose raw degrees and let callers do recursion via `memory.getLinks()`.
+  - `stale_speculative` — speculative candidates older than 30 days (uses `created_at` as age signal because `last_hit_at` would break the regenerable-from-markdown invariant). Surface stale candidates for curator pass.
+  - All four queryable via the read-only MCP `query_index` SELECT-only escape hatch.
+- **7 new smoke assertions** (`scripts/smoke-test.sh`): 4 view existence + stale_speculative age threshold + symbol normalization round-trip (mixed-case INSERT, lowercase QUERY) + self-link detection.
+
+### Fixed
+- **`runSql` line-comment handling** (`bin/modules/memory.cjs:154-162`): SQL line comments (`-- ...`) are stripped before splitting on `;`. A semicolon inside a comment used to split the comment in half, leaving an orphan statement that errored at prepare-time AND silently aborted the rest of schema initialization. The bug caused 2 of 4 new views to be silently missing during my own integration test — caught before commit. Future maintainers can write semicolons in SQL comments without fear.
+
 ## [0.24.0] - 2026-05-05
 
 ### Security

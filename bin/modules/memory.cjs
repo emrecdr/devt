@@ -152,7 +152,10 @@ function getDatabaseSync() {
  * Avoids the broad `Database.exec()` API; uses prepared statements throughout.
  */
 function runSql(db, sql) {
-  const stmts = sql.split(";").map(s => s.trim()).filter(Boolean);
+  // Strip SQL line comments before splitting — a semicolon in a comment
+  // otherwise silently aborts schema init mid-stream.
+  const stripped = sql.replace(/--[^\n]*/g, "");
+  const stmts = stripped.split(";").map(s => s.trim()).filter(Boolean);
   for (const s of stmts) {
     db.prepare(s).run();
   }
@@ -444,8 +447,53 @@ const SCHEMA_DDL = `
   CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status);
   CREATE INDEX IF NOT EXISTS idx_docs_domain ON documents(domain);
   CREATE INDEX IF NOT EXISTS idx_affects_pattern ON affects(pattern);
-  CREATE INDEX IF NOT EXISTS idx_affects_symbol ON affects(symbol);
+  CREATE INDEX IF NOT EXISTS idx_affects_symbol ON affects(symbol COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id);
+
+  -- Views (CCA v21.0 §10, adapted). Survive atomic rebuildIndex() because
+  -- rebuilds DELETE FROM tables rather than DROP them.
+  CREATE VIEW IF NOT EXISTS pending_review AS
+  SELECT id, doc_type, title, confidence, domain, created_at, file_path
+  FROM documents
+  WHERE status = 'candidate'
+  ORDER BY
+    CASE confidence
+      WHEN 'verified' THEN 1
+      WHEN 'explicit' THEN 2
+      WHEN 'inferred' THEN 3
+      WHEN 'observed' THEN 4
+      WHEN 'speculative' THEN 5
+      ELSE 6
+    END,
+    created_at DESC;
+
+  CREATE VIEW IF NOT EXISTS speculative_candidates AS
+  SELECT id, doc_type, status, title, domain, created_at, file_path
+  FROM documents
+  WHERE confidence = 'speculative'
+  ORDER BY created_at DESC;
+
+  CREATE VIEW IF NOT EXISTS constraint_chains AS
+  SELECT
+    d.id, d.doc_type, d.title, d.status,
+    COUNT(DISTINCT l_out.target_id) AS outgoing_links,
+    COUNT(DISTINCT l_in.source_id)  AS incoming_links
+  FROM documents d
+  LEFT JOIN links l_out ON l_out.source_id = d.id
+  LEFT JOIN links l_in  ON l_in.target_id  = d.id
+  GROUP BY d.id, d.doc_type, d.title, d.status;
+
+  -- created_at as age proxy: last_hit_at tracking would break the
+  -- regenerable-from-markdown invariant (writes during reads).
+  CREATE VIEW IF NOT EXISTS stale_speculative AS
+  SELECT
+    id, doc_type, title, domain, created_at, file_path,
+    CAST(julianday('now') - julianday(created_at) AS INTEGER) AS age_days
+  FROM documents
+  WHERE status = 'candidate'
+    AND confidence = 'speculative'
+    AND julianday('now') - julianday(created_at) > 30
+  ORDER BY created_at ASC;
 `;
 
 function openDb(dbPath) {
@@ -659,7 +707,7 @@ function getBySymbol(symbol) {
   return withDb(db => db.prepare(`
     SELECT d.*, a.binding_confidence
     FROM documents d JOIN affects a ON d.id = a.doc_id
-    WHERE a.symbol = ? AND d.status IN ('active', 'candidate')
+    WHERE a.symbol = ? COLLATE NOCASE AND d.status IN ('active', 'candidate')
   `).all(symbol));
 }
 
@@ -1214,6 +1262,20 @@ function validate() {
           severity: "warning",
           category: "broken-link",
           error: `link points to non-existent doc: ${b.target_id} (${b.link_type})`,
+        });
+      }
+
+      const selfLinks = db.prepare(`
+        SELECT source_id, link_type
+        FROM links
+        WHERE source_id = target_id
+      `).all();
+      for (const s of selfLinks) {
+        issues.push({
+          filePath: `(link from ${s.source_id})`,
+          severity: "warning",
+          category: "self-link",
+          error: `doc links to itself (${s.link_type}) — likely authoring mistake`,
         });
       }
     } finally {

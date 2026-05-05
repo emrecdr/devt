@@ -1533,6 +1533,83 @@ for code in MEM_PATH_UNREACHABLE MEM_INDEX_STALE MEM_VALIDATE_ERRORS MEM_CONFLIC
   fi
 done
 
+# v0.25.0 — CCA v21.0 §10 SQL views + symbol NOCASE + self-link detection.
+TMP_VIEW_PROJ=$(mktemp -d)
+mkdir -p "$TMP_VIEW_PROJ/.devt/memory/decisions" "$TMP_VIEW_PROJ/.devt/memory/concepts"
+
+# Helper: write a memory doc fixture. Trailing positional arg is extra YAML
+# inserted before the closing ---.
+write_memory_doc() {
+  local outfile="$1" id="$2" doc_type="$3" status="$4" confidence="$5" extra_yaml="$6"
+  {
+    printf -- '---\n'
+    printf 'id: %s\n' "$id"
+    printf 'doc_type: %s\n' "$doc_type"
+    printf 'status: %s\n' "$status"
+    printf 'confidence: %s\n' "$confidence"
+    printf 'title: %s smoke fixture\n' "$id"
+    printf 'summary: smoke test fixture\n'
+    printf 'created_at: 2026-04-01T00:00:00Z\n'
+    [[ -n "$extra_yaml" ]] && printf '%s\n' "$extra_yaml"
+    printf -- '---\nBody\n'
+  } > "$outfile"
+}
+
+# Helper: read-only sqlite query against the fixture project's index.
+mem_db_query() {
+  local tmpdir="$1" js="$2"
+  node -e "
+    const sqlite = require('node:sqlite');
+    const db = new sqlite.DatabaseSync('$tmpdir/.devt/memory/index.db', { readOnly: true });
+    $js
+    db.close();
+  " 2>/dev/null || echo ""
+}
+
+write_memory_doc "$TMP_VIEW_PROJ/.devt/memory/decisions/ADR-001-test.md" \
+  ADR-001 decision candidate speculative ""
+write_memory_doc "$TMP_VIEW_PROJ/.devt/memory/concepts/CON-001-test.md" \
+  CON-001 concept active explicit "affects_symbols: [UserService]"
+write_memory_doc "$TMP_VIEW_PROJ/.devt/memory/decisions/ADR-002-selflink.md" \
+  ADR-002 decision active explicit "links:
+  - id: ADR-002
+    type: relates_to"
+(cd "$TMP_VIEW_PROJ" && node "$CLI" memory index >/dev/null 2>&1) || true
+
+VIEW_NAMES=$(mem_db_query "$TMP_VIEW_PROJ" \
+  "console.log(db.prepare(\"SELECT name FROM sqlite_master WHERE type='view' ORDER BY name\").all().map(x => x.name).join(','));")
+for view in pending_review speculative_candidates constraint_chains stale_speculative; do
+  if echo "$VIEW_NAMES" | grep -q "$view"; then
+    pass "memory index creates SQL view: $view"
+  else
+    fail "memory index missing SQL view: $view"
+  fi
+done
+
+STALE_COUNT=$(mem_db_query "$TMP_VIEW_PROJ" \
+  "console.log(db.prepare('SELECT COUNT(*) c FROM stale_speculative WHERE id=?').get('ADR-001').c);")
+if [ "$STALE_COUNT" = "1" ]; then
+  pass "stale_speculative view surfaces ADR > 30 days old"
+else
+  fail "stale_speculative view did not surface stale candidate (count=$STALE_COUNT)"
+fi
+
+SYM_LOWER=$(cd "$TMP_VIEW_PROJ" && node "$CLI" memory affects-symbol userservice 2>/dev/null | grep -c '"id": "CON-001"' || true)
+SYM_UPPER=$(cd "$TMP_VIEW_PROJ" && node "$CLI" memory affects-symbol UserService 2>/dev/null | grep -c '"id": "CON-001"' || true)
+if [ "$SYM_LOWER" -ge 1 ] && [ "$SYM_UPPER" -ge 1 ]; then
+  pass "memory affects-symbol is case-insensitive (NOCASE collation)"
+else
+  fail "memory affects-symbol case-sensitivity broken (lower=$SYM_LOWER upper=$SYM_UPPER)"
+fi
+
+SELF_OUT=$(cd "$TMP_VIEW_PROJ" && node "$CLI" memory validate 2>/dev/null || true)
+if echo "$SELF_OUT" | grep -q '"category": "self-link"'; then
+  pass "memory validate flags self-link"
+else
+  fail "memory validate missed self-link on ADR-002"
+fi
+rm -rf "$TMP_VIEW_PROJ"
+
 echo "== Agent size budget =="
 # Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500
 # leaves room to grow but blocks bloat. Bump deliberately if a future
