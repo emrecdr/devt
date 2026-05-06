@@ -186,7 +186,7 @@ One-time setup for a new project. Scaffolds `.devt/rules/` with project conventi
 1. Asks which template: `python-fastapi`, `go`, `typescript-node`, `vue-bootstrap`, `blank` (language-agnostic defaults)
 2. Asks for project metadata: git provider, workspace, branch name
 3. Copies template files to `.devt/rules/`
-4. Creates `.devt/config.json`, `.devt/state/`, `.devt/learning-playbook.md`
+4. Creates `.devt/config.json`, `.devt/state/`, `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`
 5. Adds `.devt/state/` to `.gitignore`
 
 ---
@@ -312,7 +312,7 @@ Checks: config valid, state directory exists, hooks registered, required files p
 
 ### `/devt:memory` -- Permanent knowledge layer
 
-The memory layer is the third tier of devt's knowledge persistence — distinct from per-workflow ephemeral state (`.devt/state/decisions.md`) and operational lessons (`.devt/learning-playbook.md`). It holds **architectural rules that govern future decisions**: ADR-xxx (decisions), CON-xxx (concepts/domain models), FLOW-xxx (business processes), REJ-xxx (rejected ideas / tombstones).
+The memory layer is the permanent knowledge surface — distinct from per-workflow ephemeral state (`.devt/state/decisions.md`). It holds **all five doc types** under one canonical store: ADR-xxx (decisions), CON-xxx (concepts/domain models), FLOW-xxx (business processes), REJ-xxx (rejected ideas / tombstones), and LES-xxx (operational lessons — "when X happens, do Y"). Lessons live in `.devt/memory/lessons/` alongside the architectural docs and are FTS5-indexed in the same `index.db`.
 
 Phase 1 (v0.16.0) ships the data layer — file format, FTS5 unified index, query CLI. Agent integrations (Topic Pre-Flight Brief auto-fired from dev workflows, curator-gated promotion of session DECs to permanent ADRs, Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence, claude-mem ⚖️ decision and 🔵 discovery tag harvest, vendored MCP query layer for read-only agent access, PreToolUse pre-flight enforcement) land in Phases 2-4 (v0.17.0 → v0.19.0).
 
@@ -573,8 +573,9 @@ scan        --> scan-results.md  --> programmer, architect
 baseline    --> baseline-gates.md --> verifier (regression detection)
 architect   --> arch-review.md   --> programmer
 retro       --> lessons.yaml     --> curator
-curator     --> .devt/learning-playbook.md --> semantic sync --> lessons.db (FTS5)
-                                    --> future workflows (queried in context_init, injected as <learning_context>)
+curator     --> .devt/memory/lessons/LES-NNNN.md (AskUserQuestion-gated)
+                                    --> memory index --> .devt/memory/index.db (FTS5)
+                                    --> future workflows (Pre-Flight Brief Lane F surfaces matching lessons)
 debugger    --> debug-summary.md + .claude/agent-memory/devt-debugger/MEMORY.md --> future debug sessions
 ```
 

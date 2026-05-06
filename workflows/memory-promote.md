@@ -88,13 +88,14 @@ CRITICAL HARD INVARIANTS — see skills/memory-curation/SKILL.md:
 <files_to_read>
 - .devt/memory/_suggestions.md (the discovery report)
 - .devt/state/decisions.md (DEC-xxx source)
-- .devt/learning-playbook.md (for cross-checking against operational lessons)
+- .devt/state/lessons.yaml (LES draft source from retro, if present)
+- .devt/memory/lessons/*.md (existing LES-NNNN entries for cross-checking)
 - skills/memory-curation/SKILL.md (the protocol body — already preloaded via your skills frontmatter)
-- templates/memory/{ADR,CON,FLOW,REJ}-template.md (use as scaffolding for any approved write)
+- templates/memory/{ADR,CON,FLOW,REJ,LES}-template.md (use as scaffolding for any approved write)
 </files_to_read>
 </context>
 Write summary to .devt/state/curation-summary.md (status: DONE)
-Each approved promotion produces one .devt/memory/{decisions,concepts,flows,rejected}/<NEW-ID>-<slug>.md file.
+Each approved promotion produces one .devt/memory/{decisions,concepts,flows,rejected,lessons}/<NEW-ID>-<slug>.md file.
 ")
 ```
 
@@ -134,7 +135,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=
 </process>
 
 <success_criteria>
-- For every approved candidate, exactly one new file exists in `.devt/memory/{decisions,concepts,flows,rejected}/`
+- For every approved candidate, exactly one new file exists in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`
 - The FTS5 index at `.devt/memory/index.db` has been rebuilt and contains the new docs
 - `.devt/state/curation-summary.md` has Status: DONE and lists every action taken
 - Zero permanent files were written without an AskUserQuestion approval

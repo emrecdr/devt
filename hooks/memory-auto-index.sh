@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Memory auto-index — PostToolUse hook on Edit/Write touching .devt/memory/**.md.
 #
-# Phase 3 (v0.18.0). Rebuilds the FTS5 unified index when an ADR/CON/FLOW/REJ
+# Phase 3 (v0.18.0). Rebuilds the FTS5 unified index when an ADR/CON/FLOW/REJ/LES
 # markdown file is created or modified, so subsequent /devt:memory queries
 # always reflect the current state of disk.
 #
 # Idempotent: if the file isn't under .devt/memory/ or isn't a .md file, no-op.
 # If memory.auto_index_on_change is false, no-op.
+# Debounced via .devt/memory/.auto-index-stamp — back-to-back hook fires within
+# DEVT_AUTO_INDEX_DEBOUNCE_SEC (default 5s) collapse to a single rebuild. This
+# matters for the curator's batch-promote pass: writing N approved candidates
+# would otherwise trigger N full rebuilds.
 # If `memory index` fails, log to stderr but exit 0 — never break the parent
 # tool call due to an indexing problem.
 [[ $- == *i* ]] && return
@@ -52,6 +56,18 @@ node -e "
     } catch { /* default true */ }
     if (!enabled) process.exit(0);
 
+    // Debounce: skip if a previous auto-index ran within the window. The stamp
+    // file is touched only by this hook, so manual `memory index` calls don't
+    // suppress auto-index. Curator batch-promotes (N writes back-to-back) collapse
+    // to a single rebuild.
+    const debounceSec = Number(process.env.DEVT_AUTO_INDEX_DEBOUNCE_SEC || 5);
+    const stampPath = path.join(dir, '.devt', 'memory', '.auto-index-stamp');
+    try {
+      const st = fs.statSync(stampPath);
+      const ageSec = (Date.now() - st.mtimeMs) / 1000;
+      if (ageSec < debounceSec) process.exit(0);
+    } catch { /* stamp missing — first run, proceed */ }
+
     // Locate devt-tools.cjs — prefer CLAUDE_PLUGIN_ROOT, fall back to walking up
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     let toolsPath = null;
@@ -80,6 +96,9 @@ node -e "
     if (r.status !== 0) {
       // Log to stderr; do NOT exit non-zero — never break the parent tool call.
       process.stderr.write('[memory-auto-index] memory index exited ' + r.status + ': ' + (r.stderr || '').slice(0, 500) + '\\n');
+    } else {
+      // Touch the debounce stamp on success so the next hook fire skips if soon.
+      try { fs.writeFileSync(stampPath, ''); } catch { /* non-fatal */ }
     }
     process.exit(0);
   } catch { process.exit(0); }

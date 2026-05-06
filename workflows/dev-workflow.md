@@ -89,7 +89,7 @@ The following agent types can be dispatched via Task():
 - `devt:architect` — structural review specialist, READ-ONLY (Read, Bash, Glob, Grep)
 - `devt:docs-writer` — documentation specialist (Read, Write, Edit, Bash, Glob, Grep)
 - `devt:retro` — lesson extraction specialist (Read, Write, Bash, Glob, Grep)
-- `devt:curator` — playbook quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep)
+- `devt:curator` — memory-layer quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion)
 - `devt:verifier` — goal-backward verification specialist, READ-ONLY (Read, Bash, Glob, Grep)
 - `devt:researcher` — technical investigation specialist, READ-ONLY (Read, Bash, Glob, Grep)
 - `devt:debugger` — systematic debugging specialist, 4-phase investigation protocol (Read, Write, Edit, Bash, Glob, Grep)
@@ -162,18 +162,7 @@ Then load project context:
 - Read `.devt/rules/quality-gates.md`
 - Read `.devt/rules/testing-patterns.md`
 - Read `CLAUDE.md` if it exists
-- Search for relevant lessons: if `.devt/learning-playbook.md` exists, query it for entries relevant to the task:
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic query "{task_keywords}" --min-importance=6 --limit=8
-  ```
-  Tighten the filters when the task is well-scoped — e.g., `--category=architecture` for a refactor, `--tags=testing,fixtures` when the task is test-focused, or `--min-importance=8` for a brief context window. Drop the filters entirely on broad tasks. Supported flags: `--limit=N`, `--min-importance=N` (1-10), `--min-confidence=F` (0-1), `--category=NAME`, `--tags=a,b,c`.
-  Parse the JSON output. If `count > 0`, format results as a readable `learning_context` string for agent dispatches. Each result has `description` and `evidence` fields — format as a bulleted list:
-    ```
-    Relevant lessons from past workflows:
-    - Always check for existing error types before creating new ones (evidence: Created DuplicateEntryError when ConflictError already existed)
-    - Run the full module test suite before marking implementation done (evidence: New code broke 3 existing tests)
-    ```
-  If `.devt/learning-playbook.md` does not exist or returns zero results, set `learning_context` to empty (agents proceed without prior lessons — this is normal for new projects).
+- Search for relevant lessons: lessons live in the unified memory layer at `.devt/memory/lessons/` (LES-NNNN frontmatter docs, FTS5-indexed in `.devt/memory/index.db`). The Pre-Flight Brief (auto-fired earlier) already surfaces task-relevant lessons via Lane F (it filters governing docs by `doc_type='lesson'`). Read `.devt/state/preflight-brief.md` and lift its "Related Operational Lessons" section into `learning_context` for agent dispatches. If no Brief exists yet OR the section is empty, set `learning_context` to empty — agents proceed without prior lessons (normal for new projects).
 - Read `.devt/state/spec.md` if it exists (from `/devt:specify`)
   - If spec exists: use it as the primary requirements source — decisions, API design, test scenarios
   - If no spec: derive requirements from the task description
@@ -736,7 +725,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       ...
       The verifier will cross-reference this list against impl-summary.md to detect scope reduction. Every numbered requirement must have corresponding implementation evidence.
     </scope_requirements>
-    <learning_context>{learning_context from context_init — relevant lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write summary to .devt/state/impl-summary.md
@@ -784,7 +773,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use the "Test Scenarios" section as required coverage targets.</spec>
-    <learning_context>{learning_context from context_init — relevant lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write summary to .devt/state/test-summary.md
@@ -865,7 +854,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
-    <learning_context>{learning_context from context_init — relevant lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write review to .devt/state/review.md
@@ -1022,7 +1011,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
       CLAUDE.md (if exists),
       .devt/rules/coding-standards.md,
       .devt/rules/testing-patterns.md,
-      .devt/learning-playbook.md (if exists)
+      .devt/memory/lessons/*.md (existing LES-NNNN entries)
     </files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -1060,45 +1049,35 @@ The `|| true` is intentional: harvest is best-effort. A missing `.devt/memory/` 
 
 ## Step 9b: Curation (COMPLEX only)
 
-<step name="curate" gate="curation-summary.md is written and .devt/learning-playbook.md is updated">
+<step name="curate" gate="curation-summary.md is written and .devt/memory/ is updated">
 
 _Skip this step if complexity is SIMPLE or STANDARD._
 
 **Pre-dispatch check**: Read `.devt/state/lessons.yaml` AND `.devt/memory/_suggestions.md` (the latter was refreshed by Step 9a).
 
-- If both lessons.yaml has entries AND _suggestions.md has candidates: dispatch curator (dual-path)
-- If only lessons.yaml has entries: dispatch curator (playbook-only path)
-- If only _suggestions.md has candidates: dispatch curator (memory-only path)
+- If lessons.yaml OR _suggestions.md has entries: dispatch curator
 - If both empty/missing: skip curation entirely
 
-Dispatch the curator agent (dual-path dispatch — `_suggestions.md` is now in scope alongside lessons.yaml):
+Dispatch the curator agent. Both lessons and architectural candidates flow into the unified `.devt/memory/` layer through a single approval gate (AskUserQuestion per candidate):
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <task>
-    Run BOTH curation paths:
-    1. PLAYBOOK PATH: Evaluate incoming lessons from .devt/state/lessons.yaml.
-       For each lesson: accept, merge, edit, reject, or archive.
-       Update .devt/learning-playbook.md with accepted/merged entries.
-       Prune expired or low-confidence entries.
-    2. MEMORY-LAYER PATH: Review .devt/memory/_suggestions.md candidates.
-       For each ⚖️/🔵 candidate that passes the 5-filter, present an
-       AskUserQuestion proposal per memory-curation skill. NEVER write
-       to .devt/memory/{decisions,concepts,flows,rejected}/ without
-       explicit user approval — this invariant is non-negotiable.
+    Evaluate two upstream sources and gate every promotion via AskUserQuestion:
+    1. LESSONS: drafts in .devt/state/lessons.yaml. accept → write LES-NNNN.md
+       to .devt/memory/lessons/. merge → update existing LES. reject → record reason.
+    2. ARCHITECTURAL CANDIDATES: ⚖️/🔵 entries in .devt/memory/_suggestions.md.
+       For each candidate that passes the 5-filter, present AskUserQuestion per
+       memory-curation skill. NEVER write without explicit user approval.
+    3. PRUNE: propose status:superseded for contradicted/stale lessons.
+    4. After all writes, run `memory index` to refresh the FTS5 index.
   </task>
   <context>
-    <files_to_read>.devt/learning-playbook.md (if exists), .devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), CLAUDE.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation for memory-layer path}</agent_skills>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
-  Write summary of BOTH paths to .devt/state/curation-summary.md
+  Write summary to .devt/state/curation-summary.md
 ")
-```
-
-Sync the updated playbook to the FTS5 semantic database (non-blocking — grep fallback works if sync fails):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic sync
 ```
 
 ```bash

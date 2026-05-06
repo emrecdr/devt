@@ -64,7 +64,7 @@ The CLI:
 4. Runs Lane C (`memory getBySymbol` per extracted symbol)
 5. Runs Lane D (`memory getLinks` depth-2 from A+B+C union)
 6. Runs Lane E (`memory listRejectedKeywords` filtered to topic)
-7. Runs Lane F (`semantic query` over learning playbook)
+7. Runs Lane F (filters governing docs A∪B∪C∪D for `doc_type='lesson'` — surfaces LES-NNNN entries from `.devt/memory/lessons/`)
 8. Computes blast radius via `graphify.blastRadius` (or degrades to grep heuristics)
 9. Atomically writes `.devt/state/preflight-brief.md`
 

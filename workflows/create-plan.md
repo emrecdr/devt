@@ -47,7 +47,7 @@ Read `.devt/rules/` for project conventions:
 - Read `CLAUDE.md` if it exists
 - Read `.devt/state/decisions.md` if it exists (from `/devt:clarify` or `/devt:specify`) — decisions constrain the plan and must be respected. Reference DEC-xxx IDs when tasks implement specific decisions.
 
-Search for relevant lessons: check `.devt/learning-playbook.md` for entries tagged with keywords from the task description.
+Search for relevant lessons: read `.devt/state/preflight-brief.md` (auto-generated) — its "Related Operational Lessons" section already pulls LES-NNNN entries from `.devt/memory/lessons/` matching the task topic. If the Brief isn't present, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_keywords}" --limit=8` and filter the results for `doc_type: "lesson"`.
 </step>
 
 <step name="research_gate" gate="research is complete, skipped, or already exists">

@@ -153,10 +153,74 @@ This command:
 2. Copies template files to `.devt/rules/` (create: full copy, update: missing files only, reinit: overwrite)
 3. Creates `.devt/config.json` with deep-merged config: defaults ← git auto-detect ← user input
 4. Creates `.devt/state/` directory for workflow state artifacts
-5. Sets up initial `.devt/learning-playbook.md` if it does not exist
+5. Scaffolds `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` (curator's write target)
 6. Creates or appends `.devt/state/` to `.gitignore`
 
 **If the command fails**: Report the error verbatim to the user and STOP with status BLOCKED.
+</step>
+
+<step name="prompt_graphify_setup" gate="graphify install/enable prompt resolved">
+
+Probe Graphify availability and the project's effective `graphify.enabled` value. The aim is to surface install instructions when Graphify is absent (strongly recommended — ~10× lower-token code search across all dev agents) and to offer to flip `graphify.enabled=true` when Graphify is present but devt isn't yet configured to use it. Without this prompt, a fully-installed Graphify silently sits unused because the default in `bin/modules/config.cjs` is `enabled: false`.
+
+```bash
+GRAPHIFY_AVAILABLE=$(command -v graphify >/dev/null 2>&1 && echo yes || echo no)
+GRAPHIFY_ENABLED=$(node -e "try{const c=require('${PWD}/.devt/config.json');console.log(c.graphify&&c.graphify.enabled?'yes':'no')}catch{console.log('no')}")
+echo "graphify_available=$GRAPHIFY_AVAILABLE graphify_enabled=$GRAPHIFY_ENABLED"
+```
+
+Branch on the result:
+
+**Case A — `graphify_available=no`** (binary not on PATH):
+
+Ask via AskUserQuestion:
+
+```yaml
+question: "Graphify is not installed. devt agents fall back to grep-based search without it, but Graphify reduces code-search token cost ~10× and powers blast-radius + stale-symbol checks. Show install instructions?"
+header: "Graphify Install"
+multiSelect: false
+options:
+  - label: "Yes, show install command (Recommended)"
+    description: "Prints the install command — does NOT execute it. devt setup continues regardless. Re-run /devt:init after install to register the integration."
+  - label: "No, skip"
+    description: "Continue without Graphify. Install later with `pip install graphifyy[mcp]` and re-run /devt:init."
+```
+
+On "Yes", print to the user (do NOT execute — Python env changes are user-owned):
+
+```
+To install Graphify:
+  pip install graphifyy[mcp]
+  # or: uv tool install graphifyy[mcp]
+  # or: pipx install graphifyy[mcp]
+
+Then re-run /devt:init so devt can register the MCP server and offer to enable the integration.
+```
+
+**Case B — `graphify_available=yes` AND `graphify_enabled=no`** (the silent-failure case — Graphify is installed but devt isn't using it):
+
+Ask via AskUserQuestion:
+
+```yaml
+question: "Graphify is installed but devt isn't using it (graphify.enabled=false in .devt/config.json). Enable now? Without this, blast-radius checks, stale-symbol detection, and Pre-Flight Brief enrichment all silently fall back to grep."
+header: "Enable Graphify"
+multiSelect: false
+options:
+  - label: "Yes, enable in devt config (Recommended)"
+    description: "Sets graphify.enabled=true in .devt/config.json. All dev agents route code-search through Graphify with grep fallback on empty/error."
+  - label: "No, keep disabled"
+    description: "devt continues with grep fallback. Enable later: node bin/devt-tools.cjs config set graphify.enabled=true"
+```
+
+On "Yes":
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config set graphify.enabled=true 2>&1 | tail -3 || echo "(config update failed — non-fatal, run manually: node bin/devt-tools.cjs config set graphify.enabled=true)"
+```
+
+**Case C — `graphify_available=yes` AND `graphify_enabled=yes`**: skip (already configured).
+
+This step is best-effort: failures NEVER fail the init workflow. Report which case was taken so the user has a record.
 </step>
 
 <step name="prompt_graphify_hook" gate="graphify hook prompt resolved (installed, declined, or N/A)">

@@ -48,58 +48,7 @@ run_json "models list"     node "$CLI" models list
 run_json "models get"      node "$CLI" models get quality
 run_json "update local-version" node "$CLI" update local-version
 run_json "health"          node "$CLI" health
-run_json "semantic status" node "$CLI" semantic status
-run_json "semantic query (no playbook)"  node "$CLI" semantic query "smoke" --min-importance=5 --limit=3
 run_json "report window"   node "$CLI" report window
-
-echo "== semantic query rejects unknown flag =="
-BAD_FLAG_OUT=$(node "$CLI" semantic query "x" --bogus 2>&1 || true)
-if echo "$BAD_FLAG_OUT" | grep -q "Unknown flag"; then
-  echo "PASS: unknown flag rejected"
-else
-  echo "FAIL: unknown flag was accepted"
-  echo "$BAD_FLAG_OUT"
-  exit 1
-fi
-
-echo "== semantic query rejects out-of-range value =="
-BAD_VAL_OUT=$(node "$CLI" semantic query "x" --min-importance=99 2>&1 || true)
-if echo "$BAD_VAL_OUT" | grep -q "must be 1-10"; then
-  echo "PASS: out-of-range importance rejected"
-else
-  echo "FAIL: out-of-range importance was accepted"
-  echo "$BAD_VAL_OUT"
-  exit 1
-fi
-
-echo "== parsePlaybook accepts both flat and YAML-list entry forms =="
-PARSER_TMP="$TMP/parser-test"
-mkdir -p "$PARSER_TMP/.devt"
-cat > "$PARSER_TMP/.devt/learning-playbook.md" <<'EOF_PB'
-- description: YAML-list form (matches schema example)
-  category: testing
-  importance: 7
-  tags: "testing"
-
----
-
-description: Flat form
-category: architecture
-importance: 8
-tags: "architecture"
-EOF_PB
-# Drop stderr — Node 22 emits "ExperimentalWarning: SQLite is an experimental
-# feature" on first node:sqlite require, which would otherwise pollute the
-# JSON capture. Local dev may not see this; CI runners do.
-PARSER_OUT=$(cd "$PARSER_TMP" && node "$CLI" semantic sync 2>/dev/null)
-SYNCED=$(echo "$PARSER_OUT" | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).synced))" 2>/dev/null || echo 0)
-if [[ "$SYNCED" == "2" ]]; then
-  pass "parser handles both '- key: val' and 'key: val' forms (synced 2/2)"
-else
-  fail "parser regression — synced=$SYNCED, expected 2; output: $PARSER_OUT"
-fi
-# Clean the DB the test populated, otherwise it pollutes other smoke runs.
-rm -rf "$ROOT/memory/semantic/lessons.db" 2>/dev/null
 
 echo "== python-fastapi reference arch-scan: clean project produces zero findings =="
 SCAN_TMP="$TMP/arch-scan-clean"
@@ -276,12 +225,12 @@ mkdir -p "$MEMTMP/.git" "$MEMTMP/.devt"
 SAVED_CWD=$(pwd)
 cd "$MEMTMP"
 if node "$CLI" memory init >/dev/null 2>&1; then
-  pass "memory init scaffolds .devt/memory/{decisions,concepts,flows,rejected}"
+  pass "memory init scaffolds .devt/memory/{decisions,concepts,flows,rejected,lessons}"
 else
   fail "memory init failed"
 fi
 
-for sub in decisions concepts flows rejected; do
+for sub in decisions concepts flows rejected lessons; do
   if [ -d ".devt/memory/$sub" ]; then
     pass "memory init created .devt/memory/$sub/"
   else
@@ -536,6 +485,61 @@ else
   fail "memory affects-symbol: expected degraded=true, got $AFFECTS_SYM_DEGRADED"
 fi
 
+# LES-NNNN doc_type=lesson acceptance (v0.28.0+) — schema accepts lessons as a 5th memory shape.
+# Validates: id pattern, doc_type=lesson, indexable, FTS5-queryable.
+cat > .devt/memory/lessons/LES-001-test.md <<'EOF_LES'
+---
+id: LES-001
+title: "Concurrent map writes panic"
+doc_type: lesson
+domain: backend
+status: active
+confidence: explicit
+summary: "Concurrent goroutine writes to in-memory map cache panic without sync.RWMutex."
+affects_paths:
+  - "internal/cache/store.go"
+links: []
+created_at: "2026-05-06T13:00:00Z"
+created_by: retro
+---
+
+## Trigger
+High-throughput tests with 50+ concurrent writers.
+
+## Action
+Wrap map access with sync.RWMutex.
+EOF_LES
+
+LES_INDEX=$(node "$CLI" memory index 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.errors.filter(e=>e.filePath&&e.filePath.includes('LES-001')).length)")
+if [ "$LES_INDEX" = "0" ]; then
+  pass "memory index accepts LES-NNNN doc_type=lesson without schema errors"
+else
+  fail "memory index rejected LES-001 with $LES_INDEX errors"
+fi
+
+LES_QUERY=$(node "$CLI" memory query "concurrent" 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const r=d.results.find(x=>x.id==='LES-001');console.log(r&&r.doc_type==='lesson'?'yes':'no')")
+if [ "$LES_QUERY" = "yes" ]; then
+  pass "memory query: lesson surfaces via unified FTS5 (closes playbook isolation gap)"
+else
+  fail "memory query: LES-001 did not surface for 'concurrent' query"
+fi
+
+# v0.28.0 — memory query --doc-type=<type> filter restricts results to that type.
+# Project has ADR-001..004 + LES-001; filtering by lesson must exclude ADRs.
+LES_FILTER_OK=$(node "$CLI" memory query "source" --doc-type=lesson 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const types=new Set(d.results.map(r=>r.doc_type));console.log(types.size===0||(types.size===1&&types.has('lesson'))?'yes':'no')")
+if [ "$LES_FILTER_OK" = "yes" ]; then
+  pass "memory query --doc-type=lesson restricts results to lesson docs"
+else
+  fail "memory query --doc-type=lesson leaked non-lesson docs"
+fi
+
+LES_FILTER_REJECT=$(node "$CLI" memory query "x" --doc-type=bogus 2>&1 | head -1 || true)
+if echo "$LES_FILTER_REJECT" | grep -q "Invalid --doc-type"; then
+  pass "memory query --doc-type rejects invalid values"
+else
+  fail "memory query --doc-type accepted invalid value: $LES_FILTER_REJECT"
+fi
+
 cd "$SAVED2"
 rm -rf "$MEMTMP2"
 
@@ -555,7 +559,7 @@ else
 fi
 
 # Existing skills got the memory + graphify integration sections
-for skill in codebase-scan code-review-guide lesson-extraction playbook-curation architecture-health-scanner autoskill strategic-analysis tdd-patterns verification-patterns complexity-assessment semantic-search; do
+for skill in codebase-scan code-review-guide lesson-extraction architecture-health-scanner autoskill strategic-analysis tdd-patterns verification-patterns complexity-assessment; do
   if grep -q "Memory + Graphify integration\|Memory layer integration\|REJ tombstone consultation\|Sister skill: memory-curation" "$ROOT/skills/$skill/SKILL.md" 2>/dev/null; then
     pass "skills/$skill/SKILL.md has Phase 2 integration section"
   else
@@ -777,7 +781,7 @@ fi
 # docs/MEMORY.md exists with required sections
 pass_if_file "$ROOT/docs/MEMORY.md" "docs/MEMORY.md exists"
 if [ -f "$ROOT/docs/MEMORY.md" ]; then
-  for section in "Three Layers" "Two-Tier Pre-Flight" "MCP Server" "Curator Promotion" "Memory Maintenance"; do
+  for section in "Two Layers" "Two-Tier Pre-Flight" "MCP Server" "Curator Promotion" "Memory Maintenance"; do
     if grep -q "$section" "$ROOT/docs/MEMORY.md"; then
       pass "docs/MEMORY.md has '$section' section"
     else
@@ -1732,6 +1736,17 @@ if grep -q '"prompt_graphify_hook"' "$ROOT/workflows/project-init.md" \
   pass "project-init prompts graphify hook install when needed"
 else
   fail "project-init missing graphify hook install prompt"
+fi
+
+# project-init.md offers Graphify install instructions when absent and offers to
+# flip graphify.enabled=true when present-but-disabled (silent-failure mode where
+# Graphify is installed but devt's default graphify.enabled=false leaves it unused).
+if grep -q '"prompt_graphify_setup"' "$ROOT/workflows/project-init.md" \
+   && grep -q "graphify.enabled=true" "$ROOT/workflows/project-init.md" \
+   && grep -q "pip install graphifyy" "$ROOT/workflows/project-init.md"; then
+  pass "project-init prompts graphify install + enable when needed"
+else
+  fail "project-init missing graphify install/enable prompt"
 fi
 
 echo "== Agent size budget =="

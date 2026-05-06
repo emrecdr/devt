@@ -180,7 +180,7 @@ Skills are injected into agents at dispatch time based on `skill-index.yaml` or 
 | researcher      | codebase-scan, strategic-analysis                                                   |
 | debugger        | codebase-scan                                                                       |
 | retro           | lesson-extraction, autoskill                                                        |
-| curator         | playbook-curation, semantic-search, memory-compaction, autoskill                    |
+| curator         | memory-curation, autoskill                                                          |
 
 ## The .devt/rules/ Convention
 
@@ -352,31 +352,29 @@ Standard AI coding is **amnesiac** — it forgets architectural decisions the mo
 
 System stays fully functional without Graphify or claude-mem (grep fallback for the former, scratchpad-tag fallback for the latter). Both are opt-in.
 
-### Three layers, three lifetimes
+### Two layers, two lifetimes
 
 ```
 .devt/state/                    LAYER 1 — ephemeral (per-workflow)
 ├── decisions.md                    DEC-xxx — clarify/specify/research scratch
+├── lessons.yaml                    retro draft hand-off → curator promotes to LES-NNNN
 ├── preflight-brief.md              Topic Pre-Flight Brief (auto-fired)
 ├── scratchpad.md                   cross-agent handoff (#KNOWLEDGE-CANDIDATE)
 └── ...                             reset on /devt:cancel-workflow
 
-.devt/learning-playbook.md      LAYER 2 — permanent (operational lessons)
-                                    LES-xxx — "when X fails, check Y first"
-                                    indexed via FTS5 at memory/semantic/lessons.db
-
-.devt/memory/                   LAYER 3 — permanent (architectural truth)
+.devt/memory/                   LAYER 2 — permanent (canonical knowledge)
 ├── decisions/                      ADR-xxx — constitutional decisions
 ├── concepts/                       CON-xxx — durable mental models
 ├── flows/                          FLOW-xxx — named sequences (auth, deploy, etc.)
 ├── rejected/                       REJ-xxx — tombstones (we said no, here's why)
+├── lessons/                        LES-xxx — operational lessons ("when X happens, do Y")
 ├── _suggestions.md                 discovery proposals (curator-only writes)
 └── index.db                        FTS5 unified index (gitignored, regenerable)
 ```
 
-### The four doc types
+### The five doc types
 
-Each doc is markdown with strict YAML frontmatter. Every doc has `id`, `doc_type`, `status`, `confidence`, `title`, `summary`, `affects_paths`, `affects_symbols`, `links`, `created_at`. ID prefixes are enforced (`ADR-001`, `CON-042`, `FLOW-007`, `REJ-013`).
+Each doc is markdown with strict YAML frontmatter. Every doc has `id`, `doc_type`, `status`, `confidence`, `title`, `summary`, `affects_paths`, `affects_symbols`, `links`, `created_at`. ID prefixes are enforced (`ADR-001`, `CON-042`, `FLOW-007`, `REJ-013`, `LES-001`).
 
 | Type | Use for | Example |
 |------|---------|---------|
@@ -384,6 +382,7 @@ Each doc is markdown with strict YAML frontmatter. Every doc has `id`, `doc_type
 | **CON** (concept) | Durable mental models — "this is what X means here" | "A 'session' in this app is a request chain bound by trace_id" |
 | **FLOW** (sequence) | Named multi-step processes — "the deploy flow is…" | "Production deploy: PR→smoke→canary→staged rollout→pagerduty hold" |
 | **REJ** (rejected) | Tombstones — "we considered X, here's why it's a no" | "Server-Sent Events: rejected (cors_workarounds, mobile_battery_drain)" |
+| **LES** (lesson) | Operational tactics — "when X happens, do Y" | "When integration tests flake on first run, check fixture seed order" |
 
 Confidence values: `verified` > `explicit` > `inferred` > `observed` > `speculative`. Status values: `candidate` (awaiting curator) → `active` (in force) → `superseded` (replaced by another ADR) → `rejected` (no-go).
 
@@ -395,7 +394,7 @@ Confidence values: `verified` > `explicit` > `inferred` > `observed` > `speculat
   - Lane C — `affects_symbols` AST match (Graphify-anchored if enabled)
   - Lane D — wiki-link transitive closure (depth 2) from A+B+C seeds
   - Lane E — REJ tombstone overlap on `search_keywords`
-  - Lane F — relevant lessons from `learning-playbook.md`
+  - Lane F — filters governing docs (A∪B∪C∪D) for `doc_type='lesson'` to render LES-NNNN entries under their own header
 
   All 8 dev agents preload the `devt:memory-pre-flight` skill and read the Brief first.
 
@@ -512,13 +511,13 @@ The system stays fully functional without it via grep fallback (4 fallback trigg
 
 devt includes a closed feedback loop that captures and reuses knowledge across sessions:
 
-1. **Extract** -- After a workflow completes, the retro agent extracts lessons (what worked, what failed, patterns discovered) with a 4-filter quality gate.
-2. **Curate** -- The curator agent evaluates lessons (accept, merge, edit, reject, archive) and writes them to `.devt/learning-playbook.md`.
-3. **Index** -- The semantic module syncs the playbook to a SQLite FTS5 database (`node:sqlite` built-in, zero dependencies).
-4. **Query** -- At the start of each workflow, `context_init` queries the FTS5 database for lessons relevant to the current task.
-5. **Inject** -- Matching lessons are formatted and injected as `<learning_context>` into programmer, tester, and code-reviewer dispatches.
+1. **Extract** -- After a workflow completes, the retro agent extracts lessons (what worked, what failed, patterns discovered) with a 4-filter quality gate. Drafts go to `.devt/state/lessons.yaml`.
+2. **Curate** -- The curator agent evaluates each draft against the 5-filter (Specificity, Durability, Non-obviousness, Evidence, Actionability) and presents an `AskUserQuestion` per candidate. Approved lessons land at `.devt/memory/lessons/LES-NNNN-slug.md` with full frontmatter (id/doc_type/status/confidence/summary/affects_paths/affects_symbols/links).
+3. **Index** -- `memory index` rebuilds the unified FTS5 database at `.devt/memory/index.db` (`node:sqlite` built-in, zero dependencies). The PostToolUse `hooks/memory-auto-index.sh` triggers this automatically when any `.devt/memory/**.md` file is touched (debounced to collapse batch promotions into one rebuild).
+4. **Query** -- At the start of each workflow, the Pre-Flight Brief generator queries `index.db` across all 5 doc types. Lessons surface naturally via Lane B (FTS5), Lane C (symbol match), and Lane D (wiki-link closure); Lane F then filters the union by `doc_type='lesson'` for dedicated rendering.
+5. **Inject** -- The Brief's "Related Operational Lessons" section is lifted into `<learning_context>` for programmer, tester, and code-reviewer dispatches.
 
-The loop is fully closed: lessons flow from completed work back into future agents. Early sessions produce raw lessons; later sessions benefit from accumulated project knowledge.
+The loop is fully closed: lessons flow from completed work back into future agents. Early sessions produce raw lessons; later sessions benefit from accumulated project knowledge — surfaced via the same query path that finds ADRs, Concepts, and Flows.
 
 ## Hooks
 

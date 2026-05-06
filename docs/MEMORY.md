@@ -1,33 +1,29 @@
 # The Memory Layer
 
-> Comprehensive guide to devt's three-layer knowledge persistence model.
-> Last updated for v0.26.0 (CCA-v27 §2 Symbol Decay closure: stale-symbol detection in `memory validate` with Graphify circuit breaker; graph-staleness alert in Pre-Flight Brief; GRAPHIFY_MCP_UNREGISTERED drift detection; unconditional `harvest_observations` decouples cheap claude-mem harvest from gated curator review).
+> Comprehensive guide to devt's two-layer knowledge persistence model.
+> Last updated for v0.28.0 (lessons consolidation: operational lessons gain a 5th doc type `LES-NNNN` in `.devt/memory/lessons/`, alongside ADR/CON/FLOW/REJ. Legacy `learning-playbook.md` + `lessons.db` + `bin/modules/semantic.cjs` removed. Single FTS5 index, single curation skill, single approval gate.).
 
-devt persists structured knowledge across **three distinct layers**, each with a different lifetime, write authority, and consumption pattern. Understanding which layer to use for which fact is critical — putting an architectural decision in `.devt/state/` (ephemeral) or a transient debug note in `.devt/memory/` (permanent) is the most common authoring mistake.
+devt persists structured knowledge across **two distinct layers**, each with a different lifetime and write authority. Understanding which layer to use for which fact is critical — putting an architectural decision in `.devt/state/` (ephemeral) or a transient debug note in `.devt/memory/` (permanent) is the most common authoring mistake.
 
-## The Three Layers
+## The Two Layers
 
 ```
 .devt/state/                       ← LAYER 1: ephemeral (per-workflow)
 ├── decisions.md                       DEC-001, DEC-002 — captured during clarify/specify/research
+├── lessons.yaml                       retro draft hand-off → curator promotes to LES-NNNN
 ├── plan.md, spec.md, etc.             workflow artifacts
 ├── preflight-brief.md                 (v0.18.0+) Topic Pre-Flight Brief — auto-fired
 ├── scratchpad.md                      cross-agent handoff notes within workflow
 └── ...                                wiped on /devt:cancel-workflow OR `state reset`
 
-.devt/learning-playbook.md         ← LAYER 2: permanent (operational lessons)
-                                       LES-001, LES-002 — "when X fails, check Y first"
-                                       managed by retro/curator existing pipeline
-                                       FTS5-indexed via memory/semantic/lessons.db (v0.16.0)
-                                       OR via unified .devt/memory/index.db (v0.17.0+)
-
-.devt/memory/                      ← LAYER 3: permanent (architectural truth)
+.devt/memory/                      ← LAYER 2: permanent (unified knowledge)
 ├── index.db                           gitignored FTS5 index (regenerable from markdown)
 ├── decisions/                         ADR-001, ADR-002 — constitutional decisions
 │   └── _index.md                      auto-generated catalog
 ├── concepts/                          CON-001, CON-002 — durable mental models
 ├── flows/                             FLOW-001, FLOW-002 — named sequences
 ├── rejected/                          REJ-001, REJ-002 — tombstones (we said no)
+├── lessons/                           LES-001, LES-002 — "when X happens, do Y" (v0.28.0+)
 └── _suggestions.md                    auto-generated discovery proposals (curator-gated)
 ```
 
@@ -35,13 +31,13 @@ devt persists structured knowledge across **three distinct layers**, each with a
 
 | Question | Answer |
 |---|---|
-| "We decided to use Argon2 for passwords. Where does this go?" | **Layer 3** — ADR. It's a permanent architectural decision affecting multiple files. |
+| "We decided to use Argon2 for passwords. Where does this go?" | **Layer 2** — ADR. It's a permanent architectural decision affecting multiple files. |
 | "I picked option B for this specific PR." | **Layer 1** — DEC. It's per-workflow, doesn't bind future work. (If it turns out to be load-bearing across workflows, the curator can promote DEC → ADR via `/devt:memory promote`.) |
-| "When the integration tests fail, check the migration first." | **Layer 2** — lesson. Operational gotcha for retro/curator. |
-| "We tried Redis caching and rejected it for compliance." | **Layer 3** — REJ tombstone. Future agents must NOT propose Redis. |
-| "AuthService talks to PaymentService via this 4-step handshake." | **Layer 3** — FLOW. Permanent named sequence. |
+| "When the integration tests fail, check the migration first." | **Layer 2** — LES. Operational lesson, written by retro+curator pipeline to `.devt/memory/lessons/`. |
+| "We tried Redis caching and rejected it for compliance." | **Layer 2** — REJ tombstone. Future agents must NOT propose Redis. |
+| "AuthService talks to PaymentService via this 4-step handshake." | **Layer 2** — FLOW. Permanent named sequence. |
 
-## Layer 3: `.devt/memory/` Frontmatter Schema
+## Layer 2: `.devt/memory/` Frontmatter Schema
 
 Every ADR/Concept/Flow/REJ markdown file starts with strict YAML frontmatter:
 
@@ -371,11 +367,11 @@ The curator agent (memory-curation skill) writes promoted ADRs/Concepts/Flows/RE
 
 Precedence: rightmost (project-local) wins, leftmost loses. Mid-tier overrides global; project overrides mid-tier.
 
-## Migration Notes
+## Version Notes
 
-- **v0.16.0 → v0.17.0**: legacy `memory/semantic/lessons.db` rows are imported into the unified `.devt/memory/index.db` via `memory migrate-lessons` (one-time).
-- **v0.17.0 → v0.18.0**: nothing user-facing breaks. Pre-flight runs in `warn` mode by default — opt-in to `off` if you want to disable temporarily.
+- **v0.17.0 → v0.18.0**: Pre-flight runs in `warn` mode by default — opt-in to `off` if you want to disable temporarily.
 - **v0.18.0 → v0.19.0**: `preflight_mode` flips from `warn` to `block`. Agents that already write PREFLIGHT scratchpad lines (via the `devt:memory-pre-flight` skill) need no changes. Older custom workflows that bypass the protocol must be updated OR set `preflight_mode: "warn"` per-project.
+- **v0.27.0 → v0.28.0**: lessons consolidated into the unified memory layer. Operational lessons now live as LES-NNNN frontmatter docs in `.devt/memory/lessons/` (5th doc type alongside ADR/CON/FLOW/REJ), FTS5-indexed in the same `index.db`. The legacy `learning-playbook.md` flat file, separate `lessons.db`, `bin/modules/semantic.cjs`, and `memory migrate-lessons` subcommand are all removed. The retro→curator pipeline now writes structured LES-NNNN docs gated by AskUserQuestion.
 
 ## Related Documentation
 

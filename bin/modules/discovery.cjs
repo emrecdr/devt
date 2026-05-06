@@ -7,7 +7,6 @@
  *   1. claude-mem ⚖️ decision and 🔵 discovery tagged entries (when claude-mem is installed)
  *   2. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
  *   3. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
- *   4. learning-playbook.md entries that look architectural
  *
  * For each candidate, the engine:
  *   - Fetches the FULL original reasoning (verbatim — no AI summarization)
@@ -278,7 +277,6 @@ const WIKI_LINK_SURFACES = [
   ".devt/state/decisions.md",
   ".devt/state/research.md",
   ".devt/state/spec.md",
-  ".devt/learning-playbook.md",
   "CLAUDE.md",
 ];
 

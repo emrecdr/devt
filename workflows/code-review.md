@@ -128,7 +128,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
-    <learning_context>{learning_context — relevant review/quality lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write review to .devt/state/review.md

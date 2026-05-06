@@ -61,11 +61,6 @@ function main() {
       case "setup":
         console.log(JSON.stringify(setup.run(args.slice(1), PLUGIN_ROOT)));
         break;
-      case "semantic":
-        console.log(
-          JSON.stringify(require("./modules/semantic.cjs").run(subcommand, args.slice(2), PLUGIN_ROOT)),
-        );
-        break;
       case "memory": {
         // memory subcommand prints its own JSON via process.stdout.write — don't double-encode here.
         const code = require("./modules/memory.cjs").run(subcommand, args.slice(2));
@@ -142,16 +137,13 @@ Commands:
         [--mode create|update|reinit]  create=fresh, update=add missing, reinit=overwrite
         [--config JSON]    Extra config to merge into .devt/config.json
         [--detect]         Just detect stack and git info, don't set up
-  semantic sync             Sync learning-playbook.md → FTS5 database
-  semantic query <terms>    Query lessons by keyword (FTS5 or grep fallback)
-  semantic compact          Archive stale lessons (--dry-run to preview)
-  semantic status           Show database, playbook, and entry count
   memory init               Scaffold .devt/memory/ + first FTS5 index pass
   memory index              Atomic drop+rebuild of the unified memory FTS5 index
-  memory query <terms>      Full-text search across ADR/CON/FLOW/REJ docs
-  memory get <doc-id>       Fetch a single doc by id (e.g. ADR-007)
+  memory query <terms>      Full-text search across ADR/CON/FLOW/REJ/LES docs
+                            [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson]
+  memory get <doc-id>       Fetch a single doc by id (e.g. ADR-007, LES-001)
   memory affects <path>     Which active/candidate docs govern this file? (glob-aware)
-  memory list [doc_type]    List all docs (decision|concept|flow|rejected)
+  memory list [doc_type]    List all docs (decision|concept|flow|rejected|lesson)
   memory links <id> [--depth=N]  Transitive link traversal (default depth 2)
   memory active [domain]    All status:active docs, optionally domain-filtered
   memory rejected-keywords  All REJ tombstones with their AI-suppression keywords
@@ -162,7 +154,6 @@ Commands:
   memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
   memory suggest            Run discovery: claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
-  memory migrate-lessons    Import legacy lessons.db rows into the unified .devt/memory/index.db
   graphify status           Probe whether Graphify is enabled + binary present + graph.json exists
   graphify freshness        Compare graph.json built_at_commit to current HEAD
   graphify warm-cache       Return preferred warm-cache path (wiki/index.md OR GRAPH_REPORT.md)

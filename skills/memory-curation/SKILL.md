@@ -1,6 +1,6 @@
 ---
 name: memory-curation
-description: Use when promoting ephemeral DEC-xxx (from .devt/state/decisions.md) into permanent ADR-xxx, when capturing rejected ideas as REJ-xxx tombstones, or when reviewing _suggestions.md proposals from the discovery engine. Trigger on phrases like 'promote this decision', 'capture as ADR', 'add as Concept', 'reject this idea, never suggest again', 'create tombstone', 'review memory suggestions', 'curator review', 'memory promotion', 'archive decision', 'codify this rule', or 'this should be permanent'. Sister skill to playbook-curation but for the architectural memory layer (.devt/memory/) rather than operational lessons (.devt/learning-playbook.md). HARD INVARIANT — never writes a permanent .devt/memory/{decisions,concepts,flows,rejected}/*.md file without explicit user approval via AskUserQuestion. The discovery engine surfaces candidates; this skill drives the approval flow that turns them into committed markdown.
+description: Use when promoting any candidate into the unified memory layer at `.devt/memory/` — ephemeral DEC-xxx (from .devt/state/decisions.md) into permanent ADR-xxx, retro lesson drafts (from .devt/state/lessons.yaml) into LES-xxx, rejected ideas into REJ-xxx tombstones, or when reviewing _suggestions.md proposals from the discovery engine. Trigger on phrases like 'promote this decision', 'capture as ADR', 'add as Concept', 'capture as lesson', 'reject this idea, never suggest again', 'create tombstone', 'review memory suggestions', 'curator review', 'memory promotion', 'archive decision', 'archive stale lesson', 'codify this rule', or 'this should be permanent'. This is the single curation skill for ALL 5 doc types (decision, concept, flow, rejected, lesson). HARD INVARIANT — never writes a permanent .devt/memory/{decisions,concepts,flows,rejected,lessons}/*.md file without explicit user approval via AskUserQuestion. The discovery engine + retro surface candidates; this skill drives the approval flow that turns them into committed markdown.
 allowed-tools: Bash Read Write Edit Grep Glob Skill Task
 ---
 
@@ -18,12 +18,15 @@ from `.devt/memory/_suggestions.md` (produced by the discovery engine), presents
 to the user via `AskUserQuestion` with the full original reasoning, and writes the
 permanent markdown ONLY on approval.
 
-This skill is sister to `playbook-curation` but operates on a different surface:
-- **playbook-curation** maintains operational lessons in `.devt/learning-playbook.md`
-- **memory-curation** maintains architectural rules in `.devt/memory/`
+This is the **sole** curation skill for the unified `.devt/memory/` layer (v0.28.0+). It
+covers all 5 doc types under one approval flow:
 
-Both share the curator agent's `memory: project` persistent memory and the same 5-filter
-quality discipline.
+- **architectural rules** — ADR (decisions), CON (concepts), FLOW (process), REJ (tombstones)
+- **operational lessons** — LES ("when X happens, do Y") in `.devt/memory/lessons/`
+
+The same 5-filter discipline (Specificity, Durability, Non-obviousness, Evidence,
+Actionability) applies across all 5 — the curator agent's `memory: project` persistent
+memory carries the running state.
 
 ## When to Run It
 
@@ -42,14 +45,13 @@ Trigger on:
 
 Skip for:
 
-- Operational lessons ("when X fails, check Y first") — those go to playbook-curation
 - Per-workflow tentative decisions that won't outlive the session — those stay in
   `.devt/state/decisions.md` ephemeral
 - Trivial or single-use choices — promotion criteria below
 
 ## Promotion Criteria (the 5-filter)
 
-Inherits from `playbook-curation`'s 5-filter, adapted for architectural rules:
+The 5-filter, applied uniformly to architectural docs (ADR/CON/FLOW/REJ) and operational lessons (LES):
 
 1. **Specificity**: The rule names a specific behavior or constraint, not vague advice.
    ✓ "Use Argon2 for password hashing" / ✗ "Be careful with auth"
@@ -192,7 +194,9 @@ Reference the curation summary path so the user can audit the run.
 
 ## Credit & Lineage
 
-Sister skill to `playbook-curation` (operational lessons) — same 5-filter discipline,
-different surface. The promotion-via-AskUserQuestion pattern is shared with the council
-offramp (`references/council-offramp.md` §3.2) — both encode "discovery automated,
-action approved" as the core devt invariant for irreversible state changes.
+Unified curation skill (v0.28.0+) — supersedes the v0.17-v0.27 split between
+`playbook-curation` (operational) and `memory-curation` (architectural). Now covers all 5
+doc types (ADR/CON/FLOW/REJ/LES) with one 5-filter and one approval flow. The
+promotion-via-AskUserQuestion pattern is shared with the council offramp
+(`references/council-offramp.md` §3.2) — both encode "discovery automated, action
+approved" as the core devt invariant for irreversible state changes.

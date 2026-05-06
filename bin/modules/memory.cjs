@@ -1,10 +1,11 @@
 "use strict";
 
 /**
- * Memory layer — permanent ADR/Concept/Flow/Rejected docs with FTS5 unified index.
+ * Memory layer — permanent ADR/Concept/Flow/Rejected/Lesson docs with FTS5 unified index.
  *
- * Phase 1 (v0.16.0): foundation only — indexes `.devt/memory/{decisions,concepts,flows,rejected}/*.md`
- * Phase 2 (v0.17.0): extends to lesson/rule/guardrail/state/claude_md/top_level doc_class values.
+ * Indexes `.devt/memory/{decisions,concepts,flows,rejected,lessons}/*.md`. The 5 doc types
+ * share frontmatter shape (id/title/doc_type/status/confidence/summary/links/affects_*);
+ * each id pattern is enforced via ID_PATTERN_BY_TYPE.
  *
  * Zero external dependencies. Uses node:sqlite (built-in since Node 22.5).
  * Every doc carries strict frontmatter; the index is regenerable from markdown at any time.
@@ -28,7 +29,7 @@ const { safeJsonParse } = require("./security.cjs");
 
 const SCHEMA_VERSION = 1;
 
-const DOC_TYPES = ["decision", "concept", "flow", "rejected"];
+const DOC_TYPES = ["decision", "concept", "flow", "rejected", "lesson"];
 const STATUS_VALUES = ["candidate", "active", "superseded", "rejected"];
 const CONFIDENCE_VALUES = ["verified", "explicit", "inferred", "observed", "speculative"];
 const LINK_TYPES = ["supersedes", "depends_on", "implements", "relates_to"];
@@ -39,6 +40,7 @@ const ID_PATTERN_BY_TYPE = {
   concept: /^CON-\d{3,}$/,
   flow: /^FLOW-\d{3,}$/,
   rejected: /^REJ-\d{3,}$/,
+  lesson: /^LES-\d{3,}$/,
 };
 
 const SUBDIR_BY_TYPE = {
@@ -46,6 +48,7 @@ const SUBDIR_BY_TYPE = {
   concept: "concepts",
   flow: "flows",
   rejected: "rejected",
+  lesson: "lessons",
 };
 
 // ---------------------------------------------------------------------------
@@ -755,6 +758,12 @@ function listRejectedKeywords() {
 
 function queryFTS(terms, opts) {
   const limit = (opts && opts.limit) || 20;
+  // Optional doc_type filter: when set, restricts results to one of DOC_TYPES.
+  // Whitelist-validated against DOC_TYPES so a typo or injection can never
+  // reach the prepared statement as a free-form value.
+  const docType = opts && opts.docType && DOC_TYPES.includes(opts.docType)
+    ? opts.docType
+    : null;
   return withDb(db => {
     // Tokenize on whitespace, strip FTS5 special chars per token, append * for
     // prefix matching. Multiple tokens AND together (FTS5 default). This makes
@@ -766,14 +775,21 @@ function queryFTS(terms, opts) {
       .filter(Boolean);
     if (tokens.length === 0) return [];
     const ftsQuery = tokens.map(t => `${t}*`).join(" ");
+    const sql = docType
+      ? `SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
+         FROM documents_fts
+         WHERE documents_fts MATCH ? AND doc_type = ?
+         ORDER BY rank
+         LIMIT ?`
+      : `SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
+         FROM documents_fts
+         WHERE documents_fts MATCH ?
+         ORDER BY rank
+         LIMIT ?`;
     try {
-      return db.prepare(`
-        SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
-        FROM documents_fts
-        WHERE documents_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit);
+      return docType
+        ? db.prepare(sql).all(ftsQuery, docType, limit)
+        : db.prepare(sql).all(ftsQuery, limit);
     } catch (err) {
       // Malformed FTS5 query — return empty rather than crash
       return [];
@@ -867,15 +883,6 @@ function findStaleLinks() {
 /**
  * Symbol-anchored docs lookup. Routes through graphify.cjs when available;
  * otherwise returns a payload with degraded=true so callers fall back to grep.
- */
-/**
- * Phase 2 consolidation helper: imports lessons from the legacy
- * `memory/semantic/lessons.db` into the unified `.devt/memory/index.db`
- * with doc_class='lesson'. Read-only on the source DB. Idempotent — safe
- * to run repeatedly. Phase 3 will make this automatic; for now it's
- * an explicit subcommand so users opt in.
- *
- * Returns: { imported: N, skipped_duplicates: N, errors: [...] }
  */
 // ---------------------------------------------------------------------------
 // Portable bundle export / import (v0.20.0+)
@@ -1152,78 +1159,6 @@ function importBundle(bundlePath, opts) {
   };
 }
 
-function migrateLessons() {
-  const Database = getDatabaseSync();
-  const lessonsDbCandidates = [
-    process.env.CLAUDE_PLUGIN_DATA && path.join(process.env.CLAUDE_PLUGIN_DATA, "semantic", "lessons.db"),
-    path.join(findProjectRoot(), "memory", "semantic", "lessons.db"),
-  ].filter(Boolean);
-
-  const lessonsDb = lessonsDbCandidates.find(p => fs.existsSync(p));
-  if (!lessonsDb) {
-    return { imported: 0, skipped_duplicates: 0, errors: ["lessons.db not found at any expected path"] };
-  }
-
-  const src = new Database(lessonsDb);
-  let lessons;
-  try {
-    lessons = src.prepare("SELECT * FROM lessons").all();
-  } catch (e) {
-    src.close();
-    return { imported: 0, skipped_duplicates: 0, errors: [`failed to read lessons.db: ${e.message}`] };
-  }
-  src.close();
-
-  if (lessons.length === 0) {
-    return { imported: 0, skipped_duplicates: 0, errors: [] };
-  }
-
-  const dest = ensureDb();
-  let imported = 0;
-  let skipped = 0;
-  const errors = [];
-  try {
-    dest.prepare("BEGIN").run();
-    const insert = dest.prepare(
-      `INSERT OR IGNORE INTO documents (id, doc_type, doc_class, status, confidence, domain, title, summary, file_path, created_at, created_by, schema_version)
-       VALUES (?, ?, 'lesson', 'active', ?, ?, ?, ?, ?, ?, 'retro', 1)`
-    );
-    const insertFts = dest.prepare(
-      `INSERT INTO documents_fts (id, title, summary, file_path, doc_type, doc_class, status)
-       VALUES (?, ?, ?, ?, 'lesson', 'lesson', 'active')`
-    );
-
-    let idx = 0;
-    for (const l of lessons) {
-      // Synthesize a stable lesson id from description hash. Lessons.db has no id column.
-      idx++;
-      const id = `LES-${String(idx).padStart(4, "0")}`;
-      const title = (l.description || "").slice(0, 80);
-      const summary = (l.description || "").slice(0, 200);
-      const conf = l.confidence || "0.5";
-      const domain = l.category || null;
-      try {
-        const result = insert.run(id, "lesson", String(conf), domain, title, summary, "(from lessons.db)", l.created_at || null);
-        if (result.changes > 0) {
-          insertFts.run(id, title, summary, "(from lessons.db)");
-          imported++;
-        } else {
-          skipped++;
-        }
-      } catch (e) {
-        errors.push(`${id}: ${e.message}`);
-      }
-    }
-    dest.prepare("COMMIT").run();
-  } catch (e) {
-    try { dest.prepare("ROLLBACK").run(); } catch { /* swallow */ }
-    errors.push(`transaction failed: ${e.message}`);
-  }
-  dest.close();
-
-  return { imported, skipped_duplicates: skipped, errors, source: lessonsDb };
-}
-
 function affectsSymbol(symbol) {
   const dbResults = getBySymbol(symbol);
   let graphifyState = null;
@@ -1385,7 +1320,7 @@ function validate() {
 }
 
 // ---------------------------------------------------------------------------
-// Init: scaffold .devt/memory/{decisions,concepts,flows,rejected}/ + first index
+// Init: scaffold .devt/memory/{decisions,concepts,flows,rejected,lessons}/ + first index
 // ---------------------------------------------------------------------------
 
 function init() {
@@ -1429,12 +1364,18 @@ function run(subcommand, args) {
     case "query": {
       const terms = args.filter(a => !a.startsWith("--")).join(" ");
       if (!terms.trim()) {
-        process.stderr.write("Usage: memory query <terms>\n");
+        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson]\n");
         return 2;
       }
       const limitArg = args.find(a => a.startsWith("--limit="));
       const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 20;
-      json({ query: terms, limit, results: queryFTS(terms, { limit }) });
+      const docTypeArg = args.find(a => a.startsWith("--doc-type="));
+      const docType = docTypeArg ? docTypeArg.split("=")[1] : null;
+      if (docType && !DOC_TYPES.includes(docType)) {
+        process.stderr.write(`Invalid --doc-type: ${docType}. Allowed: ${DOC_TYPES.join("|")}\n`);
+        return 2;
+      }
+      json({ query: terms, limit, doc_type: docType, results: queryFTS(terms, { limit, docType }) });
       return 0;
     }
     case "get": {
@@ -1499,10 +1440,6 @@ function run(subcommand, args) {
     case "affects-symbol": {
       if (!args[0]) { process.stderr.write("Usage: memory affects-symbol <symbol>\n"); return 2; }
       json(affectsSymbol(args[0]));
-      return 0;
-    }
-    case "migrate-lessons": {
-      json(migrateLessons());
       return 0;
     }
     case "paths": {
@@ -1689,7 +1626,6 @@ module.exports = {
   findOrphans,
   findStaleLinks,
   affectsSymbol,
-  migrateLessons,
   DOC_TYPES,
   STATUS_VALUES,
   CONFIDENCE_VALUES,

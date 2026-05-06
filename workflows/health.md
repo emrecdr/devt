@@ -173,7 +173,6 @@ Status: DEGRADED → HEALTHY
 | Add .gitignore entry | Appends .devt/state/ | None |
 | Clear stale workflow | Sets active=false | Loses "in-progress" marker |
 | Fix permissions | chmod +x on hook scripts | None |
-| Create playbook | Creates learning-playbook.md template | None |
 
 **Not repairable (too risky):**
 - Missing .devt/rules/ — requires template selection (run /devt:init)

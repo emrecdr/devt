@@ -1,6 +1,6 @@
 # Lesson Extraction Workflow
 
-Retrospective and curation: extract lessons from the current session, validate them, and sync to the learning playbook.
+Retrospective and curation: extract lessons from the current session, validate them, and promote accepted lessons as LES-NNNN frontmatter docs in the unified memory layer (`.devt/memory/lessons/`).
 
 ---
 
@@ -16,7 +16,7 @@ Retrospective and curation: extract lessons from the current session, validate t
 The following agent types are used in this workflow:
 
 - `devt:retro` — lesson extraction specialist (Read, Write, Bash, Glob, Grep)
-- `devt:curator` — playbook quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep)
+- `devt:curator` — memory-layer quality maintenance specialist (Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion)
 
 Not used in this workflow:
 
@@ -34,7 +34,7 @@ Before dispatching any agent, check `.devt/config.json` for an `agent_skills` co
 {
   "agent_skills": {
     "retro": ["lesson-extraction"],
-    "curator": ["playbook-curation"]
+    "curator": ["memory-curation"]
   }
 }
 ```
@@ -75,7 +75,7 @@ List which artifacts exist. If none exist, the retro agent will work from sessio
 
 Also check for:
 
-- `.devt/learning-playbook.md` — existing playbook for deduplication
+- `.devt/memory/lessons/` — existing LES-NNNN docs for deduplication
 - `CLAUDE.md` — project rules for evaluating lesson relevance
   </step>
 
@@ -106,7 +106,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
       CLAUDE.md (if exists),
       .devt/rules/coding-standards.md,
       .devt/rules/testing-patterns.md,
-      .devt/learning-playbook.md (if exists)
+      .devt/memory/lessons/*.md (existing LES-NNNN entries)
     </files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -132,46 +132,47 @@ Best-effort: harvest gracefully no-ops when claude-mem is absent or no observati
 
 </step>
 
-<step name="curate" gate="curation-summary.md is written and .devt/learning-playbook.md is updated">
+<step name="curate" gate="curation-summary.md is written and .devt/memory/ is updated">
 
-Dispatch the curator agent — dual-path: playbook (lessons.yaml) + memory layer (_suggestions.md from Step harvest_observations):
+Dispatch the curator agent. Both lessons and architectural candidates flow through the same unified memory layer at `.devt/memory/` — every promotion is gated by AskUserQuestion per candidate.
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <task>
-    Run BOTH curation paths:
-    1. PLAYBOOK PATH: Evaluate incoming lessons from .devt/state/lessons.yaml.
-       For each lesson, decide: accept, merge, edit, reject, or archive.
-       Update .devt/learning-playbook.md with accepted/merged entries.
-       Prune expired or low-confidence entries from the existing playbook.
-       Resolve any contradictions between new and existing entries.
-    2. MEMORY-LAYER PATH: Review .devt/memory/_suggestions.md candidates.
-       For each ⚖️/🔵 candidate that passes the 5-filter (Specificity,
-       Durability, Non-obviousness, Evidence, Actionability), present
-       an AskUserQuestion proposal per memory-curation skill. NEVER write
-       to .devt/memory/{decisions,concepts,flows,rejected}/ without
+    Evaluate two upstream sources and gate every promotion via AskUserQuestion:
+    1. LESSONS: Incoming retro drafts in .devt/state/lessons.yaml. For each,
+       decide: accept (write LES-NNNN.md), merge (update existing LES), edit
+       (refine then accept), reject (record reason). Accepted lessons land in
+       .devt/memory/lessons/.
+    2. ARCHITECTURAL CANDIDATES: ⚖️/🔵 entries in .devt/memory/_suggestions.md.
+       For each candidate that passes the 5-filter (Specificity, Durability,
+       Non-obviousness, Evidence, Actionability), present an AskUserQuestion
+       proposal per memory-curation skill. Accepted candidates land in
+       .devt/memory/{decisions,concepts,flows,rejected}/. NEVER write without
        explicit user approval — hard invariant.
+    3. PRUNE: Review existing LES-NNNN entries; propose status:superseded for
+       contradicted or stale lessons via AskUserQuestion.
+    4. After all writes, run `memory index` to refresh .devt/memory/index.db.
   </task>
   <context>
-    <files_to_read>.devt/learning-playbook.md (if exists), .devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), CLAUDE.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation for memory-layer path}</agent_skills>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
-  Write summary of BOTH paths to .devt/state/curation-summary.md
+  Write summary to .devt/state/curation-summary.md
 ")
 ```
 
 </step>
 
-<step name="sync" gate="semantic database is updated (or skipped if Python unavailable)">
+<step name="reindex" gate="memory FTS5 index is up to date">
 
-After curation, sync the updated playbook to the FTS5 semantic database:
+After curation, ensure the FTS5 index reflects newly written `.md` files:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" semantic sync
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory index
 ```
 
-If the sync succeeds, lessons are now searchable via FTS5 for future workflows.
-If it fails (no playbook yet), this is non-blocking — the CLI falls back to keyword matching automatically.
+This is idempotent — safe to run even when the curator already triggered it. The index drives Pre-Flight Brief lookups, so any drift here means lessons silently disappear from future Briefs.
 </step>
 
 <step name="report" gate="results are presented to the user">
@@ -179,11 +180,11 @@ If it fails (no playbook yet), this is non-blocking — the CLI falls back to ke
 Read `.devt/state/curation-summary.md` and report to the user:
 
 - **Lessons extracted**: total count from retro agent
-- **Lessons accepted**: added to playbook
-- **Lessons merged**: combined with existing entries
+- **Lessons accepted**: written as LES-NNNN.md to `.devt/memory/lessons/`
+- **Lessons merged**: combined with existing LES-NNNN entries
 - **Lessons rejected**: failed quality criteria (with brief reasons)
-- **Entries archived**: pruned from playbook due to decay or low confidence
-- **Playbook health**: total entries, average importance, entries expiring soon
+- **Entries superseded**: existing LES-NNNN moved to `status:superseded`
+- **Memory layer health**: total active docs (LES + ADR + CON + FLOW + REJ), index rebuild status
 
 Final status: **DONE**
 
@@ -198,25 +199,32 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 1. **Auto-fix: bugs** — Not applicable. This workflow reads and writes knowledge artifacts, not code.
 2. **Auto-fix: lint** — Not applicable.
-3. **Auto-fix: deps** — If `.devt/learning-playbook.md` does not exist, the curator agent creates it from scratch.
-4. **STOP: architecture** — If the retro agent encounters contradictory evidence (two artifacts disagree about what happened), it flags the contradiction in `lessons.yaml` for the curator to resolve. The curator decides which version to trust.
+3. **Auto-fix: deps** — If `.devt/memory/lessons/` does not exist, the curator's `memory index` step creates it from scratch (init scaffolds all 5 subfolders).
+4. **STOP: architecture** — If the retro agent encounters contradictory evidence (two artifacts disagree about what happened), it flags the contradiction in `lessons.yaml` for the curator to resolve via AskUserQuestion.
    </deviation_rules>
 
 <success_criteria>
 
 - Retro agent has reviewed all available artifacts
 - Each extracted lesson passes the 4-filter test
-- Curator has evaluated all incoming lessons (accept/merge/edit/reject/archive)
-- `.devt/learning-playbook.md` is updated (or created) with accepted entries
-- Expired and low-confidence entries are pruned
+- Curator has evaluated every incoming lesson (accept/merge/edit/reject)
+- Accepted lessons written as LES-NNNN.md frontmatter docs to `.devt/memory/lessons/` with explicit user approval per candidate
+- Superseded lessons marked `status:superseded` (not deleted — history preserved)
+- `memory index` ran cleanly so Pre-Flight Briefs see new lessons immediately
 - Final status: **DONE**
   </success_criteria>
 
-## Memory layer integration (v0.17.0+)
+## Memory layer integration (v0.28.0+)
 
-Retro extracts BOTH operational lessons (existing flow → curator → playbook) AND architectural
-candidates (NEW → curator → memory-curation skill → AskUserQuestion). The 4-filter still gates
-lesson candidates. Architectural candidates use the memory-curation 5-filter (Specificity,
-Durability, Non-obviousness, Evidence, Actionability). After retro, the curator agent runs
-both promotion paths: lessons.yaml → playbook, AND _suggestions.md (from discovery harvest)
-→ memory layer.
+Retro extracts BOTH operational lessons AND architectural candidates. Both flow into the
+**unified** memory layer at `.devt/memory/`:
+
+- Operational lessons → `.devt/memory/lessons/LES-NNNN.md` (4-filter at extraction; curator
+  AskUserQuestion at promotion)
+- Architectural candidates (⚖️/🔵 from discovery harvest) → `.devt/memory/{decisions,concepts,flows,rejected}/`
+  (5-filter from contamination-guidelines: Specificity, Durability, Non-obviousness, Evidence,
+  Actionability)
+
+There is one canonical store and one approval gate (curator + AskUserQuestion). All five doc
+types are FTS5-indexed in `.devt/memory/index.db` and surface in Pre-Flight Briefs by the same
+domain/symbol/keyword/wiki-link match logic.

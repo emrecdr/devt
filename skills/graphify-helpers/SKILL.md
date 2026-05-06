@@ -1,6 +1,6 @@
 ---
 name: graphify-helpers
-description: Use whenever a developer skill needs to search the codebase for symbols, callers, dependents, or paths between symbols. This is the canonical implementation of the Graphify-first protocol — Graphify queries first, grep fallback when any of four trigger conditions hits (empty result, error, not setup, under min_results_threshold). All other dev skills (codebase-scan, code-review-guide, lesson-extraction, tdd-patterns, verification-patterns, complexity-assessment, strategic-analysis, semantic-search, architecture-health-scanner, council, autoskill) consume this skill rather than calling Graphify directly. Skill auto-degrades to grep-only mode when graphify.enabled=false in .devt/config.json — system stays fully functional without Graphify, just less token-efficient.
+description: Use whenever a developer skill needs to search the codebase for symbols, callers, dependents, or paths between symbols. This is the canonical implementation of the Graphify-first protocol — Graphify queries first, grep fallback when any of four trigger conditions hits (empty result, error, not setup, under min_results_threshold). All other dev skills (codebase-scan, code-review-guide, lesson-extraction, tdd-patterns, verification-patterns, complexity-assessment, strategic-analysis, architecture-health-scanner, council, autoskill) consume this skill rather than calling Graphify directly. Skill auto-degrades to grep-only mode when graphify.enabled=false in .devt/config.json — system stays fully functional without Graphify, just less token-efficient.
 allowed-tools: Bash Read Grep Glob
 ---
 
@@ -97,7 +97,6 @@ When skills consume graphify-helpers, they should pass an appropriate
 | `complexity-assessment` | blast-radius | (uses `effect_size` heuristic, no threshold) |
 | `tdd-patterns` | find-tests-near-symbol | 1 — even one similar test is enough scaffolding |
 | `strategic-analysis` | get-dependent-set per option | 0 — empty is informative ("Option A touches 0 callers") |
-| `semantic-search` | symbol query | 0 — pairs with FTS5 over docs |
 
 Callers SHOULD override the default when their use case demands richer evidence.
 

@@ -11,7 +11,9 @@
  *   .devt/config.json          — project configuration
  *   .devt/rules/               — coding standards, testing patterns, etc.
  *   .devt/state/               — workflow state (gitignored)
- *   .devt/learning-playbook.md — accumulated lessons
+ *   .devt/memory/lessons/      — operational lessons (LES-NNNN frontmatter docs)
+ *   .devt/memory/{decisions,concepts,flows,rejected}/ — architectural docs
+ *   .devt/memory/index.db      — unified FTS5 index (regenerable from .md files)
  */
 
 const fs = require("fs");
@@ -179,28 +181,12 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // Phase 1 (v0.16.0): scaffolding only — no template seeding. Project owners
   // create their first ADR via /devt:memory promote or by hand.
   const memoryDir = path.join(devtDir, "memory");
-  for (const subdir of ["decisions", "concepts", "flows", "rejected"]) {
+  for (const subdir of ["decisions", "concepts", "flows", "rejected", "lessons"]) {
     const target = path.join(memoryDir, subdir);
     if (!fs.existsSync(target)) {
       fs.mkdirSync(target, { recursive: true });
       results.files_created.push(`.devt/memory/${subdir}/`);
     }
-  }
-
-  // Create .devt/learning-playbook.md if it doesn't exist
-  const playbookPath = path.join(devtDir, "learning-playbook.md");
-  if (!fs.existsSync(playbookPath)) {
-    const playbookHeader = [
-      "# Learning Playbook",
-      "",
-      "Lessons extracted from development workflows. Entries are YAML blocks separated by `---`.",
-      "Managed by /devt:retro (extraction) and /devt:curator (curation).",
-      "",
-      "---",
-      "",
-    ].join("\n");
-    fs.writeFileSync(playbookPath, playbookHeader);
-    results.files_created.push(".devt/learning-playbook.md");
   }
 
   // Create or update .devt/config.json
@@ -264,6 +250,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     { path: ".devt/state/", header: "# devt workflow state" },
     { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
     { path: ".devt/memory/index.db", header: "# devt memory FTS5 index (regenerable from markdown)" },
+    { path: ".devt/memory/.auto-index-stamp", header: "# devt memory auto-index debounce marker (transient)" },
     { path: ".devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace (v0.21.0+, append-only telemetry; safe to delete)" },
     { path: ".devt/memory/export-*.json", header: "# devt memory export bundles (transient — share via explicit channel)" },
     { path: "graphify-out/cache/", header: "# Graphify ephemeral cache" },

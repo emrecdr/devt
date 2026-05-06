@@ -31,7 +31,6 @@ const CHECKS = {
   W009: { severity: "warning", message: "Plugin agent file missing", repairable: false, fix: "Reinstall devt — agent files may be corrupted or incomplete" },
   W010: { severity: "warning", message: "Workflow missing <available_agent_types> section", repairable: false, fix: "Add <available_agent_types> to the workflow to prevent post-/clear silent fallback to general-purpose" },
   I001: { severity: "info", message: "CLAUDE.md not found (recommended)", repairable: false, fix: "Create a CLAUDE.md with project-specific guidance for Claude Code" },
-  I002: { severity: "info", message: ".devt/learning-playbook.md not found", repairable: true, fix: "Run /devt:health --repair to create, or /devt:retro to start the learning loop" },
   I003: { severity: "info", message: "No active workflow", repairable: false, fix: "No action needed — start a workflow with /devt:workflow" },
   W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:health --repair to clear invalid state, or /devt:cancel-workflow" },
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
@@ -307,11 +306,6 @@ function runChecks(pluginRoot) {
     add("I001");
   }
 
-  // I002: Learning playbook
-  if (!fs.existsSync(path.join(devtDir, "learning-playbook.md"))) {
-    add("I002");
-  }
-
   // I003: No active workflow
   if (!state.active) {
     add("I003");
@@ -459,16 +453,6 @@ function runRepairs(pluginRoot, checkResult) {
           break;
         }
 
-        case "I002": {
-          const playbookPath = path.join(devtDir, "learning-playbook.md");
-          fs.writeFileSync(playbookPath, [
-            "# Learning Playbook", "",
-            "Lessons extracted from development workflows. Entries are YAML blocks separated by `---`.",
-            "Managed by /devt:retro (extraction) and /devt:curator (curation).", "", "---", "",
-          ].join("\n"));
-          repairs.push({ code: issue.code, action: "Created .devt/learning-playbook.md", success: true });
-          break;
-        }
       }
     } catch (e) {
       repairs.push({ code: issue.code, action: e.message, success: false });

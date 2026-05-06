@@ -132,7 +132,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
-    <learning_context>{learning_context from context_init — relevant lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write summary to .devt/state/impl-summary.md
@@ -165,7 +165,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
-    <learning_context>{learning_context from context_init — relevant testing lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant testing lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write summary to .devt/state/test-summary.md
@@ -199,7 +199,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
-    <learning_context>{learning_context from context_init — relevant review/quality lessons from .devt/learning-playbook.md, if any}</learning_context>
+    <learning_context>{learning_context from context_init — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write review to .devt/state/review.md

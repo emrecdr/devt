@@ -14,7 +14,7 @@
  *   C: Symbol match (Graphify) — getBySymbol(sym) per subject symbol
  *   D: Wiki-link closure       — getLinks(id, depth=2) from initial matches
  *   E: Rejected check          — listRejectedKeywords() filtered to topic
- *   F: Lessons match           — semantic.cjs query() against learning playbook
+ *   F: Lessons filter         — filters governing docs (A∪B∪C∪D) for doc_type='lesson'
  *
  * Determinism: lanes are independent and ordered; merging is by doc_id;
  * output ordering is alphabetical by id within each section. Identical
@@ -26,10 +26,7 @@ const fs = require("fs");
 const path = require("path");
 const memory = require("./memory.cjs");
 const graphify = require("./graphify.cjs");
-const semantic = require("./semantic.cjs");
 const { findProjectRoot } = require("./config.cjs");
-
-const PLUGIN_ROOT = path.resolve(__dirname, "..", "..");
 
 const STATE_DIR = path.join(".devt", "state");
 const BRIEF_FILE = "preflight-brief.md";
@@ -231,20 +228,14 @@ function laneE(topic) {
 }
 
 /**
- * Lane F — operational lessons via semantic.cjs. Falls back gracefully when
- * the lessons DB is absent.
+ * Lane F — pulls lesson-typed entries out of the deduped governing union so the
+ * Brief can render them under a dedicated header. Caller must pass an already-
+ * deduped array; the architectural rationale lives in docs/MEMORY.md.
+ *
+ * @param {Array<{id: string, doc_type: string}>} dedupedUnion
  */
-function laneF(topic, limit = 8) {
-  const tokens = [
-    ...topic.domains,
-    ...topic.symbols.map(s => s.toLowerCase()),
-    ...topic.keywords.slice(0, 6),
-  ].slice(0, 10);
-  if (tokens.length === 0) return [];
-  let res;
-  try { res = semantic.query(tokens.join(" "), PLUGIN_ROOT, { limit }); }
-  catch { res = { results: [] }; }
-  return (res && res.results) ? res.results : [];
+function laneF(dedupedUnion, limit = 8) {
+  return dedupedUnion.filter(d => d && d.doc_type === "lesson").slice(0, limit);
 }
 
 /**
@@ -272,8 +263,11 @@ function renderBrief({ task, topic, lanes, blast, generatedAt }) {
   lines.push(`- **Keywords:** ${topic.keywords.length ? topic.keywords.slice(0, 12).join(", ") : "_(none)_"}`);
   lines.push("");
 
-  // Governing docs = unique union of A, B, C, D, ordered by id
-  const governing = dedupSortById([...lanes.A, ...lanes.B, ...lanes.C, ...lanes.D]);
+  // Governing docs = the deduped union hoisted by generate(); fall back to
+  // recomputing if a caller invokes renderBrief without it (defensive — keeps
+  // the renderer self-sufficient for tests that build `lanes` directly).
+  const governing = lanes.governingUnion
+    || dedupSortById([...lanes.A, ...lanes.B, ...lanes.C, ...lanes.D]);
 
   // Per-doc lane attribution: A wins on tie, then B, C, D. Build once (O(n))
   // instead of running 3 Array.find probes per governing doc.
@@ -306,12 +300,12 @@ function renderBrief({ task, topic, lanes, blast, generatedAt }) {
 
   lines.push("## Related Operational Lessons");
   if (lanes.F.length === 0) {
-    lines.push("_No related lessons in the playbook._");
+    lines.push("_No related lessons indexed for this topic._");
   } else {
     for (const l of lanes.F.slice(0, 8)) {
       const id = l.id || "LES-?";
-      const lesson = l.lesson || l.summary || l.text || "";
-      lines.push(`- [${id}] ${lesson}`);
+      const text = l.title || l.summary || "";
+      lines.push(`- [${id}] ${text}`);
     }
   }
   lines.push("");
@@ -397,12 +391,15 @@ function generate(taskText, opts) {
   const C = laneC(topic);
   const D = laneD(dedupSortById([...A, ...B, ...C]), opts.depth || 2);
   const E = laneE(topic);
-  const F = laneF(topic);
+  // Hoist the deduped union once: laneF filters it for lessons, renderBrief reuses
+  // it for the governing docs section. Avoids two separate dedupSortById passes.
+  const governingUnion = dedupSortById([...A, ...B, ...C, ...D]);
+  const F = laneF(governingUnion);
 
   // Blast radius
   const blast = blastRadius(topic);
 
-  const lanes = { A, B, C, D, E, F };
+  const lanes = { A, B, C, D, E, F, governingUnion };
   const generatedAt = new Date().toISOString();
   const brief = renderBrief({ task: taskText, topic, lanes, blast, generatedAt });
 

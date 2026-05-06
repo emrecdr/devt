@@ -99,9 +99,7 @@ agents:
 
   curator:
     skills:
-      - playbook-curation
-      - semantic-search
-      - memory-compaction
+      - memory-curation
       - autoskill
 
 workflows:
@@ -109,7 +107,6 @@ workflows:
     skills:
       - complexity-assessment
       - codebase-scan
-      - semantic-search
   create-plan:
     skills:
       - codebase-scan
