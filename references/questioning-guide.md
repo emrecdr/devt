@@ -26,6 +26,27 @@ Don't interrogate. Collaborate. Don't follow a script. Follow the thread.
 
 ---
 
+## Before You Ask
+
+Every question costs the user time. Before asking, ask yourself: **can this be answered by reading the codebase?** If yes — `grep`, `Read`, or invoke `memory query` instead. Only ask about decisions that genuinely require user judgment (preferences, constraints not in the code, domain choices, scope boundaries).
+
+**Examples — DON'T ask:**
+- "What's the existing test framework?" → grep `package.json` / `pyproject.toml`
+- "Is there an existing `X` function?" → grep
+- "What do other modules do here?" → Read adjacent files
+- "Which doc types does the memory layer support?" → Read `bin/modules/memory.cjs::DOC_TYPES`
+- "What's the current test count?" → run smoke
+
+**Examples — DO ask:**
+- "Should this be visible to all users or admin-only?"
+- "Do you want backward compatibility with existing data?"
+- "Which of these 2 valid approaches matches your team's intent?"
+- "Is this a hard requirement or a nice-to-have?"
+
+A question the codebase could have answered is a question that wasted a turn.
+
+---
+
 ## How to Question
 
 **Start open.** Let them dump their mental model. Don't interrupt with structure.
@@ -66,7 +87,39 @@ Use as inspiration, not a checklist. Pick what's relevant.
 
 ---
 
+## Walk the Decision Tree
+
+When multiple gray areas exist, they often have dependencies — the answer to one constrains the options for another. Map them mentally before asking:
+
+1. **Identify root decisions** — the choices that cascade into others (e.g., "is this a CLI tool or a daemon?" gates almost everything else).
+2. **Walk depth-first** — resolve roots first, then their dependents.
+3. **Cut subtrees** — if a root answer eliminates a branch entirely, don't ask the dependents in that branch.
+
+This prevents contradictions where Q3's answer invalidates Q1's framing. It also keeps the user's cognitive load minimal — they're never asked about a sub-branch that won't apply.
+
+**Example:** A task "add caching to the API" has these gray areas:
+- (root) In-memory vs distributed cache?
+- (dependent on root=in-memory) LRU or TTL eviction?
+- (dependent on root=distributed) Redis or Memcached?
+- (independent) Cache invalidation on writes?
+
+Ask the root first. The answer cuts one of the two dependent branches entirely.
+
+---
+
 ## Using AskUserQuestion
+
+### One at a Time
+
+AskUserQuestion supports 1-4 questions per call. **Use one.** Each answer reframes the next question's options dynamically; batched questions get stale (Q2's options may not make sense after Q1's answer changes the context). Sequencing is itself a feature — it lets you adapt.
+
+**Exception:** when 2-4 questions are genuinely independent (no dependency between them), batching is fine. When in doubt, ask one at a time.
+
+### Recommendation Required
+
+Every option must carry validated reasoning in its `description` — concrete why grounded in evidence (codebase patterns, prior conversation context, trade-off analysis, risk assessment), not bare preference. Mark the recommended option with "(Recommended)" in the label and place it FIRST in the options array.
+
+### Options
 
 **Good options:**
 - Interpretations of what they might mean

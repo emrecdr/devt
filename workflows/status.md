@@ -62,6 +62,12 @@ Also read `.devt/state/continue-here.md` if it exists for human-readable summary
 
 ### If no active workflow:
 
+Read the deferred-task counts so the report can flag queued work:
+
+```bash
+DEFER_COUNTS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred count 2>/dev/null)
+```
+
 Report:
 
 ```
@@ -69,6 +75,13 @@ No active workflow.
 
 Use /devt:workflow or /devt:implement to start a new task.
 Use /devt:fast for trivial changes (3 or fewer files).
+```
+
+If `DEFER_COUNTS.open > 0`, append:
+
+```
+Deferred queue: {open} open, {closed} closed (total {total}).
+Use /devt:defer list to review, or /devt:next to pick one up.
 ```
 
 If stopped_at exists from a previous session:
@@ -106,8 +119,12 @@ Artifacts:
 
 Pre-Flight Brief: {FRESH | STALE | MISSING}  (generated {timestamp})
 
+Deferred queue: {open} open  (use /devt:defer list to review)
+
 Next: {description of what comes next}
 ```
+
+**Deferred queue inclusion** (v0.29.0+): always include the line if `deferred count` reports `open > 0`. Suppress when `open === 0` to avoid noise. The queue persists across `/devt:cancel-workflow`, so a long-running deferred backlog stays visible in every status check.
 
 **Pre-Flight Brief inclusion** (Phase 4 v0.19.0+): if `.devt/state/preflight-brief.md` exists, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight status` to get its FRESH/STALE/MISSING status + generated_at, and surface that line in the status output. STALE is a soft warning — suggest re-running `/devt:preflight` if the workflow's scope feels different from the Brief's task.
 

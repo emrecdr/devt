@@ -251,7 +251,7 @@ function blastRadius(topic) {
 /**
  * Render the markdown Brief from lane outputs.
  */
-function renderBrief({ task, topic, lanes, blast, generatedAt }) {
+function renderBrief({ task, topic, lanes, governing, blast, generatedAt }) {
   const lines = [];
   lines.push(`# Pre-Flight Brief: ${task || "(unspecified task)"}`);
   lines.push("");
@@ -263,11 +263,11 @@ function renderBrief({ task, topic, lanes, blast, generatedAt }) {
   lines.push(`- **Keywords:** ${topic.keywords.length ? topic.keywords.slice(0, 12).join(", ") : "_(none)_"}`);
   lines.push("");
 
-  // Governing docs = the deduped union hoisted by generate(); fall back to
-  // recomputing if a caller invokes renderBrief without it (defensive — keeps
-  // the renderer self-sufficient for tests that build `lanes` directly).
-  const governing = lanes.governingUnion
-    || dedupSortById([...lanes.A, ...lanes.B, ...lanes.C, ...lanes.D]);
+  // Caller passes the deduped union directly. Defensive fallback for tests
+  // that build `lanes` without pre-deduping — keeps renderer self-sufficient.
+  if (!governing) {
+    governing = dedupSortById([...lanes.A, ...lanes.B, ...lanes.C, ...lanes.D]);
+  }
 
   // Per-doc lane attribution: A wins on tie, then B, C, D. Build once (O(n))
   // instead of running 3 Array.find probes per governing doc.
@@ -399,9 +399,9 @@ function generate(taskText, opts) {
   // Blast radius
   const blast = blastRadius(topic);
 
-  const lanes = { A, B, C, D, E, F, governingUnion };
+  const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
-  const brief = renderBrief({ task: taskText, topic, lanes, blast, generatedAt });
+  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, blast, generatedAt });
 
   // Write atomically to .devt/state/preflight-brief.md
   const root = findProjectRoot();
@@ -416,7 +416,7 @@ function generate(taskText, opts) {
     counts: {
       lane_a: A.length, lane_b: B.length, lane_c: C.length,
       lane_d: D.length, lane_e: E.length, lane_f: F.length,
-      governing: new Set([...A, ...B, ...C, ...D].map(d => d.id)).size,
+      governing: governingUnion.length,
     },
     blast: {
       effect_size: blast.effect_size,

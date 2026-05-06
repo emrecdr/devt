@@ -85,6 +85,12 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "deferred": {
+        // deferred subcommand — DEF-NNN TODO tracker at .devt/state/deferred.md (v0.29.0+)
+        const code = require("./modules/deferred.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "token-report": {
         // token-report — aggregate Claude Code session token usage (v0.20.0+)
         const code = require("./modules/token-report.cjs").run(subcommand, args.slice(2));
@@ -154,6 +160,14 @@ Commands:
   memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
   memory suggest            Run discovery: claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
+  deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md (v0.29.0+)
+                            [--context="..."] [--tags=a,b,c] [--by=<agent>]
+                            Survives /devt:cancel-workflow (reset-exempted)
+  deferred list             List deferred items [--status=open|closed] [--tag=X] [--limit=N]
+  deferred get <DEF-ID>     Fetch a single deferred item
+  deferred close <DEF-ID>   Mark deferred item as closed [--by=<agent>]
+  deferred reopen <DEF-ID>  Reopen a closed deferred item
+  deferred count            Counts: {open, closed, total}
   graphify status           Probe whether Graphify is enabled + binary present + graph.json exists
   graphify freshness        Compare graph.json built_at_commit to current HEAD
   graphify warm-cache       Return preferred warm-cache path (wiki/index.md OR GRAPH_REPORT.md)

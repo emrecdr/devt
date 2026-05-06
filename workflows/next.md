@@ -195,6 +195,32 @@ Found uncommitted changes ({N} files). Ship them?
 ```
 Ask: "Create PR?" → if yes, execute `/devt:ship`.
 
+### Idle, deferred queue has open items (v0.29.0+)
+Fetch the top open items in a single call (no separate `count` invocation —
+presence is implied by the list being non-empty):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred list --status=open --limit=4
+```
+
+If the array is empty, fall through to "Nothing detected" below.
+Otherwise, present via AskUserQuestion (one question, 2-4 options):
+
+```yaml
+question: "No active workflow. {N} deferred items waiting. Pick one to work on?"
+header: "Deferred queue"
+multiSelect: false
+options:
+  - label: "Start: {DEF-NNN-1 title}"
+    description: "Captured {captured_at_relative} by {captured_by}. Tags: {tags}. Context: {context}"
+  - label: "Start: {DEF-NNN-2 title}"
+    description: "..."
+  - label: "Skip — show me everything"
+    description: "Run /devt:defer list to see the full queue without starting work."
+```
+
+On a "Start: DEF-NNN" pick, run `/devt:workflow "{title from DEF-NNN}"` and on workflow completion, prompt to close DEF-NNN. On "Skip", invoke `/devt:defer list`.
+
 ### Nothing detected
 ```
 Clean slate. Use /devt:workflow to start building.

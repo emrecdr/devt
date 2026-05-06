@@ -543,6 +543,69 @@ fi
 cd "$SAVED2"
 rm -rf "$MEMTMP2"
 
+# v0.29.0 — Deferred-task tracker (.devt/state/deferred.md, DEF-NNN, reset-exempt).
+echo "== Deferred-task tracker (v0.29.0) =="
+DEFTMP=$(mktemp -d)
+mkdir -p "$DEFTMP/.git"
+SAVED_DEF=$(pwd)
+cd "$DEFTMP"
+
+# Add: assigns DEF-NNN sequentially
+DEF1_OUT=$(node "$CLI" deferred add "First deferred item" --tags=security,api --by=user 2>/dev/null)
+DEF1_ID=$(echo "$DEF1_OUT" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(0,'utf8')).id)")
+DEF2_OUT=$(node "$CLI" deferred add "Second deferred item" --tags=refactor 2>/dev/null)
+DEF2_ID=$(echo "$DEF2_OUT" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(0,'utf8')).id)")
+if [[ "$DEF1_ID" == "DEF-001" && "$DEF2_ID" == "DEF-002" ]]; then
+  pass "deferred add: assigns DEF-NNN ids sequentially (DEF-001, DEF-002)"
+else
+  fail "deferred add: expected DEF-001/DEF-002, got $DEF1_ID/$DEF2_ID"
+fi
+
+# List: returns both items
+DEF_LIST_COUNT=$(node "$CLI" deferred list 2>/dev/null | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).length))")
+if [[ "$DEF_LIST_COUNT" == "2" ]]; then
+  pass "deferred list: returns 2 items"
+else
+  fail "deferred list: expected 2 items, got $DEF_LIST_COUNT"
+fi
+
+# Close: flips status, sets closed_at + closed_by
+DEF_CLOSE_OUT=$(node "$CLI" deferred close DEF-001 --by=programmer 2>/dev/null)
+DEF_CLOSE_OK=$(echo "$DEF_CLOSE_OUT" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.status==='closed'&&!!d.closed_at&&!!d.closed_by?'yes':'no')")
+if [[ "$DEF_CLOSE_OK" == "yes" ]]; then
+  pass "deferred close: status=closed, closed_at + closed_by set"
+else
+  fail "deferred close: expected closed status with metadata, got $DEF_CLOSE_OUT"
+fi
+
+# Count: open=1, closed=1, total=2
+DEF_COUNT=$(node "$CLI" deferred count 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.open+'/'+d.closed+'/'+d.total)")
+if [[ "$DEF_COUNT" == "1/1/2" ]]; then
+  pass "deferred count: {open:1, closed:1, total:2}"
+else
+  fail "deferred count: expected 1/1/2, got $DEF_COUNT"
+fi
+
+# Reset exemption: state reset must NOT wipe deferred.md
+node "$CLI" state update phase=test >/dev/null 2>&1
+node "$CLI" state reset >/dev/null 2>&1
+if [ -f .devt/state/deferred.md ] && grep -q "DEF-001" .devt/state/deferred.md; then
+  pass "state reset preserves deferred.md (DEF-001 still present after reset)"
+else
+  fail "state reset wiped deferred.md or its contents"
+fi
+
+# Invalid id rejected with exit 2
+DEF_INVALID_OUT=$(node "$CLI" deferred get FOO-001 2>&1 || true)
+if echo "$DEF_INVALID_OUT" | grep -q "invalid id"; then
+  pass "deferred get rejects invalid DEF-NNN ids"
+else
+  fail "deferred get accepted invalid id: $DEF_INVALID_OUT"
+fi
+
+cd "$SAVED_DEF"
+rm -rf "$DEFTMP"
+
 # Phase 2 file presence (use $ROOT — script's cwd is the smoke-test tmp dir)
 [ -f "$ROOT/bin/modules/graphify.cjs" ] && pass "bin/modules/graphify.cjs exists" || fail "bin/modules/graphify.cjs missing"
 [ -f "$ROOT/bin/modules/discovery.cjs" ] && pass "bin/modules/discovery.cjs exists" || fail "bin/modules/discovery.cjs missing"
@@ -786,6 +849,18 @@ if [ -f "$ROOT/docs/MEMORY.md" ]; then
       pass "docs/MEMORY.md has '$section' section"
     else
       fail "docs/MEMORY.md missing '$section' section"
+    fi
+  done
+fi
+
+# v0.29.0+ — questioning-guide gained codebase-first, decision-tree, and one-at-a-time sections.
+# Lightweight presence check; protects against accidental deletion during future edits.
+if [ -f "$ROOT/references/questioning-guide.md" ]; then
+  for section in "Before You Ask" "Walk the Decision Tree" "One at a Time"; do
+    if grep -q "$section" "$ROOT/references/questioning-guide.md"; then
+      pass "questioning-guide.md has '$section' section"
+    else
+      fail "questioning-guide.md missing '$section' section"
     fi
   done
 fi

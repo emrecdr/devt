@@ -468,6 +468,19 @@ function updateState(keyValues) {
   }
 }
 
+// Files in .devt/state/ that survive `state reset` / `/devt:cancel-workflow`.
+// Most state is per-workflow ephemeral, but some artifacts span sessions —
+// e.g. deferred.md (v0.29.0+) is the cross-workflow TODO queue and must NOT
+// disappear when the user cancels an unrelated active workflow.
+//
+// Filenames imported from their owning module where possible, so renaming the
+// canonical file in one place doesn't desync the exemption list.
+const { FILE_REL: DEFERRED_FILE_REL } = require("./deferred.cjs");
+const RESET_EXEMPT = new Set([
+  ".lock",                              // active locking — never delete
+  path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
+]);
+
 function resetState() {
   const dir = getStateDir();
   if (!fs.existsSync(dir)) {
@@ -477,7 +490,7 @@ function resetState() {
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name === ".lock") continue; // Don't remove our own lock
+      if (RESET_EXEMPT.has(entry.name)) continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         fs.rmSync(fullPath, { recursive: true, force: true });

@@ -297,6 +297,7 @@ Configuration merges in 3 layers (later overrides earlier):
 | `/devt:forensics`       | Post-mortem investigation of failed or stuck workflows           |
 | `/devt:cancel-workflow` | Abort the currently active workflow and reset state              |
 | `/devt:note`            | Zero-friction idea capture -- save, list, or promote to task     |
+| `/devt:defer`           | Capture a deferred TODO (DEF-NNN) at `.devt/state/deferred.md` -- survives `cancel-workflow` (v0.29.0+) |
 | `/devt:health`          | Diagnose plugin health -- checks config, state, hooks. `--repair` flag |
 | `/devt:session-report`  | Post-session summary -- commits, files changed, decisions       |
 | `/devt:update`          | Check for and install plugin updates from GitHub                 |
@@ -318,7 +319,7 @@ Configuration merges in 3 layers (later overrides earlier):
 | `/devt:retro`       | Extract lessons learned into persistent memory                                        |
 | `/devt:arch-health` | Architecture health scan with baseline diffing                                        |
 | `/devt:autoskill`   | Propose skill and agent updates based on observed patterns                            |
-| `/devt:memory`      | Permanent ADR/Concept/Flow/REJ knowledge layer (v0.16.0+) — multi-root via `memory.paths` (v0.22.0+) |
+| `/devt:memory`      | Permanent ADR/CON/FLOW/REJ/LES knowledge layer (v0.16.0+, 5 doc types since v0.28.0) — multi-root via `memory.paths` (v0.22.0+); `query --doc-type=<type>` filter (v0.28.0+) |
 | `/devt:preflight`   | Generate Topic Pre-Flight Brief (v0.18.0+) — auto-fired by every dev workflow at context_init |
 
 ## The Memory Layer

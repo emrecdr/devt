@@ -41,7 +41,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCR
 
 The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — surfacing existing ADRs/Concepts/REJ tombstones for the topic. This is especially load-bearing for `/devt:clarify`: gray areas that match an active REJ tombstone do NOT need to be re-clarified — the team already decided. The Brief at `.devt/state/preflight-brief.md` is the first thing the agent should consult before listing gray areas.
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer.
+Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer. **Critical sections** (v0.29.0+):
+- "Before You Ask" — grep/Read the codebase before any question; only ask about decisions requiring user judgment
+- "Walk the Decision Tree" — when multiple gray areas exist, resolve roots before dependents and cut subtrees on root answers
+- "One at a Time" — AskUserQuestion supports up to 4 questions per call; use ONE unless they are genuinely independent
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — structured probes for discovering domain unknowns, constraints, and edge cases. Use selectively based on the task's domain complexity.
 
