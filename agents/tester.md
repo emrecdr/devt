@@ -11,6 +11,7 @@ description: |
 tools: Read, Write, Edit, Bash, Glob, Grep
 skills:
   - devt:memory-pre-flight
+  - devt:tdd-patterns
 ---
 
 <role>

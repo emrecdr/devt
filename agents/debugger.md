@@ -11,6 +11,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 memory: project
 skills:
   - devt:memory-pre-flight
+  - devt:codebase-scan
 ---
 
 <role>

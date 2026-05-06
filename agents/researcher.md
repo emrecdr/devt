@@ -11,6 +11,7 @@ description: |
 tools: Read, Bash, Glob, Grep
 skills:
   - devt:memory-pre-flight
+  - devt:codebase-scan
 ---
 
 <role>
