@@ -454,6 +454,17 @@ function run(subcommand, args) {
   }
 }
 
+// Config-independent binary probe used during setup/health before .devt/config.json
+// exists. Returns true when `graphify --help` exits 0 within the timeout.
+function probeBinary(command = "graphify", timeoutMs = 1500) {
+  try {
+    const probe = require("child_process").spawnSync(command, ["--help"], { timeout: timeoutMs, stdio: "ignore" });
+    return Boolean(probe && probe.status === 0);
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   run,
   status,
@@ -466,4 +477,5 @@ module.exports = {
   shortestPath,
   blastRadius,
   getGraphifyOutDir,
+  probeBinary,
 };

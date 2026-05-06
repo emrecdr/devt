@@ -456,7 +456,7 @@ Optional `.devt/config.json` at project root configures plugin behavior. Global 
 | `agent_skills` | Per-agent skill list overrides | see `skill-index.yaml` |
 | `memory.paths` | Multi-root memory roots (last-wins precedence) | project-local only |
 | `memory.preflight_mode` | `off` / `warn` / `block` | `block` |
-| `graphify.enabled` | Boolean | `false` (opt-in) |
+| `graphify.enabled` | Boolean | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) |
 | `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
@@ -541,7 +541,7 @@ devt/
     devt-memory-mcp.cjs  Vendored read-only MCP server (10 tools, JSON-RPC stdio)
     modules/             init, state, config, model-profiles, setup, memory, preflight,
                          discovery, graphify, deferred, mcp-stats, token-report,
-                         security, health, weekly-report, update, cli-args
+                         security, health, weekly-report, update, cli-args, io
   commands/              Slash command entry points (32 files)
   workflows/             Orchestration files (31 files)
   agents/                Agent definitions (13 files)

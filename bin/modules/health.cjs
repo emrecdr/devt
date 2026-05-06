@@ -373,11 +373,8 @@ function runChecks(pluginRoot) {
         registered = !!(result.ok && result.value?.mcpServers?.graphify);
       } catch { /* unreadable .mcp.json — treat as unregistered */ }
     }
-    if (!registered) {
-      const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
-      if (probe && probe.status === 0) {
-        add("GRAPHIFY_MCP_UNREGISTERED", null, { binary_on_path: true, mcp_json_exists: fs.existsSync(mcpPath) });
-      }
+    if (!registered && require("./graphify.cjs").probeBinary()) {
+      add("GRAPHIFY_MCP_UNREGISTERED", null, { binary_on_path: true, mcp_json_exists: fs.existsSync(mcpPath) });
     }
   } catch { /* swallow */ }
 

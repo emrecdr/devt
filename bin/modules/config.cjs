@@ -12,7 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { safeJsonParse } = require("./security.cjs");
+const { safeJsonParse, maskSecrets } = require("./security.cjs");
 const { atomicWriteJsonSync } = require("./io.cjs");
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -247,10 +247,38 @@ function setConfig(key, value) {
   return { ok: true, path: projectPath, key, value };
 }
 
+// Walk the merged config by dot-notation path. Returns the schema default
+// when the path is absent in user/global layers but present in DEFAULTS,
+// matching the symmetry with `setConfig` (which already supports dot paths).
+function getByPath(merged, dotPath) {
+  if (!dotPath) return merged;
+  const segments = dotPath.split(".");
+  for (const segment of segments) {
+    if (FORBIDDEN_KEYS.has(segment)) throw new Error("Forbidden key segment: " + segment);
+  }
+  let cursor = merged;
+  for (const segment of segments) {
+    if (cursor === null || cursor === undefined || typeof cursor !== "object") return undefined;
+    // nosemgrep — segment validated against FORBIDDEN_KEYS above; own-prop check refuses prototype-chain reads.
+    if (!Object.prototype.hasOwnProperty.call(cursor, segment)) return undefined;
+    // nosemgrep — see hasOwnProperty guard immediately above.
+    cursor = cursor[segment];
+  }
+  return cursor;
+}
+
 function run(subcommand, args) {
   switch (subcommand) {
-    case "get":
-      return getMergedConfig();
+    case "get": {
+      const merged = getMergedConfig();
+      const masked = maskSecrets(merged);
+      const [keyArg] = args || [];
+      if (keyArg) {
+        const value = getByPath(masked, keyArg);
+        return value === undefined ? { key: keyArg, value: null, found: false } : { key: keyArg, value, found: true };
+      }
+      return masked;
+    }
     case "set": {
       const [keyValue] = args;
       if (!keyValue || !keyValue.includes("=")) {

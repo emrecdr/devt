@@ -356,14 +356,44 @@ fi
 cd "$SAVED_CWD"
 rm -rf "$MEMTMP"
 
+echo "== Shared utilities (security.cjs, io.cjs, graphify.cjs::probeBinary) =="
+
+# config get accepts dot-notation path arg; bare config get still returns full config.
+GET_PATH=$(node "$CLI" config get model_profile 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.found===true && typeof d.value==='string')")
+[ "$GET_PATH" = "true" ] && pass "config get supports dot-notation path arg" || fail "config get dot-notation broken (got: $GET_PATH)"
+
+# config get rejects __proto__-style traversal (CLI exits non-zero on rejection — swallow it)
+PROTO_REJECT=$( { node "$CLI" config get __proto__.constructor 2>&1 || true; } | node -e "
+let d; try { d = JSON.parse(require('fs').readFileSync(0,'utf8')); } catch { console.log('false'); process.exit(0); }
+console.log(typeof d.error==='string' && d.error.includes('Forbidden'))
+" 2>/dev/null)
+[ "$PROTO_REJECT" = "true" ] && pass "config get blocks prototype-chain traversal" || fail "config get __proto__ NOT blocked (got: $PROTO_REJECT)"
+
+# maskSecrets masks secret-shaped keys, leaves non-secret keys alone, and survives cycles.
+MASK_OK=$(node -e "
+const sec = require('${ROOT}/bin/modules/security.cjs');
+const out = sec.maskSecrets({ api_key: 'leak', auth_strategy: 'jwt', nested: { token: 'x' } });
+const cycle = { name: 'a' }; cycle.self = cycle;
+const cy = sec.maskSecrets(cycle);
+console.log(out.api_key==='***MASKED***' && out.auth_strategy==='jwt' && out.nested.token==='***MASKED***' && cy.self==='[Circular]')
+")
+[ "$MASK_OK" = "true" ] && pass "maskSecrets masks secrets, spares non-secrets, handles cycles" || fail "maskSecrets misbehaving (got: $MASK_OK)"
+
+# graphify.probeBinary callable, returns boolean
+PROBE_TYPE=$(node -e "console.log(typeof require('${ROOT}/bin/modules/graphify.cjs').probeBinary())")
+[ "$PROBE_TYPE" = "boolean" ] && pass "graphify.probeBinary returns boolean" || fail "graphify.probeBinary broken (got: $PROBE_TYPE)"
+
 echo "== Memory layer Phase 2 (v0.17.0) =="
 # Phase 2 surfaces: graphify wrapper, discovery engine, new memory subcommands,
 # memory-curation + graphify-helpers skills, memory-promote/memory-reject workflows.
 
-# graphify.cjs degrades cleanly when disabled (default)
+# graphify.cjs degrades cleanly when disabled. Force-disable here in case the
+# host machine has graphify on PATH — setup.cjs auto-enables in that case, so
+# we explicitly opt out for these disabled-mode assertions.
+node "$CLI" config set graphify.enabled=false >/dev/null 2>&1
 GRAPHIFY_STATE=$(node "$CLI" graphify status 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.state)")
 if [ "$GRAPHIFY_STATE" = "disabled" ]; then
-  pass "graphify.cjs reports state=disabled when graphify.enabled=false (default)"
+  pass "graphify.cjs reports state=disabled when graphify.enabled=false"
 else
   fail "graphify.cjs unexpected state: $GRAPHIFY_STATE"
 fi

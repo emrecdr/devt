@@ -13,7 +13,7 @@ const path = require("path");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
 const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
-const { sanitizeForPrompt, scanForInjection, validatePath } = require("./security.cjs");
+const { sanitizeForPrompt, scanForInjection, validatePath, maskSecrets } = require("./security.cjs");
 
 const REQUIRED_DEV_RULES = [
   "coding-standards.md",
@@ -93,7 +93,7 @@ function initWorkflow(task, pluginRoot) {
     task: sanitizedTask,
     project_root: projectRoot,
     plugin_root: pluginRoot,
-    config,
+    config: maskSecrets(config),
     models,
     state,
     workflow_lock: workflowLock,

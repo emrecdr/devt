@@ -21,6 +21,7 @@ const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
 const { validatePath, safeJsonParse } = require("./security.cjs");
 const { atomicWriteJsonSync } = require("./io.cjs");
+const { probeBinary: probeGraphifyBinary } = require("./graphify.cjs");
 
 /**
  * Reject filesystem entry names that could break out of their parent directory.
@@ -270,6 +271,13 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
       );
       finalConfig = deepMerge(finalConfig, { git: autoGit });
     }
+    // Auto-enable graphify when binary is on PATH at first setup. Without this,
+    // a fully-installed Graphify silently sits unused because the schema default
+    // is `enabled: false`. The /devt:init workflow has its own AskUserQuestion
+    // for the same — this branch covers CLI-direct setup.
+    if (probeGraphifyBinary()) {
+      finalConfig = deepMerge(finalConfig, { graphify: { enabled: true } });
+    }
     if (extraConfig) {
       finalConfig = deepMerge(finalConfig, extraConfig);
     }
@@ -352,19 +360,14 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
       },
     };
     // Probe Graphify
-    try {
-      const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
-      if (probe && probe.status === 0) {
-        mcpServers["graphify"] = {
-          command: "graphify",
-          args: ["mcp", "--project", "."],
-          env: {},
-        };
-      } else {
-        mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
-      }
-    } catch {
-      mcpHints.push("graphify probe failed — Graphify MCP not registered.");
+    if (probeGraphifyBinary()) {
+      mcpServers["graphify"] = {
+        command: "graphify",
+        args: ["mcp", "--project", "."],
+        env: {},
+      };
+    } else {
+      mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
     }
     // Probe claude-mem
     try {
@@ -423,13 +426,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     const postCommitPath = path.join(hooksDir, "post-commit");
     if (fs.existsSync(gitDir) && mode === "create" && !fs.existsSync(postCommitPath)) {
       // Detect Graphify
-      let graphifyAvailable = false;
-      try {
-        const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
-        graphifyAvailable = probe && probe.status === 0;
-      } catch { /* fall through */ }
-
-      if (graphifyAvailable) {
+      if (probeGraphifyBinary()) {
         results.warnings.push(
           "Graphify detected — for post-commit graph refresh + stale-symbol checks, run `graphify hook install` once. devt's lightweight post-commit-validate.sh is NOT installed (Graphify's own hook supersedes it)."
         );

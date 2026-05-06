@@ -264,6 +264,61 @@ function validateShellArg(value, label) {
   return value;
 }
 
+// Secret-shaped config keys masked before any value flows into agent context
+// or `config get` JSON output. Defense-in-depth: today's DEFAULTS holds nothing
+// secret, but `.devt/config.json` is user-extensible — a project that adds a
+// custom integration key (e.g., a CI token) gets masked-by-default rather than
+// leaked through every workflow init payload.
+//
+// Match shape: exact-case-insensitive name OR suffix `_<exact>`. Substring match
+// is intentionally NOT used to avoid false positives on legitimate keys (e.g.,
+// `auth_strategy` should not be masked just because it contains "auth").
+const SECRET_KEY_NAMES = new Set([
+  "secret", "password", "passwd", "token", "api_key", "apikey", "auth_token",
+  "access_token", "refresh_token", "private_key", "client_secret", "credentials",
+  "bearer", "authorization",
+]);
+const SECRET_KEY_SUFFIXES = ["_secret", "_password", "_token", "_key", "_apikey", "_credentials"];
+
+function isSecretKey(name) {
+  if (typeof name !== "string") return false;
+  const k = name.toLowerCase();
+  if (SECRET_KEY_NAMES.has(k)) return true;
+  return SECRET_KEY_SUFFIXES.some((suffix) => k.endsWith(suffix) && k !== suffix.slice(1));
+}
+
+// Walk a plain-data structure and mask values whose KEY name matches the
+// secret shape. Non-secret values pass through untouched. Arrays are walked but
+// their indices never mask (no key name to match against). Returns a new
+// object — never mutates the input.
+//
+// Empty/null/undefined secret values still mask: `api_key: ""` rendering as
+// `***MASKED***` tells an LLM "exists, masked, don't reason about it" rather
+// than "exists and is unset" (which would be a leakier signal).
+//
+// Cycle/depth guard: callers today only pass JSON-loaded data (no cycles, shallow
+// nesting). The WeakSet + depth cap make the helper safe for future callers
+// passing live objects without measurable cost on the JSON-loaded happy path.
+const MAX_MASK_DEPTH = 50;
+function maskSecrets(obj, _depth = 0, _seen = new WeakSet()) {
+  if (obj === null || typeof obj !== "object") return obj;
+  // Cycle/depth guard returns string sentinels rather than the live object so the
+  // result stays JSON-serializable (the whole point of the helper).
+  if (_seen.has(obj)) return "[Circular]";
+  if (_depth >= MAX_MASK_DEPTH) return "[MaxDepth]";
+  _seen.add(obj);
+  if (Array.isArray(obj)) return obj.map((item) => maskSecrets(item, _depth + 1, _seen));
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (isSecretKey(k) && v !== null && v !== undefined) {
+      out[k] = "***MASKED***";
+    } else {
+      out[k] = maskSecrets(v, _depth + 1, _seen);
+    }
+  }
+  return out;
+}
+
 module.exports = {
   validatePath,
   safeJsonParse,
@@ -275,4 +330,6 @@ module.exports = {
   decodeUrlEncoding,
   decodeHtmlEntities,
   INJECTION_PATTERNS,
+  isSecretKey,
+  maskSecrets,
 };

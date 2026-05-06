@@ -263,7 +263,7 @@ Before proposing any new candidate, the discovery engine consults `rejected/` fo
 | `memory.auto_index_on_change` | `true` | PostToolUse hook on `.devt/memory/**.md` edits |
 | `memory.mcp_telemetry` | `true` (v0.21.0+) | MCP tool-call trace JSONL log |
 | `memory.paths` | `null` (v0.22.0+) | List of memory roots to scan + index. `null` = single-root behavior. See "Multi-Root Memory" below. |
-| `graphify.enabled` | `false` | Opt-in AST symbol anchoring |
+| `graphify.enabled` | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) | Opt-in AST symbol anchoring |
 
 Override per-project in `.devt/config.json`:
 

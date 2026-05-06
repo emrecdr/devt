@@ -147,8 +147,7 @@ function validateSelectOnly(sql) {
 
 const TOOLS = {
   get_context_for_path: {
-    description:
-      "Return all active/candidate ADR/Concept/Flow docs that govern a given file path (glob-aware via affects_paths). Pass `path` as a project-relative path. Spans all configured memory roots (v0.22.0+) — shared org-wide ADRs are returned alongside project-local ones, with last-wins precedence on ID collisions.",
+    description: "Return active docs governing a file path (glob-matched via affects_paths). Spans all configured memory roots; rows include source_root.",
     inputSchema: {
       type: "object",
       required: ["path"],
@@ -164,8 +163,7 @@ const TOOLS = {
   },
 
   get_context_for_symbol: {
-    description:
-      "Return active/candidate docs whose affects_symbols includes the given symbol. Requires Graphify for AST validation; works without it (path-only) but symbol resolution is whatever was authored in the frontmatter.",
+    description: "Return active docs whose affects_symbols includes the given symbol.",
     inputSchema: {
       type: "object",
       required: ["symbol"],
@@ -181,8 +179,7 @@ const TOOLS = {
   },
 
   query_fts: {
-    description:
-      "Full-text search across the unified memory + lessons + rules + guardrails index. Tokens AND together with prefix matching.",
+    description: "Full-text search across the memory index. Tokens AND together with prefix matching.",
     inputSchema: {
       type: "object",
       required: ["terms"],
@@ -198,7 +195,7 @@ const TOOLS = {
   },
 
   get_doc: {
-    description: "Fetch a single doc by id (e.g. ADR-007, REJ-001) with full affects_paths/affects_symbols/links/search_keywords payload. Includes `source_root` (v0.22.0+) showing which configured memory root the doc came from — useful when `memory.paths` indexes both shared org-wide ADRs and project-local ones.",
+    description: "Fetch a single doc by id (e.g. ADR-007, REJ-001) with its full payload, including source_root.",
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -214,7 +211,7 @@ const TOOLS = {
   },
 
   list_active: {
-    description: "Enumerate all active docs, optionally filtered by domain. Returns docs from EVERY configured memory root (v0.22.0+); each row includes `source_root` so callers can distinguish shared org-wide ADRs from project-local ones.",
+    description: "List all active docs across configured memory roots; rows include source_root. Optionally filter by domain.",
     inputSchema: {
       type: "object",
       properties: { domain: { type: "string", description: "Optional domain filter, e.g. 'security'" } },
@@ -226,7 +223,7 @@ const TOOLS = {
   },
 
   list_rejected_keywords: {
-    description: "Return all REJ tombstones with their search_keywords. Used by autoskill and the discovery engine to suppress re-proposals.",
+    description: "Return REJ tombstones with their search_keywords (used to suppress re-proposals).",
     inputSchema: { type: "object", properties: {} },
     handler: () => {
       try { return { results: memory.listRejectedKeywords() || [] }; }
@@ -252,8 +249,7 @@ const TOOLS = {
   },
 
   preflight: {
-    description:
-      "Run the full Topic Pre-Flight: lanes A-F + blast radius for a free-form task description. Writes .devt/state/preflight-brief.md and returns lane counts + brief path.",
+    description: "Run the full Topic Pre-Flight (lanes A-F + blast radius). Writes .devt/state/preflight-brief.md and returns lane counts.",
     inputSchema: {
       type: "object",
       required: ["task"],
@@ -267,8 +263,7 @@ const TOOLS = {
   },
 
   blast_radius: {
-    description:
-      "Compute Graphify-derived blast radius for a list of subject symbols. Returns degraded payload when Graphify is disabled (effect_size: null, source: 'grep').",
+    description: "Compute Graphify blast radius for subject symbols. Falls back to grep when Graphify is disabled.",
     inputSchema: {
       type: "object",
       required: ["symbols"],
@@ -284,8 +279,7 @@ const TOOLS = {
   },
 
   query_index: {
-    description:
-      "Raw SQL escape hatch — SELECT-only. Multi-statement payloads, PRAGMA, ATTACH, DETACH, and any DML/DDL are rejected by a parser-level check; the DB is also opened read-only at the SQLite layer.",
+    description: "Raw SQL escape hatch — SELECT-only. Multi-statements, PRAGMA, ATTACH, and DML/DDL are rejected; DB opens read-only.",
     inputSchema: {
       type: "object",
       required: ["sql"],
