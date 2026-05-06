@@ -865,8 +865,8 @@ if [ -f "$ROOT/references/questioning-guide.md" ]; then
   done
 fi
 
-# README has Memory Layer section
-if grep -q "^## The Memory Layer" "$ROOT/README.md"; then
+# README has Memory Layer section (under Features in v0.29.0+ structure)
+if grep -q "memory layer" "$ROOT/README.md"; then
   pass "README.md has 'The Memory Layer' section"
 else
   fail "README.md missing Memory Layer section"
