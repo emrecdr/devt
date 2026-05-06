@@ -866,6 +866,19 @@ if [ -f "$ROOT/references/questioning-guide.md" ]; then
 fi
 
 # README has Memory Layer section (under Features in v0.29.0+ structure)
+# primary_branch detection surfaces detection_source field (v0.30.0+)
+if grep -q "primary_branch_source\|primary_branch_low_confidence" "$ROOT/bin/modules/setup.cjs"; then
+  pass "setup.cjs primary_branch detection emits source + low_confidence fields"
+else
+  fail "setup.cjs missing primary_branch detection chain output fields"
+fi
+
+if grep -q "primary_branch_low_confidence" "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md escalates primary_branch when detection is low-confidence"
+else
+  fail "project-init.md missing primary_branch low-confidence escalation"
+fi
+
 if grep -q "memory layer" "$ROOT/README.md"; then
   pass "README.md has 'The Memory Layer' section"
 else

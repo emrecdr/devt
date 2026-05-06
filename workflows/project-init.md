@@ -94,16 +94,38 @@ Store the selection as `$TEMPLATE`.
 
 Present auto-detected values as defaults. Only ask about fields that couldn't be auto-detected.
 
-**If git remote was detected**, show what was found:
+**If git remote was detected**, show what was found, including how `primary_branch` was resolved:
+
 ```
 Auto-detected from git remote:
   Provider: {provider}
   Workspace: {workspace}
   Repository: {slug}
-  Branch: {primary_branch}
+  Branch: {primary_branch}  (source: {primary_branch_source})
 ```
 
-Ask via AskUserQuestion:
+`primary_branch_source` reports the detection chain: `origin_head_symref` (canonical, set on git clone) > `init_default_branch` (local config) > `common_name_heuristic` (matched `development` / `develop` / `main` / `master` / `trunk` on origin) > `current_branch` (last resort — what's checked out right now).
+
+**Branch confidence escalation:** if `detected_git.primary_branch_low_confidence === true` (set when detection fell to `current_branch` AND the branch matches a feature-shape pattern like `feat/`, `fix/`, `chore/`, `wip/`, `task/`, `hotfix/`, `release/`), the auto-detected branch is almost certainly NOT the integration branch. In that case, escalate via a dedicated AskUserQuestion BEFORE the general git-config confirmation:
+
+```yaml
+question: "Detected `{primary_branch}` as your integration branch, but that looks like a feature branch. What's your team's actual integration branch (the one /devt:ship targets for PRs)?"
+header: "Branch"
+multiSelect: false
+options:
+  - label: "development (Recommended for many teams)"
+    description: "Common integration branch for teams using GitFlow or trunk-based development with a long-lived dev branch"
+  - label: "main"
+    description: "Single-trunk repos where main is the integration target"
+  - label: "master"
+    description: "Legacy default — repos that haven't migrated naming"
+  - label: "Use the detected `{primary_branch}` anyway"
+    description: "Override only if you're certain this branch is your integration target"
+```
+
+The user can pick "Other" to type any branch name. Whatever they choose replaces `primary_branch` in the config.
+
+Then ask the standard git-config confirmation:
 
 ```yaml
 question: "Is the auto-detected git configuration correct?"

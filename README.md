@@ -185,6 +185,81 @@ This scaffolds `.devt/rules/` with project-specific conventions and creates `.de
 - ✗ `"make it better"` — too vague
 - ✗ `"refactor everything"` — too broad
 
+### Reset / fresh setup in a project
+
+There is no `/devt:uninstall` command yet (deferred). For a fresh setup in a project, three options ordered by destructiveness:
+
+**A — Reinit (keeps memory + lessons + deferred queue):**
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/bin/devt-tools.cjs" setup --template <name> --mode reinit
+```
+
+Overwrites `.devt/rules/` and `.devt/config.json` from template. Does NOT touch `.devt/memory/` (ADR/CON/FLOW/REJ/LES) or `.devt/state/deferred.md`. Use this when you want fresh rules+config but to keep accumulated knowledge.
+
+**B — Project-local nuke (full `.devt/` reset):**
+
+```bash
+# Optional: backup first
+cp -r .devt .devt.bak.$(date +%Y%m%d) 2>/dev/null
+
+rm -rf .devt/
+/devt:init
+```
+
+Wipes everything under `.devt/` — config, rules, state, memory, lessons, deferred queue. Useful when project conventions changed dramatically.
+
+**C — Truly fresh (also clears scattered files devt installs at root):**
+
+`rm -rf .devt/` is NOT enough — devt also touches files outside `.devt/` per Claude Code spec requirements. For a truly clean state:
+
+```bash
+# In project root — destructive, run with care:
+rm -rf .devt/
+rm -f .mcp.json                              # project MCP server registry
+rm -rf .claude/agent-memory/devt-debugger    # debugger persistent memory
+# rm -f .claude/settings.json                # ONLY if you have no non-devt customizations
+
+# Strip devt-appended .gitignore lines (review the diff before committing):
+sed -i.bak '/^\.devt\//d; /^\.claude\/agent-memory\//d' .gitignore
+
+# Remove devt-installed git hook (only if it references devt or graphify):
+HOOK=.git/hooks/post-commit
+[ -f "$HOOK" ] && grep -q "devt\|CLAUDE_PLUGIN_ROOT" "$HOOK" && rm "$HOOK"
+
+# Optional: external integration caches
+rm -rf graphify-out/   # only if you don't want the Graphify cache
+rm -rf .claude-mem/    # only if you don't use claude-mem elsewhere
+
+/devt:init
+```
+
+**Why devt scatters files outside `.devt/`** — each scattered file lives where it does because of its integration partner's spec, not by choice:
+
+| File | Lives where it does because… |
+|---|---|
+| `.mcp.json` | Claude Code only auto-discovers MCP from `<repo-root>/.mcp.json` |
+| `.claude/settings.json` | Claude Code's spec for project settings |
+| `.claude/agent-memory/devt-debugger` | Claude Code's spec for `memory: project` agent persistence |
+| `.gitignore` entries | git's spec — entries must live in user-owned `.gitignore` |
+| `.git/hooks/post-commit` | git's spec — hooks live in `.git/hooks/`, not redirectable |
+
+### Uninstalling the devt plugin itself
+
+Different from project reset — this removes devt's own code:
+
+**Via marketplace:**
+```text
+/plugin uninstall devt
+```
+
+**Via git clone:**
+```bash
+rm -rf ~/.devt   # or wherever you cloned it
+```
+
+This wipes the plugin's own files but does NOT touch any project's `.devt/` directory — those are project-local config, owned by your repo.
+
 ---
 
 ## Use cases

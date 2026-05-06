@@ -4,6 +4,13 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/). The `[Unreleased]` section below stages changes for the next version — when bumping, rename it to `## [X.Y.Z] - YYYY-MM-DD` so the release workflow's changelog extractor (`scripts/extract-changelog.sh`) can find it.
 
+## [Unreleased]
+
+### Changed
+- **`primary_branch` auto-detection** (`bin/modules/setup.cjs::detectPrimaryBranch`): replaces the old single-shot `git rev-parse --abbrev-ref HEAD` with a 4-step fallback chain: (1) `git symbolic-ref refs/remotes/origin/HEAD --short` — canonical answer set on `git clone`; (2) `git config init.defaultBranch` — explicit user/local config; (3) common-name heuristic — matches `development` / `develop` / `main` / `master` / `trunk` against `origin/` refs; (4) current branch as last resort, flagged `primary_branch_low_confidence: true` when it matches a feature-shape pattern (`feat/`, `fix/`, `chore/`, `wip/`, `task/`, `hotfix/`, `release/`). The detection result also surfaces `primary_branch_source` so users can see why a particular branch was picked.
+- **`/devt:init` git-config escalation** (`workflows/project-init.md`): when `primary_branch_low_confidence === true`, the wizard now presents a dedicated AskUserQuestion before the standard git-config confirmation: "Detected `<X>` as your integration branch, but that looks like a feature branch. What's your team's actual integration branch?" with `development` / `main` / `master` / "use detected anyway" options. Closes the validated friction from greenfield-api onboarding where `feat/login-errors` was auto-detected instead of `development`.
+- Smoke gains 2 structural-presence assertions for the new detection chain + escalation prompt.
+
 ## [0.29.0] - 2026-05-06
 
 ### Changed

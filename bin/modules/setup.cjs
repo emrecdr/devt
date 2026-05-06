@@ -89,22 +89,79 @@ function detectGitRemote(projectRoot) {
       result.slug = match[2];
     }
 
-    try {
-      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd: projectRoot,
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["pipe", "pipe", "pipe"],
-      }).trim();
-      if (branch && branch !== "HEAD") result.primary_branch = branch;
-    } catch {
-      // Fall through
+    const detected = detectPrimaryBranch(projectRoot, execFileSync);
+    if (detected) {
+      result.primary_branch = detected.value;
+      if (detected.low_confidence) result.primary_branch_low_confidence = true;
+      if (detected.detection_source) result.primary_branch_source = detected.detection_source;
     }
 
     return result;
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the project's integration branch by walking a fallback chain.
+ * Returns { value, detection_source, low_confidence? }.
+ *
+ * Chain order:
+ *   1. origin/HEAD symref     — canonical answer (set on `git clone`, sometimes stale)
+ *   2. init.defaultBranch     — explicit user/local config
+ *   3. Common-name heuristic  — `development`, `develop`, `main`, `master`, `trunk` if present on origin
+ *   4. Current branch         — last-resort, marked low_confidence (callers should escalate)
+ */
+function detectPrimaryBranch(projectRoot, execFileSync) {
+  const tryCmd = (args) => {
+    try {
+      return execFileSync("git", args, {
+        cwd: projectRoot,
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+    } catch {
+      return "";
+    }
+  };
+
+  // 1. origin/HEAD symref — strip "origin/" prefix
+  const symref = tryCmd(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]);
+  if (symref) {
+    return { value: symref.replace(/^origin\//, ""), detection_source: "origin_head_symref" };
+  }
+
+  // 2. init.defaultBranch (locally-configured or globally-configured)
+  const initDefault = tryCmd(["config", "init.defaultBranch"]);
+  if (initDefault) {
+    return { value: initDefault, detection_source: "init_default_branch" };
+  }
+
+  // 3. Heuristic: common integration-branch names that exist on origin
+  const remoteList = tryCmd(["branch", "-r", "--format=%(refname:short)"]);
+  if (remoteList) {
+    const remoteSet = new Set(remoteList.split("\n").map(s => s.trim()).filter(Boolean));
+    for (const candidate of ["development", "develop", "main", "master", "trunk"]) {
+      if (remoteSet.has(`origin/${candidate}`)) {
+        return { value: candidate, detection_source: "common_name_heuristic" };
+      }
+    }
+  }
+
+  // 4. Last resort: current branch — flag as low-confidence so callers can escalate.
+  // A branch matching ^(feat|fix|chore|wip|task)/ is almost certainly NOT the integration branch.
+  const current = tryCmd(["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (current && current !== "HEAD") {
+    const featureShape = /^(feat|feature|fix|bug|chore|wip|task|hotfix|release)\b[\/-]/i;
+    return {
+      value: current,
+      detection_source: "current_branch",
+      low_confidence: featureShape.test(current),
+    };
+  }
+
+  return null;
 }
 
 function setupProject(templateName, pluginRoot, extraConfig, options) {
