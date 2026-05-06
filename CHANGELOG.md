@@ -4,6 +4,17 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/). The `[Unreleased]` section below stages changes for the next version — when bumping, rename it to `## [X.Y.Z] - YYYY-MM-DD` so the release workflow's changelog extractor (`scripts/extract-changelog.sh`) can find it.
 
+## [Unreleased]
+
+### Added
+- **All 8 dev agents now Graphify-first.** Pre-v0.26.0, only programmer / code-reviewer / verifier preloaded a skill that routes through the canonical `graphify-helpers` wrapper. The other 4 dev agents (architect, debugger, researcher, tester) preloaded only `devt:memory-pre-flight` — giving them the Pre-Flight Brief (pre-computed Graphify output) but no per-query routing during deep investigation. Their bodies explicitly used Grep/Glob for symbol traversal, dependency tracing, pattern discovery, and test-pattern lookup — exactly the workloads where Graphify cuts ~10× the token cost. Each agent now preloads the most-specific skill that already routes through Graphify-first with grep fallback:
+  - `architect` → `devt:graphify-helpers` (low-level wrapper for boundary inspection)
+  - `debugger` → `devt:codebase-scan` (caller traversal during root-cause)
+  - `researcher` → `devt:codebase-scan` (canonical pattern-discovery use case)
+  - `tester` → `devt:tdd-patterns` (find tests near subject via `graphify neighbors`)
+  - The added skills auto-degrade to grep when `graphify.enabled: false`, so no behavior changes for projects without Graphify.
+- **`prompt_graphify_hook` step in `/devt:init`** (`workflows/project-init.md`): when Graphify is detected on PATH but its post-commit hook isn't registered, the wizard now asks via AskUserQuestion whether to run `graphify hook install`. Without the hook, the graph cache drifts behind HEAD and Pre-Flight Briefs surface stale-symbol false alarms after every refactor. Pre-fix `setup.cjs` only pushed a `warnings[]` hint gated to `mode=create`, so users who installed Graphify *after* `/devt:init` never saw the prompt; the new step fires for both `mode=create` and `mode=update`. Best-effort: failures never fail the workflow. Skipped silently when graphify is absent or hook already installed. Smoke gains 1 assertion (239 total pass).
+
 ## [0.26.0] - 2026-05-06
 
 ### Added
