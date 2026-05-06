@@ -4,7 +4,7 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/). The `[Unreleased]` section below stages changes for the next version — when bumping, rename it to `## [X.Y.Z] - YYYY-MM-DD` so the release workflow's changelog extractor (`scripts/extract-changelog.sh`) can find it.
 
-## [Unreleased]
+## [0.27.0] - 2026-05-06
 
 ### Added
 - **All 8 dev agents now Graphify-first.** Pre-v0.26.0, only programmer / code-reviewer / verifier preloaded a skill that routes through the canonical `graphify-helpers` wrapper. The other 4 dev agents (architect, debugger, researcher, tester) preloaded only `devt:memory-pre-flight` — giving them the Pre-Flight Brief (pre-computed Graphify output) but no per-query routing during deep investigation. Their bodies explicitly used Grep/Glob for symbol traversal, dependency tracing, pattern discovery, and test-pattern lookup — exactly the workloads where Graphify cuts ~10× the token cost. Each agent now preloads the most-specific skill that already routes through Graphify-first with grep fallback:
