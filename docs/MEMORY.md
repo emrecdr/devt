@@ -1,7 +1,7 @@
 # The Memory Layer
 
 > Comprehensive guide to devt's three-layer knowledge persistence model.
-> Last updated for v0.25.0 (post-CCA-v21.0 gap-closure: SQL views + symbol NOCASE + self-link detection).
+> Last updated for v0.26.0 (CCA-v27 §2 Symbol Decay closure: stale-symbol detection in `memory validate` with Graphify circuit breaker; graph-staleness alert in Pre-Flight Brief; GRAPHIFY_MCP_UNREGISTERED drift detection; unconditional `harvest_observations` decouples cheap claude-mem harvest from gated curator review).
 
 devt persists structured knowledge across **three distinct layers**, each with a different lifetime, write authority, and consumption pattern. Understanding which layer to use for which fact is critical — putting an architectural decision in `.devt/state/` (ephemeral) or a transient debug note in `.devt/memory/` (permanent) is the most common authoring mistake.
 
@@ -247,7 +247,7 @@ The harvest step (which writes `_suggestions.md`) and the curator review step (w
 - **`harvest_observations`** — runs in every `dev-workflow`, `lesson-extraction`, and `quick-implement` finalize phase, regardless of complexity tier or `config.workflow.retro` flags. Cost is ~50ms when claude-mem is absent. Best-effort: harvest failures NEVER fail the workflow. This guarantees that a SIMPLE-tier workflow that skips retro+curator still buffers its observations into `_suggestions.md` for the next dev-workflow's curator to review.
 - **`curate`** — only runs when `complexity=COMPLEX` (or `/devt:retro` standalone). Dual-path: PLAYBOOK PATH (lessons.yaml → playbook) AND MEMORY-LAYER PATH (_suggestions.md → AskUserQuestion approval flow). Hard invariant: NEVER writes a permanent memory doc without explicit user approval.
 
-The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor (the bug behavior pre-Unreleased) cannot recur.
+The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor (the bug behavior pre-v0.26.0) cannot recur.
 
 ## Memory Maintenance Discipline
 
