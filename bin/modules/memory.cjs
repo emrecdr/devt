@@ -1265,8 +1265,11 @@ function validateSymbolsViaGraphify(docs) {
 
   const issues = [];
   const probeCache = new Map();
+  let consecutiveErrors = 0;
+  let aborted = false;
 
   for (const doc of docs) {
+    if (aborted) break;
     const fm = doc.frontmatter;
     if (!fm || !Array.isArray(fm.affects_symbols)) continue;
     for (const entry of fm.affects_symbols) {
@@ -1275,10 +1278,25 @@ function validateSymbolsViaGraphify(docs) {
 
       if (!probeCache.has(symbol)) {
         const r = graphify.queryGraph(symbol);
+        if (r && r.degraded) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) {
+            issues.push({
+              filePath: null,
+              severity: "warning",
+              category: "graphify-unreachable",
+              error: `Graphify queries failed ${consecutiveErrors}× consecutively — stale-symbol checks aborted (run \`graphify update .\`)`,
+            });
+            aborted = true;
+            break;
+          }
+          continue;
+        }
+        consecutiveErrors = 0;
         const count = Array.isArray(r && r.results) ? r.results.length : 0;
         probeCache.set(symbol, count > 0);
       }
-      if (!probeCache.get(symbol)) {
+      if (probeCache.has(symbol) && !probeCache.get(symbol)) {
         issues.push({
           filePath: doc.relativePath,
           severity: "warning",

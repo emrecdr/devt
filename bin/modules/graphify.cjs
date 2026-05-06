@@ -98,15 +98,18 @@ function freshness() {
   const s = status();
   if (s.state !== "ready") return { state: s.state, fresh: false, built_at: null, head: null };
 
+  // Read only the first 8KB to extract built_at_commit. graph.json is a top-level
+  // object emitted by graphify with built_at_commit near the start, and full JSON
+  // parse on a 50MB+ graph would dominate freshness() cost.
   let builtAt = null;
   try {
-    const raw = fs.readFileSync(s.graph_path, "utf8");
-    // 200MB cap — Graphify graph caches scale with codebase size; raise above default.
-    const result = safeJsonParse(raw, "graph cache", 200 * 1024 * 1024);
-    if (!result.ok) {
-      return { state: "ready", fresh: false, built_at: null, head: null, error: `graph.json unreadable: ${result.error}` };
-    }
-    builtAt = result.value.built_at_commit || null;
+    const fd = fs.openSync(s.graph_path, "r");
+    const buf = Buffer.alloc(8192);
+    const bytesRead = fs.readSync(fd, buf, 0, 8192, 0);
+    fs.closeSync(fd);
+    const head = buf.toString("utf8", 0, bytesRead);
+    const m = head.match(/"built_at_commit"\s*:\s*"([0-9a-fA-F]{4,64})"/);
+    if (m) builtAt = m[1];
   } catch {
     return { state: "ready", fresh: false, built_at: null, head: null, error: "graph.json unreadable" };
   }
