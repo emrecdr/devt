@@ -323,34 +323,172 @@ Configuration merges in 3 layers (later overrides earlier):
 
 ## The Memory Layer
 
-devt persists structured knowledge across **three distinct layers**, each with a different lifetime and write authority:
+### What we are building
+
+A **self-evolving knowledge graph** that bridges three sources of truth:
+
+1. **The code that exists** — what functions, classes, and modules actually live in the repo (Graphify AST)
+2. **The conversation happening now** — ephemeral observations captured mid-session (claude-mem ⚖️ decisions / 🔵 discoveries)
+3. **The permanent architectural rules of the project** — what we always do and what we said no to (Markdown + SQLite FTS5)
+
+The layer is **ground truth**: every dev workflow consults it before touching code, and curator-gated promotion ensures only validated knowledge lands.
+
+### Why this matters
+
+Standard AI coding is **amnesiac** — it forgets architectural decisions the moment the context window rolls over. The memory layer fixes three concrete failure modes:
+
+- **Deterministic retrieval** — the AI finds the *exact* rule that governs a file (`affects_paths` glob match + symbol AST anchor), not just something semantically similar.
+- **Proactive documentation** — the AI detects patterns mid-session, drafts its own ADRs/Concepts via `_suggestions.md`, and waits for your explicit approval before promoting them.
+- **Refactor safety** — when you rename `UserService` → `AccountService`, the AI knows exactly which ADRs are now stale (`memory validate` flags broken symbol bindings).
+
+### The four tools and why each was chosen
+
+| Tool | Role | Why this one |
+|------|------|--------------|
+| **Markdown** | The canonical truth | Human-readable, Git-tracked, diff-able. Every doc is `<id>-<slug>.md` with strict YAML frontmatter. |
+| **SQLite (FTS5)** | The machine index | Lets the AI run Multi-Lane queries — joining `affects_paths`, `affects_symbols`, and `links` simultaneously. Text search alone can't do that. Built-in `node:sqlite` (zero dependencies, regenerable from markdown). |
+| **Graphify** | Code reality (optional, AST) | Parses tree-sitter AST to bind docs to actual functions/classes — survives file renames. ADR symbol bindings carry `EXTRACTED`/`INFERRED`/`AMBIGUOUS` confidence. ~10× lower token cost on code-search ops. |
+| **claude-mem** | Session buffer (optional) | Catches ephemeral ⚖️/🔵 observations during the conversation before they get "smelted" into permanent ADRs by the curator. Prevents knowledge loss between context-window rollovers. |
+
+System stays fully functional without Graphify or claude-mem (grep fallback for the former, scratchpad-tag fallback for the latter). Both are opt-in.
+
+### Three layers, three lifetimes
 
 ```
 .devt/state/                    LAYER 1 — ephemeral (per-workflow)
 ├── decisions.md                    DEC-xxx — clarify/specify/research scratch
 ├── preflight-brief.md              Topic Pre-Flight Brief (auto-fired)
+├── scratchpad.md                   cross-agent handoff (#KNOWLEDGE-CANDIDATE)
 └── ...                             reset on /devt:cancel-workflow
 
 .devt/learning-playbook.md      LAYER 2 — permanent (operational lessons)
                                     LES-xxx — "when X fails, check Y first"
+                                    indexed via FTS5 at memory/semantic/lessons.db
 
 .devt/memory/                   LAYER 3 — permanent (architectural truth)
 ├── decisions/                      ADR-xxx — constitutional decisions
 ├── concepts/                       CON-xxx — durable mental models
-├── flows/                          FLOW-xxx — named sequences
-└── rejected/                       REJ-xxx — tombstones (we said no)
+├── flows/                          FLOW-xxx — named sequences (auth, deploy, etc.)
+├── rejected/                       REJ-xxx — tombstones (we said no, here's why)
+├── _suggestions.md                 discovery proposals (curator-only writes)
+└── index.db                        FTS5 unified index (gitignored, regenerable)
 ```
 
-**Two-Tier Pre-Flight Protocol** (v0.18.0+):
+### The four doc types
 
-- **Tier 1 (Topic, automatic)**: dev workflows auto-fire `/devt:preflight "<task>"` to write `.devt/state/preflight-brief.md` listing every governing ADR/Concept/Flow + REJ tombstones for the topic. All 8 dev agents read it first.
-- **Tier 2 (File, agent-driven)**: before each Edit/Write, agents append a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line to scratchpad.md. The PreToolUse `pre-flight-guard.sh` hook checks the line — `memory.preflight_mode: block` (v0.19.0+) denies otherwise.
+Each doc is markdown with strict YAML frontmatter. Every doc has `id`, `doc_type`, `status`, `confidence`, `title`, `summary`, `affects_paths`, `affects_symbols`, `links`, `created_at`. ID prefixes are enforced (`ADR-001`, `CON-042`, `FLOW-007`, `REJ-013`).
 
-**Vendored MCP server**: `bin/devt-memory-mcp.cjs` is registered in project `.mcp.json` (auto-scaffolded at `/devt:init`). Read-only, SELECT-only `query_index`, 10 helper tools — agents query memory via MCP rather than re-grepping markdown.
+| Type | Use for | Example |
+|------|---------|---------|
+| **ADR** (decision) | Constitutional rules — "we always do X, never Y" | "Auth uses HMAC-SHA256, never plain JWT" |
+| **CON** (concept) | Durable mental models — "this is what X means here" | "A 'session' in this app is a request chain bound by trace_id" |
+| **FLOW** (sequence) | Named multi-step processes — "the deploy flow is…" | "Production deploy: PR→smoke→canary→staged rollout→pagerduty hold" |
+| **REJ** (rejected) | Tombstones — "we considered X, here's why it's a no" | "Server-Sent Events: rejected (cors_workarounds, mobile_battery_drain)" |
 
-**Multi-root memory** (v0.22.0+): set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones. Last-wins precedence (project always overrides shared). Use case: `memory.paths: ["../engineering-adrs", ".devt/memory"]` → every ACME project inherits the org's architectural truth via git submodule or sibling clone. Conflicts are explicit (never silent), `source_root` traces provenance, curator writes always go project-local. See `docs/MEMORY.md`.
+Confidence values: `verified` > `explicit` > `inferred` > `observed` > `speculative`. Status values: `candidate` (awaiting curator) → `active` (in force) → `superseded` (replaced by another ADR) → `rejected` (no-go).
 
-**Graphify integration** (optional, `pip install graphifyy[mcp]`): when enabled, AST symbol anchoring + ~10× lower token cost on code-search ops. Setup wizard pitches it as "strongly recommended" but the system stays fully functional without it via grep fallback. Same for `claude-mem` (mid-session capture).
+### Two-Tier Pre-Flight Protocol (v0.18.0+)
+
+- **Tier 1 — Topic Brief (automatic)**: every dev workflow auto-fires `/devt:preflight "<task>"` at context_init. The 6-lane orchestrator (`bin/modules/preflight.cjs`) reads the topic and writes `.devt/state/preflight-brief.md`:
+  - Lane A — `affects_paths` glob match against changed files
+  - Lane B — FTS5 keyword expansion across title/summary
+  - Lane C — `affects_symbols` AST match (Graphify-anchored if enabled)
+  - Lane D — wiki-link transitive closure (depth 2) from A+B+C seeds
+  - Lane E — REJ tombstone overlap on `search_keywords`
+  - Lane F — relevant lessons from `learning-playbook.md`
+
+  All 8 dev agents preload the `devt:memory-pre-flight` skill and read the Brief first.
+
+- **Tier 2 — File guard (PreToolUse)**: before each Edit/Write/NotebookEdit, agents append `PREFLIGHT <ts> edit <path> :: <governing IDs>` to `.devt/state/scratchpad.md`. The `hooks/pre-flight-guard.sh` PreToolUse hook checks the line. `memory.preflight_mode` controls behavior: `off` (no-op) / `warn` (advisory stderr) / `block` (denies the edit) — **default `block` in v0.19.0+**.
+
+The PostToolUse hook `hooks/memory-auto-index.sh` rebuilds the FTS5 index whenever any `.devt/memory/**.md` file is touched, so queries always reflect the latest state.
+
+### Vendored MCP server (10 tools, read-only)
+
+`bin/devt-memory-mcp.cjs` is auto-registered in project `.mcp.json` at `/devt:init`. JSON-RPC 2.0 stdio, zero external dependencies, three layers of defense (`OPEN_READONLY` + SELECT-only validator + multi-statement guard) on the `query_index` SQL escape hatch. Tools:
+
+| Tool | Purpose |
+|------|---------|
+| `get_context_for_path(path)` | Governing ADRs/CONs/FLOWs for a file |
+| `get_context_for_symbol(symbol)` | Docs whose `affects_symbols` includes the symbol |
+| `query_fts(terms, limit?)` | FTS5 unified search across all doc_class values |
+| `get_doc(id)` | Fetch a single doc with affects/links/keywords |
+| `list_active(domain?)` | Enumerate `status: active` docs |
+| `list_rejected_keywords()` | REJ tombstones with their `search_keywords` |
+| `list_links(doc_id, depth?)` | Transitive link expansion (depth-1 default) |
+| `preflight(task)` | Full 6-lane Brief, same as CLI |
+| `blast_radius(symbols)` | Graphify-derived dependents (degraded payload when disabled) |
+| `query_index(sql)` | SELECT-only escape hatch for arbitrary FTS5 queries |
+
+Per-call telemetry (v0.21.0+) lands in `.devt/memory/_mcp-trace.jsonl` (privacy-safe — sizes + 12-char fingerprints, no raw args). Aggregate via `node bin/devt-tools.cjs mcp-stats`.
+
+### SQL views for triage (v0.25.0+)
+
+Four convenience views accessible through `query_index`:
+
+| View | What it surfaces | When to query |
+|------|-----------------|---------------|
+| `pending_review` | All `status: candidate` docs sorted by confidence (verified→speculative) then recency | Daily triage: which candidates need a curator pass? |
+| `speculative_candidates` | All `confidence: speculative` docs regardless of status | Audit: what low-confidence claims exist in the system? |
+| `constraint_chains` | Per-doc link degree (`outgoing_links` + `incoming_links`) | Spot hub docs (high incoming) and isolated leaves (zero outgoing) |
+| `stale_speculative` | Speculative candidates >30 days old (uses `created_at` as age signal) | Cleanup: candidates that have sat untouched too long — promote, demote, or reject |
+
+### Discovery → Curator promotion (v0.17.0+)
+
+The curator agent is the **only** writer to `.devt/memory/`. Discovery (`bin/modules/discovery.cjs`) harvests three signal sources into `_suggestions.md` (never permanent files):
+
+1. **claude-mem ⚖️/🔵** observations (decision and discovery tagged entries)
+2. **`#KNOWLEDGE-CANDIDATE`** inline tags in `scratchpad.md`
+3. **DEC-xxx** entries from `decisions.md`
+
+Each candidate goes through five filters (relevance, novelty, dedup against existing memory, REJ tombstone overlap, schema-fit). Survivors are presented to the user via `AskUserQuestion` with the **full original reasoning verbatim** — no AI summarization. Only on user approval does the curator write the markdown file. REJ tombstones suppress matching future proposals **silently** (the "no nag" mechanism — keywords listed in `search_keywords` block re-proposals across discovery, autoskill, and the debugger).
+
+### Validation surfaces
+
+`memory validate` runs four checks:
+- **Frontmatter schema** — required fields, valid `doc_type`/`status`/`confidence`/`link_type`/`rejection_reason` enums
+- **Stale paths** — `affects_paths` entries that don't resolve to existing files
+- **Broken links** — wiki-links pointing to non-existent doc ids
+- **Self-links** (v0.25.0+) — `source_id = target_id` (almost always copy-paste authoring slip)
+
+Plus standalone subcommands: `memory orphans` (docs with no incoming links), `memory stale-links` (link targets that don't exist anywhere). Symbol lookups via `affects-symbol` are case-insensitive (`COLLATE NOCASE`, v0.25.0+).
+
+### Multi-root memory (v0.22.0+)
+
+Set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones:
+
+```json
+{
+  "memory": {
+    "paths": ["../engineering-adrs", ".devt/memory"]
+  }
+}
+```
+
+Last-wins precedence: project-local always overrides shared on ID collision (like CSS specificity). The `source_root` column tracks provenance. Conflicts are explicit (never silent) — `memory index` returns a `conflicts[]` array. Curator writes always land in the project-local root. Operational helpers:
+
+- `memory paths --validate` — stat each root, surface `MEM_PATH_UNREACHABLE` with actionable hints
+- `memory diff <root-a> <root-b>` — added/removed/changed docs with sha256:16 fingerprint over (frontmatter + body)
+- Native MEM_* health checks in `devt-tools health`: `MEM_PATH_UNREACHABLE`, `MEM_INDEX_STALE`, `MEM_VALIDATE_ERRORS`, `MEM_CONFLICT_HIGH`
+
+Use case: every ACME microservice inherits the org's 30+ ADRs via git submodule, while keeping its own project-specific decisions local — a single source of architectural truth without monolith coupling.
+
+### Bundle export/import (v0.20.0+)
+
+```bash
+node bin/devt-tools.cjs memory bundle export --out=acme-memory.json --filter=domain:auth
+node bin/devt-tools.cjs memory bundle import acme-memory.json --prefix=ACME-
+```
+
+Portable JSON snapshots with optional `--prefix` remapping (e.g., `ACME-` rewrites `ADR-001` → `ACME-ADR-001` to avoid collisions during cross-org sharing). Round-trip safe — exported `+` re-imported produces a byte-identical fingerprint.
+
+### Graphify integration (optional)
+
+```bash
+pip install 'graphifyy[mcp]'   # then enable in .devt/config.json: graphify.enabled = true
+```
+
+Multi-language tree-sitter AST extractor. When enabled, the system upgrades five surfaces:
 
 | Feature | Without Graphify | With Graphify |
 |---|---|---|
@@ -360,7 +498,15 @@ devt persists structured knowledge across **three distinct layers**, each with a
 | `architecture-health-scanner` | Path-based boundaries | Symbol-anchored boundaries |
 | Code-search token cost | Baseline | ~10× reduction on symbol queries |
 
-See `docs/MEMORY.md` for the comprehensive guide, `guardrails/golden-rules.md` Rules 14+15, and `skills/memory-pre-flight/SKILL.md` for the protocol skill.
+The system stays fully functional without it via grep fallback (4 fallback triggers: empty result / error / not setup / under `min_results_threshold`). Same opt-in design for `claude-mem` (mid-session capture).
+
+### Where to read more
+
+- **`docs/MEMORY.md`** — comprehensive user guide (frontmatter reference, authoring conventions, troubleshooting)
+- **`guardrails/golden-rules.md`** — Rules 14 (Pre-Flight Protocol) and 15 (Memory Maintenance) — the constitutional rules every agent follows
+- **`skills/memory-pre-flight/SKILL.md`** — the protocol skill loaded by all 8 dev agents
+- **`skills/memory-curation/SKILL.md`** — the curator's promotion gate
+- **`templates/memory/`** — ADR/CON/FLOW/REJ scaffolds for new docs
 
 ## Learning Loop
 
@@ -463,6 +609,29 @@ node bin/devt-tools.cjs update changelog        # Fetch changelog from GitHub
 # Reports
 node bin/devt-tools.cjs report window [--weeks N]                   # Compute reporting window
 node bin/devt-tools.cjs report generate [--weeks N] [--output PATH] # Generate contribution report
+
+# Memory layer (v0.16.0+)
+node bin/devt-tools.cjs memory init                       # Scaffold .devt/memory/ subdirs
+node bin/devt-tools.cjs memory index                      # Rebuild FTS5 unified index
+node bin/devt-tools.cjs memory query <terms>              # Full-text search across all docs
+node bin/devt-tools.cjs memory get <id>                   # Fetch single doc by id
+node bin/devt-tools.cjs memory affects <path>             # Docs governing a file path
+node bin/devt-tools.cjs memory affects-symbol <name>      # Docs governing a symbol (NOCASE)
+node bin/devt-tools.cjs memory list <status>              # List docs by status (active|candidate|...)
+node bin/devt-tools.cjs memory validate                   # Frontmatter + broken-link + self-link checks
+node bin/devt-tools.cjs memory orphans                    # Docs with no incoming links
+node bin/devt-tools.cjs memory stale-links                # Wiki-links to non-existent ids
+node bin/devt-tools.cjs memory paths [--validate]         # List memory roots (multi-root, v0.22.0+)
+node bin/devt-tools.cjs memory diff <root-a> <root-b>     # Cross-root added/removed/changed (v0.23.0+)
+
+# Topic Pre-Flight Brief (v0.18.0+)
+node bin/devt-tools.cjs preflight "<topic>"               # 6-lane brief (path/FTS/symbol/wiki/REJ/lessons)
+
+# Telemetry (v0.20.0+)
+node bin/devt-tools.cjs token-report [--sessions=N]       # Session token cost breakdown
+node bin/devt-tools.cjs token-report --baseline=PATH      # Snapshot for later comparison
+node bin/devt-tools.cjs token-report --compare=PATH       # Compare current vs baseline
+node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME]  # Per-tool MCP call stats
 ```
 
 ## Directory Structure
@@ -474,7 +643,10 @@ devt/
   bin/
     devt-tools.cjs        # CLI entry point
     modules/              # init, state, config, model-profiles, setup, semantic,
-                          # security, health, weekly-report, update
+                          # security, health, weekly-report, update, cli-args,
+                          # memory, preflight, discovery, graphify, mcp-stats,
+                          # token-report
+    devt-memory-mcp.cjs   # Vendored read-only MCP server (10 tools, JSON-RPC stdio)
   commands/               # 29 command entry points
   workflows/              # 26 orchestration files
   agents/                 # 10 agent definitions

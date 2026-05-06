@@ -1,7 +1,7 @@
 # The Memory Layer
 
 > Comprehensive guide to devt's three-layer knowledge persistence model.
-> Last updated for v0.19.0 (Phase 4).
+> Last updated for v0.25.0 (post-CCA-v21.0 gap-closure: SQL views + symbol NOCASE + self-link detection).
 
 devt persists structured knowledge across **three distinct layers**, each with a different lifetime, write authority, and consumption pattern. Understanding which layer to use for which fact is critical — putting an architectural decision in `.devt/state/` (ephemeral) or a transient debug note in `.devt/memory/` (permanent) is the most common authoring mistake.
 
@@ -144,6 +144,15 @@ node bin/devt-tools.cjs memory validate          # schema + link integrity
 node bin/devt-tools.cjs memory backlinks <id>    # incoming refs
 node bin/devt-tools.cjs memory orphans           # no-link docs
 node bin/devt-tools.cjs memory stale-links       # broken cross-refs
+node bin/devt-tools.cjs memory affects-symbol <name>  # case-insensitive (v0.25.0+ NOCASE collation)
+
+# Bundle export/import (v0.20.0+)
+node bin/devt-tools.cjs memory export --out=PATH [--include=...] [--all-roots]
+node bin/devt-tools.cjs memory import <bundle.json> [--prefix=ORG-] [--overwrite]
+
+# Multi-root operational helpers (v0.22.0+ paths, v0.23.0+ --validate / diff)
+node bin/devt-tools.cjs memory paths [--validate]      # list roots; --validate stats each
+node bin/devt-tools.cjs memory diff <root-a> <root-b>  # added/removed/changed across roots
 
 # Discovery (v0.17.0+) — never writes permanent files
 node bin/devt-tools.cjs memory suggest           # writes _suggestions.md
@@ -156,7 +165,42 @@ node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius
 node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction
 node bin/devt-tools.cjs preflight status            # FRESH/STALE/MISSING + timestamp
 node bin/devt-tools.cjs preflight mark-stale [reason]
+
+# Telemetry (v0.21.0+)
+node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME] [--top=N --by=calls|duration|errors]
+node bin/devt-tools.cjs mcp-stats --prune-older-than=30d  # compact trace JSONL
 ```
+
+## SQL Views (v0.25.0+)
+
+Four convenience views accessible via the read-only MCP `query_index` SELECT-only escape hatch — useful for triage workflows and operational dashboards.
+
+| View | Definition | Triage use |
+|------|-----------|------------|
+| `pending_review` | `status: candidate` ordered by confidence (`verified` → `speculative`) then `created_at DESC` | Daily curator pass: which candidates need attention, in what order? |
+| `speculative_candidates` | `confidence: speculative` regardless of status | Audit: what low-confidence claims exist anywhere in the system? |
+| `constraint_chains` | Per-doc `outgoing_links` + `incoming_links` counts via LEFT JOIN | Hub detection (high incoming) and orphan detection (zero outgoing) |
+| `stale_speculative` | Speculative candidates >30 days old (using `created_at` as age signal) | Cleanup: candidates that have sat untouched too long — promote, demote, or reject |
+
+The `stale_speculative` view uses `created_at` rather than a `last_hit_at` field deliberately — tracking pre-flight hits would require writes during reads, breaking the "index regenerable from markdown" invariant.
+
+Example MCP query (via `query_index`):
+```sql
+SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
+```
+
+## Native MEM_* Health Checks (v0.23.0+)
+
+`bin/devt-tools.cjs health` runs four memory-specific checks natively (no agent in the loop, suitable for CI):
+
+| Check | Severity | Triggered when |
+|-------|----------|----------------|
+| `MEM_PATH_UNREACHABLE` | error | Any `memory.paths` root doesn't exist on disk |
+| `MEM_INDEX_STALE` | warning | `index.db` is older than the newest `.md` mtime across all roots |
+| `MEM_VALIDATE_ERRORS` | error | Frontmatter schema violations from `memory validate` |
+| `MEM_CONFLICT_HIGH` | info | High count of cross-root ID collisions (last-wins applied) |
+
+The `MEM_PATH_UNREACHABLE` check pairs with `memory paths --validate` — both surface actionable hints ("git submodule init / NFS mount / sibling clone") rather than bare "missing directory" errors.
 
 ## MCP Server (v0.18.0+)
 
