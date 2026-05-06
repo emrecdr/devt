@@ -21,6 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const { findProjectRoot } = require("./config.cjs");
 const { sanitizeForDisplay } = require("./security.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 const FILE_REL = path.join(".devt", "state", "deferred.md");
 const ID_PATTERN = /^DEF-\d{3,}$/;
@@ -56,10 +57,7 @@ function ensureFile() {
 }
 
 function atomicWrite(content) {
-  const p = ensureFile();
-  const tmp = p + ".tmp";
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, p);
+  atomicWriteFileSync(ensureFile(), content);
 }
 
 /**

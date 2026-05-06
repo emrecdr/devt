@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteJsonSync } = require("./io.cjs");
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -242,10 +243,7 @@ function setConfig(key, value) {
   }
   obj[keys[keys.length - 1]] = value;
 
-  // Atomic write: temp file + rename to prevent corruption on crash
-  const tmpPath = projectPath + ".tmp";
-  fs.writeFileSync(tmpPath, JSON.stringify(existing, null, 2) + "\n");
-  fs.renameSync(tmpPath, projectPath);
+  atomicWriteJsonSync(projectPath, existing);
   return { ok: true, path: projectPath, key, value };
 }
 

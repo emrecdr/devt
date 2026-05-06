@@ -9,6 +9,7 @@
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 // ---------------------------------------------------------------------------
 // Time window
@@ -266,9 +267,7 @@ function run(subcommand, args) {
       const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents);
 
       if (outputPath) {
-        const tmp = outputPath + ".tmp";
-        fs.writeFileSync(tmp, report);
-        fs.renameSync(tmp, outputPath);
+        atomicWriteFileSync(outputPath, report);
         return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents };
       }
 

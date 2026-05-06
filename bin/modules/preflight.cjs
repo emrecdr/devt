@@ -27,6 +27,7 @@ const path = require("path");
 const memory = require("./memory.cjs");
 const graphify = require("./graphify.cjs");
 const { findProjectRoot } = require("./config.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 const STATE_DIR = path.join(".devt", "state");
 const BRIEF_FILE = "preflight-brief.md";
@@ -127,12 +128,6 @@ function dedupSortById(docs) {
   const map = new Map();
   for (const d of docs) if (d && d.id && !map.has(d.id)) map.set(d.id, d);
   return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
-}
-
-function atomicWrite(dest, body) {
-  const tmp = dest + ".tmp";
-  fs.writeFileSync(tmp, body, "utf8");
-  fs.renameSync(tmp, dest);
 }
 
 /**
@@ -408,7 +403,7 @@ function generate(taskText, opts) {
   const stateDir = path.join(root, STATE_DIR);
   if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
   const dest = path.join(stateDir, BRIEF_FILE);
-  atomicWrite(dest, brief);
+  atomicWriteFileSync(dest, brief);
 
   return {
     brief_path: dest,
@@ -440,7 +435,7 @@ function markStale(reason) {
   try { body = fs.readFileSync(dest, "utf8"); } catch (e) { return { ok: false, reason: e.message }; }
   if (/^## Status:\s*STALE/m.test(body)) return { ok: true, already_stale: true };
   const updated = body.replace(/^## Status:\s*FRESH.*$/m, `## Status: STALE\n\n_Reason:_ ${reason || "scope expanded mid-task"}`);
-  atomicWrite(dest, updated);
+  atomicWriteFileSync(dest, updated);
   return { ok: true, marked_stale_at: new Date().toISOString() };
 }
 

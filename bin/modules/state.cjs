@@ -10,6 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const { findProjectRoot } = require("./config.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 const STATE_DIR = path.join(".devt", "state");
 const WORKFLOW_FILE = "workflow.yaml";
@@ -447,9 +448,7 @@ function updateState(keyValues) {
       delete current.validation_warnings;
     }
 
-    const tmpFile = getWorkflowPath() + ".tmp";
-    fs.writeFileSync(tmpFile, serializeSimpleYaml(current));
-    fs.renameSync(tmpFile, getWorkflowPath());
+    atomicWriteFileSync(getWorkflowPath(), serializeSimpleYaml(current));
 
     // Stderr emission and _validation echo for visibility (non-blocking)
     if (preciseMismatches.length > 0) {
@@ -585,10 +584,7 @@ function syncState() {
     };
     if (inferredType) reconstructed.workflow_type = inferredType;
 
-    // Atomic write
-    const tmpFile = getWorkflowPath() + ".tmp";
-    fs.writeFileSync(tmpFile, serializeSimpleYaml(reconstructed));
-    fs.renameSync(tmpFile, getWorkflowPath());
+    atomicWriteFileSync(getWorkflowPath(), serializeSimpleYaml(reconstructed));
 
     return {
       ok: true,

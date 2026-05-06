@@ -22,6 +22,7 @@
 const fs = require("fs");
 const path = require("path");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1125,9 +1126,7 @@ function importBundle(bundlePath, opts) {
       const fmYaml = serializeFrontmatter(fm);
       const body = doc.body.startsWith("\n") ? doc.body : "\n" + doc.body;
       const md = `---\n${fmYaml}\n---${body}`;
-      const tmp = filePath + ".tmp";
-      fs.writeFileSync(tmp, md, "utf8");
-      fs.renameSync(tmp, filePath);
+      atomicWriteFileSync(filePath, md);
     } catch (e) {
       errors.push({ id: (doc && doc.id) || "(unknown)", reason: e.message });
     }
@@ -1543,9 +1542,7 @@ function run(subcommand, args) {
       const defaultName = `export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
       const requestedOut = outArg ? outArg.split("=")[1] : path.join(getMemoryRoot(), defaultName);
       const resolved = resolveExportPath(requestedOut);
-      const tmp = resolved + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(result, null, 2) + "\n", "utf8");
-      fs.renameSync(tmp, resolved);
+      atomicWriteJsonSync(resolved, result);
       json({ exported_to: resolved, doc_count: result.docs.length, exported_at: result.exported_at });
       return 0;
     }

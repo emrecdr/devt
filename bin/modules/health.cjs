@@ -13,6 +13,7 @@ const { findProjectRoot, DEFAULTS } = require("./config.cjs");
 const { readState, validateConsistency, describeMismatch, VALID_PHASES, VALID_WORKFLOW_TYPES, VALID_TIERS } = require("./state.cjs");
 const { REQUIRED_DEV_RULES } = require("./init.cjs");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteJsonSync } = require("./io.cjs");
 
 const CHECKS = {
   E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:init to set up project, or /devt:health --repair" },
@@ -403,9 +404,7 @@ function runRepairs(pluginRoot, checkResult) {
         case "E002":
         case "E003": {
           const configPath = path.join(devtDir, "config.json");
-          const tmp = configPath + ".tmp";
-          fs.writeFileSync(tmp, JSON.stringify(DEFAULTS, null, 2) + "\n");
-          fs.renameSync(tmp, configPath);
+          atomicWriteJsonSync(configPath, DEFAULTS);
           repairs.push({ code: issue.code, action: "Created .devt/config.json with defaults", success: true });
           break;
         }

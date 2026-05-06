@@ -20,6 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
 const { validatePath, safeJsonParse } = require("./security.cjs");
+const { atomicWriteJsonSync } = require("./io.cjs");
 
 /**
  * Reject filesystem entry names that could break out of their parent directory.
@@ -485,9 +486,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
 }
 
 function atomicWriteJson(filePath, data) {
-  const tmp = filePath + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
-  fs.renameSync(tmp, filePath);
+  atomicWriteJsonSync(filePath, data);
 }
 
 function copyDirRecursive(src, dest) {

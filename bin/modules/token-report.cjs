@@ -25,6 +25,7 @@ const fs = require("fs");
 const path = require("path");
 const { safeJsonParse } = require("./security.cjs");
 const os = require("os");
+const { atomicWriteJsonSync } = require("./io.cjs");
 
 function projectSlugFromPath(absPath) {
   // Claude Code maps /Users/emrec/Projects/devt → -Users-emrec-Projects-devt
@@ -296,9 +297,7 @@ function run(subcommand, args) {
       aggregate: report.aggregate,
       sessions_in_report: report.sessions_in_report,
     };
-    const tmp = opts.baseline + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(baselineOut, null, 2) + "\n", "utf8");
-    fs.renameSync(tmp, opts.baseline);
+    atomicWriteJsonSync(opts.baseline, baselineOut);
     report.baseline_written_to = opts.baseline;
   }
 

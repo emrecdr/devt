@@ -28,6 +28,7 @@ const fs = require("fs");
 const path = require("path");
 const { findProjectRoot } = require("./config.cjs");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 function getTracePath() {
   return path.join(findProjectRoot(), ".devt", "memory", "_mcp-trace.jsonl");
@@ -157,9 +158,7 @@ function pruneOlderThan(spec) {
     if (tsMs >= cutoff) kept.push(parsed.raw[i]);
     else pruned++;
   }
-  const tmp = tracePath + ".tmp";
-  fs.writeFileSync(tmp, kept.join("\n") + (kept.length > 0 ? "\n" : ""), "utf8");
-  fs.renameSync(tmp, tracePath);
+  atomicWriteFileSync(tracePath, kept.join("\n") + (kept.length > 0 ? "\n" : ""));
   return { pruned, kept: kept.length, path: tracePath, cutoff_iso: new Date(cutoff).toISOString() };
 }
 
