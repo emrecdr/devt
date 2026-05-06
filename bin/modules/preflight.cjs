@@ -34,6 +34,10 @@ const PLUGIN_ROOT = path.resolve(__dirname, "..", "..");
 const STATE_DIR = path.join(".devt", "state");
 const BRIEF_FILE = "preflight-brief.md";
 
+// Graph staleness threshold for Pre-Flight warnings — balances actionable signal
+// vs noise after every minor commit.
+const STALE_LAG_COMMITS = 10;
+
 // Topic extraction — pragmatic keyword + symbol parsing. Not NLP-grade, but
 // deterministic and zero-deps. The intent: pull domain hints, capitalized
 // symbols (likely class names), and quoted phrases out of a free-form task.
@@ -327,6 +331,16 @@ function renderBrief({ task, topic, lanes, blast, generatedAt }) {
     if (blast.ambiguous_bindings && blast.ambiguous_bindings > 0) {
       lines.push(`- ⚠️ **AMBIGUOUS bindings:** ${blast.ambiguous_bindings} (review needed)`);
     }
+    try {
+      const f = graphify.freshness();
+      const stale = f.state === "ready" && !f.fresh;
+      if (stale && typeof f.lag_commits === "number" && f.lag_commits >= STALE_LAG_COMMITS) {
+        lines.push(`- ⚠️ **Graph cache is stale** — ${f.lag_commits} commits behind HEAD. Run \`graphify update .\` (or \`graphify hook install\` once for auto-refresh on commit). Numbers above may reflect old code.`);
+      } else if (stale && f.built_at && f.head && f.lag_commits === null) {
+        // Shallow clone: built_at != head but rev-list count unavailable.
+        lines.push(`- ⚠️ **Graph cache may be stale** — built at ${f.built_at.slice(0,7)}, HEAD is ${f.head.slice(0,7)}. Run \`graphify update .\`.`);
+      }
+    } catch { /* freshness probe is advisory; never fail the Brief */ }
   }
   lines.push("");
 

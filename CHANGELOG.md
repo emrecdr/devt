@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Added
+- **Graph-staleness alert in Pre-Flight Brief** (`bin/modules/preflight.cjs`): when Graphify ran successfully but the graph cache is ≥10 commits behind HEAD, the Brief's Blast Radius section emits a warning with the exact lag count and the fix command (`graphify update .` or `graphify hook install` for auto-refresh). Previously, blast-radius numbers could silently reflect old code with no signal that the graph was stale. Threshold of 10 commits balances actionable signal against post-every-commit noise.
+- **`graphify.freshness().lag_commits` field** (`bin/modules/graphify.cjs`): the JSDoc has promised this field since v0.17.0 but the implementation never delivered it — surfacing the contract drift. Now computed via `git rev-list --count <built_at>..<head>`. Returns `null` for shallow clones, force-pushed history, or missing git binary.
+- **Health check `GRAPHIFY_MCP_UNREGISTERED`** (`bin/modules/health.cjs`): info-severity warning when `graphify` is on PATH but not registered in `.mcp.json`. Catches the "user installed Graphify after `/devt:init`" drift case where MCP queries silently fall back to grep without any signal. **Warn-only by design** — `health --repair` does NOT auto-edit `.mcp.json` to avoid stomping user MCP customizations. Fix guidance points the user at `node bin/devt-tools.cjs setup --mode update` to regenerate the MCP server entries.
+
+### Fixed
+- **Smoke test environment-aware post-commit assertions** (`scripts/smoke-test.sh`): the `setup.cjs installs .git/hooks/post-commit` assertions assumed a Graphify-absent environment, which fails on dev machines where Graphify is locally installed. Setup correctly yields post-commit ownership to Graphify when present (`graphify hook install` supersedes devt's hook). Smoke now branches on `command -v graphify` and asserts the correct behavior in both environments.
+- **Eliminated dynamic-RegExp construction in 2 hot paths.** Pre-existing semgrep warnings traced to RegExp built from runtime strings — although both sites had length caps and metachar-escaping, removing the dynamic construction is real defense-in-depth and cleaner than nosemgrep suppression.
+  - `bin/modules/graphify.cjs::blastRadius` god-node detection: rewrote `\b<sym>\b` regex match as an `indexOf` walk with charCode boundary checks. Same semantics, no RegExp.
+  - `bin/modules/memory.cjs::matchesPattern` glob check: rewrote glob-to-regex conversion as a recursive descent matcher (`globMatch`). Supports `*` (within-segment) and `**` (cross-segment). O(n*m) with both bounded by the existing 256-char input cap.
+- **Curator-gated harvest is now actually wired and unconditional.** Audit revealed three real wiring gaps that made the documented "curator-gated harvest" path effectively skippable:
+  1. `workflows/quick-implement.md` skipped retro+curator entirely (by design, for speed) — but that meant ⚖️/🔵 observations from quick workflows were dropped on the floor, never reaching `_suggestions.md`.
+  2. `workflows/dev-workflow.md::curate` step (and its `lesson-extraction.md` standalone counterpart) dispatched the curator with playbook-only context — the "dual-path" claim in `lesson-extraction.md` line 202 was documentation drift from the actual `<files_to_read>` block.
+  3. The retro step itself was skippable when `complexity=SIMPLE` or `config.workflow.retro=false`, cascading into curator never running, harvest never running.
+  - **Fix shape:** Decoupled harvest (cheap, unconditional) from curator review (gated). New `harvest_observations` step in all three workflows runs `memory suggest` unconditionally — buffers candidates into `.devt/memory/_suggestions.md` even when curator never runs. Curator dispatches in `dev-workflow.md` + `lesson-extraction.md` updated to dual-path: `<files_to_read>` now includes `_suggestions.md` and the `<task>` block instructs both PLAYBOOK PATH and MEMORY-LAYER PATH per the `memory-curation` skill's hard invariant (never write permanent docs without AskUserQuestion approval).
+  - **Smoke assertions** (3 new): `memory suggest` is idempotent on empty projects (rc=0, zero candidates); `memory suggest` is wired into all three workflow files; curator dispatches reference `_suggestions.md`. These assertions catch regression to the earlier playbook-only dispatch.
+
+### Added
+- **Symbol Decay detection in `memory validate`** (`bin/modules/memory.cjs::validateSymbolsViaGraphify`): each `affects_symbols[]` entry is probed via `graphify.queryGraph()`; symbols that resolve to zero AST nodes are flagged as `category: "stale-symbol"` warnings. Closes the last gap from CCA v27 §2 "Tricky Parts" and delivers the spec's "Refactor Safety" promise from §1 — when you rename a class, validate surfaces every doc that still claims to govern the old name. Graphify-disabled installs gracefully skip the check (existing validation paths unchanged).
+  - **Caching:** per-symbol probe cache keyed by raw symbol string. A project where 5 docs reference `UserService` runs one Graphify subprocess, not five.
+  - **Severity:** `warning`, not `error`. Graphify resolution can be ambiguous on overloaded names; flagging stale candidates without blocking validate keeps the workflow advisory.
+  - **Smoke assertion** (`scripts/smoke-test.sh`): graceful-skip path verified — Graphify-disabled installs MUST NOT false-positive stale-symbol on docs with affects_symbols populated.
+
 ## [0.25.0] - 2026-05-06
 
 ### Added

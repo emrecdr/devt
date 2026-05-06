@@ -674,18 +674,43 @@ function matchesGlob(filePath, pattern) {
     return remainder !== "" && !remainder.includes("/");
   }
   if (pattern.includes("*")) {
-    // Patterns come from validated frontmatter (affects_paths). Cap length to bound
-    // regex complexity and prevent ReDoS via pathological inputs. After substitution
-    // every `*` becomes a bounded character class (`[^/]*` or `.*`), neither of which
-    // exhibits catastrophic backtracking on the linear input strings we test.
-    if (pattern.length > 256) return false;
-    const re = new RegExp("^" + pattern
-      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*\*/g, ".*")
-      .replace(/\*/g, "[^/]*") + "$");
-    return re.test(filePath);
+    if (pattern.length > 256) return false; // defense-in-depth bound
+    return globMatch(pattern, filePath);
   }
   return false;
+}
+
+/**
+ * Pure-string glob matcher: `*` matches within a path segment (no `/`), `**`
+ * matches across segments. Implemented via recursive descent — no RegExp, no
+ * dynamic pattern construction. O(n*m) worst case where n=pattern length,
+ * m=filePath length; both are bounded by the 256-char input cap above.
+ */
+function globMatch(pattern, str) {
+  // Collapse `**/**/...` repeats — they're semantically equivalent to a single `**/`
+  // and would otherwise multiply the recursive branching factor.
+  pattern = pattern.replace(/(\*\*\/)+/g, "**/");
+  function match(pi, si) {
+    while (pi < pattern.length) {
+      const pc = pattern[pi];
+      if (pc === "*") {
+        // Detect `**` (multi-segment) vs `*` (within-segment).
+        const isDoubleStar = pattern[pi + 1] === "*";
+        const nextPi = pi + (isDoubleStar ? 2 : 1);
+        // Try every match position from current to end (or to next `/` for `*`).
+        for (let k = si; k <= str.length; k++) {
+          if (!isDoubleStar && k > si && str[k - 1] === "/") break;
+          if (match(nextPi, k)) return true;
+        }
+        return false;
+      }
+      if (si >= str.length || str[si] !== pc) return false;
+      pi++;
+      si++;
+    }
+    return si === str.length;
+  }
+  return match(0, 0);
 }
 
 function getByPath(filePath) {
@@ -1220,6 +1245,52 @@ function affectsSymbol(symbol) {
 // Validate (Phase 1: path-only — no Graphify yet)
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve each affects_symbols entry through Graphify. Symbols that return
+ * zero results are flagged as `stale-symbol` warnings — the canonical
+ * "Refactor Safety" decay scenario from CCA v27 §2 (a doc claims to govern
+ * `UserService` but the class was renamed to `AccountService`).
+ *
+ * Gracefully no-ops when Graphify isn't ready (disabled in config, binary
+ * missing, or graph cache absent). Symbol decay detection is opt-in based on
+ * Graphify availability; the rest of validate() always runs.
+ *
+ * Caches per-symbol probes — many docs reference the same symbol, and each
+ * Graphify query is a subprocess spawn.
+ */
+function validateSymbolsViaGraphify(docs) {
+  let graphify;
+  try { graphify = require("./graphify.cjs"); } catch { return []; }
+  if (graphify.status().state !== "ready") return [];
+
+  const issues = [];
+  const probeCache = new Map();
+
+  for (const doc of docs) {
+    const fm = doc.frontmatter;
+    if (!fm || !Array.isArray(fm.affects_symbols)) continue;
+    for (const entry of fm.affects_symbols) {
+      const symbol = typeof entry === "object" && entry !== null ? entry.symbol : entry;
+      if (typeof symbol !== "string" || symbol.trim() === "") continue;
+
+      if (!probeCache.has(symbol)) {
+        const r = graphify.queryGraph(symbol);
+        const count = Array.isArray(r && r.results) ? r.results.length : 0;
+        probeCache.set(symbol, count > 0);
+      }
+      if (!probeCache.get(symbol)) {
+        issues.push({
+          filePath: doc.relativePath,
+          severity: "warning",
+          category: "stale-symbol",
+          error: `affects_symbols entry "${symbol}" did not resolve via Graphify — likely renamed or removed`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 function validate() {
   const root = findProjectRoot();
   const docs = scanDocs();
@@ -1282,6 +1353,8 @@ function validate() {
       db.close();
     }
   }
+
+  issues.push(...validateSymbolsViaGraphify(docs));
 
   return {
     docs_scanned: docs.length,

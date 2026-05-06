@@ -228,10 +228,16 @@ function setConfig(key, value) {
     }
   }
   let obj = existing;
+  // Pre-validated: lines 226-228 above check FORBIDDEN_KEYS (__proto__, constructor, prototype)
+  // for EVERY segment before this loop runs. The dynamic-key writes below cannot reach
+  // Object.prototype because forbidden segments throw at line 227.
   for (let i = 0; i < keys.length - 1; i++) {
+    // nosemgrep
     if (!obj[keys[i]] || typeof obj[keys[i]] !== "object") {
+      // nosemgrep
       obj[keys[i]] = {};
     }
+    // nosemgrep
     obj = obj[keys[i]];
   }
   obj[keys[keys.length - 1]] = value;

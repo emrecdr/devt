@@ -122,7 +122,25 @@ function freshness() {
   } catch { /* swallow — git may be missing */ }
 
   const fresh = !!(builtAt && head && builtAt === head);
-  return { state: "ready", fresh, built_at: builtAt, head };
+
+  // lag_commits stays null when count can't be computed (built_at/head missing,
+  // shallow clone where built_at sha is unreachable, or git unavailable).
+  let lagCommits = fresh ? 0 : null;
+  if (builtAt && head && builtAt !== head) {
+    try {
+      const r = child_process.spawnSync(
+        "git",
+        ["rev-list", "--count", `${builtAt}..${head}`],
+        { cwd: findProjectRoot(), timeout: 2000, encoding: "utf8" }
+      );
+      if (r.status === 0) {
+        const n = parseInt(r.stdout.trim(), 10);
+        if (Number.isFinite(n)) lagCommits = n;
+      }
+    } catch { /* swallow */ }
+  }
+
+  return { state: "ready", fresh, built_at: builtAt, head, lag_commits: lagCommits };
 }
 
 // ---------------------------------------------------------------------------
@@ -338,16 +356,24 @@ function blastRadius(symbols, _options) {
       const godSection = report.match(/##\s*God Nodes[\s\S]*?(?=\n##\s|$)/i);
       if (godSection) {
         const haystack = godSection[0];
+        // Whole-word match without dynamic RegExp. `\b` = word/non-word transition;
+        // we check that condition at both edges of each indexOf hit.
+        const isWord = c => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
         for (const sym of symbols) {
-          // Symbols are caller-provided; cap length to bound regex complexity.
-          // After escaping, the pattern is a literal symbol surrounded by word
-          // boundaries — no quantifiers that could backtrack catastrophically.
           if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
-          const escaped = sym.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          if (new RegExp(`\\b${escaped}\\b`).test(haystack)) {
-            godNodeMatch = true;
-            break;
+          const symStartWord = isWord(sym.charCodeAt(0));
+          const symEndWord = isWord(sym.charCodeAt(sym.length - 1));
+          let idx = 0;
+          let found = false;
+          while ((idx = haystack.indexOf(sym, idx)) !== -1) {
+            // Treat "off the ends of haystack" as non-word (matches regex `\b` at boundaries).
+            const beforeWord = idx > 0 ? isWord(haystack.charCodeAt(idx - 1)) : false;
+            const afterWord = idx + sym.length < haystack.length ? isWord(haystack.charCodeAt(idx + sym.length)) : false;
+            // `\b` matches when exactly one side is a word char (XOR transition).
+            if (symStartWord !== beforeWord && symEndWord !== afterWord) { found = true; break; }
+            idx += sym.length;
           }
+          if (found) { godNodeMatch = true; break; }
         }
       }
     }

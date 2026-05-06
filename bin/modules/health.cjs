@@ -43,6 +43,11 @@ const CHECKS = {
   MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
   MEM_PATH_UNREACHABLE: { severity: "warning", message: "memory.paths references a directory that doesn't exist", repairable: false, fix: "Initialize the missing root: git submodule init, mount the NFS share, or remove the entry from .devt/config.json" },
   MEM_CONFLICT_HIGH: { severity: "info", message: "Memory layer has ID collisions across configured roots (last-wins applied)", repairable: false, fix: "Inspect with `node bin/devt-tools.cjs memory index` to see the collisions; rename project-local docs OR accept the override as intentional" },
+  // Graphify integration drift — `graphify` binary on PATH but MCP server not registered in
+  // .mcp.json. Setup wizard's MCP probe is one-shot at install time; users who install
+  // Graphify AFTER /devt:init don't auto-pick up the MCP entry. Warn-only by design — auto-
+  // editing .mcp.json risks stomping user customizations.
+  GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
 };
 
 const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
@@ -359,6 +364,27 @@ function runChecks(pluginRoot) {
       } catch { /* validate may throw if index missing — skipped already */ }
     } catch { /* memory module load failed — skip silently */ }
   }
+
+  // Drift case: Graphify installed after /devt:init never gets registered in .mcp.json.
+  // Read .mcp.json first — when graphify is already registered (the common case) we
+  // skip the subprocess probe entirely.
+  try {
+    const mcpPath = path.join(projectRoot, ".mcp.json");
+    let registered = false;
+    if (fs.existsSync(mcpPath)) {
+      try {
+        const raw = fs.readFileSync(mcpPath, "utf8");
+        const result = require("./security.cjs").safeJsonParse(raw, ".mcp.json", 1024 * 1024);
+        registered = !!(result.ok && result.value?.mcpServers?.graphify);
+      } catch { /* unreadable .mcp.json — treat as unregistered */ }
+    }
+    if (!registered) {
+      const probe = require("child_process").spawnSync("graphify", ["--help"], { timeout: 1500, stdio: "ignore" });
+      if (probe && probe.status === 0) {
+        add("GRAPHIFY_MCP_UNREGISTERED", null, { binary_on_path: true, mcp_json_exists: fs.existsSync(mcpPath) });
+      }
+    }
+  } catch { /* swallow */ }
 
   const hasErrors = issues.some((i) => i.severity === "error");
   const hasWarnings = issues.some((i) => i.severity === "warning");

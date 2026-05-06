@@ -905,18 +905,31 @@ rm -rf "$TIMP"
   && pass "hooks/post-commit-validate.sh exists and is executable" \
   || fail "hooks/post-commit-validate.sh missing or not executable"
 
-# setup.cjs scaffolds .git/hooks/post-commit (in tmp project — Graphify absent)
+# setup.cjs scaffolds .git/hooks/post-commit. Behavior is environment-dependent:
+#  - Graphify NOT on PATH → devt installs its own wrapper (validates memory layer)
+#  - Graphify ON PATH      → devt yields ownership (graphify hook install supersedes;
+#                            documented in setup.cjs:383). Hook absence is correct.
 TGIT=$(mktemp -d)
 (cd "$TGIT" && git init -q && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
-if [ -x "$TGIT/.git/hooks/post-commit" ]; then
-  pass "setup.cjs installs .git/hooks/post-commit when Graphify absent"
+if command -v graphify >/dev/null 2>&1; then
+  # Graphify on PATH — devt's hook MUST be skipped (Graphify supersedes)
+  if [ -e "$TGIT/.git/hooks/post-commit" ]; then
+    fail "setup.cjs installed devt post-commit when Graphify on PATH (Graphify supersedes — devt hook should be absent)"
+  else
+    pass "setup.cjs yields post-commit ownership to Graphify when Graphify is on PATH"
+  fi
 else
-  fail ".git/hooks/post-commit not installed"
-fi
-if grep -q "post-commit-validate.sh" "$TGIT/.git/hooks/post-commit" 2>/dev/null; then
-  pass "post-commit wrapper delegates to plugin script"
-else
-  fail "post-commit wrapper does not delegate"
+  # Graphify absent — devt's wrapper must be installed and delegate to plugin script
+  if [ -x "$TGIT/.git/hooks/post-commit" ]; then
+    pass "setup.cjs installs .git/hooks/post-commit when Graphify absent"
+  else
+    fail ".git/hooks/post-commit not installed"
+  fi
+  if grep -q "post-commit-validate.sh" "$TGIT/.git/hooks/post-commit" 2>/dev/null; then
+    pass "post-commit wrapper delegates to plugin script"
+  else
+    fail "post-commit wrapper does not delegate"
+  fi
 fi
 rm -rf "$TGIT"
 
@@ -1608,7 +1621,108 @@ if echo "$SELF_OUT" | grep -q '"category": "self-link"'; then
 else
   fail "memory validate missed self-link on ADR-002"
 fi
+
+# CCA v27 §2 Symbol Decay — Graphify-disabled graceful skip.
+# affects_symbols on docs but graphify.enabled=false MUST NOT emit stale-symbol
+# false positives. Real decay detection only fires when Graphify is ready;
+# absence of Graphify is not absence of governance.
+if echo "$SELF_OUT" | grep -q '"category": "stale-symbol"'; then
+  fail "memory validate emitted stale-symbol when Graphify is disabled (must skip gracefully)"
+else
+  pass "memory validate skips stale-symbol checks when Graphify is disabled"
+fi
 rm -rf "$TMP_VIEW_PROJ"
+
+# Curator-gated harvest wiring: `memory suggest` MUST exit 0 cleanly on:
+#  (a) project with no .devt/memory/ directory  (b) no claude-mem installed
+#  (c) zero ⚖️/🔵 observations  — anything else would break the unconditional
+#  harvest_observations step in dev-workflow / lesson-extraction / quick-implement.
+TMP_HARVEST_PROJ=$(mktemp -d)
+( cd "$TMP_HARVEST_PROJ" && git init -q )
+HARVEST_OUT=$(cd "$TMP_HARVEST_PROJ" && node "$CLI" memory suggest 2>&1)
+HARVEST_RC=$?
+if [ "$HARVEST_RC" -eq 0 ] && echo "$HARVEST_OUT" | grep -q '"total_candidates": 0'; then
+  pass "memory suggest is idempotent on empty project (unconditional harvest safety)"
+else
+  fail "memory suggest non-idempotent on empty project — rc=$HARVEST_RC"
+fi
+rm -rf "$TMP_HARVEST_PROJ"
+
+# Curator-gated harvest is wired into all three retro/finalize touchpoints.
+# Without these grep checks, the curator dispatch can silently drift back to
+# playbook-only (the bug this fix addresses).
+HARVEST_WIRED_COUNT=0
+for wf in "$ROOT/workflows/dev-workflow.md" \
+          "$ROOT/workflows/lesson-extraction.md" \
+          "$ROOT/workflows/quick-implement.md"; do
+  if grep -q 'memory suggest' "$wf"; then
+    HARVEST_WIRED_COUNT=$((HARVEST_WIRED_COUNT + 1))
+  fi
+done
+if [ "$HARVEST_WIRED_COUNT" -eq 3 ]; then
+  pass "memory suggest is wired into dev-workflow + lesson-extraction + quick-implement"
+else
+  fail "memory suggest missing from one of the three workflows ($HARVEST_WIRED_COUNT/3)"
+fi
+
+# Graphify freshness exposes lag_commits per its JSDoc contract. Without this
+# field, the Pre-Flight Brief's staleness check (introduced this version) would
+# silently no-op forever. The check verifies the contract holds even when
+# Graphify is disabled — degraded payload should NOT include lag_commits, but
+# also MUST NOT throw. Use a fresh tmp project where graphify is disabled.
+TFRESH=$(mktemp -d)
+( cd "$TFRESH" && git init -q )
+FRESH_OUT=$(cd "$TFRESH" && node "$CLI" graphify freshness 2>/dev/null || true)
+if echo "$FRESH_OUT" | grep -q '"state":'; then
+  pass "graphify freshness returns structured state field (Brief staleness contract)"
+else
+  fail "graphify freshness output missing state field"
+fi
+rm -rf "$TFRESH"
+
+# GRAPHIFY_MCP_UNREGISTERED health check: when graphify is on PATH but .mcp.json
+# lacks the entry, health emits info-level drift warning (NOT an auto-repair).
+if command -v graphify >/dev/null 2>&1; then
+  TGRA=$(mktemp -d)
+  ( cd "$TGRA" && git init -q )
+  # Health check requires .devt/ to exist (E001 early-returns otherwise) — scaffold blank first.
+  ( cd "$TGRA" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1 )
+  # Strip any auto-registered graphify entry from .mcp.json so the drift check has something to detect.
+  if [ -f "$TGRA/.mcp.json" ]; then
+    node -e "const fs=require('fs');const f='$TGRA/.mcp.json';const j=JSON.parse(fs.readFileSync(f,'utf8'));if(j.mcpServers&&j.mcpServers.graphify){delete j.mcpServers.graphify;fs.writeFileSync(f,JSON.stringify(j,null,2));}"
+  fi
+  GRA_OUT=$(cd "$TGRA" && node "$CLI" health 2>/dev/null || true)
+  if echo "$GRA_OUT" | grep -q "GRAPHIFY_MCP_UNREGISTERED"; then
+    pass "health detects Graphify-on-PATH without .mcp.json registration"
+  else
+    fail "health missed GRAPHIFY_MCP_UNREGISTERED drift"
+  fi
+  # Must be info severity (warn-only, not auto-repairable — don't stomp .mcp.json)
+  if echo "$GRA_OUT" | grep -q '"code":"GRAPHIFY_MCP_UNREGISTERED","severity":"info"'; then
+    pass "GRAPHIFY_MCP_UNREGISTERED is info-severity (advisory, not auto-repairable)"
+  else
+    fail "GRAPHIFY_MCP_UNREGISTERED severity mismatch (expected info)"
+  fi
+  rm -rf "$TGRA"
+else
+  pass "GRAPHIFY_MCP_UNREGISTERED check skipped (Graphify not on PATH)"
+  pass "GRAPHIFY_MCP_UNREGISTERED severity check skipped (Graphify not on PATH)"
+fi
+
+# Curator dispatches in dev-workflow + lesson-extraction MUST pass _suggestions.md
+# in <files_to_read>, otherwise dual-path curation degrades to playbook-only.
+DISPATCH_WIRED_COUNT=0
+for wf in "$ROOT/workflows/dev-workflow.md" \
+          "$ROOT/workflows/lesson-extraction.md"; do
+  if grep -q '_suggestions\.md' "$wf"; then
+    DISPATCH_WIRED_COUNT=$((DISPATCH_WIRED_COUNT + 1))
+  fi
+done
+if [ "$DISPATCH_WIRED_COUNT" -eq 2 ]; then
+  pass "curator dispatches reference _suggestions.md in dev-workflow + lesson-extraction"
+else
+  fail "curator dispatch missing _suggestions.md context ($DISPATCH_WIRED_COUNT/2)"
+fi
 
 echo "== Agent size budget =="
 # Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500

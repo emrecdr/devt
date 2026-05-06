@@ -1040,33 +1040,58 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 ---
 
-## Step 9: Curation (COMPLEX only)
+## Step 9a: Memory Harvest (UNCONDITIONAL — all complexity tiers)
+
+<step name="harvest_observations" gate="memory suggest exits 0">
+
+This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests claude-mem ⚖️/🔵 entries + `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
+
+Harvest is cheap (~50ms when claude-mem is absent, bounded by claude-mem-CLI timeout otherwise). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
+```
+
+The `|| true` is intentional: harvest is best-effort. A missing `.devt/memory/` directory, missing claude-mem, or empty observation set ALL produce a 0-issue report. We never fail a workflow because harvest had nothing to find.
+
+</step>
+
+---
+
+## Step 9b: Curation (COMPLEX only)
 
 <step name="curate" gate="curation-summary.md is written and .devt/learning-playbook.md is updated">
 
 _Skip this step if complexity is SIMPLE or STANDARD._
 
-**Pre-dispatch check**: Read `.devt/state/lessons.yaml`.
+**Pre-dispatch check**: Read `.devt/state/lessons.yaml` AND `.devt/memory/_suggestions.md` (the latter was refreshed by Step 9a).
 
-- If file exists and has entries: dispatch curator
-- If file exists but empty: skip curation (retro found no lessons)
-- If file missing: skip curation with note "No lessons extracted"
+- If both lessons.yaml has entries AND _suggestions.md has candidates: dispatch curator (dual-path)
+- If only lessons.yaml has entries: dispatch curator (playbook-only path)
+- If only _suggestions.md has candidates: dispatch curator (memory-only path)
+- If both empty/missing: skip curation entirely
 
-Dispatch the curator agent:
+Dispatch the curator agent (dual-path dispatch — `_suggestions.md` is now in scope alongside lessons.yaml):
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <task>
-    Evaluate incoming lessons from .devt/state/lessons.yaml.
-    For each lesson: accept, merge, edit, reject, or archive.
-    Update .devt/learning-playbook.md with accepted/merged entries.
-    Prune expired or low-confidence entries.
+    Run BOTH curation paths:
+    1. PLAYBOOK PATH: Evaluate incoming lessons from .devt/state/lessons.yaml.
+       For each lesson: accept, merge, edit, reject, or archive.
+       Update .devt/learning-playbook.md with accepted/merged entries.
+       Prune expired or low-confidence entries.
+    2. MEMORY-LAYER PATH: Review .devt/memory/_suggestions.md candidates.
+       For each ⚖️/🔵 candidate that passes the 5-filter, present an
+       AskUserQuestion proposal per memory-curation skill. NEVER write
+       to .devt/memory/{decisions,concepts,flows,rejected}/ without
+       explicit user approval — this invariant is non-negotiable.
   </task>
   <context>
-    <files_to_read>.devt/learning-playbook.md (if exists), .devt/state/lessons.yaml, CLAUDE.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+    <files_to_read>.devt/learning-playbook.md (if exists), .devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation for memory-layer path}</agent_skills>
   </context>
-  Write summary to .devt/state/curation-summary.md
+  Write summary of BOTH paths to .devt/state/curation-summary.md
 ")
 ```
 

@@ -339,7 +339,7 @@ Standard AI coding is **amnesiac** — it forgets architectural decisions the mo
 
 - **Deterministic retrieval** — the AI finds the *exact* rule that governs a file (`affects_paths` glob match + symbol AST anchor), not just something semantically similar.
 - **Proactive documentation** — the AI detects patterns mid-session, drafts its own ADRs/Concepts via `_suggestions.md`, and waits for your explicit approval before promoting them.
-- **Refactor safety** — when you rename `UserService` → `AccountService`, the AI knows exactly which ADRs are now stale (`memory validate` flags broken symbol bindings).
+- **Refactor safety** — when you rename `UserService` → `AccountService`, `memory validate` flags every doc whose `affects_symbols[]` no longer resolves via Graphify (`category: "stale-symbol"`). Requires `graphify.enabled: true`; degrades gracefully without it (the rest of `validate` still runs path/link checks).
 
 ### The four tools and why each was chosen
 

@@ -173,6 +173,22 @@ following features become approximations rather than precise:
 | Blast radius effect_size | LARGE/MEDIUM/SMALL from AST + god_node detection | Approximation: file count + module spread |
 | AMBIGUOUS binding flagging | Surfaced from Graphify's confidence taxonomy | n/a (no binding confidence available) |
 
+## Upstream MCP tool surface (Graphify ≥ recent)
+
+When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:init`), the upstream MCP server exposes 7 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 3 are reachable by the AI agent via the Claude Code MCP system but devt's helper code does not call them.
+
+| MCP tool | devt wrapper | When to use |
+|---|---|---|
+| `query_graph` | `graphify.queryGraph(text)` | Free-text symbol/concept search across the graph |
+| `get_node` | `graphify.getNode(nodeId)` | Fetch a single node's definition + references |
+| `get_neighbors` | `graphify.getNeighbors(sym, {direction, depth})` | Callers/dependents traversal |
+| `shortest_path` | `graphify.shortestPath(from, to)` | Cross-module relationship discovery |
+| `god_nodes` | (no wrapper — call MCP directly) | Top-N most-connected core abstractions. Better than parsing GRAPH_REPORT.md text |
+| `get_community` | (no wrapper — call MCP directly) | All nodes in a community by ID — feature-cluster traversal |
+| `graph_stats` | (no wrapper — call MCP directly) | Node/edge counts + confidence breakdown — useful for assessing graph density before relying on it |
+
+For tools without a devt wrapper, call them via the registered `graphify` MCP server directly. The `blast_radius` tool exposed by devt's vendored `bin/devt-memory-mcp.cjs` aggregates `get_neighbors` calls — it is NOT a Graphify-native tool, but a devt-specific composition.
+
 ## Hard Invariants
 
 1. **`graphify.enabled: false` is fully supported.** No skill, no workflow, no agent

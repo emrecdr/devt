@@ -140,7 +140,7 @@ node bin/devt-tools.cjs memory list [doc_type]   # enumerate
 node bin/devt-tools.cjs memory links <id>        # transitive link traversal
 node bin/devt-tools.cjs memory active [domain]   # status: active filter
 node bin/devt-tools.cjs memory rejected-keywords # all REJ search_keywords
-node bin/devt-tools.cjs memory validate          # schema + link integrity
+node bin/devt-tools.cjs memory validate          # schema + link integrity + (Graphify-enabled) stale-symbol detection
 node bin/devt-tools.cjs memory backlinks <id>    # incoming refs
 node bin/devt-tools.cjs memory orphans           # no-link docs
 node bin/devt-tools.cjs memory stale-links       # broken cross-refs
@@ -191,7 +191,7 @@ SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
 
 ## Native MEM_* Health Checks (v0.23.0+)
 
-`bin/devt-tools.cjs health` runs four memory-specific checks natively (no agent in the loop, suitable for CI):
+`bin/devt-tools.cjs health` runs five memory-specific checks natively (no agent in the loop, suitable for CI):
 
 | Check | Severity | Triggered when |
 |-------|----------|----------------|
@@ -199,8 +199,11 @@ SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
 | `MEM_INDEX_STALE` | warning | `index.db` is older than the newest `.md` mtime across all roots |
 | `MEM_VALIDATE_ERRORS` | error | Frontmatter schema violations from `memory validate` |
 | `MEM_CONFLICT_HIGH` | info | High count of cross-root ID collisions (last-wins applied) |
+| `GRAPHIFY_MCP_UNREGISTERED` | info | `graphify` binary is on PATH but `.mcp.json` lacks the server entry — MCP queries silently fall back to grep |
 
 The `MEM_PATH_UNREACHABLE` check pairs with `memory paths --validate` — both surface actionable hints ("git submodule init / NFS mount / sibling clone") rather than bare "missing directory" errors.
+
+`GRAPHIFY_MCP_UNREGISTERED` is **warn-only by design** — `health --repair` does NOT auto-edit `.mcp.json` to avoid stomping user MCP customizations. The fix is `node bin/devt-tools.cjs setup --mode update` (regenerates the MCP server entries, preserving any unrelated customizations).
 
 ## MCP Server (v0.18.0+)
 
@@ -236,6 +239,15 @@ The curator agent gates ALL writes to `.devt/memory/`. Discovery engine (`bin/mo
 All candidates flow into `.devt/memory/_suggestions.md` (NEVER auto-promoted). Curator presents each via `AskUserQuestion` with the FULL original reasoning verbatim — no AI summarization. Only on user approval (Promote active | Promote candidate | Reject as REJ | Defer | Edit before promoting) does the markdown file get written.
 
 REJ tombstones suppress future proposals matching their `search_keywords` — the "no nag" mechanism.
+
+### Harvest is unconditional; curator review is gated
+
+The harvest step (which writes `_suggestions.md`) and the curator review step (which dispatches `AskUserQuestion` per candidate) are wired separately:
+
+- **`harvest_observations`** — runs in every `dev-workflow`, `lesson-extraction`, and `quick-implement` finalize phase, regardless of complexity tier or `config.workflow.retro` flags. Cost is ~50ms when claude-mem is absent. Best-effort: harvest failures NEVER fail the workflow. This guarantees that a SIMPLE-tier workflow that skips retro+curator still buffers its observations into `_suggestions.md` for the next dev-workflow's curator to review.
+- **`curate`** — only runs when `complexity=COMPLEX` (or `/devt:retro` standalone). Dual-path: PLAYBOOK PATH (lessons.yaml → playbook) AND MEMORY-LAYER PATH (_suggestions.md → AskUserQuestion approval flow). Hard invariant: NEVER writes a permanent memory doc without explicit user approval.
+
+The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor (the bug behavior pre-Unreleased) cannot recur.
 
 ## Memory Maintenance Discipline
 
