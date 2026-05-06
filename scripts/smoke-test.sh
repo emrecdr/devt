@@ -1724,6 +1724,16 @@ else
   fail "curator dispatch missing _suggestions.md context ($DISPATCH_WIRED_COUNT/2)"
 fi
 
+# project-init.md prompts the user to install graphify's post-commit hook when
+# graphify is on PATH but the hook is missing. Without this, graph drift causes
+# stale-symbol false alarms after every refactor.
+if grep -q '"prompt_graphify_hook"' "$ROOT/workflows/project-init.md" \
+   && grep -q "graphify hook install" "$ROOT/workflows/project-init.md"; then
+  pass "project-init prompts graphify hook install when needed"
+else
+  fail "project-init missing graphify hook install prompt"
+fi
+
 echo "== Agent size budget =="
 # Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500
 # leaves room to grow but blocks bloat. Bump deliberately if a future

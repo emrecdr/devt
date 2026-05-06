@@ -159,6 +159,44 @@ This command:
 **If the command fails**: Report the error verbatim to the user and STOP with status BLOCKED.
 </step>
 
+<step name="prompt_graphify_hook" gate="graphify hook prompt resolved (installed, declined, or N/A)">
+
+Check whether Graphify is available and whether its post-commit hook is registered. If Graphify is on PATH but its hook is missing, prompt the user — without this hook, the graph cache drifts behind HEAD and Pre-Flight Briefs surface stale-symbol false alarms after every refactor.
+
+```bash
+GRAPHIFY_AVAILABLE=$(command -v graphify >/dev/null 2>&1 && echo yes || echo no)
+HOOK_PATH=".git/hooks/post-commit"
+HOOK_IS_GRAPHIFY=no
+if [ -f "$HOOK_PATH" ] && grep -q "graphify" "$HOOK_PATH" 2>/dev/null; then
+  HOOK_IS_GRAPHIFY=yes
+fi
+echo "graphify_available=$GRAPHIFY_AVAILABLE hook_is_graphify=$HOOK_IS_GRAPHIFY"
+```
+
+If `graphify_available=no` OR `hook_is_graphify=yes`: skip this step (nothing to do).
+
+Otherwise, ask via AskUserQuestion:
+
+```yaml
+question: "Graphify is installed but its post-commit hook is not registered. Install it now? (Recommended — keeps the graph cache fresh after every commit so blast-radius and stale-symbol checks stay accurate.)"
+header: "Graphify Hook"
+multiSelect: false
+options:
+  - label: "Yes, install graphify hook"
+    description: "Runs `graphify hook install` once. Each subsequent commit auto-refreshes the graph (~1-3s on small repos)."
+  - label: "No, skip for now"
+    description: "Graph cache will drift; Pre-Flight Brief alerts when ≥10 commits behind HEAD. Run `graphify hook install` manually when ready."
+```
+
+On "Yes":
+
+```bash
+graphify hook install 2>&1 | tail -5 || echo "(graphify hook install failed — non-fatal, you can retry manually)"
+```
+
+This is best-effort: failures NEVER fail the init workflow. Report which path was taken so the user has a record.
+</step>
+
 <step name="verify_and_report" gate="all expected files exist">
 
 Verify the setup created everything expected:
