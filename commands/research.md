@@ -1,6 +1,6 @@
 ---
 name: research
-description: Research implementation approaches before planning — investigates codebase patterns, identifies pitfalls, recommends strategy. Use before /devt:plan for unfamiliar domains or complex tasks.
+description: Research implementation approaches before planning — codebase patterns, pitfalls, recommended strategy. Use before /devt:plan for unfamiliar domains or complex tasks.
 ---
 
 <tool_restrictions>

@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create a detailed implementation plan before coding — analyzes the task, identifies files to change, breaks into steps, and validates the approach. Use before /devt:workflow for complex tasks.
+description: Create a detailed implementation plan before coding — analyzes the task, identifies files, breaks into steps, validates the approach. Use before /devt:workflow for complex tasks.
 ---
 
 <tool_restrictions>

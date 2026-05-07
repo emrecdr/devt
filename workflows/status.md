@@ -203,6 +203,10 @@ Based on current state, suggest the appropriate next command:
 | Active, workflow_type=plan               | "Continue with /devt:plan to resume planning"                            |
 | Active, workflow_type=specify            | "Continue with /devt:specify to resume spec generation"                  |
 | Active, workflow_type=clarify            | "Continue with /devt:clarify to resume decision capture"                 |
+| Active, workflow_type=code_review        | "Continue with /devt:review to resume code review"                       |
+| Active, workflow_type=preflight          | "Continue with /devt:preflight to regenerate the Brief"                  |
+| Active, workflow_type=memory_promote     | "Continue with /devt:memory promote to resume curator promotion"         |
+| Active, workflow_type=memory_reject      | "Continue with /devt:memory reject to resume tombstone capture"          |
 | Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
 | Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 

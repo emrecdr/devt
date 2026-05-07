@@ -45,12 +45,14 @@ node -e "
       dir = path.dirname(dir);
     }
 
-    // Honor memory.auto_index_on_change config (defaults to true)
+    // Honor memory.enabled (master switch) AND memory.auto_index_on_change
+    // (feature-specific gate). Either set to false → hook no-ops.
     let enabled = true;
     try {
       const cfgPath = path.join(dir, '.devt', 'config.json');
       if (fs.existsSync(cfgPath)) {
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        if (cfg.memory && cfg.memory.enabled === false) enabled = false;
         if (cfg.memory && cfg.memory.auto_index_on_change === false) enabled = false;
       }
     } catch { /* default true */ }

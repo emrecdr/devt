@@ -48,12 +48,15 @@ node -e "
       dir = path.dirname(dir);
     }
 
-    // Resolve memory.preflight_mode (defaults ← global ← project)
+    // Resolve memory.preflight_mode (defaults ← global ← project) AND honor
+    // the memory.enabled master switch (when false, the entire memory layer
+    // is opted out — guard becomes a no-op).
     let mode = 'warn';
     try {
       const projectCfgPath = path.join(dir, '.devt', 'config.json');
       if (fs.existsSync(projectCfgPath)) {
         const cfg = JSON.parse(fs.readFileSync(projectCfgPath, 'utf8'));
+        if (cfg.memory && cfg.memory.enabled === false) process.exit(0);
         if (cfg.memory && cfg.memory.preflight_mode) mode = cfg.memory.preflight_mode;
       }
     } catch { /* fall through with default */ }

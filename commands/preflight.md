@@ -1,6 +1,6 @@
 ---
 name: preflight
-description: Generate a Topic Pre-Flight Brief for a development task. Runs Lanes A-F (domain match, FTS expansion, symbol match, wiki-link closure, rejected check, lessons match) plus Graphify blast radius (when enabled) and writes .devt/state/preflight-brief.md so every subsequent agent reads the same governing rules. Auto-fired by dev workflows; standalone invocation also supported.
+description: Generate a Topic Pre-Flight Brief for a task — surfaces governing ADR/CON/FLOW, REJ tombstones, lessons, and (with Graphify) blast radius. Auto-fired by dev workflows.
 argument-hint: "<task description>   e.g. /devt:preflight 'Add MFA to AuthService'"
 ---
 

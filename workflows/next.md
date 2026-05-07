@@ -60,10 +60,34 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=nu
 ```
 </step>
 
+<dispatcher_contract>
+## Dispatch mechanic
+
+Every "Execute `/devt:X`" instruction in this workflow means a Skill tool call —
+**not** a prose answer about what `/devt:X` would do. devt slash commands are
+addressable as skills with the `devt:` prefix (e.g., `/devt:debug` ↔
+`Skill tool: name=devt:debug`). Subcommand routes (e.g., `/devt:memory promote`)
+translate to `Skill tool: name=devt:memory, args="promote"`.
+
+**Hard rules — what counts as "executing":**
+
+- ✅ RIGHT: `Skill tool: name=devt:debug, args="<task>"` after stating the routing decision
+- ✅ RIGHT: `AskUserQuestion(...)` first when a routing rule explicitly says to ask, then Skill tool with the chosen route
+- ❌ WRONG: prose like "Let me look at the bug..." then reading code or grepping
+- ❌ WRONG: explaining what `/devt:debug` would do without invoking it
+- ❌ WRONG: running diagnostics, lint, or tests instead of dispatching
+
+The routing tree below decides WHICH command. The mechanic above decides HOW
+to invoke it. If a routing branch lands on `/devt:X`, your final action of this
+turn is the Skill tool call — nothing else. (Auxiliary one-shot bash commands
+like `rm -f .devt/state/handoff.json` to consume one-shot artifacts ARE allowed
+when the routing block specifies them; they are not "doing the work.")
+</dispatcher_contract>
+
 <step name="route" gate="next action is determined and executed">
 ## Step 2: Route to Next Action
 
-Based on detected state, execute the appropriate action:
+Based on detected state, execute the appropriate action (per the dispatch mechanic above):
 
 ### No workflow, no artifacts
 ```
@@ -90,7 +114,7 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `specify` | `/devt:specify` with the original task |
 | `clarify` | `/devt:clarify` with the original task |
 | `preflight` | `/devt:preflight` with the original task (or just `cat .devt/state/preflight-brief.md` if the Brief is FRESH) |
-| `memory_init` / `memory_index` / `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
+| `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```

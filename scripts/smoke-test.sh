@@ -1867,6 +1867,181 @@ else
   fail "project-init missing graphify install/enable prompt"
 fi
 
+echo "== memory.enabled master switch =="
+# When memory.enabled=false, the load-bearing memory surfaces (preflight Brief
+# generation + discovery harvest) must short-circuit and return a disabled
+# envelope without writing memory-layer artifacts. This regression-tests the
+# gate wiring in preflight.cjs and discovery.cjs.
+SWITCH_TMP=$(mktemp -d)
+(
+  cd "$SWITCH_TMP"
+  git init -q
+  mkdir -p .devt
+  echo '{"memory":{"enabled":false}}' > .devt/config.json
+)
+if node "$CLI" preflight generate "smoke gate test" --root "$SWITCH_TMP" 2>/dev/null \
+   | node -e "
+       const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
+       process.exit(r.state === 'disabled' && r.brief_path === null ? 0 : 1);
+     "; then
+  pass "preflight short-circuits when memory.enabled=false"
+else
+  # Fallback: invoke from the temp project's cwd (preflight resolves root via cwd if --root unsupported)
+  if (cd "$SWITCH_TMP" && node "$CLI" preflight generate "smoke gate test" 2>/dev/null) \
+     | node -e "
+         const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
+         process.exit(r.state === 'disabled' && r.brief_path === null ? 0 : 1);
+       "; then
+    pass "preflight short-circuits when memory.enabled=false"
+  else
+    fail "preflight did NOT short-circuit when memory.enabled=false"
+  fi
+fi
+
+if (cd "$SWITCH_TMP" && node "$CLI" discovery harvest 2>/dev/null) \
+   | node -e "
+       const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
+       process.exit(r.state === 'disabled' && r.suggestions_path === null ? 0 : 1);
+     "; then
+  pass "discovery harvest short-circuits when memory.enabled=false"
+else
+  fail "discovery harvest did NOT short-circuit when memory.enabled=false"
+fi
+
+# Confirm no memory-layer artifact was written when disabled (the whole point).
+if [ ! -f "$SWITCH_TMP/.devt/memory/_suggestions.md" ] && [ ! -f "$SWITCH_TMP/.devt/state/preflight-brief.md" ]; then
+  pass "no memory-layer artifacts written when memory.enabled=false"
+else
+  fail "memory-layer artifact leaked despite memory.enabled=false"
+fi
+rm -rf "$SWITCH_TMP"
+
+echo "== io.cjs atomic-write helpers =="
+# Round-trip: atomicWriteFileSync writes content; read-back equals input.
+if node -e "
+  const { atomicWriteFileSync, atomicWriteJsonSync } = require('$ROOT/bin/modules/io.cjs');
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devt-io-'));
+  const f = path.join(tmp, 'sample.txt');
+  atomicWriteFileSync(f, 'hello\n');
+  if (fs.readFileSync(f, 'utf8') !== 'hello\n') process.exit(1);
+  const j = path.join(tmp, 'sample.json');
+  atomicWriteJsonSync(j, { a: 1 });
+  if (JSON.parse(fs.readFileSync(j, 'utf8')).a !== 1) process.exit(2);
+  fs.rmSync(tmp, { recursive: true, force: true });
+" 2>/dev/null; then
+  pass "atomicWriteFileSync + atomicWriteJsonSync round-trip"
+else
+  fail "io.cjs round-trip failed"
+fi
+
+# Orphan cleanup: when renameSync fails (target is an existing non-empty dir on
+# the same filesystem), the .tmp must be unlinked so a failed write doesn't leave
+# stale state behind. Verifies the EXDEV/EACCES/EBUSY cleanup branch.
+if node -e "
+  const { atomicWriteFileSync } = require('$ROOT/bin/modules/io.cjs');
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devt-io-orphan-'));
+  // Make target an existing directory with a child — rename(file -> nonemptydir) fails on POSIX.
+  const target = path.join(tmp, 'target');
+  fs.mkdirSync(target);
+  fs.writeFileSync(path.join(target, 'child'), 'x');
+  let threw = false;
+  try { atomicWriteFileSync(target, 'data'); } catch { threw = true; }
+  if (!threw) process.exit(1);  // must rethrow original error
+  if (fs.existsSync(target + '.tmp')) process.exit(2);  // orphan cleanup must have run
+  fs.rmSync(tmp, { recursive: true, force: true });
+" 2>/dev/null; then
+  pass "atomicWriteFileSync cleans up .tmp orphan on rename failure"
+else
+  fail "io.cjs orphan-cleanup branch broken"
+fi
+
+echo "== security.cjs masking + sanitization =="
+# isSecretKey + maskSecrets — known names, suffix-based, and non-secret keys.
+if node -e "
+  const { isSecretKey, maskSecrets, sanitizeForDisplay } = require('$ROOT/bin/modules/security.cjs');
+  // Known-name detection
+  if (!isSecretKey('password')) process.exit(1);
+  if (!isSecretKey('API_KEY')) process.exit(2);  // case-insensitive
+  if (!isSecretKey('db_token')) process.exit(3);  // suffix
+  if (isSecretKey('auth_strategy')) process.exit(4);  // contains 'auth' but not suffix-shaped
+  // maskSecrets envelope check
+  const masked = maskSecrets({ api_key: 'abcd', name: 'public', nested: { db_password: 'pw' } });
+  if (masked.api_key !== '***MASKED***') process.exit(5);
+  if (masked.name !== 'public') process.exit(6);
+  if (masked.nested.db_password !== '***MASKED***') process.exit(7);
+  // sanitizeForDisplay strips protocol-like leak markers but preserves normal text
+  if (sanitizeForDisplay('<|assistant|>') !== '') process.exit(8);
+  if (sanitizeForDisplay('hello world') !== 'hello world') process.exit(9);
+" 2>/dev/null; then
+  pass "isSecretKey + maskSecrets + sanitizeForDisplay correctness"
+else
+  fail "security.cjs masking/sanitization failed"
+fi
+
+# Cycle guard returns a string sentinel (must stay JSON-serializable) — bug 888 regression test.
+if node -e "
+  const { maskSecrets } = require('$ROOT/bin/modules/security.cjs');
+  const a = { name: 'x' }; a.self = a;
+  const out = maskSecrets(a);
+  // out.self must be the string sentinel, not the live cyclic object
+  if (typeof out.self !== 'string' || out.self !== '[Circular]') process.exit(1);
+  // And the whole result must be JSON-serializable (the whole point of the helper).
+  JSON.stringify(out);
+" 2>/dev/null; then
+  pass "maskSecrets cycle guard returns serializable sentinel"
+else
+  fail "maskSecrets cycle guard regressed (bug 888)"
+fi
+
+echo "== workflow_type registry coverage =="
+# Mirror of CI lint: every entry in VALID_WORKFLOW_TYPES (state.cjs) must have
+# routing in BOTH workflows/next.md and workflows/status.md. Catches drift
+# locally before push.
+if node -e "
+  const { VALID_WORKFLOW_TYPES } = require('$ROOT/bin/modules/state.cjs');
+  const fs = require('fs');
+  const next = fs.readFileSync('$ROOT/workflows/next.md', 'utf8');
+  const status = fs.readFileSync('$ROOT/workflows/status.md', 'utf8');
+  const missingNext = [], missingStatus = [];
+  for (const t of VALID_WORKFLOW_TYPES) {
+    if (t === null) continue;
+    if (!next.includes(t)) missingNext.push(t);
+    if (!status.includes(t)) missingStatus.push(t);
+  }
+  if (missingNext.length || missingStatus.length) {
+    if (missingNext.length)   process.stderr.write('missing-next: ' + missingNext.join(',') + '\n');
+    if (missingStatus.length) process.stderr.write('missing-status: ' + missingStatus.join(',') + '\n');
+    process.exit(1);
+  }
+" 2>/dev/null; then
+  pass "every VALID_WORKFLOW_TYPES entry covered in next.md AND status.md"
+else
+  fail "workflow_type registry drift — missing rows in next.md or status.md"
+fi
+
+echo "== Command description budget =="
+# Slash-command descriptions appear in autocomplete and the system prompt's
+# command list — every char costs cold-start tokens. 180 chars is enough for
+# action verb + 1 trigger-phrase clause; multi-sentence paragraphs belong in
+# the command body, not the description field.
+DESC_LIMIT=180
+DESC_OVER=()
+for cmd_file in "$ROOT"/commands/*.md; do
+  desc_len=$(awk -F': ' '/^description:/ {sub(/^description: */, ""); print length($0); exit}' "$cmd_file")
+  if [ -n "$desc_len" ] && [ "$desc_len" -gt "$DESC_LIMIT" ]; then
+    DESC_OVER+=("$(basename "$cmd_file"): ${desc_len} chars")
+  fi
+done
+if [ ${#DESC_OVER[@]} -eq 0 ]; then
+  pass "all command descriptions within $DESC_LIMIT-char budget"
+else
+  for entry in "${DESC_OVER[@]}"; do
+    fail "command description over budget — $entry (limit $DESC_LIMIT)"
+  done
+fi
+
 echo "== Agent size budget =="
 # Hard limit per agent file. Largest at v0.9.3 is 387 lines; cap at 500
 # leaves room to grow but blocks bloat. Bump deliberately if a future

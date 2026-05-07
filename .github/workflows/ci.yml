@@ -54,16 +54,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify VALID_WORKFLOW_TYPES has resume routing
+      - name: Verify VALID_WORKFLOW_TYPES has resume routing in next.md AND status.md
         run: |
           node -e "
             const { VALID_WORKFLOW_TYPES } = require('./bin/modules/state.cjs');
-            const next = require('fs').readFileSync('workflows/next.md', 'utf8');
-            const missing = [];
+            const fs = require('fs');
+            const next = fs.readFileSync('workflows/next.md', 'utf8');
+            const status = fs.readFileSync('workflows/status.md', 'utf8');
+            const missingNext = [], missingStatus = [];
             for (const t of VALID_WORKFLOW_TYPES) {
               if (t === null) continue;
-              if (!next.includes(t)) missing.push(t);
+              if (!next.includes(t)) missingNext.push(t);
+              if (!status.includes(t)) missingStatus.push(t);
             }
-            if (missing.length) { console.error('Missing in next.md:', missing); process.exit(1); }
-            console.log('All', [...VALID_WORKFLOW_TYPES].filter(Boolean).length, 'workflow types have resume routing');
+            if (missingNext.length)   { console.error('Missing in next.md:', missingNext); process.exit(1); }
+            if (missingStatus.length) { console.error('Missing in status.md:', missingStatus); process.exit(1); }
+            console.log('All', [...VALID_WORKFLOW_TYPES].filter(Boolean).length, 'workflow types covered in both next.md and status.md');
           "

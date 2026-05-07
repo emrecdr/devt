@@ -33,7 +33,7 @@ The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, or anything
 ### What you get out of the box
 
 - **Auto-complexity detection** — analyzes your task and selects the right pipeline (TRIVIAL through COMPLEX)
-- **13 specialized agents** — programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger, plus 3 supporting agents
+- **10 specialized agents** — programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger
 - **Closed learning loop** — lessons extracted from each workflow feed back into future sessions
 - **Permanent memory layer** — ADR/CON/FLOW/REJ/LES knowledge graph that survives session boundaries (curator-gated, FTS5-indexed)
 - **Topic Pre-Flight Brief** — every workflow starts by surfacing governing decisions, rejected approaches, related lessons, and blast radius
@@ -81,7 +81,7 @@ The execution model follows a **Command → Workflow → Agent** architecture:
 
 - **Commands** (32 files): thin entry points. Parse arguments, delegate to a workflow. No business logic.
 - **Workflows** (31 files): orchestration. Determine tier, coordinate agents, manage state transitions.
-- **Agents** (13 files): focused workers. Each owns one concern.
+- **Agents** (10 files): focused workers. Each owns one concern.
 - **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
 - **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`).
 
@@ -544,7 +544,7 @@ devt/
                          security, health, weekly-report, update, cli-args, io
   commands/              Slash command entry points (32 files)
   workflows/             Orchestration files (31 files)
-  agents/                Agent definitions (13 files)
+  agents/                Agent definitions (10 files; 3 agents bundle sub-skill subdirectories)
   skills/                Skill libraries (16 directories)
   hooks/                 Lifecycle hook scripts + hooks.json
   guardrails/            Protective guidelines

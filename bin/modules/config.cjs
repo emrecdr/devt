@@ -30,6 +30,10 @@ const DEFAULTS = {
   // auto_index_on_change: PostToolUse hook (memory-auto-index.sh) rebuilds the FTS5 unified
   // index after Edit/Write on .devt/memory/**.md files. Idempotent — no-op when nothing changed.
   memory: {
+    // Master switch (v0.30.0+): when explicitly false, disables Pre-Flight Brief
+    // generation, the auto-index PostToolUse hook, and the pre-flight-guard
+    // PreToolUse hook. Per-feature flags below still apply when this is true.
+    // The MCP query layer is gated separately via .mcp.json registration.
     enabled: true,
     preflight_mode: "block",
     auto_index_on_change: true,
@@ -302,4 +306,18 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, readJsonSafe, DEFAULTS };
+/**
+ * Master switch for the memory layer. Returns false only when the user has
+ * explicitly set `memory.enabled: false` in `.devt/config.json`. Default and
+ * any unset/non-boolean value resolves to enabled — the layer is opt-out, not
+ * opt-in. Consumers: `bin/modules/preflight.cjs` (Brief generation),
+ * `hooks/memory-auto-index.sh` (FTS5 rebuild), `hooks/pre-flight-guard.sh`
+ * (PREFLIGHT line check). When false, all three become no-ops; the MCP query
+ * layer is not gated here because it's separately opt-in via `.mcp.json`
+ * registration.
+ */
+function isMemoryEnabled(cfg) {
+  return !(cfg && cfg.memory && cfg.memory.enabled === false);
+}
+
+module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, readJsonSafe, isMemoryEnabled, DEFAULTS };

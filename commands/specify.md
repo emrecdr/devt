@@ -1,6 +1,6 @@
 ---
 name: specify
-description: Create a detailed PRD through systematic interview and codebase analysis — generates structured specifications with decisions, API design, test scenarios, and task breakdown. Use when the user says 'specify', 'write a spec', 'create a PRD', 'requirements for', 'what should we build', 'define the feature', 'before we start building', or describes a feature idea that needs scoping before implementation.
+description: Create a detailed PRD through systematic interview + codebase analysis. Use when scoping a feature before implementation — "specify", "write a spec", "requirements for X".
 ---
 
 <tool_restrictions>

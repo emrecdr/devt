@@ -21,7 +21,13 @@ Not applicable.
 <deviation_rules>
 1. **STOP: ambiguity** — If intent matches 2+ commands equally, ask the user to choose. Do not guess.
 2. **STOP: no match** — If no command fits, show `/devt:help` and ask the user to rephrase.
-3. **Never do the work** — This is a dispatcher only. Route and hand off.
+3. **Never do the work** — This is a dispatcher only. The ONLY valid final action of this turn is invoking the routed command via the Skill tool. "Doing the work" is forbidden and includes:
+   - Answering the user's underlying question in prose (even partially)
+   - Running diagnostics, reading code, grepping the repo, or calling Bash
+   - Asking clarifying questions about the task itself (the routed command will ask)
+   - Validating whether the task is real, scoped correctly, or worth doing
+
+   If you start typing prose about the task content instead of the routing decision, STOP — you've broken the contract. The routed command exists to do exactly that work, with persisted state.
 </deviation_rules>
 
 ---
@@ -90,21 +96,42 @@ options:
 
 </step>
 
-<step name="dispatch" gate="command invoked">
+<step name="dispatch" gate="Skill tool called for routed command">
 
-Display the routing decision:
+**Mechanic:** invoke the routed command via the Skill tool. devt slash commands are addressable as skills with the `devt:` prefix (e.g., `/devt:debug` ↔ `Skill tool: name=devt:debug`).
 
+**Order — exactly two actions, no others:**
+
+1. Display the routing decision (one line only):
+   ```
+   Routing: /devt:{command} — {one-line reason}
+   ```
+2. **Immediately** invoke the routed command (Skill tool: `name=devt:{command}`, args=`{original input verbatim}`). No prose between the routing line and the Skill call.
+
+**Worked example — bug report:**
+
+User: `/devt:do "405 on POST /api/v1/admin/impersonate, integrator says it should work"`
+
+✅ RIGHT — two actions only:
 ```
-Routing: /devt:{command} — {one-line reason}
+Routing: /devt:debug — bug report, systematic root-cause investigation
+
+[Skill tool: name=devt:debug, args="405 on POST /api/v1/admin/impersonate, integrator says it should work"]
 ```
 
-Invoke the selected command, passing the original input as arguments.
+❌ WRONG — this is the failure mode this contract prevents:
+```
+Let me look at the route definition... [reads code]
+The 405 likely means the method isn't registered. Probable cause is...
+[never dispatches; the user is now stuck outside the devt ecosystem they invoked]
+```
+That's "doing the work." `/devt:debug` exists to do exactly that, with persisted state in `.devt/state/`, preflight Brief, debugger agent, and resume support. The dispatcher must hand off, not investigate.
 
 </step>
 
 <success_criteria>
 - Input validated (not empty)
 - Intent matched to exactly one command
-- Routing decision displayed
-- Command invoked — dispatcher exits
+- Routing decision displayed (one line)
+- Skill tool invoked with `name=devt:<routed-command>` — dispatcher exits without further commentary or work
 </success_criteria>

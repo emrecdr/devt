@@ -193,12 +193,11 @@ const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
   "research", "plan", "specify", "clarify",
   // Memory layer workflow types (v0.16.0+) — see workflows/memory-*.md.
-  // memory_init: scaffolds .devt/memory/ + first index pass (Phase 1).
-  // memory_index: rebuilds the FTS5 unified index from markdown (Phase 1).
   // memory_promote: curator promotes ephemeral DEC -> permanent ADR (Phase 2).
   // memory_reject: curator creates a REJ tombstone with search_keywords (Phase 2).
   // preflight: standalone Topic Pre-Flight Brief generation (Phase 3).
-  "memory_init", "memory_index", "memory_promote", "memory_reject", "preflight",
+  // (memory_init / memory_index are CLI-only subcommands — they don't set state and aren't workflow_types.)
+  "memory_promote", "memory_reject", "preflight",
   null,
 ]);
 

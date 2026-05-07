@@ -1,6 +1,6 @@
 ---
 name: health
-description: Diagnose devt plugin health — checks .devt/state/ integrity, .devt/rules/ completeness, config validation, and hook status. Use when workflows fail unexpectedly or after interrupted sessions.
+description: Diagnose devt plugin health — checks .devt/state/, .devt/rules/, config, and hook status. Use when workflows fail unexpectedly or after interrupted sessions.
 ---
 
 <tool_restrictions>

@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Manage the permanent memory layer — ADR/Concept/Flow/Rejected docs at .devt/memory/. Subcommands - init, index, query, get, affects, list, links, active, rejected-keywords, validate. Phase 2 adds promote/reject/suggest.
+description: Manage the permanent memory layer at .devt/memory/ (ADR/Concept/Flow/Rejected/Lesson). Subcommands - init, index, query, list, affects, promote, reject, suggest, validate.
 argument-hint: "<subcommand> [args]   e.g. /devt:memory query argon hashing"
 ---
 

@@ -14,7 +14,17 @@ Acts as a smart dispatcher — never does work itself.
 </execution_context>
 
 <process>
-Execute the do workflow from the referenced file. Route user intent to the best devt command.
+Execute the do workflow from the referenced file. The workflow is a pure dispatcher — read the routing table, pick the matching command, invoke it via the Skill tool. devt slash commands are addressable as skills with the `devt:` prefix (e.g., `/devt:debug` ↔ `Skill tool: name=devt:debug`).
+
+**Hard contract — the only valid final action is the Skill tool call.**
+
+"Doing the work" — all forbidden in this turn — includes:
+- Answering the user's underlying question in prose, even partially
+- Running diagnostics, reading code, grepping the repo, calling Bash
+- Asking clarifying questions about the task itself (the routed command will ask)
+- Validating whether the task is real, scoped correctly, or worth doing
+
+If you find yourself drafting more than the routing decision line + the Skill tool call, you have broken the contract — back out and dispatch.
 </process>
 
 ## Memory integration (v0.20.0+)

@@ -1,6 +1,6 @@
 ---
 name: thread
-description: Persistent context threads for cross-session work — create, list, or resume investigation threads that survive session boundaries. Use for multi-session debugging, research, or explorations.
+description: Persistent context threads for cross-session work — create, list, or resume investigations that survive session boundaries. Use for multi-session debugging or research.
 ---
 
 <tool_restrictions>

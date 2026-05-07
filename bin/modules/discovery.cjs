@@ -323,6 +323,21 @@ function discoverMissingWikiLinks() {
 
 function harvest(options) {
   options = options || {};
+
+  // Master switch — when memory.enabled=false, harvest is a no-op so we don't
+  // write to .devt/memory/_suggestions.md (a memory-layer artifact). Returns
+  // the same envelope shape callers expect, with empty arrays + a state marker.
+  const { getMergedConfig, isMemoryEnabled } = require("./config.cjs");
+  if (!isMemoryEnabled(getMergedConfig())) {
+    return {
+      state: "disabled",
+      reason: "memory.enabled=false in .devt/config.json",
+      proposals: [],
+      suppressed: [],
+      duplicates: [],
+    };
+  }
+
   const rejs = loadRejectedKeywords();
   const existing = loadExistingMemoryDocs();
 
@@ -454,6 +469,13 @@ function run(subcommand, _args) {
   switch (subcommand) {
     case "harvest": {
       const result = harvest({});
+      // When memory is disabled (master switch), skip writing the suggestions
+      // report file — that file is itself a memory-layer artifact. Surface the
+      // disabled state in the JSON envelope instead.
+      if (result.state === "disabled") {
+        json({ ...result, suggestions_path: null });
+        return 0;
+      }
       writeSuggestionsReport(result);
       json({
         ...result,

@@ -26,7 +26,7 @@ const fs = require("fs");
 const path = require("path");
 const memory = require("./memory.cjs");
 const graphify = require("./graphify.cjs");
-const { findProjectRoot } = require("./config.cjs");
+const { findProjectRoot, getMergedConfig, isMemoryEnabled } = require("./config.cjs");
 const { atomicWriteFileSync } = require("./io.cjs");
 
 const STATE_DIR = path.join(".devt", "state");
@@ -378,6 +378,22 @@ function synthesizeRecommendations(governing, rejected, blast) {
  */
 function generate(taskText, opts) {
   opts = opts || {};
+
+  // Master switch — when memory.enabled=false, no Brief is generated.
+  // Returns a disabled envelope so callers can branch cleanly without crashing.
+  const cfg = getMergedConfig();
+  if (!isMemoryEnabled(cfg)) {
+    return {
+      state: "disabled",
+      reason: "memory.enabled=false in .devt/config.json",
+      brief_path: null,
+      topic: null,
+      counts: { lane_a: 0, lane_b: 0, lane_c: 0, lane_d: 0, lane_e: 0, lane_f: 0, governing: 0 },
+      blast: { effect_size: 0, source: null, god_node_match: false, ambiguous_bindings: 0 },
+      generated_at: null,
+    };
+  }
+
   const topic = extractTopic(taskText);
 
   // Run lanes
