@@ -625,6 +625,45 @@ else
   fail "state reset wiped deferred.md or its contents"
 fi
 
+# v0.30.4 — state reset archives non-exempt artifacts to .devt/state/.archive/<ts>/
+echo "scratch" > .devt/state/scratchpad.md
+RESET_OUT=$(node "$CLI" state reset 2>/dev/null)
+ARCHIVED_TO=$(echo "$RESET_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d).archived_to||'')}catch{}});")
+if [ -n "$ARCHIVED_TO" ] && [ -f "$ARCHIVED_TO/scratchpad.md" ] && [ ! -f .devt/state/scratchpad.md ]; then
+  pass "state reset archives non-exempt artifacts to .archive/<ts>/"
+else
+  fail "state reset did not archive properly (archived_to=$ARCHIVED_TO)"
+fi
+
+# v0.30.4 — workflow_type alias hint guides agents away from common hallucinations
+WT_HINT_OUT=$(node "$CLI" state update workflow_type=workflow 2>&1 | head -1)
+if echo "$WT_HINT_OUT" | grep -q 'Did you mean .*dev' && echo "$WT_HINT_OUT" | grep -q 'Valid:'; then
+  pass "workflow_type alias hint: 'workflow' suggests 'dev' + lists valid values"
+else
+  fail "workflow_type alias hint missing for 'workflow' input: $WT_HINT_OUT"
+fi
+
+# v0.30.4 — state read-section returns sliced content with match mode
+cat > .devt/state/plan.md <<'PLAN_EOF'
+# Plan
+## Phase 1: Setup
+Setup body.
+## Phase 2: Build
+Build body.
+PLAN_EOF
+SECTION_OUT=$(node "$CLI" state read-section --file plan.md --section "Phase 2" 2>/dev/null)
+if echo "$SECTION_OUT" | grep -q '"match":"prefix"' && echo "$SECTION_OUT" | grep -q "Build body"; then
+  pass "state read-section: prefix match returns sliced section"
+else
+  fail "state read-section: expected prefix match with 'Build body', got: $SECTION_OUT"
+fi
+SECTION_MISS=$(node "$CLI" state read-section --file plan.md --section "NoSuchSection" 2>/dev/null)
+if echo "$SECTION_MISS" | grep -q '"ok":false' && echo "$SECTION_MISS" | grep -q "section not found"; then
+  pass "state read-section: missing section returns ok:false"
+else
+  fail "state read-section: missing section did not return expected error: $SECTION_MISS"
+fi
+
 # Invalid id rejected with exit 2
 DEF_INVALID_OUT=$(node "$CLI" deferred get FOO-001 2>&1 || true)
 if echo "$DEF_INVALID_OUT" | grep -q "invalid id"; then

@@ -219,7 +219,18 @@ function validateStateEntry(key, value) {
     warnState(`Unknown tier "${value}"`);
   }
   if (key === "workflow_type" && !VALID_WORKFLOW_TYPES.has(value)) {
-    warnState(`Unknown workflow_type "${value}"`);
+    // Surface the registry + a closest-match hint so agent hallucinations
+    // (e.g. `workflow_type=workflow` from the slash-command name) are self-
+    // correcting on the next try. Common false-friends mapped explicitly.
+    const aliasHint = {
+      workflow: "dev",
+      implement: "quick_implement",
+      review: "code_review",
+      arch: "arch_health_scan",
+    }[value];
+    const validList = [...VALID_WORKFLOW_TYPES].filter((v) => v !== null).sort().join(", ");
+    const suggestion = aliasHint ? ` Did you mean "${aliasHint}"?` : "";
+    warnState(`Unknown workflow_type "${value}".${suggestion} Valid: ${validList}`);
   }
   if (key === "complexity") {
     warnState(`"complexity" is deprecated — use "tier" instead`);
@@ -474,32 +485,178 @@ function updateState(keyValues) {
 // Filenames imported from their owning module where possible, so renaming the
 // canonical file in one place doesn't desync the exemption list.
 const { FILE_REL: DEFERRED_FILE_REL } = require("./deferred.cjs");
+const ARCHIVE_DIR = ".archive";       // .devt/state/.archive/ — ring buffer of prior resets
 const RESET_EXEMPT = new Set([
   ".lock",                              // active locking — never delete
+  ARCHIVE_DIR,                          // ring buffer survives reset (rolls off via pruneArchive)
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
 ]);
+
+// Get configured archive ring-buffer size (state.archive_runs). Reads via
+// require() at call time to avoid circular deps with config.cjs at module load.
+function getArchiveRuns() {
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    const n = cfg && cfg.state && cfg.state.archive_runs;
+    return Number.isInteger(n) && n >= 0 ? n : 5;
+  } catch {
+    return 5;
+  }
+}
+
+// Prune .archive/ to the most recent `keep` snapshots (oldest first by name —
+// timestamps sort lexicographically). No-op when keep=0 (caller already cleared
+// or directory doesn't exist).
+function pruneArchive(stateDir, keep) {
+  const archiveDir = path.join(stateDir, ARCHIVE_DIR);
+  if (!fs.existsSync(archiveDir)) return;
+  const snapshots = fs
+    .readdirSync(archiveDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  while (snapshots.length > keep) {
+    const oldest = snapshots.shift();
+    fs.rmSync(path.join(archiveDir, oldest), { recursive: true, force: true });
+  }
+}
 
 function resetState() {
   const dir = getStateDir();
   if (!fs.existsSync(dir)) {
     return { ok: true, cleaned: dir };
   }
+  const archiveRuns = getArchiveRuns();
   const lockFile = acquireLock();
+  let archivedTo = null;
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (RESET_EXEMPT.has(entry.name)) continue;
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        fs.rmSync(fullPath, { recursive: true, force: true });
-      } else {
-        fs.unlinkSync(fullPath);
+    const movable = entries.filter((e) => !RESET_EXEMPT.has(e.name));
+    if (archiveRuns > 0 && movable.length > 0) {
+      // Archive: move non-exempt entries into .archive/<ISO-ts>/
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      archivedTo = path.join(dir, ARCHIVE_DIR, ts);
+      fs.mkdirSync(archivedTo, { recursive: true });
+      for (const entry of movable) {
+        const src = path.join(dir, entry.name);
+        const dst = path.join(archivedTo, entry.name);
+        try {
+          fs.renameSync(src, dst);
+        } catch {
+          // Cross-device or permission issue — fall back to copy+remove
+          if (entry.isDirectory()) {
+            fs.cpSync(src, dst, { recursive: true });
+            fs.rmSync(src, { recursive: true, force: true });
+          } else {
+            fs.copyFileSync(src, dst);
+            fs.unlinkSync(src);
+          }
+        }
+      }
+      pruneArchive(dir, archiveRuns);
+    } else {
+      // archive_runs=0 OR nothing to archive — original behavior (delete in place)
+      for (const entry of movable) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(fullPath);
+        }
       }
     }
   } finally {
     releaseLock(lockFile);
   }
-  return { ok: true, cleaned: dir };
+  return { ok: true, cleaned: dir, archived_to: archivedTo };
+}
+
+/**
+ * Read a single section from a state-dir markdown file.
+ *
+ * Token-saver for agents: instead of `Read .devt/state/plan.md` (entire file),
+ * call `state read-section --file plan.md --section "Phase 2"` to get just
+ * that heading's body. Slice runs from the matching heading line to (but not
+ * including) the next same-or-higher level heading, or EOF.
+ *
+ * Heading match: exact text after the `#`s, case-insensitive, leading/trailing
+ * whitespace trimmed. Level inferred from the input — `"## Foo"` matches only
+ * H2; bare `"Foo"` matches the first heading at any level.
+ *
+ * Returns `{ ok: true, section, content, level }` on hit,
+ *         `{ ok: false, reason }` on miss/missing-file.
+ */
+function readSection(fileName, sectionQuery) {
+  if (!fileName || !sectionQuery) {
+    return { ok: false, reason: "file and section are required" };
+  }
+  // Path safety — keep reads inside .devt/state/, no traversal.
+  const safe = path.basename(fileName);
+  if (safe !== fileName) {
+    return { ok: false, reason: `invalid file name: ${fileName}` };
+  }
+  const filePath = path.join(getStateDir(), safe);
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, reason: `file not found: ${safe}` };
+  }
+  // Parse heading query — split off optional leading `#`s
+  const m = sectionQuery.trim().match(/^(#{1,6})?\s*(.+?)\s*$/);
+  if (!m) return { ok: false, reason: "could not parse section query" };
+  const queryLevel = m[1] ? m[1].length : null;
+  const queryText = m[2].toLowerCase();
+
+  const lines = fs.readFileSync(filePath, "utf8").split("\n");
+  // Two-pass match: exact first, prefix fallback. Exact wins so unambiguous
+  // queries are never overridden by accidental prefix collisions; prefix is
+  // a convenience so `--section "Phase 2"` finds `## Phase 2: Implementation`.
+  let startIdx = -1;
+  let foundLevel = -1;
+  let matchMode = null;
+  const candidates = [];
+  for (let i = 0; i < lines.length; i++) {
+    const h = lines[i].match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (!h) continue;
+    const lvl = h[1].length;
+    if (queryLevel !== null && lvl !== queryLevel) continue;
+    candidates.push({ idx: i, lvl, text: h[2].toLowerCase() });
+  }
+  // Pass 1: exact
+  for (const c of candidates) {
+    if (c.text === queryText) {
+      startIdx = c.idx; foundLevel = c.lvl; matchMode = "exact";
+      break;
+    }
+  }
+  // Pass 2: prefix (only if no exact hit)
+  if (startIdx === -1) {
+    for (const c of candidates) {
+      if (c.text.startsWith(queryText)) {
+        startIdx = c.idx; foundLevel = c.lvl; matchMode = "prefix";
+        break;
+      }
+    }
+  }
+  if (startIdx === -1) {
+    return { ok: false, reason: `section not found: ${sectionQuery}` };
+  }
+  // Slice until next same-or-higher level heading
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const h = lines[i].match(/^(#{1,6})\s+/);
+    if (h && h[1].length <= foundLevel) {
+      endIdx = i;
+      break;
+    }
+  }
+  return {
+    ok: true,
+    file: safe,
+    section: lines[startIdx].replace(/^#+\s+/, "").trim(),
+    level: foundLevel,
+    match: matchMode,
+    content: lines.slice(startIdx, endIdx).join("\n"),
+  };
 }
 
 function checkWorkflowLock(preReadState) {
@@ -632,6 +789,7 @@ function pruneState(dryRun) {
     const entries = fs.readdirSync(stateDir);
     for (const entry of entries) {
       if (entry === ".lock") continue;
+      if (entry === ARCHIVE_DIR) continue;   // ring buffer survives prune (rolls off via reset)
       if (!expectedFiles.has(entry)) {
         const fullPath = path.join(stateDir, entry);
         if (dryRun) {
@@ -653,10 +811,23 @@ function pruneState(dryRun) {
   }
 }
 
+// Extract --flag <value> from a positional args array. Returns null when absent.
+function _getFlag(args, name) {
+  if (!Array.isArray(args)) return null;
+  const i = args.indexOf(name);
+  if (i === -1 || i + 1 >= args.length) return null;
+  return args[i + 1];
+}
+
 function run(subcommand, args) {
   switch (subcommand) {
     case "read":
       return readState();
+    case "read-section": {
+      const file = _getFlag(args, "--file");
+      const section = _getFlag(args, "--section");
+      return readSection(file, section);
+    }
     case "update":
       return updateState(args);
     case "reset":
@@ -669,7 +840,7 @@ function run(subcommand, args) {
       return pruneState(args.includes("--dry-run"));
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, update, reset, validate, sync, prune`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, update, reset, validate, sync, prune`,
       );
   }
 }
@@ -677,6 +848,7 @@ function run(subcommand, args) {
 module.exports = {
   run,
   readState,
+  readSection,
   updateState,
   resetState,
   syncState,

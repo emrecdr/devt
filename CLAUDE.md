@@ -92,8 +92,9 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 node bin/devt-tools.cjs init workflow "task"
 node bin/devt-tools.cjs init review "task"
 node bin/devt-tools.cjs state read
+node bin/devt-tools.cjs state read-section --file plan.md --section "Phase 2"  # Slice one heading; exact-then-prefix match
 node bin/devt-tools.cjs state update key=value
-node bin/devt-tools.cjs state reset
+node bin/devt-tools.cjs state reset             # Archives non-exempt artifacts to .devt/state/.archive/<ts>/ (ring buffer; size: state.archive_runs, default 5; set 0 to disable)
 node bin/devt-tools.cjs state validate          # Check state/artifact consistency
 node bin/devt-tools.cjs state sync              # Reconstruct workflow.yaml from artifacts
 node bin/devt-tools.cjs state prune [--dry-run]  # Remove orphaned artifacts

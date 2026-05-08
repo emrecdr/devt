@@ -86,6 +86,15 @@ const DEFAULTS = {
     autoskill: true,
     regression_baseline: true,
   },
+  // State ring buffer (v0.30.4+) — `state reset` archives prior artifacts to
+  // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug
+  // contexts, plans, etc. survive a workflow restart and can be inspected for
+  // continuity. Set archive_runs to 0 to disable archiving entirely (pure-
+  // ephemeral state, pre-v0.30.4 behavior). The archive itself is exempt from
+  // reset, so old runs only roll off when N+1 new resets happen.
+  state: {
+    archive_runs: 5,
+  },
 };
 
 let _cachedProjectRoot = null;
