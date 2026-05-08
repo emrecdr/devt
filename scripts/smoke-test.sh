@@ -664,6 +664,25 @@ else
   fail "state read-section: missing section did not return expected error: $SECTION_MISS"
 fi
 
+# v0.30.5 — pre-flight-guard hook appends every deny to .devt/state/preflight-denies.log
+echo '{"memory":{"preflight_mode":"block","enabled":true}}' > .devt/config.json
+echo "active: true" > .devt/state/workflow.yaml
+rm -f .devt/state/scratchpad.md .devt/state/preflight-denies.log
+HOOK_OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/smoke-target.py"}}' | bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
+if [ -f .devt/state/preflight-denies.log ] && grep -q "block .* edit /tmp/smoke-target.py :: missing PREFLIGHT line" .devt/state/preflight-denies.log; then
+  pass "pre-flight-guard: deny appended to preflight-denies.log"
+else
+  fail "pre-flight-guard: deny log missing or malformed (content: $(cat .devt/state/preflight-denies.log 2>/dev/null))"
+fi
+# Verify the deny JSON itself is unchanged (forensic logging must not break the hook contract)
+if echo "$HOOK_OUT" | grep -q '"decision":"deny"'; then
+  pass "pre-flight-guard: deny JSON contract still emitted alongside log"
+else
+  fail "pre-flight-guard: deny JSON missing — hook contract broken: $HOOK_OUT"
+fi
+# Cleanup placeholder so subsequent assertions have a clean state dir
+rm -f .devt/state/preflight-denies.log .devt/state/workflow.yaml .devt/config.json
+
 # Invalid id rejected with exit 2
 DEF_INVALID_OUT=$(node "$CLI" deferred get FOO-001 2>&1 || true)
 if echo "$DEF_INVALID_OUT" | grep -q "invalid id"; then

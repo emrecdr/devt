@@ -140,6 +140,30 @@ To pass the hook, just write the PREFLIGHT scratchpad line BEFORE calling the
 edit tool. This is the entire ceremony — five seconds of discipline per edit
 catches the kinds of governance drift that compound into incidents over months.
 
+### Recovering from a deny (v0.30.5+)
+
+Every hook deny (or warn) is appended to `.devt/state/preflight-denies.log` —
+single-writer, append-only, gitignored. **If you receive a `decision: "deny"`
+in a tool result, your first action should be to read this log** — it shows
+your prior denied attempts in this session so you can satisfy the hook in
+order. The log format:
+
+```
+<mode> <ISO-timestamp> <action> <file_path> :: missing PREFLIGHT line
+block 2026-05-08T18:56:20.800Z edit /path/to/foo.py :: missing PREFLIGHT line
+```
+
+Recovery sequence on deny:
+1. **Read** `.devt/state/preflight-denies.log` — see which paths got blocked
+2. **Append** a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line to
+   `.devt/state/scratchpad.md` for each blocked path (one PREFLIGHT line per
+   target — no batching)
+3. **Retry** the original Edit/Write call
+
+The log survives `state reset` via the v0.30.4 archive ring buffer
+(`.devt/state/.archive/<ts>/preflight-denies.log`), so post-mortem inspection
+of stalled workflows is possible after the workflow finishes.
+
 ## Common pitfalls
 
 1. **Skipping the scratchpad line "because the Brief covers this file"** — the

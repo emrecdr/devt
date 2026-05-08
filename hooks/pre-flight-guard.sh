@@ -82,6 +82,19 @@ node -e "
     // Build the advisory / block message
     const reason = 'Pre-Flight Protocol: no PREFLIGHT line found in .devt/state/scratchpad.md for \"' + fp + '\". Before editing, append a line like \"PREFLIGHT <ISO-timestamp> edit ' + fp + ' :: <governing ADR/CON/FLOW ids or \\'no governance found\\'>\" — see skills/memory-pre-flight/SKILL.md. If this file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" or perform the 5-Lane File Pre-Flight (memory affects + memory query + memory active).';
 
+    // Forensic logging (v0.30.5+): append every deny/warn to a single-writer
+    // side-log so future agent attempts can read their own history. Survives
+    // state reset via the v0.30.4 archive ring buffer (.devt/state/.archive/).
+    // Hook stays stateless — log is append-only side-effect, never read by hook.
+    // Wrapped in try-catch so log failure never blocks the deny path.
+    try {
+      const logPath = path.join(dir, '.devt', 'state', 'preflight-denies.log');
+      const ts = new Date().toISOString();
+      const action = (d.tool_name || 'edit').toLowerCase();
+      const line = mode + ' ' + ts + ' ' + action + ' ' + fp + ' :: missing PREFLIGHT line\\n';
+      fs.appendFileSync(logPath, line);
+    } catch { /* never block on log failure */ }
+
     if (mode === 'block') {
       // PreToolUse deny — JSON to stdout per Claude Code hook spec
       process.stdout.write(JSON.stringify({

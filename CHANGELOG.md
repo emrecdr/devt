@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.30.5] - 2026-05-08
+
+### Added
+- **Forensic deny log for the pre-flight guard** (`hooks/pre-flight-guard.sh`, `skills/memory-pre-flight/SKILL.md`). Every `decision: "deny"` (block mode) and every advisory (warn mode) now appends one line to `.devt/state/preflight-denies.log` — single-writer, append-only, gitignored under existing `.devt/state/` rules. Format: `<mode> <ISO-ts> <action> <file_path> :: missing PREFLIGHT line`. Closes the silent-stall failure mode where a subagent dispatched without the `devt:memory-pre-flight` skill received a deny it didn't know how to satisfy, then went silent (no streaming output) for 600s until Claude Code's stream watchdog killed it. With the log, recovering agents read `.devt/state/preflight-denies.log` first to see their own prior denied attempts, then write the missing PREFLIGHT lines to scratchpad in order. Hook stays stateless — log is pure side-effect, never read by the hook itself. Wrapped in try-catch so a log failure can never block the deny path. Survives `state reset` via the v0.30.4 archive ring buffer (`.devt/state/.archive/<ts>/preflight-denies.log`), so post-mortem of stalled workflows is possible after the workflow finishes.
+- **`memory-pre-flight` skill documents the deny-recovery sequence** with explicit Read-log → Append-PREFLIGHT-lines → Retry steps. All 8 dev agents preload the skill, so the recovery protocol propagates without per-agent prompt edits.
+
+### Changed
+- **`workflows/dev-workflow.md` Step 1 gains a CONTRACT callout** above the `state update` line: "Execute the next bash block VERBATIM. Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name)." Addresses the orchestrator-deviation bug where an agent invoked `/devt:workflow` and improvised `workflow_type=workflow` instead of executing the workflow file's `workflow_type=dev` literal — the entire downstream stall traced back to this single deviation. The v0.30.4 alias hint catches drift after the fact; this callout prevents drift in the first place.
+- **`CLAUDE.md` Two-Tier Pre-Flight Protocol entry updated** to mention the forensic deny log and point at the skill's recovery section.
+
+### Fixed
+- **Silent watchdog stalls when subagent hits a deny without the memory-pre-flight skill loaded** — fixed by giving the agent its own deny history via the new log so it can break out of silent reasoning and write the missing PREFLIGHT lines on retry. Root cause was orchestrator drift (separate fix above) plus agents lacking forensic visibility into hook denies (this fix).
+
+### Smoke
+- **2 new assertions** (`scripts/smoke-test.sh`): hook deny appends correctly to `preflight-denies.log`; deny JSON contract (`decision: "deny"`) still emitted alongside the log so the existing hook protocol is preserved. 273 total pass (was 271).
+
 ## [0.30.4] - 2026-05-08
 
 ### Added

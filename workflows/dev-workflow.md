@@ -180,7 +180,9 @@ Then load project context:
     rm -f .devt/state/handoff.json .devt/state/continue-here.md
     ```
 
-Store the task description in workflow state for reference by status, forensics, and resume:
+Store the task description in workflow state for reference by status, forensics, and resume.
+
+> **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint (v0.30.4+), but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
