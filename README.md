@@ -417,7 +417,7 @@ devt is **zero-dependency Node.js stdlib only** for the runtime tooling. Every e
 | **Runtime** | Node.js 22+ (`node:sqlite` built-in) | Zero npm dependencies; FTS5 ships with Node 22.5+ |
 | **Memory index** | SQLite FTS5 | Multi-lane queries joining `affects_paths` + `affects_symbols` + `links`. Regenerable from markdown. |
 | **Knowledge format** | Markdown + strict YAML frontmatter | Human-readable, Git-tracked, diff-able |
-| **AST anchoring** *(optional)* | [Graphify](https://github.com/safishamsi/graphify) (`pip install graphifyy[mcp]`) | Tree-sitter multi-language; binds docs to actual functions/classes; ~10× lower token cost on code-search |
+| **AST anchoring** *(optional)* | [Graphify](https://github.com/safishamsi/graphify) (`uv tool install graphifyy[mcp]`) | Tree-sitter multi-language; binds docs to actual functions/classes; ~10× lower token cost on code-search. MCP server launches via `uv run -m graphify.serve` (graphify v0.7.10+ canonical invocation). |
 | **Session capture** *(optional)* | claude-mem | Catches ⚖️/🔵 mid-session observations before context-window rolls over |
 | **Hook runner** | Polyglot Node.js shim (`run-hook.js`) | Profile-controlled lifecycle events |
 | **MCP query layer** | JSON-RPC 2.0 stdio (vendored `bin/devt-memory-mcp.cjs`) | Read-only access to `index.db` from agents; SELECT-only escape hatch with three layers of defense |

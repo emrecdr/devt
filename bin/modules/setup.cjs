@@ -353,20 +353,41 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   const mcpJsonPath = path.join(projectRoot, ".mcp.json");
   const mcpHints = [];
   const probedServers = {};
-  // Three-state probe: (1) binary missing → install hint; (2) binary present but `mcp` subcommand
-  // missing (user installed `graphifyy` without the `[mcp]` extra) → reinstall hint; (3) full
-  // support → register the MCP server entry. Probing only --help would falsely register the entry
-  // for state (2), producing a "command failed: unknown command 'mcp'" warning every session.
-  if (probeGraphifyBinary("graphify", 1500, { subcommand: "mcp" })) {
+  // Graphify MCP scaffolding (v0.7.10+ canonical invocation): the upstream `graphify mcp`
+  // subcommand was removed; the MCP server is now `python -m graphify.serve <graph.json>`.
+  // Two launch paths, probed in priority order:
+  //   1. `uv` on PATH + `graphify` on PATH — preferred. Uses `uv run --with graphifyy --with mcp`
+  //      per graphify's own `__main__._antigravity_install` template; resolves dependencies
+  //      lazily and works regardless of how graphifyy was installed.
+  //   2. `python3 -c "import graphify, mcp"` succeeds — pip / pipx fallback. Direct
+  //      `python3 -m graphify.serve` works when graphifyy was installed into the system
+  //      Python via `pip install graphifyy[mcp]` (no `uv` dependency).
+  // If neither path resolves but the binary is on PATH, emit an actionable hint pointing at
+  // the path most likely to fix the user's setup.
+  function probePythonGraphifyMcp(pythonCmd = "python3", timeoutMs = 2000) {
+    try {
+      const probe = require("child_process").spawnSync(pythonCmd, ["-c", "import graphify, mcp"], { timeout: timeoutMs, stdio: "ignore" });
+      return Boolean(probe && probe.status === 0);
+    } catch {
+      return false;
+    }
+  }
+  if (probeGraphifyBinary("uv") && probeGraphifyBinary()) {
     probedServers["graphify"] = {
-      command: "graphify",
-      args: ["mcp", "--project", "."],
+      command: "uv",
+      args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "graphify-out/graph.json"],
+      env: {},
+    };
+  } else if (probePythonGraphifyMcp()) {
+    probedServers["graphify"] = {
+      command: "python3",
+      args: ["-m", "graphify.serve", "graphify-out/graph.json"],
       env: {},
     };
   } else if (probeGraphifyBinary()) {
-    mcpHints.push("graphify is on PATH but lacks the `mcp` subcommand — reinstall with the MCP extra (`uv tool install --reinstall 'graphifyy[mcp]'` or `pip install --upgrade 'graphifyy[mcp]'`) and re-run setup to register the Graphify MCP server.");
+    mcpHints.push("graphify is on PATH but neither `uv` nor a system `python3` with graphifyy+mcp importable was found — either install uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`) for the recommended launch path, or `pip install graphifyy[mcp]` into the system Python for the pip path. Then re-run setup to register the Graphify MCP server.");
   } else {
-    mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
+    mcpHints.push("graphify not detected on PATH — install with `uv tool install graphifyy[mcp]` (recommended) or `pip install graphifyy[mcp]`, then re-run setup to register the Graphify MCP server.");
   }
   try {
     const probe = require("child_process").spawnSync("claude-mem", ["--help"], { timeout: 1500, stdio: "ignore" });

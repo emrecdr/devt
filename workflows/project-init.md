@@ -205,16 +205,16 @@ options:
   - label: "Yes, show install command (Recommended)"
     description: "Prints the install command — does NOT execute it. devt setup continues regardless. Re-run /devt:init after install to register the integration."
   - label: "No, skip"
-    description: "Continue without Graphify. Install later with `pip install graphifyy[mcp]` and re-run /devt:init."
+    description: "Continue without Graphify. Install later with `uv tool install graphifyy[mcp]` and re-run /devt:init."
 ```
 
 On "Yes", print to the user (do NOT execute — Python env changes are user-owned):
 
 ```
 To install Graphify:
-  pip install graphifyy[mcp]
-  # or: uv tool install graphifyy[mcp]
+  uv tool install graphifyy[mcp]      # recommended — MCP server launches via `uv run`
   # or: pipx install graphifyy[mcp]
+  # or: pip install graphifyy[mcp]    # works for CLI; MCP server entry still requires `uv` on PATH
 
 Then re-run /devt:init so devt can register the MCP server and offer to enable the integration.
 ```

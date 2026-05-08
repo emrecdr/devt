@@ -111,7 +111,7 @@ If `governing == 0 AND lane_e == 0 AND lane_f == 0`, add:
 
 If Graphify status is `disabled` or `binary_missing`, add:
 
-> _Tip: install Graphify for ~10× lower token cost on code-search ops + symbol-anchored blast radius. See `/devt:init --graphify` or run `pip install graphifyy[mcp]`._
+> _Tip: install Graphify for ~10× lower token cost on code-search ops + symbol-anchored blast radius. See `/devt:init --graphify` or run `uv tool install graphifyy[mcp]`._
 </step>
 
 </process>

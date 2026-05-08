@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.30.3] - 2026-05-08
+
+### Fixed
+- **Graphify MCP scaffolding switched to v0.7.10+ canonical invocation** (`bin/modules/setup.cjs`). Upstream removed the `graphify mcp` subcommand entirely — the MCP server is now `python -m graphify.serve <graph.json>`. devt's previous scaffold pattern `command: "graphify", args: ["mcp", "--project", "."]` produced `unknown command 'mcp'` failures on every Claude Code session for users on graphify v0.7.10+. New scaffolding probes two launch paths in priority order: (1) `uv` and `graphify` both on PATH → registers `command: "uv", args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "graphify-out/graph.json"]` (matching graphify's own `__main__._antigravity_install` template); (2) `python3 -c "import graphify, mcp"` succeeds → registers `command: "python3", args: ["-m", "graphify.serve", "graphify-out/graph.json"]` for pip / pipx users without `uv`. Both paths use `graphify-out/graph.json` (project-relative) so the entry works in any cwd. If neither resolves but the binary is on PATH, an actionable hint points at the install path most likely to fix the user's setup.
+- **Install hints across docs reordered** to lead with `uv tool install graphifyy[mcp]` (recommended — works for both CLI and MCP server) instead of `pip install graphifyy[mcp]` (works for CLI but MCP server still requires `uv` unless graphifyy is importable from system Python). Updated: `README.md` Optional integrations table, `workflows/preflight.md` install tip, `workflows/project-init.md` AskUserQuestion + install printout (now lists `uv tool` first, `pipx` second, `pip` third with note about `uv`-on-PATH requirement), `bin/modules/graphify.cjs` module docstring.
+
 ## [0.30.2] - 2026-05-08
 
 ### Fixed

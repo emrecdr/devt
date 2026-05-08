@@ -4,9 +4,11 @@
  * Graphify integration — optional, with graceful degradation.
  *
  * Wraps the `graphify` CLI binary (https://github.com/safishamsi/graphify) as an
- * optional dependency. Project owners install via `pip install graphifyy[mcp]`
- * (or uv tool / pipx equivalent) and set `graphify.enabled: true` in
- * .devt/config.json. devt itself stays Node-stdlib-only.
+ * optional dependency. Project owners install via `uv tool install graphifyy[mcp]`
+ * (or pipx / pip equivalent) and set `graphify.enabled: true` in
+ * .devt/config.json. devt itself stays Node-stdlib-only. Note: graphify v0.7.10+
+ * launches its MCP server via `uv run -m graphify.serve`, so `uv` on PATH is
+ * required even when graphifyy is installed via pip/pipx.
  *
  * Core invariant (locked decision): the system is fully functional WITHOUT
  * Graphify. Every method returns a structured `{ source, results, degraded?,
