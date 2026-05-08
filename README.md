@@ -13,14 +13,15 @@
 ## Contents
 
 1. [What is devt?](#what-is-devt)
-2. [The problem it solves](#the-problem-it-solves)
-3. [How it works (architecture)](#how-it-works-architecture)
-4. [Setup](#setup)
-5. [Use cases](#use-cases)
+2. [Setup](#setup)
+3. [Configuration](#configuration)
+4. [Use cases](#use-cases)
+5. [Dependencies & integrations](#dependencies--integrations)
 6. [Features](#features)
-7. [Stack & tools used](#stack--tools-used)
-8. [Reference](#reference) — commands, configuration, CLI, hooks, troubleshooting
-9. [Releases & contributing](#releases--contributing)
+7. [How it works (architecture)](#how-it-works-architecture)
+8. [The problem it solves](#the-problem-it-solves)
+9. [Reference](#reference) — commands, CLI, hooks, troubleshooting
+10. [Releases & contributing](#releases--contributing)
 
 ---
 
@@ -43,94 +44,6 @@ The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, or anything
 - **Deferred-task tracker** — capture mid-work TODOs without derailing current focus
 
 ---
-
-## The problem it solves
-
-Standard AI coding has three concrete failure modes that compound over time:
-
-### 1. Amnesia between sessions
-
-A monolithic prompt forgets every architectural decision the moment the context window rolls over. You end up re-explaining "we use Argon2id for hashing, never bcrypt" in every session, and the AI silently re-proposes rejected approaches.
-
-**devt fixes this** with a permanent memory layer at `.devt/memory/` — markdown docs with strict frontmatter, FTS5-indexed, queried at every workflow start. REJ tombstones suppress re-proposals across all agents.
-
-### 2. Surface understanding, no judgment
-
-A single prompt either over-engineers a one-line fix or under-thinks a refactor. There's no orchestration that matches effort to complexity.
-
-**devt fixes this** with auto-tier selection. TRIVIAL tasks run inline; STANDARD tasks add scan/test/review; COMPLEX tasks add research, plan, architecture review, verification, and curated lesson capture. You never pick a tier — devt detects it.
-
-### 3. No accumulating expertise
-
-Even within a single project, lessons are lost the moment a session ends. The team's hard-won "the integration tests fail when fixture seed order changes" insight gets re-discovered three weeks later.
-
-**devt fixes this** with a closed learning loop: retro extracts → curator gates approval → LES-NNNN docs land in `.devt/memory/lessons/` → Pre-Flight Brief surfaces them at the next workflow start. Knowledge accumulates instead of evaporating.
-
----
-
-## How it works (architecture)
-
-```
-User → Command (thin) → Workflow (orchestration) → Agent (worker)
-                                                  ↓
-                                            .devt/state/  (artifacts)
-                                            .devt/memory/ (permanent knowledge)
-```
-
-The execution model follows a **Command → Workflow → Agent** architecture:
-
-- **Commands** (32 files): thin entry points. Parse arguments, delegate to a workflow. No business logic.
-- **Workflows** (31 files): orchestration. Determine tier, coordinate agents, manage state transitions.
-- **Agents** (10 files): focused workers. Each owns one concern.
-- **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
-- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`).
-
-### Workflow tiers
-
-`/devt:workflow` auto-selects a tier based on task complexity:
-
-| Tier         | Pipeline                                                                                    | Auto-detected when                    |
-| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **TRIVIAL**  | execute inline → validate gates                                                             | ≤3 files, no decisions needed         |
-| **SIMPLE**   | implement → test → review                                                                   | Single file, known pattern            |
-| **STANDARD** | scan → implement → test → review → verify → docs → retro → autoskill                        | Multiple files, existing patterns     |
-| **COMPLEX**  | auto-research → auto-plan → scan → architect → implement → test → review → verify → docs → retro → curate → autoskill | New patterns, architectural decisions |
-
-You never need to pick a tier. Override the auto-detection if needed.
-
-### Agent–skill mapping
-
-Skills inject into agents at dispatch time based on `skill-index.yaml` (or `.devt/config.json` overrides):
-
-| Agent           | Default Skills                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------------- |
-| programmer      | codebase-scan, scratchpad, api-docs-fetcher, strategic-analysis, tdd-patterns, verification-patterns    |
-| tester          | scratchpad, tdd-patterns                                                                                |
-| code-reviewer   | code-review-guide, codebase-scan, scratchpad                                                            |
-| docs-writer     | scratchpad                                                                                              |
-| architect       | codebase-scan, architecture-health-scanner, api-docs-fetcher, strategic-analysis, complexity-assessment |
-| verifier        | codebase-scan, verification-patterns                                                                    |
-| researcher      | codebase-scan, strategic-analysis                                                                       |
-| debugger        | codebase-scan                                                                                           |
-| retro           | lesson-extraction, autoskill                                                                            |
-| curator         | memory-curation, autoskill                                                                              |
-
-### The `.devt/rules/` convention
-
-Every project configured with devt gets a `.devt/rules/` directory containing project-specific rules that agents read at execution time. This keeps the plugin generic while giving agents deep project knowledge.
-
-**Required files:**
-
-| File                  | Purpose                                                |
-| --------------------- | ------------------------------------------------------ |
-| `coding-standards.md` | Language conventions, naming, formatting, import rules |
-| `testing-patterns.md` | Test framework, patterns, coverage expectations        |
-| `quality-gates.md`    | Lint, typecheck, test commands and pass criteria       |
-| `architecture.md`     | Layer structure, dependency rules, module boundaries   |
-
-**Optional files:** `review-checklist.md`, `api-changelog.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `patterns/common-smells.md`.
-
-Run `/devt:init` to generate these from a template matched to your stack. Available templates: `python-fastapi`, `go`, `typescript-node`, `vue-bootstrap`, `blank`.
 
 ---
 
@@ -262,6 +175,43 @@ This wipes the plugin's own files but does NOT touch any project's `.devt/` dire
 
 ---
 
+---
+
+## Configuration
+
+Optional `.devt/config.json` at project root configures plugin behavior. Global `~/.devt/defaults.json` sets user-wide defaults that project config overrides.
+
+```json
+{
+  "model_profile": "quality",
+  "model_overrides": { "tester": "opus" },
+  "git": {
+    "provider": "github", "workspace": "my-team", "slug": "my-repo",
+    "primary_branch": "main", "contributors": ["alice", "bob"]
+  },
+  "agent_skills": { "programmer": ["codebase-scan", "scratchpad", "api-docs-fetcher"] },
+  "memory": { "paths": ["../engineering-adrs", ".devt/memory"], "preflight_mode": "block" },
+  "graphify": { "enabled": true, "command": "graphify" },
+  "arch_scanner": { "command": "make arch-scan", "report_dir": "docs/reports" }
+}
+```
+
+| Key | Values | Default |
+|---|---|---|
+| `model_profile` | `quality` / `balanced` / `budget` / `inherit` | `quality` |
+| `model_overrides` | Per-agent model tier (opus / sonnet / haiku / inherit) | from `model_profile` |
+| `git.*` | provider / workspace / slug / primary_branch / contributors | auto-detect |
+| `agent_skills` | Per-agent skill list overrides | see `skill-index.yaml` |
+| `memory.paths` | Multi-root memory roots (last-wins precedence) | project-local only |
+| `memory.preflight_mode` | `off` / `warn` / `block` | `block` |
+| `graphify.enabled` | Boolean | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) |
+| `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
+| `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
+
+Config merge order: hardcoded defaults → `~/.devt/defaults.json` → `.devt/config.json` (later overrides earlier).
+
+---
+
 ## Use cases
 
 | When you want to… | Run |
@@ -282,6 +232,74 @@ This wipes the plugin's own files but does NOT touch any project's `.devt/` dire
 | Pressure-test a hard decision (5 advisors) | `/devt:council "<question>"` |
 | Create a PR with auto-generated description | `/devt:ship` |
 | Update the plugin | `/devt:update` |
+
+---
+
+---
+
+## Dependencies & integrations
+
+devt is **zero-npm-dependency** by design. The required install footprint is just Node.js, bash, and Claude Code itself. Optional integrations plug into specific pipelines and degrade gracefully when absent.
+
+### Required
+
+| Tool | Why | How devt uses it |
+|---|---|---|
+| **Node.js ≥ 22** | Runtime for all CLI tooling. The `node:sqlite` built-in (v22.5+) backs the FTS5 memory index — no `better-sqlite3` npm dep. | All `bin/*.cjs` modules; `node:sqlite` for `.devt/memory/index.db` |
+| **bash + standard Unix tools** (`grep`, `sed`, `awk`, `git`) | Lifecycle hooks (`hooks/*.sh`), CI scripts, prompt-injection scanner | 11 hooks across 6 lifecycle events + smoke test infrastructure |
+| **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** | Host platform | Skills/agents/commands/hooks all run through Claude Code's harness |
+
+### Recommended optional integrations
+
+Each adds a measurable benefit at a specific pipeline point. Setup auto-detects each binary on PATH; if absent, devt falls back to grep / scratchpad markers.
+
+#### Graphify — multi-language AST anchoring (~10× lower token cost on code-search)
+
+**Install:** `uv tool install graphifyy[mcp]` *(recommended — works for both CLI and MCP server launch)* or `pip install graphifyy[mcp]` *(MCP launch still requires `uv` on PATH for graphify v0.7.10+)*
+
+**What it improves:**
+
+| Surface | Without Graphify | With Graphify |
+|---|---|---|
+| Pre-Flight Brief Lane C (symbol resolution) | grep across `affects_symbols` text fields | tree-sitter AST resolution — knows `User` the class differs from `User` the type alias |
+| `blast_radius()` MCP tool | Falls back to filename matching | Walks actual import graph via `getNeighbors()` for true impact analysis |
+| `memory validate` stale-symbol check | Cannot detect — keeps `affects_symbols: [renamedFn]` after refactor silently | Flags symbols in memory docs that no longer exist in the codebase |
+| Code-search agents (programmer/debugger/researcher/code-reviewer/verifier/architect) | grep + path patterns | Graphify-first protocol → ~200–400 tokens per query vs ~3–5K with grep |
+
+Concrete savings vary by codebase size; the ~10× claim is conservative for medium codebases (500+ files).
+
+#### uv — fast Python package manager
+
+**Install:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+**Why required for Graphify:** graphify v0.7.10+ launches its MCP server via `uv run --with graphifyy --with mcp -m graphify.serve`. Without `uv`, devt scaffolds a Python-direct fallback (`python3 -m graphify.serve`) only when graphifyy is importable from your system Python.
+
+#### claude-mem — mid-session insight capture
+
+**Install:** see [claude-mem](https://github.com/anthropics/claude-mem) docs. Optional `npm install -g claude-mem` if available.
+
+**What it improves:** `bin/modules/discovery.cjs::harvest()` mines claude-mem's ⚖️ (decisions) and 🔵 (insights) tags into `.devt/memory/_suggestions.md` — the curator agent then gates each candidate via AskUserQuestion before promoting to permanent memory. Without claude-mem, discovery still works on `#KNOWLEDGE-CANDIDATE` scratchpad markers and DEC-xxx entries — you get fewer auto-surfaced ADR/CON candidates but nothing breaks.
+
+### Vendored / built-in (no install needed)
+
+| Component | Where | What it provides |
+|---|---|---|
+| **devt-memory MCP server** | `bin/devt-memory-mcp.cjs` | 10-tool stdio JSON-RPC server (`get_context_for_path`, `get_context_for_symbol`, `query_fts`, `get_doc`, `list_active`, `list_rejected_keywords`, `list_links`, `preflight`, `blast_radius`, `query_index`). Read-only — `OPEN_READONLY` + SELECT-only validator + multi-statement guard on the `query_index` SQL escape hatch. Auto-registers when devt is loaded as a plugin. |
+| **SQLite FTS5** | Node 22.5+ stdlib (`node:sqlite`) | Full-text search across all 5 doc types in `.devt/memory/index.db` with BM25 ranking, 4 SQL views, NOCASE collation, multi-root provenance |
+| **Atomic write helpers** | `bin/modules/io.cjs` | `tmp + renameSync + cleanup-on-failure` for every state mutation — prevents partial writes |
+| **Security utilities** | `bin/modules/security.cjs` | Path-traversal prevention, prompt injection detection, `safeJsonParse`, secret masking before LLM context |
+
+### Per-template tools (only if you use that template)
+
+| Template | Tool | Notes |
+|---|---|---|
+| `python-fastapi` | Python 3 + stdlib | Reference architecture scanner (`arch-scan.py`) detects 6 layer-violation patterns; stdlib-only, no pip install |
+| `python-fastapi` | HURL | Recommended E2E test pattern; install only if your project uses it |
+| `go` / `typescript-node` / `vue-bootstrap` / `blank` | (per template) | Each template documents its own ecosystem's recommended tooling; devt has no opinion |
+
+### CI
+
+GitHub Actions runs `scripts/smoke-test.sh` (260+ assertions across all CLI subcommands) and `scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Version coherence, CHANGELOG coverage, and `workflow_type` registry coverage are enforced. Releases are tag-driven — push `vX.Y.Z` to fire `.github/workflows/release.yml` which extracts the matching CHANGELOG section into the GitHub release notes.
 
 ---
 
@@ -408,59 +426,103 @@ Guardrails (`guardrails/`) include: contamination guidelines, generative-debt ch
 
 ---
 
-## Stack & tools used
+---
 
-devt is **zero-dependency Node.js stdlib only** for the runtime tooling. Every external system is optional and degrades gracefully.
+## How it works (architecture)
 
-| Layer | Tech | Why |
-|---|---|---|
-| **Runtime** | Node.js 22+ (`node:sqlite` built-in) | Zero npm dependencies; FTS5 ships with Node 22.5+ |
-| **Memory index** | SQLite FTS5 | Multi-lane queries joining `affects_paths` + `affects_symbols` + `links`. Regenerable from markdown. |
-| **Knowledge format** | Markdown + strict YAML frontmatter | Human-readable, Git-tracked, diff-able |
-| **AST anchoring** *(optional)* | [Graphify](https://github.com/safishamsi/graphify) (`uv tool install graphifyy[mcp]`) | Tree-sitter multi-language; binds docs to actual functions/classes; ~10× lower token cost on code-search. MCP server launches via `uv run -m graphify.serve` (graphify v0.7.10+ canonical invocation). |
-| **Session capture** *(optional)* | claude-mem | Catches ⚖️/🔵 mid-session observations before context-window rolls over |
-| **Hook runner** | Polyglot Node.js shim (`run-hook.js`) | Profile-controlled lifecycle events |
-| **MCP query layer** | JSON-RPC 2.0 stdio (vendored `bin/devt-memory-mcp.cjs`) | Read-only access to `index.db` from agents; SELECT-only escape hatch with three layers of defense |
-| **CI** | GitHub Actions (`smoke-test.sh` + concurrent locking test) | Version coherence, CHANGELOG coverage, workflow_type registry coverage |
+```
+User → Command (thin) → Workflow (orchestration) → Agent (worker)
+                                                  ↓
+                                            .devt/state/  (artifacts)
+                                            .devt/memory/ (permanent knowledge)
+```
 
-System stays fully functional without Graphify or claude-mem (grep fallback for the former, scratchpad-tag fallback for the latter). Both are opt-in.
+The execution model follows a **Command → Workflow → Agent** architecture:
+
+- **Commands** (32 files): thin entry points. Parse arguments, delegate to a workflow. No business logic.
+- **Workflows** (31 files): orchestration. Determine tier, coordinate agents, manage state transitions.
+- **Agents** (10 files): focused workers. Each owns one concern.
+- **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
+- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`).
+
+### Workflow tiers
+
+`/devt:workflow` auto-selects a tier based on task complexity:
+
+| Tier         | Pipeline                                                                                    | Auto-detected when                    |
+| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **TRIVIAL**  | execute inline → validate gates                                                             | ≤3 files, no decisions needed         |
+| **SIMPLE**   | implement → test → review                                                                   | Single file, known pattern            |
+| **STANDARD** | scan → implement → test → review → verify → docs → retro → autoskill                        | Multiple files, existing patterns     |
+| **COMPLEX**  | auto-research → auto-plan → scan → architect → implement → test → review → verify → docs → retro → curate → autoskill | New patterns, architectural decisions |
+
+You never need to pick a tier. Override the auto-detection if needed.
+
+### Agent–skill mapping
+
+Skills inject into agents at dispatch time based on `skill-index.yaml` (or `.devt/config.json` overrides):
+
+| Agent           | Default Skills                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| programmer      | codebase-scan, scratchpad, api-docs-fetcher, strategic-analysis, tdd-patterns, verification-patterns    |
+| tester          | scratchpad, tdd-patterns                                                                                |
+| code-reviewer   | code-review-guide, codebase-scan, scratchpad                                                            |
+| docs-writer     | scratchpad                                                                                              |
+| architect       | codebase-scan, architecture-health-scanner, api-docs-fetcher, strategic-analysis, complexity-assessment |
+| verifier        | codebase-scan, verification-patterns                                                                    |
+| researcher      | codebase-scan, strategic-analysis                                                                       |
+| debugger        | codebase-scan                                                                                           |
+| retro           | lesson-extraction, autoskill                                                                            |
+| curator         | memory-curation, autoskill                                                                              |
+
+### The `.devt/rules/` convention
+
+Every project configured with devt gets a `.devt/rules/` directory containing project-specific rules that agents read at execution time. This keeps the plugin generic while giving agents deep project knowledge.
+
+**Required files:**
+
+| File                  | Purpose                                                |
+| --------------------- | ------------------------------------------------------ |
+| `coding-standards.md` | Language conventions, naming, formatting, import rules |
+| `testing-patterns.md` | Test framework, patterns, coverage expectations        |
+| `quality-gates.md`    | Lint, typecheck, test commands and pass criteria       |
+| `architecture.md`     | Layer structure, dependency rules, module boundaries   |
+
+**Optional files:** `review-checklist.md`, `api-changelog.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `patterns/common-smells.md`.
+
+Run `/devt:init` to generate these from a template matched to your stack. Available templates: `python-fastapi`, `go`, `typescript-node`, `vue-bootstrap`, `blank`.
+
+---
+
+---
+
+## The problem it solves
+
+Standard AI coding has three concrete failure modes that compound over time:
+
+### 1. Amnesia between sessions
+
+A monolithic prompt forgets every architectural decision the moment the context window rolls over. You end up re-explaining "we use Argon2id for hashing, never bcrypt" in every session, and the AI silently re-proposes rejected approaches.
+
+**devt fixes this** with a permanent memory layer at `.devt/memory/` — markdown docs with strict frontmatter, FTS5-indexed, queried at every workflow start. REJ tombstones suppress re-proposals across all agents.
+
+### 2. Surface understanding, no judgment
+
+A single prompt either over-engineers a one-line fix or under-thinks a refactor. There's no orchestration that matches effort to complexity.
+
+**devt fixes this** with auto-tier selection. TRIVIAL tasks run inline; STANDARD tasks add scan/test/review; COMPLEX tasks add research, plan, architecture review, verification, and curated lesson capture. You never pick a tier — devt detects it.
+
+### 3. No accumulating expertise
+
+Even within a single project, lessons are lost the moment a session ends. The team's hard-won "the integration tests fail when fixture seed order changes" insight gets re-discovered three weeks later.
+
+**devt fixes this** with a closed learning loop: retro extracts → curator gates approval → LES-NNNN docs land in `.devt/memory/lessons/` → Pre-Flight Brief surfaces them at the next workflow start. Knowledge accumulates instead of evaporating.
+
+---
 
 ---
 
 ## Reference
-
-### Configuration
-
-Optional `.devt/config.json` at project root configures plugin behavior. Global `~/.devt/defaults.json` sets user-wide defaults that project config overrides.
-
-```json
-{
-  "model_profile": "quality",
-  "model_overrides": { "tester": "opus" },
-  "git": {
-    "provider": "github", "workspace": "my-team", "slug": "my-repo",
-    "primary_branch": "main", "contributors": ["alice", "bob"]
-  },
-  "agent_skills": { "programmer": ["codebase-scan", "scratchpad", "api-docs-fetcher"] },
-  "memory": { "paths": ["../engineering-adrs", ".devt/memory"], "preflight_mode": "block" },
-  "graphify": { "enabled": true, "command": "graphify" },
-  "arch_scanner": { "command": "make arch-scan", "report_dir": "docs/reports" }
-}
-```
-
-| Key | Values | Default |
-|---|---|---|
-| `model_profile` | `quality` / `balanced` / `budget` / `inherit` | `quality` |
-| `model_overrides` | Per-agent model tier (opus / sonnet / haiku / inherit) | from `model_profile` |
-| `git.*` | provider / workspace / slug / primary_branch / contributors | auto-detect |
-| `agent_skills` | Per-agent skill list overrides | see `skill-index.yaml` |
-| `memory.paths` | Multi-root memory roots (last-wins precedence) | project-local only |
-| `memory.preflight_mode` | `off` / `warn` / `block` | `block` |
-| `graphify.enabled` | Boolean | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) |
-| `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
-| `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
-
-Config merge order: hardcoded defaults → `~/.devt/defaults.json` → `.devt/config.json` (later overrides earlier).
 
 ### Commands
 
@@ -589,6 +651,8 @@ devt/
 - **`skills/memory-curation/SKILL.md`** — the curator's promotion gate
 - **`templates/memory/`** — ADR/CON/FLOW/REJ/LES scaffolds for new docs
 - **[CHANGELOG.md](CHANGELOG.md)** — full version history
+
+---
 
 ---
 
