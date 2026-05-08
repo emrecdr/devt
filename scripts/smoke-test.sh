@@ -834,6 +834,8 @@ pass_if_file "$ROOT/commands/preflight.md"            "commands/preflight.md exi
 pass_if_file "$ROOT/workflows/preflight.md"           "workflows/preflight.md exists"
 pass_if_file "$ROOT/bin/modules/preflight.cjs"        "bin/modules/preflight.cjs exists"
 pass_if_file "$ROOT/bin/devt-memory-mcp.cjs"          "bin/devt-memory-mcp.cjs exists"
+pass_if_file "$ROOT/commands/uninstall.md"            "commands/uninstall.md exists"
+pass_if_file "$ROOT/workflows/uninstall.md"           "workflows/uninstall.md exists"
 
 # Auto-fire integration: every dev workflow calls preflight
 for wf in dev-workflow.md quick-implement.md create-plan.md clarify-task.md specify.md research-task.md debug.md code-review.md; do

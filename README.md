@@ -98,80 +98,24 @@ This scaffolds `.devt/rules/` with project-specific conventions and creates `.de
 - ✗ `"make it better"` — too vague
 - ✗ `"refactor everything"` — too broad
 
-### Reset / fresh setup in a project
+### Reset or uninstall
 
-There is no `/devt:uninstall` command yet (deferred). For a fresh setup in a project, three options ordered by destructiveness:
-
-**A — Reinit (keeps memory + lessons + deferred queue):**
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/bin/devt-tools.cjs" setup --template <name> --mode reinit
-```
-
-Overwrites `.devt/rules/` and `.devt/config.json` from template. Does NOT touch `.devt/memory/` (ADR/CON/FLOW/REJ/LES) or `.devt/state/deferred.md`. Use this when you want fresh rules+config but to keep accumulated knowledge.
-
-**B — Project-local nuke (full `.devt/` reset):**
-
-```bash
-# Optional: backup first
-cp -r .devt .devt.bak.$(date +%Y%m%d) 2>/dev/null
-
-rm -rf .devt/
-/devt:init
-```
-
-Wipes everything under `.devt/` — config, rules, state, memory, lessons, deferred queue. Useful when project conventions changed dramatically.
-
-**C — Truly fresh (also clears scattered files devt installs at root):**
-
-`rm -rf .devt/` is NOT enough — devt also touches files outside `.devt/` per Claude Code spec requirements. For a truly clean state:
-
-```bash
-# In project root — destructive, run with care:
-rm -rf .devt/
-rm -f .mcp.json                              # project MCP server registry
-rm -rf .claude/agent-memory/devt-debugger    # debugger persistent memory
-# rm -f .claude/settings.json                # ONLY if you have no non-devt customizations
-
-# Strip devt-appended .gitignore lines (review the diff before committing):
-sed -i.bak '/^\.devt\//d; /^\.claude\/agent-memory\//d' .gitignore
-
-# Remove devt-installed git hook (only if it references devt or graphify):
-HOOK=.git/hooks/post-commit
-[ -f "$HOOK" ] && grep -q "devt\|CLAUDE_PLUGIN_ROOT" "$HOOK" && rm "$HOOK"
-
-# Optional: external integration caches
-rm -rf graphify-out/   # only if you don't want the Graphify cache
-rm -rf .claude-mem/    # only if you don't use claude-mem elsewhere
-
-/devt:init
-```
-
-**Why devt scatters files outside `.devt/`** — each scattered file lives where it does because of its integration partner's spec, not by choice:
-
-| File | Lives where it does because… |
-|---|---|
-| `.mcp.json` | Claude Code only auto-discovers MCP from `<repo-root>/.mcp.json` |
-| `.claude/settings.json` | Claude Code's spec for project settings |
-| `.claude/agent-memory/devt-debugger` | Claude Code's spec for `memory: project` agent persistence |
-| `.gitignore` entries | git's spec — entries must live in user-owned `.gitignore` |
-| `.git/hooks/post-commit` | git's spec — hooks live in `.git/hooks/`, not redirectable |
-
-### Uninstalling the devt plugin itself
-
-Different from project reset — this removes devt's own code:
-
-**Via marketplace:**
 ```text
-/plugin uninstall devt
+/devt:uninstall
 ```
 
-**Via git clone:**
-```bash
-rm -rf ~/.devt   # or wherever you cloned it
-```
+Interactive workflow that asks which level of reset you want and confirms before any destructive op. Always creates a `.devt.bak.YYYYMMDD-HHMMSS/` backup for project-reset and full-reset modes, so you can restore by `mv`-ing it back.
 
-This wipes the plugin's own files but does NOT touch any project's `.devt/` directory — those are project-local config, owned by your repo.
+Four modes:
+
+| Mode | What it does | Keeps |
+|---|---|---|
+| **Reinit** | Re-scaffold `.devt/rules/` + `.devt/config.json` from template | Memory (ADR/CON/FLOW/REJ/LES), lessons, deferred queue |
+| **Project reset** | Wipe all `.devt/` in this project | Files outside `.devt/` (`.mcp.json`, `.claude/`, `.gitignore` entries) |
+| **Full reset** | Wipe `.devt/` + scattered devt files at repo root | Optional Graphify / claude-mem caches (not auto-removed) |
+| **Plugin uninstall** | Remove the plugin itself (advisory — auto-detects install type and instructs) | All project `.devt/` directories — those are owned by your repos |
+
+devt scatters a few files outside `.devt/` (`.mcp.json`, `.claude/agent-memory/devt-debugger/`, `.gitignore` entries, `.git/hooks/post-commit`) because Claude Code and git specs require those paths. The full-reset mode handles all of them.
 
 ---
 
@@ -192,7 +136,8 @@ Optional `.devt/config.json` at project root configures plugin behavior. Global 
   "agent_skills": { "programmer": ["codebase-scan", "scratchpad", "api-docs-fetcher"] },
   "memory": { "paths": ["../engineering-adrs", ".devt/memory"], "preflight_mode": "block" },
   "graphify": { "enabled": true, "command": "graphify" },
-  "arch_scanner": { "command": "make arch-scan", "report_dir": "docs/reports" }
+  "arch_scanner": { "command": "make arch-scan", "report_dir": "docs/reports" },
+  "scope_mode": "surgical"
 }
 ```
 
@@ -206,9 +151,21 @@ Optional `.devt/config.json` at project root configures plugin behavior. Global 
 | `memory.preflight_mode` | `off` / `warn` / `block` | `block` |
 | `graphify.enabled` | Boolean | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) |
 | `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
+| `scope_mode` | `surgical` / `boyscout` — see below | `surgical` |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
 Config merge order: hardcoded defaults → `~/.devt/defaults.json` → `.devt/config.json` (later overrides earlier).
+
+#### `scope_mode` — surgical (default) vs boy-scout
+
+Controls how agents handle *unrelated* findings discovered while doing the requested task — dead imports, lint warnings, cosmetic issues in files they're touching anyway.
+
+| Mode | Behavior | When to pick |
+|---|---|---|
+| **`surgical`** (default) | Find-Surface-Decide protocol per `golden-rules.md` Rule 5: agent **finds** the unrelated issue, **surfaces** it to you (in the impl-summary or a `defer add`), and **does NOT fix it** without explicit approval. Keeps PRs reviewable — diff scope matches the asked-for change. | Production codebases, regulated environments, anywhere PR diff hygiene matters, code-review handoffs |
+| **`boyscout`** | Blanket authority for small mechanical in-file cleanups (dead imports, formatter fixes, removing `console.log`) without asking — *only* in files the agent is already touching, and *only* for changes that don't alter behavior. Bigger findings (refactors, behavior changes, structural fixes) still go through Find-Surface-Decide. | Personal projects, prototypes, fast-moving codebases, individual contributors who own the diff |
+
+The setting is **declarative** — no enforcement code reads it. Agents self-regulate based on the rule body and the resolved value in their context. Switching modes mid-project just changes future agent behavior; existing artifacts are unaffected.
 
 ---
 
@@ -255,6 +212,8 @@ Each adds a measurable benefit at a specific pipeline point. Setup auto-detects 
 
 #### Graphify — multi-language AST anchoring (~10× lower token cost on code-search)
 
+**Repo:** [github.com/safishamsi/graphify](https://github.com/safishamsi/graphify)
+
 **Install:** `uv tool install graphifyy[mcp]` *(recommended — works for both CLI and MCP server launch)* or `pip install graphifyy[mcp]` *(MCP launch still requires `uv` on PATH for graphify v0.7.10+)*
 
 **What it improves:**
@@ -276,7 +235,7 @@ Concrete savings vary by codebase size; the ~10× claim is conservative for medi
 
 #### claude-mem — mid-session insight capture
 
-**Install:** see [claude-mem](https://github.com/anthropics/claude-mem) docs. Optional `npm install -g claude-mem` if available.
+**Install:** see [claude-mem](https://github.com/thedotmack/claude-mem) docs.
 
 **What it improves:** `bin/modules/discovery.cjs::harvest()` mines claude-mem's ⚖️ (decisions) and 🔵 (insights) tags into `.devt/memory/_suggestions.md` — the curator agent then gates each candidate via AskUserQuestion before promoting to permanent memory. Without claude-mem, discovery still works on `#KNOWLEDGE-CANDIDATE` scratchpad markers and DEC-xxx entries — you get fewer auto-surfaced ADR/CON candidates but nothing breaks.
 
@@ -416,7 +375,27 @@ The loop is fully closed — lessons flow from completed work back into future a
 - **One at a Time** — AskUserQuestion supports up to 4 questions per call but discipline says use 1; each answer reframes the next
 - **Recommendation Required** — every option carries validated reasoning; mark recommended option `(Recommended)` and place first
 
-`references/council-offramp.md` defines when to escalate to `/devt:council` (5-advisor peer review) for high-stakes branches.
+### The council — adversarial peer review for high-stakes decisions
+
+`/devt:council "<question>"` convenes 5 advisors in parallel, each with a distinct thinking style designed to create three natural tensions: **Contrarian ⇄ Generalizer** (downside vs upside), **First Principles ⇄ Pragmatist** (rethink vs ship), with **the Newcomer** keeping everyone honest by reading the question fresh and asking obvious questions.
+
+| Advisor | Lens | Asks |
+|---|---|---|
+| **Contrarian** | What's the worst case? | "What breaks under load? What's the on-call cost when this fails? Have we hit this class of bug before?" |
+| **First Principles Thinker** | What does the problem actually require? | "Strip away the current solution — what are we really trying to do? Is there a simpler primitive?" |
+| **Generalizer** | What latent value or pattern fits? | "Have other teams solved this? Can this become a reusable pattern? What does the broader literature say?" |
+| **Newcomer** | What's obvious that everyone missed? | "Why does this even need to exist? What would a junior dev assume? What's the simplest thing that could work?" |
+| **Pragmatist** | What's the smallest concrete next step? | "Even if the plan is brilliant, what do we actually do tomorrow morning? What's the 30-min experiment that de-risks this?" |
+
+After advisors respond in parallel, responses are anonymized and **peer-reviewed** (no advisor knows who said what). A **Chairman** then synthesizes the round into a verdict: consensus, conflicts, blind spots, a recommendation, and one concrete next step. The full transcript saves to `.devt/state/council-{slug}-{timestamp}.md` for later reference.
+
+**When the council fires:**
+
+- **Manually** — invoke `/devt:council "should we use Postgres or Mongo for this workload?"` whenever you suspect your first instinct is biased.
+- **Automatically (off-ramp)** — `references/council-offramp.md` defines the escalation criteria. `/devt:clarify` and `/devt:specify` route to council when an open question is high-stakes (architecture-shaping, expensive-to-reverse, or has 3+ defensible options with no clear winner). The off-ramp sequence is: clarify → if council-worthy → council → resume clarify with the council verdict as decision input.
+- **`--mixed-models` flag** — dispatches advisors across opus/sonnet/haiku for higher reasoning diversity at extra token cost. Default is single-model dispatch.
+
+The council deliberately does NOT fire for trivial questions (factual lookups, single-line fixes, syntax). The skill description's trigger boundary keeps it from being a hammer for every nail.
 
 ### Hooks & guardrails
 

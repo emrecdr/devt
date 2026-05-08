@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Added
+- **`/devt:uninstall` command** (`commands/uninstall.md`, `workflows/uninstall.md`). Replaces the verbose 60+ line manual reset/uninstall instructions in the README with a guided AskUserQuestion-driven flow offering four modes: **Reinit** (re-scaffold rules + config from template; keeps memory + lessons + deferred queue) → **Project reset** (wipe `.devt/` only; backs up to `.devt.bak.YYYYMMDD-HHMMSS/` first) → **Full reset** (wipe `.devt/` + scattered files at repo root: `.mcp.json`, `.claude/agent-memory/devt-debugger/`, devt-managed git hooks, devt entries in `.gitignore`) → **Plugin uninstall** (advisory — auto-detects install type via `update install-type` and instructs the user; never auto-runs because plugin install lifecycle is user-owned). Destructive modes get a second confirmation prompt before any `rm -rf`. Always backs up before deleting so the user can `mv` the backup back to recover.
+
+### Changed
+- **README restructured for reader-journey flow** (`README.md`). New section order: What is devt → **Setup** → **Configuration** → Use cases → **Dependencies & integrations** → Features → How it works → The problem it solves → Reference → Releases. Setup moved up from line 137 to line 50 (above the fold). Configuration promoted from H3 inside §Reference to its own H2. New §Dependencies & integrations section absorbs the old §Stack table and expands it with concrete pipeline-by-pipeline benefit tables for Graphify (with surface-by-surface "without/with" comparison), uv, claude-mem, plus vendored components (devt-memory MCP, FTS5, atomic write helpers, security utilities). §Stack & tools used dropped (folded into Dependencies). The problem narrative moves later — now reads as "why we built this" after the user has seen what it does.
+- **README §Reset slimmed** from 60+ lines of manual bash blocks to a 14-line section pointing at `/devt:uninstall` with a 4-mode summary table.
+- **README council section expanded** with a 5-row advisor table (Contrarian / First Principles Thinker / Generalizer / Newcomer / Pragmatist), the three-tension framing (Contrarian ⇄ Generalizer, First Principles ⇄ Pragmatist, with Newcomer keeping everyone honest), the anonymized peer-review + Chairman synthesis flow, when the council fires (manual via `/devt:council "<question>"`, automatic off-ramp from `/devt:clarify` and `/devt:specify` per `references/council-offramp.md`), and the `--mixed-models` flag for opus/sonnet/haiku diversity at extra token cost.
+- **README documents `scope_mode` config** (`surgical` default vs `boyscout`) with a side-by-side behavior table and guidance on when to pick each. Was previously only in `CLAUDE.md` Key Conventions and `golden-rules.md` Rule 5.
+- **README claude-mem URL fixed** to [github.com/thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) (was incorrectly pointing at `anthropics/claude-mem`).
+- **README graphify repo link added** at the top of the Graphify subsection ([github.com/safishamsi/graphify](https://github.com/safishamsi/graphify)).
+
 ## [0.30.3] - 2026-05-08
 
 ### Fixed
