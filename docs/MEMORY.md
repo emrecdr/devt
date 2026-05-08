@@ -203,7 +203,7 @@ The `MEM_PATH_UNREACHABLE` check pairs with `memory paths --validate` — both s
 
 ## MCP Server (v0.18.0+)
 
-Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server registered in project `.mcp.json`. Tools:
+Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Registered via the plugin-root `.mcp.json` (Claude Code resolves `${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs` at server launch when devt is loaded as a plugin); no per-project scaffolding needed. Tools:
 
 | Tool | Purpose |
 |---|---|

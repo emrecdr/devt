@@ -345,63 +345,59 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     }
   }
 
-  // Scaffold project .mcp.json (Phase 3 v0.18.0) — registers devt-memory-mcp + conditional graphify + claude-mem.
-  // The vendored devt-memory-mcp server is referenced via ${CLAUDE_PLUGIN_ROOT} so plugin updates propagate
-  // automatically — no per-project copy of the server script. Other MCP entries are conditional on detected
-  // tooling; absence is logged as a hint, never an error.
+  // Scaffold project .mcp.json — conditional graphify + claude-mem only.
+  // The devt-memory MCP server is registered by the plugin's own .mcp.json at the plugin root
+  // (resolved by Claude Code via ${CLAUDE_PLUGIN_ROOT} when devt is loaded as a plugin). Project-level
+  // .mcp.json does NOT receive ${CLAUDE_PLUGIN_ROOT} substitution — it is reserved for project-relative
+  // MCP servers (graphify, claude-mem) whose args reference the project working directory.
   const mcpJsonPath = path.join(projectRoot, ".mcp.json");
   const mcpHints = [];
-  if (!fs.existsSync(mcpJsonPath)) {
-    const mcpServers = {
-      "devt-memory": {
-        command: "node",
-        args: ["${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"],
-        env: {},
-      },
+  const probedServers = {};
+  if (probeGraphifyBinary()) {
+    probedServers["graphify"] = {
+      command: "graphify",
+      args: ["mcp", "--project", "."],
+      env: {},
     };
-    // Probe Graphify
-    if (probeGraphifyBinary()) {
-      mcpServers["graphify"] = {
-        command: "graphify",
-        args: ["mcp", "--project", "."],
+  } else {
+    mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
+  }
+  try {
+    const probe = require("child_process").spawnSync("claude-mem", ["--help"], { timeout: 1500, stdio: "ignore" });
+    if (probe && probe.status === 0) {
+      probedServers["claude-mem"] = {
+        command: "claude-mem",
+        args: ["mcp", "--db", ".claude-mem/mem.db"],
         env: {},
       };
     } else {
-      mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
+      mcpHints.push("claude-mem not detected — install for richer mid-session capture.");
     }
-    // Probe claude-mem
-    try {
-      const probe = require("child_process").spawnSync("claude-mem", ["--help"], { timeout: 1500, stdio: "ignore" });
-      if (probe && probe.status === 0) {
-        mcpServers["claude-mem"] = {
-          command: "claude-mem",
-          args: ["mcp", "--db", ".claude-mem/mem.db"],
-          env: {},
-        };
-      } else {
-        mcpHints.push("claude-mem not detected — install for richer mid-session capture.");
-      }
-    } catch {
-      mcpHints.push("claude-mem probe failed — claude-mem MCP not registered.");
+  } catch {
+    mcpHints.push("claude-mem probe failed — claude-mem MCP not registered.");
+  }
+  if (!fs.existsSync(mcpJsonPath)) {
+    if (Object.keys(probedServers).length > 0) {
+      atomicWriteJson(mcpJsonPath, { mcpServers: probedServers });
+      results.files_created.push(".mcp.json");
     }
-    atomicWriteJson(mcpJsonPath, { mcpServers });
-    results.files_created.push(".mcp.json");
   } else {
-    // Only ADD devt-memory if missing — never modify existing servers (user may have customized)
     try {
       const mcpRaw = fs.readFileSync(mcpJsonPath, "utf8");
       const mcpParse = safeJsonParse(mcpRaw, ".mcp.json");
       if (!mcpParse.ok) throw new Error(mcpParse.error);
       const existing = mcpParse.value;
       if (!existing.mcpServers) existing.mcpServers = {};
-      if (!existing.mcpServers["devt-memory"]) {
-        existing.mcpServers["devt-memory"] = {
-          command: "node",
-          args: ["${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"],
-          env: {},
-        };
+      let mutated = false;
+      for (const [name, cfg] of Object.entries(probedServers)) {
+        if (!existing.mcpServers[name]) {
+          existing.mcpServers[name] = cfg;
+          mutated = true;
+        }
+      }
+      if (mutated) {
         atomicWriteJson(mcpJsonPath, existing);
-        results.files_updated.push(".mcp.json (added devt-memory entry)");
+        results.files_updated.push(`.mcp.json (added ${Object.keys(probedServers).join(", ")})`);
       }
     } catch (e) {
       results.warnings.push(`.mcp.json present but unreadable: ${e.message}`);

@@ -350,7 +350,7 @@ The PostToolUse `hooks/memory-auto-index.sh` rebuilds the FTS5 index whenever `.
 
 #### Vendored MCP server (10 tools, read-only)
 
-`bin/devt-memory-mcp.cjs` is auto-registered in project `.mcp.json` at `/devt:init`. JSON-RPC 2.0 stdio, zero external dependencies, three layers of defense (`OPEN_READONLY` + SELECT-only validator + multi-statement guard) on the `query_index` SQL escape hatch. Tools: `get_context_for_path`, `get_context_for_symbol`, `query_fts`, `get_doc`, `list_active`, `list_rejected_keywords`, `list_links`, `preflight`, `blast_radius`, `query_index`.
+`bin/devt-memory-mcp.cjs` ships with the plugin and is registered via the plugin-root `.mcp.json` — Claude Code resolves `${CLAUDE_PLUGIN_ROOT}` at MCP-server launch and starts the server automatically whenever the devt plugin is loaded (no per-project scaffolding). JSON-RPC 2.0 stdio, zero external dependencies, three layers of defense (`OPEN_READONLY` + SELECT-only validator + multi-statement guard) on the `query_index` SQL escape hatch. Tools: `get_context_for_path`, `get_context_for_symbol`, `query_fts`, `get_doc`, `list_active`, `list_rejected_keywords`, `list_links`, `preflight`, `blast_radius`, `query_index`.
 
 Per-call telemetry lands in `.devt/memory/_mcp-trace.jsonl` (privacy-safe — sizes + 12-char fingerprints, no raw args). Aggregate via `node bin/devt-tools.cjs mcp-stats`.
 

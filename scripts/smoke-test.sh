@@ -798,15 +798,21 @@ else
 fi
 rm -f .devt/state/scratchpad.md .devt/state/workflow.yaml
 
-# .mcp.json scaffolded with devt-memory entry
+# Project .mcp.json must NOT contain devt-memory — that server lives in the plugin-root .mcp.json
+# (resolved by Claude Code via ${CLAUDE_PLUGIN_ROOT} when devt is loaded as a plugin). Project-level
+# .mcp.json is reserved for project-relative servers (graphify, claude-mem) only.
 if [ -f .mcp.json ]; then
   if grep -q "devt-memory" .mcp.json; then
-    pass ".mcp.json scaffolded with devt-memory entry"
+    fail "project .mcp.json must not contain devt-memory (it ships in the plugin-root .mcp.json)"
   else
-    fail ".mcp.json missing devt-memory entry"
+    pass "project .mcp.json correctly omits devt-memory"
   fi
+fi
+# Plugin-root .mcp.json must register devt-memory with the ${CLAUDE_PLUGIN_ROOT} path template
+if [ -f "$ROOT/.mcp.json" ] && grep -q '"devt-memory"' "$ROOT/.mcp.json" && grep -q '${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs' "$ROOT/.mcp.json"; then
+  pass "plugin-root .mcp.json registers devt-memory via \${CLAUDE_PLUGIN_ROOT}"
 else
-  fail ".mcp.json not scaffolded by setup"
+  fail "plugin-root .mcp.json missing or malformed devt-memory entry"
 fi
 
 # Gitignore additions for Graphify + claude-mem

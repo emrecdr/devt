@@ -6,7 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
-## [0.30.0] - 2026-05-07
+## [0.30.1] - 2026-05-08
+
+### Fixed
+- **Project `.mcp.json` no longer scaffolds the `devt-memory` server** (`bin/modules/setup.cjs`). Per Claude Code's plugin reference, `${CLAUDE_PLUGIN_ROOT}` substitution applies only to MCP configs at the **plugin root** (`<plugin-root>/.mcp.json` or inline in `plugin.json`) — project-level `.mcp.json` is treated as user-authored config with no plugin-context env vars, so the previously scaffolded entry produced a `Missing environment variables: CLAUDE_PLUGIN_ROOT` warning on every session and never started the server. The plugin's own `.mcp.json` (already present at the devt repo root) registers `devt-memory` correctly via `${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs` and starts the server automatically whenever devt is loaded as a plugin (no per-project copy needed). `setup.cjs` now writes only project-relative MCP servers (`graphify`, `claude-mem`) into project `.mcp.json`, conditional on their binaries being on PATH; if neither is present, the file is not created at all.
+- **Smoke test assertion flipped** (`scripts/smoke-test.sh`). The "project `.mcp.json` scaffolded with devt-memory entry" check now asserts the *absence* of `devt-memory` from project `.mcp.json` (it must live in the plugin-root `.mcp.json`) and adds a positive assertion that the plugin-root `.mcp.json` registers `devt-memory` via the `${CLAUDE_PLUGIN_ROOT}` template. CI now enforces the architectural invariant.
+- **Documentation reframed** (`README.md` §Vendored MCP server, `docs/MEMORY.md` §MCP Server, `commands/init.md`): the MCP server "ships with the plugin and registers automatically when devt is loaded" replaces the old "auto-registered in project `.mcp.json` at /devt:init" framing.
 
 ### Added
 - **`bin/modules/io.cjs`** — shared atomic-write helpers (`atomicWriteFileSync`, `atomicWriteJsonSync`). Consolidates 12 inline `tmp + writeFileSync + renameSync` instances across 9 modules (state, config, deferred, memory, preflight, token-report, health, mcp-stats, weekly-report) plus `setup.cjs`'s local helper. Adds cleanup-on-rename-failure (unlinks the orphan `.tmp` if `EXDEV`/`EACCES`/`EBUSY` occurs, while preserving the original error). Future tweaks (cross-device fallback, `fdatasync` for true durability) are now single-file changes.
