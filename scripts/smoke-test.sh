@@ -800,13 +800,17 @@ rm -f .devt/state/scratchpad.md .devt/state/workflow.yaml
 
 # Project .mcp.json must NOT contain devt-memory — that server lives in the plugin-root .mcp.json
 # (resolved by Claude Code via ${CLAUDE_PLUGIN_ROOT} when devt is loaded as a plugin). Project-level
-# .mcp.json is reserved for project-relative servers (graphify, claude-mem) only.
+# .mcp.json is reserved for project-relative servers (graphify, claude-mem) only — and is
+# only created when at least one of those probes succeeds. Both states are valid; both must
+# uphold the "no devt-memory in project scope" invariant, so the assertion always fires.
 if [ -f .mcp.json ]; then
   if grep -q "devt-memory" .mcp.json; then
     fail "project .mcp.json must not contain devt-memory (it ships in the plugin-root .mcp.json)"
   else
     pass "project .mcp.json correctly omits devt-memory"
   fi
+else
+  pass "project .mcp.json correctly absent (no project-relative MCP servers detected)"
 fi
 # Plugin-root .mcp.json must register devt-memory with the ${CLAUDE_PLUGIN_ROOT} path template
 if [ -f "$ROOT/.mcp.json" ] && grep -q '"devt-memory"' "$ROOT/.mcp.json" && grep -q '${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs' "$ROOT/.mcp.json"; then

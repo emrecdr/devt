@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-05-08
+
+### Fixed
+- **Graphify MCP scaffolding now validates the `mcp` subcommand**, not just the binary's presence (`bin/modules/graphify.cjs::probeBinary`, `bin/modules/setup.cjs`). The previous probe only checked that `graphify --help` returned 0, so a user who installed the bare package (`uv tool install graphifyy` or `pip install graphifyy` — without the `[mcp]` extra) had a `graphify mcp --project .` entry written into project `.mcp.json` that produced `unknown command 'mcp'` failures every Claude Code session. `probeBinary` now accepts `{ subcommand }` and runs `<command> <subcommand> --help` instead, so setup correctly distinguishes three states: (a) binary missing — install hint as before; (b) binary present but `mcp` subcommand missing — new actionable hint pointing at `uv tool install --reinstall 'graphifyy[mcp]'` / `pip install --upgrade 'graphifyy[mcp]'`; (c) full support — register the MCP server entry. The other 3 `probeBinary` call sites (general "is graphify installed" checks in `setup.cjs::detectStack` post-commit-hook decision, the Graphify auto-enable config write, and `health.cjs::GRAPHIFY_MCP_UNREGISTERED`) keep the bare-binary semantics — they only need to know the binary exists, not whether it supports MCP.
+- **Smoke assertion for project `.mcp.json` always fires** (`scripts/smoke-test.sh`). v0.30.1's "project `.mcp.json` correctly omits devt-memory" pass was conditioned on the file existing, which silently dropped on test machines where neither graphify (with MCP) nor claude-mem was installed. Added a parallel "project `.mcp.json` correctly absent" pass for the no-probes-succeeded path so the invariant is enforced in both states.
+
 ## [0.30.1] - 2026-05-08
 
 ### Fixed

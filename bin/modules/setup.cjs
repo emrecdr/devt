@@ -353,12 +353,18 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   const mcpJsonPath = path.join(projectRoot, ".mcp.json");
   const mcpHints = [];
   const probedServers = {};
-  if (probeGraphifyBinary()) {
+  // Three-state probe: (1) binary missing → install hint; (2) binary present but `mcp` subcommand
+  // missing (user installed `graphifyy` without the `[mcp]` extra) → reinstall hint; (3) full
+  // support → register the MCP server entry. Probing only --help would falsely register the entry
+  // for state (2), producing a "command failed: unknown command 'mcp'" warning every session.
+  if (probeGraphifyBinary("graphify", 1500, { subcommand: "mcp" })) {
     probedServers["graphify"] = {
       command: "graphify",
       args: ["mcp", "--project", "."],
       env: {},
     };
+  } else if (probeGraphifyBinary()) {
+    mcpHints.push("graphify is on PATH but lacks the `mcp` subcommand — reinstall with the MCP extra (`uv tool install --reinstall 'graphifyy[mcp]'` or `pip install --upgrade 'graphifyy[mcp]'`) and re-run setup to register the Graphify MCP server.");
   } else {
     mcpHints.push("graphify not detected on PATH — install with `pip install graphifyy[mcp]` and re-run setup to register the Graphify MCP server.");
   }

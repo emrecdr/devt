@@ -455,10 +455,15 @@ function run(subcommand, args) {
 }
 
 // Config-independent binary probe used during setup/health before .devt/config.json
-// exists. Returns true when `graphify --help` exits 0 within the timeout.
-function probeBinary(command = "graphify", timeoutMs = 1500) {
+// exists. Returns true when `<command> --help` (or `<command> <subcommand> --help`
+// if `subcommand` is set) exits 0 within the timeout. The subcommand variant is
+// needed because `graphifyy` ships without the `mcp` subcommand unless the
+// `[mcp]` extra was installed — bare-binary detection alone is not sufficient
+// to know whether the MCP server can actually start.
+function probeBinary(command = "graphify", timeoutMs = 1500, options = {}) {
+  const args = options.subcommand ? [options.subcommand, "--help"] : ["--help"];
   try {
-    const probe = require("child_process").spawnSync(command, ["--help"], { timeout: timeoutMs, stdio: "ignore" });
+    const probe = require("child_process").spawnSync(command, args, { timeout: timeoutMs, stdio: "ignore" });
     return Boolean(probe && probe.status === 0);
   } catch {
     return false;
