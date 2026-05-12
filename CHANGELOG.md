@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-05-12
+
+Wave 4 closeout: two more items from the deferred list that survived a second-pass validation against the current Claude Code 2.x reference. **D-19 (devt-coordinator opt-in main-thread router)** and **D-29 (CLAUDE.md sweep)**. The other Wave 4-5 items remain deferred — second-pass validation confirmed: D-12 already-marginal (1-2 KB Brief, not 5-10 KB); D-21 in current form has no mechanism (`FileChanged` matcher is literal filenames, not globs); D-22 best concrete win needs MCP server write capability (separate architectural decision); D-23 inverted premise (`paths:` LIMITS auto-activation, doesn't expand); D-25/D-26/D-27/D-28 speculative without concrete devt drivers; D-10 sub-1 / D-20 / D-24 deferred with concrete revisit triggers (token-comparison data, init friction reports, /devt:research weight complaints respectively).
+
+### Added
+- **`agents/devt-coordinator.md`** (D-19) — thin opt-in main-thread router. Users add `"agent": "devt-coordinator"` to their project's `.claude/settings.json` (or `claude --agent devt-coordinator` ad-hoc); every prompt is classified as devt-shaped (route via Skill tool to matching `/devt:*` command) or casual (pass through to normal Claude session). 256 lines, well under the 500-line agent budget. Mirrors `workflows/do.md` routing table — smoke test enforces row-count parity to catch drift. Pass-through-by-default policy: routing is the exception, not the rule, and the agent explicitly refuses to "nag" about devt commands during casual conversation.
+- **README "Main-thread coordinator (opt-in)" section** documents the opt-in mechanism, the classification protocol, and the plugin-agent caveat (no per-coordinator `hooks`/`mcpServers`/`permissionMode` — workaround is copying the agent to user's `.claude/agents/`).
+
+### Changed
+- **`CLAUDE.md` (D-29)** — documented previously undocumented v0.33.0/v0.34.0 mechanics. New entries cover: the JSON sidecar contract (impl-summary.json + verification.json); the outcome-grader bounded-retry mechanism (rubric system + revisions[] routing + the two-scopes `verdict` field disjointness); the inline-guardrails wiring (init payload → `<guardrails_inline>` dispatch block → agent fallback); the devt-coordinator opt-in pattern. The Pre-Flight Protocol entry already covered v0.33.0 JSONL migration; v0.34.0 additions land alongside it.
+- **`.claude-plugin/plugin.json` agents list** — added `./agents/devt-coordinator.md`. 11 agents total now (10 dev specialists + 1 opt-in coordinator). README "10 specialized agents" line updated to mention the coordinator as an opt-in addition.
+
+### Smoke
+- **+3 new assertions** (`scripts/smoke-test.sh`):
+  - `agents/devt-coordinator.md` exists.
+  - Coordinator is registered in `plugin.json` agents list.
+  - Coordinator's routing table row count matches `workflows/do.md` (drift guard — adding a command to one file but not the other fails the build).
+- **321 total pass** (was 318 at v0.34.0).
+
+### Deferred (confirmed after second-pass validation)
+The "Deferred (plan vs. reality)" section in v0.34.0 already enumerated 8 items with concrete blockers. v0.34.1 confirms those deferrals after re-analysis with hard data (current agent line counts, MCP server tool surface, init wizard complexity):
+
+- **D-21 (hook event modernization)**: `FileChanged` matcher is literal filenames only — plan's biggest leverage win for memory-auto-index has no mechanism. `Setup`/`ConfigChange`/`InstructionsLoaded`/`PostToolBatch` are real but each is a solution-in-search-of-problem in current devt. Skip permanently in current form.
+- **D-22 (non-command hook types)**: `mcp_tool` for memory-auto-index requires adding a write tool to the read-only `bin/devt-memory-mcp.cjs` — a security-posture change deserving its own plan. `prompt`/`http`/`agent` types either net-negative (latency/cost) or speculative.
+- **D-23 (skill `paths:` glob)**: feature LIMITS skill auto-activation; plan's "saves tokens by skipping" premise inverts the documented semantics. Only `tdd-patterns` (already path-scoped) fits the model.
+- **D-12 (Pre-Flight Brief inline injection)**: re-confirmed marginal — Brief is 1-2 KB, not 5-10 KB. Stay dropped.
+- **D-10 sub-1 (trim non-programmer agent bodies)**: current line counts measured — programmer 423, verifier 357, tester 322, debugger 315, code-reviewer 313, all under 500-line budget. Without `/devt:tokens --compare` data showing specific agents dominate cache-miss prefix cost, trimming is guessing. Concrete trigger: when measurement data exists.
+- **D-20 (userConfig migration)**: `/devt:init` works (14-question AskUserQuestion wizard runs once per project at setup). userConfig prompts at plugin-enable time would be a marginal UX nicety for substantial refactor. Concrete trigger: user reports `/devt:init` friction, or a sensitive value (license/API key) needs keychain storage.
+- **D-24 (research-fork skill)**: devt already has `/devt:research`, `/devt:thread`, plus Claude Code's built-in `/explore`. A fourth way overlaps without clear differentiation. Concrete trigger: users find `/devt:research` too heavyweight for one-off read-only queries.
+- **D-25 (`${CLAUDE_PLUGIN_DATA}`)**: no devt state today needs to persist across plugin updates and across projects. Plan mentioned FTS5 schema migrations (devt rebuilds the index on every memory write — no migration state) and embedding caches (don't exist). Skip until concrete need surfaces.
+- **D-26 (channels)**: push-vs-poll for deferred reminders is marginal UX vs. heavy user setup (bot tokens, channel auth). `/devt:status` already surfaces deferred queue count. Skip.
+- **D-27 (personal-agent install)**: niche edge case for power users wanting plugin-agent restrictions removed. Nobody has requested it. Skip until request.
+- **D-28 (dispatch-time conditional skill preload)**: double-speculative (gated on D-10 sub-1 which is itself measurement-gated). Skip until D-10 data exists and post-trim cost is still high.
+
 ## [0.34.0] - 2026-05-12
 
 Wave 4 opens with two items: **D-16 (outcome-grader rubrics + bounded retry)** from Wave 3 carryover, and **D-11 consumer wiring (inline guardrails)** completing the v0.32.0 data plumbing. Other Wave 4 items (D-19/D-20/D-21/D-22/D-23/D-24) deferred after validate-during-impl verification against the current Claude Code 2.x plugin reference revealed that several plan premises don't match documented feature semantics — see the "Deferred (plan vs. reality)" section below. Re-plan in a follow-up cycle with feature constraints verified up-front. Same two directives applied — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.
