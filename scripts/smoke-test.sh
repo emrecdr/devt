@@ -2223,6 +2223,19 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== state read-section surfaced for surgical re-reads (v0.31.0+) =="
+# D-1 (refined): mid-flight validation showed wholesale wiring of read-section
+# into 7 dispatch sites would be busywork — most readers (tester, code-reviewer,
+# verifier) legitimately need whole-file plan context. The one genuine win is
+# programmer-on-iteration>1 after a phase-scoped review.md flag. Document the
+# CLI in agents/programmer.md so it's a known runtime tool for that case.
+# Assertion: the programmer agent body references the read-section CLI.
+if grep -q "state read-section" "$ROOT/agents/programmer.md"; then
+  pass "agents/programmer.md surfaces state read-section for iteration>1 re-reads (D-1)"
+else
+  fail "programmer.md missing state read-section guidance (D-1)"
+fi
+
 echo "== skill-index.yaml resolved via init.cjs (v0.31.0+) =="
 # D-2: init.cjs::resolveSkills parses skill-index.yaml + merges with
 # .devt/config.json::agent_skills (config wins) and returns the merged map

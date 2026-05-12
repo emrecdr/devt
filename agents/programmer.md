@@ -37,6 +37,14 @@ BEFORE starting any work, load the following in order:
 11. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/generative-debt-checklist.md` — BEFORE/DURING/AFTER coding gates to prevent AI-introduced technical debt (duplicates, over-engineering, incomplete implementations)
 12. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant lessons from past workflows. Apply them to avoid repeating known mistakes.
 
+**Token-saver for iteration > 1 (v0.31.0+).** When a `<review_feedback>` block flags one specific phase of the plan, prefer a targeted section read over re-reading the whole plan:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-section --file plan.md --section "Phase 2"
+```
+
+Exact-then-prefix heading match; `"Phase 2"` finds `## Phase 2: ...`. Returns `{ok:true, section, level, content, match}` on hit, `{ok:false, reason}` on miss. For iteration 1 or whole-plan re-reads (verifier-style requirement-coverage sweeps), use the full Read tool — section-read is for surgical re-reads when the prior agent's feedback is phase-scoped.
+
 Do NOT skip any of these. Missing context causes implementation errors that waste everyone's time.
 </context_loading>
 
