@@ -6,6 +6,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-05-12
+
+Two waves consolidated into one release. v0.35.0's Wave A (6 options) was authored in a prior session but never published; v0.36.0's wave adds 3 more options on top. Ships 9 architectural improvements drawn from the `ticklish-mapping-backus.md` 12-option roadmap. Smoke: **336 passed** (was 325 pre-wave). Locking: **3/3**. Plugin contract surface: stable (no breaking changes to commands, agents, or hooks).
+
+### Added — v0.36.0 wave (Options 9a, 10, 11)
+
+- **Parallel researcher + arch_health dispatch** (Option 9a). COMPLEX-tier `dev` flows now dispatch the researcher and (when arch_health is opted-in via risk-signal `AskUserQuestion`) the architect in **one message with two `Task` tool calls** from `workflows/dev-workflow.md` Step 2.5. The arch_health architect dispatch reads `.devt/state/scan-results.md` only — the `plan.md` dependency dropped since the plan does not yet exist at parallel-dispatch time. Inline Auto-Plan consumes both `research.md` AND `arch-health-scan.md`. Workflow carries `<!-- parallel-dispatch: researcher + architect (arch_health mode) -->` marker; smoke test asserts presence + absence of regressions.
+- **Memory Graph subgraph in Pre-Flight Brief** (Option 10). `bin/modules/memory.cjs::getSubgraphTriples(seedIds, depth=2, maxTriples=50)` reshapes per-seed `getLinks` rows into a deduped, sorted `{source, predicate, target}` array. `bin/modules/preflight.cjs::renderBrief` emits a new `## Memory Graph (2-hop subgraph)` section between **Governing Documentation** and **Rejected Approaches**. Agents scan structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without per-doc `get_doc` round-trips. Smoke: 2 linked ADRs produce 2 expected triples.
+- **Pinned rubric versions** (Option 11). `references/rubrics/dev.md` renamed to `dev.v1.md`. New `bin/modules/config.cjs::DEFAULTS.rubrics` block (default `{ dev: "dev.v1.md" }`) exposed at the top of the init payload as `rubrics`. `workflows/dev-workflow.md` verifier dispatch injects `<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>`; `agents/verifier.md` prefers that block over computing the path from `<workflow_type>`. Future rubric updates ship as new files (`dev.v2.md`); projects opt in by overriding `rubrics.dev` in `.devt/config.json`. Naming convention: `<workflow_type>.v<N>.md`.
+
+### Added — v0.35.0 carryover wave (Options 1, 2, 4, 5, 6, 8)
+
+- **Hot-path read cache: governing rules wiring** (Option 1). `bin/modules/init.cjs::loadGoverningRules` returns the project's `CLAUDE.md` + `.devt/rules/*.md` contents inline in the init payload as `governing_rules: {content, paths_included, paths_excluded, rules_hash, total_bytes}`. Cap is 96 KB total. Workflows `dev-workflow.md`, `quick-implement.md`, `code-review.md`, `research-task.md` inject a `<governing_rules rules_hash="...">` block (with `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>`, `<review_checklist>` sub-tags) into **code-reviewer, verifier, and researcher** dispatches. Those agents prefer inline content over on-disk Reads when present. `rules_hash` (SHA-256 first 16 chars) lets agents detect mid-workflow drift.
+- **MCP write surface for curator** (Option 2). `bin/modules/memory.cjs::upsertDoc({frontmatter, body})` atomically writes a `.devt/memory/<subdir>/<ID>-<slug>.md` file AND refreshes the FTS5 index in one call. Validates frontmatter BEFORE touching disk; rolls back file write if index rebuild fails. `bin/devt-memory-mcp.cjs` exposes `memory_upsert_doc` tool gated by `DEVT_MCP_ALLOW_WRITES=1` (set by plugin's `.mcp.json` env block by default). `listTools()` filters out write tools when the flag is unset; `callTool()` re-checks at handler level. `agents/curator.md` instructs the curator to call `memory_upsert_doc` first and fall back to the legacy 3-tool ritual on `WRITES_DISABLED` error.
+- **Sidecar-only status routing** (Option 4). `impl-summary.md` + `verification.md` no longer carry a `## Status` header in their markdown templates. JSON sidecars (`impl-summary.json` / `verification.json`) are the single source of truth for workflow routing. `bin/modules/state.cjs::SIDECAR_FOR_MARKDOWN` maps markdown → sidecar; `validateConsistency()` reads the sidecar's `status` field for these artifacts. Other 7 ARTIFACT_SCHEMA artifacts keep the markdown `## Status` header until backfilled with their own sidecars in a future wave (Path A of Option 4, deferred).
+- **Stable-prefix invariant smoke test** (Option 5). Asserts that the byte-prefix of `init` payloads is stable across task-string variations — guards against accidentally moving task-text into a prefix-position that would defeat cache hits.
+- **Memory query aggregate flags** (Option 6). `bin/modules/memory.cjs::queryFTS` accepts a `mode` option — `"full"` (default), `"count"`, `"top"`, `"domain-counts"`. CLI surfaces: `memory query "<terms>" --count|--top=N|--domain-counts|--json-compact`. MCP exposes `query_fts_count`, `query_fts_top`, `query_fts_by_domain`. Aggregates return ~50–500 B vs ~1.5–15 KB for full payloads — memory-pre-flight skill documents the "aggregate-first" probe pattern.
+- **Hook profile docs resync** (Option 8). Updated the hook-profile table in `CLAUDE.md` to reflect the current `minimal | standard | full` set.
+
+### Changed
+
+- `references/rubrics/dev.md` → `references/rubrics/dev.v1.md` (rename, full content preserved). Future rubric revisions ship as new versioned files.
+- `workflows/dev-workflow.md` Step 2.7 deleted — its risk-signal detection + user prompt logic moved into Step 2.5's parallel-dispatch block. Step 3's architect review prompt updated to reference the parallel dispatch instead of the deleted Step 2.7.
+- `agents/verifier.md`: prefers the dispatch-injected `<rubric_path>` over computing the path from `<workflow_type>`; falls back to `<workflow_type>.v1.md` lookup when the block is absent.
+- `agents/code-reviewer.md`, `agents/verifier.md`, `agents/researcher.md`: prefer the `<governing_rules>` dispatch block over on-disk Reads of `CLAUDE.md` + `.devt/rules/*.md`.
+- `agents/programmer.md`, `agents/verifier.md`: emit BOTH `.md` (narrative) AND `.json` (workflow-routing sidecar) per Option 4's sidecar-only contract. Markdown templates no longer carry `## Status` for these two artifacts.
+- `agents/curator.md`: instructs the curator to call `memory_upsert_doc` first and fall back to the legacy 3-tool ritual on `WRITES_DISABLED` error.
+- `bin/devt-memory-mcp.cjs`: adds `query_fts_count`, `query_fts_top`, `query_fts_by_domain`, `memory_upsert_doc` tools; write tools filtered out via `listTools()` when `DEVT_MCP_ALLOW_WRITES` is unset.
+- `bin/modules/state.cjs`: new `SIDECAR_FOR_MARKDOWN` registry; `validateConsistency()` reads sidecar `status` for sidecar-covered artifacts.
+
+### Smoke
+
+- **+11 new assertions** in `scripts/smoke-test.sh`:
+  - Option 9a (4): parallel-dispatch marker comment present; Step 2.7 deleted; arch_health dispatch reads scan-results.md only (no `plan.md`); no stale "from Step 2.7" references.
+  - Option 10 (4): preflight Brief generated with seeded ADRs; Brief contains Memory Graph section header; section renders `source → predicate → target` triples; `getSubgraphTriples` returns flat `{source, predicate, target}` array.
+  - Option 11 (3): verifier rubric resolved via `DEFAULTS.rubrics.dev` exists (`dev.v1.md`); init payload exposes `rubrics.dev`; dev-workflow verifier dispatch injects `<rubric_path>`.
+- **336 total pass** (was 325 pre-wave). 3/3 locking assertions still pass.
+
+### Docs
+
+- **`CLAUDE.md`** — six new architecture doc blocks covering each shipped option, plus an updated entry for Option 11's `rubrics` config key.
+- **`docs/MEMORY.md`** — added aggregate-flag CLI variants under "CLI Surface"; added `query_fts_count` / `query_fts_top` / `query_fts_by_domain` / `memory_upsert_doc` rows under "MCP Server"; added Memory Graph bullet under "Tier 1 — Topic Pre-Flight".
+- **`README.md`** — added `rubrics.dev` config row under "Basic configuration".
+- **`skills/memory-pre-flight/SKILL.md`** — documents the aggregate-first probe pattern and the Memory Graph Brief section.
+
+### Notes for projects upgrading from v0.34.1
+
+- No config migration required. `.devt/config.json` keeps working unchanged.
+- Projects that subclassed `references/rubrics/dev.md` directly need to update their path — point to `dev.v1.md` (or override `rubrics.dev` in `.devt/config.json`).
+- MCP write surface (Option 2) is **enabled by default** via `DEVT_MCP_ALLOW_WRITES=1` in the plugin's `.mcp.json`. Set to `"0"` or remove the env var to disable and force the legacy 3-tool path.
+
 ## [0.34.1] - 2026-05-12
 
 Wave 4 closeout: two more items from the deferred list that survived a second-pass validation against the current Claude Code 2.x reference. **D-19 (devt-coordinator opt-in main-thread router)** and **D-29 (CLAUDE.md sweep)**. The other Wave 4-5 items remain deferred — second-pass validation confirmed: D-12 already-marginal (1-2 KB Brief, not 5-10 KB); D-21 in current form has no mechanism (`FileChanged` matcher is literal filenames, not globs); D-22 best concrete win needs MCP server write capability (separate architectural decision); D-23 inverted premise (`paths:` LIMITS auto-activation, doesn't expand); D-25/D-26/D-27/D-28 speculative without concrete devt drivers; D-10 sub-1 / D-20 / D-24 deferred with concrete revisit triggers (token-comparison data, init friction reports, /devt:research weight complaints respectively).

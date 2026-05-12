@@ -87,6 +87,7 @@ Produces `.devt/state/preflight-brief.md` with `## Status: FRESH`. The Brief con
 
 - **Topic Extracted** — domains, symbols, keywords parsed from the task
 - **Governing Documentation** — ADRs/CONs/FLOWs from Lanes A (domain), B (FTS), C (symbol), D (link closure depth-2)
+- **Memory Graph (2-hop subgraph)** *(v0.36.0+)* — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Reuses `memory.cjs::getLinks` per seed; deduplicates across seeds; capped at 50 triples for scannability. Agents inspect structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without per-doc `get_doc` round-trips. When the governing union is empty, the section renders an informational fallback so the Brief layout stays stable.
 - **Rejected Approaches** — REJ tombstones whose `search_keywords` overlap the topic (Lane E)
 - **Related Operational Lessons** — playbook entries matching the topic (Lane F)
 - **Blast Radius** — Graphify-derived dependents/effect-size (or grep heuristic if disabled)
@@ -130,6 +131,10 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
 node bin/devt-tools.cjs memory init              # scaffold + first index pass
 node bin/devt-tools.cjs memory index             # atomic drop+rebuild FTS5
 node bin/devt-tools.cjs memory query <terms>     # full-text search
+node bin/devt-tools.cjs memory query <terms> --count           # aggregate: row count only (v0.35.0+)
+node bin/devt-tools.cjs memory query <terms> --top=N           # aggregate: top-N compact rows
+node bin/devt-tools.cjs memory query <terms> --domain-counts   # aggregate: counts grouped by domain
+node bin/devt-tools.cjs memory query <terms> --json-compact    # full rows, compact JSON (no formatting)
 node bin/devt-tools.cjs memory get <id>          # fetch single doc
 node bin/devt-tools.cjs memory affects <path>    # path-based pre-flight
 node bin/devt-tools.cjs memory list [doc_type]   # enumerate
@@ -217,6 +222,10 @@ Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Regis
 | `preflight(task)` | Run lanes A-F + blast radius |
 | `blast_radius(symbols)` | Graphify-derived blast radius |
 | `query_index(sql)` | Raw SQL escape hatch — SELECT-only |
+| `query_fts_count(terms)` *(v0.35.0+)* | Aggregate-first FTS — returns `{count}` only |
+| `query_fts_top(terms, n?)` *(v0.35.0+)* | Aggregate-first FTS — top-N compact rows |
+| `query_fts_by_domain(terms)` *(v0.35.0+)* | Aggregate-first FTS — group counts by domain |
+| `memory_upsert_doc(frontmatter, body)` *(v0.35.0+)* | Atomic write of `.devt/memory/<subdir>/<ID>-<slug>.md` **and** FTS5 index refresh in one call. Gated by `DEVT_MCP_ALLOW_WRITES=1` (set by plugin's `.mcp.json` env block by default; remove or set `"0"` to disable writes). Validates frontmatter BEFORE touching disk; rolls back file write if index rebuild fails. Curator's preferred write path — falls back to the legacy 3-tool ritual (file Write + Bash mv + `memory index`) on `WRITES_DISABLED` error. |
 
 **Hard guarantees:**
 - SQLite opened with `readOnly: true` — even malicious helpers cannot mutate

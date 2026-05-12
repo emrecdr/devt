@@ -137,6 +137,7 @@ Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/co
 | `memory.preflight_mode` | Pre-flight guard strictness — `off` / `warn` / `block` | `block` |
 | `graphify.enabled` | Enable AST-anchored code search | `false` (auto-set to `true` if `graphify` is on PATH at first setup) |
 | `scope_mode` | How agents handle unrelated findings — `surgical` (ask first) / `boyscout` (small mechanical fixes ok) | `surgical` |
+| `rubrics.dev` | Pinned verifier rubric filename for the `dev` workflow (v0.36.0+). Bump to a newer version (`dev.v2.md`) after testing — devt ships old rubrics alongside new ones. | `dev.v1.md` |
 | `git.primary_branch` / `git.contributors` | Used by `/devt:ship` and reports | auto-detected |
 
 For the full schema (model_overrides, agent_skills, multi-root memory, arch_scanner, workflow toggles), see [Configuration reference](#configuration-reference).
