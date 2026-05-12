@@ -87,6 +87,8 @@ when the routing block specifies them; they are not "doing the work.")
 <step name="route" gate="next action is determined and executed">
 ## Step 2: Route to Next Action
 
+> **PRIORITY GUARD (v0.31.0+).** Before evaluating any of the routing branches below, check `workflow.yaml.validation_status`. If it is `"warned"`, jump straight to the **"Active workflow, validation_status='warned'"** branch later in this list and follow that flow. Do NOT match the generic "Active workflow, phase known" branch first — the warned-state branch is more specific and the generic branch would silently advance past the warning. The branches below are ordered presentation-of-options, not strict priority; this guard is the one exception that overrides ordering.
+
 Based on detected state, execute the appropriate action (per the dispatch mechanic above):
 
 ### No workflow, no artifacts

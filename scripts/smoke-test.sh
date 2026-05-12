@@ -2223,6 +2223,24 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== next.md PRIORITY GUARD for validation_status=warned (v0.31.0+) =="
+# D-7: next.md Step 2 must lead with an explicit PRIORITY GUARD instruction
+# that surfaces validation_status="warned" BEFORE any other routing branch.
+# The earlier "Active workflow, phase known" branch is a generic catch-all
+# that could otherwise silently absorb a warned state. Guard text contains
+# the literal token "PRIORITY GUARD" so future drift is loud.
+if grep -q "PRIORITY GUARD" "$ROOT/workflows/next.md"; then
+  # Also confirm the guard mentions validation_status — guards against a
+  # rename of the field that would silently break the routing intent.
+  if grep -A 1 "PRIORITY GUARD" "$ROOT/workflows/next.md" | grep -q "validation_status"; then
+    pass "next.md PRIORITY GUARD references validation_status (D-7)"
+  else
+    fail "PRIORITY GUARD present but doesn't reference validation_status (D-7)"
+  fi
+else
+  fail "next.md missing PRIORITY GUARD preamble (D-7)"
+fi
+
 echo "== /devt:tokens + /devt:mcp-stats command surfaces (v0.31.0+) =="
 # D-3: both new commands have a command file (slash-namespace registration)
 # and a workflow file (orchestration body). The underlying CLI subcommands
