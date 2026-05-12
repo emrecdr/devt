@@ -2223,6 +2223,35 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== Pre-Flight Brief read instruction not duplicated in agent bodies (v0.31.0+) =="
+# D-4: the memory-pre-flight skill (preloaded by 8 dev agents via skills:
+# frontmatter) is the canonical source for "Read .devt/state/preflight-brief.md
+# at startup". Previously only programmer.md duplicated this instruction in its
+# context_loading block — creating drift where the documented preload was
+# uniform but the actual prompts were not. Remove duplication; rely on the
+# skill body in the agent's system prompt.
+SKILL_BODY="$ROOT/skills/memory-pre-flight/SKILL.md"
+if grep -q "preflight-brief.md" "$SKILL_BODY"; then
+  pass "memory-pre-flight skill references preflight-brief.md (canonical source)"
+else
+  fail "memory-pre-flight skill missing preflight-brief.md reference (D-4 regression)"
+fi
+# No agent body should have a Read instruction for preflight-brief.md — the
+# skill provides it via the preloaded system-prompt section.
+DUPES=()
+for agent in "$ROOT"/agents/*.md; do
+  if grep -qE "Read .*preflight-brief\.md|Read the Pre-Flight Brief" "$agent"; then
+    DUPES+=("$(basename "$agent")")
+  fi
+done
+if [ ${#DUPES[@]} -eq 0 ]; then
+  pass "no agent body duplicates the preflight-brief.md read instruction (D-4)"
+else
+  for d in "${DUPES[@]}"; do
+    fail "$d duplicates the preflight-brief.md read — should rely on memory-pre-flight skill (D-4)"
+  done
+fi
+
 echo "== state read-section surfaced for surgical re-reads (v0.31.0+) =="
 # D-1 (refined): mid-flight validation showed wholesale wiring of read-section
 # into 7 dispatch sites would be busywork — most readers (tester, code-reviewer,

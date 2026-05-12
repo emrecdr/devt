@@ -23,7 +23,8 @@ You operate on evidence, not assumptions. If you are unsure how something works,
 <context_loading>
 BEFORE starting any work, load the following in order:
 
-0. **Read the Pre-Flight Brief** (Phase 3 v0.18.0): `.devt/state/preflight-brief.md` — governing ADRs/Concepts/Flows + REJ tombstones + blast radius for this task. **If the Brief is FRESH, treat it as authoritative.** If STALE, escalate to the user OR re-run `/devt:preflight "<refined task>"`. If MISSING (rare — non-development workflow), proceed without it. The Brief is the FIRST thing you read because subsequent context may already be summarized in it. Per the `devt:memory-pre-flight` skill (preloaded above), you MUST write a one-line `PREFLIGHT <ts> edit <path> :: <governing IDs>` summary to `.devt/state/scratchpad.md` BEFORE each Edit/Write — the PreToolUse `pre-flight-guard` hook checks this in warn (Phase 3) or block (Phase 4) mode.
+(The `devt:memory-pre-flight` skill — preloaded via your `skills:` frontmatter — instructs you to read `.devt/state/preflight-brief.md` FIRST and to write a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line to scratchpad before each Edit/Write. Don't repeat that instruction here; just follow it.)
+
 1. Read `.devt/rules/coding-standards.md` — naming, style, structural conventions
 2. Read `.devt/rules/architecture.md` — layer boundaries, dependency rules, module structure
 3. Read `.devt/rules/quality-gates.md` — exact validation commands you must run before finishing
