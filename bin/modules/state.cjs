@@ -346,8 +346,15 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function acquireLock() {
-  const lockFile = path.join(getStateDir(), ".lock");
+function acquireLock(lockDir) {
+  // Default to state dir for backward compatibility; memory.cjs passes its own dir
+  // for FTS5 rebuild serialization across concurrent Claude sessions.
+  // Callers are internal only (state.cjs::updateState/resetState/syncState/pruneState
+  // pass undefined → defaults to getStateDir; memory.cjs::rebuildIndex passes the
+  // memory dir derived from getDbPath()). No user input flows here.
+  const dir = lockDir || getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const lockFile = path.join(dir, ".lock");
   const start = Date.now();
 
   while (Date.now() - start < LOCK_TIMEOUT_MS) {
@@ -858,6 +865,8 @@ module.exports = {
   describeMismatch,
   getStateDir,
   ensureStateDir,
+  acquireLock,
+  releaseLock,
   PHASE_ORDER,
   PHASE_ARTIFACT_MAP,
   VALID_PHASES,

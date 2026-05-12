@@ -522,12 +522,44 @@ function ensureDb() {
  * Atomic rebuild: drops all rows in a single transaction and re-inserts.
  * If anything throws mid-rebuild, the transaction rolls back and the
  * previous index state is preserved.
+ *
+ * Cross-process serialization (v0.30.6): wraps the rebuild in a file lock
+ * against the memory directory so two concurrent Claude sessions that both
+ * trigger memory-auto-index.sh (e.g. user edits memory docs from two terminals)
+ * cannot race on the DELETE→INSERT transaction. Returns `{ok:false, reason:
+ * "index_in_progress"}` if another rebuild is in flight — the debounce timer
+ * in memory-auto-index.sh will pick it up on the next cycle.
  */
 function rebuildIndex() {
   const dbPath = getDbPath();
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
+  // Acquire FTS5 rebuild lock against the memory directory. Bail cleanly on
+  // contention so the caller can retry rather than waiting indefinitely.
+  const { acquireLock, releaseLock } = require("./state.cjs");
+  let lockFile;
+  try {
+    lockFile = acquireLock(dir);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "index_in_progress",
+      error: e.message,
+      inserted: 0,
+      skipped: 0,
+      errors: [],
+    };
+  }
+
+  try {
+    return rebuildIndexLocked();
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+function rebuildIndexLocked() {
   const docs = scanDocs();
   const validationErrors = [];
   const validDocs = [];
