@@ -2223,6 +2223,50 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== byte-stable agent/skill bodies (v0.32.0+) =="
+# D-10 sub-2: Claude Code auto-caches stable prompt prefixes (proven by the
+# cache_read_input_tokens telemetry token-report parses). The cache only fires
+# when the prefix is BYTE-stable across dispatches. An agent body or preloaded
+# skill body containing a Date(), ISO timestamp, run-ID, or other per-session
+# value silently invalidates the cache for every downstream content.
+# Lint: scan agent bodies + skills/*/SKILL.md for forbidden patterns.
+STABILITY_VIOLATIONS=()
+FORBIDDEN_PATTERNS='new Date\(\)|Date\.now\(\)|\bUTC time\b|\bcurrent timestamp\b|\$\(date\b'
+for file in "$ROOT"/agents/*.md "$ROOT"/skills/*/SKILL.md; do
+  # Skip if file doesn't exist (e.g. glob didn't expand)
+  [ -f "$file" ] || continue
+  # Match the patterns. False-positive guard: documentation about "use Date.now()"
+  # as a pattern reference is fine; ACTUAL invocations in a prompt body would be
+  # bash/JS run by the agent — they go in code-fenced examples. We allow patterns
+  # inside ```...``` blocks via a coarse check: only fail if the match is NOT
+  # within 5 lines of a triple-backtick.
+  hits=$(grep -nE "$FORBIDDEN_PATTERNS" "$file" 2>/dev/null || true)
+  if [ -n "$hits" ]; then
+    # Inspect each hit: is it inside a code fence? Pre-existing examples in
+    # agent bodies that DOCUMENT timestamp generation are fine (they're code,
+    # not prose). Filter via context.
+    while IFS= read -r hit; do
+      [ -z "$hit" ] && continue
+      lineno=$(echo "$hit" | cut -d: -f1)
+      # Check the 3 lines before for a code-fence start
+      start=$((lineno > 3 ? lineno - 3 : 1))
+      ctx=$(sed -n "${start},${lineno}p" "$file" 2>/dev/null)
+      if echo "$ctx" | grep -q '^\`\`\`'; then
+        # Inside a code fence — likely documentation example, allow
+        continue
+      fi
+      STABILITY_VIOLATIONS+=("$(basename "$file"):$lineno — prose contains volatile pattern")
+    done <<<"$hits"
+  fi
+done
+if [ ${#STABILITY_VIOLATIONS[@]} -eq 0 ]; then
+  pass "no Date()/timestamp/runtime-value in agent/skill prose (prefix-cache stability)"
+else
+  for v in "${STABILITY_VIOLATIONS[@]}"; do
+    fail "byte-stability violation — $v"
+  done
+fi
+
 echo "== init.cjs inline_guardrails plumbing (v0.32.0+) =="
 # D-11: init.cjs returns the 3 plugin-shipped guardrails as inline content for
 # future consumer wiring (agent/workflow opt-in once /devt:tokens --compare
