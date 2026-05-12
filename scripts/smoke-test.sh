@@ -2223,6 +2223,29 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== no orphan templates/ references (v0.31.0+) =="
+# Guard against dead-contract drift: any reference to templates/<name>.md from
+# workflows/ or agents/ must point at a file that exists. Catches the
+# task-handoff-template.md class of bug (referenced but unused, or referenced
+# after deletion).
+ORPHAN_REFS=()
+while IFS= read -r line; do
+  src=$(echo "$line" | cut -d: -f1)
+  # Extract the templates/... path inside the match
+  refpath=$(echo "$line" | grep -oE 'templates/[a-zA-Z0-9_/.-]+\.md' | head -1)
+  [ -z "$refpath" ] && continue
+  if [ ! -f "$ROOT/$refpath" ]; then
+    ORPHAN_REFS+=("$src references missing $refpath")
+  fi
+done < <(grep -rn "templates/[a-zA-Z0-9_/.-]\+\.md" "$ROOT/workflows" "$ROOT/agents" 2>/dev/null || true)
+if [ ${#ORPHAN_REFS[@]} -eq 0 ]; then
+  pass "no orphan templates/ references in workflows + agents"
+else
+  for ref in "${ORPHAN_REFS[@]}"; do
+    fail "orphan templates/ reference — $ref"
+  done
+fi
+
 echo "== atomic-write consistency (v0.30.6+) =="
 # CLAUDE.md claims all writes route through io.cjs::atomicWriteFileSync.
 # Verify: bin/modules/*.cjs (excluding io.cjs + state.cjs lock special-case)

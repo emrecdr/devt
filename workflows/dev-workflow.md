@@ -120,21 +120,6 @@ If `agent_skills.<agent_type>` exists, inject the skill references into the agen
 If `agent_skills` is not configured or the key is missing for the agent type, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for the default agent→skill mapping and inject those defaults.
 </agent_skill_injection>
 
-<task_handoff>
-## Structured Task Handoff
-
-When dispatching agents via `Task()`, use the structured handoff format from `${CLAUDE_PLUGIN_ROOT}/templates/task-handoff-template.md`. Fill in fields from available `.devt/state/` artifacts:
-
-- **Objective**: from task description + spec.md (if exists)
-- **Acceptance criteria**: from spec.md or derived from task description
-- **Prior artifacts**: summarize each existing .devt/state/ file (do NOT reference missing files)
-- **Constraints**: from .devt/rules/ + CLAUDE.md + decisions.md
-- **Test scenarios**: from spec.md (if exists) — include in tester dispatch only
-- **Handoff notes**: from previous agent's output + concerns from workflow state
-
-This ensures every agent receives consistent, complete context — no missing information, no free-form prompts that vary between dispatches.
-</task_handoff>
-
 ---
 
 ## Context Loading
