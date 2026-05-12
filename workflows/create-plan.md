@@ -20,7 +20,7 @@ Plans that pass validation result in fewer iterations during implementation.
   </available_agent_types>
 
 <agent_skill_injection>
-Before dispatching agents, check `.devt/config.json` for `agent_skills.<agent_type>`. If not configured, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for defaults:
+Before dispatching agents, read `resolved_skills.<agent_type>` from the compound `init` output. Pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills` overrides; skill-index.yaml fills gaps. Defaults for plan-phase agents:
 - researcher: codebase-scan, strategic-analysis
 - architect: codebase-scan, architecture-health-scanner, api-docs-fetcher, strategic-analysis, complexity-assessment
 </agent_skill_injection>

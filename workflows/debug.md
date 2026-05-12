@@ -20,7 +20,7 @@ follows a structured protocol that builds evidence before proposing fixes.
 </available_agent_types>
 
 <agent_skill_injection>
-Before dispatching the debugger agent, check `.devt/config.json` for `agent_skills.debugger`. If not configured, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for defaults (codebase-scan).
+Before dispatching the debugger agent, read `resolved_skills.debugger` from the compound `init` output. This is pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills.debugger` overrides; default falls back to skill-index.yaml (`codebase-scan`).
 </agent_skill_injection>
 
 <process>

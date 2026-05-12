@@ -20,7 +20,7 @@ and surfaces pitfalls before any code is written.
   </available_agent_types>
 
 <agent_skill_injection>
-Before dispatching the researcher agent, check `.devt/config.json` for `agent_skills.researcher`. If not configured, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for defaults (codebase-scan, strategic-analysis).
+Before dispatching the researcher agent, read `resolved_skills.researcher` from the compound `init` output. Pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills.researcher` overrides; default falls back to skill-index.yaml (`codebase-scan`, `strategic-analysis`).
 </agent_skill_injection>
 
 <process>

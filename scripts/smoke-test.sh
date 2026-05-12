@@ -2223,6 +2223,47 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== skill-index.yaml resolved via init.cjs (v0.31.0+) =="
+# D-2: init.cjs::resolveSkills parses skill-index.yaml + merges with
+# .devt/config.json::agent_skills (config wins) and returns the merged map
+# as `resolved_skills` in the init JSON. Workflows reference this field
+# rather than the prior "consult skill-index.yaml" LLM-driven fallback.
+#
+# Two checks:
+# 1. init JSON includes resolved_skills with the expected agent keys.
+# 2. No workflow still uses the dead LLM-consult phrasing.
+TMP_SKILL=$(mktemp -d)
+cd "$TMP_SKILL"
+mkdir -p .devt
+INIT_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "smoke-test-task" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$TMP_SKILL"
+if echo "$INIT_OUT" | node -e "
+  let data = ''; process.stdin.on('data', c => data += c).on('end', () => {
+    try {
+      const j = JSON.parse(data);
+      const rs = j.resolved_skills || {};
+      const keys = Object.keys(rs);
+      // skill-index.yaml ships with 10 agents; expect at minimum programmer + tester + debugger.
+      const required = ['programmer', 'tester', 'debugger', 'code-reviewer', 'verifier'];
+      const missing = required.filter(k => !keys.includes(k));
+      if (missing.length) { console.error('missing agents:', missing.join(',')); process.exit(1); }
+      if (!Array.isArray(rs.programmer) || rs.programmer.length === 0) process.exit(2);
+      process.exit(0);
+    } catch (e) { console.error('JSON parse failed:', e.message); process.exit(3); }
+  });
+" 2>/dev/null; then
+  pass "init.cjs returns resolved_skills with skill-index.yaml defaults (D-2)"
+else
+  fail "resolved_skills missing or malformed in init JSON (D-2)"
+fi
+# Guard against regressing the LLM-consult fallback phrasing.
+if ! grep -rE "consult \\\$\\{CLAUDE_PLUGIN_ROOT\\}/skill-index\.yaml" "$ROOT/workflows" "$ROOT/agents" >/dev/null 2>&1; then
+  pass "no workflows/agents reference the dead 'consult skill-index.yaml' phrase (D-2)"
+else
+  fail "found lingering 'consult skill-index.yaml' phrasing — should reference resolved_skills instead"
+fi
+
 echo "== next.md PRIORITY GUARD for validation_status=warned (v0.31.0+) =="
 # D-7: next.md Step 2 must lead with an explicit PRIORITY GUARD instruction
 # that surfaces validation_status="warned" BEFORE any other routing branch.

@@ -49,7 +49,7 @@ If `agent_skills.<agent_type>` exists, inject the skill references into the agen
 </agent_skills>
 ```
 
-If `agent_skills` is not configured or the key is missing for the agent type, consult `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` for the default agent→skill mapping and inject those defaults.
+Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::resolveSkills` — merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt.
 </agent_skill_injection>
 
 ---

@@ -24,6 +24,106 @@ const REQUIRED_DEV_RULES = [
 
 const MAX_TASK_LENGTH = 50_000;
 
+/**
+ * Parse skill-index.yaml — devt's default-per-agent skill injection catalog.
+ *
+ * The file lives at `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` and ships with
+ * the plugin. Structure (only the `agents` block is consumed today):
+ *
+ *   agents:
+ *     <agent_type>:
+ *       skills:
+ *         - <skill-name>
+ *         - <skill-name>
+ *       reads: [ optional, ignored here ]
+ *
+ * Zero-deps parser scoped to this exact shape. Other YAML files in devt go
+ * through `state.cjs::parseSimpleYaml` (flat-only) or are JSON. If
+ * skill-index.yaml grows new top-level sections, extend this parser
+ * explicitly — do NOT generalize.
+ */
+function parseSkillIndex(pluginRoot) {
+  if (!pluginRoot) return {};
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const indexPath = path.join(pluginRoot, "skill-index.yaml");
+  if (!fs.existsSync(indexPath)) return {};
+  const content = fs.readFileSync(indexPath, "utf8");
+  const lines = content.split("\n");
+
+  const result = {};
+  let section = null;        // top-level key: "agents" or "workflows"
+  let currentName = null;    // the agent/workflow name
+  let listKey = null;        // "skills" or "reads" — which list we're filling
+  const indentOf = (l) => l.length - l.trimStart().length;
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = indentOf(line);
+
+    if (indent === 0 && trimmed.endsWith(":")) {
+      section = trimmed.slice(0, -1);
+      currentName = null;
+      listKey = null;
+      if (!result[section]) result[section] = {};
+      continue;
+    }
+    if (section === "agents" && indent === 2 && trimmed.endsWith(":")) {
+      currentName = trimmed.slice(0, -1);
+      result[section][currentName] = {};
+      listKey = null;
+      continue;
+    }
+    if (section === "agents" && indent === 4 && trimmed.endsWith(":")) {
+      listKey = trimmed.slice(0, -1);
+      if (currentName) result[section][currentName][listKey] = [];
+      continue;
+    }
+    if (indent === 6 && trimmed.startsWith("- ") && currentName && listKey) {
+      result[section][currentName][listKey].push(trimmed.slice(2).trim());
+      continue;
+    }
+  }
+  return result;
+}
+
+/**
+ * Resolve which skills the workflow orchestrator should inject as
+ * `<agent_skills>` for a given agent type. Two sources, last-wins:
+ *
+ *   1. `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml`'s `agents.<type>.skills` —
+ *      ships with devt, single source of truth for defaults.
+ *   2. `.devt/config.json`'s `agent_skills.<type>` — per-project override.
+ *
+ * Returns `{ <agent_type>: [...skill-names...], ... }`. Agents absent from
+ * BOTH sources do not appear in the result — callers fall back to "no
+ * runtime skill injection beyond the agent's preloaded frontmatter."
+ */
+function resolveSkills(pluginRoot, config) {
+  const index = parseSkillIndex(pluginRoot);
+  const indexAgents = (index && index.agents) || {};
+  const configAgents = (config && config.agent_skills) || {};
+
+  const resolved = {};
+  const allAgentNames = new Set([
+    ...Object.keys(indexAgents),
+    ...Object.keys(configAgents),
+  ]);
+
+  for (const agent of allAgentNames) {
+    if (Array.isArray(configAgents[agent])) {
+      resolved[agent] = configAgents[agent].slice();
+      continue;
+    }
+    const fromIndex = indexAgents[agent] && Array.isArray(indexAgents[agent].skills)
+      ? indexAgents[agent].skills
+      : null;
+    if (fromIndex) resolved[agent] = fromIndex.slice();
+  }
+  return resolved;
+}
+
 function initWorkflow(task, pluginRoot) {
   const projectRoot = findProjectRoot();
   const config = getMergedConfig();
@@ -107,6 +207,7 @@ function initWorkflow(task, pluginRoot) {
     config_exists: configExists,
     state_dir: path.join(projectRoot, ".devt", "state"),
     tdd_mode: state.tdd_mode || false,
+    resolved_skills: resolveSkills(pluginRoot, config),
     warnings: warnings.concat(injectionWarning),
   };
 }
