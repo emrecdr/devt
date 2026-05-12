@@ -71,9 +71,14 @@ Review existing `.devt/memory/lessons/` for entries that need maintenance. Lesso
 For each `accept`-action candidate that the user approved via AskUserQuestion:
 
 1. Assign the next available `LES-NNNN` (or `ADR-NNNN`, etc.) by scanning the target subfolder for the highest existing id and incrementing.
-2. Write `.devt/memory/<subfolder>/<ID>-<slug>.md` with the frontmatter shape from `<memory_doc_format>` below.
-3. Atomic write: write `.tmp` first, then `mv` — never partial writes.
-4. After all writes complete, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory index` to refresh `.devt/memory/index.db` so the new entries are FTS5-queryable immediately.
+2. **PREFERRED — single atomic call via MCP** (v0.35.0+, when the curator dispatch sets `DEVT_MCP_ALLOW_WRITES=1`): call `mcp__devt-memory__memory_upsert_doc({frontmatter: {...}, body: "..."})`. This one call:
+   - Validates frontmatter shape (returns errors before any file is touched).
+   - Resolves target path `.devt/memory/<subfolder>/<ID>-<slug>.md` deterministically (slug derived from title).
+   - Atomically writes the markdown file (`.tmp` + rename — never partial).
+   - Refreshes the FTS5 index in the same operation so the new doc is queryable immediately.
+
+   Returns `{ok: true, file_path, indexed: {inserted, ...}}` on success, `{ok: false, errors: [...]}` on validation failure (rolls back any file write).
+3. **FALLBACK — when MCP writes are disabled** (`{error, code: "WRITES_DISABLED"}` returned from the MCP tool, or the tool is not listed): write the file manually with the Write tool to `.devt/memory/<subfolder>/<ID>-<slug>.md` using the frontmatter shape from `<memory_doc_format>` below, then run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory index` to refresh `.devt/memory/index.db`. Atomic write via `.tmp` + `mv`. This fallback is functionally equivalent but requires 3 tool calls instead of 1.
 </step>
 
 <step name="summarize">

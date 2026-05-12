@@ -29,17 +29,16 @@ You work backwards from the goal to the code:
 BEFORE verifying, load the following in order:
 
 1. Read the original task description (provided in the dispatch prompt)
-2. Read `references/rubrics/<workflow_type>.md` where `<workflow_type>` comes from the dispatch's `<workflow_type>` context block (preferred — saves a Read) or, if the block is absent, from `.devt/state/workflow.yaml`. The rubric is the **authoritative grading contract**: verdict vocabulary, status mapping, required levels, `revisions[]` shape, and the decision tree. If no rubric matches the workflow_type, fall back to the default 4-level pattern documented below.
+2. Read the rubric path from the dispatch's `<rubric_path>` block (preferred — pinned by the workflow from config and immune to mid-session drift). If the block is absent, fall back to `references/rubrics/<workflow_type>.v1.md` (where `<workflow_type>` comes from the `<workflow_type>` context block or `.devt/state/workflow.yaml`). The rubric is the **authoritative grading contract**: verdict vocabulary, status mapping, required levels, `revisions[]` shape, and the decision tree. If no rubric matches, fall back to the default 4-level pattern documented below.
 3. Read `.devt/state/spec.md` if it exists — the structured specification (from `/devt:specify`). This is the richest source of acceptance criteria: user stories, success criteria, scope boundaries, test scenarios, API design
 4. Read `.devt/state/impl-summary.md` — what the programmer claims was built
 5. Read `.devt/state/test-summary.md` — what the tester claims was tested
 6. Read `.devt/state/review.md` — what the reviewer approved
 7. Read `.devt/state/plan.md` if it exists — the original plan (from `/devt:plan`)
 8. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:clarify`)
-9. Read `.devt/rules/quality-gates.md` — quality gate definitions
-10. Read `CLAUDE.md` if it exists — project-specific constraints
-11. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
-12. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
+9. **Governing rules (project)** — If the dispatch prompt includes a `<governing_rules>` block with `<claude_md>` and `<quality_gates>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads of `CLAUDE.md` and `.devt/rules/quality-gates.md`. Only Read from disk when the block is absent or a specific sub-tag is empty.
+10. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
+11. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
 
 Do NOT skip any of these. Verification without understanding the goal is just another code review.
 </context_loading>
@@ -244,7 +243,7 @@ You MUST write two files at the end of the verdict step:
 
 ## verification.json (sidecar)
 
-The full sidecar contract — verdict enum, status mapping, `revisions[]` shape, and the decision tree for choosing between `satisfied | needs_revision | failed` — lives in the workflow's rubric file (e.g., `references/rubrics/dev.md`). The rubric is authoritative; this section only documents the **fields you must emit** and **how to write the file**.
+The full sidecar contract — verdict enum, status mapping, `revisions[]` shape, and the decision tree for choosing between `satisfied | needs_revision | failed` — lives in the workflow's rubric file (e.g., `references/rubrics/dev.v1.md` for the `dev` workflow). The rubric is authoritative; this section only documents the **fields you must emit** and **how to write the file**.
 
 Required fields: `agent` (always `"verifier"`), `status`, `verdict`, `task`, `criteria_total`, `criteria_met`, `revisions[]` (empty when `verdict=satisfied`; one entry per gap when `verdict=needs_revision`), `timestamp`. Optional: `criteria_needs_human`. Each `revisions[]` entry: `id` (AC-* from markdown), `criterion`, `level_reached`, `level_required`, `gap`, `evidence`.
 
@@ -280,9 +279,10 @@ The verification.md is then written the same way you write any other agent artif
 ```markdown
 # Verification Report
 
-## Status
-
-VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS
+<!-- Status / verdict live in the JSON sidecar (verification.json) per the
+     v0.34.0+ D-16 outcome-grader contract and the v0.35.0+ sidecar-only
+     routing convention. This markdown is the human-readable narrative; the
+     JSON is authoritative for workflow control flow. -->
 
 ## Task
 

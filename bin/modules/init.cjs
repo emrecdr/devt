@@ -10,6 +10,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
 const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
@@ -31,11 +32,6 @@ const MAX_TASK_LENGTH = 50_000;
  * lists them in context_loading), stable across plugin versions, and total
  * ~27KB at v0.32.0. Inlining them in `init.cjs` eliminates 3 Read tool calls
  * per agent dispatch — STANDARD workflow saves ~12 Reads (4 agents × 3 files).
- *
- * `.devt/rules/*.md` are NOT inlined here — they vary per project (some
- * templates have 11KB+ coding-standards) and the size-vs-cache trade-off
- * needs measurement before committing. Revisit in a future wave with
- * /devt:tokens --compare data.
  *
  * Cap at 64KB total to prevent runaway-template scenarios. On overflow,
  * fall back to path-only and emit a warning — agents revert to reading.
@@ -68,6 +64,104 @@ function loadInlineGuardrails(pluginRoot) {
     result[name] = buf.toString("utf8");
   }
   return { content: result, bytes: totalBytes, warnings };
+}
+
+/**
+ * Project-shipped governing rules inlined into the init payload (v0.35.0+).
+ *
+ * Same pattern as `loadInlineGuardrails` but pulls from the PROJECT (CLAUDE.md +
+ * .devt/rules/*.md), not the plugin. Consumed by 3 reading agents
+ * (code-reviewer, verifier, researcher) via the `<governing_rules>` dispatch
+ * tag block. Agents prefer inline content over on-disk Reads when present.
+ *
+ * Priority order (always-included first, then alphabetical):
+ *   CLAUDE.md, coding-standards.md, architecture.md, quality-gates.md,
+ *   review-checklist.md, then any remaining .devt/rules/*.md alphabetically.
+ *
+ * Cap at 96KB total — generous enough for CLAUDE.md (~27KB) + 5 rule files
+ * (~8KB each). Files beyond cap are NOT included; their paths surface in
+ * `paths_excluded` so agents can Read them on demand when relevant.
+ *
+ * The `rules_hash` is SHA-256 (first 16 chars) of the concatenated content
+ * of ALL discovered rule files (included and excluded), in a stable order.
+ * Workflows surface this in the dispatch prompt so agents can detect mid-
+ * workflow drift via re-hash, and so the same dispatch is byte-identical
+ * across cache-eligible retries.
+ */
+const GOVERNING_RULES_PRIORITY = [
+  "coding-standards.md",
+  "architecture.md",
+  "quality-gates.md",
+  "review-checklist.md",
+];
+const MAX_GOVERNING_RULES_BYTES = 96 * 1024;
+
+function loadGoverningRules(projectRoot) {
+  const result = { content: {}, paths_included: [], paths_excluded: [], rules_hash: null, total_bytes: 0, warnings: [] };
+  if (!projectRoot) return result;
+
+  // Discover candidate files in priority order. All path.join calls use
+  // either project-root + fixed constant suffix, or rulesDir + a name from
+  // an allowlist (GOVERNING_RULES_PRIORITY) or a readdir result that passes
+  // validatePath confinement. Equivalent to scanDevRules's hardening at L266.
+  const candidates = [];
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const claudeMd = path.join(projectRoot, "CLAUDE.md");
+  if (fs.existsSync(claudeMd)) candidates.push({ name: "CLAUDE.md", filePath: claudeMd });
+
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const rulesDir = path.join(projectRoot, ".devt", "rules");
+  if (fs.existsSync(rulesDir)) {
+    // Priority files first — names come from a hardcoded allowlist.
+    for (const name of GOVERNING_RULES_PRIORITY) {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const p = path.join(rulesDir, name);
+      if (fs.existsSync(p)) candidates.push({ name: `.devt/rules/${name}`, filePath: p });
+    }
+    // Then any remaining *.md alphabetically — each name passes
+    // validatePath confinement before being joined back to rulesDir.
+    try {
+      const entries = fs.readdirSync(rulesDir, { withFileTypes: true });
+      const others = entries
+        .filter(e => e.isFile() && !e.isSymbolicLink())
+        .map(e => e.name)
+        .filter(n => n.endsWith(".md")
+                     && !GOVERNING_RULES_PRIORITY.includes(n)
+                     && !n.includes("/") && !n.includes("\\")
+                     && n !== "." && n !== "..")
+        .sort();
+      for (const name of others) {
+        const check = validatePath(name, rulesDir);
+        if (!check.safe) continue;
+        const rootCheck = validatePath(check.resolved, rulesDir);
+        if (!rootCheck.safe) continue;
+        candidates.push({ name: `.devt/rules/${name}`, filePath: check.resolved });
+      }
+    } catch { /* dir empty or unreadable */ }
+  }
+
+  if (candidates.length === 0) return result;
+
+  // Read all candidates once, hash all, inline up to budget.
+  const hash = crypto.createHash("sha256");
+  let totalBytes = 0;
+  for (const c of candidates) {
+    let buf;
+    try { buf = fs.readFileSync(c.filePath); } catch { result.warnings.push(`unreadable: ${c.name}`); continue; }
+    hash.update(c.name); hash.update("\0"); hash.update(buf);
+    if (totalBytes + buf.length <= MAX_GOVERNING_RULES_BYTES) {
+      result.content[c.name] = buf.toString("utf8");
+      result.paths_included.push({ name: c.name, bytes: buf.length });
+      totalBytes += buf.length;
+    } else {
+      result.paths_excluded.push({ name: c.name, bytes: buf.length, reason: "over_budget" });
+      result.warnings.push(`${c.name} excluded from inline (${buf.length} bytes; budget ${MAX_GOVERNING_RULES_BYTES})`);
+    }
+  }
+
+  result.rules_hash = hash.digest("hex").slice(0, 16);
+  result.total_bytes = totalBytes;
+  return result;
 }
 
 /**
@@ -259,6 +353,22 @@ function initWorkflow(task, pluginRoot) {
       warnings.push(...r.warnings);
       return r.content;
     })(),
+    governing_rules: (() => {
+      const r = loadGoverningRules(projectRoot);
+      warnings.push(...r.warnings);
+      return {
+        content: r.content,
+        paths_included: r.paths_included,
+        paths_excluded: r.paths_excluded,
+        rules_hash: r.rules_hash,
+        total_bytes: r.total_bytes,
+      };
+    })(),
+    // Pinned rubric filenames per workflow_type (v0.36.0+). Surfaced at the
+    // top level so dispatch templates use the flat `{rubrics.dev}` namespace
+    // rather than nested `{config.rubrics.dev}` access. Defaults to
+    // `dev.v1.md`; override in `.devt/config.json` to bump version.
+    rubrics: config.rubrics || {},
     warnings: warnings.concat(injectionWarning),
   };
 }

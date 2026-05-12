@@ -196,11 +196,18 @@ const JSON_SIDECAR_SCHEMAS = {
   },
 };
 
+// v0.35.0+ (Option 4) — artifacts that ALSO have a JSON sidecar in
+// JSON_SIDECAR_SCHEMAS no longer appear here. Their status validation goes
+// through the sidecar (machine-readable, single source of truth). The
+// remaining entries are markdown-only artifacts pending future sidecar
+// backfill; extractStatus continues to read them.
+//
+// Removed in v0.35.0:
+//   - "impl-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["impl-summary.json"]
+//   - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
 const ARTIFACT_SCHEMA = {
-  "impl-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
-  "verification.md": VERIFICATION_STATUSES,
   "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
   "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
@@ -209,7 +216,18 @@ const ARTIFACT_SCHEMA = {
   // Phase 1 (v0.16.0) — Pre-Flight Brief artifact. FRESH = generated this session,
   // STALE = brief exists but workflow scope expanded beyond it (caught by Tier-2
   // File Pre-Flight in Phase 3), MISSING = brief never generated for this workflow.
+  // (Brief uses its own lifecycle parsers in preflight.cjs; entry retained here
+  // only for the existence-check pass of validateConsistency.)
   "preflight-brief.md": ["FRESH", "STALE", "MISSING"],
+};
+
+// Map markdown artifact -> JSON sidecar filename for sidecar-status validation.
+// Sidecar-covered artifacts pull status from JSON_SIDECAR_SCHEMAS instead of
+// extractStatus. Adding a sidecar: register in JSON_SIDECAR_SCHEMAS, add the
+// pairing here, remove the matching entry from ARTIFACT_SCHEMA above.
+const SIDECAR_FOR_MARKDOWN = {
+  "impl-summary.md": "impl-summary.json",
+  "verification.md": "verification.json",
 };
 
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase
@@ -344,7 +362,33 @@ function validateConsistency(stateOverride = null) {
         mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.MISSING, exists: false });
         continue;
       }
-      // Existence passed — check content schema if one is defined
+      // v0.35.0+ (Option 4) — if a sidecar exists for this markdown artifact,
+      // read status from the JSON sidecar (single source of truth). Otherwise
+      // fall through to the legacy extractStatus path on markdown.
+      const sidecarName = SIDECAR_FOR_MARKDOWN[artifact];
+      if (sidecarName) {
+        const sidecarSchema = JSON_SIDECAR_SCHEMAS[sidecarName];
+        const sidecarPath = path.join(stateDir, sidecarName);
+        if (!fs.existsSync(sidecarPath)) {
+          mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.MISSING, exists: false, note: `sidecar ${sidecarName} missing` });
+          continue;
+        }
+        let sidecar;
+        try {
+          sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+        } catch (e) {
+          mismatches.push({ phase, expected_artifact: sidecarName, reason: MISMATCH_REASONS.UNREADABLE, error: e.message });
+          continue;
+        }
+        const allowed = sidecarSchema && sidecarSchema.status;
+        if (allowed && (!sidecar || typeof sidecar.status !== "string")) {
+          mismatches.push({ phase, expected_artifact: sidecarName, reason: MISMATCH_REASONS.NO_STATUS_LINE, allowed });
+        } else if (allowed && !allowed.includes(sidecar.status)) {
+          mismatches.push({ phase, expected_artifact: sidecarName, reason: MISMATCH_REASONS.INVALID_STATUS, actual: sidecar.status, allowed });
+        }
+        continue;
+      }
+      // Legacy: extractStatus on markdown for artifacts without sidecars yet.
       const allowedStatuses = ARTIFACT_SCHEMA[artifact];
       if (!allowedStatuses) continue;
       let content;

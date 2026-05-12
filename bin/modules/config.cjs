@@ -97,6 +97,17 @@ const DEFAULTS = {
   state: {
     archive_runs: 5,
   },
+  // Pinned rubric versions per workflow_type (v0.36.0+). The verifier reads
+  // `references/rubrics/<filename>` rather than computing the path from
+  // `<workflow_type>`, so we can ship rubric updates as new files (`dev.v2.md`)
+  // and let projects opt in by bumping this map. Override per-project in
+  // `.devt/config.json`:
+  //   "rubrics": { "dev": "dev.v2.md" }
+  // The verifier dispatch in dev-workflow.md injects the resolved path as
+  // `<rubric_path>` so the agent never has to know about config layout.
+  rubrics: {
+    dev: "dev.v1.md",
+  },
 };
 
 let _cachedProjectRoot = null;

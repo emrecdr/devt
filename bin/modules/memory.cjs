@@ -671,6 +671,103 @@ function rebuildIndexLocked() {
 }
 
 // ---------------------------------------------------------------------------
+// Programmatic upsert (v0.35.0+, Option 2 — MCP write surface for curator)
+// ---------------------------------------------------------------------------
+
+/**
+ * Slugify a title for filename use. Lowercase ASCII alphanumerics + hyphen,
+ * max 60 chars. Stable, deterministic, no deps.
+ */
+function slugify(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60) || "untitled";
+}
+
+// Frontmatter serialization is handled by the existing `serializeFrontmatter`
+// + `serializeScalar` helpers further down this file (originally added for the
+// importBundle path). upsertDoc wraps their output with the `---` doc delimiters.
+
+/**
+ * Atomic upsert of a single memory doc — single MCP call replaces the legacy
+ * 4-tool curator ritual (Write .tmp + Bash mv + Bash memory index + state read).
+ *
+ * Steps (in order; any failure rolls back the file write):
+ *   1. Validate frontmatter via validateFrontmatter
+ *   2. Resolve target path: `.devt/memory/<subdir>/<ID>-<slug>.md`
+ *   3. Render markdown (YAML frontmatter + body)
+ *   4. atomicWriteFileSync (tmp + rename)
+ *   5. rebuildIndex() — refreshes FTS5, affects, links, rejected_keywords
+ *
+ * Returns: { ok: true, file_path, indexed: {inserted, skipped, ...} }
+ *      or  { ok: false, errors: [...] }
+ *
+ * @param {object} doc - { frontmatter: {...}, body: "..." }
+ */
+function upsertDoc(doc) {
+  if (!doc || typeof doc !== "object") {
+    return { ok: false, errors: [{ error: "doc payload required" }] };
+  }
+  const fm = doc.frontmatter || {};
+  const body = (doc.body == null) ? "" : String(doc.body);
+
+  // 1. Validate
+  const errors = validateFrontmatter(fm, "(programmatic upsert)");
+  if (errors.length) return { ok: false, errors };
+
+  // 2. Resolve target path. getSubdirPath throws on unknown doc_type — but
+  //    validateFrontmatter already checked, so this is defensive.
+  let subdirPath;
+  try { subdirPath = getSubdirPath(fm.doc_type); }
+  catch (e) { return { ok: false, errors: [{ error: e.message }] }; }
+
+  if (!fs.existsSync(subdirPath)) fs.mkdirSync(subdirPath, { recursive: true });
+
+  const filename = `${fm.id}-${slugify(fm.title)}.md`;
+  // path.join(<trusted subdirPath>, <validated-id>-<sanitized-slug>.md) — both
+  // components fully constrained: subdirPath comes from the hardcoded
+  // SUBDIR_BY_TYPE map, id is regex-validated by validateFrontmatter, slug is
+  // ASCII-alphanum-hyphen via slugify. No untrusted input reaches path.join.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const targetPath = path.join(subdirPath, filename);
+
+  // 3. Render — wrap the existing serializer's body with the YAML doc delimiters.
+  //    Field order is whatever Object.entries() yields; callers wanting stable
+  //    diffs should construct their frontmatter object with the canonical order.
+  const markdown = `---\n${serializeFrontmatter(fm)}\n---\n\n${body.replace(/\s+$/, "")}\n`;
+
+  // 4. Atomic write
+  try { atomicWriteFileSync(targetPath, markdown); }
+  catch (e) { return { ok: false, errors: [{ error: `atomic write failed: ${e.message}` }] }; }
+
+  // 5. Rebuild FTS index. On failure, undo the file write so the on-disk
+  //    state remains consistent with the index.
+  let indexed;
+  try {
+    indexed = rebuildIndex();
+    if (indexed && indexed.ok === false) {
+      // Index rebuild lock contention — file IS written, but the next
+      // memory-auto-index pass will pick it up. Surface as warning, not error.
+      return {
+        ok: true,
+        file_path: targetPath,
+        indexed: null,
+        warning: `index_in_progress — file written, will be indexed on next auto-index cycle`,
+      };
+    }
+  } catch (e) {
+    try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch { /* swallow */ }
+    return { ok: false, errors: [{ error: `index rebuild failed (file rolled back): ${e.message}` }] };
+  }
+
+  return { ok: true, file_path: targetPath, indexed };
+}
+
+// ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
 
@@ -797,6 +894,13 @@ function queryFTS(terms, opts) {
   const docType = opts && opts.docType && DOC_TYPES.includes(opts.docType)
     ? opts.docType
     : null;
+  // Aggregation modes (v0.35.0+, Option 6 — pre-filter CLI aggregations to cut
+  // token cost of common probe-the-FTS-then-discard-most-rows patterns):
+  //   "full"            — default; returns array of full rows
+  //   "count"           — returns {count}; no rows
+  //   "domain-counts"   — returns {counts: {<domain>: N, ...}}; no rows
+  //   "compact"         — returns array of {id, title, doc_type} only (no summary/file_path/rank)
+  const mode = (opts && opts.mode) || "full";
   return withDb(db => {
     // Tokenize on whitespace, strip FTS5 special chars per token, append * for
     // prefix matching. Multiple tokens AND together (FTS5 default). This makes
@@ -806,25 +910,55 @@ function queryFTS(terms, opts) {
     const tokens = terms.trim().split(/\s+/)
       .map(t => t.replace(/["()*+\-:^]/g, "").trim())
       .filter(Boolean);
-    if (tokens.length === 0) return [];
+    if (tokens.length === 0) {
+      if (mode === "count") return { count: 0 };
+      if (mode === "domain-counts") return { counts: {} };
+      return [];
+    }
     const ftsQuery = tokens.map(t => `${t}*`).join(" ");
-    const sql = docType
-      ? `SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
-         FROM documents_fts
-         WHERE documents_fts MATCH ? AND doc_type = ?
-         ORDER BY rank
-         LIMIT ?`
-      : `SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
-         FROM documents_fts
-         WHERE documents_fts MATCH ?
-         ORDER BY rank
-         LIMIT ?`;
+    const docTypeClause = docType ? " AND doc_type = ?" : "";
     try {
+      if (mode === "count") {
+        const sql = `SELECT COUNT(*) AS c FROM documents_fts WHERE documents_fts MATCH ?${docTypeClause}`;
+        const row = docType ? db.prepare(sql).get(ftsQuery, docType) : db.prepare(sql).get(ftsQuery);
+        return { count: row ? row.c : 0 };
+      }
+      if (mode === "domain-counts") {
+        // Join FTS rows back to documents to read the indexed domain column.
+        const sql = `SELECT d.domain AS domain, COUNT(*) AS c
+                     FROM documents_fts f
+                     JOIN documents d ON d.id = f.id
+                     WHERE f.documents_fts MATCH ?${docType ? " AND d.doc_type = ?" : ""}
+                     GROUP BY d.domain
+                     ORDER BY c DESC`;
+        const rows = docType ? db.prepare(sql).all(ftsQuery, docType) : db.prepare(sql).all(ftsQuery);
+        const counts = {};
+        for (const r of rows) counts[r.domain || "_uncategorized"] = r.c;
+        return { counts };
+      }
+      if (mode === "compact") {
+        const sql = `SELECT id, title, doc_type
+                     FROM documents_fts
+                     WHERE documents_fts MATCH ?${docTypeClause}
+                     ORDER BY rank
+                     LIMIT ?`;
+        return docType
+          ? db.prepare(sql).all(ftsQuery, docType, limit)
+          : db.prepare(sql).all(ftsQuery, limit);
+      }
+      // default "full"
+      const sql = `SELECT id, title, summary, file_path, doc_type, doc_class, status, rank
+                   FROM documents_fts
+                   WHERE documents_fts MATCH ?${docTypeClause}
+                   ORDER BY rank
+                   LIMIT ?`;
       return docType
         ? db.prepare(sql).all(ftsQuery, docType, limit)
         : db.prepare(sql).all(ftsQuery, limit);
     } catch (err) {
-      // Malformed FTS5 query — return empty rather than crash
+      // Malformed FTS5 query — return empty (or zero-shaped aggregate) rather than crash
+      if (mode === "count") return { count: 0 };
+      if (mode === "domain-counts") return { counts: {} };
       return [];
     }
   });
@@ -854,6 +988,44 @@ function getLinks(docId, depth) {
     }
     return result;
   });
+}
+
+/**
+ * Flatten transitive link expansion into `{source, predicate, target}` triples
+ * for the Pre-Flight Brief subgraph section (v0.36.0+, Option 10).
+ *
+ * Reuses `getLinks` so depth-capping, visited-set tracking, and the existing
+ * `links` table query are inherited unchanged. The output is deduplicated
+ * across seeds and capped at `maxTriples` (default 50) to keep the Brief
+ * scannable — agents that need fuller graph data should call `getLinks`
+ * directly via the MCP query layer.
+ *
+ * Triples come back sorted by `source` then `target` for byte-stable Brief
+ * output (the renderer relies on this for cache-eligible re-dispatches).
+ */
+function getSubgraphTriples(seedIds, depth = 2, maxTriples = 50) {
+  if (!Array.isArray(seedIds) || seedIds.length === 0) return [];
+  const seen = new Set();
+  const triples = [];
+  for (const seedId of seedIds) {
+    let links;
+    try { links = getLinks(seedId, depth); } catch { links = []; }
+    if (!Array.isArray(links)) continue;
+    for (const row of links) {
+      const source = row.from;
+      const predicate = row.link_type;
+      const target = row.target_id;
+      if (!source || !predicate || !target) continue;
+      const key = `${source}|${predicate}|${target}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      triples.push({ source, predicate, target });
+      if (triples.length >= maxTriples) break;
+    }
+    if (triples.length >= maxTriples) break;
+  }
+  triples.sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+  return triples;
 }
 
 function listDocs(docType) {
@@ -1395,18 +1567,33 @@ function run(subcommand, args) {
     case "query": {
       const terms = args.filter(a => !a.startsWith("--")).join(" ");
       if (!terms.trim()) {
-        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson]\n");
+        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson] [--count|--top=N|--domain-counts|--json-compact]\n");
         return 2;
       }
       const limitArg = args.find(a => a.startsWith("--limit="));
-      const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 20;
+      const topArg = args.find(a => a.startsWith("--top="));
       const docTypeArg = args.find(a => a.startsWith("--doc-type="));
       const docType = docTypeArg ? docTypeArg.split("=")[1] : null;
       if (docType && !DOC_TYPES.includes(docType)) {
         process.stderr.write(`Invalid --doc-type: ${docType}. Allowed: ${DOC_TYPES.join("|")}\n`);
         return 2;
       }
-      json({ query: terms, limit, doc_type: docType, results: queryFTS(terms, { limit, docType }) });
+      // Aggregate modes (v0.35.0+, Option 6) — at most one wins; precedence:
+      // --count > --domain-counts > --top > --json-compact > full.
+      const wantCount = args.includes("--count");
+      const wantDomain = args.includes("--domain-counts");
+      const wantCompact = args.includes("--json-compact");
+      const hasTop = !!topArg;
+      let limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 20;
+      let mode = "full";
+      if (wantCount) mode = "count";
+      else if (wantDomain) mode = "domain-counts";
+      else if (hasTop) { mode = "compact"; limit = Math.max(1, parseInt(topArg.split("=")[1], 10) || 5); }
+      else if (wantCompact) mode = "compact";
+      const out = queryFTS(terms, { limit, docType, mode });
+      if (mode === "count") json({ query: terms, doc_type: docType, count: out.count });
+      else if (mode === "domain-counts") json({ query: terms, doc_type: docType, counts: out.counts });
+      else json({ query: terms, limit, doc_type: docType, mode, results: out });
       return 0;
     }
     case "get": {
@@ -1640,6 +1827,7 @@ module.exports = {
   listRejectedKeywords,
   queryFTS,
   getLinks,
+  getSubgraphTriples,
   listDocs,
   scanDocs,
   parseFrontmatter,
@@ -1660,4 +1848,8 @@ module.exports = {
   CONFIDENCE_VALUES,
   LINK_TYPES,
   SCHEMA_VERSION,
+  // v0.35.0+ — Option 2 (MCP write surface)
+  upsertDoc,
+  ID_PATTERN_BY_TYPE,
+  SUBDIR_BY_TYPE,
 };

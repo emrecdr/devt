@@ -47,6 +47,7 @@ It does NOT apply when:
 The Brief contains:
 - **Topic Extracted** — domains, symbols, keywords parsed from the task
 - **Governing Documentation** — ADRs/CONs/FLOWs from Lanes A (domain), B (FTS), C (symbol), D (link closure)
+- **Memory Graph (2-hop subgraph)** *(v0.36.0+)* — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Scan this section to understand structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without firing per-doc `get_doc` calls.
 - **Rejected Approaches** — REJ tombstones whose `search_keywords` overlap the topic (Lane E)
 - **Related Operational Lessons** — playbook entries matching the topic (Lane F)
 - **Blast Radius** — Graphify-derived dependents/effect-size (or grep heuristic if disabled)
@@ -115,6 +116,15 @@ When the file isn't covered by the Brief, run these in order:
 | 3 | Symbol-anchored *(Graphify only)* | `node bin/devt-tools.cjs memory affects-symbol "<sym>"` |
 | 4 | Domain-active | `node bin/devt-tools.cjs memory active "<domain>"` |
 | 5 | FTS task-summary | `node bin/devt-tools.cjs memory query "<terms>"` |
+
+**Aggregate-first probes (v0.35.0+, Option 6)** — when you only need to know IF/WHERE/HOW-MANY docs match (not their contents), use the aggregate flags or the matching MCP tool. Aggregates return ~50-500 bytes vs ~1.5-15KB for full payloads. Default to aggregate-first; pull full rows only when you've identified a specific doc to drill into via `get_doc`.
+
+| Aggregate need | CLI | MCP tool |
+|---|---|---|
+| Count matches only | `memory query "<terms>" --count` | `query_fts_count` |
+| Top-N compact preview | `memory query "<terms>" --top=5` | `query_fts_top` |
+| Group by domain | `memory query "<terms>" --domain-counts` | `query_fts_by_domain` |
+| All compact rows | `memory query "<terms>" --json-compact` | (use `query_fts_top` with larger n) |
 
 After the lookup, append findings to scratchpad AND run:
 

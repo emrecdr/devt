@@ -2420,6 +2420,203 @@ else
   fail "inline_guardrails missing or malformed in init JSON (D-11)"
 fi
 
+echo "== init.cjs returns governing_rules with project rules inlined (v0.35.0+, Option 1) =="
+# Option 1 of v0.35.x — Hot-path read cache via init-payload injection. The
+# init payload exposes governing_rules: a {content: {<path>: <content>}, ..., rules_hash}
+# shape covering CLAUDE.md + .devt/rules/*.md. Cap is 96KB; files past cap surface in
+# paths_excluded. Consumed by code-reviewer/verifier/researcher dispatches via the
+# <governing_rules> tag block instead of a Read-from-disk pass on every dispatch.
+TMP_GR=$(mktemp -d)
+cd "$TMP_GR"
+mkdir -p .devt/rules
+printf '# CLAUDE\nproject anchor doc\n' > CLAUDE.md
+printf '# coding\n- rule A\n- rule B\n' > .devt/rules/coding-standards.md
+printf '# arch\n- boundary X\n' > .devt/rules/architecture.md
+GR_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "smoke-gr" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$TMP_GR"
+if echo "$GR_OUT" | node -e "
+  let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try {
+      const j=JSON.parse(d);
+      const gr=j.governing_rules||{};
+      if (!gr || typeof gr !== 'object') { console.error('governing_rules missing'); process.exit(1); }
+      if (typeof gr.rules_hash !== 'string' || gr.rules_hash.length !== 16) { console.error('rules_hash malformed:',gr.rules_hash); process.exit(2); }
+      const c = gr.content || {};
+      const required = ['CLAUDE.md','.devt/rules/coding-standards.md','.devt/rules/architecture.md'];
+      const missing = required.filter(k=>!c[k]||typeof c[k]!=='string'||c[k].length===0);
+      if (missing.length) { console.error('missing/empty governing_rules.content:',missing.join(',')); process.exit(3); }
+      if (gr.total_bytes <= 0 || gr.total_bytes > 96*1024) { console.error('total_bytes out of cap:',gr.total_bytes); process.exit(4); }
+      if (!Array.isArray(gr.paths_included) || gr.paths_included.length < 3) { console.error('paths_included malformed'); process.exit(5); }
+      process.exit(0);
+    } catch (e) { console.error('parse failed:',e.message); process.exit(6); }
+  });
+" 2>/dev/null; then
+  pass "init.cjs returns governing_rules with CLAUDE.md + .devt/rules/*.md + hash + paths_included"
+else
+  fail "governing_rules missing or malformed in init JSON (Option 1)"
+fi
+
+echo "== init.cjs stable-prefix invariant across task strings (v0.35.0+, Option 5) =="
+# Option 5 of v0.35.x — Prompt-caching-aware dispatch structure. Two consecutive
+# init workflow calls with DIFFERENT task strings must produce IDENTICAL values
+# for the cacheable prefix fields: inline_guardrails, governing_rules, resolved_skills.
+# These are the blocks that flow verbatim into dispatch prompts; if they vary by
+# task, Claude Code's prompt cache cannot hit on the stable prefix across dispatches.
+TMP_SP=$(mktemp -d)
+cd "$TMP_SP"
+mkdir -p .devt/rules
+printf '# CLAUDE\nproject anchor doc\n' > CLAUDE.md
+printf '# coding\n- rule A\n' > .devt/rules/coding-standards.md
+SP_A=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "task A — feature alpha" 2>/dev/null || true)
+SP_B=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "task B — feature beta" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$TMP_SP"
+if node -e "
+  const crypto=require('crypto');
+  const a=JSON.parse(process.argv[1]||'{}');
+  const b=JSON.parse(process.argv[2]||'{}');
+  const pick=(j)=>({inline_guardrails:j.inline_guardrails, governing_rules:j.governing_rules, resolved_skills:j.resolved_skills, models:j.models, dev_rules:j.dev_rules});
+  const ha=crypto.createHash('sha256').update(JSON.stringify(pick(a))).digest('hex');
+  const hb=crypto.createHash('sha256').update(JSON.stringify(pick(b))).digest('hex');
+  if (ha!==hb) { console.error('stable-prefix hash divergence: A=',ha,'B=',hb); process.exit(1); }
+  if (a.task===b.task) { console.error('task fields identical — test invalid'); process.exit(2); }
+  process.exit(0);
+" "$SP_A" "$SP_B" 2>/dev/null; then
+  pass "init.cjs produces byte-stable inline_guardrails+governing_rules+resolved_skills across task strings (Option 5)"
+else
+  fail "stable-prefix invariant broken — cacheable fields vary by task description (Option 5)"
+fi
+
+echo "== memory query pre-filter aggregations (v0.35.0+, Option 6) =="
+# Option 6 of v0.35.x — Pre-filter CLI aggregations. Adds --count, --top=N,
+# --domain-counts, --json-compact flags to `memory query`. Agents can probe
+# the FTS index without pulling full payloads. Mirrors as 3 MCP tools too.
+TMP_AGG=$(mktemp -d)
+cd "$TMP_AGG"
+node "$CLI" memory init >/dev/null 2>&1
+mkdir -p .devt/memory/decisions .devt/memory/concepts
+cat > .devt/memory/decisions/ADR-001-test.md <<'AGG_ADR1'
+---
+id: ADR-001
+doc_type: decision
+status: active
+confidence: verified
+domain: auth
+title: Use Argon2 for password hashing
+summary: ADR mandating Argon2 for new password hashes
+affects_paths: [src/auth/*]
+affects_symbols: [hashPassword]
+links: []
+---
+Argon2 is the recommended algorithm.
+AGG_ADR1
+cat > .devt/memory/decisions/ADR-002-test.md <<'AGG_ADR2'
+---
+id: ADR-002
+doc_type: decision
+status: active
+confidence: verified
+domain: payment
+title: Use Stripe for payments
+summary: ADR for Stripe integration
+affects_paths: [src/payment/*]
+affects_symbols: []
+links: []
+---
+Stripe handles all payment flows.
+AGG_ADR2
+cat > .devt/memory/concepts/CON-001-test.md <<'AGG_CON1'
+---
+id: CON-001
+doc_type: concept
+status: active
+confidence: verified
+domain: auth
+title: Authentication session lifecycle
+summary: How auth sessions flow through the system
+affects_paths: [src/session/*]
+affects_symbols: [SessionManager]
+links: []
+---
+Sessions are created on login and revoked on logout.
+AGG_CON1
+node "$CLI" memory index >/dev/null 2>&1
+AGG_COUNT=$(node "$CLI" memory query "session" --count 2>/dev/null)
+AGG_TOP=$(node "$CLI" memory query "use" --top=5 2>/dev/null)
+AGG_DOMAIN=$(node "$CLI" memory query "use" --domain-counts 2>/dev/null)
+AGG_COMPACT=$(node "$CLI" memory query "use" --json-compact 2>/dev/null)
+cd "$ROOT"
+rm -rf "$TMP_AGG"
+if node -e "
+  const c=JSON.parse(process.argv[1]||'{}');
+  const t=JSON.parse(process.argv[2]||'{}');
+  const d=JSON.parse(process.argv[3]||'{}');
+  const k=JSON.parse(process.argv[4]||'{}');
+  if (typeof c.count !== 'number' || c.count !== 1) { console.error('--count wrong shape/value:',JSON.stringify(c)); process.exit(1); }
+  if (!Array.isArray(t.results) || t.mode !== 'compact') { console.error('--top wrong shape:',JSON.stringify(t)); process.exit(2); }
+  if (t.results.some(r => r.summary || r.file_path || r.rank)) { console.error('--top leaked full-row fields'); process.exit(3); }
+  if (!d.counts || typeof d.counts !== 'object') { console.error('--domain-counts wrong shape:',JSON.stringify(d)); process.exit(4); }
+  if ((d.counts.auth||0) < 1 || (d.counts.payment||0) < 1) { console.error('--domain-counts missing expected domains:',JSON.stringify(d.counts)); process.exit(5); }
+  if (!Array.isArray(k.results) || k.mode !== 'compact') { console.error('--json-compact wrong shape:',JSON.stringify(k)); process.exit(6); }
+  process.exit(0);
+" "$AGG_COUNT" "$AGG_TOP" "$AGG_DOMAIN" "$AGG_COMPACT" 2>/dev/null; then
+  pass "memory query --count/--top/--domain-counts/--json-compact return well-shaped aggregates (Option 6)"
+else
+  fail "memory query aggregation flags broken (Option 6)"
+fi
+
+echo "== memory.upsertDoc + MCP write surface (v0.35.0+, Option 2) =="
+# Option 2 of v0.35.x — MCP write surface for curator. Adds memory.upsertDoc()
+# primitive (atomic file write + FTS5 index refresh in one call) and the
+# memory_upsert_doc MCP tool gated by DEVT_MCP_ALLOW_WRITES=1.
+TMP_UPSERT=$(mktemp -d)
+cd "$TMP_UPSERT"
+node "$CLI" memory init >/dev/null 2>&1
+# 1. Direct upsertDoc call — should write file + refresh index.
+UPSERT_OUT=$(node -e "
+  const m = require('$ROOT/bin/modules/memory.cjs');
+  const r = m.upsertDoc({
+    frontmatter: { id: 'ADR-099', doc_type: 'decision', status: 'active', confidence: 'verified',
+                   domain: 'auth', title: 'Smoke upsert ADR', summary: 'Smoke',
+                   affects_paths: ['src/auth/*'], links: [] },
+    body: '## Body\n\nText.'
+  });
+  console.log(JSON.stringify(r));
+" 2>&1)
+# 2. MCP tool with writes ENABLED — should succeed and list memory_upsert_doc.
+MCP_ON_TOOLS=$(printf '%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | DEVT_MCP_ALLOW_WRITES=1 node "$ROOT/bin/devt-memory-mcp.cjs" 2>/dev/null \
+  | grep -c '"name":"memory_upsert_doc"' || true)
+# 3. MCP tool with writes DISABLED — must NOT list memory_upsert_doc.
+MCP_OFF_TOOLS=$(printf '%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | node "$ROOT/bin/devt-memory-mcp.cjs" 2>/dev/null \
+  | grep -c '"name":"memory_upsert_doc"' || true)
+# 4. MCP call WITHOUT flag — must return WRITES_DISABLED error.
+MCP_OFF_CALL=$(printf '%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_upsert_doc","arguments":{"frontmatter":{"id":"ADR-200","doc_type":"decision","status":"active","confidence":"verified","title":"x","summary":"x"}}}}' \
+  | node "$ROOT/bin/devt-memory-mcp.cjs" 2>/dev/null)
+cd "$ROOT"
+rm -rf "$TMP_UPSERT"
+if node -e "
+  const r = JSON.parse(process.argv[1]);
+  if (!r.ok) { console.error('upsertDoc failed:',JSON.stringify(r)); process.exit(1); }
+  if (!r.file_path || !r.file_path.endsWith('ADR-099-smoke-upsert-adr.md')) { console.error('wrong file_path:',r.file_path); process.exit(2); }
+  if (!r.indexed || r.indexed.inserted !== 1) { console.error('index not refreshed:',JSON.stringify(r.indexed)); process.exit(3); }
+" "$UPSERT_OUT" 2>/dev/null && \
+   [ "${MCP_ON_TOOLS//[[:space:]]/}" = "1" ] && \
+   [ "${MCP_OFF_TOOLS//[[:space:]]/}" = "0" ] && \
+   echo "$MCP_OFF_CALL" | grep -q "WRITES_DISABLED"; then
+  pass "memory.upsertDoc primitive + memory_upsert_doc MCP tool with env-gated visibility (Option 2)"
+else
+  fail "Option 2 broken: upsertDoc=$UPSERT_OUT; tools_visible_on=$MCP_ON_TOOLS off=$MCP_OFF_TOOLS; off_call=$MCP_OFF_CALL"
+fi
+
 echo "== hook overhead reduction (v0.32.0+) =="
 # D-13: prompt-guard.sh consolidates 6 grep shellouts into the existing Node
 # block (1 process spawn instead of 7). workflow-context-injector.sh caches
@@ -2473,10 +2670,22 @@ for i in "${!AGENT_NAMES[@]}"; do
     # No "Status field is one of" — agent may use a different documentation style; skip rather than fail
     continue
   fi
-  # Resolve the whitelist for this artifact via the exported ARTIFACT_SCHEMA.
-  # Beats regex-parsing the source — covers literal arrays AND const references
-  # (e.g. verification.md → VERIFICATION_STATUSES, deduped at v0.34.1+).
-  whitelist=$(node -e "const s=require('$ROOT/bin/modules/state.cjs'); const a=s.ARTIFACT_SCHEMA['$artifact']; if(Array.isArray(a)) console.log(a.join('\\n'))" 2>/dev/null || true)
+  # Resolve the whitelist for this artifact. v0.35.0+ (Option 4) — for artifacts
+  # whose status now lives in a JSON sidecar (impl-summary.md, verification.md),
+  # pull from JSON_SIDECAR_SCHEMAS[sidecar].status. Otherwise fall back to the
+  # legacy ARTIFACT_SCHEMA[markdown] whitelist.
+  whitelist=$(node -e "
+    const s = require('$ROOT/bin/modules/state.cjs');
+    const sidecarMap = { 'impl-summary.md': 'impl-summary.json', 'verification.md': 'verification.json' };
+    const sidecar = sidecarMap['$artifact'];
+    let allowed = null;
+    if (sidecar && s.JSON_SIDECAR_SCHEMAS && s.JSON_SIDECAR_SCHEMAS[sidecar]) {
+      allowed = s.JSON_SIDECAR_SCHEMAS[sidecar].status;
+    } else if (s.ARTIFACT_SCHEMA && Array.isArray(s.ARTIFACT_SCHEMA['$artifact'])) {
+      allowed = s.ARTIFACT_SCHEMA['$artifact'];
+    }
+    if (Array.isArray(allowed)) console.log(allowed.join('\\n'));
+  " 2>/dev/null || true)
   for s in $emitted; do
     if ! echo "$whitelist" | grep -qx "$s"; then
       ARTIFACT_DRIFT+=("agents/$agent.md emits $s but $artifact whitelist excludes it")
@@ -2490,11 +2699,52 @@ else
     fail "schema drift — $d"
   done
 fi
-# extractStatus cap is now 100 (was 50). Sanity-check the literal.
+# extractStatus cap is now 100 (was 50). Still relevant for markdown-only
+# artifacts in ARTIFACT_SCHEMA (test-summary.md, review.md, etc.). impl-summary
+# and verification.md route through their JSON sidecars per Option 4.
 if grep -q "slice(0, 100)" "$ROOT/bin/modules/state.cjs"; then
   pass "extractStatus reads first 100 lines for ## Status (was 50)"
 else
   fail "extractStatus line cap regression (D-14)"
+fi
+
+echo "== sidecar-only status for impl-summary + verification (v0.35.0+, Option 4) =="
+# Option 4 of v0.35.x — sidecar-only routing for the 2 D-16-aligned artifacts.
+# Markdown templates must no longer contain `## Status` blocks for these
+# artifacts (status lives in the JSON sidecar). ARTIFACT_SCHEMA must NOT list
+# them. validateConsistency must read the sidecar's status field via
+# SIDECAR_FOR_MARKDOWN. Other artifacts (test-summary, review, etc.) keep
+# the legacy ## Status: header until backfilled with sidecars.
+SIDECAR_DRIFT=()
+if grep -qE "^## Status$" "$ROOT/agents/programmer.md"; then
+  SIDECAR_DRIFT+=("agents/programmer.md still emits '## Status' header — should be sidecar-only")
+fi
+if grep -qE "^## Status$" "$ROOT/agents/verifier.md"; then
+  SIDECAR_DRIFT+=("agents/verifier.md still emits '## Status' header — should be sidecar-only")
+fi
+NOT_IN_SCHEMA=$(node -e "
+  const s = require('$ROOT/bin/modules/state.cjs');
+  const offenders = [];
+  if (s.ARTIFACT_SCHEMA && s.ARTIFACT_SCHEMA['impl-summary.md']) offenders.push('impl-summary.md');
+  if (s.ARTIFACT_SCHEMA && s.ARTIFACT_SCHEMA['verification.md']) offenders.push('verification.md');
+  if (offenders.length) console.log(offenders.join(','));
+" 2>/dev/null)
+if [ -n "$NOT_IN_SCHEMA" ]; then
+  SIDECAR_DRIFT+=("ARTIFACT_SCHEMA still contains sidecar-covered artifacts: $NOT_IN_SCHEMA")
+fi
+# Sidecar wiring: SIDECAR_FOR_MARKDOWN must reference both replaced artifacts.
+if ! grep -q "\"impl-summary.md\": \"impl-summary.json\"" "$ROOT/bin/modules/state.cjs"; then
+  SIDECAR_DRIFT+=("state.cjs::SIDECAR_FOR_MARKDOWN missing impl-summary mapping")
+fi
+if ! grep -q "\"verification.md\": \"verification.json\"" "$ROOT/bin/modules/state.cjs"; then
+  SIDECAR_DRIFT+=("state.cjs::SIDECAR_FOR_MARKDOWN missing verification mapping")
+fi
+if [ ${#SIDECAR_DRIFT[@]} -eq 0 ]; then
+  pass "impl-summary + verification are sidecar-only; markdown templates carry no '## Status' (Option 4)"
+else
+  for d in "${SIDECAR_DRIFT[@]}"; do
+    fail "Option 4 regression — $d"
+  done
 fi
 
 echo "== tester inner-iteration budget references fix-loop-protocol (v0.31.0+) =="
@@ -2806,6 +3056,116 @@ else
   fail "coordinator routing-table drift — coordinator=${COORD_ROWS} do.md=${DO_ROWS} min=${MIN_ROUTING_ROWS}"
 fi
 
+echo "== Parallel researcher + arch_health dispatch (v0.36.0+, Option 9a) =="
+# The Auto-Research-and-Plan section must carry the parallel-dispatch marker
+# instructing the orchestrator to fire researcher + architect (arch_health
+# mode) in ONE message with two Task tool calls. Without the marker, the
+# dispatches serialize and the v0.36.0 round-trip saving is lost.
+if grep -qE '<!-- parallel-dispatch: researcher \+ architect' "$ROOT/workflows/dev-workflow.md"; then
+  pass "dev-workflow.md carries parallel-dispatch marker comment"
+else
+  fail "dev-workflow.md missing parallel-dispatch marker (researcher + architect)"
+fi
+# Step 2.7 should no longer exist as its own section — its logic moved into Step 2.5
+if grep -q "^## Step 2.7:" "$ROOT/workflows/dev-workflow.md"; then
+  fail "Step 2.7 section still present in dev-workflow.md (should be subsumed into Step 2.5 parallel dispatch)"
+else
+  pass "Step 2.7 section deleted (logic subsumed into Step 2.5)"
+fi
+# arch_health dispatch must NOT depend on plan.md anymore — the scan reads scan-results.md alone
+if grep -q "Write findings to .devt/state/arch-health-scan.md" "$ROOT/workflows/dev-workflow.md"; then
+  # Check the block does NOT reference plan.md for input scoping
+  ARCH_BLOCK=$(awk '/Write findings to .devt\/state\/arch-health-scan.md/{found=1} found && /^```$/{print; exit} found' "$ROOT/workflows/dev-workflow.md")
+  # Walk backward — verify the dispatch context block doesn't read plan.md
+  ARCH_CTX=$(awk '
+    /Run an architecture health scan on the modules affected/{found=1}
+    found{print}
+    found && /Write findings to .devt\/state\/arch-health-scan.md/{exit}
+  ' "$ROOT/workflows/dev-workflow.md")
+  if echo "$ARCH_CTX" | grep -q "Read .devt/state/plan.md"; then
+    fail "arch_health dispatch still reads plan.md (must scope from scan-results.md only when running in parallel with researcher)"
+  else
+    pass "arch_health dispatch scopes from scan-results.md (no plan.md dependency)"
+  fi
+else
+  fail "arch_health dispatch not found in dev-workflow.md"
+fi
+# No stale "Step 2.7" references in prompt context blocks
+STALE_REFS=$(grep -c "from Step 2\.7" "$ROOT/workflows/dev-workflow.md" || true)
+if [ "$STALE_REFS" -eq 0 ]; then
+  pass "no stale 'from Step 2.7' references in dev-workflow.md"
+else
+  fail "$STALE_REFS stale 'from Step 2.7' reference(s) in dev-workflow.md"
+fi
+
+echo "== Pre-Flight Brief Memory Graph subgraph (v0.36.0+, Option 10) =="
+# Two linked ADRs → Brief surfaces the 2-hop subgraph as flat triples.
+SUBG_TMP="$TMP/subgraph-smoke"
+mkdir -p "$SUBG_TMP/.devt/memory/decisions"
+cd "$SUBG_TMP" && git init -q
+cat > "$SUBG_TMP/.devt/memory/decisions/ADR-001-foo.md" <<'EOF_ADR1'
+---
+id: ADR-001
+doc_type: decision
+status: active
+confidence: verified
+domain: testing
+summary: Test ADR A
+title: ADR Foo
+affects_paths: []
+affects_symbols: []
+links:
+  - id: ADR-002
+    type: relates_to
+---
+EOF_ADR1
+cat > "$SUBG_TMP/.devt/memory/decisions/ADR-002-bar.md" <<'EOF_ADR2'
+---
+id: ADR-002
+doc_type: decision
+status: active
+confidence: verified
+domain: testing
+summary: Test ADR B
+title: ADR Bar
+affects_paths: []
+affects_symbols: []
+links:
+  - id: ADR-001
+    type: supersedes
+---
+EOF_ADR2
+(cd "$SUBG_TMP" && node "$CLI" memory index >/dev/null 2>&1 && node "$CLI" preflight generate "testing ADR Foo Bar work" >/dev/null 2>&1)
+if [ -f "$SUBG_TMP/.devt/state/preflight-brief.md" ]; then
+  pass "preflight Brief generated with seeded ADRs"
+else
+  fail "preflight Brief not generated"
+fi
+if grep -q "^## Memory Graph (2-hop subgraph)$" "$SUBG_TMP/.devt/state/preflight-brief.md" 2>/dev/null; then
+  pass "Brief contains Memory Graph section header"
+else
+  fail "Brief missing Memory Graph section header"
+fi
+if grep -qE "^- ADR-(001|002) → (relates_to|supersedes) → ADR-(001|002)$" "$SUBG_TMP/.devt/state/preflight-brief.md" 2>/dev/null; then
+  pass "Memory Graph section renders source → predicate → target triples"
+else
+  fail "Memory Graph triples not rendered correctly"
+fi
+# Unit-level: getSubgraphTriples helper exported and shapes correctly
+TRIPLES_TEST=$(cd "$SUBG_TMP" && node -e "
+const m = require('$ROOT/bin/modules/memory.cjs');
+const t = m.getSubgraphTriples(['ADR-001', 'ADR-002'], 2);
+const ok = Array.isArray(t) && t.length === 2 &&
+  t.every(x => typeof x.source === 'string' && typeof x.predicate === 'string' && typeof x.target === 'string');
+process.exit(ok ? 0 : 1);
+" 2>/dev/null && echo ok || echo fail)
+if [ "$TRIPLES_TEST" = "ok" ]; then
+  pass "getSubgraphTriples returns flat {source, predicate, target} array"
+else
+  fail "getSubgraphTriples shape wrong or not exported"
+fi
+cd "$TMP"
+
 echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # Every workflow_type that invokes the verifier MUST have a matching rubric
 # under references/rubrics/. Today the only verifier-using workflow is `dev`
@@ -2815,14 +3175,40 @@ echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # both land. Workflows that don't dispatch the verifier have no rubric
 # obligation (debug/code-review/arch-health use their own terminal agents).
 VERIFIER_USING_WORKFLOWS=("dev")
+# v0.36.0+ — rubrics are version-pinned. The smoke test resolves each
+# workflow_type to its pinned filename via the `rubrics` config map in
+# DEFAULTS, then asserts the file exists. When a project bumps its rubric
+# (e.g., dev.v1.md → dev.v2.md), both DEFAULTS and the new file must land
+# in the same commit.
 for wt in "${VERIFIER_USING_WORKFLOWS[@]}"; do
-  rubric="${ROOT}/references/rubrics/${wt}.md"
+  pinned=$(node -e "console.log(require('$ROOT/bin/modules/config.cjs').DEFAULTS.rubrics?.['$wt'] || '')")
+  if [ -z "$pinned" ]; then
+    fail "no pinned rubric in DEFAULTS.rubrics.${wt} (config.cjs)"
+    continue
+  fi
+  rubric="${ROOT}/references/rubrics/${pinned}"
   if [ -f "$rubric" ]; then
-    pass "verifier rubric exists for workflow_type=${wt}"
+    pass "verifier rubric exists for workflow_type=${wt} (pinned: ${pinned})"
   else
     fail "verifier rubric missing for workflow_type=${wt} (expected: ${rubric})"
   fi
 done
+# Init payload exposes `rubrics` so dispatch templates can read {rubrics.<wt>}.
+INIT_RUBRICS=$(node "$CLI" init workflow "rubric smoke" 2>/dev/null | node -e "
+const j = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+process.exit(j.rubrics && j.rubrics.dev === 'dev.v1.md' ? 0 : 1);
+" && echo ok || echo fail)
+if [ "$INIT_RUBRICS" = "ok" ]; then
+  pass "init payload exposes rubrics.dev = dev.v1.md"
+else
+  fail "init payload missing or wrong rubrics.dev (expected dev.v1.md)"
+fi
+# Dev-workflow verifier dispatch must reference {rubrics.dev} in a <rubric_path> tag.
+if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.md"; then
+  pass "dev-workflow verifier dispatch injects <rubric_path>"
+else
+  fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
+fi
 # Drift guard: if a workflow file dispatches the verifier but its workflow_type
 # is not in the allow-list above, fail loudly so coverage stays honest.
 ACTUAL_VERIFIER_WORKFLOWS=$(grep -l 'devt:verifier' "$ROOT"/workflows/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' | sort -u || true)

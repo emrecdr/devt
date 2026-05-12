@@ -123,7 +123,19 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Every valid finding must be reported with file, line, severity, and rule reference.
   </task>
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         researcher, code-reviewer, and verifier dispatch templates in
+         workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
+         When one changes, update the others. governing_rules comes from the
+         init payload; omit this block entirely when content is empty (agent
+         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+      <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
+    </governing_rules>
     <review_scope>Read .devt/state/review-scope.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>

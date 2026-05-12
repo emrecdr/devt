@@ -169,6 +169,8 @@ Store the task description in workflow state for reference by status, forensics,
 
 **Capture `inline_guardrails` for downstream dispatches**: the `init workflow` payload includes `inline_guardrails` — a `{ "<file>.md": "<content>" }` object covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this in working memory across the workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block — those two agents read all three files on every dispatch, so inlining cuts three Read tool calls per dispatch in favor of cache-friendly prefix injection. Other dev agents continue reading from disk.
 
+**Capture `governing_rules` for downstream dispatches (v0.35.0+)**: the same `init workflow` payload also includes `governing_rules` — a `{ content: {<path>: <content>}, paths_included: [...], paths_excluded: [...], rules_hash: "<sha256-16>", total_bytes: N }` shape covering the PROJECT's `CLAUDE.md` plus `.devt/rules/*.md` files (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical). Cap is 96 KB total — files past the cap appear in `paths_excluded` and agents Read them on demand. The `code-reviewer`, `verifier`, and `researcher` dispatches embed this as a `<governing_rules>` block — those three READ-ONLY agents previously reread `CLAUDE.md` + 1-4 rule files on every dispatch (~30-50 KB duplicate reads per workflow). The `rules_hash` lets agents detect mid-workflow drift if a rule file is edited between Brief generation and agent dispatch.
+
 > **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint (v0.30.4+), but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
 
 ```bash
@@ -377,13 +379,50 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=risk_warning 
 
 _Only applies if complexity tier is COMPLEX._
 
-**Auto-Research**: If no `.devt/state/research.md` exists, dispatch the researcher agent automatically:
+**Arch-Health Pre-Decision** (v0.36.0+, Option 9a): Before dispatching the researcher, evaluate whether to also fire an architecture health scan in parallel. This was historically Step 2.7's job, but firing it alongside the researcher (instead of after the plan) lets the inline plan consume both artifacts in one pass and shaves a serial subagent round-trip off COMPLEX flows.
+
+**Risk signals** (if ANY are true from `.devt/state/scan-results.md`, recommend the scan):
+- Scan results touch 3+ modules or services
+- Scan results show existing coupling or boundary violations in the affected area
+- Task mentions a new architectural pattern (new service, new layer, new integration)
+- Task modifies shared infrastructure (core/, base classes, middleware)
+- Task changes database schema across multiple services
+
+**If any signal trips, present via AskUserQuestion BEFORE the parallel dispatch:**
+
+```yaml
+question: "This task has architectural risk signals. Run an architecture health scan in parallel with research?"
+header: "Architecture Health Scan"
+multiSelect: false
+options:
+  - label: "Yes — scan in parallel (Recommended)"
+    description: "Dispatch arch-health alongside the researcher. Findings feed into the plan and the architect review."
+  - label: "Skip — research only"
+    description: "Dispatch only the researcher. Plan will not consider existing architectural debt."
+```
+
+If no risk signals trip, skip the prompt and dispatch only the researcher.
+
+**Auto-Research (parallel dispatch)**: If no `.devt/state/research.md` exists, dispatch the researcher. If arch_health was opted-in AND `.devt/state/arch-health-scan.md` does not exist, dispatch the architect alongside it. Both dispatches MUST be issued in **one message with two Task tool calls** to actually run in parallel — sequential Task calls serialize.
+
+<!-- parallel-dispatch: researcher + architect (arch_health mode). Both must
+     be in the SAME message for true parallelism per the Anthropic Task
+     parallelism contract. -->
 
 ```
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   <task>Research implementation approaches for: {task_description}</task>
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         researcher, code-reviewer, and verifier dispatch templates. When one
+         changes, update the others. governing_rules comes from the init
+         payload; omit this block entirely when content is empty (agent falls
+         back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+    </governing_rules>
     <spec>Read .devt/state/spec.md (if exists)</spec>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
@@ -393,7 +432,31 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 ")
 ```
 
-If research.md already exists: skip, use existing findings.
+```
+# Only when arch_health was opted-in above — dispatched in the SAME message as the researcher Task call.
+Task(subagent_type="devt:architect", model="{models.architect}", prompt="
+  <task>
+    Run an architecture health scan on the modules affected by this task.
+    Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
+    Classify each finding as: true positive, false positive, or pre-existing.
+    Report only findings relevant to the in-scope modules.
+  </task>
+  <context>
+    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
+    <scan_results>Read .devt/state/scan-results.md for affected modules — the plan does not exist yet, so scope from the scan.</scan_results>
+    <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+  </context>
+  Write findings to .devt/state/arch-health-scan.md
+")
+```
+
+If research.md already exists: skip the researcher dispatch.
+If arch-health-scan.md already exists OR arch_health was skipped: skip the architect dispatch.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=DONE
+```
 
 **Open Questions gate** (applies when `.devt/state/research.md` exists with status DONE or DONE_WITH_CONCERNS):
 - Scan for a `## Open Questions` section in research.md
@@ -415,7 +478,7 @@ If research.md already exists: skip, use existing findings.
   - If user resolves: update research.md with the answers and proceed
   - If user says proceed anyway: note the risk in plan.md and continue
 
-**Auto-Plan**: If no `.devt/state/plan.md` exists, create one inline using the planning logic from `${CLAUDE_PLUGIN_ROOT}/workflows/create-plan.md` (Steps 3-5: analyze, plan, validate). Do NOT dispatch a separate subagent for planning — the main session creates the plan.
+**Auto-Plan**: If no `.devt/state/plan.md` exists, create one inline using the planning logic from `${CLAUDE_PLUGIN_ROOT}/workflows/create-plan.md` (Steps 3-5: analyze, plan, validate). Do NOT dispatch a separate subagent for planning — the main session creates the plan. The plan MUST read both `.devt/state/research.md` AND `.devt/state/arch-health-scan.md` (if it exists from the parallel dispatch above) — true-positive arch findings feed directly into plan scope so the architect review (Step 3) and programmer don't waste a cycle on debt that was already surfaced.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=plan status=DONE
@@ -527,81 +590,6 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=regression_ba
 
 ---
 
-## Step 2.7: Architecture Health Scan (COMPLEX only, optional)
-
-<step name="arch_health" gate="user has decided whether to run arch-health scan">
-
-_Only applies if complexity tier is COMPLEX._
-
-Evaluate whether an architecture health scan should be recommended before implementation. Analyze the plan and scan results for architectural risk signals:
-
-**Risk signals** (if ANY are true, recommend the scan):
-- Plan touches 3+ modules or services
-- Plan adds new cross-module dependencies
-- Plan introduces a new architectural pattern (new service, new layer, new integration)
-- Plan modifies shared infrastructure (core/, base classes, middleware)
-- Plan changes database schema across multiple services
-- Scan results show existing coupling or boundary violations in the affected area
-
-**Present the recommendation via AskUserQuestion:**
-
-```yaml
-question: "This task has architectural risk signals. Run an architecture health scan before implementing?"
-header: "Architecture Health Scan"
-multiSelect: false
-options:
-  - label: "Yes — scan first (Recommended)"
-    description: "Detect existing violations in affected modules before adding complexity. Findings feed into the architect review."
-  - label: "Skip — proceed without scan"
-    description: "Go straight to architect review and implementation"
-```
-
-If **no risk signals** detected, skip silently — do not ask.
-
-**If user chooses Yes:**
-
-Run the arch-health scan workflow inline (delta mode — only new findings since last baseline):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=IN_PROGRESS
-```
-
-Dispatch the architect agent with the scan protocol:
-
-```
-Task(subagent_type="devt:architect", model="{models.architect}", prompt="
-  <task>
-    Run an architecture health scan on the modules affected by this task.
-    Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
-    Classify each finding as: true positive, false positive, or pre-existing.
-    Report only findings relevant to the planned changes.
-  </task>
-  <context>
-    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
-    <scan_results>Read .devt/state/scan-results.md for affected modules</scan_results>
-    <plan>Read .devt/state/plan.md for planned changes</plan>
-    <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
-    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
-  </context>
-  Write findings to .devt/state/arch-health-scan.md
-")
-```
-
-**Gate check**: Read `.devt/state/arch-health-scan.md`:
-
-- If true-positive findings exist in affected modules: pass them as additional context to the architect review (Step 3) and programmer (Step 4)
-- If clean: proceed normally
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=DONE
-```
-
-**If user chooses Skip:** proceed to Step 3 directly.
-
-</step>
-
----
-
 ## Step 3: Architecture Review (COMPLEX only)
 
 <step name="architect" gate="arch-review.md is written to .devt/state/">
@@ -622,7 +610,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     <scan_results>Read .devt/state/scan-results.md</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Review intended design against architecture rules.</spec>
     <plan>Read .devt/state/plan.md (if exists)</plan>
-    <arch_health>Read .devt/state/arch-health-scan.md (if exists — from Step 2.7). If present, factor existing violations into your review: flag any planned changes that would worsen existing issues.</arch_health>
+    <arch_health>Read .devt/state/arch-health-scan.md (if exists — from the parallel dispatch in Step 2.5). If present, factor existing violations into your review: flag any planned changes that would worsen existing issues.</arch_health>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   Write findings to .devt/state/arch-review.md
@@ -856,7 +844,18 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review ALL code in scope — do not filter by origin or label findings as pre-existing.
   </task>
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         researcher, code-reviewer, and verifier dispatch templates. When one
+         changes, update the others. governing_rules comes from the init
+         payload; omit this block entirely when content is empty (agent falls
+         back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+      <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
+    </governing_rules>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
          programmer and code-reviewer dispatch templates. When one changes,
          update the other. inline_guardrails comes from the init payload;
@@ -935,9 +934,25 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   </task>
   <context>
     <workflow_type>dev</workflow_type>
+    <!-- Rubric path is pinned by the v0.36.0+ `rubrics` config key. The init
+         payload exposes `rubrics.dev` (default "dev.v1.md"); override per
+         project in .devt/config.json. The verifier reads this block instead
+         of computing the path from <workflow_type>, so we can ship rubric
+         updates as new files (dev.v2.md) without breaking projects pinned
+         to v1. -->
+    <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
     <original_task>{task_description}</original_task>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
-    <files_to_read>.devt/state/impl-summary.md, .devt/state/test-summary.md, .devt/state/review.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         researcher, code-reviewer, and verifier dispatch templates. When one
+         changes, update the others. governing_rules comes from the init
+         payload; omit this block entirely when content is empty (agent falls
+         back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+    </governing_rules>
+    <files_to_read>.devt/state/impl-summary.md, .devt/state/test-summary.md, .devt/state/review.md</files_to_read>
     <baseline>Read .devt/state/baseline-gates.md (if exists). Compare current quality gate results against this baseline — tests that PASSED in baseline but FAIL now are regressions. Pre-existing failures are NOT regressions.</baseline>
     <plan>Read .devt/state/plan.md (if exists)</plan>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

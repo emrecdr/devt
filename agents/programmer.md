@@ -339,9 +339,9 @@ Write `.devt/state/impl-summary.md` with:
 ```markdown
 # Implementation Summary
 
-## Status
-
-DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+<!-- Status / verdict live in the JSON sidecar (impl-summary.json) per the
+     v0.35.0+ sidecar-only routing contract. This markdown is the human-readable
+     narrative; the JSON is authoritative for workflow control flow. -->
 
 ## Task
 

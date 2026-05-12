@@ -194,6 +194,89 @@ const TOOLS = {
     },
   },
 
+  // Pre-filter aggregations (v0.35.0+, Option 6) — return aggregates instead of full
+  // FTS rows so agents that only need a count, a top-N preview, or a domain breakdown
+  // don't pay the per-row payload cost (each full row is ~600-1500 bytes; aggregates
+  // are typically <500 bytes total).
+  query_fts_count: {
+    description: "Count FTS5 matches without returning rows. Use when you only need to know IF/HOW MANY docs match a topic, not their contents.",
+    inputSchema: {
+      type: "object",
+      required: ["terms"],
+      properties: {
+        terms: { type: "string", description: "Whitespace-separated search terms" },
+      },
+    },
+    handler: ({ terms }) => {
+      try { return memory.queryFTS(terms, { mode: "count" }) || { count: 0 }; }
+      catch (e) { return { error: e.message }; }
+    },
+  },
+
+  query_fts_top: {
+    description: "Return top-N most-relevant FTS5 matches as compact rows (id, title, doc_type only). Use for preview/triage before drilling into a specific doc with get_doc.",
+    inputSchema: {
+      type: "object",
+      required: ["terms"],
+      properties: {
+        terms: { type: "string", description: "Whitespace-separated search terms" },
+        n: { type: "integer", description: "Top-N (default 5)", minimum: 1, maximum: 50 },
+      },
+    },
+    handler: ({ terms, n }) => {
+      try { return { results: memory.queryFTS(terms, { mode: "compact", limit: n || 5 }) || [] }; }
+      catch (e) { return { error: e.message }; }
+    },
+  },
+
+  query_fts_by_domain: {
+    description: "Group FTS5 matches by document `domain` and return only the {domain: count} map. Use when you want to see WHERE in the project the topic is concentrated.",
+    inputSchema: {
+      type: "object",
+      required: ["terms"],
+      properties: {
+        terms: { type: "string", description: "Whitespace-separated search terms" },
+      },
+    },
+    handler: ({ terms }) => {
+      try { return memory.queryFTS(terms, { mode: "domain-counts" }) || { counts: {} }; }
+      catch (e) { return { error: e.message }; }
+    },
+  },
+
+  // Write surface (v0.35.0+, Option 2) — only exposed when DEVT_MCP_ALLOW_WRITES=1
+  // is set in the MCP server's process environment. The curator agent's
+  // workflow dispatch sets this flag; all other dispatches see a read-only
+  // tool surface. listTools() filters write tools out when the flag is unset,
+  // and callTool() rejects the call at the handler level (defense in depth).
+  memory_upsert_doc: {
+    description: "Atomically write a memory doc (.devt/memory/<subdir>/<ID>-<slug>.md) and refresh the FTS5 index in a single call. Replaces the legacy 4-tool curator ritual (Write .tmp + Bash mv + Bash memory index). Requires DEVT_MCP_ALLOW_WRITES=1.",
+    writable: true,
+    inputSchema: {
+      type: "object",
+      required: ["frontmatter"],
+      properties: {
+        frontmatter: {
+          type: "object",
+          description: "Frontmatter object: {id, doc_type, status, confidence, title, summary, domain?, affects_paths?, affects_symbols?, links?, reason?, search_keywords?, created_at?, created_by?}",
+          required: ["id", "doc_type", "status", "confidence", "title", "summary"],
+        },
+        body: { type: "string", description: "Markdown body (without frontmatter delimiters). Default: empty." },
+      },
+    },
+    handler: (args) => {
+      if (process.env.DEVT_MCP_ALLOW_WRITES !== "1") {
+        return { error: "write surface disabled — set DEVT_MCP_ALLOW_WRITES=1 to enable (curator dispatch only)", code: "WRITES_DISABLED" };
+      }
+      const payload = args || {};
+      if (!payload.frontmatter || typeof payload.frontmatter !== "object") {
+        return { error: "frontmatter object required" };
+      }
+      try { return memory.upsertDoc({ frontmatter: payload.frontmatter, body: payload.body || "" }); }
+      catch (e) { return { error: e.message }; }
+    },
+  },
+
   get_doc: {
     description: "Fetch a single doc by id (e.g. ADR-007, REJ-001) with its full payload, including source_root.",
     inputSchema: {
@@ -323,12 +406,18 @@ function replyError(id, code, message, data) {
 }
 
 function listTools() {
+  // Write tools are visible only when DEVT_MCP_ALLOW_WRITES=1. This keeps the
+  // tool catalogue lean for non-curator dispatches and ensures Claude doesn't
+  // see (and try to call) write tools that are env-gated off anyway.
+  const writesEnabled = process.env.DEVT_MCP_ALLOW_WRITES === "1";
   return {
-    tools: Object.entries(TOOLS).map(([name, def]) => ({
-      name,
-      description: def.description,
-      inputSchema: def.inputSchema,
-    })),
+    tools: Object.entries(TOOLS)
+      .filter(([, def]) => writesEnabled || !def.writable)
+      .map(([name, def]) => ({
+        name,
+        description: def.description,
+        inputSchema: def.inputSchema,
+      })),
   };
 }
 

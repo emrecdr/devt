@@ -16,6 +16,10 @@
  *   E: Rejected check          — listRejectedKeywords() filtered to topic
  *   F: Lessons filter         — filters governing docs (A∪B∪C∪D) for doc_type='lesson'
  *
+ * v0.36.0+ Memory Graph: a flat `{source, predicate, target}` triples view of
+ * the depth-2 subgraph rooted at the governing union (A∪B∪C∪D). Rendered as a
+ * dedicated section between Governing Documentation and Rejected Approaches.
+ *
  * Determinism: lanes are independent and ordered; merging is by doc_id;
  * output ordering is alphabetical by id within each section. Identical
  * input on identical state produces byte-identical output (modulo the
@@ -246,7 +250,7 @@ function blastRadius(topic) {
 /**
  * Render the markdown Brief from lane outputs.
  */
-function renderBrief({ task, topic, lanes, governing, blast, generatedAt }) {
+function renderBrief({ task, topic, lanes, governing, triples, blast, generatedAt }) {
   const lines = [];
   lines.push(`# Pre-Flight Brief: ${task || "(unspecified task)"}`);
   lines.push("");
@@ -278,6 +282,20 @@ function renderBrief({ task, topic, lanes, governing, blast, generatedAt }) {
     for (const d of governing) {
       const lane = laneOf.get(d.id) || "D";
       lines.push(`- [${d.id}] ${d.title || "(untitled)"} — ${d.summary || ""} _(lane ${lane})_`);
+    }
+  }
+  lines.push("");
+
+  // Memory Graph subgraph (v0.36.0+, Option 10). Renders the depth-2 link
+  // closure rooted at the governing union as flat triples — agents can scan
+  // structural relationships (supersedes/depends_on/relates_to/etc.) without
+  // running individual get_doc calls per neighbor.
+  lines.push("## Memory Graph (2-hop subgraph)");
+  if (!Array.isArray(triples) || triples.length === 0) {
+    lines.push("_No outgoing links from governing docs — flat docset for this topic._");
+  } else {
+    for (const t of triples) {
+      lines.push(`- ${t.source} → ${t.predicate} → ${t.target}`);
     }
   }
   lines.push("");
@@ -388,7 +406,7 @@ function generate(taskText, opts) {
       reason: "memory.enabled=false in .devt/config.json",
       brief_path: null,
       topic: null,
-      counts: { lane_a: 0, lane_b: 0, lane_c: 0, lane_d: 0, lane_e: 0, lane_f: 0, governing: 0 },
+      counts: { lane_a: 0, lane_b: 0, lane_c: 0, lane_d: 0, lane_e: 0, lane_f: 0, governing: 0, triples: 0 },
       blast: { effect_size: 0, source: null, god_node_match: false, ambiguous_bindings: 0 },
       generated_at: null,
     };
@@ -410,9 +428,17 @@ function generate(taskText, opts) {
   // Blast radius
   const blast = blastRadius(topic);
 
+  // Memory Graph triples — depth-2 subgraph rooted at governing union (v0.36.0+).
+  // Cheap to compute since getLinks already does the heavy lifting; the helper
+  // just reshapes per-seed results into flat triples and dedupes across seeds.
+  let triples = [];
+  try {
+    triples = memory.getSubgraphTriples(governingUnion.map(d => d.id), opts.depth || 2);
+  } catch { /* memory layer not initialized — empty triples is the correct degradation */ }
+
   const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
-  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, blast, generatedAt });
+  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, generatedAt });
 
   // Write atomically to .devt/state/preflight-brief.md
   const root = findProjectRoot();
@@ -428,6 +454,7 @@ function generate(taskText, opts) {
       lane_a: A.length, lane_b: B.length, lane_c: C.length,
       lane_d: D.length, lane_e: E.length, lane_f: F.length,
       governing: governingUnion.length,
+      triples: triples.length,
     },
     blast: {
       effect_size: blast.effect_size,

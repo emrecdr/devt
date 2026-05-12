@@ -63,7 +63,17 @@ Research implementation approaches for: {task_description}
 Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
 </task>
 <context>
-<files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md</files_to_read>
+<!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+     researcher, code-reviewer, and verifier dispatch templates in
+     workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
+     When one changes, update the others. governing_rules comes from the
+     init payload; omit this block entirely when content is empty (agent
+     falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+  <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+  <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+  <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+</governing_rules>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>
 <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>

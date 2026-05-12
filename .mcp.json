@@ -5,7 +5,9 @@
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs"
       ],
-      "env": {}
+      "env": {
+        "DEVT_MCP_ALLOW_WRITES": "1"
+      }
     }
   }
 }

@@ -33,17 +33,13 @@ For each diff hunk:
 <context_loading>
 BEFORE starting the review, load the following in order:
 
-1. Read `.devt/rules/coding-standards.md` — the project's code conventions (your primary reference)
-2. Read `.devt/rules/review-checklist.md` — language-specific review priorities and security patterns (if exists)
-3. Read `.devt/rules/architecture.md` — structural and boundary rules
-4. Read `.devt/rules/quality-gates.md` — what the code must pass
-5. Read `CLAUDE.md` — project-specific rules and constraints
-6. Read `.devt/state/impl-summary.md` — what was changed and why
-7. Read `.devt/state/test-summary.md` — test coverage context
-8. Read all files listed in the impl-summary as modified or created
-9. Read adjacent code in the same module to understand context
-10-12. Load the three plugin guardrails — `golden-rules.md` (universal rules the code must follow: scan before implementing, no duplicates, no backward compat code, no TODOs), `generative-debt-checklist.md` (over-engineering, dead code, unnecessary abstractions from AI), and `engineering-principles.md` (SOLID, DRY, KISS, SoC). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>`, and `<generative_debt_checklist>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles,generative-debt-checklist}.md` when the inline block is absent (the workflow inlines them when small enough; oversized files trigger fallback to path-only).
-13. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant quality/review lessons from past workflows. Check whether current code repeats known issues.
+1. **Governing rules (project)** — If the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>`, `<review_checklist>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads of `CLAUDE.md` and `.devt/rules/{coding-standards,architecture,quality-gates,review-checklist}.md`. Only Read from disk when the block is absent or a specific sub-tag is empty (workflow inlines them when present; oversized files trigger fallback to path-only via `paths_excluded` in the init payload).
+2. Read `.devt/state/impl-summary.md` — what was changed and why
+3. Read `.devt/state/test-summary.md` — test coverage context
+4. Read all files listed in the impl-summary as modified or created
+5. Read adjacent code in the same module to understand context
+6. **Plugin guardrails** — Load `golden-rules.md` (universal rules the code must follow: scan before implementing, no duplicates, no backward compat code, no TODOs), `generative-debt-checklist.md` (over-engineering, dead code, unnecessary abstractions from AI), and `engineering-principles.md` (SOLID, DRY, KISS, SoC). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>`, and `<generative_debt_checklist>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles,generative-debt-checklist}.md` when the inline block is absent.
+7. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant quality/review lessons from past workflows. Check whether current code repeats known issues.
 
 **DISTRUST PRINCIPLE**: Read impl-summary.md for ORIENTATION only — what files were touched,
 what the programmer claims. Then VERIFY every claim by reading the actual code.
