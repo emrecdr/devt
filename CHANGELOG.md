@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-05-12
+
+Wave 2 of the coordination-quality-tokens improvement series: token economics + hook overhead. Five items planned; three shipped substantively (D-13, D-14, D-11 plumbing, D-10 sub-2), two refined to deferral after validation showed the cost-benefit didn't hold up (D-10 sub-1, D-12). Same two directives applied throughout — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.
+
+### Added
+- **`init.cjs` returns `inline_guardrails`** (`bin/modules/init.cjs`). The 3 plugin-shipped guardrail files (`golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md`) are loaded into the compound init payload at ~27KB total (capped at 64KB; on overflow falls back to path-only + warning). Dev agents read these on every dispatch; this exposes the content one level up so future orchestrator wiring can inline them in dispatch prompts and eliminate per-dispatch Read tool calls. **Data plumbing only this release** — agents still Read the on-disk files; consumer wiring deferred to Wave 3 once `/devt:tokens --compare` measures the prompt-cost-vs-Read-savings trade-off direction. Top-level constants `INLINE_GUARDRAILS` (list) + `MAX_INLINE_BYTES` (64KB) for easy auditing.
+
+### Changed
+- **`hooks/prompt-guard.sh` consolidates 6 grep shellouts into a single Node block.** Was 7 subprocess spawns per Edit/Write to `.devt/state/` (6 × `echo $CONTENT | grep -qiE PATTERN` for injection patterns + 1 Node block for invisible-Unicode). All 7 checks now run in one Node spawn; patterns mirror the prior bash regex set verbatim. Hot-path latency reduction proportional to the number of grep spawns saved.
+- **`hooks/workflow-context-injector.sh` caches state-read result keyed by `workflow.yaml` mtime.** Was paying ~30-60ms cold-start to spawn `node devt-tools.cjs state read` on every UserPromptSubmit event. Cache lives at `$TMPDIR/devt-cache/wf-state-<projhash>.json`; mtime-pinned to source so any state.cjs::updateState write auto-invalidates the cache. Cross-platform: BSD/macOS `stat -f` + GNU/Linux `stat -c` fallback, universal `shasum`, `TMPDIR` with `/tmp` fallback. Live benchmark: 158ms cold → 77ms warm → 132ms after mtime touch (~50% reduction on repeat fires within an active workflow).
+- **`bin/modules/state.cjs::extractStatus` reads first 100 lines** (was 50). Long verifier reports with prologue + scope + requirements-coverage sections push the `## Status` line past the original cap, causing `validateConsistency` to false-flag artifacts that DO have a valid status, just one written deeper in the file. Cross-reference at v0.31.0: every agent's "Status field is one of: ..." documentation aligns with the corresponding `ARTIFACT_SCHEMA` whitelist — current state is clean. The new line cap covers every realistic prologue length devt agents write today.
+
+### Validated-as-marginal (no code change)
+- **D-12 from the plan ("Pre-Flight Brief inline injection in dispatch")** — the audit's "5-10k token savings per STANDARD workflow" estimate did not survive close inspection. The Brief is small (~1-2KB typical). Inlining saves 4 Read tool calls per STANDARD but adds the same content to dispatch prompts; net token cost is roughly neutral, only round-trip count is reduced. The actual win is at most 4 Read round-trips per workflow — not worth the architectural change. Future wave can revisit if `/devt:tokens` measurement shows Read overhead is meaningfully larger than estimated.
+- **D-10 sub-1 from the plan ("trim non-programmer agent bodies from 286-320 to ≤250 lines")** — deferred to Wave 3 with measurement data. Editorial work that benefits from knowing which agents actually contribute most to prefix cost before guessing what to cut. The 500-line ceiling is enforced; the 250-line target is aspirational and trim-what-matters should be evidence-driven.
+
+### Smoke
+- **+5 new assertions** (`scripts/smoke-test.sh`):
+  - `ARTIFACT_SCHEMA` drift prevention: parses every agent's "Status field is one of: ..." docs and confirms each emitted value is in the corresponding artifact's whitelist (bash 3.2-compatible via parallel arrays; macOS ships 3.2 default).
+  - `extractStatus` cap is 100 lines (was 50), enforced by literal-string match.
+  - `prompt-guard.sh` has zero remaining `grep -qiE` shellouts (D-13 regression guard).
+  - `workflow-context-injector.sh` references the cache dir.
+  - `prompt-guard.sh` still detects "ignore all previous instructions" after consolidation (no detection regression).
+  - `init.cjs` returns `inline_guardrails` with 3 keys, non-empty content, total bytes in [10KB, 64KB].
+  - Byte-stability lint: no `Date()` / `Date.now()` / `$(date)` / ISO timestamp / "current timestamp" in agent or skill **prose** (code-fenced documentation examples are allowed via 3-line-of-fence proximity check). Current state is clean across all 10 agents + 16 skills. Catches future contributions that would silently invalidate the prefix cache.
+- **307 total pass** (was 300 at v0.31.0; 287 at v0.30.6; 273 at v0.30.5).
+
 ## [0.31.0] - 2026-05-12
 
 Wave 1 of the coordination-quality-tokens improvement series (`/Users/emrec/.claude/plans/polymorphic-orbiting-popcorn.md`): coordination clarity + observability surfacing. All changes guided by two recurring directives — *validate every assumption during implementation, don't trust the plan blindly* and *no backward-compat hedging — devt has no production usage yet, ship clean implementations only*.
