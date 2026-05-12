@@ -182,6 +182,17 @@ const JSON_SIDECAR_SCHEMAS = {
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["programmer"],
   },
+  // D-16 outcome-grader sidecar. `status` is devt's terminal vocabulary (kept
+  // for human-readable verification.md parity); `verdict` is the canonical
+  // grader signal the workflow orchestrator routes on. `revisions[]` carries
+  // per-criterion gap descriptions (AC-* ids from the markdown report) so the
+  // re-dispatched programmer can address each gap without the workflow having
+  // to re-parse the markdown.
+  "verification.json": {
+    status: ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"],
+    verdict: ["satisfied", "needs_revision", "failed"],
+    agent: ["verifier"],
+  },
 };
 
 const ARTIFACT_SCHEMA = {

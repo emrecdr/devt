@@ -6,6 +6,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-05-12
+
+Wave 4 opens with the carryover item from Wave 3: **D-16 (outcome-grader rubrics + bounded retry)**. One Wave-4 item this release rather than the full plugin-author-levers batch — D-16 is structurally invasive enough (verifier output contract change + workflow gate-check refactor + new authoritative rubric layer) that bundling other Wave-4 items would muddy review. The other Wave-4 items (D-19/D-20/D-21/D-22/D-23/D-24) ship in subsequent v0.34.x or v0.35.0 releases. Same two directives applied — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.
+
+### Added
+- **`references/rubrics/dev.md`** — authoritative grading rubric for the `dev` workflow's verifier. Defines: verdict vocabulary (`satisfied | needs_revision | failed`), status mapping to existing devt vocabulary (`VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS`), required Level 1-5.5 verification bars per AC, `revisions[]` array shape, and the satisfied-vs-needs_revision-vs-failed decision tree. The verifier reads its body of *techniques* from `agents/verifier.md` and reads *what passes* for the active workflow_type from this rubric. New verifier-using workflows (none today) will need a rubric — smoke test enforces.
+- **`verification.json` sidecar** registered in `state.cjs::JSON_SIDECAR_SCHEMAS` (status whitelist mirrors `ARTIFACT_SCHEMA`; verdict whitelist is the grader enum; agent gated to `verifier`). The verifier emits BOTH `.md` (human review) and `.json` (workflow routing) at verdict time. JSON is authoritative for control flow.
+- **`workflow.max_iterations: 3`** in `bin/modules/config.cjs` DEFAULTS. Centralises the verifier-retry cap. Was hardcoded at "VERIFY_ITER 0-1 → RETRY, 2 → PRUNE" inline in `dev-workflow.md`. No opt-in flag (per no-legacy-trash directive — the grader retry ships unconditionally, not behind a `workflow.grader_loop: bool` toggle as the plan originally proposed).
+- **`revisions[]` structured retry contract** — when verdict is `needs_revision`, the sidecar carries one entry per unmet AC: `{id, criterion, level_reached, level_required, gap, evidence}`. The orchestrator passes this list directly into the next programmer dispatch's `<review_feedback>` block. Programmer addresses each entry by AC-* id; no markdown re-parsing required on retry.
+
+### Changed
+- **`agents/verifier.md`** — context_loading now reads `.devt/state/workflow.yaml::workflow_type` then loads the matching rubric from `references/rubrics/<type>.md`. Verdict step writes both `verification.md` and `verification.json` (sidecar shape documented inline). The "How to write the sidecar" section uses a date-captured-to-shell-var pattern so the agent body stays byte-stable (no inlined `$(date ...)` in prose that would invalidate prefix cache; D-10 sub-2 lint enforces). Verifier body grew from 287 → 357 lines, well under the 500-line agent budget.
+- **`workflows/dev-workflow.md` Step 6.5 verify gate** reads `verification.json` via `state read-sidecar` instead of grepping `verification.md` for status. Iteration cap now comes from `config get | jq -r '.workflow.max_iterations'` instead of the hardcoded `0-1/2` matrix. Routing dispatches on the lowercase `verdict` field; the uppercase `verdict` field on `workflow.yaml` state stays in the existing devt vocabulary (`GAPS_FOUND` etc.) for `/devt:next` and `/devt:status` compatibility — two `verdict` fields with disjoint scopes, documented inline in the gate-check section.
+- **Programmer's `<review_feedback>` block** in the dispatch template explicitly differentiates code-review retry (read `review.md`) vs. verifier retry (read `verification.json` and address each `revisions[]` entry by AC id). The structured list is the contract — no markdown re-parsing.
+
+### Smoke
+- **+3 new assertions** (`scripts/smoke-test.sh`):
+  - `references/rubrics/dev.md` exists (rubric coverage for the only verifier-using workflow today).
+  - Drift guard: any future workflow file that dispatches `devt:verifier` whose workflow_type is not in the `VERIFIER_USING_WORKFLOWS` allow-list fails the build — keeps coverage honest as new workflows surface.
+  - `verification.json` registered in `JSON_SIDECAR_SCHEMAS` + `workflow.max_iterations` default present in config DEFAULTS.
+- **318 total pass** (was 315 at v0.33.0).
+
+### Validation
+- Manual sidecar round-trip: schema-conformant `verification.json` passes all three validation flags (`valid_status`, `valid_verdict`, `valid_agent`). Negative test: orchestrator-only outcome `max_iterations_reached` is rejected as a verifier emission (`valid_verdict: false`), enforcing the contract that the verifier itself has no iteration awareness.
+- Concurrent locking test (`scripts/test-locking.cjs`): 3/3 pass — no regressions from the state.cjs schema addition.
+
+### Plan-vs-impl deviations (validate-during-impl directive)
+- **5 rubrics planned, 1 shipped**. The original plan called for rubrics covering `dev / quick_implement / debug / code_review / arch_health_scan`. Validation found only `dev` invokes the verifier (`grep verifier workflows/quick-implement.md` → empty; the other workflows have their own terminal agents — debugger, code-reviewer, architect — producing their own verdicts in their own artifacts). Shipping 5 rubrics for 4 non-verifier-using workflows would be the speculative scaffolding the no-legacy directive forbids. Smoke test allow-list designed for one-line expansion when a real second verifier-using workflow lands.
+- **No `workflow.grader_loop` opt-in flag** — the plan proposed shipping behind a boolean toggle for safer rollout. Overridden by no-legacy-trash directive in the handoff: devt has no production usage; new contract ships at its final value.
+- **Verifier enum dropped `max_iterations_reached`** — the plan listed it as the fourth verifier verdict (CMA vocabulary parity). Validation found this conflates orchestrator-level outcome with verifier-level emission. The verifier has no iteration awareness — it can only see the artifacts in front of it. `max_iterations_reached` is now an orchestrator outcome (state field `repair=PRUNE` set when `verify_iteration >= MAX_ITER`); the sidecar's last `verdict=needs_revision` is preserved as historical evidence.
+
 ## [0.33.0] - 2026-05-12
 
 Wave 3 of the coordination-quality-tokens improvement series: handoff quality + structured-data foundations. Three items shipped (D-15, D-17, D-18); one deferred to Wave 4 (D-16) where it gets full context-budget room and measurement data to inform implementation choices. Same two directives applied — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.

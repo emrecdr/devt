@@ -706,7 +706,12 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <!-- COMPLEX only: include arch_review and research -->
     <arch_review>Read .devt/state/arch-review.md (if it exists)</arch_review>
     <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>
-    <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
+    <review_feedback>
+      If this is a fix iteration, read feedback from whichever upstream gate failed:
+      - Code-review retry: read `.devt/state/review.md` (full quality findings)
+      - Verifier retry: read `.devt/state/verification.json` and address each entry in `revisions[]` by AC id. The structured `revisions[]` list IS the contract — each entry contains `id`, `criterion`, `gap`, and `evidence`. Address the gap directly; do not re-parse `verification.md`. The verifier rubric (`references/rubrics/dev.md`) defines the verdict semantics.
+      - Both: address review findings first, then verification gaps.
+    </review_feedback>
     <scope_requirements>
       Extract every discrete requirement from the best available source (spec.md, plan.md, or task description) and list them numbered:
       R1: {requirement}
@@ -919,31 +924,50 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
 ")
 ```
 
-**Gate check**: Read `.devt/state/verification.md` and check status:
+**Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing — the JSON is authoritative for control flow per the D-16 outcome-grader contract (`references/rubrics/dev.md`):
 
-- **VERIFIED**: Check if any acceptance criteria have `NEEDS_HUMAN` status. If so, emit a **Human Verify checkpoint** (even in autonomous mode) listing those specific items for the user to confirm:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar verification.json
+```
+
+The sidecar exposes `verdict` (`satisfied|needs_revision|failed`), `status` (mirrors the markdown), and `revisions[]` (per-criterion gap descriptions tied to AC-* ids). Also extract the iteration cap from config:
+
+```bash
+MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.workflow.max_iterations // 3')
+VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
+```
+
+Route on `verdict`:
+
+- **`verdict=satisfied`** (status=VERIFIED): Check if any acceptance criteria have `NEEDS_HUMAN` status. If so, emit a **Human Verify checkpoint** (even in autonomous mode) listing those specific items for the user to confirm:
   ```yaml
   question: "Verification passed, but {N} criteria need human confirmation:"
   header: "Human Verification Needed"
   ```
   List each NEEDS_HUMAN criterion with what the user should check. After user confirms (or in autonomous mode after a timeout), proceed to docs.
-- **VERIFIED** with DONE_WITH_CONCERNS: proceed to docs, but report concerns to user:
+- **`verdict=satisfied`** with `status=DONE_WITH_CONCERNS`: proceed to docs, but report concerns to user:
   "Verification passed with concerns: [extract from verification.md]"
-- **GAPS_FOUND** — apply the **repair operator** based on verify iteration:
-  - Track verify iterations separately from review iterations (use VERIFY_ITER counter, starting at 0)
-  - **VERIFY_ITER 0–1 → RETRY**: go back to **Step 4 (implement)** with gap list as feedback
-    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GAPS_FOUND repair=RETRY`
-    - The programmer agent reads `.devt/state/verification.md` as additional `<review_feedback>`
-  - **VERIFY_ITER 2 → PRUNE**: stop iterating
-    - Write remaining gaps to `.devt/state/scratchpad.md` under `## Deferred Verification Gaps`
+- **`verdict=needs_revision`** (status=GAPS_FOUND) — apply the **repair operator** based on `VITER` vs `MAX_ITER`:
+  - **`VITER < MAX_ITER` → RETRY**: go back to **Step 4 (implement)** feeding `revisions[]` as structured `<review_feedback>`:
+    - Pass each `revisions[].gap` (with its AC-* id and evidence) verbatim into the next programmer dispatch's `<review_feedback>` block — do NOT have the programmer re-parse the markdown; the structured list is the contract.
+    - Increment: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GAPS_FOUND repair=RETRY`
+  - **`VITER >= MAX_ITER` → PRUNE**: stop iterating
+    - Write remaining `revisions[]` to `.devt/state/scratchpad.md` under `## Deferred Verification Gaps` (one entry per revision: AC id, criterion, gap, evidence)
     - Proceed with status DONE_WITH_CONCERNS
-    - Report: "Verification gap limit reached. N gaps deferred to scratchpad."
-    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=3 verdict=GAPS_FOUND repair=PRUNE`
-- **FAILED**: surface to user as BLOCKED
+    - Report: "Verification gap limit reached after `MAX_ITER` iterations. `revisions[].length` gaps deferred to scratchpad."
+    - `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((MAX_ITER)) verdict=GAPS_FOUND repair=PRUNE`
+- **`verdict=failed`** (status=FAILED): surface to user as BLOCKED. Do NOT retry — `failed` means architectural rework needed or verification cannot run; iteration will not converge.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=$STATUS
 ```
+
+**Vocabulary note** — two `verdict` fields exist with different scopes:
+
+- `workflow.yaml::verdict` — uppercase status vocab (`GAPS_FOUND`, `NEEDS_WORK`, `FAILED`, etc.) — used by `/devt:next` and `/devt:status` for resume routing. Preserved unchanged by D-16.
+- `verification.json::verdict` — lowercase grader vocab (`satisfied | needs_revision | failed`) — used by THIS gate-check to decide retry vs. proceed.
+
+The PRUNE branch sets `repair=PRUNE` on state so a future inspector can distinguish "converged with gaps" from "hit the iteration cap" without reading the JSON sidecar.
 
 </step>
 

@@ -2781,6 +2781,54 @@ else
   done
 fi
 
+echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
+# Every workflow_type that invokes the verifier MUST have a matching rubric
+# under references/rubrics/. Today the only verifier-using workflow is `dev`
+# (verified by `grep -l 'devt:verifier' workflows/`). When a new workflow
+# adds a verifier dispatch, add its workflow_type to VERIFIER_USING_WORKFLOWS
+# below AND author the corresponding rubric — the smoke test will fail until
+# both land. Workflows that don't dispatch the verifier have no rubric
+# obligation (debug/code-review/arch-health use their own terminal agents).
+VERIFIER_USING_WORKFLOWS=("dev")
+for wt in "${VERIFIER_USING_WORKFLOWS[@]}"; do
+  rubric="${ROOT}/references/rubrics/${wt}.md"
+  if [ -f "$rubric" ]; then
+    pass "verifier rubric exists for workflow_type=${wt}"
+  else
+    fail "verifier rubric missing for workflow_type=${wt} (expected: ${rubric})"
+  fi
+done
+# Drift guard: if a workflow file dispatches the verifier but its workflow_type
+# is not in the allow-list above, fail loudly so coverage stays honest.
+ACTUAL_VERIFIER_WORKFLOWS=$(grep -l 'devt:verifier' "$ROOT"/workflows/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' | sort -u || true)
+for actual in $ACTUAL_VERIFIER_WORKFLOWS; do
+  # Map workflow filename → workflow_type. Today they're the same except
+  # dev-workflow.md → dev. Add mappings here as new workflows surface.
+  case "$actual" in
+    dev-workflow) wt="dev" ;;
+    *) wt="$actual" ;;
+  esac
+  found=0
+  for known in "${VERIFIER_USING_WORKFLOWS[@]}"; do
+    [ "$known" = "$wt" ] && found=1 && break
+  done
+  if [ $found -eq 0 ]; then
+    fail "workflow ${actual} dispatches devt:verifier but workflow_type=${wt} is not in VERIFIER_USING_WORKFLOWS allow-list"
+  fi
+done
+# Sidecar registration check
+if grep -q '"verification.json"' "$ROOT/bin/modules/state.cjs"; then
+  pass "verification.json registered in JSON_SIDECAR_SCHEMAS"
+else
+  fail "verification.json not registered in bin/modules/state.cjs::JSON_SIDECAR_SCHEMAS"
+fi
+# Config gate check
+if node -e "const c=require('$ROOT/bin/modules/config.cjs'); process.exit(c.DEFAULTS.workflow.max_iterations === 3 ? 0 : 1)"; then
+  pass "workflow.max_iterations default present in config DEFAULTS"
+else
+  fail "workflow.max_iterations missing or wrong value in config DEFAULTS"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

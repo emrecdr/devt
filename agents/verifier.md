@@ -29,16 +29,17 @@ You work backwards from the goal to the code:
 BEFORE verifying, load the following in order:
 
 1. Read the original task description (provided in the dispatch prompt)
-2. Read `.devt/state/spec.md` if it exists — the structured specification (from `/devt:specify`). This is the richest source of acceptance criteria: user stories, success criteria, scope boundaries, test scenarios, API design
-3. Read `.devt/state/impl-summary.md` — what the programmer claims was built
-4. Read `.devt/state/test-summary.md` — what the tester claims was tested
-5. Read `.devt/state/review.md` — what the reviewer approved
-6. Read `.devt/state/plan.md` if it exists — the original plan (from `/devt:plan`)
-7. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:clarify`)
-8. Read `.devt/rules/quality-gates.md` — quality gate definitions
-9. Read `CLAUDE.md` if it exists — project-specific constraints
-10. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
-11. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
+2. Read `.devt/state/workflow.yaml` and extract `workflow_type`. Then read `references/rubrics/<workflow_type>.md` if it exists — this is the **authoritative grading rubric** for the active workflow. It defines: verdict vocabulary (`satisfied|needs_revision|failed`), status mapping, required L1-L5 levels, `revisions[]` shape, and the satisfied-vs-needs_revision-vs-failed decision tree. If no rubric matches the workflow_type, fall back to the default 4-level pattern documented below.
+3. Read `.devt/state/spec.md` if it exists — the structured specification (from `/devt:specify`). This is the richest source of acceptance criteria: user stories, success criteria, scope boundaries, test scenarios, API design
+4. Read `.devt/state/impl-summary.md` — what the programmer claims was built
+5. Read `.devt/state/test-summary.md` — what the tester claims was tested
+6. Read `.devt/state/review.md` — what the reviewer approved
+7. Read `.devt/state/plan.md` if it exists — the original plan (from `/devt:plan`)
+8. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:clarify`)
+9. Read `.devt/rules/quality-gates.md` — quality gate definitions
+10. Read `CLAUDE.md` if it exists — project-specific constraints
+11. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
+12. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
 
 Do NOT skip any of these. Verification without understanding the goal is just another code review.
 </context_loading>
@@ -153,7 +154,11 @@ Inconsistencies between artifacts AND between artifacts and reality are findings
 </step>
 
 <step name="verdict">
-Write `.devt/state/verification.md` with the final verdict.
+Write BOTH `.devt/state/verification.md` (human-readable narrative) AND `.devt/state/verification.json` (workflow-routing sidecar).
+
+The JSON sidecar is **authoritative for workflow control flow** — the orchestrator reads it via `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar verification.json` to decide retry vs. proceed. The markdown is authoritative for the human-readable record. The two files MUST agree on status; mismatches surface as state-validation warnings.
+
+See `<output_format>` below for both shapes.
 </step>
 
 </execution_flow>
@@ -232,7 +237,72 @@ Never let a turn limit expire silently. Partial output > no output.
 </turn_limit_awareness>
 
 <output_format>
-Write `.devt/state/verification.md` with:
+You MUST write two files at the end of the verdict step:
+
+1. `.devt/state/verification.md` — human-readable narrative (existing format, below).
+2. `.devt/state/verification.json` — workflow-routing sidecar (schema below).
+
+## verification.json (sidecar)
+
+```json
+{
+  "agent": "verifier",
+  "status": "VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS",
+  "verdict": "satisfied | needs_revision | failed",
+  "task": "{original task description, truncated to 500 chars}",
+  "criteria_total": 7,
+  "criteria_met": 5,
+  "criteria_needs_human": 1,
+  "revisions": [
+    {
+      "id": "AC-2",
+      "criterion": "{short criterion text}",
+      "level_reached": "L1",
+      "level_required": "L3",
+      "gap": "{specific gap with file:line evidence where possible}",
+      "evidence": "{command + output, or grep result}"
+    }
+  ],
+  "timestamp": "2026-05-12T09:55:00Z"
+}
+```
+
+**Field rules:**
+
+- `agent` MUST be `"verifier"` (validated by `state.cjs` schema).
+- `status` and `verdict` MUST come from the whitelists above (also enforced by schema).
+- `verdict=satisfied` requires `revisions[] = []`.
+- `verdict=needs_revision` requires `revisions[].length >= 1`.
+- `verdict=failed` MAY include `revisions[]` for context but the workflow does not iterate on it.
+- `revisions[].id` MUST match an AC-* id from the markdown report.
+- The status→verdict mapping (or whatever workflow-specific override is in your rubric) MUST be consistent: e.g., `status=VERIFIED` pairs with `verdict=satisfied`; `status=GAPS_FOUND` pairs with `verdict=needs_revision`.
+
+**How to write the sidecar** (the verifier has no Write tool — use a Bash heredoc).
+
+First, capture an ISO 8601 UTC timestamp into a shell var (the standard pattern across devt agents), then expand it into the heredoc with a double-quoted EOF so the variable interpolates:
+
+```bash
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > .devt/state/verification.json <<EOF
+{
+  "agent": "verifier",
+  "status": "GAPS_FOUND",
+  "verdict": "needs_revision",
+  "task": "...",
+  "criteria_total": 7,
+  "criteria_met": 5,
+  "criteria_needs_human": 0,
+  "revisions": [
+    {"id": "AC-2", "criterion": "...", "level_reached": "L1", "level_required": "L3", "gap": "...", "evidence": "..."}
+  ],
+  "timestamp": "\${TS}"
+}
+EOF
+```
+
+The verification.md is then written the same way you write any other agent artifact (Bash heredoc into `.devt/state/verification.md`).
+
+## verification.md (narrative)
 
 ```markdown
 # Verification Report

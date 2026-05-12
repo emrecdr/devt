@@ -85,6 +85,12 @@ const DEFAULTS = {
     verification: true,
     autoskill: true,
     regression_baseline: true,
+    // Outcome-grader bounded retry (v0.34.0 / D-16). When the verifier emits
+    // verdict=needs_revision, the dev-workflow re-dispatches the programmer
+    // with the structured revisions[] list. After this many failed iterations
+    // (verify_iteration counter), the workflow PRUNEs: writes remaining gaps
+    // to scratchpad and proceeds with status DONE_WITH_CONCERNS.
+    max_iterations: 3,
   },
   // State ring buffer (v0.30.4+) — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug
