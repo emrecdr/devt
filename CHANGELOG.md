@@ -6,6 +6,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-05-12
+
+Wave 3 of the coordination-quality-tokens improvement series: handoff quality + structured-data foundations. Three items shipped (D-15, D-17, D-18); one deferred to Wave 4 (D-16) where it gets full context-budget room and measurement data to inform implementation choices. Same two directives applied — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.
+
+### Added
+- **`bin/modules/logger.cjs::appendJsonl`** — shared forensic-log helper with PIPE_BUF (4096 - 64 bytes) per-record cap. POSIX guarantees `write()` calls ≤ PIPE_BUF are atomic, so concurrent writers never interleave bytes. On oversize the helper appends a `{_truncated:true, _original_bytes, _cap, ts, + preserved identifying keys}` stub so the file stays parseable JSONL line-by-line. Zero-deps. Returns `{ok, bytes}` or `{ok:false, reason}`.
+- **`state.cjs::readSidecar(name)`** + `JSON_SIDECAR_SCHEMAS` registry + `state read-sidecar` CLI subcommand. Reads + validates JSON sidecar artifacts against per-sidecar enum schemas. v0.33.0 registers `impl-summary.json` (programmer-authored). Returns `{ok:true, file, data, validation:{valid_status, valid_verdict, valid_agent}}` on hit. Adding a new sidecar = one entry in the registry + agent body documents the shape + consumer workflow uses `readSidecar`.
+- **`impl-summary.json` canary** — programmer now writes a JSON sidecar alongside `impl-summary.md`. Fields: `status` (DONE/DONE_WITH_CONCERNS/BLOCKED/NEEDS_CONTEXT), `verdict` (PASS/FAIL/INDETERMINATE), `agent`, `workflow_type`, `iteration`, `files_changed[]`, `tests_added[]`, `requirements_covered[]`, `requirements_missing[]`, `concerns[]`, `next_agent_hints{}`. JSON is authoritative for workflow routing; markdown stays for human review. Verifier reads `requirements_covered/missing` directly instead of parsing markdown — unlocks D-16's outcome-grader retry loop in Wave 4.
+
+### Changed
+- **`hooks/pre-flight-guard.sh` deny log: `.log` → `.jsonl`** (`bin/modules/logger.cjs::appendJsonl` via `process.env.CLAUDE_PLUGIN_ROOT`; fallback inline `appendFileSync` for direct-test invocations). Unified forensic-log format across devt — same JSONL shape as `_mcp-trace.jsonl`. One record per line: `{mode, ts, action, file_path, reason}`. `jq` and any structured log tool now parse both logs uniformly.
+- **`skills/memory-pre-flight/SKILL.md`** updated "Recovering from a deny" section for JSONL format with field-level schema and parsing examples.
+- **`CLAUDE.md` Pre-Flight Protocol entry** documents the v0.33.0 JSONL migration + shared `logger.cjs` helper + 4KB PIPE_BUF cap.
+- **`state.cjs::extractStatus` first-50→first-100 line cap** (Wave 2 carryover, mentioned here for completeness; assertion added in Wave 2).
+
+### Deferred (to Wave 4)
+- **D-16 (Outcome-grader rubrics + bounded retry)** — multi-file architectural change touching `references/rubrics/`, `agents/verifier.md`, `workflows/dev-workflow.md` retry loop, `bin/modules/config.cjs` schema. Builds on D-15's JSON sidecar (now landed) for `verification.json` verdict shape. Deferred to Wave 4 where it gets full context-budget room and measurement data from `/devt:tokens --compare` to inform iteration-cap and grader-loop scoping.
+
+### Smoke
+- **+8 new assertions**:
+  - `bin/modules/logger.cjs` exports `appendJsonl`
+  - `hooks/pre-flight-guard.sh` writes to `preflight-denies.jsonl` (was `.log`)
+  - Live-fire produces valid JSONL with v0.33.0 schema (`mode/ts/action/file_path/reason`)
+  - v0.30.5 deny-log assertion updated to JSONL schema (parse-by-line)
+  - `state read-sidecar impl-summary.json` happy path returns `valid_status`+`valid_agent`
+  - `state read-sidecar` rejects unregistered sidecar names (schema gate)
+  - `state read-sidecar` rejects path traversal in file name
+  - `programmer.md` documents the `impl-summary.json` shape
+  - Skill→skill coupling validator: every `skills/<name>/SKILL.md` reference resolves to existing file (catches future broken links in the 5-skill Graphify-routed transitive chain)
+- **315 total pass** (was 307 at v0.32.0; 300 at v0.31.0; 287 at v0.30.6; 273 at v0.30.5).
+
 ## [0.32.0] - 2026-05-12
 
 Wave 2 of the coordination-quality-tokens improvement series: token economics + hook overhead. Five items planned; three shipped substantively (D-13, D-14, D-11 plumbing, D-10 sub-2), two refined to deferral after validation showed the cost-benefit didn't hold up (D-10 sub-1, D-12). Same two directives applied throughout — *validate every assumption during implementation* and *no backward-compat hedging — ship clean implementations only*.
