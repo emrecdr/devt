@@ -2223,6 +2223,51 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== ARTIFACT_SCHEMA drift prevention (v0.32.0+) =="
+# D-14: every status value an agent documents as "Status field is one of: ..."
+# must be in the corresponding ARTIFACT_SCHEMA whitelist in state.cjs. Current
+# state is clean (manually verified at v0.31.0); this assertion catches future
+# drift when agents add new states or the schema is edited independently.
+# Mapping: agent file → artifact name → expected statuses parsed from the
+# "Status field is one of: X | Y | Z" line.
+ARTIFACT_DRIFT=()
+# Parallel arrays — macOS ships bash 3.2 which lacks associative arrays.
+# Index N of AGENT_NAMES maps to index N of AGENT_ARTIFACTS.
+AGENT_NAMES=(programmer tester code-reviewer verifier architect docs-writer curator debugger)
+AGENT_ARTIFACTS=(impl-summary.md test-summary.md review.md verification.md arch-review.md docs-summary.md curation-summary.md debug-summary.md)
+for i in "${!AGENT_NAMES[@]}"; do
+  agent="${AGENT_NAMES[$i]}"
+  artifact="${AGENT_ARTIFACTS[$i]}"
+  # Extract status values from the "Status field is one of: X | Y | Z" line.
+  # Min 3 chars on [A-Z_] to skip the lone "S" that grep would otherwise pick
+  # from "Status" before the lowercase letters break the match.
+  emitted=$(grep -oE "Status field is one of\*?\*?:?\s*[A-Z_]+(\s*\|\s*[A-Z_]+)+" "$ROOT/agents/$agent.md" | head -1 | grep -oE "[A-Z_]{3,}" || true)
+  if [ -z "$emitted" ]; then
+    # No "Status field is one of" — agent may use a different documentation style; skip rather than fail
+    continue
+  fi
+  # Resolve the whitelist for this artifact from state.cjs (min 3 chars same reason)
+  whitelist=$(grep -oE "\"$artifact\":\s*\[[^]]+\]" "$ROOT/bin/modules/state.cjs" | grep -oE "\"[A-Z_]{3,}\"" | tr -d '"' || true)
+  for s in $emitted; do
+    if ! echo "$whitelist" | grep -qx "$s"; then
+      ARTIFACT_DRIFT+=("agents/$agent.md emits $s but $artifact whitelist excludes it")
+    fi
+  done
+done
+if [ ${#ARTIFACT_DRIFT[@]} -eq 0 ]; then
+  pass "all agent-documented statuses align with ARTIFACT_SCHEMA whitelists (D-14)"
+else
+  for d in "${ARTIFACT_DRIFT[@]}"; do
+    fail "schema drift — $d"
+  done
+fi
+# extractStatus cap is now 100 (was 50). Sanity-check the literal.
+if grep -q "slice(0, 100)" "$ROOT/bin/modules/state.cjs"; then
+  pass "extractStatus reads first 100 lines for ## Status (was 50)"
+else
+  fail "extractStatus line cap regression (D-14)"
+fi
+
 echo "== tester inner-iteration budget references fix-loop-protocol (v0.31.0+) =="
 # D-9: programmer already had fix-loop-protocol.md (5-iteration bounded loop
 # with explicit escalation gates). Tester was missing the same discipline —

@@ -251,12 +251,16 @@ function readState() {
 }
 
 /**
- * Extract the `## Status` value from an artifact's first 50 lines.
+ * Extract the `## Status` value from an artifact's first 100 lines (v0.32.0+
+ * — bumped from 50 after the audit found that long verifier reports with
+ * prologue / scope / requirements-coverage sections push the status line
+ * past the original cap).
+ *
  * Looks for either `## Status\n\nVALUE` or `## Status: VALUE` patterns.
  * Returns null if no status line is found.
  */
 function extractStatus(content) {
-  const lines = content.split("\n").slice(0, 50);
+  const lines = content.split("\n").slice(0, 100);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     // Inline form: `## Status: VALUE`
