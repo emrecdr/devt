@@ -2223,6 +2223,18 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== /devt:tokens + /devt:mcp-stats command surfaces (v0.31.0+) =="
+# D-3: both new commands have a command file (slash-namespace registration)
+# and a workflow file (orchestration body). The underlying CLI subcommands
+# (token-report, mcp-stats) already have extensive coverage at lines 1159+
+# (mcp-stats: aggregate, error_code, --tool, --prune) and 1639+ (token-report
+# baseline + --top --by), so the new D-3 assertions only verify that the
+# slash-command surfaces are wired — the CLI behaviour itself is unchanged.
+for cmd in tokens mcp-stats; do
+  pass_if_file "$ROOT/commands/$cmd.md" "commands/$cmd.md exists (D-3 surface)"
+  pass_if_file "$ROOT/workflows/$cmd.md" "workflows/$cmd.md exists (D-3 surface)"
+done
+
 echo "== no orphan templates/ references (v0.31.0+) =="
 # Guard against dead-contract drift: any reference to templates/<name>.md from
 # workflows/ or agents/ must point at a file that exists. Catches the
