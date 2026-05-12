@@ -386,6 +386,31 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - Timestamp: {ISO 8601}
 ```
 
+**Also write `.devt/state/impl-summary.json` (v0.33.0+)** alongside the markdown, with the same logical content in a machine-readable shape. The JSON is the authoritative source for workflow routing (status, verdict, requirements coverage); the markdown stays for human review. Required fields:
+
+```json
+{
+  "status": "DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+  "verdict": "PASS | FAIL | INDETERMINATE",
+  "agent": "programmer",
+  "workflow_type": "<from workflow.yaml>",
+  "iteration": <integer from workflow.yaml>,
+  "files_changed": ["src/foo.ts", "src/bar.ts"],
+  "tests_added": ["tests/foo.test.ts"],
+  "requirements_covered": ["R1", "R3"],
+  "requirements_missing": ["R2"],
+  "concerns": [
+    {"severity": "high|med|low", "msg": "...", "ref": "R3"}
+  ],
+  "next_agent_hints": {
+    "focus_areas": ["string"],
+    "skip_areas": ["string"]
+  }
+}
+```
+
+The `verdict` is your own assessment of whether the implementation matches the spec/plan — separate from `status` which is about whether you finished the work. Use `requirements_covered` / `requirements_missing` to declare which numbered requirements from `<scope_requirements>` you addressed; the verifier reads these directly for coverage checks instead of parsing the markdown narrative.
+
 </output_format>
 
 <analysis_paralysis_guard>

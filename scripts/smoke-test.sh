@@ -2236,6 +2236,42 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== JSON sidecars canary: impl-summary.json (v0.33.0+) =="
+# D-15: programmer writes impl-summary.json alongside impl-summary.md.
+# state.cjs::readSidecar reads + validates the JSON shape; workflow consumes
+# it for routing decisions instead of parsing markdown narrative.
+# Assertions: state CLI exposes read-sidecar; happy + missing + invalid-name
+# paths return expected JSON; programmer.md documents the JSON shape.
+SC_DIR=$(mktemp -d)
+mkdir -p "$SC_DIR/.devt/state"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":["src/a.ts"],"tests_added":[],"requirements_covered":["R1"],"requirements_missing":[],"concerns":[],"next_agent_hints":{}}' > "$SC_DIR/.devt/state/impl-summary.json"
+cd "$SC_DIR"
+HAPPY=$(node "$CLI" state read-sidecar impl-summary.json 2>/dev/null || true)
+MISSING=$(node "$CLI" state read-sidecar test-summary.json 2>/dev/null || true)
+TRAVERSAL=$(node "$CLI" state read-sidecar ../../etc/passwd 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$SC_DIR"
+if echo "$HAPPY" | grep -q '"ok":true' && echo "$HAPPY" | grep -q '"valid_status":true' && echo "$HAPPY" | grep -q '"valid_agent":true'; then
+  pass "state read-sidecar impl-summary.json returns ok:true with valid_status + valid_agent"
+else
+  fail "state read-sidecar happy path failed (got: $HAPPY)"
+fi
+if echo "$MISSING" | grep -q "not a registered JSON sidecar"; then
+  pass "state read-sidecar rejects unregistered sidecar names (D-15 schema gate)"
+else
+  fail "state read-sidecar accepted unregistered name: $MISSING"
+fi
+if echo "$TRAVERSAL" | grep -q "invalid file name"; then
+  pass "state read-sidecar rejects path traversal in file name"
+else
+  fail "state read-sidecar accepted traversal: $TRAVERSAL"
+fi
+if grep -q "impl-summary.json" "$ROOT/agents/programmer.md" && grep -q '"requirements_covered"' "$ROOT/agents/programmer.md"; then
+  pass "agents/programmer.md documents the impl-summary.json shape (D-15)"
+else
+  fail "programmer.md missing impl-summary.json documentation (D-15)"
+fi
+
 echo "== forensic log unified to JSONL (v0.33.0+) =="
 # D-17: pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared

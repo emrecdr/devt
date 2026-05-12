@@ -165,6 +165,25 @@ const MISMATCH_REASONS = Object.freeze({
 // TODO (post-1.0): Consider DEVT_VALIDATE_ENFORCE=1 to upgrade shadow warnings
 // into hard failures. Today validateConsistency only warns on mismatch and
 // persists validation_status to workflow.yaml; enforce mode would block writes.
+// JSON sidecars (v0.33.0+) — machine-readable companions to the markdown
+// artifacts. Programmer writes impl-summary.json alongside impl-summary.md;
+// workflows read the JSON for routing decisions (status, verdict, requirements
+// coverage) and read the markdown for human-review narrative. JSON is
+// authoritative for workflow control flow; markdown is authoritative for
+// the human-readable record.
+//
+// Adding a new sidecar requires:
+//   1. An entry in JSON_SIDECAR_SCHEMAS below (whitelisted status + verdict)
+//   2. The owning agent's body documents the JSON shape and writes both files
+//   3. The consumer workflow uses readSidecar() to read the JSON
+const JSON_SIDECAR_SCHEMAS = {
+  "impl-summary.json": {
+    status: ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+    verdict: ["PASS", "FAIL", "INDETERMINATE"],
+    agent: ["programmer"],
+  },
+};
+
 const ARTIFACT_SCHEMA = {
   "impl-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
@@ -636,6 +655,57 @@ function truncateArtifact(name) {
   return { ok: true, path: filePath, status: "truncated" };
 }
 
+/**
+ * Read a JSON sidecar artifact (v0.33.0+) and validate against its schema.
+ *
+ * Sidecars are machine-readable companions to markdown artifacts written by
+ * the same agent. Today: only impl-summary.json (programmer). Future: test-
+ * summary.json (tester), review.json (code-reviewer), verification.json
+ * (verifier). Adding new sidecars = entry in JSON_SIDECAR_SCHEMAS.
+ *
+ * Returns `{ ok: true, file, data, validation }` where validation is
+ *   { valid_status, valid_verdict, valid_agent } — any false fields are
+ *   surfaced as schema warnings the caller can decide how to handle.
+ * Returns `{ ok: false, reason }` on missing file, parse error, or unknown
+ *   sidecar name.
+ */
+function readSidecar(fileName) {
+  if (!fileName) return { ok: false, reason: "file name is required" };
+  const safe = path.basename(fileName);
+  if (safe !== fileName) return { ok: false, reason: `invalid file name: ${fileName}` };
+  const schema = JSON_SIDECAR_SCHEMAS[safe];
+  if (!schema) {
+    return {
+      ok: false,
+      reason: `${safe} is not a registered JSON sidecar`,
+      allowed: Object.keys(JSON_SIDECAR_SCHEMAS),
+    };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const filePath = path.join(getStateDir(), safe);
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, reason: "file not found", path: filePath };
+  }
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch (e) {
+    return { ok: false, reason: `read failed: ${e.message}`, path: filePath };
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, reason: `not valid JSON: ${e.message}`, path: filePath };
+  }
+  const validation = {
+    valid_status: Array.isArray(schema.status) ? schema.status.includes(data.status) : true,
+    valid_verdict: Array.isArray(schema.verdict) ? schema.verdict.includes(data.verdict) : true,
+    valid_agent: Array.isArray(schema.agent) ? schema.agent.includes(data.agent) : true,
+  };
+  return { ok: true, file: safe, data, validation };
+}
+
 function readSection(fileName, sectionQuery) {
   if (!fileName || !sectionQuery) {
     return { ok: false, reason: "file and section are required" };
@@ -878,6 +948,10 @@ function run(subcommand, args) {
       const section = _getFlag(args, "--section");
       return readSection(file, section);
     }
+    case "read-sidecar": {
+      const file = _getFlag(args, "--file") || ((args && args.length && !args[0].startsWith("--")) ? args[0] : null);
+      return readSidecar(file);
+    }
     case "truncate-artifact": {
       // First positional arg after the subcommand is the artifact name.
       // Falls back to --name flag for symmetry with other state subcommands.
@@ -896,7 +970,7 @@ function run(subcommand, args) {
       return pruneState(args.includes("--dry-run"));
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, truncate-artifact, update, reset, validate, sync, prune`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune`,
       );
   }
 }
@@ -905,6 +979,7 @@ module.exports = {
   run,
   readState,
   readSection,
+  readSidecar,
   truncateArtifact,
   updateState,
   resetState,
