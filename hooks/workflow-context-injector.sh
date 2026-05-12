@@ -7,8 +7,37 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Read current workflow state (exit 0 on failure — don't block the prompt)
-STATE_JSON=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null) || exit 0
+# State-read cache (v0.32.0+) keyed by workflow.yaml mtime. Hook fires on every
+# user prompt; the prior unconditional `node devt-tools.cjs state read` paid
+# ~30-60ms cold-start per prompt. Cache invalidates automatically because
+# state.cjs::updateState rewrites workflow.yaml on every state change, and we
+# pin the cache file's mtime to match.
+WF_PATH="$(pwd)/.devt/state/workflow.yaml"
+CACHE_DIR="${TMPDIR:-/tmp}/devt-cache"
+# 12-char project hash — shasum is universal (macOS + Linux).
+PROJ_HASH=$(printf '%s' "$(pwd)" | shasum 2>/dev/null | cut -c1-12)
+CACHE_FILE="$CACHE_DIR/wf-state-$PROJ_HASH.json"
+STATE_JSON=""
+
+if [ -f "$WF_PATH" ] && [ -f "$CACHE_FILE" ]; then
+  # stat -f for BSD/macOS, stat -c for GNU/Linux — try both.
+  WF_MTIME=$(stat -f %m "$WF_PATH" 2>/dev/null || stat -c %Y "$WF_PATH" 2>/dev/null || echo 0)
+  CACHE_MTIME=$(stat -f %m "$CACHE_FILE" 2>/dev/null || stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
+  if [ "$WF_MTIME" != "0" ] && [ "$CACHE_MTIME" != "0" ] && [ "$CACHE_MTIME" -ge "$WF_MTIME" ]; then
+    STATE_JSON=$(cat "$CACHE_FILE" 2>/dev/null || true)
+  fi
+fi
+
+if [ -z "$STATE_JSON" ]; then
+  STATE_JSON=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null) || exit 0
+  # Populate cache for the next prompt. Pin cache mtime to workflow.yaml mtime
+  # so the next mtime comparison reuses without staleness.
+  if [ -n "$STATE_JSON" ]; then
+    mkdir -p "$CACHE_DIR" 2>/dev/null || true
+    printf '%s' "$STATE_JSON" > "$CACHE_FILE" 2>/dev/null || true
+    [ -f "$WF_PATH" ] && touch -r "$WF_PATH" "$CACHE_FILE" 2>/dev/null || true
+  fi
+fi
 
 # Parse state and build context using node (proper JSON handling)
 RESULT=$(node -e "

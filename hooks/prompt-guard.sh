@@ -42,33 +42,27 @@ if [[ -z "$CONTENT" ]]; then
   exit 0
 fi
 
-# Scan for injection patterns (11 known patterns)
-WARNINGS=""
-
-# Instruction overrides
-if echo "$CONTENT" | grep -qiE "ignore (all |any )?(previous |prior |above )?instructions"; then
-  WARNINGS="${WARNINGS}\n- Instruction override pattern detected"
-fi
-if echo "$CONTENT" | grep -qiE "you are now|new role|act as|pretend to be"; then
-  WARNINGS="${WARNINGS}\n- Role manipulation pattern detected"
-fi
-if echo "$CONTENT" | grep -qiE "system prompt|reveal.*instructions|show.*system"; then
-  WARNINGS="${WARNINGS}\n- System prompt extraction attempt detected"
-fi
-if echo "$CONTENT" | grep -qiE "output.*verbatim|repeat.*above|echo.*system"; then
-  WARNINGS="${WARNINGS}\n- Verbatim extraction pattern detected"
-fi
-if echo "$CONTENT" | grep -qiE "<system>|<\/system>|\[INST\]|\[\/INST\]"; then
-  WARNINGS="${WARNINGS}\n- Prompt markup injection detected"
-fi
-if echo "$CONTENT" | grep -qiE "base64|atob|btoa"; then
-  WARNINGS="${WARNINGS}\n- Base64 encoding pattern detected"
-fi
-
-# Check for invisible Unicode characters (cross-platform, no grep -P dependency)
-if node -e "process.exit(/[\u200B\u200C\u200D\uFEFF\u00AD\u2060]/.test(process.argv[1]) ? 0 : 1)" "$CONTENT" 2>/dev/null; then
-  WARNINGS="${WARNINGS}\n- Invisible Unicode characters detected"
-fi
+# Scan for injection patterns + invisible-Unicode in a SINGLE Node subprocess
+# (was 6 grep shellouts + 1 Node = 7 subprocesses per Edit/Write to .devt/state/).
+# Each grep was 5-10ms warm; consolidation drops the per-write hook latency to
+# one process spawn. Patterns mirror the prior bash regex set verbatim.
+WARNINGS=$(node -e "
+  const content = process.argv[1] || '';
+  const checks = [
+    [/ignore (all |any )?(previous |prior |above )?instructions/i, 'Instruction override pattern detected'],
+    [/you are now|new role|act as|pretend to be/i,                'Role manipulation pattern detected'],
+    [/system prompt|reveal.*instructions|show.*system/i,          'System prompt extraction attempt detected'],
+    [/output.*verbatim|repeat.*above|echo.*system/i,              'Verbatim extraction pattern detected'],
+    [/<system>|<\/system>|\[INST\]|\[\/INST\]/i,                  'Prompt markup injection detected'],
+    [/base64|atob|btoa/i,                                          'Base64 encoding pattern detected'],
+    [/[\u200B\u200C\u200D\uFEFF\u00AD\u2060]/,                    'Invisible Unicode characters detected'],
+  ];
+  const hits = [];
+  for (const [re, label] of checks) {
+    if (re.test(content)) hits.push('- ' + label);
+  }
+  if (hits.length) process.stdout.write(hits.join('\\n'));
+" "$CONTENT" 2>/dev/null || true)
 
 if [[ -n "$WARNINGS" ]]; then
   # Advisory warning — do NOT block
