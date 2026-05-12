@@ -13,6 +13,9 @@ memory/semantic/*.db
 # Claude Code per-agent persistent memory (project-scope, written by subagents at runtime)
 .claude/agent-memory/
 
+# Claude Code scheduled-task runtime locks
+.claude/*.lock
+
 # OS files
 .DS_Store
 Thumbs.db
