@@ -2223,6 +2223,34 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== skill→skill coupling integrity (v0.33.0+) =="
+# D-18: skills/codebase-scan references graphify-helpers; 5 skills transitively
+# depend on graphify-helpers via the Graphify-first routing protocol. No drift
+# detector exists today — a typo or rename of a skill would silently break the
+# coupling. Lint: every `skills/<name>/SKILL.md` reference in any skill body
+# must point at a file that exists on disk.
+SKILL_LINK_BROKEN=()
+for skill_file in "$ROOT"/skills/*/SKILL.md; do
+  [ -f "$skill_file" ] || continue
+  # Extract every `skills/<name>/SKILL.md` reference. Use the literal path
+  # prefix so we don't match e.g. "skills/foo" without /SKILL.md (those are
+  # more permissive directory mentions).
+  refs=$(grep -oE 'skills/[a-z0-9-]+/SKILL\.md' "$skill_file" 2>/dev/null | sort -u || true)
+  for ref in $refs; do
+    target="$ROOT/$ref"
+    if [ ! -f "$target" ]; then
+      SKILL_LINK_BROKEN+=("$(basename $(dirname "$skill_file"))/SKILL.md → $ref (missing)")
+    fi
+  done
+done
+if [ ${#SKILL_LINK_BROKEN[@]} -eq 0 ]; then
+  pass "all skills/*/SKILL.md cross-references resolve to existing skills (D-18)"
+else
+  for b in "${SKILL_LINK_BROKEN[@]}"; do
+    fail "skill-link drift — $b"
+  done
+fi
+
 echo "== byte-stable agent/skill bodies (v0.32.0+) =="
 # D-10 sub-2: Claude Code auto-caches stable prompt prefixes (proven by the
 # cache_read_input_tokens telemetry token-report parses). The cache only fires
