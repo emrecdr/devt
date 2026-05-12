@@ -167,6 +167,8 @@ Then load project context:
 
 Store the task description in workflow state for reference by status, forensics, and resume.
 
+**Capture `inline_guardrails` for downstream dispatches** (v0.34.0+, D-11): the `init workflow` payload includes `inline_guardrails` — a `{ "golden-rules.md": "<content>", "engineering-principles.md": "<content>", "generative-debt-checklist.md": "<content>" }` object (or `null` if the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this content in working memory across this workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block so those two agents (the ones that read all three files on every dispatch) can skip three Read tool calls per dispatch and rely on cache-friendly prefix injection instead. Other dev agents continue reading from disk — they read fewer guardrail files and the cost is marginal.
+
 > **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint (v0.30.4+), but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
 
 ```bash
@@ -698,6 +700,14 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <task>{task_description}</task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <guardrails_inline>
+      <!-- D-11: inline guardrails from init payload — skip 3 Read calls when present. -->
+      <!-- If inline_guardrails is null (over 64KB cap), omit this block entirely; -->
+      <!-- the agent falls back to on-disk Reads of the three files below. -->
+      <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
+      <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
+      <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
+    </guardrails_inline>
     <spec>Read .devt/state/spec.md (if it exists — from /devt:specify). This is the primary requirements source with user stories, API design, and detailed acceptance criteria.</spec>
     <!-- STANDARD+: include scan_results and plan -->
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
@@ -845,6 +855,14 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   </task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <guardrails_inline>
+      <!-- D-11: inline guardrails from init payload — skip 3 Read calls when present. -->
+      <!-- If inline_guardrails is null (over 64KB cap), omit this block entirely; -->
+      <!-- the agent falls back to on-disk Reads of the three files below. -->
+      <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
+      <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
+      <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
+    </guardrails_inline>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
