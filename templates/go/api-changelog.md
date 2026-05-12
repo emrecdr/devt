@@ -204,3 +204,30 @@ The changelog file starts with a Version Index table. When adding a new version:
 4. **Document API endpoint changes** — Scan `api/` and `dto` files for HTTP contract changes
 5. **Update version index** — Add row to the top table
 6. **Validate against code** — Read the actual git diff to verify claims, not just PR descriptions
+7. **Synchronize all version sources** — See "Version Bump — Keep Sources In Sync" below
+
+---
+
+## Version Bump — Keep Sources In Sync (MANDATORY)
+
+A project typically tracks its version in **several places at once**. Every version bump MUST update all of them in the same commit, and the values MUST be identical. Drift between any two of them either fails the CI pipeline or ships a build whose advertised version doesn't match its API contract.
+
+### Version sources to keep aligned
+
+Identify which of these your project actually uses (most projects have 2–3), then update them together on every bump:
+
+1. **A dedicated `VERSION` file (strongly recommended).** A single line containing `X.Y.Z` with no `v` prefix. Cheap to read from shell, Make, Dockerfiles, and CI pipeline guards. devt promotes this pattern because it gives every other tool a stable, unambiguous source of truth.
+2. **A changelog file (strongly recommended).** Conventionally `docs/API-CHANGELOG.md` or `CHANGELOG.md`, but the actual path is project-specific. The latest `## [X.Y.Z]` heading is the human-/consumer-facing version source and must match the numeric one.
+3. **A code-level version constant, if your binary exposes one.** Common in Go: `const Version = "X.Y.Z"` in something like `internal/version/version.go` or `cmd/<binary>/main.go`, surfaced via a `--version` flag, health endpoint, or log line. Either keep it in lockstep or derive it at build time from one of the above.
+4. **Git module tags.** Go module consumers resolve `go get` against tags of the form `v<X.Y.Z>`. Tag AFTER the bump commit lands on the default branch — never before — and the tag value must match what's in `VERSION` / the constant.
+
+### Verification before commit
+
+Read each source your project uses and confirm they all return the same `X.Y.Z`. A short script wired into a pre-commit hook or `make` target is the most reliable enforcement; the exact shell varies by which sources you maintain.
+
+### Anti-patterns
+
+- ❌ Bumping the `VERSION` file alone "just to unblock the merge" — leaves the code-level constant and any embedded version stale.
+- ❌ Adding a changelog entry without bumping the numeric sources — the next main-bound pipeline guard will reject the merge.
+- ❌ Tagging `vX.Y.Z` before the bump commit lands on the default branch — the tag will reference the wrong commit.
+- ❌ Letting `development` drift several patch versions ahead of `VERSION` — when caught at PR time the fix is non-obvious.

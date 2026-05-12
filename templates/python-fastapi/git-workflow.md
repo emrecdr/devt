@@ -236,13 +236,29 @@ NEVER commit directly to `main` or `development` (or whatever the project's defa
 
 ---
 
+## Version Bump — Keep Sources In Sync
+
+When a PR introduces a change that justifies a new version, bump **every** version source the project uses in the same commit. Concrete files vary per project, but typically include:
+
+- A dedicated `VERSION` file (devt promotes this pattern — single line, `X.Y.Z`).
+- The changelog file (commonly `docs/API-CHANGELOG.md` or `CHANGELOG.md`).
+- The package-manager manifest, if the stack has one (for Python projects this is usually `pyproject.toml`'s `[project] version`).
+- Any code-level constant or runtime exposure that's hard-coded rather than derived.
+
+All numeric values MUST match. CI pipeline guards typically reject main-bound merges where `VERSION` is not strictly greater than main's via `sort -V`. See [`./api-changelog.md`](./api-changelog.md) for the full rule.
+
+**Common failure**: bumping only the changelog when merging into the integration branch, then having the integration → main PR rejected because `VERSION` (and any package manifest) is still at the old number.
+
+---
+
 ## Quality Checklist
 
 Before committing or creating PR:
 
 - [ ] On correct base branch (default branch, not another feature branch)
-- [ ] Quality gates pass (ruff check + format, mypy, tests)
+- [ ] Quality gates pass (lint + typecheck + tests for your stack)
 - [ ] Commit message follows conventional format
 - [ ] PR title uses `<type>: <description>` format
 - [ ] Changes are staged and reviewed
 - [ ] MODULE.md updated if service changed
+- [ ] If version was bumped: every version source the project uses (VERSION, changelog, package manifest, runtime constants) shows the same `X.Y.Z`

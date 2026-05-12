@@ -94,6 +94,21 @@ EOF
 | Giant PR (50+ files) | Split by package/concern into smaller PRs |
 | Commit message says "fix stuff" | Use conventional format: `fix(scope): what` |
 
+## Version Bump — Keep Sources In Sync
+
+When a PR introduces a change that justifies a new version, bump **every** version source the project uses in the same commit. Concrete files vary per project, but typically include:
+
+- A dedicated `VERSION` file (devt promotes this pattern — single line, `X.Y.Z`).
+- The changelog file (commonly `docs/API-CHANGELOG.md` or `CHANGELOG.md`).
+- Any code-level version constant the binary exposes (e.g. via a `--version` flag or `/health` payload) — common in Go since the toolchain doesn't write a version into a manifest.
+- A `v<X.Y.Z>` git tag for Go module consumers — tagged AFTER the bump commit lands on the default branch.
+
+All numeric values MUST match. CI pipeline guards typically reject main-bound merges where `VERSION` is not strictly greater than main's via `sort -V`. See [`./api-changelog.md`](./api-changelog.md) for the full rule.
+
+**Common failure**: bumping only the changelog when merging into the integration branch, then having the integration → main PR rejected because `VERSION` is still at the old number.
+
+---
+
 ## Quality Checklist
 
 Before creating a PR:
@@ -105,3 +120,4 @@ Before creating a PR:
 - [ ] No dead code introduced
 - [ ] Commit messages follow convention
 - [ ] PR description explains WHY, not just WHAT
+- [ ] If version was bumped: every version source the project uses (VERSION, changelog, code-level constant, eventual git tag) shows the same `X.Y.Z`

@@ -103,6 +103,21 @@ EOF
 | Committing compiled CSS | Only commit SCSS sources, not generated CSS |
 | Missing E2E test for new feature | Add at least happy-path E2E before merging |
 
+## Version Bump — Keep Sources In Sync
+
+When a PR introduces a change that justifies a new version, bump **every** version source the project uses in the same commit. For a Vue + Bootstrap frontend this typically includes:
+
+- A dedicated `VERSION` file (devt promotes this pattern — single line, `X.Y.Z`).
+- The changelog file (commonly `CHANGELOG.md`).
+- `package.json`'s top-level `"version"`. Run `npm install` so the lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) re-syncs and commit it too.
+- Any runtime exposure of the version — Vite env (`import.meta.env.VITE_APP_VERSION`), an `<AppVersion>` component, a `console.info(version)` boot line, or a footer string. If yours is hard-coded rather than derived from `package.json`, treat it as another source to update.
+
+All numeric values MUST match. CI pipeline guards typically reject main-bound merges where `VERSION` is not strictly greater than main's via `sort -V`.
+
+**Common failure**: bumping only the changelog when merging into the integration branch, then having the integration → main PR rejected because `VERSION` (and `package.json`) is still at the old number. Also: `npm version` only touches `package.json` + lockfile + tag — it leaves the `VERSION` file and the changelog stale.
+
+---
+
 ## Pre-Commit Checklist
 
 Before creating a PR:
@@ -117,4 +132,5 @@ Before creating a PR:
 - [ ] New routes have `meta: { requiresAuth: true }` if protected
 - [ ] New API endpoints added to `shared/constants/api.js`
 - [ ] Commit messages follow convention
+- [ ] If version was bumped: `VERSION`, `package.json`, `CHANGELOG.md`, and any runtime exposure all show the same `X.Y.Z`; lockfile re-synced
 - [ ] PR description explains WHY

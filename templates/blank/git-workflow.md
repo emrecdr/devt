@@ -88,6 +88,21 @@ EOF
 | PR includes unrelated formatting | Run formatter separately from feature commits |
 | No PR description | Always explain WHY, not just WHAT |
 
+## Version Bump — Keep Sources In Sync
+
+When a PR introduces a change that justifies a new version, bump **every** version source the project uses in the same commit. Concrete files vary per stack, but typically include:
+
+- A dedicated `VERSION` file (devt promotes this pattern — single line, `X.Y.Z`).
+- The changelog file (commonly `CHANGELOG.md` or `docs/API-CHANGELOG.md`).
+- The package-manager manifest if your stack has one (`package.json`, `pyproject.toml`, `Cargo.toml`, `*.csproj`, etc.). If a lockfile exists, run an install so it re-syncs and commit it too.
+- Any code-level constant or runtime exposure (e.g. `--version` flag, `/health` payload) that's hard-coded rather than derived.
+
+All numeric values MUST match. CI pipeline guards typically reject main-bound merges where `VERSION` is not strictly greater than main's via `sort -V`.
+
+**Common failure**: bumping only the changelog when merging into the integration branch, then having the integration → main PR rejected because `VERSION` (and any package manifest) is still at the old number. Also: language-specific helpers like `npm version` / `cargo set-version` only touch the manifest + lockfile + tag — they leave the `VERSION` file and the changelog stale.
+
+---
+
 ## Quality Checklist
 
 Before creating a PR:
@@ -97,4 +112,5 @@ Before creating a PR:
 - [ ] Linter / type-checker clean
 - [ ] No dead code introduced
 - [ ] Commit messages follow convention
+- [ ] If version was bumped: every version source the project uses (VERSION, changelog, package manifest, runtime constants) shows the same `X.Y.Z` and any lockfile is committed
 - [ ] PR description explains WHY, not just WHAT
