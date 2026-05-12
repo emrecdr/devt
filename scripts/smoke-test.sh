@@ -2223,6 +2223,18 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== programmer dispatch gets isolation:worktree under autonomous (v0.31.0+) =="
+# D-8: when autonomous_chain is set, the programmer Task() dispatch must pass
+# isolation:"worktree" so autonomous fix loops don't clobber the user's
+# in-flight checkout. Per the no-legacy directive, this is always-on for
+# autonomous (no config flag for opt-out). Interactive dispatches omit the
+# kwarg — direct-to-checkout is expected behavior.
+if grep -qE 'isolation.*worktree' "$ROOT/workflows/dev-workflow.md"; then
+  pass "dev-workflow.md programmer dispatch documents isolation:worktree for autonomous (D-8)"
+else
+  fail "dev-workflow.md missing isolation:worktree guidance for autonomous (D-8)"
+fi
+
 echo "== Pre-Flight Brief read instruction not duplicated in agent bodies (v0.31.0+) =="
 # D-4: the memory-pre-flight skill (preloaded by 8 dev agents via skills:
 # frontmatter) is the canonical source for "Read .devt/state/preflight-brief.md
