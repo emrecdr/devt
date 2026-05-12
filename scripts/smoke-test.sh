@@ -2223,6 +2223,37 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== init.cjs inline_guardrails plumbing (v0.32.0+) =="
+# D-11: init.cjs returns the 3 plugin-shipped guardrails as inline content for
+# future consumer wiring (agent/workflow opt-in once /devt:tokens --compare
+# measures the prompt-cost-vs-Read-savings trade-off). Today the agents still
+# Read the on-disk files; this just exposes the data on the init payload.
+# Assertion: keys present + content non-empty + total under cap.
+TMP_IG=$(mktemp -d)
+cd "$TMP_IG"
+mkdir -p .devt
+IG_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "smoke-ig" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$TMP_IG"
+if echo "$IG_OUT" | node -e "
+  let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try {
+      const j=JSON.parse(d);
+      const ig=j.inline_guardrails||{};
+      const required=['golden-rules.md','engineering-principles.md','generative-debt-checklist.md'];
+      const missing=required.filter(k=>!ig[k]||typeof ig[k]!=='string'||ig[k].length===0);
+      if (missing.length) { console.error('missing/empty:',missing.join(',')); process.exit(1); }
+      const total=Object.values(ig).reduce((s,v)=>s+v.length,0);
+      if (total<10000||total>65536) { console.error('total bytes out of expected range:',total); process.exit(2); }
+      process.exit(0);
+    } catch (e) { console.error('parse failed:',e.message); process.exit(3); }
+  });
+" 2>/dev/null; then
+  pass "init.cjs returns inline_guardrails with 3 keys + content + under 64KB cap (D-11)"
+else
+  fail "inline_guardrails missing or malformed in init JSON (D-11)"
+fi
+
 echo "== hook overhead reduction (v0.32.0+) =="
 # D-13: prompt-guard.sh consolidates 6 grep shellouts into the existing Node
 # block (1 process spawn instead of 7). workflow-context-injector.sh caches

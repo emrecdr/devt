@@ -25,6 +25,52 @@ const REQUIRED_DEV_RULES = [
 const MAX_TASK_LENGTH = 50_000;
 
 /**
+ * Plugin-shipped guardrails inlined into the init payload (v0.32.0+).
+ *
+ * These three files are universal across all dev agents (programmer L34-37
+ * lists them in context_loading), stable across plugin versions, and total
+ * ~27KB at v0.32.0. Inlining them in `init.cjs` eliminates 3 Read tool calls
+ * per agent dispatch — STANDARD workflow saves ~12 Reads (4 agents × 3 files).
+ *
+ * `.devt/rules/*.md` are NOT inlined here — they vary per project (some
+ * templates have 11KB+ coding-standards) and the size-vs-cache trade-off
+ * needs measurement before committing. Revisit in a future wave with
+ * /devt:tokens --compare data.
+ *
+ * Cap at 64KB total to prevent runaway-template scenarios. On overflow,
+ * fall back to path-only and emit a warning — agents revert to reading.
+ */
+const INLINE_GUARDRAILS = [
+  "golden-rules.md",
+  "engineering-principles.md",
+  "generative-debt-checklist.md",
+];
+const MAX_INLINE_BYTES = 64 * 1024;
+
+function loadInlineGuardrails(pluginRoot) {
+  if (!pluginRoot) return { content: null, bytes: 0, warnings: [] };
+  const result = {};
+  const warnings = [];
+  let totalBytes = 0;
+  for (const name of INLINE_GUARDRAILS) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const filePath = path.join(pluginRoot, "guardrails", name);
+    if (!fs.existsSync(filePath)) {
+      warnings.push(`guardrail missing on disk: ${name}`);
+      continue;
+    }
+    const buf = fs.readFileSync(filePath);
+    totalBytes += buf.length;
+    if (totalBytes > MAX_INLINE_BYTES) {
+      warnings.push(`inline-guardrails over ${MAX_INLINE_BYTES} bytes — falling back to path-only`);
+      return { content: null, bytes: totalBytes, warnings };
+    }
+    result[name] = buf.toString("utf8");
+  }
+  return { content: result, bytes: totalBytes, warnings };
+}
+
+/**
  * Parse skill-index.yaml — devt's default-per-agent skill injection catalog.
  *
  * The file lives at `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` and ships with
@@ -208,6 +254,11 @@ function initWorkflow(task, pluginRoot) {
     state_dir: path.join(projectRoot, ".devt", "state"),
     tdd_mode: state.tdd_mode || false,
     resolved_skills: resolveSkills(pluginRoot, config),
+    inline_guardrails: (() => {
+      const r = loadInlineGuardrails(pluginRoot);
+      warnings.push(...r.warnings);
+      return r.content;
+    })(),
     warnings: warnings.concat(injectionWarning),
   };
 }
