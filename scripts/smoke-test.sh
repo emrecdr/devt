@@ -664,15 +664,28 @@ else
   fail "state read-section: missing section did not return expected error: $SECTION_MISS"
 fi
 
-# v0.30.5 — pre-flight-guard hook appends every deny to .devt/state/preflight-denies.log
+# v0.30.5 → v0.33.0 (D-17): pre-flight-guard hook appends every deny as one
+# JSON record to .devt/state/preflight-denies.jsonl (migrated from .log).
 echo '{"memory":{"preflight_mode":"block","enabled":true}}' > .devt/config.json
 echo "active: true" > .devt/state/workflow.yaml
-rm -f .devt/state/scratchpad.md .devt/state/preflight-denies.log
-HOOK_OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/smoke-target.py"}}' | bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
-if [ -f .devt/state/preflight-denies.log ] && grep -q "block .* edit /tmp/smoke-target.py :: missing PREFLIGHT line" .devt/state/preflight-denies.log; then
-  pass "pre-flight-guard: deny appended to preflight-denies.log"
+rm -f .devt/state/scratchpad.md .devt/state/preflight-denies.jsonl
+HOOK_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/smoke-target.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
+if [ -f .devt/state/preflight-denies.jsonl ]; then
+  # Each line must be valid JSON with the v0.33.0 schema (mode, ts, action, file_path, reason).
+  if node -e "
+    const lines = require('fs').readFileSync('.devt/state/preflight-denies.jsonl','utf8').split('\n').filter(Boolean);
+    for (const l of lines) {
+      const j = JSON.parse(l);
+      if (j.mode==='block' && j.action==='edit' && j.file_path==='/tmp/smoke-target.py' && j.reason==='missing PREFLIGHT line') process.exit(0);
+    }
+    process.exit(1);
+  " 2>/dev/null; then
+    pass "pre-flight-guard: deny appended to preflight-denies.jsonl with v0.33.0 schema"
+  else
+    fail "pre-flight-guard: jsonl format wrong (content: $(cat .devt/state/preflight-denies.jsonl 2>/dev/null))"
+  fi
 else
-  fail "pre-flight-guard: deny log missing or malformed (content: $(cat .devt/state/preflight-denies.log 2>/dev/null))"
+  fail "pre-flight-guard: preflight-denies.jsonl not created"
 fi
 # Verify the deny JSON itself is unchanged (forensic logging must not break the hook contract)
 if echo "$HOOK_OUT" | grep -q '"decision":"deny"'; then
@@ -681,7 +694,7 @@ else
   fail "pre-flight-guard: deny JSON missing — hook contract broken: $HOOK_OUT"
 fi
 # Cleanup placeholder so subsequent assertions have a clean state dir
-rm -f .devt/state/preflight-denies.log .devt/state/workflow.yaml .devt/config.json
+rm -f .devt/state/preflight-denies.jsonl .devt/state/workflow.yaml .devt/config.json
 
 # Invalid id rejected with exit 2
 DEF_INVALID_OUT=$(node "$CLI" deferred get FOO-001 2>&1 || true)
@@ -2221,6 +2234,51 @@ if node -e "
   pass "every VALID_WORKFLOW_TYPES entry covered in next.md AND status.md"
 else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
+fi
+
+echo "== forensic log unified to JSONL (v0.33.0+) =="
+# D-17: pre-flight-guard's deny log migrated from preflight-denies.log (plain
+# text) to preflight-denies.jsonl (one JSON record per line). The new shared
+# helper at bin/modules/logger.cjs::appendJsonl is the canonical entry point
+# (4KB PIPE_BUF cap, atomicity guarantee, truncation stub on oversize).
+# Assertions:
+# 1. logger.cjs exists with appendJsonl export
+# 2. pre-flight-guard.sh emits .jsonl, not .log
+# 3. Live-fire produces valid JSONL with the expected schema
+LOGGER_FILE="$ROOT/bin/modules/logger.cjs"
+if [ -f "$LOGGER_FILE" ] && grep -q "exports.*appendJsonl\|appendJsonl[,}]" "$LOGGER_FILE"; then
+  pass "bin/modules/logger.cjs exports appendJsonl (D-17)"
+else
+  fail "logger.cjs missing or doesn't export appendJsonl (D-17)"
+fi
+if grep -q "preflight-denies.jsonl" "$ROOT/hooks/pre-flight-guard.sh" && ! grep -q "preflight-denies\.log[^.j]" "$ROOT/hooks/pre-flight-guard.sh"; then
+  pass "pre-flight-guard.sh writes to preflight-denies.jsonl (was .log)"
+else
+  fail "pre-flight-guard.sh still references the old .log filename (D-17)"
+fi
+# Live test: trigger an uncovered edit and confirm one valid JSONL line lands.
+LOGTEST_DIR=$(mktemp -d)
+mkdir -p "$LOGTEST_DIR/.devt/state"
+printf 'active: true\nphase: implement\nworkflow_type: dev\n' > "$LOGTEST_DIR/.devt/state/workflow.yaml"
+echo "PREFLIGHT 2026 edit covered.txt :: ADR-001" > "$LOGTEST_DIR/.devt/state/scratchpad.md"
+cd "$LOGTEST_DIR"
+CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" <<<'{"tool_name":"Write","tool_input":{"file_path":"./uncovered.py","content":"x"}}' >/dev/null 2>&1 || true
+LOG_LINE=$(head -1 "$LOGTEST_DIR/.devt/state/preflight-denies.jsonl" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$LOGTEST_DIR"
+if echo "$LOG_LINE" | node -e "
+  let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try {
+      const j=JSON.parse(d.trim());
+      if (!j.mode || !j.ts || !j.action || !j.file_path || !j.reason) process.exit(1);
+      if (j.mode !== 'warn' && j.mode !== 'block') process.exit(2);
+      process.exit(0);
+    } catch (e) { console.error('parse failed:',e.message); process.exit(3); }
+  });
+" 2>/dev/null; then
+  pass "preflight-denies.jsonl produces valid one-line JSON records with required fields"
+else
+  fail "preflight-denies.jsonl output not valid JSONL or missing fields (D-17)"
 fi
 
 echo "== skill→skill coupling integrity (v0.33.0+) =="

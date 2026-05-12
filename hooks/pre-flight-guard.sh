@@ -82,17 +82,43 @@ node -e "
     // Build the advisory / block message
     const reason = 'Pre-Flight Protocol: no PREFLIGHT line found in .devt/state/scratchpad.md for \"' + fp + '\". Before editing, append a line like \"PREFLIGHT <ISO-timestamp> edit ' + fp + ' :: <governing ADR/CON/FLOW ids or \\'no governance found\\'>\" — see skills/memory-pre-flight/SKILL.md. If this file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" or perform the 5-Lane File Pre-Flight (memory affects + memory query + memory active).';
 
-    // Forensic logging (v0.30.5+): append every deny/warn to a single-writer
-    // side-log so future agent attempts can read their own history. Survives
-    // state reset via the v0.30.4 archive ring buffer (.devt/state/.archive/).
-    // Hook stays stateless — log is append-only side-effect, never read by hook.
+    // Forensic logging (v0.33.0+): append every deny/warn as one JSON record
+    // per line via bin/modules/logger.cjs::appendJsonl. JSONL replaces the
+    // v0.30.5 plain-text format — unified parsing surface for /devt:forensics
+    // and any future log reader. Survives state reset via the v0.30.4 archive
+    // ring buffer. Hook stays stateless — log is append-only side-effect.
     // Wrapped in try-catch so log failure never blocks the deny path.
     try {
-      const logPath = path.join(dir, '.devt', 'state', 'preflight-denies.log');
-      const ts = new Date().toISOString();
-      const action = (d.tool_name || 'edit').toLowerCase();
-      const line = mode + ' ' + ts + ' ' + action + ' ' + fp + ' :: missing PREFLIGHT line\\n';
-      fs.appendFileSync(logPath, line);
+      // CLAUDE_PLUGIN_ROOT is set by Claude Code when the plugin loads; the
+      // hook inherits it from the bash parent. Fall back to the hook script's
+      // own location (../../) for direct-invocation test scenarios.
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      const loggerPath = pluginRoot
+        ? path.join(pluginRoot, 'bin', 'modules', 'logger.cjs')
+        : null;
+      const logPath = path.join(dir, '.devt', 'state', 'preflight-denies.jsonl');
+      if (loggerPath && fs.existsSync(loggerPath)) {
+        const { appendJsonl } = require(loggerPath);
+        appendJsonl(logPath, {
+          mode: mode,
+          ts: new Date().toISOString(),
+          action: (d.tool_name || 'edit').toLowerCase(),
+          file_path: fp,
+          reason: 'missing PREFLIGHT line',
+        });
+      } else {
+        // Fallback: append the JSON line directly without the helper. Same
+        // JSONL format. Used when CLAUDE_PLUGIN_ROOT isn't set (e.g. direct
+        // test invocation of the hook outside Claude Code).
+        const rec = JSON.stringify({
+          mode: mode,
+          ts: new Date().toISOString(),
+          action: (d.tool_name || 'edit').toLowerCase(),
+          file_path: fp,
+          reason: 'missing PREFLIGHT line',
+        });
+        fs.appendFileSync(logPath, rec + '\\n');
+      }
     } catch { /* never block on log failure */ }
 
     if (mode === 'block') {
