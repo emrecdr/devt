@@ -2091,6 +2091,51 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== scratchpad truncate-on-finalize pattern (v0.30.6+) =="
+# Three workflows that dispatch dev agents writing PREFLIGHT lines to
+# scratchpad.md MUST truncate it at finalize so stale lines from workflow A
+# don't falsely satisfy the pre-flight-guard hook for files touched in
+# workflow B (cross-workflow bleed bug). Pattern: state truncate-artifact
+# scratchpad.md called after `active=false` at the finalize gate.
+TRUNC_FAIL=0
+for wf in dev-workflow.md quick-implement.md debug.md; do
+  if grep -qE 'state truncate-artifact scratchpad\.md' "$ROOT/workflows/$wf"; then
+    pass "$wf truncates scratchpad at finalize"
+  else
+    fail "$wf does not truncate scratchpad at finalize (D-W0-2)"
+    TRUNC_FAIL=$((TRUNC_FAIL+1))
+  fi
+done
+# CLI surface assertion: state truncate-artifact must accept scratchpad.md and
+# reject non-whitelisted names + path-traversal attempts. Run in a fresh
+# isolated temp project so this assertion is independent of cwd state from
+# prior tests. cd back to $ROOT afterward so the pass/fail counters remain
+# in-shell (no subshell).
+TRUNC_DIR=$(mktemp -d)
+mkdir -p "$TRUNC_DIR/.devt/state"
+echo "PREFLIGHT 2026 edit foo :: ADR-001" > "$TRUNC_DIR/.devt/state/scratchpad.md"
+cd "$TRUNC_DIR"
+TRUNC_OUT=$(node "$CLI" state truncate-artifact scratchpad.md 2>&1 || true)
+if echo "$TRUNC_OUT" | grep -q '"ok":true' && echo "$TRUNC_OUT" | grep -q '"status":"truncated"'; then
+  pass "state truncate-artifact scratchpad.md returns ok:true + status:truncated"
+else
+  fail "state truncate-artifact scratchpad.md unexpected output: $TRUNC_OUT"
+fi
+TRUNC_REJ=$(node "$CLI" state truncate-artifact plan.md 2>&1 || true)
+if echo "$TRUNC_REJ" | grep -q "not in TRUNCATABLE_ARTIFACTS"; then
+  pass "state truncate-artifact rejects non-whitelisted file (plan.md)"
+else
+  fail "state truncate-artifact accepted non-whitelisted file: $TRUNC_REJ"
+fi
+TRUNC_TRAV=$(node "$CLI" state truncate-artifact ../../etc/passwd 2>&1 || true)
+if echo "$TRUNC_TRAV" | grep -q "invalid artifact name"; then
+  pass "state truncate-artifact rejects path-traversal"
+else
+  fail "state truncate-artifact accepted traversal: $TRUNC_TRAV"
+fi
+cd "$ROOT"
+rm -rf "$TRUNC_DIR"
+
 echo "== autonomous_chain consumer-clear pattern (v0.30.6+) =="
 # next.md MUST clear autonomous_chain BEFORE dispatching /devt:ship so a stale
 # value from a prior session cannot re-trigger ship inappropriately. ship.md

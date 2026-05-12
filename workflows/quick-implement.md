@@ -243,7 +243,10 @@ Best-effort. Never fails the workflow.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
+
+The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` (v0.30.6+) so the next workflow in the same session starts clean. Quick workflows don't have a `review_deferred` step, but the scratchpad still accumulates pre-flight-guard coverage records during the run.
 
 Report to the user:
 

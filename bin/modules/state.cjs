@@ -594,6 +594,44 @@ function resetState() {
  * Returns `{ ok: true, section, content, level }` on hit,
  *         `{ ok: false, reason }` on miss/missing-file.
  */
+/**
+ * Truncate a state-dir artifact to zero bytes atomically (v0.30.6+).
+ *
+ * Used at clean workflow finalize to clear ephemeral scratchpad content
+ * — specifically PREFLIGHT lines from the pre-flight-guard hook contract —
+ * that would otherwise bleed into the next workflow in the same session
+ * and falsely satisfy the hook's edit-coverage check.
+ *
+ * Preserves the file (just empties it) so the next workflow doesn't need
+ * to recreate it. No-op if the file doesn't exist. Returns
+ * `{ ok: true, path, status: "truncated"|"missing" }`.
+ *
+ * Path safety: name is basenamed and must be a known PERSISTENT artifact
+ * — only scratchpad.md is currently allowed to prevent accidental wipes
+ * of critical state. Extend `TRUNCATABLE_ARTIFACTS` to opt new files in.
+ */
+const TRUNCATABLE_ARTIFACTS = new Set(["scratchpad.md"]);
+
+function truncateArtifact(name) {
+  if (!name) return { ok: false, reason: "artifact name is required" };
+  const safe = path.basename(name);
+  if (safe !== name) return { ok: false, reason: `invalid artifact name: ${name}` };
+  if (!TRUNCATABLE_ARTIFACTS.has(safe)) {
+    return {
+      ok: false,
+      reason: `artifact "${safe}" is not in TRUNCATABLE_ARTIFACTS — refusing to wipe`,
+      allowed: Array.from(TRUNCATABLE_ARTIFACTS),
+    };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const filePath = path.join(getStateDir(), safe);
+  if (!fs.existsSync(filePath)) {
+    return { ok: true, path: filePath, status: "missing" };
+  }
+  atomicWriteFileSync(filePath, "");
+  return { ok: true, path: filePath, status: "truncated" };
+}
+
 function readSection(fileName, sectionQuery) {
   if (!fileName || !sectionQuery) {
     return { ok: false, reason: "file and section are required" };
@@ -603,6 +641,7 @@ function readSection(fileName, sectionQuery) {
   if (safe !== fileName) {
     return { ok: false, reason: `invalid file name: ${fileName}` };
   }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const filePath = path.join(getStateDir(), safe);
   if (!fs.existsSync(filePath)) {
     return { ok: false, reason: `file not found: ${safe}` };
@@ -835,6 +874,12 @@ function run(subcommand, args) {
       const section = _getFlag(args, "--section");
       return readSection(file, section);
     }
+    case "truncate-artifact": {
+      // First positional arg after the subcommand is the artifact name.
+      // Falls back to --name flag for symmetry with other state subcommands.
+      const name = (args && args.length && !args[0].startsWith("--")) ? args[0] : _getFlag(args, "--name");
+      return truncateArtifact(name);
+    }
     case "update":
       return updateState(args);
     case "reset":
@@ -847,7 +892,7 @@ function run(subcommand, args) {
       return pruneState(args.includes("--dry-run"));
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, update, reset, validate, sync, prune`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, truncate-artifact, update, reset, validate, sync, prune`,
       );
   }
 }
@@ -856,6 +901,7 @@ module.exports = {
   run,
   readState,
   readSection,
+  truncateArtifact,
   updateState,
   resetState,
   syncState,

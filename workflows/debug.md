@@ -86,7 +86,10 @@ Read `.devt/state/debug-summary.md`:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=DONE active=false
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
+
+The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` (v0.30.6+) so the next workflow in the same session starts clean. Debugger writes PREFLIGHT entries during investigation; without this, stale entries would falsely satisfy the pre-flight-guard hook for files touched in the next workflow.
 </step>
 
 </process>
