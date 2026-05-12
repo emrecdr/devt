@@ -2091,6 +2091,22 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== autonomous_chain consumer-clear pattern (v0.30.6+) =="
+# next.md MUST clear autonomous_chain BEFORE dispatching /devt:ship so a stale
+# value from a prior session cannot re-trigger ship inappropriately. ship.md
+# MUST also clear at start as a defense-in-depth idempotency safety net for
+# direct invocations. Both clears use `state update autonomous_chain=null`.
+if grep -qE 'state update autonomous_chain=null' "$ROOT/workflows/next.md"; then
+  pass "next.md consumer-clears autonomous_chain before dispatch"
+else
+  fail "next.md does not clear autonomous_chain before /devt:ship dispatch (D-W0-1)"
+fi
+if grep -qE 'state update autonomous_chain=null' "$ROOT/workflows/ship.md"; then
+  pass "ship.md clears autonomous_chain at start (idempotency safety net)"
+else
+  fail "ship.md does not clear autonomous_chain at start (D-W0-1)"
+fi
+
 echo "== Command description budget =="
 # Slash-command descriptions appear in autocomplete and the system prompt's
 # command list — every char costs cold-start tokens. 180 chars is enough for

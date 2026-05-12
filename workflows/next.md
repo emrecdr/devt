@@ -163,7 +163,10 @@ Execute `/devt:workflow` with the original task — the workflow restarts from c
 ```
 Implementation complete and approved. Ready to ship.
 ```
-If state has `autonomous_chain=ship`: execute `/devt:ship` directly (no prompt — autonomous pipeline continuation).
+If state has `autonomous_chain=ship`: consume the chain (clear it BEFORE dispatching so a stale value from a prior session cannot re-trigger ship inappropriately), then execute `/devt:ship` directly (no prompt — autonomous pipeline continuation):
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=null
+```
 Otherwise: Ask "Create PR now?" → if yes, execute `/devt:ship`.
 
 ### No workflow, has impl-summary.md and review.md but verdict unreadable

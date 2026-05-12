@@ -29,6 +29,12 @@ Not applicable — this workflow does not dispatch subagents.
 
 Run these checks in order. If any fails, report the specific issue and STOP.
 
+0. **Consume autonomous_chain** — idempotency safety net: clear the chain flag at the start of ship so that retries (e.g. after a push/PR failure) don't see a stale autonomous-dispatch instruction. The consumer in `/devt:next` already clears before dispatching; this is defense-in-depth for direct invocations:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=null
+   ```
+
 1. **PR CLI available** (based on git provider in `.devt/config.json`):
 
    ```bash
