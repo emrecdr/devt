@@ -19,7 +19,7 @@ Investigate a failed or stuck devt workflow to determine what went wrong, why, a
 Execute the forensics workflow from the referenced file. No arguments required — the investigation reads existing state and artifacts.
 </process>
 
-## Memory integration (v0.20.0+)
+## Memory integration
 
 This command does not auto-fire `/devt:preflight` (it's a meta workflow, not a dev workflow). However:
 - If `.devt/state/preflight-brief.md` exists from a prior workflow, this command may surface it as context (e.g., `/devt:forensics` reads it when investigating failures; `/devt:thread` references it for cross-session work).

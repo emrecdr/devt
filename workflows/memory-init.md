@@ -8,8 +8,8 @@ The memory layer (`.devt/memory/`) is the permanent knowledge graph for architec
 decisions, concepts, flows, and rejected proposals. This workflow is a thin shell over
 the CLI — no agent dispatch, no state mutation beyond the index rebuild itself.
 
-Phase 1 (v0.16.0) covers the data layer only (init, index, query, get, affects, list,
-links, active, rejected-keywords, validate). Phase 2 (v0.17.0) will add curator-gated
+Phase 1 covers the data layer only (init, index, query, get, affects, list,
+links, active, rejected-keywords, validate). Phase 2 will add curator-gated
 promotion subcommands (promote, reject, suggest) that DO mutate markdown files via
 AskUserQuestion approval flow.
 </purpose>

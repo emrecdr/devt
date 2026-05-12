@@ -169,21 +169,21 @@ Store the task description in workflow state for reference by status, forensics,
 
 **Capture `inline_guardrails` for downstream dispatches**: the `init workflow` payload includes `inline_guardrails` — a `{ "<file>.md": "<content>" }` object covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this in working memory across the workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block — those two agents read all three files on every dispatch, so inlining cuts three Read tool calls per dispatch in favor of cache-friendly prefix injection. Other dev agents continue reading from disk.
 
-**Capture `governing_rules` for downstream dispatches (v0.35.0+)**: the same `init workflow` payload also includes `governing_rules` — a `{ content: {<path>: <content>}, paths_included: [...], paths_excluded: [...], rules_hash: "<sha256-16>", total_bytes: N }` shape covering the PROJECT's `CLAUDE.md` plus `.devt/rules/*.md` files (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical). Cap is 96 KB total — files past the cap appear in `paths_excluded` and agents Read them on demand. The `code-reviewer`, `verifier`, and `researcher` dispatches embed this as a `<governing_rules>` block — those three READ-ONLY agents previously reread `CLAUDE.md` + 1-4 rule files on every dispatch (~30-50 KB duplicate reads per workflow). The `rules_hash` lets agents detect mid-workflow drift if a rule file is edited between Brief generation and agent dispatch.
+**Capture `governing_rules` for downstream dispatches**: the same `init workflow` payload also includes `governing_rules` — a `{ content: {<path>: <content>}, paths_included: [...], paths_excluded: [...], rules_hash: "<sha256-16>", total_bytes: N }` shape covering the PROJECT's `CLAUDE.md` plus `.devt/rules/*.md` files (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical). Cap is 96 KB total — files past the cap appear in `paths_excluded` and agents Read them on demand. The `code-reviewer`, `verifier`, and `researcher` dispatches embed this as a `<governing_rules>` block — those three READ-ONLY agents previously reread `CLAUDE.md` + 1-4 rule files on every dispatch (~30-50 KB duplicate reads per workflow). The `rules_hash` lets agents detect mid-workflow drift if a rule file is edited between Brief generation and agent dispatch.
 
-> **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint (v0.30.4+), but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
+> **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint, but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
-**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0, Tier 1 of the Two-Tier Pre-Flight Protocol):
+**Auto-fire Pre-Flight Brief**:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
 
-This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn (Phase 3) or block (Phase 4) edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
+This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn or block edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
 
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
 
@@ -379,7 +379,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=risk_warning 
 
 _Only applies if complexity tier is COMPLEX._
 
-**Arch-Health Pre-Decision** (v0.36.0+, Option 9a): Before dispatching the researcher, evaluate whether to also fire an architecture health scan in parallel. This was historically Step 2.7's job, but firing it alongside the researcher (instead of after the plan) lets the inline plan consume both artifacts in one pass and shaves a serial subagent round-trip off COMPLEX flows.
+**Arch-Health Pre-Decision**: Before dispatching the researcher, evaluate whether to also fire an architecture health scan in parallel. This was historically Step 2.7's job, but firing it alongside the researcher (instead of after the plan) lets the inline plan consume both artifacts in one pass and shaves a serial subagent round-trip off COMPLEX flows.
 
 **Risk signals** (if ANY are true from `.devt/state/scan-results.md`, recommend the scan):
 - Scan results touch 3+ modules or services
@@ -411,7 +411,6 @@ If no risk signals trip, skip the prompt and dispatch only the researcher.
 
 ```
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
-  <task>Research implementation approaches for: {task_description}</task>
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
@@ -428,6 +427,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>Research implementation approaches for: {task_description}</task>
   Write findings to .devt/state/research.md
 ")
 ```
@@ -435,18 +435,18 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 ```
 # Only when arch_health was opted-in above — dispatched in the SAME message as the researcher Task call.
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
-  <task>
-    Run an architecture health scan on the modules affected by this task.
-    Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
-    Classify each finding as: true positive, false positive, or pre-existing.
-    Report only findings relevant to the in-scope modules.
-  </task>
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt/state/scan-results.md for affected modules — the plan does not exist yet, so scope from the scan.</scan_results>
     <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Run an architecture health scan on the modules affected by this task.
+    Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
+    Classify each finding as: true positive, false positive, or pre-existing.
+    Report only findings relevant to the in-scope modules.
+  </task>
   Write findings to .devt/state/arch-health-scan.md
 ")
 ```
@@ -600,11 +600,6 @@ Dispatch the architect agent to review the proposed approach before implementati
 
 ```
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
-  <task>
-    Review the architectural approach for: {task_description}
-    Assess module boundaries, dependency direction, and structural impact.
-    Identify risks before implementation begins.
-  </task>
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt/state/scan-results.md</scan_results>
@@ -613,6 +608,11 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     <arch_health>Read .devt/state/arch-health-scan.md (if exists — from the parallel dispatch in Step 2.5). If present, factor existing violations into your review: flag any planned changes that would worsen existing issues.</arch_health>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review the architectural approach for: {task_description}
+    Assess module boundaries, dependency direction, and structural impact.
+    Identify risks before implementation begins.
+  </task>
   Write findings to .devt/state/arch-review.md
 ")
 ```
@@ -679,13 +679,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 
 When building the programmer's prompt, omit the `<arch_review>` and `<research>` XML elements entirely for SIMPLE/STANDARD — don't include them with "skip" instructions, as that wastes tokens on instructions about what NOT to read.
 
-**Autonomous worktree isolation (v0.31.0+)**: when `workflow.yaml.autonomous_chain` is non-null (i.e. this dispatch is part of an autonomous chain), pass `isolation: "worktree"` to the Task tool so the programmer's edits land in a temporary git worktree. Claude Code auto-cleans the worktree if the agent makes no changes; on success the diff is presented to the user before merge. Prevents an autonomous fix loop from clobbering an unrelated in-flight checkout. For interactive (non-autonomous) invocations, omit `isolation` — direct edits to the user's checkout are the expected behavior.
+**Autonomous worktree isolation**: when `workflow.yaml.autonomous_chain` is non-null (i.e. this dispatch is part of an autonomous chain), pass `isolation: "worktree"` to the Task tool so the programmer's edits land in a temporary git worktree. Claude Code auto-cleans the worktree if the agent makes no changes; on success the diff is presented to the user before merge. Prevents an autonomous fix loop from clobbering an unrelated in-flight checkout. For interactive (non-autonomous) invocations, omit `isolation` — direct edits to the user's checkout are the expected behavior.
 
 Dispatch the programmer agent:
 
 ```
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
-  <task>{task_description}</task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
@@ -722,6 +721,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>{task_description}</task>
   Write summary to .devt/state/impl-summary.md
 ")
 ```
@@ -758,11 +758,6 @@ Dispatch the tester agent:
 
 ```
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
-  <task>
-    Write comprehensive tests for the implementation described in .devt/state/impl-summary.md.
-    Cover happy paths, error paths, edge cases, and boundary conditions.
-    If a spec exists, ensure every test scenario from the spec has a corresponding test.
-  </task>
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
@@ -770,6 +765,11 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Write comprehensive tests for the implementation described in .devt/state/impl-summary.md.
+    Cover happy paths, error paths, edge cases, and boundary conditions.
+    If a spec exists, ensure every test scenario from the spec has a corresponding test.
+  </task>
   Write summary to .devt/state/test-summary.md
 ")
 ```
@@ -839,10 +839,6 @@ Dispatch the code-reviewer agent:
 
 ```
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
-  <task>
-    Review the implementation and tests for quality, correctness, and standards compliance.
-    Review ALL code in scope — do not filter by origin or label findings as pre-existing.
-  </task>
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
@@ -872,6 +868,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review the implementation and tests for quality, correctness, and standards compliance.
+    Review ALL code in scope — do not filter by origin or label findings as pre-existing.
+  </task>
   Write review to .devt/state/review.md
 ")
 ```
@@ -927,19 +927,13 @@ If all three exist, dispatch the verifier agent:
 
 ```
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
-  <task>
-    Verify the implementation achieves the original task goal.
-    Use goal-backward verification: trace from requirements to code.
-    If a spec exists, verify against its user stories, success criteria, and test scenarios — not just the task description.
-  </task>
   <context>
     <workflow_type>dev</workflow_type>
-    <!-- Rubric path is pinned by the v0.36.0+ `rubrics` config key. The init
-         payload exposes `rubrics.dev` (default "dev.v1.md"); override per
-         project in .devt/config.json. The verifier reads this block instead
-         of computing the path from <workflow_type>, so we can ship rubric
-         updates as new files (dev.v2.md) without breaking projects pinned
-         to v1. -->
+    <!-- Rubric path is pinned by the `rubrics` config key. The init payload
+         exposes `rubrics.dev` (default "dev.v1.md"); override per project in
+         .devt/config.json. The verifier reads this block instead of computing
+         the path from <workflow_type>, so we can ship rubric updates as new
+         files (dev.v2.md) without breaking projects pinned to v1. -->
     <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
     <original_task>{task_description}</original_task>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
@@ -958,11 +952,16 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Verify the implementation achieves the original task goal.
+    Use goal-backward verification: trace from requirements to code.
+    If a spec exists, verify against its user stories, success criteria, and test scenarios — not just the task description.
+  </task>
   Write verification to .devt/state/verification.md
 ")
 ```
 
-**Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing — the JSON is authoritative for control flow per the D-16 outcome-grader contract (`references/rubrics/dev.md`):
+**Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing — the JSON is authoritative for control flow per the  outcome-grader contract (`references/rubrics/dev.md`):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar verification.json
@@ -1002,7 +1001,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status
 
 **Vocabulary note** — two `verdict` fields exist with different scopes:
 
-- `workflow.yaml::verdict` — uppercase status vocab (`GAPS_FOUND`, `NEEDS_WORK`, `FAILED`, etc.) — used by `/devt:next` and `/devt:status` for resume routing. Preserved unchanged by D-16.
+- `workflow.yaml::verdict` — uppercase status vocab (`GAPS_FOUND`, `NEEDS_WORK`, `FAILED`, etc.) — used by `/devt:next` and `/devt:status` for resume routing. Preserved unchanged by .
 - `verification.json::verdict` — lowercase grader vocab (`satisfied | needs_revision | failed`) — used by THIS gate-check to decide retry vs. proceed.
 
 The PRUNE branch sets `repair=PRUNE` on state so a future inspector can distinguish "converged with gaps" from "hit the iteration cap" without reading the JSON sidecar.
@@ -1031,11 +1030,6 @@ Dispatch both agents in parallel:
 
 ```
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
-  <task>
-    Update module documentation to reflect the implementation changes.
-    Update existing docs — do not create parallel documentation.
-    Delete documentation for any removed features.
-  </task>
   <context>
     <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
@@ -1043,15 +1037,15 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
     <review>Read .devt/state/review.md</review>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Update module documentation to reflect the implementation changes.
+    Update existing docs — do not create parallel documentation.
+    Delete documentation for any removed features.
+  </task>
   Write summary to .devt/state/docs-summary.md
 ")
 
 Task(subagent_type="devt:retro", model="{models.retro}", prompt="
-  <task>
-    Review all workflow artifacts and extract lessons learned.
-    Apply the 4-filter test: specific, generalizable, actionable, evidence-based.
-    Discard anything that fails any filter.
-  </task>
   <context>
     <files_to_read>
       .devt/state/impl-summary.md,
@@ -1066,6 +1060,11 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
     </files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review all workflow artifacts and extract lessons learned.
+    Apply the 4-filter test: specific, generalizable, actionable, evidence-based.
+    Discard anything that fails any filter.
+  </task>
   Write lessons to .devt/state/lessons.yaml
 ")
 ```
@@ -1113,6 +1112,10 @@ Dispatch the curator agent. Both lessons and architectural candidates flow into 
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+  <context>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
+  </context>
   <task>
     Evaluate two upstream sources and gate every promotion via AskUserQuestion:
     1. LESSONS: drafts in .devt/state/lessons.yaml. accept → write LES-NNNN.md
@@ -1123,10 +1126,6 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
     3. PRUNE: propose status:superseded for contradicted/stale lessons.
     4. After all writes, run `memory index` to refresh the FTS5 index.
   </task>
-  <context>
-    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
-  </context>
   Write summary to .devt/state/curation-summary.md
 ")
 ```
@@ -1201,7 +1200,7 @@ Summarize the workflow results:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
 ```
 
-**Clear ephemeral scratchpad (v0.30.6+).** The `scratchpad.md` PREFLIGHT lines and Deferred sections served their purpose: discovery harvested any `#KNOWLEDGE-CANDIDATE` tags (Step 9), `review_deferred` surfaced any deferred findings to the user (Step 11). Truncate now so the next workflow in this session starts clean and stale PREFLIGHT lines do not falsely satisfy the pre-flight-guard hook for unrelated files:
+**Clear ephemeral scratchpad.** The `scratchpad.md` PREFLIGHT lines and Deferred sections served their purpose: discovery harvested any `#KNOWLEDGE-CANDIDATE` tags (Step 9), `review_deferred` surfaced any deferred findings to the user (Step 11). Truncate now so the next workflow in this session starts clean and stale PREFLIGHT lines do not falsely satisfy the pre-flight-guard hook for unrelated files:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md

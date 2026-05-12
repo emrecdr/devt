@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Post-commit memory validation — lightweight Graphify-disabled fallback.
 #
-# v0.20.0+. Installed by setup.cjs into .git/hooks/post-commit ONLY when
+#. Installed by setup.cjs into .git/hooks/post-commit ONLY when
 # Graphify is NOT enabled. Runs `memory validate` and surfaces stale-path
 # warnings to the developer right after each commit.
 #

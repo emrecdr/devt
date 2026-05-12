@@ -152,20 +152,20 @@ const MISMATCH_REASONS = Object.freeze({
 // workflow routing decisions. The schema is deliberately narrow.
 //
 // Excluded by design:
-//   - YAML/JSON state files (workflow.yaml, handoff.json, arch-baseline.json,
-//     arch-triage.json, lessons.yaml) — validated structurally elsewhere or have
-//     no Status convention.
-//   - Persistent cross-phase artifacts in PERSISTENT_ARTIFACTS (scratchpad.md,
-//     baseline-gates.md, debug-context.md, debug-investigation.md, review-scope.md,
-//     session-report.md, autoskill-proposals.md, scanner-output.txt, scan-delta.md)
-//     — content varies, no status enum.
-//   - Free-form artifacts (plan.md, decisions.md, spec.md, scan-results.md,
-//     continue-here.md, docs-summary.md, autoskill-proposals.md) — no status enum.
+// - YAML/JSON state files (workflow.yaml, handoff.json, arch-baseline.json,
+// arch-triage.json, lessons.yaml) — validated structurally elsewhere or have
+// no Status convention.
+// - Persistent cross-phase artifacts in PERSISTENT_ARTIFACTS (scratchpad.md,
+// baseline-gates.md, debug-context.md, debug-investigation.md, review-scope.md,
+// session-report.md, autoskill-proposals.md, scanner-output.txt, scan-delta.md)
+// — content varies, no status enum.
+// - Free-form artifacts (plan.md, decisions.md, spec.md, scan-results.md,
+// continue-here.md, docs-summary.md, autoskill-proposals.md) — no status enum.
 //
 // TODO (post-1.0): Consider DEVT_VALIDATE_ENFORCE=1 to upgrade shadow warnings
 // into hard failures. Today validateConsistency only warns on mismatch and
 // persists validation_status to workflow.yaml; enforce mode would block writes.
-// JSON sidecars (v0.33.0+) — machine-readable companions to the markdown
+// JSON sidecars — machine-readable companions to the markdown
 // artifacts. Programmer writes impl-summary.json alongside impl-summary.md;
 // workflows read the JSON for routing decisions (status, verdict, requirements
 // coverage) and read the markdown for human-review narrative. JSON is
@@ -173,9 +173,9 @@ const MISMATCH_REASONS = Object.freeze({
 // the human-readable record.
 //
 // Adding a new sidecar requires:
-//   1. An entry in JSON_SIDECAR_SCHEMAS below (whitelisted status + verdict)
-//   2. The owning agent's body documents the JSON shape and writes both files
-//   3. The consumer workflow uses readSidecar() to read the JSON
+// 1. An entry in JSON_SIDECAR_SCHEMAS below (whitelisted status + verdict)
+// 2. The owning agent's body documents the JSON shape and writes both files
+// 3. The consumer workflow uses readSidecar() to read the JSON
 // Verifier verdict vocabularies — kept as shared constants so the JSON sidecar
 // schema and the markdown ARTIFACT_SCHEMA below can't drift independently.
 // `verification.json::verdict` is the workflow-routing enum; `verification.md`
@@ -196,15 +196,15 @@ const JSON_SIDECAR_SCHEMAS = {
   },
 };
 
-// v0.35.0+ (Option 4) — artifacts that ALSO have a JSON sidecar in
+// artifacts that ALSO have a JSON sidecar in
 // JSON_SIDECAR_SCHEMAS no longer appear here. Their status validation goes
 // through the sidecar (machine-readable, single source of truth). The
 // remaining entries are markdown-only artifacts pending future sidecar
 // backfill; extractStatus continues to read them.
 //
-// Removed in v0.35.0:
-//   - "impl-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["impl-summary.json"]
-//   - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
+// Removed:
+// - "impl-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["impl-summary.json"]
+// - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
 const ARTIFACT_SCHEMA = {
   "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
@@ -213,7 +213,7 @@ const ARTIFACT_SCHEMA = {
   "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "curation-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "research.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
-  // Phase 1 (v0.16.0) — Pre-Flight Brief artifact. FRESH = generated this session,
+  // Phase 1 — Pre-Flight Brief artifact. FRESH = generated this session,
   // STALE = brief exists but workflow scope expanded beyond it (caught by Tier-2
   // File Pre-Flight in Phase 3), MISSING = brief never generated for this workflow.
   // (Brief uses its own lifecycle parsers in preflight.cjs; entry retained here
@@ -241,10 +241,10 @@ const PERSISTENT_ARTIFACTS = [
 const VALID_WORKFLOW_TYPES = new Set([
   "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
   "research", "plan", "specify", "clarify",
-  // Memory layer workflow types (v0.16.0+) — see workflows/memory-*.md.
-  // memory_promote: curator promotes ephemeral DEC -> permanent ADR (Phase 2).
-  // memory_reject: curator creates a REJ tombstone with search_keywords (Phase 2).
-  // preflight: standalone Topic Pre-Flight Brief generation (Phase 3).
+  // Memory layer workflow types — see workflows/memory-*.md.
+  // memory_promote: curator promotes ephemeral DEC -> permanent ADR.
+  // memory_reject: curator creates a REJ tombstone with search_keywords.
+  // preflight: standalone Topic Pre-Flight Brief generation.
   // (memory_init / memory_index are CLI-only subcommands — they don't set state and aren't workflow_types.)
   "memory_promote", "memory_reject", "preflight",
   null,
@@ -300,10 +300,9 @@ function readState() {
 }
 
 /**
- * Extract the `## Status` value from an artifact's first 100 lines (v0.32.0+
- * — bumped from 50 after the audit found that long verifier reports with
- * prologue / scope / requirements-coverage sections push the status line
- * past the original cap).
+ * Extract the `## Status` value from an artifact's first 100 lines.
+ * Long verifier reports with prologue / scope / requirements-coverage
+ * sections push the status line further down, so we scan generously.
  *
  * Looks for either `## Status\n\nVALUE` or `## Status: VALUE` patterns.
  * Returns null if no status line is found.
@@ -329,8 +328,8 @@ function extractStatus(content) {
 /**
  * Validate consistency between workflow phases and expected artifacts.
  * Two checks per artifact:
- *   1. Existence: file present for phases passed through
- *   2. Content schema: `## Status` value is in the allowed enum (if defined in ARTIFACT_SCHEMA)
+ * 1. Existence: file present for phases passed through
+ * 2. Content schema: `## Status` value is in the allowed enum (if defined in ARTIFACT_SCHEMA)
  *
  * Returns { consistent: true/false, mismatches: [{phase, expected_artifact, reason, ...}] }
  */
@@ -362,7 +361,7 @@ function validateConsistency(stateOverride = null) {
         mismatches.push({ phase, expected_artifact: artifact, reason: MISMATCH_REASONS.MISSING, exists: false });
         continue;
       }
-      // v0.35.0+ (Option 4) — if a sidecar exists for this markdown artifact,
+      // if a sidecar exists for this markdown artifact,
       // read status from the JSON sidecar (single source of truth). Otherwise
       // fall through to the legacy extractStatus path on markdown.
       const sidecarName = SIDECAR_FOR_MARKDOWN[artifact];
@@ -565,7 +564,7 @@ function updateState(keyValues) {
 
 // Files in .devt/state/ that survive `state reset` / `/devt:cancel-workflow`.
 // Most state is per-workflow ephemeral, but some artifacts span sessions —
-// e.g. deferred.md (v0.29.0+) is the cross-workflow TODO queue and must NOT
+// e.g. deferred.md is the cross-workflow TODO queue and must NOT
 // disappear when the user cancels an unrelated active workflow.
 //
 // Filenames imported from their owning module where possible, so renaming the
@@ -671,10 +670,10 @@ function resetState() {
  * H2; bare `"Foo"` matches the first heading at any level.
  *
  * Returns `{ ok: true, section, content, level }` on hit,
- *         `{ ok: false, reason }` on miss/missing-file.
+ * `{ ok: false, reason }` on miss/missing-file.
  */
 /**
- * Truncate a state-dir artifact to zero bytes atomically (v0.30.6+).
+ * Truncate a state-dir artifact to zero bytes atomically.
  *
  * Used at clean workflow finalize to clear ephemeral scratchpad content
  * — specifically PREFLIGHT lines from the pre-flight-guard hook contract —
@@ -712,7 +711,7 @@ function truncateArtifact(name) {
 }
 
 /**
- * Read a JSON sidecar artifact (v0.33.0+) and validate against its schema.
+ * Read a JSON sidecar artifact and validate against its schema.
  *
  * Sidecars are machine-readable companions to markdown artifacts written by
  * the same agent. Today: only impl-summary.json (programmer). Future: test-
@@ -720,10 +719,10 @@ function truncateArtifact(name) {
  * (verifier). Adding new sidecars = entry in JSON_SIDECAR_SCHEMAS.
  *
  * Returns `{ ok: true, file, data, validation }` where validation is
- *   { valid_status, valid_verdict, valid_agent } — any false fields are
- *   surfaced as schema warnings the caller can decide how to handle.
+ * { valid_status, valid_verdict, valid_agent } — any false fields are
+ * surfaced as schema warnings the caller can decide how to handle.
  * Returns `{ ok: false, reason }` on missing file, parse error, or unknown
- *   sidecar name.
+ * sidecar name.
  */
 function readSidecar(fileName) {
   if (!fileName) return { ok: false, reason: "file name is required" };

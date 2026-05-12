@@ -37,7 +37,7 @@ const CHECKS = {
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
   W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Re-run the phase to regenerate the artifact, fix the offending `## Status` line, or /devt:cancel-workflow to reset" },
   W014: { severity: "warning", message: "next.md missing routing for workflow_type", repairable: false, fix: "Add the missing workflow_type to the routing table in workflows/next.md" },
-  // Memory layer checks (v0.23.0+) — promoted from agent-orchestrated bash to native checks
+  // Memory layer checks — promoted from agent-orchestrated bash to native checks
   // so CI can rely on `health` returning these directly without an agent in the loop.
   MEM_INDEX_STALE: { severity: "warning", message: "Memory FTS5 index is older than the most recent .devt/memory/**/*.md file", repairable: true, fix: "Run /devt:health --repair to rebuild, or: node bin/devt-tools.cjs memory index" },
   MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
@@ -312,7 +312,7 @@ function runChecks(pluginRoot) {
     add("I003");
   }
 
-  // Memory layer checks (v0.23.0+) — native, deterministic, no agent in the loop.
+  // Memory layer checks — native, deterministic, no agent in the loop.
   // Skip cleanly when memory layer hasn't been initialized.
   const memoryDir = path.join(devtDir, "memory");
   if (fs.existsSync(memoryDir)) {

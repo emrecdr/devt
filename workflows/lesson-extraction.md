@@ -85,17 +85,6 @@ Dispatch the retro agent:
 
 ```
 Task(subagent_type="devt:retro", model="{models.retro}", prompt="
-  <task>
-    Review all available workflow artifacts and session context.
-    Extract lessons learned using the 4-filter test:
-    1. Specific — describes a concrete situation and action
-    2. Generalizable — applies beyond this single task
-    3. Actionable — a developer can act on it immediately
-    4. Evidence-based — grounded in what happened, not theory
-
-    Discard any candidate that fails ANY filter.
-    For each surviving lesson, assign importance (1-10), confidence (0.0-1.0), and decay_days.
-  </task>
   <context>
     <files_to_read>
       .devt/state/impl-summary.md (if exists),
@@ -110,6 +99,17 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
     </files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review all available workflow artifacts and session context.
+    Extract lessons learned using the 4-filter test:
+    1. Specific — describes a concrete situation and action
+    2. Generalizable — applies beyond this single task
+    3. Actionable — a developer can act on it immediately
+    4. Evidence-based — grounded in what happened, not theory
+
+    Discard any candidate that fails ANY filter.
+    For each surviving lesson, assign importance (1-10), confidence (0.0-1.0), and decay_days.
+  </task>
   Write lessons to .devt/state/lessons.yaml
 ")
 ```
@@ -122,7 +122,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-Unconditional harvest (CCA v27 §2 promotion pipeline — capture phase). Refreshes `.devt/memory/_suggestions.md` from claude-mem ⚖️/🔵 + `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
+Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from claude-mem ⚖️/🔵 + `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
@@ -138,6 +138,10 @@ Dispatch the curator agent. Both lessons and architectural candidates flow throu
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+  <context>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
+  </context>
   <task>
     Evaluate two upstream sources and gate every promotion via AskUserQuestion:
     1. LESSONS: Incoming retro drafts in .devt/state/lessons.yaml. For each,
@@ -154,10 +158,6 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
        contradicted or stale lessons via AskUserQuestion.
     4. After all writes, run `memory index` to refresh .devt/memory/index.db.
   </task>
-  <context>
-    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
-    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
-  </context>
   Write summary to .devt/state/curation-summary.md
 ")
 ```
@@ -214,7 +214,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 - Final status: **DONE**
   </success_criteria>
 
-## Memory layer integration (v0.28.0+)
+## Memory layer integration
 
 Retro extracts BOTH operational lessons AND architectural candidates. Both flow into the
 **unified** memory layer at `.devt/memory/`:

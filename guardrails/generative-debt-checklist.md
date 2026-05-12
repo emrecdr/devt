@@ -8,7 +8,7 @@ Quality gates at three stages of implementation. Generative debt is the technica
 
 Run these checks before writing any implementation code.
 
-- [ ] **Read the Pre-Flight Brief**: `.devt/state/preflight-brief.md` is FRESH and consulted (Phase 3 v0.18.0). If MISSING and this is a development workflow, run `/devt:preflight "<task>"` first. If STALE, refresh or accept that governance coverage may be incomplete.
+- [ ] **Read the Pre-Flight Brief**: `.devt/state/preflight-brief.md` is FRESH and consulted. If MISSING and this is a development workflow, run `/devt:preflight "<task>"` first. If STALE, refresh or accept that governance coverage may be incomplete.
 - [ ] **Read project rules**: `.devt/rules/` and `CLAUDE.md` loaded and internalized
 - [ ] **Scan codebase**: Searched for existing implementations related to the task
 - [ ] **Verify requirements**: Task specification is clear and unambiguous — no assumptions

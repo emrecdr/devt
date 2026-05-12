@@ -165,11 +165,11 @@ function renderMarkdown(stats, title) {
 }
 
 /**
- * Memory layer event aggregations (v0.20.0+) — counts new ADRs/Concepts/Flows/REJ
+ * Memory layer event aggregations — counts new ADRs/Concepts/Flows/REJ
  * created in the reporting window by reading file mtimes (cheap, no git log diff).
  *
  * Returns { adrs_added, concepts_added, flows_added, rejected_added,
- *           total_active_adrs, briefs_invoked }.
+ * total_active_adrs, briefs_invoked }.
  *
  * "Briefs invoked" is approximated from the existence of `.devt/state/preflight-brief.md`
  * — a precise count would require parsing session logs (see bin/modules/token-report.cjs

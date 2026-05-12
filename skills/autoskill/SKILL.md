@@ -248,7 +248,7 @@ Present `.devt/rules/` changes before skill changes (project context first). Wai
 - **Used by agents**: retro (post-session analysis), curator (playbook-to-skill promotion)
 - **Related skills**: lesson-extraction (captures lessons; autoskill captures system improvements)
 
-## REJ tombstone consultation (v0.17.0+) — HARD RULE
+## REJ tombstone consultation — HARD RULE
 
 Before generating ANY proposal, query the rejected-keywords list:
 `node bin/devt-tools.cjs memory rejected-keywords` (or via the unified MCP query layer

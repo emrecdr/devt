@@ -137,7 +137,7 @@ Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/co
 | `memory.preflight_mode` | Pre-flight guard strictness — `off` / `warn` / `block` | `block` |
 | `graphify.enabled` | Enable AST-anchored code search | `false` (auto-set to `true` if `graphify` is on PATH at first setup) |
 | `scope_mode` | How agents handle unrelated findings — `surgical` (ask first) / `boyscout` (small mechanical fixes ok) | `surgical` |
-| `rubrics.<workflow_type>` | Pinned verifier rubric filename per workflow_type (v0.36.0+). Two workflows dispatch the verifier today: `dev` (default `dev.v1.md`) and `code_review` (default `code_review.v1.md`). Bump to a newer version after testing — devt ships old rubrics alongside new ones, so projects can pin or roll back independently. | `{dev: "dev.v1.md", code_review: "code_review.v1.md"}` |
+| `rubrics.<workflow_type>` | Pinned verifier rubric filename per workflow_type. Two workflows dispatch the verifier today: `dev` (default `dev.v1.md`) and `code_review` (default `code_review.v1.md`). Bump to a newer version after testing — devt ships old rubrics alongside new ones, so projects can pin or roll back independently. | `{dev: "dev.v1.md", code_review: "code_review.v1.md"}` |
 | `git.primary_branch` / `git.contributors` | Used by `/devt:ship` and reports | auto-detected |
 
 For the full schema (model_overrides, agent_skills, multi-root memory, arch_scanner, workflow toggles), see [Configuration reference](#configuration-reference).
@@ -886,7 +886,7 @@ devt/
 - `/devt:health` — surfaces `MEM_INDEX_STALE`, `MEM_PATH_UNREACHABLE`, `MEM_VALIDATE_ERRORS`, `MEM_CONFLICT_HIGH`
 
 **MCP server warnings (`Missing environment variables: CLAUDE_PLUGIN_ROOT`, `unknown command 'mcp'`):**
-- Resolved in v0.30.1–v0.30.3. Update via `/devt:update`.
+- Already fixed in current versions. Update via `/devt:update`.
 
 ### Where to read more
 

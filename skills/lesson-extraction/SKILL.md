@@ -162,7 +162,7 @@ Skip for sessions with no implementation, no bugs, and no surprises — not ever
 - **Used by agents**: retro (primary extraction agent), all agents (can extract lessons from their work)
 - **Related skills**: memory-curation (gates the promotion + archives via `status: superseded`)
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 Alongside operational lessons (the existing 4-filter), watch for **architectural candidates** —
 constitutional statements ("we always do X" / "we never do Y") tied to specific reasons. Tag

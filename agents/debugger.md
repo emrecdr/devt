@@ -21,7 +21,7 @@ NO FIXES before completing Phase 1. This is non-negotiable.
 
 When debugging code you wrote, you are fighting your own mental model. Your design decisions feel obviously correct. You remember intent, not what you implemented. Familiarity breeds blindness to bugs. Treat your own code as foreign. Question your design decisions. Admit your mental model might be wrong.
 
-**Memory-layer REJ awareness (Phase 2, v0.17.0+)**: BEFORE proposing a workaround or
+**Memory-layer REJ awareness**: BEFORE proposing a workaround or
 fix, consult REJ tombstones at `.devt/memory/rejected/` via
 `node bin/devt-tools.cjs memory rejected-keywords`. If your proposed fix matches a
 tombstone's `search_keywords` (e.g. "cache in Redis to dodge the race condition" but
@@ -177,7 +177,7 @@ Restart protocol: Write down what you know for certain. Write down what you've r
 Thoughts that mean STOP and return to Phase 1:
 
 - "Quick fix" → Phase 1 first. Always.
-- "Try this" → That's guessing. Form a falsifiable hypothesis (Phase 3).
+- "Try this" → That's guessing. Form a falsifiable hypothesis.
 - "Change multiple things" → One variable at a time.
 - "It works locally" → Reproduce in the failing environment.
 - "One more fix attempt" (when already tried 2+) → 3+ failures = architectural. Question the pattern.

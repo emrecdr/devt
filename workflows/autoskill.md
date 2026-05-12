@@ -126,7 +126,7 @@ This is an append-only audit trail. Never edit or delete existing entries.
 - Every accepted proposal recorded in `.devt/autoskill-changelog.md`
 </success_criteria>
 
-## Memory layer integration (v0.17.0+) — REJ tombstone consultation (HARD RULE)
+## Memory layer integration — REJ tombstone consultation (HARD RULE)
 
 BEFORE generating any proposal, autoskill MUST query `node bin/devt-tools.cjs memory
 rejected-keywords` and suppress every candidate proposal whose text contains any keyword

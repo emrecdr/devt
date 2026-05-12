@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Deferred-task tracker (v0.29.0).
+ * Deferred-task tracker.
  *
  * Single shared markdown file at `.devt/state/deferred.md` for "things we said
  * we'd do later." Distinct from `.devt/memory/` (permanent canonical knowledge,

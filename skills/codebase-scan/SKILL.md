@@ -147,7 +147,7 @@ Common search patterns for codebase scanning:
 - **Feeds into**: complexity-assessment (scan results inform scope), strategic-analysis (findings shape options)
 - **Used by agents**: programmer, architect, code-reviewer (to verify no duplication was introduced)
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 When `graphify.enabled: true` (config knob in `.devt/config.json`), prefer Graphify queries
 over grep — `node bin/devt-tools.cjs graphify query "<text>"` for symbol lookups, with the

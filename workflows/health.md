@@ -180,7 +180,7 @@ Status: DEGRADED → HEALTHY
 - Invalid config values — requires user decision
 - Version mismatch — requires manual version bump
 
-**Memory-integrity checks (Phase 4 v0.19.0+):**
+**Memory-integrity checks:**
 
 When `.devt/memory/` exists, also run:
 
@@ -195,8 +195,8 @@ Surface as:
 - `MEM_ORPHANS` — docs with no incoming or outgoing links (informational; surface to curator)
 - `MEM_STALE_LINKS` — links pointing to non-existent target docs (warning; ADR may have been retired without updating refs)
 - `MEM_INDEX_STALE` — when `.devt/memory/index.db` is older than the most recent `.devt/memory/**/*.md` mtime (auto-repair: run `memory index`)
-- `MEM_CONFLICT_COUNT` (v0.22.0+) — when `memory.paths` is configured and `memory index` returns `conflict_count > 0`, surface as a warning. Shows which IDs are duplicated across roots and which root won. Not auto-repairable — the user decides whether project-local override is intentional or whether one of the conflicting docs should be removed/renamed.
-- `MEM_PATH_UNREACHABLE` (v0.22.0+) — when `memory.paths` references a directory that doesn't exist on the filesystem, surface as a warning. Common causes: missing `git submodule init`, NFS mount not yet attached, sibling clone moved. Suggest the relevant fix (init the submodule, mount the share, etc.).
+- `MEM_CONFLICT_COUNT` — when `memory.paths` is configured and `memory index` returns `conflict_count > 0`, surface as a warning. Shows which IDs are duplicated across roots and which root won. Not auto-repairable — the user decides whether project-local override is intentional or whether one of the conflicting docs should be removed/renamed.
+- `MEM_PATH_UNREACHABLE` — when `memory.paths` references a directory that doesn't exist on the filesystem, surface as a warning. Common causes: missing `git submodule init`, NFS mount not yet attached, sibling clone moved. Suggest the relevant fix (init the submodule, mount the share, etc.).
 
 </repair_actions>
 

@@ -4,30 +4,30 @@
 /**
  * devt-memory-mcp — vendored MCP server (stdio transport, JSON-RPC 2.0).
  *
- * Phase 3 (v0.18.0). Exposes read-only access to the unified memory index
+ * Phase 3. Exposes read-only access to the unified memory index
  * (`.devt/memory/index.db`) via Model Context Protocol tools. Designed for
  * agents to query governing rules BEFORE proposing edits.
  *
  * Hard guarantees:
- *   1. SQLite opened with `readOnly: true` — even malicious helpers cannot mutate.
- *   2. The escape-hatch `query_index(sql)` tool rejects any non-SELECT statement.
- *   3. Multi-statement payloads are rejected (defends against semicolon injection).
- *   4. PRAGMA writes, ATTACH, and any DML/DDL are caught by the SELECT-only check
- *      AND blocked by readOnly mode at the SQLite layer.
+ * 1. SQLite opened with `readOnly: true` — even malicious helpers cannot mutate.
+ * 2. The escape-hatch `query_index(sql)` tool rejects any non-SELECT statement.
+ * 3. Multi-statement payloads are rejected (defends against semicolon injection).
+ * 4. PRAGMA writes, ATTACH, and any DML/DDL are caught by the SELECT-only check
+ * AND blocked by readOnly mode at the SQLite layer.
  *
  * Zero external dependencies — implements the subset of MCP we need by hand.
  *
  * Tools exposed:
- *   - get_context_for_path(path)      → governing ADRs/CONs/FLOWs for a file
- *   - get_context_for_symbol(symbol)  → docs whose affects_symbols includes <symbol>
- *   - query_fts(terms, limit?)        → FTS5 unified search across all doc_class values
- *   - get_doc(id)                     → fetch a single doc with affects/links/keywords
- *   - list_active(domain?)            → enumerate status:active docs
- *   - list_rejected_keywords()        → REJ tombstones with their search_keywords
- *   - list_links(doc_id, depth?)      → transitive link expansion (depth-1 default)
- *   - preflight(task)                 → run lanes A-F + blast radius; same as CLI
- *   - blast_radius(symbols)           → Graphify-derived blast radius (degraded payload when disabled)
- *   - query_index(sql)                → SELECT-only escape hatch
+ * - get_context_for_path(path) → governing ADRs/CONs/FLOWs for a file
+ * - get_context_for_symbol(symbol) → docs whose affects_symbols includes <symbol>
+ * - query_fts(terms, limit?) → FTS5 unified search across all doc_class values
+ * - get_doc(id) → fetch a single doc with affects/links/keywords
+ * - list_active(domain?) → enumerate status:active docs
+ * - list_rejected_keywords() → REJ tombstones with their search_keywords
+ * - list_links(doc_id, depth?) → transitive link expansion (depth-1 default)
+ * - preflight(task) → run lanes A-F + blast radius; same as CLI
+ * - blast_radius(symbols) → Graphify-derived blast radius (degraded payload when disabled)
+ * - query_index(sql) → SELECT-only escape hatch
  */
 
 const path = require("path");
@@ -73,10 +73,10 @@ function withReadOnly(fn) {
 // SELECT-only validator for the raw query_index escape hatch.
 //
 // Strategy:
-//  1. Strip line comments (-- ...) and block comments (/* ... */)
-//  2. Reject any payload containing more than one statement (semicolon outside string)
-//  3. Reject any leading keyword that isn't SELECT or WITH (CTE) or EXPLAIN
-//  4. Block-list dangerous tokens (PRAGMA, ATTACH, DETACH) anywhere in payload
+// 1. Strip line comments (-- ...) and block comments (/* ... */)
+// 2. Reject any payload containing more than one statement (semicolon outside string)
+// 3. Reject any leading keyword that isn't SELECT or WITH (CTE) or EXPLAIN
+// 4. Block-list dangerous tokens (PRAGMA, ATTACH, DETACH) anywhere in payload
 //
 // Because the DB is opened readOnly, even a missed token cannot mutate state.
 // This validator is defense-in-depth, not the only line of defense.
@@ -194,7 +194,7 @@ const TOOLS = {
     },
   },
 
-  // Pre-filter aggregations (v0.35.0+, Option 6) — return aggregates instead of full
+  // Pre-filter aggregations — return aggregates instead of full
   // FTS rows so agents that only need a count, a top-N preview, or a domain breakdown
   // don't pay the per-row payload cost (each full row is ~600-1500 bytes; aggregates
   // are typically <500 bytes total).
@@ -244,7 +244,7 @@ const TOOLS = {
     },
   },
 
-  // Write surface (v0.35.0+, Option 2) — only exposed when DEVT_MCP_ALLOW_WRITES=1
+  // Write surface — only exposed when DEVT_MCP_ALLOW_WRITES=1
   // is set in the MCP server's process environment. The curator agent's
   // workflow dispatch sets this flag; all other dispatches see a read-only
   // tool surface. listTools() filters write tools out when the flag is unset,
@@ -422,7 +422,7 @@ function listTools() {
 }
 
 // ----------------------------------------------------------------------------
-// Telemetry — tool-call tracing (v0.21.0+)
+// Telemetry — tool-call tracing
 //
 // Each tools/call invocation appends one JSONL line to .devt/memory/_mcp-trace.jsonl
 // (gitignored). The line records: timestamp, tool name, args size + sha256 fingerprint

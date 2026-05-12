@@ -314,7 +314,7 @@ Checks: config valid, state directory exists, hooks registered, required files p
 
 The memory layer is the permanent knowledge surface — distinct from per-workflow ephemeral state (`.devt/state/decisions.md`). It holds **all five doc types** under one canonical store: ADR-xxx (decisions), CON-xxx (concepts/domain models), FLOW-xxx (business processes), REJ-xxx (rejected ideas / tombstones), and LES-xxx (operational lessons — "when X happens, do Y"). Lessons live in `.devt/memory/lessons/` alongside the architectural docs and are FTS5-indexed in the same `index.db`.
 
-Phase 1 (v0.16.0) ships the data layer — file format, FTS5 unified index, query CLI. Agent integrations (Topic Pre-Flight Brief auto-fired from dev workflows, curator-gated promotion of session DECs to permanent ADRs, Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence, claude-mem ⚖️ decision and 🔵 discovery tag harvest, vendored MCP query layer for read-only agent access, PreToolUse pre-flight enforcement) land in Phases 2-4 (v0.17.0 → v0.19.0).
+Phase 1 ships the data layer — file format, FTS5 unified index, query CLI. Agent integrations (Topic Pre-Flight Brief auto-fired from dev workflows, curator-gated promotion of session DECs to permanent ADRs, Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence, claude-mem ⚖️ decision and 🔵 discovery tag harvest, vendored MCP query layer for read-only agent access, PreToolUse pre-flight enforcement) land in Phases 2-4.
 
 ```bash
 /devt:memory init                       # scaffold .devt/memory/{decisions,concepts,flows,rejected}/ + first FTS5 index
@@ -369,7 +369,7 @@ REJ docs additionally carry `reason` (user_preference | performance | security |
 
 Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between workflows) and `/devt:retro` (operational lessons to playbook). Use `/devt:memory` for **permanent architectural rules** that should govern future agent decisions across sessions.
 
-**Phase 5+ subcommands** (v0.20.0+):
+**Phase 5+ subcommands**:
 
 ```bash
 /devt:memory export [--out=PATH] [--include=decision,concept,flow,rejected] [--all-roots]
@@ -383,9 +383,9 @@ Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between work
                                         # (curator-gated; never auto-writes permanent files)
 ```
 
-**Multi-root memory** (v0.22.0+): set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones — `["../engineering-adrs", ".devt/memory"]`. Project-local is always appended last (highest precedence — last-wins). `memory list`/`get` expose `source_root` for provenance. `memory index` returns `conflicts[]` + `conflict_count` so collisions are explicit. See `docs/MEMORY.md` for the full guide.
+**Multi-root memory**: set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones — `["../engineering-adrs", ".devt/memory"]`. Project-local is always appended last (highest precedence — last-wins). `memory list`/`get` expose `source_root` for provenance. `memory index` returns `conflicts[]` + `conflict_count` so collisions are explicit. See `docs/MEMORY.md` for the full guide.
 
-### `/devt:preflight` -- Topic Pre-Flight Brief (v0.18.0+)
+### `/devt:preflight` -- Topic Pre-Flight Brief
 
 ```bash
 /devt:preflight "<task description>"
@@ -393,7 +393,7 @@ Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between work
 
 Generates `.devt/state/preflight-brief.md` — a single document listing every governing ADR/Concept/Flow, all REJ tombstones, related operational lessons, and (with Graphify enabled) blast radius for the task. Auto-fired by every dev workflow at context_init; standalone invocation also supported.
 
-The Brief drives Tier 1 of the Two-Tier Pre-Flight Protocol. Tier 2 = `hooks/pre-flight-guard.sh` (PreToolUse on Edit/Write) checks `.devt/state/scratchpad.md` for a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line written by the agent. Behavior governed by `memory.preflight_mode`: `off` no-op | `warn` advisory | `block` denies (default v0.19.0+).
+The Brief drives Tier 1 of the Two-Tier Pre-Flight Protocol. Tier 2 = `hooks/pre-flight-guard.sh` (PreToolUse on Edit/Write) checks `.devt/state/scratchpad.md` for a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line written by the agent. Behavior governed by `memory.preflight_mode`: `off` no-op | `warn` advisory | `block` denies.
 
 Subcommands:
 
@@ -532,10 +532,10 @@ These are called automatically by workflows. You can invoke them directly for fi
 | `/devt:autoskill` | Propose plugin improvements from session patterns | Standalone or workflow autoskill step |
 | `/devt:weekly-report` | Git-based contribution report | Standalone utility |
 | `/devt:thread` | Cross-session context threads | Standalone utility |
-| `/devt:memory` | ADR/Concept/Flow/REJ permanent layer (v0.16.0+) | All dev agents at context_loading; curator at promote/reject |
-| `/devt:preflight` | Topic Pre-Flight Brief generator (v0.18.0+) | Auto-fired by every dev workflow at context_init |
+| `/devt:memory` | ADR/Concept/Flow/REJ permanent layer | All dev agents at context_loading; curator at promote/reject |
+| `/devt:preflight` | Topic Pre-Flight Brief generator | Auto-fired by every dev workflow at context_init |
 
-### Telemetry CLI (v0.20.0+ / v0.21.0+)
+### Telemetry CLI
 
 These subcommands have no slash-command alias — they are read-only diagnostics:
 
@@ -568,7 +568,7 @@ plan        --> plan.md          --> programmer, architect, verifier
 programmer  --> impl-summary.md  --> tester, reviewer, verifier, docs-writer, retro
 tester      --> test-summary.md  --> reviewer, verifier, docs-writer, retro
 reviewer    --> review.md        --> programmer (if NEEDS_WORK in dev), verifier, retro
-verifier    --> verification.md  --> programmer (if GAPS_FOUND in dev) | reviewer (if needs_revision in code_review, v0.36.0+)
+verifier    --> verification.md  --> programmer (if GAPS_FOUND in dev) | reviewer
 scan        --> scan-results.md  --> programmer, architect
 baseline    --> baseline-gates.md --> verifier (regression detection)
 architect   --> arch-review.md   --> programmer

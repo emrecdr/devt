@@ -165,7 +165,7 @@ flush_batch() {
 
 while IFS= read -r line; do
   # Detect start of bash/sh code block. Optional `parallel` info-string after
-  # the language: ```bash parallel  →  block joins the next concurrent batch.
+  # the language: ```bash parallel → block joins the next concurrent batch.
   if [[ "$IN_BLOCK" == false ]]; then
     if echo "$line" | grep -qE '^\s*```(bash|sh)\s+parallel\s*$'; then
       IN_BLOCK=true

@@ -19,8 +19,8 @@ jobs:
       matrix:
         node: ['22', '24']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - name: CLI smoke tests
@@ -29,7 +29,7 @@ jobs:
   manifest-version-coherence:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify VERSION matches plugin.json
         run: |
           VFILE=$(cat VERSION | tr -d '[:space:]')
@@ -50,8 +50,8 @@ jobs:
   workflow-type-registry:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - name: Verify VALID_WORKFLOW_TYPES has resume routing in next.md AND status.md

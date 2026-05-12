@@ -69,7 +69,7 @@ When `verdict=needs_revision`, `verification.json` MUST include a `revisions[]` 
 
 Required fields per entry: `id`, `axis`, `gap`. Recommended: `criterion`, `evidence`. The orchestrator passes `revisions[]` to the next code-reviewer dispatch as `<reviewer_feedback>`. The reviewer addresses each entry by id; the next verifier pass reports whether each was resolved.
 
-`id` convention: `<axis-letter>-<seq>` (e.g. `A-1`, `B-3`, `D-2`). This keeps the namespace separate from the `dev` rubric's `AC-*` style so cross-rubric collisions are impossible at a glance.
+`id` convention: `<axis-letter>-<seq>`. This keeps the namespace separate from the `dev` rubric's `AC-*` style so cross-rubric collisions are impossible at a glance.
 
 ## When to choose `failed` vs `needs_revision`
 

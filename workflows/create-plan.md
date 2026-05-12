@@ -36,7 +36,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
 
-The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the planning subject. Output goes to `.devt/state/preflight-brief.md`. The architect/planner agent reads it before drafting plan.md so the plan honors all governing ADRs and acknowledges any REJ tombstones in scope. Skip silently on failure (legacy fallback to `.devt/rules/` only).
+The third call auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the planning subject. Output goes to `.devt/state/preflight-brief.md`. The architect/planner agent reads it before drafting plan.md so the plan honors all governing ADRs and acknowledges any REJ tombstones in scope. Skip silently on failure (legacy fallback to `.devt/rules/` only).
 
 Read `.devt/rules/` for project conventions:
 
@@ -79,7 +79,6 @@ Check if research is needed before planning:
 
    ```
    Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
-     <task>Research implementation approaches for: {task_description}</task>
      <context>
        <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md</files_to_read>
        <spec>Read .devt/state/spec.md (if exists)</spec>
@@ -87,6 +86,7 @@ Check if research is needed before planning:
        <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
        <agent_skills>{injected from .devt/config.json if available}</agent_skills>
      </context>
+     <task>Research implementation approaches for: {task_description}</task>
      Write findings to .devt/state/research.md
    ")
    ```
@@ -237,11 +237,11 @@ Dispatch the architect agent for structural review:
 
 ```
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
-  <task>Review this implementation plan for architectural soundness.</task>
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/state/plan.md</files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>Review this implementation plan for architectural soundness.</task>
   Write review to .devt/state/arch-review.md
 ")
 ```

@@ -7,7 +7,7 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# State-read cache (v0.32.0+) keyed by workflow.yaml mtime. Hook fires on every
+# State-read cache keyed by workflow.yaml mtime. Hook fires on every
 # user prompt; the prior unconditional `node devt-tools.cjs state read` paid
 # ~30-60ms cold-start per prompt. Cache invalidates automatically because
 # state.cjs::updateState rewrites workflow.yaml on every state change, and we

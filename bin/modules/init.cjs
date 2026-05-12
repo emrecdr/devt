@@ -26,11 +26,11 @@ const REQUIRED_DEV_RULES = [
 const MAX_TASK_LENGTH = 50_000;
 
 /**
- * Plugin-shipped guardrails inlined into the init payload (v0.32.0+).
+ * Plugin-shipped guardrails inlined into the init payload.
  *
  * These three files are universal across all dev agents (programmer L34-37
  * lists them in context_loading), stable across plugin versions, and total
- * ~27KB at v0.32.0. Inlining them in `init.cjs` eliminates 3 Read tool calls
+ * ~27KB at. Inlining them in `init.cjs` eliminates 3 Read tool calls
  * per agent dispatch — STANDARD workflow saves ~12 Reads (4 agents × 3 files).
  *
  * Cap at 64KB total to prevent runaway-template scenarios. On overflow,
@@ -67,7 +67,7 @@ function loadInlineGuardrails(pluginRoot) {
 }
 
 /**
- * Project-shipped governing rules inlined into the init payload (v0.35.0+).
+ * Project-shipped governing rules inlined into the init payload.
  *
  * Same pattern as `loadInlineGuardrails` but pulls from the PROJECT (CLAUDE.md +
  * .devt/rules/*.md), not the plugin. Consumed by 3 reading agents
@@ -75,8 +75,8 @@ function loadInlineGuardrails(pluginRoot) {
  * tag block. Agents prefer inline content over on-disk Reads when present.
  *
  * Priority order (always-included first, then alphabetical):
- *   CLAUDE.md, coding-standards.md, architecture.md, quality-gates.md,
- *   review-checklist.md, then any remaining .devt/rules/*.md alphabetically.
+ * CLAUDE.md, coding-standards.md, architecture.md, quality-gates.md,
+ * review-checklist.md, then any remaining .devt/rules/*.md alphabetically.
  *
  * Cap at 96KB total — generous enough for CLAUDE.md (~27KB) + 5 rule files
  * (~8KB each). Files beyond cap are NOT included; their paths surface in
@@ -170,12 +170,12 @@ function loadGoverningRules(projectRoot) {
  * The file lives at `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` and ships with
  * the plugin. Structure (only the `agents` block is consumed today):
  *
- *   agents:
- *     <agent_type>:
- *       skills:
- *         - <skill-name>
- *         - <skill-name>
- *       reads: [ optional, ignored here ]
+ * agents:
+ * <agent_type>:
+ * skills:
+ * - <skill-name>
+ * - <skill-name>
+ * reads: [ optional, ignored here ]
  *
  * Zero-deps parser scoped to this exact shape. Other YAML files in devt go
  * through `state.cjs::parseSimpleYaml` (flat-only) or are JSON. If
@@ -232,9 +232,9 @@ function parseSkillIndex(pluginRoot) {
  * Resolve which skills the workflow orchestrator should inject as
  * `<agent_skills>` for a given agent type. Two sources, last-wins:
  *
- *   1. `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml`'s `agents.<type>.skills` —
- *      ships with devt, single source of truth for defaults.
- *   2. `.devt/config.json`'s `agent_skills.<type>` — per-project override.
+ * 1. `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml`'s `agents.<type>.skills` —
+ * ships with devt, single source of truth for defaults.
+ * 2. `.devt/config.json`'s `agent_skills.<type>` — per-project override.
  *
  * Returns `{ <agent_type>: [...skill-names...], ... }`. Agents absent from
  * BOTH sources do not appear in the result — callers fall back to "no
@@ -364,7 +364,7 @@ function initWorkflow(task, pluginRoot) {
         total_bytes: r.total_bytes,
       };
     })(),
-    // Pinned rubric filenames per workflow_type (v0.36.0+). Surfaced at the
+    // Pinned rubric filenames per workflow_type. Surfaced at the
     // top level so dispatch templates use the flat `{rubrics.dev}` namespace
     // rather than nested `{config.rubrics.dev}` access. Defaults to
     // `dev.v1.md`; override in `.devt/config.json` to bump version.

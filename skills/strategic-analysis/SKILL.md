@@ -155,7 +155,7 @@ After recommending, ask: "Would I bet my own project on this recommendation?" If
 - **Used by agents**: architect (primary), workflow orchestrator (for workflow planning)
 - **Related skills**: code-review-guide (to evaluate the implemented choice)
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 Trade-off tables now cite governing ADRs and REJ tombstones — `node bin/devt-tools.cjs
 memory query <topic>` surfaces relevant docs. When an option matches a REJ tombstone,

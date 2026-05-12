@@ -30,7 +30,7 @@ explicit user approval per `skills/memory-curation/SKILL.md`.
 </available_agent_types>
 
 <agent_skill_injection>
-Curator's `skills:` includes `devt:memory-curation` (Phase 2). The skill body drives the
+Curator's `skills:` includes `devt:memory-curation`. The skill body drives the
 AskUserQuestion approval flow.
 </agent_skill_injection>
 
@@ -68,6 +68,16 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+<context>
+<files_to_read>
+- .devt/memory/_suggestions.md (the discovery report)
+- .devt/state/decisions.md (DEC-xxx source)
+- .devt/state/lessons.yaml (LES draft source from retro, if present)
+- .devt/memory/lessons/*.md (existing LES-NNNN entries for cross-checking)
+- skills/memory-curation/SKILL.md (the protocol body — already preloaded via your skills frontmatter)
+- templates/memory/{ADR,CON,FLOW,REJ,LES}-template.md (use as scaffolding for any approved write)
+</files_to_read>
+</context>
 <task>
 Run the memory-curation flow on candidates from .devt/memory/_suggestions.md
 ${TARGET_DEC_ID ? `(focus on candidate matching ${TARGET_DEC_ID})` : ""}.
@@ -84,16 +94,6 @@ CRITICAL HARD INVARIANTS — see skills/memory-curation/SKILL.md:
 4. No bulk auto-approve — present one AskUserQuestion per candidate (UI can render in sequence)
 5. Always run `node bin/devt-tools.cjs memory index` after each markdown write
 </task>
-<context>
-<files_to_read>
-- .devt/memory/_suggestions.md (the discovery report)
-- .devt/state/decisions.md (DEC-xxx source)
-- .devt/state/lessons.yaml (LES draft source from retro, if present)
-- .devt/memory/lessons/*.md (existing LES-NNNN entries for cross-checking)
-- skills/memory-curation/SKILL.md (the protocol body — already preloaded via your skills frontmatter)
-- templates/memory/{ADR,CON,FLOW,REJ,LES}-template.md (use as scaffolding for any approved write)
-</files_to_read>
-</context>
 Write summary to .devt/state/curation-summary.md (status: DONE)
 Each approved promotion produces one .devt/memory/{decisions,concepts,flows,rejected,lessons}/<NEW-ID>-<slug>.md file.
 ")

@@ -38,4 +38,4 @@
 <!-- List patterns that are explicitly forbidden. -->
 <!-- Example: No inline imports, no god classes, no magic numbers -->
 
-> **ADR override note** (v0.20.0+): if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.
+> **ADR override note**: if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Pre-flight guard — PreToolUse hook on Edit/Write/NotebookEdit.
 #
-# Phase 3 (v0.18.0). Checks .devt/state/scratchpad.md for a PREFLIGHT line
+# Phase 3. Checks .devt/state/scratchpad.md for a PREFLIGHT line
 # covering the target file path. Behavior governed by memory.preflight_mode:
-#   off   — no-op (skip entirely)
-#   warn  — Phase 3 default — emit stderr advisory, do NOT block
-#   block — Phase 4 default — deny the tool call with a checklist message
+# off — no-op (skip entirely)
+# warn — Phase 3 default — emit stderr advisory, do NOT block
+# block — Phase 4 default — deny the tool call with a checklist message
 #
 # The scratchpad PREFLIGHT line format (per skills/memory-pre-flight/SKILL.md):
-#   PREFLIGHT <ISO-timestamp> <action> <file_path> :: <governing IDs or notes>
+# PREFLIGHT <ISO-timestamp> <action> <file_path> :: <governing IDs or notes>
 #
 # Hook exits with:
-#   0 + JSON output  → tool call proceeds (default warn mode)
-#   {decision: "deny"} JSON in stdout → blocks the call (block mode only)
+# 0 + JSON output → tool call proceeds (default warn mode)
+# {decision: "deny"} JSON in stdout → blocks the call (block mode only)
 #
 # Reads JSON hook input from stdin. Robust to malformed input — fails-open
 # (returns 0) on any parse error, never blocks legitimate work due to a hook bug.
@@ -82,11 +82,9 @@ node -e "
     // Build the advisory / block message
     const reason = 'Pre-Flight Protocol: no PREFLIGHT line found in .devt/state/scratchpad.md for \"' + fp + '\". Before editing, append a line like \"PREFLIGHT <ISO-timestamp> edit ' + fp + ' :: <governing ADR/CON/FLOW ids or \\'no governance found\\'>\" — see skills/memory-pre-flight/SKILL.md. If this file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" or perform the 5-Lane File Pre-Flight (memory affects + memory query + memory active).';
 
-    // Forensic logging (v0.33.0+): append every deny/warn as one JSON record
-    // per line via bin/modules/logger.cjs::appendJsonl. JSONL replaces the
-    // v0.30.5 plain-text format — unified parsing surface for /devt:forensics
-    // and any future log reader. Survives state reset via the v0.30.4 archive
-    // ring buffer. Hook stays stateless — log is append-only side-effect.
+    // Forensic logging: append every deny/warn as one JSON record per line
+    // via bin/modules/logger.cjs::appendJsonl. Survives state reset via the
+    // archive ring buffer. Hook stays stateless — log is append-only side-effect.
     // Wrapped in try-catch so log failure never blocks the deny path.
     try {
       // CLAUDE_PLUGIN_ROOT is set by Claude Code when the plugin loads; the

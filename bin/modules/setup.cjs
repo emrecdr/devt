@@ -8,12 +8,12 @@
  * This module handles the file operations.
  *
  * All artifacts go under .devt/ in the project root:
- *   .devt/config.json          — project configuration
- *   .devt/rules/               — coding standards, testing patterns, etc.
- *   .devt/state/               — workflow state (gitignored)
- *   .devt/memory/lessons/      — operational lessons (LES-NNNN frontmatter docs)
- *   .devt/memory/{decisions,concepts,flows,rejected}/ — architectural docs
- *   .devt/memory/index.db      — unified FTS5 index (regenerable from .md files)
+ * .devt/config.json — project configuration
+ * .devt/rules/ — coding standards, testing patterns, etc.
+ * .devt/state/ — workflow state (gitignored)
+ * .devt/memory/lessons/ — operational lessons (LES-NNNN frontmatter docs)
+ * .devt/memory/{decisions,concepts,flows,rejected}/ — architectural docs
+ * .devt/memory/index.db — unified FTS5 index (regenerable from .md files)
  */
 
 const fs = require("fs");
@@ -109,10 +109,10 @@ function detectGitRemote(projectRoot) {
  * Returns { value, detection_source, low_confidence? }.
  *
  * Chain order:
- *   1. origin/HEAD symref     — canonical answer (set on `git clone`, sometimes stale)
- *   2. init.defaultBranch     — explicit user/local config
- *   3. Common-name heuristic  — `development`, `develop`, `main`, `master`, `trunk` if present on origin
- *   4. Current branch         — last-resort, marked low_confidence (callers should escalate)
+ * 1. origin/HEAD symref — canonical answer (set on `git clone`, sometimes stale)
+ * 2. init.defaultBranch — explicit user/local config
+ * 3. Common-name heuristic — `development`, `develop`, `main`, `master`, `trunk` if present on origin
+ * 4. Current branch — last-resort, marked low_confidence (callers should escalate)
  */
 function detectPrimaryBranch(projectRoot, execFileSync) {
   const tryCmd = (args) => {
@@ -237,7 +237,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   }
 
   // Create .devt/memory/{decisions,concepts,flows,rejected}/ directories.
-  // Phase 1 (v0.16.0): scaffolding only — no template seeding. Project owners
+  // Phase 1: scaffolding only — no template seeding. Project owners
   // create their first ADR via /devt:memory promote or by hand.
   const memoryDir = path.join(devtDir, "memory");
   for (const subdir of ["decisions", "concepts", "flows", "rejected", "lessons"]) {
@@ -295,29 +295,29 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.warnings.push(".devt/config.json already exists — skipping");
   }
 
-  // Gitignore manifest (Phase 3 v0.18.0):
-  //   ALWAYS-GITIGNORE — derived/ephemeral state, regenerable from canonical sources:
-  //     .devt/state/                  (per-workflow scratch + preflight-brief.md)
-  //     .claude/agent-memory/         (per-agent persistent memory)
-  //     .devt/memory/index.db         (FTS5 index — rebuild from .md)
-  //     graphify-out/cache/           (Graphify ephemeral cache)
-  //     graphify-out/manifest.json    (Graphify per-machine manifest)
-  //     .claude-mem/mem.db            (claude-mem session DB — local only)
+  // Gitignore manifest:
+  // ALWAYS-GITIGNORE — derived/ephemeral state, regenerable from canonical sources:
+  // .devt/state/ (per-workflow scratch + preflight-brief.md)
+  // .claude/agent-memory/ (per-agent persistent memory)
+  // .devt/memory/index.db (FTS5 index — rebuild from .md)
+  // graphify-out/cache/ (Graphify ephemeral cache)
+  // graphify-out/manifest.json (Graphify per-machine manifest)
+  // .claude-mem/mem.db (claude-mem session DB — local only)
   //
-  //   ALWAYS-COMMIT (NOT in this list — kept by default):
-  //     .devt/memory/{decisions,concepts,flows,rejected}/*.md   team-shared truth
-  //     graphify-out/graph.json                                 team-shared graph
-  //     GRAPH_REPORT.md                                         curated overview
+  // ALWAYS-COMMIT (NOT in this list — kept by default):
+  // .devt/memory/{decisions,concepts,flows,rejected}/*.md team-shared truth
+  // graphify-out/graph.json team-shared graph
+  // GRAPH_REPORT.md curated overview
   //
-  //   USER-DECIDES (commented hints — not auto-added):
-  //     .devt/memory/_suggestions.md  (some teams commit for review history)
+  // USER-DECIDES (commented hints — not auto-added):
+  // .devt/memory/_suggestions.md (some teams commit for review history)
   const gitignorePath = path.join(projectRoot, ".gitignore");
   const requiredIgnores = [
     { path: ".devt/state/", header: "# devt workflow state" },
     { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
     { path: ".devt/memory/index.db", header: "# devt memory FTS5 index (regenerable from markdown)" },
     { path: ".devt/memory/.auto-index-stamp", header: "# devt memory auto-index debounce marker (transient)" },
-    { path: ".devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace (v0.21.0+, append-only telemetry; safe to delete)" },
+    { path: ".devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace" },
     { path: ".devt/memory/export-*.json", header: "# devt memory export bundles (transient — share via explicit channel)" },
     { path: "graphify-out/cache/", header: "# Graphify ephemeral cache" },
     { path: "graphify-out/manifest.json", header: "# Graphify per-machine manifest" },
@@ -353,15 +353,15 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   const mcpJsonPath = path.join(projectRoot, ".mcp.json");
   const mcpHints = [];
   const probedServers = {};
-  // Graphify MCP scaffolding (v0.7.10+ canonical invocation): the upstream `graphify mcp`
+  // Graphify MCP scaffolding: the upstream `graphify mcp`
   // subcommand was removed; the MCP server is now `python -m graphify.serve <graph.json>`.
   // Two launch paths, probed in priority order:
-  //   1. `uv` on PATH + `graphify` on PATH — preferred. Uses `uv run --with graphifyy --with mcp`
-  //      per graphify's own `__main__._antigravity_install` template; resolves dependencies
-  //      lazily and works regardless of how graphifyy was installed.
-  //   2. `python3 -c "import graphify, mcp"` succeeds — pip / pipx fallback. Direct
-  //      `python3 -m graphify.serve` works when graphifyy was installed into the system
-  //      Python via `pip install graphifyy[mcp]` (no `uv` dependency).
+  // 1. `uv` on PATH + `graphify` on PATH — preferred. Uses `uv run --with graphifyy --with mcp`
+  // per graphify's own `__main__._antigravity_install` template; resolves dependencies
+  // lazily and works regardless of how graphifyy was installed.
+  // 2. `python3 -c "import graphify, mcp"` succeeds — pip / pipx fallback. Direct
+  // `python3 -m graphify.serve` works when graphifyy was installed into the system
+  // Python via `pip install graphifyy[mcp]` (no `uv` dependency).
   // If neither path resolves but the binary is on PATH, emit an actionable hint pointing at
   // the path most likely to fix the user's setup.
   function probePythonGraphifyMcp(pythonCmd = "python3", timeoutMs = 2000) {
@@ -434,14 +434,14 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     results.warnings.push(...mcpHints);
   }
 
-  // Post-commit hook installation (Phase 5 v0.20.0+).
+  // Post-commit hook installation.
   // Two paths based on whether Graphify is enabled:
-  //   GRAPHIFY ENABLED + binary present:
-  //     We do NOT install our hook. We surface a hint suggesting `graphify hook install`,
-  //     which registers Graphify's own post-commit hook (covers stale symbols + graph rebuild).
-  //   GRAPHIFY DISABLED OR ABSENT:
-  //     Install hooks/post-commit-validate.sh as the project's .git/hooks/post-commit.
-  //     Lightweight: runs `memory validate` after each commit, surfaces stale-path warnings.
+  // GRAPHIFY ENABLED + binary present:
+  // We do NOT install our hook. We surface a hint suggesting `graphify hook install`,
+  // which registers Graphify's own post-commit hook (covers stale symbols + graph rebuild).
+  // GRAPHIFY DISABLED OR ABSENT:
+  // Install hooks/post-commit-validate.sh as the project's .git/hooks/post-commit.
+  // Lightweight: runs `memory validate` after each commit, surfaces stale-path warnings.
   // Either path is opt-in (mode=create only); we never overwrite an existing post-commit hook.
   try {
     const gitDir = path.join(projectRoot, ".git");
@@ -457,7 +457,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
         if (!fs.existsSync(hooksDir)) fs.mkdirSync(hooksDir, { recursive: true });
         // Wrapper script delegates to plugin's post-commit-validate.sh — keeps the source-of-truth
         // hook script in the plugin, plugin updates propagate without per-project rewrites.
-        const wrapper = `#!/usr/bin/env bash\n# devt post-commit hook (v0.20.0+) — delegates to plugin script.\nif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh" ]; then\n  bash "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh"\nfi\nexit 0\n`;
+        const wrapper = `#!/usr/bin/env bash\n# devt post-commit hook — delegates to plugin script.\nif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh" ]; then\n bash "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh"\nfi\nexit 0\n`;
         // Two-step: atomic write then chmod. io.cjs::atomicWriteFileSync uses
         // tmp+renameSync which doesn't preserve the requested mode option.
         atomicWriteFileSync(postCommitPath, wrapper);

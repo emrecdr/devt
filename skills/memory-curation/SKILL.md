@@ -18,7 +18,7 @@ from `.devt/memory/_suggestions.md` (produced by the discovery engine), presents
 to the user via `AskUserQuestion` with the full original reasoning, and writes the
 permanent markdown ONLY on approval.
 
-This is the **sole** curation skill for the unified `.devt/memory/` layer (v0.28.0+). It
+This is the **sole** curation skill for the unified `.devt/memory/` layer. It
 covers all 5 doc types under one approval flow:
 
 - **architectural rules** — ADR (decisions), CON (concepts), FLOW (process), REJ (tombstones)
@@ -158,7 +158,7 @@ Run: <timestamp>
 4. **No bulk auto-approve flag.** Even for batches, present one AskUserQuestion per
    candidate (UI may render them in sequence). Bulk-approve buttons are how rules end
    up in the memory layer that nobody actually agreed to.
-5. **Multi-root awareness (v0.22.0+).** When `memory.paths` is configured (a project that
+5. **Multi-root awareness.** When `memory.paths` is configured (a project that
    indexes shared org-wide ADRs alongside project-local), writes ALWAYS target the
    project-local root (`.devt/memory/`) — never a shared root. Shared roots are read-only
    from the curator's perspective; their maintainers edit those markdown files via their
@@ -194,7 +194,7 @@ Reference the curation summary path so the user can audit the run.
 
 ## Credit & Lineage
 
-Unified curation skill (v0.28.0+) — supersedes the v0.17-v0.27 split between
+Unified curation skill — supersedes the v0.17-v0.27 split between
 `playbook-curation` (operational) and `memory-curation` (architectural). Now covers all 5
 doc types (ADR/CON/FLOW/REJ/LES) with one 5-filter and one approval flow. The
 promotion-via-AskUserQuestion pattern is shared with the council offramp

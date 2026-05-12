@@ -7,10 +7,10 @@
 # Templates with id ending in `-000` are scaffolding and are skipped during indexing.
 
 doc_types:
-  - decision   # ADR-xxx — architectural decisions
-  - concept    # CON-xxx — domain models, terminology, structural logic
-  - flow       # FLOW-xxx — business processes, data lifecycles, multi-step interactions
-  - rejected   # REJ-xxx — tombstones for ideas the user has explicitly rejected
+  - decision # ADR-xxx — architectural decisions
+  - concept # CON-xxx — domain models, terminology, structural logic
+  - flow # FLOW-xxx — business processes, data lifecycles, multi-step interactions
+  - rejected # REJ-xxx — tombstones for ideas the user has explicitly rejected
 
 # ---------------------------------------------------------------------------
 # Required fields (all doc_types)
@@ -59,20 +59,20 @@ properties:
     type: string
     enum: [candidate, active, superseded, rejected]
     description: |
-      candidate  — proposed; not yet active. Most AI-authored docs start here.
-      active     — accepted and currently governing. Promotion to this requires user approval.
+      candidate — proposed; not yet active. Most AI-authored docs start here.
+      active — accepted and currently governing. Promotion to this requires user approval.
       superseded — replaced by a newer doc; kept for history. Linked from successor via `links.type: supersedes`.
-      rejected   — for REJ tombstones; pre-set when REJ is created.
+      rejected — for REJ tombstones; pre-set when REJ is created.
 
   confidence:
     type: string
     enum: [verified, explicit, inferred, observed, speculative]
     description: |
       How the rule was AUTHORED:
-        verified    — automated verification (e.g., test passes, build succeeds)
-        explicit    — user explicitly stated the rule (highest trust for AI-extracted)
-        inferred    — AI deduced from context with reasonable confidence
-        observed    — pattern detected (e.g., applied in 4/5 services)
+        verified — automated verification (e.g., test passes, build succeeds)
+        explicit — user explicitly stated the rule (highest trust for AI-extracted)
+        inferred — AI deduced from context with reasonable confidence
+        observed — pattern detected (e.g., applied in 4/5 services)
         speculative — guess; flag for review.
       NOTE: this is doc-LEVEL confidence (provenance). Distinct from per-symbol
       `binding_confidence` (Graphify AST resolution quality) inside affects_symbols.

@@ -12,7 +12,7 @@ devt persists structured knowledge across **two distinct layers**, each with a d
 ├── decisions.md                       DEC-001, DEC-002 — captured during clarify/specify/research
 ├── lessons.yaml                       retro draft hand-off → curator promotes to LES-NNNN
 ├── plan.md, spec.md, etc.             workflow artifacts
-├── preflight-brief.md                 (v0.18.0+) Topic Pre-Flight Brief — auto-fired
+├── preflight-brief.md                 Topic Pre-Flight Brief — auto-fired
 ├── scratchpad.md                      cross-agent handoff notes within workflow
 └── ...                                wiped on /devt:cancel-workflow OR `state reset`
 
@@ -23,7 +23,7 @@ devt persists structured knowledge across **two distinct layers**, each with a d
 ├── concepts/                          CON-001, CON-002 — durable mental models
 ├── flows/                             FLOW-001, FLOW-002 — named sequences
 ├── rejected/                          REJ-001, REJ-002 — tombstones (we said no)
-├── lessons/                           LES-001, LES-002 — "when X happens, do Y" (v0.28.0+)
+├── lessons/                           LES-001, LES-002 — "when X happens, do Y"
 └── _suggestions.md                    auto-generated discovery proposals (curator-gated)
 ```
 
@@ -71,7 +71,7 @@ search_keywords:               # AI suppression triggers — surface these to di
   - "in-memory KV"
 ```
 
-## The Two-Tier Pre-Flight Protocol (v0.18.0+)
+## The Two-Tier Pre-Flight Protocol
 
 Before any non-trivial change, the protocol runs in two tiers:
 
@@ -87,7 +87,7 @@ Produces `.devt/state/preflight-brief.md` with `## Status: FRESH`. The Brief con
 
 - **Topic Extracted** — domains, symbols, keywords parsed from the task
 - **Governing Documentation** — ADRs/CONs/FLOWs from Lanes A (domain), B (FTS), C (symbol), D (link closure depth-2)
-- **Memory Graph (2-hop subgraph)** *(v0.36.0+)* — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Reuses `memory.cjs::getLinks` per seed; deduplicates across seeds; capped at 50 triples for scannability. Agents inspect structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without per-doc `get_doc` round-trips. When the governing union is empty, the section renders an informational fallback so the Brief layout stays stable.
+- **Memory Graph (2-hop subgraph)** — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Reuses `memory.cjs::getLinks` per seed; deduplicates across seeds; capped at 50 triples for scannability. Agents inspect structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without per-doc `get_doc` round-trips. When the governing union is empty, the section renders an informational fallback so the Brief layout stays stable.
 - **Rejected Approaches** — REJ tombstones whose `search_keywords` overlap the topic (Lane E)
 - **Related Operational Lessons** — playbook entries matching the topic (Lane F)
 - **Blast Radius** — Graphify-derived dependents/effect-size (or grep heuristic if disabled)
@@ -108,8 +108,8 @@ The PreToolUse `pre-flight-guard.sh` hook scans for this line. Behavior governed
 | Mode | Behavior |
 |---|---|
 | `off` | Hook is a no-op |
-| `warn` (Phase 3, v0.18.0) | Stderr advisory; edit proceeds |
-| `block` (Phase 4 default, v0.19.0+) | Returns `{decision: "deny"}` with a checklist; agent must produce the line first |
+| `warn` | Stderr advisory; edit proceeds |
+| `block` | Returns `{decision: "deny"}` with a checklist; agent must produce the line first |
 
 **5-Lane File Pre-Flight** (when scope expands beyond the Brief):
 
@@ -127,11 +127,11 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
 ## CLI Surface
 
 ```bash
-# Memory layer (v0.16.0+)
+# Memory layer
 node bin/devt-tools.cjs memory init              # scaffold + first index pass
 node bin/devt-tools.cjs memory index             # atomic drop+rebuild FTS5
 node bin/devt-tools.cjs memory query <terms>     # full-text search
-node bin/devt-tools.cjs memory query <terms> --count           # aggregate: row count only (v0.35.0+)
+node bin/devt-tools.cjs memory query <terms> --count           # aggregate: row count only
 node bin/devt-tools.cjs memory query <terms> --top=N           # aggregate: top-N compact rows
 node bin/devt-tools.cjs memory query <terms> --domain-counts   # aggregate: counts grouped by domain
 node bin/devt-tools.cjs memory query <terms> --json-compact    # full rows, compact JSON (no formatting)
@@ -145,34 +145,34 @@ node bin/devt-tools.cjs memory validate          # schema + link integrity + (Gr
 node bin/devt-tools.cjs memory backlinks <id>    # incoming refs
 node bin/devt-tools.cjs memory orphans           # no-link docs
 node bin/devt-tools.cjs memory stale-links       # broken cross-refs
-node bin/devt-tools.cjs memory affects-symbol <name>  # case-insensitive (v0.25.0+ NOCASE collation)
+node bin/devt-tools.cjs memory affects-symbol <name>  # case-insensitive
 
-# Bundle export/import (v0.20.0+)
+# Bundle export/import
 node bin/devt-tools.cjs memory export --out=PATH [--include=...] [--all-roots]
 node bin/devt-tools.cjs memory import <bundle.json> [--prefix=ORG-] [--overwrite]
 
-# Multi-root operational helpers (v0.22.0+ paths, v0.23.0+ --validate / diff)
+# Multi-root operational helpers
 node bin/devt-tools.cjs memory paths [--validate]      # list roots; --validate stats each
 node bin/devt-tools.cjs memory diff <root-a> <root-b>  # added/removed/changed across roots
 
-# Discovery (v0.17.0+) — never writes permanent files
+# Discovery — never writes permanent files
 node bin/devt-tools.cjs memory suggest           # writes _suggestions.md
 node bin/devt-tools.cjs discovery harvest        # full discovery sweep
 node bin/devt-tools.cjs discovery wiki-links     # just wiki-link enrichment
 node bin/devt-tools.cjs discovery claude-mem-status
 
-# Pre-Flight (v0.18.0+)
+# Pre-Flight
 node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius
 node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction
 node bin/devt-tools.cjs preflight status            # FRESH/STALE/MISSING + timestamp
 node bin/devt-tools.cjs preflight mark-stale [reason]
 
-# Telemetry (v0.21.0+)
+# Telemetry
 node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME] [--top=N --by=calls|duration|errors]
 node bin/devt-tools.cjs mcp-stats --prune-older-than=30d  # compact trace JSONL
 ```
 
-## SQL Views (v0.25.0+)
+## SQL Views
 
 Four convenience views accessible via the read-only MCP `query_index` SELECT-only escape hatch — useful for triage workflows and operational dashboards.
 
@@ -190,7 +190,7 @@ Example MCP query (via `query_index`):
 SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
 ```
 
-## Native MEM_* Health Checks (v0.23.0+)
+## Native MEM_* Health Checks
 
 `bin/devt-tools.cjs health` runs five memory-specific checks natively (no agent in the loop, suitable for CI):
 
@@ -206,7 +206,7 @@ The `MEM_PATH_UNREACHABLE` check pairs with `memory paths --validate` — both s
 
 `GRAPHIFY_MCP_UNREGISTERED` is **warn-only by design** — `health --repair` does NOT auto-edit `.mcp.json` to avoid stomping user MCP customizations. The fix is `node bin/devt-tools.cjs setup --mode update` (regenerates the MCP server entries, preserving any unrelated customizations).
 
-## MCP Server (v0.18.0+)
+## MCP Server
 
 Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Registered via the plugin-root `.mcp.json` (Claude Code resolves `${CLAUDE_PLUGIN_ROOT}/bin/devt-memory-mcp.cjs` at server launch when devt is loaded as a plugin); no per-project scaffolding needed. Tools:
 
@@ -222,17 +222,17 @@ Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Regis
 | `preflight(task)` | Run lanes A-F + blast radius |
 | `blast_radius(symbols)` | Graphify-derived blast radius |
 | `query_index(sql)` | Raw SQL escape hatch — SELECT-only |
-| `query_fts_count(terms)` *(v0.35.0+)* | Aggregate-first FTS — returns `{count}` only |
-| `query_fts_top(terms, n?)` *(v0.35.0+)* | Aggregate-first FTS — top-N compact rows |
-| `query_fts_by_domain(terms)` *(v0.35.0+)* | Aggregate-first FTS — group counts by domain |
-| `memory_upsert_doc(frontmatter, body)` *(v0.35.0+)* | Atomic write of `.devt/memory/<subdir>/<ID>-<slug>.md` **and** FTS5 index refresh in one call. Gated by `DEVT_MCP_ALLOW_WRITES=1` (set by plugin's `.mcp.json` env block by default; remove or set `"0"` to disable writes). Validates frontmatter BEFORE touching disk; rolls back file write if index rebuild fails. Curator's preferred write path — falls back to the legacy 3-tool ritual (file Write + Bash mv + `memory index`) on `WRITES_DISABLED` error. |
+| `query_fts_count(terms)` | Aggregate-first FTS — returns `{count}` only |
+| `query_fts_top(terms, n?)` | Aggregate-first FTS — top-N compact rows |
+| `query_fts_by_domain(terms)` | Aggregate-first FTS — group counts by domain |
+| `memory_upsert_doc(frontmatter, body)` | Atomic write of `.devt/memory/<subdir>/<ID>-<slug>.md` **and** FTS5 index refresh in one call. Gated by `DEVT_MCP_ALLOW_WRITES=1` (set by plugin's `.mcp.json` env block by default; remove or set `"0"` to disable writes). Validates frontmatter BEFORE touching disk; rolls back file write if index rebuild fails. Curator's preferred write path — falls back to the legacy 3-tool ritual (file Write + Bash mv + `memory index`) on `WRITES_DISABLED` error. |
 
 **Hard guarantees:**
 - SQLite opened with `readOnly: true` — even malicious helpers cannot mutate
 - `query_index` SELECT-only validator strips comments, blocks multi-statement payloads, rejects 17 forbidden tokens
 - Self-test: `node bin/devt-memory-mcp.cjs --self-test` validates 15 SQL fixtures
 
-## Curator Promotion Flow (v0.17.0+)
+## Curator Promotion Flow
 
 The curator agent gates ALL writes to `.devt/memory/`. Discovery engine (`bin/modules/discovery.cjs`) harvests:
 
@@ -252,7 +252,7 @@ The harvest step (which writes `_suggestions.md`) and the curator review step (w
 - **`harvest_observations`** — runs in every `dev-workflow`, `lesson-extraction`, and `quick-implement` finalize phase, regardless of complexity tier or `config.workflow.retro` flags. Cost is ~50ms when claude-mem is absent. Best-effort: harvest failures NEVER fail the workflow. This guarantees that a SIMPLE-tier workflow that skips retro+curator still buffers its observations into `_suggestions.md` for the next dev-workflow's curator to review.
 - **`curate`** — only runs when `complexity=COMPLEX` (or `/devt:retro` standalone). Dual-path: PLAYBOOK PATH (lessons.yaml → playbook) AND MEMORY-LAYER PATH (_suggestions.md → AskUserQuestion approval flow). Hard invariant: NEVER writes a permanent memory doc without explicit user approval.
 
-The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor (the bug behavior pre-v0.26.0) cannot recur.
+The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor cannot recur.
 
 ## Memory Maintenance Discipline
 
@@ -268,10 +268,10 @@ Before proposing any new candidate, the discovery engine consults `rejected/` fo
 | Key | Default | Purpose |
 |---|---|---|
 | `memory.enabled` | `true` | Master switch |
-| `memory.preflight_mode` | `block` (v0.19.0+) | Hook behavior on missing PREFLIGHT scratchpad line |
+| `memory.preflight_mode` | `block` | Hook behavior on missing PREFLIGHT scratchpad line |
 | `memory.auto_index_on_change` | `true` | PostToolUse hook on `.devt/memory/**.md` edits |
-| `memory.mcp_telemetry` | `true` (v0.21.0+) | MCP tool-call trace JSONL log |
-| `memory.paths` | `null` (v0.22.0+) | List of memory roots to scan + index. `null` = single-root behavior. See "Multi-Root Memory" below. |
+| `memory.mcp_telemetry` | `true` | MCP tool-call trace JSONL log |
+| `memory.paths` | `null` | List of memory roots to scan + index. `null` = single-root behavior. See "Multi-Root Memory" below. |
 | `graphify.enabled` | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) | Opt-in AST symbol anchoring |
 
 Override per-project in `.devt/config.json`:
@@ -286,7 +286,7 @@ Override per-project in `.devt/config.json`:
 }
 ```
 
-## Multi-Root Memory (v0.22.0+)
+## Multi-Root Memory
 
 Many engineering organizations have **company-wide architectural rules** that should apply to every project. Instead of copy-pasting ADRs across N project repos (which drift) or building a separate import command, devt's memory layer can index **multiple memory roots** in one project.
 
@@ -314,7 +314,7 @@ When `memory.paths` is set:
 
 ### Backward compat
 
-When `memory.paths` is `null` or absent (the default), devt uses `[<projectRoot>/.devt/memory]` as a single root — exactly the v0.16.0–v0.21.0 behavior. Existing projects see zero change.
+When `memory.paths` is `null` or absent (the default), devt uses `[<projectRoot>/.devt/memory]` as a single root — exactly the v0.16.0–behavior. Existing projects see zero change.
 
 ### Conflict reporting
 
@@ -378,9 +378,6 @@ Precedence: rightmost (project-local) wins, leftmost loses. Mid-tier overrides g
 
 ## Version Notes
 
-- **v0.17.0 → v0.18.0**: Pre-flight runs in `warn` mode by default — opt-in to `off` if you want to disable temporarily.
-- **v0.18.0 → v0.19.0**: `preflight_mode` flips from `warn` to `block`. Agents that already write PREFLIGHT scratchpad lines (via the `devt:memory-pre-flight` skill) need no changes. Older custom workflows that bypass the protocol must be updated OR set `preflight_mode: "warn"` per-project.
-- **v0.27.0 → v0.28.0**: lessons consolidated into the unified memory layer. Operational lessons now live as LES-NNNN frontmatter docs in `.devt/memory/lessons/` (5th doc type alongside ADR/CON/FLOW/REJ), FTS5-indexed in the same `index.db`. The legacy `learning-playbook.md` flat file, separate `lessons.db`, `bin/modules/semantic.cjs`, and `memory migrate-lessons` subcommand are all removed. The retro→curator pipeline now writes structured LES-NNNN docs gated by AskUserQuestion.
 
 ## Related Documentation
 

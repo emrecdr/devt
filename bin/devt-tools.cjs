@@ -8,14 +8,14 @@
  * Compound-init pattern: one call returns all context as JSON.
  *
  * Usage:
- *   node devt-tools.cjs init workflow "<task>"    # Compound init for workflows
- *   node devt-tools.cjs state read                # Read workflow state
- *   node devt-tools.cjs state update key=value    # Update workflow state
- *   node devt-tools.cjs state reset               # Clean .devt/state/
- *   node devt-tools.cjs config get                # Get merged config
- *   node devt-tools.cjs config set key=value      # Set project config
- *   node devt-tools.cjs models get <profile>      # Get agent→model mapping
- *   node devt-tools.cjs setup --template <name>   # Interactive project setup
+ * node devt-tools.cjs init workflow "<task>" # Compound init for workflows
+ * node devt-tools.cjs state read # Read workflow state
+ * node devt-tools.cjs state update key=value # Update workflow state
+ * node devt-tools.cjs state reset # Clean .devt/state/
+ * node devt-tools.cjs config get # Get merged config
+ * node devt-tools.cjs config set key=value # Set project config
+ * node devt-tools.cjs models get <profile> # Get agent→model mapping
+ * node devt-tools.cjs setup --template <name> # Interactive project setup
  */
 
 const path = require("path");
@@ -80,25 +80,25 @@ function main() {
         break;
       }
       case "preflight": {
-        // preflight subcommand — Topic Pre-Flight Brief (Phase 3)
+        // preflight subcommand — Topic Pre-Flight Brief
         const code = require("./modules/preflight.cjs").run(subcommand, args.slice(2));
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
       case "deferred": {
-        // deferred subcommand — DEF-NNN TODO tracker at .devt/state/deferred.md (v0.29.0+)
+        // deferred subcommand — DEF-NNN TODO tracker at .devt/state/deferred.md
         const code = require("./modules/deferred.cjs").run(subcommand, args.slice(2));
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
       case "token-report": {
-        // token-report — aggregate Claude Code session token usage (v0.20.0+)
+        // token-report — aggregate Claude Code session token usage
         const code = require("./modules/token-report.cjs").run(subcommand, args.slice(2));
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
       case "mcp-stats": {
-        // mcp-stats — aggregate MCP tool-call traces (v0.21.0+)
+        // mcp-stats — aggregate MCP tool-call traces
         const code = require("./modules/mcp-stats.cjs").run(subcommand, args.slice(2));
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;

@@ -93,10 +93,10 @@ properties:
 # Example entry (valid):
 #
 # - description: "Always check for existing error types before creating new ones"
-#   category: "error-handling"
-#   context: "When adding error handling to a new feature"
-#   evidence: "Created DuplicateEntryError when ConflictError already existed in core, caught in review"
-#   importance: 7
-#   confidence: 0.8
-#   decay_days: 365
-#   tags: "error-handling, reuse"
+# category: "error-handling"
+# context: "When adding error handling to a new feature"
+# evidence: "Created DuplicateEntryError when ConflictError already existed in core, caught in review"
+# importance: 7
+# confidence: 0.8
+# decay_days: 365
+# tags: "error-handling, reuse"

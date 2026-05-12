@@ -111,7 +111,7 @@ function validatePath(filePath, baseDir) {
  * @param {string} text - Raw JSON text.
  * @param {string} [label] - Context label for error messages.
  * @param {number} [maxSize] - Maximum byte length (default 1MB). Bump for
- *   trusted-but-large inputs (memory bundles, Graphify graph caches).
+ * trusted-but-large inputs (memory bundles, Graphify graph caches).
  */
 function safeJsonParse(text, label, maxSize) {
   label = label || "JSON";

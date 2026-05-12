@@ -515,7 +515,7 @@ else
   fail "memory affects-symbol: expected degraded=true, got $AFFECTS_SYM_DEGRADED"
 fi
 
-# LES-NNNN doc_type=lesson acceptance (v0.28.0+) — schema accepts lessons as a 5th memory shape.
+# LES-NNNN doc_type=lesson acceptance — schema accepts lessons as a 5th memory shape.
 # Validates: id pattern, doc_type=lesson, indexable, FTS5-queryable.
 cat > .devt/memory/lessons/LES-001-test.md <<'EOF_LES'
 ---
@@ -554,7 +554,7 @@ else
   fail "memory query: LES-001 did not surface for 'concurrent' query"
 fi
 
-# v0.28.0 — memory query --doc-type=<type> filter restricts results to that type.
+# memory query --doc-type=<type> filter restricts results to that type.
 # Project has ADR-001..004 + LES-001; filtering by lesson must exclude ADRs.
 LES_FILTER_OK=$(node "$CLI" memory query "source" --doc-type=lesson 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const types=new Set(d.results.map(r=>r.doc_type));console.log(types.size===0||(types.size===1&&types.has('lesson'))?'yes':'no')")
 if [ "$LES_FILTER_OK" = "yes" ]; then
@@ -573,7 +573,7 @@ fi
 cd "$SAVED2"
 rm -rf "$MEMTMP2"
 
-# v0.29.0 — Deferred-task tracker (.devt/state/deferred.md, DEF-NNN, reset-exempt).
+# Deferred-task tracker (.devt/state/deferred.md, DEF-NNN, reset-exempt).
 echo "== Deferred-task tracker (v0.29.0) =="
 DEFTMP=$(mktemp -d)
 mkdir -p "$DEFTMP/.git"
@@ -625,7 +625,7 @@ else
   fail "state reset wiped deferred.md or its contents"
 fi
 
-# v0.30.4 — state reset archives non-exempt artifacts to .devt/state/.archive/<ts>/
+# state reset archives non-exempt artifacts to .devt/state/.archive/<ts>/
 echo "scratch" > .devt/state/scratchpad.md
 RESET_OUT=$(node "$CLI" state reset 2>/dev/null)
 ARCHIVED_TO=$(echo "$RESET_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d).archived_to||'')}catch{}});")
@@ -635,7 +635,7 @@ else
   fail "state reset did not archive properly (archived_to=$ARCHIVED_TO)"
 fi
 
-# v0.30.4 — workflow_type alias hint guides agents away from common hallucinations
+# workflow_type alias hint guides agents away from common hallucinations
 WT_HINT_OUT=$(node "$CLI" state update workflow_type=workflow 2>&1 | head -1)
 if echo "$WT_HINT_OUT" | grep -q 'Did you mean .*dev' && echo "$WT_HINT_OUT" | grep -q 'Valid:'; then
   pass "workflow_type alias hint: 'workflow' suggests 'dev' + lists valid values"
@@ -643,7 +643,7 @@ else
   fail "workflow_type alias hint missing for 'workflow' input: $WT_HINT_OUT"
 fi
 
-# v0.30.4 — state read-section returns sliced content with match mode
+# state read-section returns sliced content with match mode
 cat > .devt/state/plan.md <<'PLAN_EOF'
 # Plan
 ## Phase 1: Setup
@@ -664,14 +664,14 @@ else
   fail "state read-section: missing section did not return expected error: $SECTION_MISS"
 fi
 
-# v0.30.5 → v0.33.0 (D-17): pre-flight-guard hook appends every deny as one
+# v0.30.5 → v0.33.0: pre-flight-guard hook appends every deny as one
 # JSON record to .devt/state/preflight-denies.jsonl (migrated from .log).
 echo '{"memory":{"preflight_mode":"block","enabled":true}}' > .devt/config.json
 echo "active: true" > .devt/state/workflow.yaml
 rm -f .devt/state/scratchpad.md .devt/state/preflight-denies.jsonl
 HOOK_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/smoke-target.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
 if [ -f .devt/state/preflight-denies.jsonl ]; then
-  # Each line must be valid JSON with the v0.33.0 schema (mode, ts, action, file_path, reason).
+  # Each line must be valid JSON with the schema (mode, ts, action, file_path, reason).
   if node -e "
     const lines = require('fs').readFileSync('.devt/state/preflight-denies.jsonl','utf8').split('\n').filter(Boolean);
     for (const l of lines) {
@@ -966,7 +966,7 @@ if [ -f "$ROOT/docs/MEMORY.md" ]; then
   done
 fi
 
-# v0.29.0+ — questioning-guide gained codebase-first, decision-tree, and one-at-a-time sections.
+# questioning-guide gained codebase-first, decision-tree, and one-at-a-time sections.
 # Lightweight presence check; protects against accidental deletion during future edits.
 if [ -f "$ROOT/references/questioning-guide.md" ]; then
   for section in "Before You Ask" "Walk the Decision Tree" "One at a Time"; do
@@ -978,8 +978,8 @@ if [ -f "$ROOT/references/questioning-guide.md" ]; then
   done
 fi
 
-# README has Memory Layer section (under Features in v0.29.0+ structure)
-# primary_branch detection surfaces detection_source field (v0.30.0+)
+# README has Memory Layer section
+# primary_branch detection surfaces detection_source field
 if grep -q "primary_branch_source\|primary_branch_low_confidence" "$ROOT/bin/modules/setup.cjs"; then
   pass "setup.cjs primary_branch detection emits source + low_confidence fields"
 else
@@ -1111,9 +1111,9 @@ rm -rf "$TIMP"
   || fail "hooks/post-commit-validate.sh missing or not executable"
 
 # setup.cjs scaffolds .git/hooks/post-commit. Behavior is environment-dependent:
-#  - Graphify NOT on PATH → devt installs its own wrapper (validates memory layer)
-#  - Graphify ON PATH      → devt yields ownership (graphify hook install supersedes;
-#                            documented in setup.cjs:383). Hook absence is correct.
+# - Graphify NOT on PATH → devt installs its own wrapper (validates memory layer)
+# - Graphify ON PATH → devt yields ownership (graphify hook install supersedes;
+# documented in setup.cjs:383). Hook absence is correct.
 TGIT=$(mktemp -d)
 (cd "$TGIT" && git init -q && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
 if command -v graphify >/dev/null 2>&1; then
@@ -1751,7 +1751,7 @@ for code in MEM_PATH_UNREACHABLE MEM_INDEX_STALE MEM_VALIDATE_ERRORS MEM_CONFLIC
   fi
 done
 
-# v0.25.0 — CCA v21.0 §10 SQL views + symbol NOCASE + self-link detection.
+# SQL views + symbol NOCASE + self-link detection.
 TMP_VIEW_PROJ=$(mktemp -d)
 mkdir -p "$TMP_VIEW_PROJ/.devt/memory/decisions" "$TMP_VIEW_PROJ/.devt/memory/concepts"
 
@@ -1827,7 +1827,7 @@ else
   fail "memory validate missed self-link on ADR-002"
 fi
 
-# CCA v27 §2 Symbol Decay — Graphify-disabled graceful skip.
+# Symbol Decay — Graphify-disabled graceful skip.
 # affects_symbols on docs but graphify.enabled=false MUST NOT emit stale-symbol
 # false positives. Real decay detection only fires when Graphify is ready;
 # absence of Graphify is not absence of governance.
@@ -1839,9 +1839,9 @@ fi
 rm -rf "$TMP_VIEW_PROJ"
 
 # Curator-gated harvest wiring: `memory suggest` MUST exit 0 cleanly on:
-#  (a) project with no .devt/memory/ directory  (b) no claude-mem installed
-#  (c) zero ⚖️/🔵 observations  — anything else would break the unconditional
-#  harvest_observations step in dev-workflow / lesson-extraction / quick-implement.
+# (a) project with no .devt/memory/ directory (b) no claude-mem installed
+# (c) zero ⚖️/🔵 observations — anything else would break the unconditional
+# harvest_observations step in dev-workflow / lesson-extraction / quick-implement.
 TMP_HARVEST_PROJ=$(mktemp -d)
 ( cd "$TMP_HARVEST_PROJ" && git init -q )
 HARVEST_OUT=$(cd "$TMP_HARVEST_PROJ" && node "$CLI" memory suggest 2>&1)
@@ -2237,7 +2237,7 @@ else
 fi
 
 echo "== JSON sidecars canary: impl-summary.json (v0.33.0+) =="
-# D-15: programmer writes impl-summary.json alongside impl-summary.md.
+# : programmer writes impl-summary.json alongside impl-summary.md.
 # state.cjs::readSidecar reads + validates the JSON shape; workflow consumes
 # it for routing decisions instead of parsing markdown narrative.
 # Assertions: state CLI exposes read-sidecar; happy + missing + invalid-name
@@ -2273,7 +2273,7 @@ else
 fi
 
 echo "== forensic log unified to JSONL (v0.33.0+) =="
-# D-17: pre-flight-guard's deny log migrated from preflight-denies.log (plain
+# : pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared
 # helper at bin/modules/logger.cjs::appendJsonl is the canonical entry point
 # (4KB PIPE_BUF cap, atomicity guarantee, truncation stub on oversize).
@@ -2318,7 +2318,7 @@ else
 fi
 
 echo "== skill→skill coupling integrity (v0.33.0+) =="
-# D-18: skills/codebase-scan references graphify-helpers; 5 skills transitively
+# : skills/codebase-scan references graphify-helpers; 5 skills transitively
 # depend on graphify-helpers via the Graphify-first routing protocol. No drift
 # detector exists today — a typo or rename of a skill would silently break the
 # coupling. Lint: every `skills/<name>/SKILL.md` reference in any skill body
@@ -2346,7 +2346,7 @@ else
 fi
 
 echo "== byte-stable agent/skill bodies (v0.32.0+) =="
-# D-10 sub-2: Claude Code auto-caches stable prompt prefixes (proven by the
+# sub-2: Claude Code auto-caches stable prompt prefixes (proven by the
 # cache_read_input_tokens telemetry token-report parses). The cache only fires
 # when the prefix is BYTE-stable across dispatches. An agent body or preloaded
 # skill body containing a Date(), ISO timestamp, run-ID, or other per-session
@@ -2390,7 +2390,7 @@ else
 fi
 
 echo "== init.cjs inline_guardrails plumbing (v0.32.0+) =="
-# D-11: init.cjs returns the 3 plugin-shipped guardrails as inline content for
+# : init.cjs returns the 3 plugin-shipped guardrails as inline content for
 # future consumer wiring (agent/workflow opt-in once /devt:tokens --compare
 # measures the prompt-cost-vs-Read-savings trade-off). Today the agents still
 # Read the on-disk files; this just exposes the data on the init payload.
@@ -2421,7 +2421,7 @@ else
 fi
 
 echo "== init.cjs returns governing_rules with project rules inlined (v0.35.0+, Option 1) =="
-# Option 1 of v0.35.x — Hot-path read cache via init-payload injection. The
+# Option 1 of Hot-path read cache via init-payload injection. The
 # init payload exposes governing_rules: a {content: {<path>: <content>}, ..., rules_hash}
 # shape covering CLAUDE.md + .devt/rules/*.md. Cap is 96KB; files past cap surface in
 # paths_excluded. Consumed by code-reviewer/verifier/researcher dispatches via the
@@ -2458,7 +2458,7 @@ else
 fi
 
 echo "== init.cjs stable-prefix invariant across task strings (v0.35.0+, Option 5) =="
-# Option 5 of v0.35.x — Prompt-caching-aware dispatch structure. Two consecutive
+# Option 5 of Prompt-caching-aware dispatch structure. Two consecutive
 # init workflow calls with DIFFERENT task strings must produce IDENTICAL values
 # for the cacheable prefix fields: inline_guardrails, governing_rules, resolved_skills.
 # These are the blocks that flow verbatim into dispatch prompts; if they vary by
@@ -2489,7 +2489,7 @@ else
 fi
 
 echo "== memory query pre-filter aggregations (v0.35.0+, Option 6) =="
-# Option 6 of v0.35.x — Pre-filter CLI aggregations. Adds --count, --top=N,
+# Option 6 of Pre-filter CLI aggregations. Adds --count, --top=N,
 # --domain-counts, --json-compact flags to `memory query`. Agents can probe
 # the FTS index without pulling full payloads. Mirrors as 3 MCP tools too.
 TMP_AGG=$(mktemp -d)
@@ -2567,7 +2567,7 @@ else
 fi
 
 echo "== memory.upsertDoc + MCP write surface (v0.35.0+, Option 2) =="
-# Option 2 of v0.35.x — MCP write surface for curator. Adds memory.upsertDoc()
+# Option 2 of MCP write surface for curator. Adds memory.upsertDoc()
 # primitive (atomic file write + FTS5 index refresh in one call) and the
 # memory_upsert_doc MCP tool gated by DEVT_MCP_ALLOW_WRITES=1.
 TMP_UPSERT=$(mktemp -d)
@@ -2583,7 +2583,7 @@ UPSERT_OUT=$(node -e "
     body: '## Body\n\nText.'
   });
   console.log(JSON.stringify(r));
-" 2>&1)
+" 2>/dev/null)
 # 2. MCP tool with writes ENABLED — should succeed and list memory_upsert_doc.
 MCP_ON_TOOLS=$(printf '%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
@@ -2618,7 +2618,7 @@ else
 fi
 
 echo "== hook overhead reduction (v0.32.0+) =="
-# D-13: prompt-guard.sh consolidates 6 grep shellouts into the existing Node
+# : prompt-guard.sh consolidates 6 grep shellouts into the existing Node
 # block (1 process spawn instead of 7). workflow-context-injector.sh caches
 # state-read result keyed by workflow.yaml mtime so user prompts don't pay a
 # cold-start Node spawn every time.
@@ -2648,9 +2648,9 @@ fi
 rm -rf "$PG_TMP"
 
 echo "== ARTIFACT_SCHEMA drift prevention (v0.32.0+) =="
-# D-14: every status value an agent documents as "Status field is one of: ..."
+# : every status value an agent documents as "Status field is one of: ..."
 # must be in the corresponding ARTIFACT_SCHEMA whitelist in state.cjs. Current
-# state is clean (manually verified at v0.31.0); this assertion catches future
+# state is clean; this assertion catches future
 # drift when agents add new states or the schema is edited independently.
 # Mapping: agent file → artifact name → expected statuses parsed from the
 # "Status field is one of: X | Y | Z" line.
@@ -2670,7 +2670,7 @@ for i in "${!AGENT_NAMES[@]}"; do
     # No "Status field is one of" — agent may use a different documentation style; skip rather than fail
     continue
   fi
-  # Resolve the whitelist for this artifact. v0.35.0+ (Option 4) — for artifacts
+  # Resolve the whitelist for this artifact. for artifacts
   # whose status now lives in a JSON sidecar (impl-summary.md, verification.md),
   # pull from JSON_SIDECAR_SCHEMAS[sidecar].status. Otherwise fall back to the
   # legacy ARTIFACT_SCHEMA[markdown] whitelist.
@@ -2709,7 +2709,7 @@ else
 fi
 
 echo "== sidecar-only status for impl-summary + verification (v0.35.0+, Option 4) =="
-# Option 4 of v0.35.x — sidecar-only routing for the 2 D-16-aligned artifacts.
+# Option 4 of sidecar-only routing for the 2 aligned artifacts.
 # Markdown templates must no longer contain `## Status` blocks for these
 # artifacts (status lives in the JSON sidecar). ARTIFACT_SCHEMA must NOT list
 # them. validateConsistency must read the sidecar's status field via
@@ -2748,7 +2748,7 @@ else
 fi
 
 echo "== tester inner-iteration budget references fix-loop-protocol (v0.31.0+) =="
-# D-9: programmer already had fix-loop-protocol.md (5-iteration bounded loop
+# : programmer already had fix-loop-protocol.md (5-iteration bounded loop
 # with explicit escalation gates). Tester was missing the same discipline —
 # L94 said "fix immediately" with no bound. Added an inner-iteration callout
 # in tester.md::run that cross-references the same protocol, keeping the
@@ -2760,7 +2760,7 @@ else
 fi
 
 echo "== programmer dispatch gets isolation:worktree under autonomous (v0.31.0+) =="
-# D-8: when autonomous_chain is set, the programmer Task() dispatch must pass
+# : when autonomous_chain is set, the programmer Task() dispatch must pass
 # isolation:"worktree" so autonomous fix loops don't clobber the user's
 # in-flight checkout. Per the no-legacy directive, this is always-on for
 # autonomous (no config flag for opt-out). Interactive dispatches omit the
@@ -2772,7 +2772,7 @@ else
 fi
 
 echo "== Pre-Flight Brief read instruction not duplicated in agent bodies (v0.31.0+) =="
-# D-4: the memory-pre-flight skill (preloaded by 8 dev agents via skills:
+# : the memory-pre-flight skill (preloaded by 8 dev agents via skills:
 # frontmatter) is the canonical source for "Read .devt/state/preflight-brief.md
 # at startup". Previously only programmer.md duplicated this instruction in its
 # context_loading block — creating drift where the documented preload was
@@ -2801,7 +2801,7 @@ else
 fi
 
 echo "== state read-section surfaced for surgical re-reads (v0.31.0+) =="
-# D-1 (refined): mid-flight validation showed wholesale wiring of read-section
+# (refined): mid-flight validation showed wholesale wiring of read-section
 # into 7 dispatch sites would be busywork — most readers (tester, code-reviewer,
 # verifier) legitimately need whole-file plan context. The one genuine win is
 # programmer-on-iteration>1 after a phase-scoped review.md flag. Document the
@@ -2814,7 +2814,7 @@ else
 fi
 
 echo "== skill-index.yaml resolved via init.cjs (v0.31.0+) =="
-# D-2: init.cjs::resolveSkills parses skill-index.yaml + merges with
+# : init.cjs::resolveSkills parses skill-index.yaml + merges with
 # .devt/config.json::agent_skills (config wins) and returns the merged map
 # as `resolved_skills` in the init JSON. Workflows reference this field
 # rather than the prior "consult skill-index.yaml" LLM-driven fallback.
@@ -2855,7 +2855,7 @@ else
 fi
 
 echo "== next.md PRIORITY GUARD for validation_status=warned (v0.31.0+) =="
-# D-7: next.md Step 2 must lead with an explicit PRIORITY GUARD instruction
+# : next.md Step 2 must lead with an explicit PRIORITY GUARD instruction
 # that surfaces validation_status="warned" BEFORE any other routing branch.
 # The earlier "Active workflow, phase known" branch is a generic catch-all
 # that could otherwise silently absorb a warned state. Guard text contains
@@ -2873,11 +2873,11 @@ else
 fi
 
 echo "== /devt:tokens + /devt:mcp-stats command surfaces (v0.31.0+) =="
-# D-3: both new commands have a command file (slash-namespace registration)
+# : both new commands have a command file (slash-namespace registration)
 # and a workflow file (orchestration body). The underlying CLI subcommands
 # (token-report, mcp-stats) already have extensive coverage at lines 1159+
 # (mcp-stats: aggregate, error_code, --tool, --prune) and 1639+ (token-report
-# baseline + --top --by), so the new D-3 assertions only verify that the
+# baseline + --top --by), so the new assertions only verify that the
 # slash-command surfaces are wired — the CLI behaviour itself is unchanged.
 for cmd in tokens mcp-stats; do
   pass_if_file "$ROOT/commands/$cmd.md" "commands/$cmd.md exists (D-3 surface)"
@@ -3060,7 +3060,7 @@ echo "== Parallel researcher + arch_health dispatch (v0.36.0+, Option 9a) =="
 # The Auto-Research-and-Plan section must carry the parallel-dispatch marker
 # instructing the orchestrator to fire researcher + architect (arch_health
 # mode) in ONE message with two Task tool calls. Without the marker, the
-# dispatches serialize and the v0.36.0 round-trip saving is lost.
+# dispatches serialize and the round-trip saving is lost.
 if grep -qE '<!-- parallel-dispatch: researcher \+ architect' "$ROOT/workflows/dev-workflow.md"; then
   pass "dev-workflow.md carries parallel-dispatch marker comment"
 else
@@ -3175,7 +3175,7 @@ echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # both land. Workflows that don't dispatch the verifier have no rubric
 # obligation (debug/code-review/arch-health use their own terminal agents).
 VERIFIER_USING_WORKFLOWS=("dev" "code_review")
-# v0.36.0+ — rubrics are version-pinned. The smoke test resolves each
+# rubrics are version-pinned. The smoke test resolves each
 # workflow_type to its pinned filename via the `rubrics` config map in
 # DEFAULTS, then asserts the file exists. When a project bumps its rubric
 # (e.g., dev.v1.md → dev.v2.md), both DEFAULTS and the new file must land
@@ -3209,7 +3209,7 @@ if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/
 else
   fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
 fi
-# Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag (v0.36.0+, slim Option 3).
+# Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag.
 if grep -q '<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.md"; then
   pass "code-review verifier dispatch injects <rubric_path>"
 else
@@ -3252,6 +3252,15 @@ if node -e "const c=require('$ROOT/bin/modules/config.cjs'); process.exit(c.DEFA
   pass "workflow.max_iterations default present in config DEFAULTS"
 else
   fail "workflow.max_iterations missing or wrong value in config DEFAULTS"
+fi
+
+echo "== Cache-friendly dispatch ordering =="
+BAD_DISPATCHES=$(node "$ROOT/scripts/check-dispatch-ordering.cjs" 2>&1)
+if [ -z "$BAD_DISPATCHES" ]; then
+  pass "every dispatch in workflows/*.md places <task> after </context>"
+else
+  fail "cache-unfriendly dispatch(es) found:
+$BAD_DISPATCHES"
 fi
 
 echo

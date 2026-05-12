@@ -144,7 +144,7 @@ Read these `.devt/state/` artifacts and compose a PR body:
 
 - Key design decisions with rationale
 
-### From preflight-brief.md (Phase 4 v0.19.0+, if exists):
+### From preflight-brief.md:
 
 - Topic, governing ADR/Concept/Flow ids consulted (lane A+B+C+D union)
 - Any REJ tombstones the implementation deliberately stayed clear of

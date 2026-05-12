@@ -167,7 +167,7 @@ Level 1-2 (Exists + Substantive): 1 minute. Level 3-4 (Wired + Functional): 3-5 
 Use with: codebase-scan (before), code-review-guide (after)
 Related: programmer agent self-check, tester agent coverage verification
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 After implementation, enumerate dependents that must be re-tested:
 `node bin/devt-tools.cjs graphify neighbors <changed-symbol> --direction=in` returns

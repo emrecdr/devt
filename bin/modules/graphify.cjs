@@ -16,12 +16,12 @@
  * heuristics when Graphify is disabled, missing, or fails.
  *
  * Four fallback triggers (per the Graphify-First Skill Protocol):
- *   1. Graphify returns empty
- *   2. Graphify errors out
- *   3. Graphify is not setup (config disabled OR binary missing)
- *   4. Graphify returns too few results (< caller's min_results_threshold)
+ * 1. Graphify returns empty
+ * 2. Graphify errors out
+ * 3. Graphify is not setup (config disabled OR binary missing)
+ * 4. Graphify returns too few results (< caller's min_results_threshold)
  *
- * Phase 2 (v0.17.0). Phase 3 (v0.18.0) will add the vendored MCP query layer
+ * Phase 2. Phase 3 will add the vendored MCP query layer
  * that exposes these functions to agents over stdio.
  */
 
@@ -177,7 +177,7 @@ function warmCachePath() {
  * Run a graphify subcommand and parse its JSON output. Returns a structured
  * result that callers can branch on. Never throws — always returns a payload.
  *
- *   { source: "graphify" | "grep" | "merged", results: any[], degraded?, error? }
+ * { source: "graphify" | "grep" | "merged", results: any[], degraded?, error? }
  */
 function callGraphify(subargs, options) {
   options = options || {};
@@ -301,13 +301,13 @@ function shortestPath(from, to, options) {
 
 /**
  * Compute blast radius for a set of subject symbols. Returns:
- *   { effect_size: 'small' | 'medium' | 'large',
- *     direct_dependents: [...],   // depth-1 incoming
- *     indirect_dependents: [...], // depth-2 incoming
- *     modules_touched: number,
- *     god_node_match: boolean,
- *     ambiguous_bindings: number,
- *     source: 'graphify' | 'grep' }
+ * { effect_size: 'small' | 'medium' | 'large',
+ * direct_dependents: [...], // depth-1 incoming
+ * indirect_dependents: [...], // depth-2 incoming
+ * modules_touched: number,
+ * god_node_match: boolean,
+ * ambiguous_bindings: number,
+ * source: 'graphify' | 'grep' }
  *
  * When Graphify is disabled, returns a degraded payload with effect_size estimated
  * from path heuristics and grep counts (callers fall back per the protocol).

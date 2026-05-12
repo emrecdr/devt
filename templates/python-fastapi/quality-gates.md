@@ -65,4 +65,4 @@ These mutate code. Run manually, never as part of `/devt:quality`:
 - `uv run ruff check --fix .` — apply auto-fixable lint suggestions
 - `uv run ruff format .` — reformat files in place
 
-> **ADR alignment gate** (v0.20.0+): before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.
+> **ADR alignment gate**: before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.

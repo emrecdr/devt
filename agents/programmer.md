@@ -36,7 +36,7 @@ BEFORE starting any work, load the following in order:
 9-11. Load the three plugin guardrails — `golden-rules.md` (universal rules: scan before implementing, no duplicates, no backward compat code, no TODOs), `engineering-principles.md` (SOLID, DRY, KISS, SoC), and `generative-debt-checklist.md` (BEFORE/DURING/AFTER coding gates against AI-introduced debt). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>`, and `<generative_debt_checklist>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles,generative-debt-checklist}.md` when the inline block is absent (the workflow inlines them when small enough; oversized files trigger fallback to path-only).
 12. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant lessons from past workflows. Apply them to avoid repeating known mistakes.
 
-**Token-saver for iteration > 1 (v0.31.0+).** When a `<review_feedback>` block flags one specific phase of the plan, prefer a targeted section read over re-reading the whole plan:
+**Token-saver for iteration > 1.** When a `<review_feedback>` block flags one specific phase of the plan, prefer a targeted section read over re-reading the whole plan:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-section --file plan.md --section "Phase 2"
@@ -340,7 +340,7 @@ Write `.devt/state/impl-summary.md` with:
 # Implementation Summary
 
 <!-- Status / verdict live in the JSON sidecar (impl-summary.json) per the
-     v0.35.0+ sidecar-only routing contract. This markdown is the human-readable
+     sidecar-only routing contract. This markdown is the human-readable
      narrative; the JSON is authoritative for workflow control flow. -->
 
 ## Task
@@ -384,7 +384,7 @@ Write `.devt/state/impl-summary.md` with:
 - Timestamp: {ISO 8601}
 ```
 
-**Also write `.devt/state/impl-summary.json` (v0.33.0+)** alongside the markdown, with the same logical content in a machine-readable shape. The JSON is the authoritative source for workflow routing (status, verdict, requirements coverage); the markdown stays for human review. Required fields:
+**Also write `.devt/state/impl-summary.json`** alongside the markdown, with the same logical content in a machine-readable shape. The JSON is the authoritative source for workflow routing (status, verdict, requirements coverage); the markdown stays for human review. Required fields:
 
 ```json
 {

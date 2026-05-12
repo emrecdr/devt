@@ -2,7 +2,7 @@
 
 Workflow that captures a user's rejection of an idea as a permanent REJ tombstone in
 `.devt/memory/rejected/`. The tombstone's `search_keywords` field is consulted by
-autoskill (Phase 2) and the discovery engine before any AI proposal is generated —
+autoskill and the discovery engine before any AI proposal is generated —
 suppressing re-proposals of the rejected idea forever.
 
 <purpose>
@@ -57,6 +57,11 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+<context>
+Title: ${TITLE}
+Body: ${BODY}
+Reason: ${REASON}
+</context>
 <task>
 Capture a REJ tombstone with the user's rejection. Apply the memory-curation skill's
 REJ-specific protocol:
@@ -74,11 +79,6 @@ REJ-specific protocol:
 CRITICAL: Search_keywords MUST cover every reasonable rephrasing. The user must
 explicitly approve the list. Without this gate, REJs become useless tombstones.
 </task>
-<context>
-Title: ${TITLE}
-Body: ${BODY}
-Reason: ${REASON}
-</context>
 Write summary to .devt/state/curation-summary.md (status: DONE)
 Output the new REJ-id and the absolute path of the written file.
 ")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Memory auto-index — PostToolUse hook on Edit/Write touching .devt/memory/**.md.
 #
-# Phase 3 (v0.18.0). Rebuilds the FTS5 unified index when an ADR/CON/FLOW/REJ/LES
+# Phase 3. Rebuilds the FTS5 unified index when an ADR/CON/FLOW/REJ/LES
 # markdown file is created or modified, so subsequent /devt:memory queries
 # always reflect the current state of disk.
 #

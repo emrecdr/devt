@@ -280,9 +280,9 @@ The verification.md is then written the same way you write any other agent artif
 # Verification Report
 
 <!-- Status / verdict live in the JSON sidecar (verification.json) per the
-     v0.34.0+ D-16 outcome-grader contract and the v0.35.0+ sidecar-only
-     routing convention. This markdown is the human-readable narrative; the
-     JSON is authoritative for workflow control flow. -->
+     outcome-grader contract and the sidecar-only routing convention.
+     This markdown is the human-readable narrative; the JSON is authoritative
+     for workflow control flow. -->
 
 ## Task
 

@@ -1,6 +1,6 @@
 ---
 name: memory-pre-flight
-description: Use BEFORE any code edit, plan, or architectural decision. Defines the Two-Tier Pre-Flight Protocol (Topic Pre-Flight at workflow start; File Pre-Flight at each Edit). Agents preload this skill when they may modify code or propose changes — it tells them how to read the .devt/state/preflight-brief.md, when to escalate to a 5-lane File Pre-Flight, and how to scratchpad-summarize their findings before touching files. The PreToolUse pre-flight-guard hook checks the scratchpad — missing summaries warn (Phase 3) or block (Phase 4) the edit.
+description: Use BEFORE any code edit, plan, or architectural decision. Defines the Two-Tier Pre-Flight Protocol (Topic Pre-Flight at workflow start; File Pre-Flight at each Edit). Agents preload this skill when they may modify code or propose changes — it tells them how to read the .devt/state/preflight-brief.md, when to escalate to a 5-lane File Pre-Flight, and how to scratchpad-summarize their findings before touching files. The PreToolUse pre-flight-guard hook checks the scratchpad — missing summaries warn or block the edit.
 allowed-tools: Bash Read Grep Glob
 ---
 
@@ -47,7 +47,7 @@ It does NOT apply when:
 The Brief contains:
 - **Topic Extracted** — domains, symbols, keywords parsed from the task
 - **Governing Documentation** — ADRs/CONs/FLOWs from Lanes A (domain), B (FTS), C (symbol), D (link closure)
-- **Memory Graph (2-hop subgraph)** *(v0.36.0+)* — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Scan this section to understand structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without firing per-doc `get_doc` calls.
+- **Memory Graph (2-hop subgraph)** — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Scan this section to understand structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without firing per-doc `get_doc` calls.
 - **Rejected Approaches** — REJ tombstones whose `search_keywords` overlap the topic (Lane E)
 - **Related Operational Lessons** — playbook entries matching the topic (Lane F)
 - **Blast Radius** — Graphify-derived dependents/effect-size (or grep heuristic if disabled)
@@ -117,7 +117,7 @@ When the file isn't covered by the Brief, run these in order:
 | 4 | Domain-active | `node bin/devt-tools.cjs memory active "<domain>"` |
 | 5 | FTS task-summary | `node bin/devt-tools.cjs memory query "<terms>"` |
 
-**Aggregate-first probes (v0.35.0+, Option 6)** — when you only need to know IF/WHERE/HOW-MANY docs match (not their contents), use the aggregate flags or the matching MCP tool. Aggregates return ~50-500 bytes vs ~1.5-15KB for full payloads. Default to aggregate-first; pull full rows only when you've identified a specific doc to drill into via `get_doc`.
+**Aggregate-first probes** — when you only need to know IF/WHERE/HOW-MANY docs match (not their contents), use the aggregate flags or the matching MCP tool. Aggregates return ~50-500 bytes vs ~1.5-15KB for full payloads. Default to aggregate-first; pull full rows only when you've identified a specific doc to drill into via `get_doc`.
 
 | Aggregate need | CLI | MCP tool |
 |---|---|---|
@@ -150,7 +150,7 @@ To pass the hook, just write the PREFLIGHT scratchpad line BEFORE calling the
 edit tool. This is the entire ceremony — five seconds of discipline per edit
 catches the kinds of governance drift that compound into incidents over months.
 
-### Recovering from a deny (v0.33.0+ JSONL format)
+### Recovering from a deny
 
 Every hook deny (or warn) is appended to `.devt/state/preflight-denies.jsonl` —
 single-writer, append-only, gitignored, one JSON record per line. **If you
@@ -174,7 +174,7 @@ Recovery sequence on deny:
    target — no batching)
 3. **Retry** the original Edit/Write call
 
-The log survives `state reset` via the v0.30.4 archive ring buffer
+The log survives `state reset` via the archive ring buffer
 (`.devt/state/.archive/<ts>/preflight-denies.jsonl`), so post-mortem inspection
 of stalled workflows is possible after the workflow finishes. JSONL parsing
 makes the log readable by `jq`, `node -e 'data.split("\n").map(JSON.parse)'`,
@@ -211,9 +211,9 @@ or any structured log tool — same as `_mcp-trace.jsonl`.
 
 | Config key | Default | Purpose |
 |---|---|---|
-| `memory.preflight_mode` | `block` (v0.19.0+) | Hook behavior on missing PREFLIGHT line — `off` no-op, `warn` advisory, `block` denies the edit |
+| `memory.preflight_mode` | `block` | Hook behavior on missing PREFLIGHT line — `off` no-op, `warn` advisory, `block` denies the edit |
 | `memory.enabled` | `true` | Master switch — false disables Brief generation entirely |
-| `memory.paths` | `null` (v0.22.0+) | List of memory roots to scan. `null` = single-root (`.devt/memory`). When set, lanes A-F return docs from EVERY configured root with last-wins precedence on ID collisions. The Brief surfaces the union — a shared org-wide REJ tombstone shadows the same approach in your project just as effectively as a local one. |
+| `memory.paths` | `null` | List of memory roots to scan. `null` = single-root (`.devt/memory`). When set, lanes A-F return docs from EVERY configured root with last-wins precedence on ID collisions. The Brief surfaces the union — a shared org-wide REJ tombstone shadows the same approach in your project just as effectively as a local one. |
 | `graphify.enabled` | `false` | Opt-in; controls Lanes 0/3 and blast radius |
 
 Override per-project in `.devt/config.json`:
@@ -227,7 +227,7 @@ Override per-project in `.devt/config.json`:
 }
 ```
 
-## Multi-root behavior (v0.22.0+)
+## Multi-root behavior
 
 When `memory.paths` is set, the lane queries the agent runs (`memory listActive`,
 `queryFTS`, `getBySymbol`, etc.) automatically span all configured roots. The Brief

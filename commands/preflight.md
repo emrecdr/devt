@@ -12,7 +12,7 @@ This workflow uses: Bash, Read
 Produce `.devt/state/preflight-brief.md` — a single document that lists every governing
 ADR/Concept/Flow, all relevant REJ tombstones, related operational lessons, and
 (when Graphify is enabled) blast-radius analysis for the user's task. The Brief is
-the canonical context input for every dev-workflow agent in v0.18.0+.
+the canonical context input for every dev-workflow agent.
 </objective>
 
 <execution_context>

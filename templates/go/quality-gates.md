@@ -54,4 +54,4 @@ golangci-lint run ./... && go vet ./... && go test ./... -race -count=1 && govul
 go test -tags=integration ./... -race -count=1
 ```
 
-> **ADR alignment gate** (v0.20.0+): before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.
+> **ADR alignment gate**: before finishing, run `node bin/devt-tools.cjs memory affects <changed-file>` for each modified path and verify no governing ADR is contradicted. The architect agent enforces this; this gate documents the rule.

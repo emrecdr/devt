@@ -93,7 +93,7 @@ Execute all tests using commands from `.devt/rules/quality-gates.md`:
 
 If any test fails, diagnose and fix immediately. Do NOT defer failures.
 
-**Inner-iteration budget (v0.31.0+)**: when a test or quality-gate failure is obviously self-correctable (typo, missing import, lint warning, simple assertion bug), self-correct up to **5 iterations** within this single dispatch before escalating — follow the same bounded protocol the programmer uses at `${CLAUDE_PLUGIN_ROOT}/agents/programmer/fix-loop-protocol.md` (iter 1-2 direct fix → 3 simplify → 4 alternative approach → 5 escalate via test-summary.md with status BLOCKED). Re-dispatching the workflow for an obvious typo costs a full agent prefix re-injection; bound the loop inside one Task call when the fix is mechanical.
+**Inner-iteration budget**: when a test or quality-gate failure is obviously self-correctable (typo, missing import, lint warning, simple assertion bug), self-correct up to **5 iterations** within this single dispatch before escalating — follow the same bounded protocol the programmer uses at `${CLAUDE_PLUGIN_ROOT}/agents/programmer/fix-loop-protocol.md` (iter 1-2 direct fix → 3 simplify → 4 alternative approach → 5 escalate via test-summary.md with status BLOCKED). Re-dispatching the workflow for an obvious typo costs a full agent prefix re-injection; bound the loop inside one Task call when the fix is mechanical.
 </step>
 
 <step name="validate">

@@ -31,7 +31,7 @@ Track state so `/devt:status` and `/devt:next` can detect and resume interrupted
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=debug phase=debug status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${BUG_DESCRIPTION}"
 ```
 
-**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0 — surfaces ADRs/Concepts/REJ tombstones for the bug area before debugging):
+**Auto-fire Pre-Flight Brief**:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${BUG_DESCRIPTION}"
@@ -64,12 +64,12 @@ Write to `.devt/state/debug-context.md`
 ## Step 3: Dispatch Debugger
 
 Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
-<bug>{bug_description}</bug>
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>
+<bug>{bug_description}</bug>
 Follow the 4-phase investigation protocol. Write findings to .devt/state/debug-summary.md
 ")
 </step>
@@ -89,7 +89,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
 
-The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` (v0.30.6+) so the next workflow in the same session starts clean. Debugger writes PREFLIGHT entries during investigation; without this, stale entries would falsely satisfy the pre-flight-guard hook for files touched in the next workflow.
+The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` so the next workflow in the same session starts clean. Debugger writes PREFLIGHT entries during investigation; without this, stale entries would falsely satisfy the pre-flight-guard hook for files touched in the next workflow.
 </step>
 
 </process>
@@ -110,7 +110,7 @@ The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` (v0.30.6+)
 - Summary includes root cause, not just the fix
 </success_criteria>
 
-## Memory layer integration (v0.17.0+)
+## Memory layer integration
 
 Debugger consults REJ tombstones BEFORE proposing fixes via `node bin/devt-tools.cjs memory
 rejected-keywords`. Proposed fixes matching tombstone search_keywords are silently filtered —

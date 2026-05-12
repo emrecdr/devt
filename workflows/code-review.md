@@ -73,7 +73,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${REVIEW_SCOPE}"
 ```
 
-The second call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
+The second call auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
 
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
@@ -117,11 +117,6 @@ Dispatch the code-reviewer agent with the identified file scope:
 
 ```
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
-  <task>
-    Review the following files for quality, correctness, and standards compliance.
-    Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
-    Every valid finding must be reported with file, line, severity, and rule reference.
-  </task>
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates in
@@ -143,6 +138,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <learning_context>{learning_context — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review the following files for quality, correctness, and standards compliance.
+    Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
+    Every valid finding must be reported with file, line, severity, and rule reference.
+  </task>
   Write review to .devt/state/review.md
 ")
 ```
@@ -158,7 +158,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 _Skip this step if `config.workflow.verification` is `false`._
 _Skip this step if `verify` is listed in `skipped_phases` from workflow state._
 
-Grader-driven thoroughness check (v0.36.0+, Option 3 — code-review slice). The verifier reads `references/rubrics/code_review.v1.md` and spot-checks the review for scope coverage, finding specificity, severity calibration, remediation concreteness, and ADR Compliance section presence. The verifier does NOT re-do the code review — it grades the review's quality and re-dispatches the code-reviewer with structured `revisions[]` when gaps are found.
+Grader-driven thoroughness check. The verifier reads `references/rubrics/code_review.v1.md` and spot-checks the review for scope coverage, finding specificity, severity calibration, remediation concreteness, and ADR Compliance section presence. The verifier does NOT re-do the code review — it grades the review's quality and re-dispatches the code-reviewer with structured `revisions[]` when gaps are found.
 
 **Artifact pre-gate**: confirm `.devt/state/review.md` exists. If missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact.
 
@@ -166,12 +166,6 @@ Dispatch the verifier:
 
 ```
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
-  <task>
-    Grade the code review against the code_review rubric. You are NOT re-doing the review.
-    Spot-check the review's thoroughness, specificity, severity calibration, and remediation
-    concreteness using the rubric in <rubric_path>. Read review.md as the artifact under review.
-    If axes fail, emit revisions[] keyed by axis-letter (A-1, B-3, etc.) for the reviewer to address.
-  </task>
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
@@ -189,6 +183,12 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Grade the code review against the code_review rubric. You are NOT re-doing the review.
+    Spot-check the review's thoroughness, specificity, severity calibration, and remediation
+    concreteness using the rubric in <rubric_path>. Read review.md as the artifact under review.
+    If axes fail, emit revisions[] keyed by axis-letter (A-1, B-3, etc.) for the reviewer to address.
+  </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
 ")
 ```
@@ -260,7 +260,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete stat
 - Final status: **DONE**
   </success_criteria>
 
-## Memory layer integration (v0.17.0+)
+## Memory layer integration
 
 Code review now produces an "ADR Compliance" section in `.devt/state/review.md` (Critical
 severity for violations). For each diff hunk:

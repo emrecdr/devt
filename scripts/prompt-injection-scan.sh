@@ -5,13 +5,13 @@ set -euo pipefail
 # Scans for injection patterns that could compromise agent behavior.
 #
 # Usage:
-#   scripts/prompt-injection-scan.sh              # Scan all plugin .md files
-#   scripts/prompt-injection-scan.sh --diff       # Scan only changed files (for CI)
-#   scripts/prompt-injection-scan.sh --file FILE  # Scan a single file
+# scripts/prompt-injection-scan.sh # Scan all plugin .md files
+# scripts/prompt-injection-scan.sh --diff # Scan only changed files (for CI)
+# scripts/prompt-injection-scan.sh --file FILE # Scan a single file
 #
 # Exit codes:
-#   0 = clean
-#   1 = findings detected
+# 0 = clean
+# 1 = findings detected
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="all"

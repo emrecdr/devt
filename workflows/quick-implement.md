@@ -78,7 +78,7 @@ Load project context:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
-**Auto-fire Pre-Flight Brief** (Phase 3 v0.18.0 — lighter version: same lanes A-F but expect smaller blast radius for SIMPLE-tier work):
+**Auto-fire Pre-Flight Brief**:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
@@ -124,7 +124,6 @@ Dispatch the programmer agent:
 
 ```
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
-  <task>{task_description}</task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
@@ -135,6 +134,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>{task_description}</task>
   Write summary to .devt/state/impl-summary.md
 ")
 ```
@@ -157,10 +157,6 @@ Dispatch the tester agent:
 
 ```
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
-  <task>
-    Write tests for the implementation described in .devt/state/impl-summary.md.
-    Cover happy paths, error paths, and key edge cases.
-  </task>
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
@@ -168,6 +164,10 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <learning_context>{learning_context from context_init — relevant testing lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Write tests for the implementation described in .devt/state/impl-summary.md.
+    Cover happy paths, error paths, and key edge cases.
+  </task>
   Write summary to .devt/state/test-summary.md
 ")
 ```
@@ -190,10 +190,6 @@ Dispatch the code-reviewer agent:
 
 ```
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
-  <task>
-    Review the implementation and tests for quality, correctness, and standards compliance.
-    Review ALL code in scope — do not filter by origin or label findings as pre-existing.
-  </task>
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates in
@@ -214,6 +210,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <learning_context>{learning_context from context_init — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
+  <task>
+    Review the implementation and tests for quality, correctness, and standards compliance.
+    Review ALL code in scope — do not filter by origin or label findings as pre-existing.
+  </task>
   Write review to .devt/state/review.md
 ")
 ```
@@ -258,7 +258,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete stat
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
 
-The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` (v0.30.6+) so the next workflow in the same session starts clean. Quick workflows don't have a `review_deferred` step, but the scratchpad still accumulates pre-flight-guard coverage records during the run.
+The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` so the next workflow in the same session starts clean. Quick workflows don't have a `review_deferred` step, but the scratchpad still accumulates pre-flight-guard coverage records during the run.
 
 Report to the user:
 

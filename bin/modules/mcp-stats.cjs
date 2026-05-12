@@ -1,15 +1,15 @@
 "use strict";
 
 /**
- * MCP telemetry aggregator (v0.21.0+).
+ * MCP telemetry aggregator.
  *
  * Reads the JSONL trace file appended by bin/devt-memory-mcp.cjs at
  * .devt/memory/_mcp-trace.jsonl and computes per-tool statistics:
- *   - call count
- *   - error count + rate
- *   - duration percentiles (p50, p95, p99) — useful for spotting slow tools
- *   - cumulative result size (bytes)
- *   - first / last call timestamp
+ * - call count
+ * - error count + rate
+ * - duration percentiles (p50, p95, p99) — useful for spotting slow tools
+ * - cumulative result size (bytes)
+ * - first / last call timestamp
  *
  * Also supports `--prune-older-than=30d` to compact the trace file by
  * dropping entries older than the cutoff.
@@ -18,10 +18,10 @@
  * just sizes + sha256 fingerprints.
  *
  * Usage:
- *   node bin/devt-tools.cjs mcp-stats                       # aggregate all entries
- *   node bin/devt-tools.cjs mcp-stats --since=2026-05-01    # ISO date filter
- *   node bin/devt-tools.cjs mcp-stats --tool=query_fts      # filter to one tool
- *   node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
+ * node bin/devt-tools.cjs mcp-stats # aggregate all entries
+ * node bin/devt-tools.cjs mcp-stats --since=2026-05-01 # ISO date filter
+ * node bin/devt-tools.cjs mcp-stats --tool=query_fts # filter to one tool
+ * node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
  */
 
 const fs = require("fs");

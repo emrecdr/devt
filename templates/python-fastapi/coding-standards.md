@@ -331,4 +331,4 @@ def get_user(user_id: UUID, db: Session = Depends()):
     return db.query(User).filter(User.id == user_id).first()
 ```
 
-> **ADR override note** (v0.20.0+): if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.
+> **ADR override note**: if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

@@ -34,7 +34,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
 
-The third call (Phase 3 v0.18.0) auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
+The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
 
 Read .devt/rules/ for project conventions.
 Read CLAUDE.md if it exists.
@@ -58,10 +58,6 @@ If skipping, report why and suggest next command. Do NOT dispatch the researcher
 ## Step 3: Dispatch Researcher
 
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
-<task>
-Research implementation approaches for: {task_description}
-Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
-</task>
 <context>
 <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
      researcher, code-reviewer, and verifier dispatch templates in
@@ -79,6 +75,10 @@ Investigate the codebase for existing patterns, recommend an approach, identify 
 <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>
+<task>
+Research implementation approaches for: {task_description}
+Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
+</task>
 Write findings to .devt/state/research.md
 ")
 
@@ -137,7 +137,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=false phase=
 - User has reviewed summary
   </success_criteria>
 
-## Memory layer integration (v0.17.0+)
+## Memory layer integration
 
 Researcher consults `.devt/memory/concepts/` and `.devt/memory/decisions/` BEFORE recommending
 an approach — `node bin/devt-tools.cjs memory query <topic>` and `memory affects <relevant-path>`

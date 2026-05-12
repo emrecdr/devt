@@ -1,12 +1,12 @@
 "use strict";
 
 /**
- * Append-only JSONL logger for forensic side-channels (v0.33.0+).
+ * Append-only JSONL logger for forensic side-channels.
  *
  * Use cases in devt today:
- *   - hooks/pre-flight-guard.sh deny/warn records → .devt/state/preflight-denies.jsonl
- *   - bin/devt-memory-mcp.cjs tool-call telemetry → .devt/memory/_mcp-trace.jsonl
- *     (currently does its own appendFileSync; can migrate later for symmetry)
+ * - hooks/pre-flight-guard.sh deny/warn records → .devt/state/preflight-denies.jsonl
+ * - bin/devt-memory-mcp.cjs tool-call telemetry → .devt/memory/_mcp-trace.jsonl
+ * (currently does its own appendFileSync; can migrate later for symmetry)
  *
  * Why JSONL not plain text: unified parsing surface for `/devt:forensics`,
  * `/devt:mcp-stats`, and future log readers. One record per line, valid JSON
@@ -33,7 +33,7 @@ const MAX_RECORD_BYTES = PIPE_BUF - 64;
  * a truncated stub is appended instead so the file stays valid JSONL.
  *
  * Returns `{ ok: true, bytes }` on success, or
- *         `{ ok: false, reason }` if the file cannot be written.
+ * `{ ok: false, reason }` if the file cannot be written.
  *
  * The CALLER is responsible for ensuring the parent directory exists. This
  * keeps the helper zero-IO outside of the append itself.

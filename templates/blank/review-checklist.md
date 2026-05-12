@@ -56,4 +56,4 @@ The code-reviewer reads this alongside `coding-standards.md`.
 > Customize this file with your language and framework-specific checks.
 > See other templates (python-fastapi, go, typescript-node, vue-bootstrap) for examples.
 
-> **ADR/REJ alignment** (v0.20.0+): before approving a change, confirm: (a) no governing ADR is silently violated; (b) no proposed approach matches a REJ tombstone in `.devt/memory/rejected/`. The Pre-Flight Brief surfaces both.
+> **ADR/REJ alignment**: before approving a change, confirm: (a) no governing ADR is silently violated; (b) no proposed approach matches a REJ tombstone in `.devt/memory/rejected/`. The Pre-Flight Brief surfaces both.

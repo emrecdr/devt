@@ -70,7 +70,7 @@ After 3 failed fix attempts on the same issue:
 ## Red Flags
 
 - "Quick fix" → Phase 1 first. Always.
-- "Try this" → That's guessing. Form a falsifiable hypothesis (Phase 3).
+- "Try this" → That's guessing. Form a falsifiable hypothesis.
 - "Change multiple things" → One variable at a time.
 - "It works on my end" → Reproduce in the failing environment.
 - "One more attempt" (after 2+ failures) → 3+ = architectural. Question the pattern.

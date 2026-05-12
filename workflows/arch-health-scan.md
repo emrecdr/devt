@@ -209,6 +209,20 @@ Dispatch the architect agent to interpret findings:
 
 ```
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
+  <context>
+    <files_to_read>
+      .devt/rules/architecture.md — layer rules, module boundaries, dependency direction
+      .devt/rules/coding-standards.md — coding conventions, forbidden patterns, entity standards
+      .devt/rules/testing-patterns.md — test structure, coverage rules, soft-delete testing requirements
+      .devt/rules/golden-rules.md (if exists) — non-negotiable project rules
+      .devt/rules/patterns/common-smells.md (if exists) — project-specific anti-patterns with detection commands
+      CLAUDE.md (if exists)
+    </files_to_read>
+    <scanner_output>Read .devt/state/scanner-output.txt (if exists)</scanner_output>
+    <delta>Read .devt/state/scan-delta.md (if exists)</delta>
+    <triage>Read .devt/state/arch-triage.json (if exists)</triage>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+  </context>
   <task>
     Perform a comprehensive architecture health scan of the codebase.
     Assess: module boundaries, dependency direction, coupling, structural duplication,
@@ -226,20 +240,6 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     If no scanner output is available, perform the analysis manually by scanning
     imports, module structure, and cross-module references.
   </task>
-  <context>
-    <files_to_read>
-      .devt/rules/architecture.md — layer rules, module boundaries, dependency direction
-      .devt/rules/coding-standards.md — coding conventions, forbidden patterns, entity standards
-      .devt/rules/testing-patterns.md — test structure, coverage rules, soft-delete testing requirements
-      .devt/rules/golden-rules.md (if exists) — non-negotiable project rules
-      .devt/rules/patterns/common-smells.md (if exists) — project-specific anti-patterns with detection commands
-      CLAUDE.md (if exists)
-    </files_to_read>
-    <scanner_output>Read .devt/state/scanner-output.txt (if exists)</scanner_output>
-    <delta>Read .devt/state/scan-delta.md (if exists)</delta>
-    <triage>Read .devt/state/arch-triage.json (if exists)</triage>
-    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
-  </context>
   Write findings to .devt/state/arch-review.md
 ")
 ```
@@ -330,7 +330,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_s
 - Final status: **DONE**
   </success_criteria>
 
-## Memory layer integration (v0.17.0+) — Stale ADR detection
+## Memory layer integration — Stale ADR detection
 
 Arch-health gains a new finding type: **Stale ADR**. For each active ADR in
 `.devt/memory/decisions/`, verify:

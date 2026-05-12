@@ -4,9 +4,9 @@
  * Config resolution — 3-level merge: hardcoded defaults ← global ← project.
  *
  * Locations:
- *   defaults: hardcoded in this module
- *   global:   ~/.devt/defaults.json
- *   project:  .devt/config.json (in project root)
+ * defaults: hardcoded in this module
+ * global: ~/.devt/defaults.json
+ * project: .devt/config.json (in project root)
  */
 
 const fs = require("fs");
@@ -20,31 +20,31 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const DEFAULTS = {
   model_profile: "quality",
   scope_mode: "surgical",
-  // Memory layer (v0.16.0+) — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
-  // preflight_mode: "off" (Phase 1-2) | "warn" (Phase 3) | "block" (Phase 4 default — v0.19.0+).
-  //   off   — hook is a no-op (escape hatch for projects that opt out entirely)
-  //   warn  — pre-flight-guard.sh emits stderr advisory when scratchpad lacks a PREFLIGHT line; edit proceeds
-  //   block — pre-flight-guard.sh denies the edit with a checklist; agent must produce the line first
+  // Memory layer — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
+  // preflight_mode: "off" (Phase 1-2) | "warn" | "block".
+  // off — hook is a no-op (escape hatch for projects that opt out entirely)
+  // warn — pre-flight-guard.sh emits stderr advisory when scratchpad lacks a PREFLIGHT line; edit proceeds
+  // block — pre-flight-guard.sh denies the edit with a checklist; agent must produce the line first
   // Override per-project in .devt/config.json — `block` is intentionally the default because
   // skipping the protocol on production-tier development is the higher long-term cost.
   // auto_index_on_change: PostToolUse hook (memory-auto-index.sh) rebuilds the FTS5 unified
   // index after Edit/Write on .devt/memory/**.md files. Idempotent — no-op when nothing changed.
   memory: {
-    // Master switch (v0.30.0+): when explicitly false, disables Pre-Flight Brief
+    // Master switch: when explicitly false, disables Pre-Flight Brief
     // generation, the auto-index PostToolUse hook, and the pre-flight-guard
     // PreToolUse hook. Per-feature flags below still apply when this is true.
     // The MCP query layer is gated separately via .mcp.json registration.
     enabled: true,
     preflight_mode: "block",
     auto_index_on_change: true,
-    // mcp_telemetry (v0.21.0+): when true, the vendored devt-memory-mcp server
+    // mcp_telemetry: when true, the vendored devt-memory-mcp server
     // appends one JSONL line per tools/call to .devt/memory/_mcp-trace.jsonl
     // (gitignored). Records: timestamp, tool, ok/error_code, duration_ms,
     // args_size, args_fp (sha256:12), result_size. NEVER logs args or results
     // (privacy/security). Disable for projects that don't want any session
     // persistence beyond the workflow state itself.
     mcp_telemetry: true,
-    // paths (v0.22.0+): list of memory roots to scan + index. When null (default),
+    // paths: list of memory roots to scan + index. When null (default),
     // devt uses [<projectRoot>/.devt/memory] as a single root — backward compat.
     // When set, devt indexes EVERY listed root and last-wins on ID collisions
     // (project-local writes shadow shared decisions, like CSS specificity).
@@ -52,16 +52,16 @@ const DEFAULTS = {
     // source_root so /devt:memory list shows provenance.
     //
     // Use cases:
-    //   - Company-wide ADRs: ["../engineering-adrs", ".devt/memory"]
-    //   - Monorepo shared rules: ["../../shared/memory", ".devt/memory"]
-    //   - NFS-mounted org policy: ["/mnt/acme-policy/memory", ".devt/memory"]
+    // - Company-wide ADRs: ["../engineering-adrs", ".devt/memory"]
+    // - Monorepo shared rules: ["../../shared/memory", ".devt/memory"]
+    // - NFS-mounted org policy: ["/mnt/acme-policy/memory", ".devt/memory"]
     //
     // Relative paths resolve against the project root. The project-local path
     // (.devt/memory) is automatically appended if not present, so curator writes
     // always have a destination.
     paths: null,
   },
-  // Graphify integration (v0.17.0+) — optional AST symbol anchoring + MCP query layer.
+  // Graphify integration — optional AST symbol anchoring + MCP query layer.
   // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and
   // `graphify install --platform claude`. See plan: graceful degradation when absent.
   graphify: {
@@ -88,21 +88,21 @@ const DEFAULTS = {
     // Verifier-loop iteration cap before PRUNE (no opt-in flag — ships final).
     max_iterations: 3,
   },
-  // State ring buffer (v0.30.4+) — `state reset` archives prior artifacts to
+  // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug
   // contexts, plans, etc. survive a workflow restart and can be inspected for
   // continuity. Set archive_runs to 0 to disable archiving entirely (pure-
-  // ephemeral state, pre-v0.30.4 behavior). The archive itself is exempt from
+  // ephemeral state, pre-behavior). The archive itself is exempt from
   // reset, so old runs only roll off when N+1 new resets happen.
   state: {
     archive_runs: 5,
   },
-  // Pinned rubric versions per workflow_type (v0.36.0+). The verifier reads
+  // Pinned rubric versions per workflow_type. The verifier reads
   // `references/rubrics/<filename>` rather than computing the path from
   // `<workflow_type>`, so we can ship rubric updates as new files (`dev.v2.md`)
   // and let projects opt in by bumping this map. Override per-project in
   // `.devt/config.json`:
-  //   "rubrics": { "dev": "dev.v2.md" }
+  // "rubrics": { "dev": "dev.v2.md" }
   // The verifier dispatch in dev-workflow.md injects the resolved path as
   // `<rubric_path>` so the agent never has to know about config layout.
   rubrics: {

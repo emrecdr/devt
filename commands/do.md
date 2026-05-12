@@ -27,7 +27,7 @@ Execute the do workflow from the referenced file. The workflow is a pure dispatc
 If you find yourself drafting more than the routing decision line + the Skill tool call, you have broken the contract — back out and dispatch.
 </process>
 
-## Memory integration (v0.20.0+)
+## Memory integration
 
 This command does not auto-fire `/devt:preflight` (it's a meta workflow, not a dev workflow). However:
 - If `.devt/state/preflight-brief.md` exists from a prior workflow, this command may surface it as context (e.g., `/devt:forensics` reads it when investigating failures; `/devt:thread` references it for cross-session work).

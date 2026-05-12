@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-05-12
+
+Cache-friendliness, CI hardening, and a strict documentation discipline pass. Smoke: **340 passed**, **0 failed**. Locking: **3/3**.
+
+### Added
+
+- **Cache-friendly dispatch ordering across every workflow.** Every `Task(subagent_type="devt:*", ...)` dispatch in `workflows/*.md` (25 dispatches across 11 files) was reordered so the per-task dynamic block (`<task>` or, for `workflows/debug.md`, `<bug>`) appears AFTER `</context>`. Static blocks (`<governing_rules>`, `<guardrails_inline>`, `<workflow_type>`, `<rubric_path>`) now lead the prompt so the Anthropic prompt-cache prefix is byte-stable across retry iterations within the 5-minute TTL. Subagent dispatches in a single workflow run now cache-hit each other's prefixes, paying ~10% of full input price on the static portion.
+- **Cache-ordering smoke gate.** New `scripts/check-dispatch-ordering.cjs` walks every dispatch block and rejects any `<task>` that precedes `</context>`. Wired into `scripts/smoke-test.sh` as a new section; runs on every CI push.
+- **`devt:tokens --regression` mode.** `bin/modules/token-report.cjs` exposes `detectRegressions(records, opts)` and the `--regression`, `--regression-min-input`, `--regression-streak` CLI flags. The detector scans per-turn JSONL records for streaks of "cold" turns (`cache_read_tokens == 0` with `input_tokens >= min_input_tokens`, default 5000) running ≥4-in-a-row (default). A streak is a near-certain signature of a dispatch-template ordering regression. Output: `sessions_with_regression`, `total_cold_turns`, `est_wasted_input_tokens`, `offending_sessions[].streaks[]`. Documented in `workflows/tokens.md`.
+
+### Changed
+
+- **Codebase-wide version/option/wave/D-NN reference removal.** Every devt-internal version marker (`v0.X.Y+`, `since v0.A.B`, `Phase N (v0.X.Y+)`, `Option N`, `Wave A`, `D-NN`, `CCA v27 §X`, roadmap pointers) has been stripped from every `.md`, `.cjs`, and `.sh` comment / prose surface — agents, workflows, skills, hooks, guardrails, references, docs, READMEs, CLAUDE.md. The codebase is no longer a parallel changelog; `CHANGELOG.md` + `git log` are the canonical sources for "when did X land". Third-party version markers (`Graphify v0.7.10+`, `Node v22`, model IDs) are preserved.
+- **CLAUDE.md "Key Conventions" extended** with three new rules: cache-friendly dispatch ordering, documentation discipline (no version refs in code), and comment discipline (comments reserved for non-obvious WHY).
+
+### Fixed
+
+- **CI smoke-test exit 1 on Node 22 / Node 24.** The `memory.upsertDoc + MCP write surface` smoke check captured stderr (`2>&1`) which let Node 22/24's `node:sqlite` `ExperimentalWarning` contaminate `UPSERT_OUT`, breaking the `JSON.parse` that validates the upsert result. Switched to `2>/dev/null` to match the surrounding captures. Locally on Node 26 (where the warning is silent) the check always passed; CI on Node 22/24 now matches.
+- **GitHub Actions Node-20 deprecation warnings.** Bumped `actions/checkout@v4` → `@v5` and `actions/setup-node@v4` → `@v5` in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
+
 ## [0.36.0] - 2026-05-12
 
 Two waves consolidated into one release. v0.35.0's Wave A (6 options) was authored in a prior session but never published; v0.36.0's wave adds 4 more options on top (3 new + slim 3 + Option 12 tombstone). Ships 10 architectural improvements drawn from the `ticklish-mapping-backus.md` 12-option roadmap; the remaining 2 (Option 7 deferred to v0.37.0, Option 12 rejected by design). Smoke: **339 passed** (was 325 pre-wave). Locking: **3/3**. Plugin contract surface: stable (no breaking changes to commands, agents, or hooks).

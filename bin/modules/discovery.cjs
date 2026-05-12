@@ -4,22 +4,22 @@
  * Discovery engine — harvests session signals into curator-reviewable proposals.
  *
  * Sources of candidate proposals (in priority order):
- *   1. claude-mem ⚖️ decision and 🔵 discovery tagged entries (when claude-mem is installed)
- *   2. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
- *   3. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
+ * 1. claude-mem ⚖️ decision and 🔵 discovery tagged entries (when claude-mem is installed)
+ * 2. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
+ * 3. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
  *
  * For each candidate, the engine:
- *   - Fetches the FULL original reasoning (verbatim — no AI summarization)
- *   - Cross-references existing memory docs (dedup) and REJ tombstones (suppress)
- *   - Writes structured proposals to `.devt/memory/_suggestions.md`
+ * - Fetches the FULL original reasoning (verbatim — no AI summarization)
+ * - Cross-references existing memory docs (dedup) and REJ tombstones (suppress)
+ * - Writes structured proposals to `.devt/memory/_suggestions.md`
  *
  * Hard guarantees:
- *   - NEVER writes a permanent .devt/memory/{decisions,concepts,flows,rejected}/*.md
- *     file. That is exclusively the curator agent's role via AskUserQuestion.
- *   - REJ tombstone matches suppress proposals SILENTLY (the "no nag" mechanism).
- *   - Idempotent: re-running on the same session window produces the same proposals.
+ * - NEVER writes a permanent .devt/memory/{decisions,concepts,flows,rejected}/*.md
+ * file. That is exclusively the curator agent's role via AskUserQuestion.
+ * - REJ tombstone matches suppress proposals SILENTLY (the "no nag" mechanism).
+ * - Idempotent: re-running on the same session window produces the same proposals.
  *
- * Phase 2 (v0.17.0). Phase 3 will wire this into the standalone /devt:preflight
+ * Phase 2. Phase 3 will wire this into the standalone /devt:preflight
  * Topic Pre-Flight Brief generator.
  */
 
@@ -74,7 +74,7 @@ function claudeMemAvailable() {
  * Returns [] if claude-mem is not installed (callers fall back to scratchpad tags).
  *
  * Returns array of:
- *   { id, timestamp, tag: "⚖️" | "🔵", title, body, source: "claude-mem" }
+ * { id, timestamp, tag: "⚖️" | "🔵", title, body, source: "claude-mem" }
  */
 function harvestClaudeMem(options) {
   options = options || {};

@@ -190,7 +190,7 @@ Bug fixes without tests are patches, not fixes. The test is the proof.
 **Related skills**: verification-patterns (verify after TDD), code-review-guide (review the result)
 **Feeds into**: .devt/state/impl-summary.md and .devt/state/test-summary.md
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 When scaffolding tests, find nearest existing test patterns via Graphify:
 `node bin/devt-tools.cjs graphify neighbors <subject-symbol> --direction=in` filtered to

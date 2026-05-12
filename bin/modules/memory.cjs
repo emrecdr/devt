@@ -11,12 +11,12 @@
  * Every doc carries strict frontmatter; the index is regenerable from markdown at any time.
  *
  * Schema invariants:
- *  - Atomic rebuild: drop all tables in a transaction, re-insert, commit.
- *  - Files prefixed with `_` (e.g. `_suggestions.md`, `_index.md`) are NEVER indexed
- *    as first-class docs — they are auto-generated reports.
- *  - Documents.id is unique across all four doc_types.
- *  - links.target_id has NO FK constraint — forward references to not-yet-created
- *    docs are valid; `memory validate` flags broken links separately.
+ * - Atomic rebuild: drop all tables in a transaction, re-insert, commit.
+ * - Files prefixed with `_` (e.g. `_suggestions.md`, `_index.md`) are NEVER indexed
+ * as first-class docs — they are auto-generated reports.
+ * - Documents.id is unique across all four doc_types.
+ * - links.target_id has NO FK constraint — forward references to not-yet-created
+ * docs are valid; `memory validate` flags broken links separately.
  */
 
 const fs = require("fs");
@@ -67,16 +67,16 @@ function getMemoryRoot() {
 }
 
 /**
- * Resolve the configured list of memory roots (v0.22.0+).
+ * Resolve the configured list of memory roots.
  * Returns absolute paths in scan order. Project-local (.devt/memory) is always
  * the LAST entry so it wins ID collisions per the last-wins precedence rule.
  *
  * Each path is validated:
- *   - relative paths resolve against the project root
- *   - `..` segments after normalization are allowed (shared dirs are often siblings)
- *     BUT the resolved path must still be a real existing directory
- *   - null bytes rejected
- *   - duplicates collapsed (preserving first occurrence to keep precedence stable)
+ * - relative paths resolve against the project root
+ * - `..` segments after normalization are allowed (shared dirs are often siblings)
+ * BUT the resolved path must still be a real existing directory
+ * - null bytes rejected
+ * - duplicates collapsed (preserving first occurrence to keep precedence stable)
  */
 function getMemoryRoots() {
   let configured = null;
@@ -454,7 +454,7 @@ const SCHEMA_DDL = `
   CREATE INDEX IF NOT EXISTS idx_affects_symbol ON affects(symbol COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id);
 
-  -- Views (CCA v21.0 §10, adapted). Survive atomic rebuildIndex() because
+  -- Views. Survive atomic rebuildIndex() because
   -- rebuilds DELETE FROM tables rather than DROP them.
   CREATE VIEW IF NOT EXISTS pending_review AS
   SELECT id, doc_type, title, confidence, domain, created_at, file_path
@@ -523,7 +523,7 @@ function ensureDb() {
  * If anything throws mid-rebuild, the transaction rolls back and the
  * previous index state is preserved.
  *
- * Cross-process serialization (v0.30.6): wraps the rebuild in a file lock
+ * Cross-process serialization: wraps the rebuild in a file lock
  * against the memory directory so two concurrent Claude sessions that both
  * trigger memory-auto-index.sh (e.g. user edits memory docs from two terminals)
  * cannot race on the DELETE→INSERT transaction. Returns `{ok:false, reason:
@@ -671,7 +671,7 @@ function rebuildIndexLocked() {
 }
 
 // ---------------------------------------------------------------------------
-// Programmatic upsert (v0.35.0+, Option 2 — MCP write surface for curator)
+// Programmatic upsert
 // ---------------------------------------------------------------------------
 
 /**
@@ -697,14 +697,14 @@ function slugify(text) {
  * 4-tool curator ritual (Write .tmp + Bash mv + Bash memory index + state read).
  *
  * Steps (in order; any failure rolls back the file write):
- *   1. Validate frontmatter via validateFrontmatter
- *   2. Resolve target path: `.devt/memory/<subdir>/<ID>-<slug>.md`
- *   3. Render markdown (YAML frontmatter + body)
- *   4. atomicWriteFileSync (tmp + rename)
- *   5. rebuildIndex() — refreshes FTS5, affects, links, rejected_keywords
+ * 1. Validate frontmatter via validateFrontmatter
+ * 2. Resolve target path: `.devt/memory/<subdir>/<ID>-<slug>.md`
+ * 3. Render markdown (YAML frontmatter + body)
+ * 4. atomicWriteFileSync (tmp + rename)
+ * 5. rebuildIndex() — refreshes FTS5, affects, links, rejected_keywords
  *
  * Returns: { ok: true, file_path, indexed: {inserted, skipped, ...} }
- *      or  { ok: false, errors: [...] }
+ * or { ok: false, errors: [...] }
  *
  * @param {object} doc - { frontmatter: {...}, body: "..." }
  */
@@ -720,7 +720,7 @@ function upsertDoc(doc) {
   if (errors.length) return { ok: false, errors };
 
   // 2. Resolve target path. getSubdirPath throws on unknown doc_type — but
-  //    validateFrontmatter already checked, so this is defensive.
+  // validateFrontmatter already checked, so this is defensive.
   let subdirPath;
   try { subdirPath = getSubdirPath(fm.doc_type); }
   catch (e) { return { ok: false, errors: [{ error: e.message }] }; }
@@ -736,8 +736,8 @@ function upsertDoc(doc) {
   const targetPath = path.join(subdirPath, filename);
 
   // 3. Render — wrap the existing serializer's body with the YAML doc delimiters.
-  //    Field order is whatever Object.entries() yields; callers wanting stable
-  //    diffs should construct their frontmatter object with the canonical order.
+  // Field order is whatever Object.entries() yields; callers wanting stable
+  // diffs should construct their frontmatter object with the canonical order.
   const markdown = `---\n${serializeFrontmatter(fm)}\n---\n\n${body.replace(/\s+$/, "")}\n`;
 
   // 4. Atomic write
@@ -745,7 +745,7 @@ function upsertDoc(doc) {
   catch (e) { return { ok: false, errors: [{ error: `atomic write failed: ${e.message}` }] }; }
 
   // 5. Rebuild FTS index. On failure, undo the file write so the on-disk
-  //    state remains consistent with the index.
+  // state remains consistent with the index.
   let indexed;
   try {
     indexed = rebuildIndex();
@@ -894,12 +894,12 @@ function queryFTS(terms, opts) {
   const docType = opts && opts.docType && DOC_TYPES.includes(opts.docType)
     ? opts.docType
     : null;
-  // Aggregation modes (v0.35.0+, Option 6 — pre-filter CLI aggregations to cut
-  // token cost of common probe-the-FTS-then-discard-most-rows patterns):
-  //   "full"            — default; returns array of full rows
-  //   "count"           — returns {count}; no rows
-  //   "domain-counts"   — returns {counts: {<domain>: N, ...}}; no rows
-  //   "compact"         — returns array of {id, title, doc_type} only (no summary/file_path/rank)
+  // Aggregation modes — pre-filter CLI aggregations to cut token cost of
+  // common probe-the-FTS-then-discard-most-rows patterns:
+  // "full" — default; returns array of full rows
+  // "count" — returns {count}; no rows
+  // "domain-counts" — returns {counts: {<domain>: N, ...}}; no rows
+  // "compact" — returns array of {id, title, doc_type} only (no summary/file_path/rank)
   const mode = (opts && opts.mode) || "full";
   return withDb(db => {
     // Tokenize on whitespace, strip FTS5 special chars per token, append * for
@@ -992,7 +992,7 @@ function getLinks(docId, depth) {
 
 /**
  * Flatten transitive link expansion into `{source, predicate, target}` triples
- * for the Pre-Flight Brief subgraph section (v0.36.0+, Option 10).
+ * for the Pre-Flight Brief subgraph section.
  *
  * Reuses `getLinks` so depth-capping, visited-set tracking, and the existing
  * `links` table query are inherited unchanged. The output is deduplicated
@@ -1090,30 +1090,30 @@ function findStaleLinks() {
  * otherwise returns a payload with degraded=true so callers fall back to grep.
  */
 // ---------------------------------------------------------------------------
-// Portable bundle export / import (v0.20.0+)
+// Portable bundle export / import
 //
 // Bundle format (JSON, schema_version=1):
-//   {
-//     schema_version: 1,
-//     exported_at: ISO,
-//     exported_from: <source project root>,
-//     doc_count: N,
-//     docs: [{ id, doc_type, frontmatter, body }, ...]
-//   }
+// {
+// schema_version: 1,
+// exported_at: ISO,
+// exported_from: <source project root>,
+// doc_count: N,
+// docs: [{ id, doc_type, frontmatter, body }, ...]
+// }
 //
 // Export reads markdown files, parses frontmatter + body, emits JSON. Import
 // reverses: regenerates markdown from the bundle. Conflict policy on import:
-//   default: skip if id exists
-//   --overwrite: replace existing file
-//   --prefix=X-: remap every id to X-ORIGINAL_ID (multi-source bundling)
+// default: skip if id exists
+// --overwrite: replace existing file
+// --prefix=X-: remap every id to X-ORIGINAL_ID (multi-source bundling)
 // ---------------------------------------------------------------------------
 
 /**
  * Resolve a user-supplied --out= path. Rules:
- *   - relative paths: resolved against project root, MUST stay inside project root
- *   - absolute paths: allowed (user explicitly chose external destination)
- *   - reject `..` segments after normalization on relative paths
- *   - reject null bytes
+ * - relative paths: resolved against project root, MUST stay inside project root
+ * - absolute paths: allowed (user explicitly chose external destination)
+ * - reject `..` segments after normalization on relative paths
+ * - reject null bytes
  */
 function resolveExportPath(p) {
   if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
@@ -1133,9 +1133,9 @@ function resolveExportPath(p) {
 
 /**
  * Resolve a user-supplied bundle path for import.
- *   - relative resolved against cwd
- *   - absolute allowed
- *   - reject null bytes; reject if file doesn't exist
+ * - relative resolved against cwd
+ * - absolute allowed
+ * - reject null bytes; reject if file doesn't exist
  */
 function resolveImportPath(p) {
   if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
@@ -1159,7 +1159,7 @@ function readDocFile(filePath) {
 function exportBundle(opts) {
   opts = opts || {};
   const includeTypes = opts.includeTypes || DOC_TYPES.slice();
-  // v0.22.0+: by default, bundle ONLY the project-local root. Shared roots are
+  // By default, bundle ONLY the project-local root. Shared roots are
   // typically maintained as their own repos with their own bundling — exporting
   // them here would be a copy that drifts from upstream. Pass allRoots:true to
   // bundle the union (last-wins-deduped) for multi-root archival use cases.
@@ -1386,7 +1386,7 @@ function affectsSymbol(symbol) {
 /**
  * Resolve each affects_symbols entry through Graphify. Symbols that return
  * zero results are flagged as `stale-symbol` warnings — the canonical
- * "Refactor Safety" decay scenario from CCA v27 §2 (a doc claims to govern
+ * "Refactor Safety" decay scenario from (a doc claims to govern
  * `UserService` but the class was renamed to `AccountService`).
  *
  * Gracefully no-ops when Graphify isn't ready (disabled in config, binary
@@ -1578,7 +1578,7 @@ function run(subcommand, args) {
         process.stderr.write(`Invalid --doc-type: ${docType}. Allowed: ${DOC_TYPES.join("|")}\n`);
         return 2;
       }
-      // Aggregate modes (v0.35.0+, Option 6) — at most one wins; precedence:
+      // Aggregate modes — at most one wins; precedence:
       // --count > --domain-counts > --top > --json-compact > full.
       const wantCount = args.includes("--count");
       const wantDomain = args.includes("--domain-counts");
@@ -1848,7 +1848,7 @@ module.exports = {
   CONFIDENCE_VALUES,
   LINK_TYPES,
   SCHEMA_VERSION,
-  // v0.35.0+ — Option 2 (MCP write surface)
+  // Option 2 (MCP write surface)
   upsertDoc,
   ID_PATTERN_BY_TYPE,
   SUBDIR_BY_TYPE,

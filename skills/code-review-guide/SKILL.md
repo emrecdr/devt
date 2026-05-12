@@ -214,7 +214,7 @@ Score: XX/100 — VERDICT
 - **Used by agents**: code-reviewer (primary consumer)
 - **Related skills**: codebase-scan (to verify no duplication introduced), architecture-health-scanner (for systemic issues)
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 Reviews must include an "ADR Compliance" section. For each diff hunk:
 1. `node bin/devt-tools.cjs memory affects <changed-file>` — enumerate governing docs

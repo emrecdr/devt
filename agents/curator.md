@@ -71,7 +71,7 @@ Review existing `.devt/memory/lessons/` for entries that need maintenance. Lesso
 For each `accept`-action candidate that the user approved via AskUserQuestion:
 
 1. Assign the next available `LES-NNNN` (or `ADR-NNNN`, etc.) by scanning the target subfolder for the highest existing id and incrementing.
-2. **PREFERRED — single atomic call via MCP** (v0.35.0+, when the curator dispatch sets `DEVT_MCP_ALLOW_WRITES=1`): call `mcp__devt-memory__memory_upsert_doc({frontmatter: {...}, body: "..."})`. This one call:
+2. **PREFERRED — single atomic call via MCP**: call `mcp__devt-memory__memory_upsert_doc({frontmatter: {...}, body: "..."})`. This one call:
    - Validates frontmatter shape (returns errors before any file is touched).
    - Resolves target path `.devt/memory/<subfolder>/<ID>-<slug>.md` deterministically (slug derived from title).
    - Atomically writes the markdown file (`.tmp` + rename — never partial).

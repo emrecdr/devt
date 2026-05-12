@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Topic Pre-Flight Brief generator (Phase 3, v0.18.0).
+ * Topic Pre-Flight Brief generator.
  *
  * Orchestrates Lanes A-F + Graphify blast radius for a development task,
  * producing `.devt/state/preflight-brief.md` — a single document that lists
@@ -9,14 +9,14 @@
  * lessons, and (when Graphify is enabled) blast-radius analysis.
  *
  * Lanes:
- *   A: Domain match            — list_active(domain) per extracted domain
- *   B: FTS expansion           — queryFTS(terms) across the unified index
- *   C: Symbol match (Graphify) — getBySymbol(sym) per subject symbol
- *   D: Wiki-link closure       — getLinks(id, depth=2) from initial matches
- *   E: Rejected check          — listRejectedKeywords() filtered to topic
- *   F: Lessons filter         — filters governing docs (A∪B∪C∪D) for doc_type='lesson'
+ * A: Domain match — list_active(domain) per extracted domain
+ * B: FTS expansion — queryFTS(terms) across the unified index
+ * C: Symbol match (Graphify) — getBySymbol(sym) per subject symbol
+ * D: Wiki-link closure — getLinks(id, depth=2) from initial matches
+ * E: Rejected check — listRejectedKeywords() filtered to topic
+ * F: Lessons filter — filters governing docs (A∪B∪C∪D) for doc_type='lesson'
  *
- * v0.36.0+ Memory Graph: a flat `{source, predicate, target}` triples view of
+ * Memory Graph: a flat `{source, predicate, target}` triples view of
  * the depth-2 subgraph rooted at the governing union (A∪B∪C∪D). Rendered as a
  * dedicated section between Governing Documentation and Rejected Approaches.
  *
@@ -69,7 +69,7 @@ const STOP_WORDS = new Set([
   "make", "create", "new", "support", "feature", "task",
 ]);
 
-// Symbol-extraction denylist (v0.20.0+).
+// Symbol-extraction denylist.
 // PascalCase regex catches common English words used as sentence-leading verbs/markers
 // ("Add", "Fix", "Refactor" at the start of a task description). These are NOT symbols
 // and pollute Lane C results. Filter them out so symbol-anchored queries stay precise.
@@ -286,7 +286,7 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, generatedA
   }
   lines.push("");
 
-  // Memory Graph subgraph (v0.36.0+, Option 10). Renders the depth-2 link
+  // Memory Graph subgraph. Renders the depth-2 link
   // closure rooted at the governing union as flat triples — agents can scan
   // structural relationships (supersedes/depends_on/relates_to/etc.) without
   // running individual get_doc calls per neighbor.
@@ -428,7 +428,7 @@ function generate(taskText, opts) {
   // Blast radius
   const blast = blastRadius(topic);
 
-  // Memory Graph triples — depth-2 subgraph rooted at governing union (v0.36.0+).
+  // Memory Graph triples — depth-2 subgraph rooted at governing union.
   // Cheap to compute since getLinks already does the heavy lifting; the helper
   // just reshapes per-seed results into flat triples and dedupes across seeds.
   let triples = [];

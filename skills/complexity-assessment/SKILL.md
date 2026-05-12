@@ -166,7 +166,7 @@ After scoring, verify: Could a junior developer understand the scope from your t
 - **Used by agents**: workflow orchestrator (to plan workflows), architect (to validate scope)
 - **Assets**: `assets/keywords.yaml` — signal words by dimension
 
-## Memory + Graphify integration (v0.17.0+)
+## Memory + Graphify integration
 
 Effect-size from Graphify's blast-radius is a PRIMARY input for tier selection alongside
 file count: `node bin/devt-tools.cjs graphify blast-radius <subject-symbols>` returns
