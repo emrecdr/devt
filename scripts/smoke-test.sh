@@ -2781,6 +2781,34 @@ else
   done
 fi
 
+echo "== devt-coordinator opt-in agent (v0.34.1+, D-19) =="
+# Plugin-shipped main-thread router. User opts in via .claude/settings.json:
+#   { "agent": "devt-coordinator" }
+# The agent file must exist, be registered in plugin.json, and stay within
+# the byte-stability + 500-line budgets (covered by existing assertions).
+if [ -f "$ROOT/agents/devt-coordinator.md" ]; then
+  pass "agents/devt-coordinator.md exists"
+else
+  fail "agents/devt-coordinator.md missing (D-19)"
+fi
+if grep -q '"./agents/devt-coordinator.md"' "$ROOT/.claude-plugin/plugin.json"; then
+  pass "devt-coordinator registered in plugin.json agents"
+else
+  fail "devt-coordinator NOT registered in plugin.json agents list"
+fi
+# The coordinator MUST keep its routing table in sync with workflows/do.md.
+# Detect drift by counting routing rows in both files: matching counts is a
+# necessary (not sufficient) condition. A full table-equality assertion would
+# break on legitimate column reformatting; this check catches the common case
+# where a new command is added to one file but not the other.
+COORD_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/agents/devt-coordinator.md" 2>/dev/null || echo 0)
+DO_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/workflows/do.md" 2>/dev/null || echo 0)
+if [ "$COORD_ROWS" -eq "$DO_ROWS" ] && [ "$COORD_ROWS" -gt 10 ]; then
+  pass "coordinator routing-table row count matches workflows/do.md (${COORD_ROWS} rows)"
+else
+  fail "coordinator routing-table drift — coordinator has ${COORD_ROWS} rows, workflows/do.md has ${DO_ROWS}; keep them in sync per D-19"
+fi
+
 echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # Every workflow_type that invokes the verifier MUST have a matching rubric
 # under references/rubrics/. Today the only verifier-using workflow is `dev`

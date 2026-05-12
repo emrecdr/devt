@@ -19,7 +19,7 @@ The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, or anything
 **What you get out of the box:**
 
 - **Auto-complexity detection** — analyzes your task and selects the right pipeline (TRIVIAL through COMPLEX)
-- **10 specialized agents** — programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger
+- **10 specialized agents** — programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger — plus the opt-in **devt-coordinator** main-thread router (see [Main-thread coordinator](#main-thread-coordinator-opt-in))
 - **Closed learning loop** — lessons extracted from each workflow feed back into future sessions
 - **Permanent memory layer** — ADR/CON/FLOW/REJ/LES knowledge graph that survives session boundaries
 - **Topic Pre-Flight Brief** — every workflow surfaces governing decisions, rejected approaches, related lessons, and blast radius before touching code
@@ -166,6 +166,34 @@ devt picks a tier based on task analysis. You never need to choose. Override onl
 
 Routes the freeform description to the right command (workflow, debug, review, plan, etc.). Useful when you'd otherwise stare at the command list.
 
+### <a name="main-thread-coordinator-opt-in"></a>Main-thread coordinator (opt-in)
+
+If you'd rather not type `/devt:do` on every prompt, devt ships an opt-in **main-thread coordinator** that runs in front of your session and does the same routing automatically — but only when the prompt is devt-shaped. Casual questions and conversation pass through to a normal Claude session.
+
+Opt in by adding one line to your project's `.claude/settings.json`:
+
+```json
+{
+  "agent": "devt-coordinator"
+}
+```
+
+Or invoke ad-hoc for a single session:
+
+```bash
+claude --agent devt-coordinator
+```
+
+After opting in, every prompt is classified:
+
+- **Devt-shaped task** (e.g. "fix the 405 on POST /admin", "review my changes", "ship this") → routed to the matching `/devt:*` command via Skill tool. Same routing table as `/devt:do`.
+- **Casual / general** (e.g. "explain quicksort", "thanks", "what's a closure?") → answered directly. No routing nag.
+- **Ambiguous** → asked once, with an "answer directly" bail-out option.
+
+The agent body lives at `agents/devt-coordinator.md`. Read it before opting in if you want to see the exact classification protocol.
+
+**Caveat (Claude Code plugin agent security restriction):** plugin agents cannot define their own `hooks`, `mcpServers`, or `permissionMode` frontmatter. If you need any of those per-coordinator, copy `agents/devt-coordinator.md` into your project's `.claude/agents/` and use that copy — the personal copy is unrestricted. Devt's plugin-level hooks and the devt-memory MCP server still fire normally either way.
+
 ### `/devt:debug` — systematic debugging
 
 ```bash
@@ -271,7 +299,7 @@ The execution model follows a **Command → Workflow → Agent** architecture:
 
 - **Commands** (32 files): thin entry points. Parse arguments, delegate to a workflow. No business logic.
 - **Workflows** (31 files): orchestration. Determine tier, coordinate agents, manage state transitions.
-- **Agents** (10 files): focused workers. Each owns one concern.
+- **Agents** (11 files): 10 focused workers (programmer/tester/code-reviewer/docs-writer/architect/retro/curator/verifier/researcher/debugger) plus the opt-in `devt-coordinator` main-thread router.
 - **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
 - **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`).
 
