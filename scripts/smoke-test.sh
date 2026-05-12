@@ -2223,6 +2223,18 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== tester inner-iteration budget references fix-loop-protocol (v0.31.0+) =="
+# D-9: programmer already had fix-loop-protocol.md (5-iteration bounded loop
+# with explicit escalation gates). Tester was missing the same discipline —
+# L94 said "fix immediately" with no bound. Added an inner-iteration callout
+# in tester.md::run that cross-references the same protocol, keeping the
+# bounded-loop discipline DRY rather than duplicating prose.
+if grep -q "fix-loop-protocol" "$ROOT/agents/tester.md"; then
+  pass "tester.md references fix-loop-protocol for inner-iteration budget (D-9)"
+else
+  fail "tester.md missing fix-loop-protocol cross-reference (D-9)"
+fi
+
 echo "== programmer dispatch gets isolation:worktree under autonomous (v0.31.0+) =="
 # D-8: when autonomous_chain is set, the programmer Task() dispatch must pass
 # isolation:"worktree" so autonomous fix loops don't clobber the user's
