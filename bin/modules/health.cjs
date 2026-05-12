@@ -13,7 +13,7 @@ const { findProjectRoot, DEFAULTS } = require("./config.cjs");
 const { readState, validateConsistency, describeMismatch, VALID_PHASES, VALID_WORKFLOW_TYPES, VALID_TIERS } = require("./state.cjs");
 const { REQUIRED_DEV_RULES } = require("./init.cjs");
 const { safeJsonParse } = require("./security.cjs");
-const { atomicWriteJsonSync } = require("./io.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 
 const CHECKS = {
   E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:init to set up project, or /devt:health --repair" },
@@ -416,7 +416,8 @@ function runRepairs(pluginRoot, checkResult) {
           try {
             fs.appendFileSync(gitignorePath, "\n# devt workflow state\n.devt/state/\n");
           } catch {
-            fs.writeFileSync(gitignorePath, "# devt workflow state\n.devt/state/\n");
+            // File doesn't exist (or unappendable) — bootstrap atomically.
+            atomicWriteFileSync(gitignorePath, "# devt workflow state\n.devt/state/\n");
           }
           repairs.push({ code: issue.code, action: "Added .devt/state/ to .gitignore", success: true });
           break;

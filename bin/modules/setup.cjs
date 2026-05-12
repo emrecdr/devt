@@ -20,7 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
 const { validatePath, safeJsonParse } = require("./security.cjs");
-const { atomicWriteJsonSync } = require("./io.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 const { probeBinary: probeGraphifyBinary } = require("./graphify.cjs");
 
 /**
@@ -340,7 +340,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   } catch (err) {
     if (err.code === "ENOENT") {
       const lines = requiredIgnores.flatMap(({ path, header }) => [header, path, ""]);
-      fs.writeFileSync(gitignorePath, lines.join("\n"));
+      atomicWriteFileSync(gitignorePath, lines.join("\n"));
       results.files_created.push(".gitignore");
     }
   }
@@ -458,7 +458,10 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
         // Wrapper script delegates to plugin's post-commit-validate.sh — keeps the source-of-truth
         // hook script in the plugin, plugin updates propagate without per-project rewrites.
         const wrapper = `#!/usr/bin/env bash\n# devt post-commit hook (v0.20.0+) — delegates to plugin script.\nif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh" ]; then\n  bash "\${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-validate.sh"\nfi\nexit 0\n`;
-        fs.writeFileSync(postCommitPath, wrapper, { mode: 0o755 });
+        // Two-step: atomic write then chmod. io.cjs::atomicWriteFileSync uses
+        // tmp+renameSync which doesn't preserve the requested mode option.
+        atomicWriteFileSync(postCommitPath, wrapper);
+        fs.chmodSync(postCommitPath, 0o755);
         results.files_created.push(".git/hooks/post-commit (devt memory-validate wrapper)");
       }
     }

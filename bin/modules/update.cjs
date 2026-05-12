@@ -12,6 +12,7 @@ const path = require("path");
 const https = require("https");
 const os = require("os");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteJsonSync } = require("./io.cjs");
 
 const CACHE_DIR = path.join(os.tmpdir(), "devt-cache");
 const CACHE_FILE = path.join(CACHE_DIR, "update-check.json");
@@ -139,7 +140,7 @@ function writeCache(data) {
     if (!fs.existsSync(CACHE_DIR)) {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     }
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
+    atomicWriteJsonSync(CACHE_FILE, data);
   } catch {
     // Non-critical — cache write failure is acceptable
   }

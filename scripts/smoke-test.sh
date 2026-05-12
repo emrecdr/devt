@@ -2091,6 +2091,29 @@ else
   fail "workflow_type registry drift — missing rows in next.md or status.md"
 fi
 
+echo "== atomic-write consistency (v0.30.6+) =="
+# CLAUDE.md claims all writes route through io.cjs::atomicWriteFileSync.
+# Verify: bin/modules/*.cjs (excluding io.cjs + state.cjs lock special-case)
+# may only use fs.writeFileSync inside the lock path. fs.appendFileSync is
+# semantically distinct (append-only, not a clean atomic candidate) and
+# allowed for gitignore append flows.
+ATOMIC_VIOLATIONS=()
+for mod in setup.cjs update.cjs discovery.cjs deferred.cjs health.cjs; do
+  # Count fs.writeFileSync occurrences. After D-W0-5 migration the only
+  # allowed remainder is the explicit lock path (state.cjs only).
+  count=$(grep -c "fs.writeFileSync" "$ROOT/bin/modules/$mod" || echo 0)
+  if [ "$count" -gt 0 ]; then
+    ATOMIC_VIOLATIONS+=("$mod has $count fs.writeFileSync call(s)")
+  fi
+done
+if [ ${#ATOMIC_VIOLATIONS[@]} -eq 0 ]; then
+  pass "no non-atomic fs.writeFileSync in setup/update/discovery/deferred/health (post-D-W0-5)"
+else
+  for v in "${ATOMIC_VIOLATIONS[@]}"; do
+    fail "atomic-write violation — $v"
+  done
+fi
+
 echo "== scratchpad truncate-on-finalize pattern (v0.30.6+) =="
 # Three workflows that dispatch dev agents writing PREFLIGHT lines to
 # scratchpad.md MUST truncate it at finalize so stale lines from workflow A

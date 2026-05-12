@@ -51,7 +51,7 @@ function ensureFile() {
   const p = getPath();
   if (!fs.existsSync(p)) {
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, HEADER);
+    atomicWriteFileSync(p, HEADER);
   }
   return p;
 }

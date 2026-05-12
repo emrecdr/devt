@@ -27,6 +27,7 @@ const fs = require("fs");
 const path = require("path");
 const child_process = require("node:child_process");
 const { safeJsonParse } = require("./security.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 
 // ---------------------------------------------------------------------------
 // Paths + helpers
@@ -455,7 +456,7 @@ function writeSuggestionsReport(harvestResult) {
     lines.push("");
   }
 
-  fs.writeFileSync(getSuggestionsPath(), lines.join("\n"));
+  atomicWriteFileSync(getSuggestionsPath(), lines.join("\n"));
   return getSuggestionsPath();
 }
 
