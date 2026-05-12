@@ -567,8 +567,8 @@ clarify     --> decisions.md     --> programmer, reviewer, verifier
 plan        --> plan.md          --> programmer, architect, verifier
 programmer  --> impl-summary.md  --> tester, reviewer, verifier, docs-writer, retro
 tester      --> test-summary.md  --> reviewer, verifier, docs-writer, retro
-reviewer    --> review.md        --> programmer (if NEEDS_WORK), verifier, retro
-verifier    --> verification.md  --> programmer (if GAPS_FOUND)
+reviewer    --> review.md        --> programmer (if NEEDS_WORK in dev), verifier, retro
+verifier    --> verification.md  --> programmer (if GAPS_FOUND in dev) | reviewer (if needs_revision in code_review, v0.36.0+)
 scan        --> scan-results.md  --> programmer, architect
 baseline    --> baseline-gates.md --> verifier (regression detection)
 architect   --> arch-review.md   --> programmer
