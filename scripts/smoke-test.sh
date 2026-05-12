@@ -3174,7 +3174,7 @@ echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # below AND author the corresponding rubric — the smoke test will fail until
 # both land. Workflows that don't dispatch the verifier have no rubric
 # obligation (debug/code-review/arch-health use their own terminal agents).
-VERIFIER_USING_WORKFLOWS=("dev")
+VERIFIER_USING_WORKFLOWS=("dev" "code_review")
 # v0.36.0+ — rubrics are version-pinned. The smoke test resolves each
 # workflow_type to its pinned filename via the `rubrics` config map in
 # DEFAULTS, then asserts the file exists. When a project bumps its rubric
@@ -3209,6 +3209,19 @@ if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/
 else
   fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
 fi
+# Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag (v0.36.0+, slim Option 3).
+if grep -q '<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.md"; then
+  pass "code-review verifier dispatch injects <rubric_path>"
+else
+  fail "code-review verifier dispatch missing <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>"
+fi
+# Code-review workflow must dispatch the verifier (subagent_type=devt:verifier) AND set workflow_type=code_review.
+if grep -q 'subagent_type="devt:verifier"' "$ROOT/workflows/code-review.md" && \
+   grep -q '<workflow_type>code_review</workflow_type>' "$ROOT/workflows/code-review.md"; then
+  pass "code-review workflow dispatches verifier with workflow_type=code_review"
+else
+  fail "code-review workflow missing verifier dispatch or workflow_type tag"
+fi
 # Drift guard: if a workflow file dispatches the verifier but its workflow_type
 # is not in the allow-list above, fail loudly so coverage stays honest.
 ACTUAL_VERIFIER_WORKFLOWS=$(grep -l 'devt:verifier' "$ROOT"/workflows/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' | sort -u || true)
@@ -3217,6 +3230,7 @@ for actual in $ACTUAL_VERIFIER_WORKFLOWS; do
   # dev-workflow.md → dev. Add mappings here as new workflows surface.
   case "$actual" in
     dev-workflow) wt="dev" ;;
+    code-review) wt="code_review" ;;
     *) wt="$actual" ;;
   esac
   found=0

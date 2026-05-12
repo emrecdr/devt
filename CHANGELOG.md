@@ -8,13 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [0.36.0] - 2026-05-12
 
-Two waves consolidated into one release. v0.35.0's Wave A (6 options) was authored in a prior session but never published; v0.36.0's wave adds 3 more options on top. Ships 9 architectural improvements drawn from the `ticklish-mapping-backus.md` 12-option roadmap. Smoke: **336 passed** (was 325 pre-wave). Locking: **3/3**. Plugin contract surface: stable (no breaking changes to commands, agents, or hooks).
+Two waves consolidated into one release. v0.35.0's Wave A (6 options) was authored in a prior session but never published; v0.36.0's wave adds 4 more options on top (3 new + slim 3 + Option 12 tombstone). Ships 10 architectural improvements drawn from the `ticklish-mapping-backus.md` 12-option roadmap; the remaining 2 (Option 7 deferred to v0.37.0, Option 12 rejected by design). Smoke: **339 passed** (was 325 pre-wave). Locking: **3/3**. Plugin contract surface: stable (no breaking changes to commands, agents, or hooks).
 
-### Added — v0.36.0 wave (Options 9a, 10, 11)
+### Added — v0.36.0 wave (Options 9a, 10, 11, slim 3, Option 12 tombstone)
 
 - **Parallel researcher + arch_health dispatch** (Option 9a). COMPLEX-tier `dev` flows now dispatch the researcher and (when arch_health is opted-in via risk-signal `AskUserQuestion`) the architect in **one message with two `Task` tool calls** from `workflows/dev-workflow.md` Step 2.5. The arch_health architect dispatch reads `.devt/state/scan-results.md` only — the `plan.md` dependency dropped since the plan does not yet exist at parallel-dispatch time. Inline Auto-Plan consumes both `research.md` AND `arch-health-scan.md`. Workflow carries `<!-- parallel-dispatch: researcher + architect (arch_health mode) -->` marker; smoke test asserts presence + absence of regressions.
 - **Memory Graph subgraph in Pre-Flight Brief** (Option 10). `bin/modules/memory.cjs::getSubgraphTriples(seedIds, depth=2, maxTriples=50)` reshapes per-seed `getLinks` rows into a deduped, sorted `{source, predicate, target}` array. `bin/modules/preflight.cjs::renderBrief` emits a new `## Memory Graph (2-hop subgraph)` section between **Governing Documentation** and **Rejected Approaches**. Agents scan structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without per-doc `get_doc` round-trips. Smoke: 2 linked ADRs produce 2 expected triples.
 - **Pinned rubric versions** (Option 11). `references/rubrics/dev.md` renamed to `dev.v1.md`. New `bin/modules/config.cjs::DEFAULTS.rubrics` block (default `{ dev: "dev.v1.md" }`) exposed at the top of the init payload as `rubrics`. `workflows/dev-workflow.md` verifier dispatch injects `<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>`; `agents/verifier.md` prefers that block over computing the path from `<workflow_type>`. Future rubric updates ship as new files (`dev.v2.md`); projects opt in by overriding `rubrics.dev` in `.devt/config.json`. Naming convention: `<workflow_type>.v<N>.md`.
+- **Grader-driven retry for `code_review`** (slim Option 3). New `references/rubrics/code_review.v1.md` rubric grades **review quality** along 5 axes — scope coverage, finding specificity, severity calibration, remediation concreteness, ADR Compliance section presence. `workflows/code-review.md` inserts a new `<step name="verify">` between `review` and `present_findings`; verifier dispatched with `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` + `<workflow_type>code_review</workflow_type>`. `revisions[]` entries are axis-keyed (`A-1`, `B-3`, etc.). On `needs_revision`, the code-reviewer is re-dispatched with structured `<reviewer_feedback>` up to `workflow.max_iterations`; on `failed`, workflow STOPs with BLOCKED. REJ-tombstone matches in review remediation are a hard `failed`. `DEFAULTS.rubrics` extended to `{ dev: "dev.v1.md", code_review: "code_review.v1.md" }`. Slim scope: arch-health-scan and debug deferred (rubric design for those is meta-architectural).
+- **Option 12 tombstone documented** in `CLAUDE.md`. Anthropic's specialist-team cookbook recommends sub-conversation JSON returns with no shared file artifacts; devt deliberately does NOT adopt this — `.devt/state/` file artifacts are load-bearing for cross-session resume + `/devt:next` + `/devt:pause`. Future contributors should not propose "modernizing" specialists to JSON-only returns.
 
 ### Added — v0.35.0 carryover wave (Options 1, 2, 4, 5, 6, 8)
 
@@ -35,18 +37,20 @@ Two waves consolidated into one release. v0.35.0's Wave A (6 options) was author
 - `agents/curator.md`: instructs the curator to call `memory_upsert_doc` first and fall back to the legacy 3-tool ritual on `WRITES_DISABLED` error.
 - `bin/devt-memory-mcp.cjs`: adds `query_fts_count`, `query_fts_top`, `query_fts_by_domain`, `memory_upsert_doc` tools; write tools filtered out via `listTools()` when `DEVT_MCP_ALLOW_WRITES` is unset.
 - `bin/modules/state.cjs`: new `SIDECAR_FOR_MARKDOWN` registry; `validateConsistency()` reads sidecar `status` for sidecar-covered artifacts.
+- `workflows/code-review.md`: new `<step name="verify">` between `review` and `present_findings` — verifier grader-driven retry of the code-reviewer, bounded by `workflow.max_iterations`. Skip when `config.workflow.verification` is false or `verify` is in `skipped_phases`.
 
 ### Smoke
 
-- **+11 new assertions** in `scripts/smoke-test.sh`:
+- **+14 new assertions** in `scripts/smoke-test.sh`:
   - Option 9a (4): parallel-dispatch marker comment present; Step 2.7 deleted; arch_health dispatch reads scan-results.md only (no `plan.md`); no stale "from Step 2.7" references.
   - Option 10 (4): preflight Brief generated with seeded ADRs; Brief contains Memory Graph section header; section renders `source → predicate → target` triples; `getSubgraphTriples` returns flat `{source, predicate, target}` array.
   - Option 11 (3): verifier rubric resolved via `DEFAULTS.rubrics.dev` exists (`dev.v1.md`); init payload exposes `rubrics.dev`; dev-workflow verifier dispatch injects `<rubric_path>`.
-- **336 total pass** (was 325 pre-wave). 3/3 locking assertions still pass.
+  - Slim Option 3 (3): `code_review.v1.md` rubric exists and resolves via `DEFAULTS.rubrics.code_review`; code-review verifier dispatch injects `<rubric_path>`; workflow dispatches verifier with `<workflow_type>code_review</workflow_type>`. Drift guard's filename → workflow_type map extended (`code-review` → `code_review`).
+- **339 total pass** (was 325 pre-wave). 3/3 locking assertions still pass.
 
 ### Docs
 
-- **`CLAUDE.md`** — six new architecture doc blocks covering each shipped option, plus an updated entry for Option 11's `rubrics` config key.
+- **`CLAUDE.md`** — eight new architecture doc blocks covering each shipped option (incl. slim Option 3 grader extension for `code_review`, Option 12 tombstone documenting the rejection), plus an updated entry for Option 11's `rubrics` config key.
 - **`docs/MEMORY.md`** — added aggregate-flag CLI variants under "CLI Surface"; added `query_fts_count` / `query_fts_top` / `query_fts_by_domain` / `memory_upsert_doc` rows under "MCP Server"; added Memory Graph bullet under "Tier 1 — Topic Pre-Flight".
 - **`README.md`** — added `rubrics.dev` config row under "Basic configuration".
 - **`skills/memory-pre-flight/SKILL.md`** — documents the aggregate-first probe pattern and the Memory Graph Brief section.

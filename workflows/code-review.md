@@ -153,6 +153,76 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 </step>
 
+<step name="verify" gate="verification.json is written or step is skipped">
+
+_Skip this step if `config.workflow.verification` is `false`._
+_Skip this step if `verify` is listed in `skipped_phases` from workflow state._
+
+Grader-driven thoroughness check (v0.36.0+, Option 3 — code-review slice). The verifier reads `references/rubrics/code_review.v1.md` and spot-checks the review for scope coverage, finding specificity, severity calibration, remediation concreteness, and ADR Compliance section presence. The verifier does NOT re-do the code review — it grades the review's quality and re-dispatches the code-reviewer with structured `revisions[]` when gaps are found.
+
+**Artifact pre-gate**: confirm `.devt/state/review.md` exists. If missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact.
+
+Dispatch the verifier:
+
+```
+Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
+  <task>
+    Grade the code review against the code_review rubric. You are NOT re-doing the review.
+    Spot-check the review's thoroughness, specificity, severity calibration, and remediation
+    concreteness using the rubric in <rubric_path>. Read review.md as the artifact under review.
+    If axes fail, emit revisions[] keyed by axis-letter (A-1, B-3, etc.) for the reviewer to address.
+  </task>
+  <context>
+    <workflow_type>code_review</workflow_type>
+    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <original_task>{review_scope_description}</original_task>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         researcher, code-reviewer, and verifier dispatch templates. When one
+         changes, update the others. -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+      <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
+    </governing_rules>
+    <files_to_read>.devt/state/review.md, .devt/state/review-scope.md</files_to_read>
+    <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
+    <decisions>Read .devt/state/decisions.md (if exists)</decisions>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+  </context>
+  Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
+")
+```
+
+**Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar verification.json
+MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.workflow.max_iterations // 3')
+VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
+```
+
+Route on `verdict`:
+
+- **`verdict=satisfied`** (status=VERIFIED or DONE_WITH_CONCERNS): proceed to `present_findings`.
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=DONE verdict=VERIFIED
+  ```
+- **`verdict=needs_revision`** (status=GAPS_FOUND) — apply the **repair operator**:
+  - **`VITER < MAX_ITER` → RETRY**: re-dispatch the **code-reviewer** (Step `review`) with each `revisions[].gap` (axis + AC-letter id + evidence) verbatim as `<reviewer_feedback>` in the prompt. Do NOT have the reviewer re-parse the markdown; the structured list is the contract.
+    ```bash
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GAPS_FOUND repair=RETRY
+    ```
+  - **`VITER >= MAX_ITER` → PRUNE**: stop iterating. Write remaining `revisions[]` to `.devt/state/scratchpad.md` under `## Deferred Review Verification Gaps`. Proceed to `present_findings` with `status=DONE_WITH_CONCERNS` and surface the deferred gaps in the user report.
+    ```bash
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=DONE_WITH_CONCERNS verdict=GAPS_FOUND repair=PRUNE
+    ```
+- **`verdict=failed`** (status=FAILED) — STOP with BLOCKED. Surface the verifier's failure reason (missing review.md, missing review-scope.md, REJ tombstone match, or 3+ axes failing simultaneously) to the user. No retry — this is a structural problem requiring human attention.
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
+  ```
+
+</step>
+
 <step name="present_findings" gate="findings are reported to the user">
 
 Read `.devt/state/review.md` and present to the user:

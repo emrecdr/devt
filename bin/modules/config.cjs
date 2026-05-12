@@ -107,6 +107,7 @@ const DEFAULTS = {
   // `<rubric_path>` so the agent never has to know about config layout.
   rubrics: {
     dev: "dev.v1.md",
+    code_review: "code_review.v1.md",
   },
 };
 
