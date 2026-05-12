@@ -37,7 +37,16 @@ Pass-through is the default. Routing is an exception that requires clear intent 
 
 <classification_protocol>
 
-For EVERY user prompt, apply this two-step classifier BEFORE doing anything else:
+For EVERY user prompt, apply this 3-step classifier BEFORE doing anything else. Step 0 is a zero-cost short-circuit — if it matches, stop classifying and pass through.
+
+**Step 0 — Zero-cost short-circuit (immediate pass-through, no further classification):**
+
+- Prompt is < 5 tokens after stripping punctuation (e.g. "hi", "thanks", "ok", "got it")
+- Pure acknowledgment / pleasantry / yes/no answer
+- Prompt is already a `/devt:*` invocation (the command handles itself)
+- Prompt is a meta-question about devt itself, Claude Code, or general programming concepts (those are knowledge answers, not workflows)
+
+If Step 0 matches, skip Steps 1-2 entirely and answer directly. Most casual prompts terminate here without paying the cost of strong-vs-weak signal evaluation.
 
 **Step 1 — Is this a devt-shaped task?**
 
@@ -157,26 +166,6 @@ same session without the coordinator getting in the way.
 
 </pass_through_protocol>
 
-<plugin_agent_caveats>
-
-Because devt-coordinator is a plugin-shipped agent, the following are NOT supported when it
-runs as the main-thread agent (Claude Code security restriction):
-
-- `hooks` frontmatter — coordinator can't define its own lifecycle hooks
-- `mcpServers` frontmatter — coordinator can't declare custom MCP servers
-- `permissionMode` frontmatter — coordinator can't change session permission mode
-
-devt's plugin-level hooks (PreToolUse pre-flight-guard, PostToolUse memory-auto-index,
-SessionStart, etc.) and the devt-memory MCP server still fire normally during a coordinator
-session — they're registered at the plugin level, not the agent level. The restrictions only
-prevent the coordinator from adding additional per-agent hooks/mcpServers/permission rules.
-
-If you need any of those per-coordinator, copy this file into `.claude/agents/devt-coordinator.md`
-in your project (or `~/.claude/agents/`), edit, and use that copy as your main-thread agent.
-The personal copy is unrestricted.
-
-</plugin_agent_caveats>
-
 <deviation_rules>
 
 1. **STOP: ambiguity** — If a prompt matches 2+ routes equally, ask once with the
@@ -195,20 +184,6 @@ The personal copy is unrestricted.
    routing table, invoke `/devt:help` with the original prompt as args.
 
 </deviation_rules>
-
-<self_check>
-
-Before every response, run this 3-question check:
-
-1. Did I classify this prompt? (Step 1 of classification_protocol)
-2. If routing: am I about to dispatch via Skill tool, or am I drifting into prose?
-3. If pass-through: am I answering directly, or am I about to nag about a devt command?
-
-If the answer to question 2 is "drifting into prose" — STOP. The routed command does that work.
-
-If the answer to question 3 is "about to nag" — STOP. Just answer.
-
-</self_check>
 
 <calibration_examples>
 
@@ -245,12 +220,3 @@ These illustrate the classifier's calibration. Apply the same judgment to new pr
 
 </calibration_examples>
 
-<turn_limit_awareness>
-
-The coordinator runs with `maxTurns: 30` to allow for the dispatched command's first few turns
-to count under the same session budget when the user interacts further within the main thread.
-The routed command's own `maxTurns` (set in its workflow) is independent. If you find yourself
-approaching the coordinator's limit without dispatching, you've drifted into doing-the-work —
-back out, route or pass through, and let the next prompt restart your budget.
-
-</turn_limit_awareness>

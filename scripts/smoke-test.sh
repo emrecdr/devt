@@ -2473,8 +2473,10 @@ for i in "${!AGENT_NAMES[@]}"; do
     # No "Status field is one of" — agent may use a different documentation style; skip rather than fail
     continue
   fi
-  # Resolve the whitelist for this artifact from state.cjs (min 3 chars same reason)
-  whitelist=$(grep -oE "\"$artifact\":\s*\[[^]]+\]" "$ROOT/bin/modules/state.cjs" | grep -oE "\"[A-Z_]{3,}\"" | tr -d '"' || true)
+  # Resolve the whitelist for this artifact via the exported ARTIFACT_SCHEMA.
+  # Beats regex-parsing the source — covers literal arrays AND const references
+  # (e.g. verification.md → VERIFICATION_STATUSES, deduped at v0.34.1+).
+  whitelist=$(node -e "const s=require('$ROOT/bin/modules/state.cjs'); const a=s.ARTIFACT_SCHEMA['$artifact']; if(Array.isArray(a)) console.log(a.join('\\n'))" 2>/dev/null || true)
   for s in $emitted; do
     if ! echo "$whitelist" | grep -qx "$s"; then
       ARTIFACT_DRIFT+=("agents/$agent.md emits $s but $artifact whitelist excludes it")
@@ -2781,32 +2783,27 @@ else
   done
 fi
 
-echo "== devt-coordinator opt-in agent (v0.34.1+, D-19) =="
-# Plugin-shipped main-thread router. User opts in via .claude/settings.json:
-#   { "agent": "devt-coordinator" }
-# The agent file must exist, be registered in plugin.json, and stay within
-# the byte-stability + 500-line budgets (covered by existing assertions).
-if [ -f "$ROOT/agents/devt-coordinator.md" ]; then
-  pass "agents/devt-coordinator.md exists"
-else
-  fail "agents/devt-coordinator.md missing (D-19)"
-fi
+echo "== devt-coordinator opt-in agent =="
+# Plugin-shipped main-thread router (opt-in via "agent": "devt-coordinator"
+# in user's .claude/settings.json). Must exist, be registered in plugin.json,
+# and keep its routing table in sync with workflows/do.md. Row-count parity
+# is a necessary-but-not-sufficient drift check — catches the realistic case
+# where a command is added to one file but not the other; does NOT flag
+# legitimate column reformatting. Floor below ensures the table hasn't been
+# silently emptied.
+MIN_ROUTING_ROWS=10
+pass_if_file "$ROOT/agents/devt-coordinator.md" "agents/devt-coordinator.md exists"
 if grep -q '"./agents/devt-coordinator.md"' "$ROOT/.claude-plugin/plugin.json"; then
   pass "devt-coordinator registered in plugin.json agents"
 else
   fail "devt-coordinator NOT registered in plugin.json agents list"
 fi
-# The coordinator MUST keep its routing table in sync with workflows/do.md.
-# Detect drift by counting routing rows in both files: matching counts is a
-# necessary (not sufficient) condition. A full table-equality assertion would
-# break on legitimate column reformatting; this check catches the common case
-# where a new command is added to one file but not the other.
 COORD_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/agents/devt-coordinator.md" 2>/dev/null || echo 0)
 DO_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/workflows/do.md" 2>/dev/null || echo 0)
-if [ "$COORD_ROWS" -eq "$DO_ROWS" ] && [ "$COORD_ROWS" -gt 10 ]; then
+if [ "$COORD_ROWS" -eq "$DO_ROWS" ] && [ "$COORD_ROWS" -ge "$MIN_ROUTING_ROWS" ]; then
   pass "coordinator routing-table row count matches workflows/do.md (${COORD_ROWS} rows)"
 else
-  fail "coordinator routing-table drift — coordinator has ${COORD_ROWS} rows, workflows/do.md has ${DO_ROWS}; keep them in sync per D-19"
+  fail "coordinator routing-table drift — coordinator=${COORD_ROWS} do.md=${DO_ROWS} min=${MIN_ROUTING_ROWS}"
 fi
 
 echo "== Verifier rubric coverage (v0.34.0+, D-16) =="

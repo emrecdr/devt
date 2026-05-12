@@ -2,6 +2,8 @@
 
 Route freeform natural language to the right devt command.
 
+> **Drift note**: the routing table in this file is mirrored in `agents/devt-coordinator.md` (the opt-in main-thread router). When adding/removing a `/devt:*` command from the table below, update the coordinator's table too. The smoke test enforces row-count parity but does not catch column-content drift.
+
 <purpose>
 Users describe what they want. This workflow matches intent to commands. Never does work itself.
 </purpose>

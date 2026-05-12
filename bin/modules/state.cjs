@@ -176,21 +176,22 @@ const MISMATCH_REASONS = Object.freeze({
 //   1. An entry in JSON_SIDECAR_SCHEMAS below (whitelisted status + verdict)
 //   2. The owning agent's body documents the JSON shape and writes both files
 //   3. The consumer workflow uses readSidecar() to read the JSON
+// Verifier verdict vocabularies — kept as shared constants so the JSON sidecar
+// schema and the markdown ARTIFACT_SCHEMA below can't drift independently.
+// `verification.json::verdict` is the workflow-routing enum; `verification.md`
+// status mirrors the four terminal values for human-readable parity.
+const VERIFICATION_STATUSES = ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"];
+const VERIFICATION_VERDICTS = ["satisfied", "needs_revision", "failed"];
+
 const JSON_SIDECAR_SCHEMAS = {
   "impl-summary.json": {
     status: ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["programmer"],
   },
-  // D-16 outcome-grader sidecar. `status` is devt's terminal vocabulary (kept
-  // for human-readable verification.md parity); `verdict` is the canonical
-  // grader signal the workflow orchestrator routes on. `revisions[]` carries
-  // per-criterion gap descriptions (AC-* ids from the markdown report) so the
-  // re-dispatched programmer can address each gap without the workflow having
-  // to re-parse the markdown.
   "verification.json": {
-    status: ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"],
-    verdict: ["satisfied", "needs_revision", "failed"],
+    status: VERIFICATION_STATUSES,
+    verdict: VERIFICATION_VERDICTS,
     agent: ["verifier"],
   },
 };
@@ -199,7 +200,7 @@ const ARTIFACT_SCHEMA = {
   "impl-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
-  "verification.md": ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"],
+  "verification.md": VERIFICATION_STATUSES,
   "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
   "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
@@ -1011,4 +1012,8 @@ module.exports = {
   INPUT_ARTIFACTS,
   PERSISTENT_ARTIFACTS,
   MISMATCH_REASONS,
+  ARTIFACT_SCHEMA,
+  JSON_SIDECAR_SCHEMAS,
+  VERIFICATION_STATUSES,
+  VERIFICATION_VERDICTS,
 };

@@ -29,7 +29,7 @@ You work backwards from the goal to the code:
 BEFORE verifying, load the following in order:
 
 1. Read the original task description (provided in the dispatch prompt)
-2. Read `.devt/state/workflow.yaml` and extract `workflow_type`. Then read `references/rubrics/<workflow_type>.md` if it exists — this is the **authoritative grading rubric** for the active workflow. It defines: verdict vocabulary (`satisfied|needs_revision|failed`), status mapping, required L1-L5 levels, `revisions[]` shape, and the satisfied-vs-needs_revision-vs-failed decision tree. If no rubric matches the workflow_type, fall back to the default 4-level pattern documented below.
+2. Read `references/rubrics/<workflow_type>.md` where `<workflow_type>` comes from the dispatch's `<workflow_type>` context block (preferred — saves a Read) or, if the block is absent, from `.devt/state/workflow.yaml`. The rubric is the **authoritative grading contract**: verdict vocabulary, status mapping, required levels, `revisions[]` shape, and the decision tree. If no rubric matches the workflow_type, fall back to the default 4-level pattern documented below.
 3. Read `.devt/state/spec.md` if it exists — the structured specification (from `/devt:specify`). This is the richest source of acceptance criteria: user stories, success criteria, scope boundaries, test scenarios, API design
 4. Read `.devt/state/impl-summary.md` — what the programmer claims was built
 5. Read `.devt/state/test-summary.md` — what the tester claims was tested
@@ -244,38 +244,11 @@ You MUST write two files at the end of the verdict step:
 
 ## verification.json (sidecar)
 
-```json
-{
-  "agent": "verifier",
-  "status": "VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS",
-  "verdict": "satisfied | needs_revision | failed",
-  "task": "{original task description, truncated to 500 chars}",
-  "criteria_total": 7,
-  "criteria_met": 5,
-  "criteria_needs_human": 1,
-  "revisions": [
-    {
-      "id": "AC-2",
-      "criterion": "{short criterion text}",
-      "level_reached": "L1",
-      "level_required": "L3",
-      "gap": "{specific gap with file:line evidence where possible}",
-      "evidence": "{command + output, or grep result}"
-    }
-  ],
-  "timestamp": "2026-05-12T09:55:00Z"
-}
-```
+The full sidecar contract — verdict enum, status mapping, `revisions[]` shape, and the decision tree for choosing between `satisfied | needs_revision | failed` — lives in the workflow's rubric file (e.g., `references/rubrics/dev.md`). The rubric is authoritative; this section only documents the **fields you must emit** and **how to write the file**.
 
-**Field rules:**
+Required fields: `agent` (always `"verifier"`), `status`, `verdict`, `task`, `criteria_total`, `criteria_met`, `revisions[]` (empty when `verdict=satisfied`; one entry per gap when `verdict=needs_revision`), `timestamp`. Optional: `criteria_needs_human`. Each `revisions[]` entry: `id` (AC-* from markdown), `criterion`, `level_reached`, `level_required`, `gap`, `evidence`.
 
-- `agent` MUST be `"verifier"` (validated by `state.cjs` schema).
-- `status` and `verdict` MUST come from the whitelists above (also enforced by schema).
-- `verdict=satisfied` requires `revisions[] = []`.
-- `verdict=needs_revision` requires `revisions[].length >= 1`.
-- `verdict=failed` MAY include `revisions[]` for context but the workflow does not iterate on it.
-- `revisions[].id` MUST match an AC-* id from the markdown report.
-- The status→verdict mapping (or whatever workflow-specific override is in your rubric) MUST be consistent: e.g., `status=VERIFIED` pairs with `verdict=satisfied`; `status=GAPS_FOUND` pairs with `verdict=needs_revision`.
+`state.cjs::JSON_SIDECAR_SCHEMAS["verification.json"]` enforces the `status`/`verdict`/`agent` enums — if you write a value outside those whitelists, `state read-sidecar` returns `valid_*: false` and the workflow stalls.
 
 **How to write the sidecar** (the verifier has no Write tool — use a Bash heredoc).
 

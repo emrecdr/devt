@@ -167,7 +167,7 @@ Then load project context:
 
 Store the task description in workflow state for reference by status, forensics, and resume.
 
-**Capture `inline_guardrails` for downstream dispatches** (v0.34.0+, D-11): the `init workflow` payload includes `inline_guardrails` — a `{ "golden-rules.md": "<content>", "engineering-principles.md": "<content>", "generative-debt-checklist.md": "<content>" }` object (or `null` if the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this content in working memory across this workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block so those two agents (the ones that read all three files on every dispatch) can skip three Read tool calls per dispatch and rely on cache-friendly prefix injection instead. Other dev agents continue reading from disk — they read fewer guardrail files and the cost is marginal.
+**Capture `inline_guardrails` for downstream dispatches**: the `init workflow` payload includes `inline_guardrails` — a `{ "<file>.md": "<content>" }` object covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this in working memory across the workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block — those two agents read all three files on every dispatch, so inlining cuts three Read tool calls per dispatch in favor of cache-friendly prefix injection. Other dev agents continue reading from disk.
 
 > **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint (v0.30.4+), but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
 
@@ -700,10 +700,12 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <task>{task_description}</task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
+         programmer and code-reviewer dispatch templates. When one changes,
+         update the other. inline_guardrails comes from the init payload;
+         omit this block entirely when it is null (agent falls back to on-disk
+         Reads of the three guardrail files). -->
     <guardrails_inline>
-      <!-- D-11: inline guardrails from init payload — skip 3 Read calls when present. -->
-      <!-- If inline_guardrails is null (over 64KB cap), omit this block entirely; -->
-      <!-- the agent falls back to on-disk Reads of the three files below. -->
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
@@ -855,10 +857,12 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   </task>
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/architecture.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
+         programmer and code-reviewer dispatch templates. When one changes,
+         update the other. inline_guardrails comes from the init payload;
+         omit this block entirely when it is null (agent falls back to on-disk
+         Reads of the three guardrail files). -->
     <guardrails_inline>
-      <!-- D-11: inline guardrails from init payload — skip 3 Read calls when present. -->
-      <!-- If inline_guardrails is null (over 64KB cap), omit this block entirely; -->
-      <!-- the agent falls back to on-disk Reads of the three files below. -->
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
@@ -930,6 +934,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     If a spec exists, verify against its user stories, success criteria, and test scenarios — not just the task description.
   </task>
   <context>
+    <workflow_type>dev</workflow_type>
     <original_task>{task_description}</original_task>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
     <files_to_read>.devt/state/impl-summary.md, .devt/state/test-summary.md, .devt/state/review.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
