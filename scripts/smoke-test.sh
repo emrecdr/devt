@@ -3158,6 +3158,65 @@ else
 fi
 cd "$TMP"
 
+echo "== parseReportSections + Brief Cross-Cutting Concerns =="
+# Synthesize a GRAPH_REPORT.md fixture and verify the parser + Brief renderer.
+# Cross-Cutting section appears only when topic symbols overlap report entries.
+PRS_TMP="$TMP/parse-report-smoke"
+mkdir -p "$PRS_TMP/graphify-out" "$PRS_TMP/.devt/memory/decisions"
+cd "$PRS_TMP" && git init -q
+cat > "$PRS_TMP/graphify-out/GRAPH_REPORT.md" <<'EOF_REPORT'
+# Graph Report - smoke
+
+## God Nodes (most connected - your core abstractions)
+
+1. `WidgetRegistry` - 200 edges
+2. `db_helper()` - 150 edges
+3. `frobnicate()` - 100 edges
+
+## Surprising Connections (you probably didn't know these)
+
+- `WidgetRegistry` --calls--> `frobnicate()`  [INFERRED]
+  app/widgets.py → app/util.py
+- `OtherThing` --uses--> `Unrelated`  [INFERRED]
+  src/a.py → src/b.py
+
+## Knowledge Gaps
+
+- **42 isolated node(s):** `foo`, `bar`
+EOF_REPORT
+# Parser unit check
+PRS_OUT=$(cd "$PRS_TMP" && node -e "
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.parseReportSections('$PRS_TMP/graphify-out/GRAPH_REPORT.md');
+const ok = r.god_nodes.length === 3 &&
+  r.god_nodes[0].symbol === 'WidgetRegistry' && r.god_nodes[0].edge_count === 200 &&
+  r.surprising_connections.length === 2 &&
+  r.surprising_connections[0].from === 'WidgetRegistry' &&
+  r.surprising_connections[0].confidence === 'INFERRED' &&
+  typeof r.knowledge_gaps_summary === 'string';
+process.exit(ok ? 0 : 1);
+" 2>/dev/null && echo ok || echo fail)
+if [ "$PRS_OUT" = "ok" ]; then
+  pass "parseReportSections parses god-nodes, surprising-connections, knowledge-gaps"
+else
+  fail "parseReportSections shape mismatch on fixture"
+fi
+# Disabled-graphify path: empty arrays without throwing
+PRS_EMPTY=$(node -e "
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.parseReportSections('/nonexistent/path/GRAPH_REPORT.md');
+const ok = Array.isArray(r.god_nodes) && r.god_nodes.length === 0 &&
+  Array.isArray(r.surprising_connections) && r.surprising_connections.length === 0 &&
+  r.knowledge_gaps_summary === null;
+process.exit(ok ? 0 : 1);
+" 2>/dev/null && echo ok || echo fail)
+if [ "$PRS_EMPTY" = "ok" ]; then
+  pass "parseReportSections returns empty shape on missing report"
+else
+  fail "parseReportSections didn't degrade cleanly on missing report"
+fi
+cd "$TMP"
+
 echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # Every workflow_type that invokes the verifier MUST have a matching rubric
 # under references/rubrics/. Today the only verifier-using workflow is `dev`

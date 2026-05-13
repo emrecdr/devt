@@ -267,6 +267,77 @@ function callGraphify(subargs, options) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Parse the three actionable sections out of graphify-out/GRAPH_REPORT.md.
+ *
+ * Returns { god_nodes, surprising_connections, knowledge_gaps_summary } where:
+ *   god_nodes: [{symbol, edge_count}] from "## God Nodes (...)" — top-N concepts by degree
+ *   surprising_connections: [{from, to, relation, confidence}] from "## Surprising Connections (...)"
+ *   knowledge_gaps_summary: first non-empty body line of "## Knowledge Gaps", or null
+ *
+ * Empty arrays when the report is missing, graphify is not ready, or the section
+ * fails to parse. Capped at 4 MB to bound memory.
+ *
+ * Section regexes are anchored on the prefix only (graphify suffixes the headers
+ * with descriptive parens, e.g. "## God Nodes (most connected - your core abstractions)").
+ */
+function parseReportSections(reportPath) {
+  const empty = { god_nodes: [], surprising_connections: [], knowledge_gaps_summary: null };
+  let resolvedPath = reportPath;
+  if (!resolvedPath) {
+    const s = status();
+    if (s.state !== "ready") return empty;
+    resolvedPath = path.join(s.out_dir, "GRAPH_REPORT.md");
+  }
+  let stat;
+  try { stat = fs.statSync(resolvedPath); } catch { return empty; }
+  if (!stat.isFile() || stat.size > 4 * 1024 * 1024) return empty;
+
+  let body;
+  try {
+    body = fs.readFileSync(resolvedPath, "utf8");
+  } catch { return empty; }
+
+  const sliceSection = (title) => {
+    const lines = body.split("\n");
+    let start = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("## " + title)) { start = i + 1; break; }
+    }
+    if (start < 0) return "";
+    let end = lines.length;
+    for (let i = start; i < lines.length; i++) {
+      if (lines[i].startsWith("## ")) { end = i; break; }
+    }
+    return lines.slice(start, end).join("\n");
+  };
+
+  const god = empty.god_nodes;
+  const godBody = sliceSection("God Nodes");
+  for (const line of godBody.split("\n")) {
+    const m = line.match(/^\s*\d+\.\s+`([^`]+)`\s+-\s+(\d+)\s+edges?\b/);
+    if (m && god.length < 50) god.push({ symbol: m[1], edge_count: Number(m[2]) });
+  }
+
+  const sc = empty.surprising_connections;
+  const scBody = sliceSection("Surprising Connections");
+  for (const line of scBody.split("\n")) {
+    const m = line.match(/^\s*-\s+`([^`]+)`\s+--([^-]+?)-->\s+`([^`]+)`\s*\[([A-Z]+)\]/);
+    if (m && sc.length < 50) {
+      sc.push({ from: m[1], to: m[3], relation: m[2].trim(), confidence: m[4] });
+    }
+  }
+
+  const gapBody = sliceSection("Knowledge Gaps");
+  let gapSummary = null;
+  for (const line of gapBody.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) { gapSummary = trimmed.replace(/^[-*]\s*/, "").slice(0, 300); break; }
+  }
+
+  return { god_nodes: god, surprising_connections: sc, knowledge_gaps_summary: gapSummary };
+}
+
+/**
  * Search for concepts/symbols by name or text. Mirrors Graphify's `query_graph`.
  */
 function queryGraph(text, options) {
@@ -483,6 +554,7 @@ module.exports = {
   getNeighbors,
   shortestPath,
   blastRadius,
+  parseReportSections,
   getGraphifyOutDir,
   probeBinary,
 };

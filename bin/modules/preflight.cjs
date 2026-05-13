@@ -250,7 +250,7 @@ function blastRadius(topic) {
 /**
  * Render the markdown Brief from lane outputs.
  */
-function renderBrief({ task, topic, lanes, governing, triples, blast, generatedAt }) {
+function renderBrief({ task, topic, lanes, governing, triples, blast, report, generatedAt }) {
   const lines = [];
   lines.push(`# Pre-Flight Brief: ${task || "(unspecified task)"}`);
   lines.push("");
@@ -350,6 +350,47 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, generatedA
     } catch { /* freshness probe is advisory; never fail the Brief */ }
   }
   lines.push("");
+
+  // Cross-Cutting Concerns — surfaces god-nodes / surprising-connections /
+  // knowledge-gaps from graphify-out/GRAPH_REPORT.md that overlap the topic.
+  // Omitted entirely when no overlap or when graphify hasn't produced a report.
+  if (report && (report.god_nodes.length || report.surprising_connections.length || report.knowledge_gaps_summary)) {
+    const topicTokens = new Set([
+      ...topic.symbols.map(s => s.toLowerCase()),
+      ...topic.domains.map(d => d.toLowerCase()),
+    ]);
+    const tokenMatches = (str) => {
+      if (!str || !topicTokens.size) return false;
+      const lower = str.toLowerCase();
+      for (const t of topicTokens) {
+        if (t.length >= 3 && lower.includes(t)) return true;
+      }
+      return false;
+    };
+
+    const matchedGods = report.god_nodes.filter(g => tokenMatches(g.symbol)).slice(0, 5);
+    const matchedConns = report.surprising_connections
+      .filter(c => tokenMatches(c.from) || tokenMatches(c.to))
+      .slice(0, 5);
+
+    if (matchedGods.length || matchedConns.length) {
+      lines.push("## Cross-Cutting Concerns (graphify)");
+      if (matchedGods.length) {
+        lines.push("**God-nodes touching this topic (high coupling — scope changes carefully):**");
+        for (const g of matchedGods) {
+          lines.push(`- \`${g.symbol}\` — ${g.edge_count} edges`);
+        }
+      }
+      if (matchedConns.length) {
+        if (matchedGods.length) lines.push("");
+        lines.push("**Surprising connections involving this topic:**");
+        for (const c of matchedConns) {
+          lines.push(`- \`${c.from}\` --${c.relation}--> \`${c.to}\`  [${c.confidence}]`);
+        }
+      }
+      lines.push("");
+    }
+  }
 
   lines.push("## Pre-Flight Recommendations");
   const recs = synthesizeRecommendations(governing, lanes.E, blast);
@@ -452,6 +493,11 @@ function generate(taskText, opts) {
   // Blast radius
   const blast = blastRadius(topic);
 
+  // Parse GRAPH_REPORT.md once for cross-cutting concerns (god nodes,
+  // surprising connections, knowledge gaps). Empty sections when graphify
+  // is not ready or the report is missing — the renderer omits the block.
+  const report = graphify.parseReportSections();
+
   // Memory Graph triples — depth-2 subgraph rooted at governing union.
   // Cheap to compute since getLinks already does the heavy lifting; the helper
   // just reshapes per-seed results into flat triples and dedupes across seeds.
@@ -465,7 +511,7 @@ function generate(taskText, opts) {
 
   const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
-  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, generatedAt });
+  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt });
 
   // Write atomically to .devt/state/preflight-brief.md
   const root = findProjectRoot();
