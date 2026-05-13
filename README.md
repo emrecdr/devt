@@ -437,7 +437,7 @@ Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`.
 
 A self-evolving knowledge graph that joins:
 
-1. **The code that exists** — what functions, classes, modules actually live in the repo (Graphify AST)
+1. **The code that exists** — what functions, classes, modules actually live in the repo (Graphify AST). When the graph is built, `graphify-out/GRAPH_REPORT.md` god-nodes also seed concept (CON-*) candidates and feed the Pre-Flight Brief's Cross-Cutting Concerns section so structural couplings surface before any change starts.
 2. **The conversation happening now** — ephemeral observations captured mid-session (claude-mem ⚖️ decisions / 🔵 discoveries)
 3. **The permanent rules of the project** — what we always do and what we said no to (Markdown + SQLite FTS5)
 

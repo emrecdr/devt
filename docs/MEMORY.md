@@ -242,6 +242,7 @@ The curator agent gates ALL writes to `.devt/memory/`. Discovery engine (`bin/mo
 - **claude-mem 🔵 discovery tags** → Concept/Lesson candidates
 - **`#KNOWLEDGE-CANDIDATE` scratchpad tags** → typed candidates per the inline tag
 - **`.devt/state/decisions.md` DEC entries** → ADR candidates
+- **graphify god-nodes** (when graphify is ready) → Concept candidates for the highest-fanin entities in `graphify-out/GRAPH_REPORT.md`, filtered to skip symbols already covered by an active CON/ADR
 
 All candidates flow into `.devt/memory/_suggestions.md` (NEVER auto-promoted). Curator presents each via `AskUserQuestion` with the FULL original reasoning verbatim — no AI summarization. Only on user approval (Promote active | Promote candidate | Reject as REJ | Defer | Edit before promoting) does the markdown file get written.
 

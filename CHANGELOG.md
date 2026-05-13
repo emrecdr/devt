@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Added
+
+- **Pre-Flight Brief absorbs `GRAPH_REPORT.md` sections.** `bin/modules/graphify.cjs::parseReportSections(reportPath)` is a 4 MB-capped markdown header parser that pulls God Nodes, Surprising Connections, and Knowledge Gaps out of graphify's report. `bin/modules/preflight.cjs::generate` calls it once per Brief and `renderBrief` emits a new `## Cross-Cutting Concerns (graphify)` section between Blast Radius and Recommendations — filtered to entries whose symbols overlap the topic (case-insensitive substring, ≥3 chars), capped at 5 god-nodes and 5 surprising connections. Section is omitted entirely when graphify isn't ready, the report is missing, or no entries overlap — Brief layout stays byte-stable for non-graphify projects.
+- **Discovery seeds curator concept candidates from graphify god-nodes.** `bin/modules/discovery.cjs::harvestGraphifyGodNodes()` reads the same `parseReportSections` output, strips trailing parens, skips private/module-shaped symbols, caps at top 10 by edge count, and filters out symbols already covered by an active CON/ADR via `memory.affectsSymbol()`. Composes alongside the existing 3 sources in `harvest()`; REJ tombstone keyword suppression and dedup against existing memory docs apply unchanged. Closes the gap where CON-* docs starved of candidates because session-time ⚖️/🔵 signals rarely surface structural concepts.
+
+### Fixed
+
+- **`token-report --regression` emits a stable JSON contract.** When no Claude Code session logs exist for a project (fresh CI checkout), the missing-session-dir early-return now still emits the top-level `regression` block with zero counts, so the `--fail-on-regression` consumer and downstream automation can rely on the field shape. Previously the block was silently dropped on that branch, causing the smoke gate to fail in CI.
+- **Release workflow promotes Latest by highest semver.** `.github/workflows/release.yml` computes the highest stable tag including the current `$TAG` and passes `--latest=true` only when `$TAG` is that maximum. Prereleases keep their existing `--prerelease` path and are never flagged Latest. Guards against retags of older versions or hotfixes of older series stealing "Latest" from a higher release.
+
 ## [0.39.0] - 2026-05-13
 
 Observability foundation. The MCP trace records now carry the active workflow's context, and `mcp-stats` gains three filter flags so per-workflow / per-phase / per-type slicing is possible — unlocks measuring whether the `<memory_signal>` extensions from v0.38.x actually save the predicted MCP round trips. Smoke: **379 passed**, **0 failed**. Locking: **3/3**.
