@@ -213,24 +213,33 @@ function buildReport(opts) {
   const sinceMs = opts.since ? new Date(opts.since).getTime() : 0;
 
   const sessionDir = getSessionDir(projectPath);
-  if (!fs.existsSync(sessionDir)) {
-    return {
-      project: projectPath,
-      session_dir: sessionDir,
-      error: "no Claude Code session logs found for this project",
-      sessions: [],
-    };
-  }
-
-  const allFiles = listSessionFiles(sessionDir);
-  const filtered = sinceMs > 0 ? allFiles.filter(f => f.mtime >= sinceMs) : allFiles;
-  const selected = filtered.slice(0, sessionLimit);
-
   const wantRegression = !!opts.regression;
   const regressionOpts = {
     min_input_tokens: opts.regression_min_input ? Number(opts.regression_min_input) : undefined,
     streak_threshold: opts.regression_streak ? Number(opts.regression_streak) : undefined,
   };
+  if (!fs.existsSync(sessionDir)) {
+    const stub = {
+      project: projectPath,
+      session_dir: sessionDir,
+      error: "no Claude Code session logs found for this project",
+      sessions: [],
+    };
+    if (wantRegression) {
+      stub.regression = {
+        config: { ...REGRESSION_DEFAULTS, ...regressionOpts },
+        sessions_with_regression: 0,
+        total_cold_turns: 0,
+        est_wasted_input_tokens: 0,
+        offending_sessions: [],
+      };
+    }
+    return stub;
+  }
+
+  const allFiles = listSessionFiles(sessionDir);
+  const filtered = sinceMs > 0 ? allFiles.filter(f => f.mtime >= sinceMs) : allFiles;
+  const selected = filtered.slice(0, sessionLimit);
 
   const sessions = [];
   let agg = { turns: 0, input_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, output_tokens: 0 };

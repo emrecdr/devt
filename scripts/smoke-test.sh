@@ -1962,30 +1962,22 @@ SWITCH_TMP=$(mktemp -d)
   mkdir -p .devt
   echo '{"memory":{"enabled":false}}' > .devt/config.json
 )
-if node "$CLI" preflight generate "smoke gate test" --root "$SWITCH_TMP" 2>/dev/null \
+# Preflight has no --root flag; resolve root via cwd from the temp project.
+if (cd "$SWITCH_TMP" && node "$CLI" preflight generate "smoke gate test" 2>/dev/null) \
    | node -e "
        const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
        process.exit(r.state === 'disabled' && r.brief_path === null ? 0 : 1);
-     "; then
+     " 2>/dev/null; then
   pass "preflight short-circuits when memory.enabled=false"
 else
-  # Fallback: invoke from the temp project's cwd (preflight resolves root via cwd if --root unsupported)
-  if (cd "$SWITCH_TMP" && node "$CLI" preflight generate "smoke gate test" 2>/dev/null) \
-     | node -e "
-         const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
-         process.exit(r.state === 'disabled' && r.brief_path === null ? 0 : 1);
-       "; then
-    pass "preflight short-circuits when memory.enabled=false"
-  else
-    fail "preflight did NOT short-circuit when memory.enabled=false"
-  fi
+  fail "preflight did NOT short-circuit when memory.enabled=false"
 fi
 
 if (cd "$SWITCH_TMP" && node "$CLI" discovery harvest 2>/dev/null) \
    | node -e "
        const r = JSON.parse(require('fs').readFileSync(0,'utf8'));
        process.exit(r.state === 'disabled' && r.suggestions_path === null ? 0 : 1);
-     "; then
+     " 2>/dev/null; then
   pass "discovery harvest short-circuits when memory.enabled=false"
 else
   fail "discovery harvest did NOT short-circuit when memory.enabled=false"
