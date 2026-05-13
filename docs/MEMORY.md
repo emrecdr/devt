@@ -169,6 +169,8 @@ node bin/devt-tools.cjs preflight mark-stale [reason]
 
 # Telemetry
 node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME] [--top=N --by=calls|duration|errors]
+node bin/devt-tools.cjs mcp-stats [--workflow-id=ID] [--workflow-type=TYPE] [--phase=PHASE]
+                                                          # narrow traces to a specific workflow run, type, or phase
 node bin/devt-tools.cjs mcp-stats --prune-older-than=30d  # compact trace JSONL
 ```
 

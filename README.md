@@ -815,8 +815,8 @@ node bin/devt-tools.cjs deferred list|get|close|reopen|count
 # Diagnostics + reports + telemetry
 node bin/devt-tools.cjs health [--repair]
 node bin/devt-tools.cjs report window|generate
-node bin/devt-tools.cjs token-report [--sessions=N --baseline=PATH --compare=PATH]
-node bin/devt-tools.cjs mcp-stats [--since=DATE --tool=NAME]
+node bin/devt-tools.cjs token-report [--sessions=N --baseline=PATH --compare=PATH --regression --fail-on-regression]
+node bin/devt-tools.cjs mcp-stats [--since=DATE --tool=NAME --workflow-id=ID --workflow-type=TYPE --phase=PHASE]
 
 # Updates
 node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|clear-cache|changelog
@@ -831,7 +831,7 @@ node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|cle
 | `SubagentStart`    | Tracks agent dispatch                                 |
 | `SubagentStop`     | Tracks agent completion                               |
 | `PostToolUse`      | Context monitoring + memory auto-index (debounced)    |
-| `PreToolUse`       | Prompt guard (Write/Edit), pre-flight guard           |
+| `PreToolUse`       | Prompt guard (Write/Edit), pre-flight guard, bash safety guard (destructive rm, `--no-verify`, force-push, mass-discard) |
 | `UserPromptSubmit` | Injects workflow context and statusline               |
 
 Profile control: see [Configuration reference → Hook profile](#hook-profile).

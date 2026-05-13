@@ -545,14 +545,25 @@ node bin/devt-tools.cjs token-report [--sessions=N] [--since=DATE] [--project=PA
                                         # streams ~/.claude/projects/<slug>/*.jsonl
                                         # reports cache hit rate + per-session totals
                                         # validates user-supplied paths (null bytes, traversal)
+node bin/devt-tools.cjs token-report --baseline=PATH
+                                        # snapshot current aggregate to PATH for later comparison
+node bin/devt-tools.cjs token-report --compare=PATH
+                                        # diff current aggregate against a saved baseline
+node bin/devt-tools.cjs token-report --regression [--fail-on-regression]
+                                        # detect cold-prefix streaks per session (dispatch-ordering
+                                        # regression detector); --fail-on-regression exits 1 when any
+                                        # session has streaks, suitable as a CI gate
 node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME]
                                         # aggregate MCP tool-call traces from .devt/memory/_mcp-trace.jsonl
                                         # per-tool: call count, error rate, p50/p95/p99 latency
+node bin/devt-tools.cjs mcp-stats [--workflow-id=ID] [--workflow-type=TYPE] [--phase=PHASE]
+                                        # narrow traces to a specific workflow run, type, or phase
+                                        # filters compose conjunctively with --since and --tool
 node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
                                         # compact the trace JSONL by dropping entries older than cutoff
 ```
 
-The MCP server (`bin/devt-memory-mcp.cjs`) appends one JSONL line per tool call when `memory.mcp_telemetry: true` (default). Records are privacy-safe: timestamp, tool name, ok/error_code, duration_ms, args_size, args_fp (sha256:12 fingerprint — NOT the raw args), result_size. Trace file is gitignored.
+The MCP server (`bin/devt-memory-mcp.cjs`) appends one JSONL line per tool call when `memory.mcp_telemetry: true` (default). Records are privacy-safe: timestamp, tool name, ok/error_code, duration_ms, args_size, args_fp (sha256:12 fingerprint — NOT the raw args), result_size. When a workflow is active, the record also carries `workflow_id`, `workflow_type`, and `phase` (read from `.devt/state/workflow.yaml` with mtime-invalidated caching); the fields are omitted when no workflow.yaml exists. Trace file is gitignored.
 
 ---
 
