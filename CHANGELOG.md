@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-05-13
+
+Observability foundation. The MCP trace records now carry the active workflow's context, and `mcp-stats` gains three filter flags so per-workflow / per-phase / per-type slicing is possible — unlocks measuring whether the `<memory_signal>` extensions from v0.38.x actually save the predicted MCP round trips. Smoke: **379 passed**, **0 failed**. Locking: **3/3**.
+
+### Added
+
+- **Workflow context on MCP trace records.** `bin/devt-memory-mcp.cjs` gains a `readWorkflowContext()` helper that reads `.devt/state/workflow.yaml` on demand with mtime-invalidated caching — one `stat()` syscall per MCP call when nothing changed, full re-read on workflow transitions. Each trace record emitted while a workflow is active now carries `workflow_id`, `workflow_type`, and `phase` fields merged into the existing schema. Records emitted outside any workflow omit these fields entirely (cleanest signal). Existing record fields (ts, tool, ok, duration_ms, …) take precedence on the unlikely collision.
+- **Three new filter flags in `bin/devt-tools.cjs mcp-stats`**: `--workflow-id=<UUID>`, `--workflow-type=<dev|code_review|…>`, `--phase=<implement|verify|…>`. Filters compose conjunctively with the existing `--since` and `--tool` — e.g. `mcp-stats --workflow-type=dev --phase=verify --tool=query_fts` shows verifier-phase memory lookups across all dev workflows. Trace records lacking a field are excluded when its filter is set; bare aggregate behavior is unchanged.
+
+### Internal
+
+- 5 new smoke-test gates: bare aggregate over a synthesized 4-record fixture (counts all 4), `--workflow-id=wf-A` (narrows to 2), conjunctive `--workflow-type=dev --phase=verify` (narrows to 1), unknown workflow_id returns 0 cleanly, and a live MCP server boot test that fires a real `tools/call` JSON-RPC request and asserts the resulting trace record carries `workflow_id` + `workflow_type` + `phase` from the active workflow.yaml.
+- Workflow-context regexes hardcoded (not built via `new RegExp(varName)`) so Semgrep's ReDoS analysis can prove the patterns are bounded.
+
 ## [0.38.1] - 2026-05-13
 
 Small composing additions: memory signal extended to more dispatches, narrow git destructive patterns added to the Bash safety hook, and a new input-JSON schema registry validates `handoff.json` for resume reliability.

@@ -21,7 +21,16 @@
  * node bin/devt-tools.cjs mcp-stats # aggregate all entries
  * node bin/devt-tools.cjs mcp-stats --since=2026-05-01 # ISO date filter
  * node bin/devt-tools.cjs mcp-stats --tool=query_fts # filter to one tool
+ * node bin/devt-tools.cjs mcp-stats --workflow-id=<UUID> # filter to one workflow session
+ * node bin/devt-tools.cjs mcp-stats --workflow-type=dev # filter by workflow_type (dev|code_review|…)
+ * node bin/devt-tools.cjs mcp-stats --phase=implement # filter by workflow phase
  * node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
+ *
+ * Filters compose conjunctively — e.g. `--workflow-type=dev --phase=verify --tool=query_fts`
+ * shows verifier-phase memory calls across all dev workflows. The workflow_*
+ * fields are populated by the MCP server from .devt/state/workflow.yaml; trace
+ * records emitted outside any workflow lack these fields and are excluded by
+ * the corresponding filters.
  */
 
 const fs = require("fs");
@@ -74,6 +83,12 @@ function loadEntries(opts) {
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;
     if (opts.tool && e.tool !== opts.tool) return false;
+    // Workflow-context filters. Trace records pre-v0.39.0 (and any emitted
+    // outside an active workflow) lack these fields → excluded when the
+    // corresponding filter is set. Bare aggregate (no filters) still includes them.
+    if (opts.workflow_id && e.workflow_id !== opts.workflow_id) return false;
+    if (opts.workflow_type && e.workflow_type !== opts.workflow_type) return false;
+    if (opts.phase && e.phase !== opts.phase) return false;
     return true;
   });
   return { entries, path: tracePath, exists: true, parse_errors: parsed.parseErrors };

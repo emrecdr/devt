@@ -456,6 +456,52 @@ function getTelemetry() {
   return _telemetryState;
 }
 
+// Workflow-context cache. The MCP server is long-lived across many workflows in
+// one Claude Code session, so we can't lazy-cache once like getTelemetry — the
+// active workflow changes. Solution: read .devt/state/workflow.yaml on demand
+// but cache the parsed context, invalidating when the file's mtime changes.
+// One stat() syscall per MCP call is the entire overhead when nothing changed.
+let _workflowContextCache = null; // { mtimeMs, context: {workflow_id, workflow_type, phase} | null }
+
+function readWorkflowContext() {
+  try {
+    const { findProjectRoot } = require("./modules/config.cjs");
+    const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
+    let stat;
+    try {
+      stat = fs.statSync(wfPath);
+    } catch {
+      // No workflow.yaml — MCP call is outside any workflow context. Return null
+      // so the caller can omit workflow fields entirely (cleanest signal).
+      _workflowContextCache = { mtimeMs: 0, context: null };
+      return null;
+    }
+    if (_workflowContextCache && _workflowContextCache.mtimeMs === stat.mtimeMs) {
+      return _workflowContextCache.context;
+    }
+    const body = fs.readFileSync(wfPath, "utf8");
+    // Hand-parse three known keys instead of pulling state.cjs's YAML helper —
+    // keeps the MCP server's dependency surface minimal and the parse trivially
+    // auditable. Hardcoded patterns (no dynamic RegExp) so Semgrep ReDoS analysis
+    // can prove they're bounded.
+    const idMatch = body.match(/^workflow_id:\s*"?([^"\n\r]+)"?\s*$/m);
+    const typeMatch = body.match(/^workflow_type:\s*"?([^"\n\r]+)"?\s*$/m);
+    const phaseMatch = body.match(/^phase:\s*"?([^"\n\r]+)"?\s*$/m);
+    const workflow_id = idMatch ? idMatch[1].trim() : null;
+    const workflow_type = typeMatch ? typeMatch[1].trim() : null;
+    const phase = phaseMatch ? phaseMatch[1].trim() : null;
+    // If none of the three known fields are present, treat as "no context" —
+    // happens for pre-v0.38.0 workflow.yaml files written before auto-stamp.
+    const context = (workflow_id || workflow_type || phase)
+      ? { workflow_id, workflow_type, phase }
+      : null;
+    _workflowContextCache = { mtimeMs: stat.mtimeMs, context };
+    return context;
+  } catch {
+    return null;
+  }
+}
+
 function fingerprint(obj) {
   try {
     return crypto.createHash("sha256").update(JSON.stringify(obj || {})).digest("hex").slice(0, 12);
@@ -470,8 +516,14 @@ function appendTrace(record) {
   // Only write if the parent dir already exists. The MCP server must not have side
   // effects on projects that haven't opted into the memory layer yet.
   if (!fs.existsSync(path.dirname(t.tracePath))) return;
+  // Merge workflow context (id/type/phase) when available. Fields are omitted
+  // entirely when no workflow.yaml exists or its fields are unset, so a record
+  // outside any workflow stays as compact as before. Existing record fields
+  // (ts, tool, ok, duration_ms, …) win on the unlikely collision.
+  const ctx = readWorkflowContext();
+  const merged = ctx ? { ...ctx, ...record } : record;
   try {
-    fs.appendFileSync(t.tracePath, JSON.stringify(record) + "\n", "utf8");
+    fs.appendFileSync(t.tracePath, JSON.stringify(merged) + "\n", "utf8");
   } catch {
     // Trace write failure must NEVER affect tool result.
   }

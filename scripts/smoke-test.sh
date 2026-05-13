@@ -3624,6 +3624,88 @@ else
   fail "bash-guard regression: git reset --hard origin/main was blocked (got: $GD5) — devt update flow broken"
 fi
 
+echo "== v0.39.0 — MCP workflow_id trace propagation =="
+
+# Synthesize a mixed trace file: 2 records tagged with wf-A/dev, 1 with wf-B/code_review,
+# 1 untagged (pre-v0.39.0 shape). Each filter should narrow correctly.
+WF_TMP=$(mktemp -d)
+mkdir -p "$WF_TMP/.devt/memory"
+cat > "$WF_TMP/.devt/memory/_mcp-trace.jsonl" <<'WF_EOF'
+{"workflow_id":"wf-A","workflow_type":"dev","phase":"implement","ts":"2026-05-13T07:00:00Z","tool":"query_fts","ok":true,"duration_ms":10,"args_size":20,"args_fp":"a","result_size":100}
+{"workflow_id":"wf-A","workflow_type":"dev","phase":"verify","ts":"2026-05-13T07:01:00Z","tool":"query_fts","ok":true,"duration_ms":12,"args_size":20,"args_fp":"b","result_size":150}
+{"workflow_id":"wf-B","workflow_type":"code_review","phase":"review","ts":"2026-05-13T07:02:00Z","tool":"get_doc","ok":true,"duration_ms":5,"args_size":10,"args_fp":"c","result_size":50}
+{"ts":"2026-05-13T07:03:00Z","tool":"query_fts","ok":true,"duration_ms":8,"args_size":15,"args_fp":"d","result_size":80}
+WF_EOF
+
+# Extract entries_considered (top-level count, robust when aggregate is absent
+# because the filter matched zero rows). Use a temp file + try/catch so set -e
+# can't abort the script if the probe throws.
+extract_entries() {
+  local f="$1"
+  node -e "
+    try {
+      const j = JSON.parse(require('fs').readFileSync('$f','utf8'));
+      process.stdout.write(String(j.entries_considered ?? 0));
+    } catch { process.stdout.write('-1'); }
+  "
+}
+
+# Bare aggregate sees all 4
+WF_F=$(mktemp)
+(cd "$WF_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats > "$WF_F" 2>/dev/null) || true
+WF_BARE_N=$(extract_entries "$WF_F")
+if [ "$WF_BARE_N" = "4" ]; then
+  pass "mcp-stats bare aggregate counts all 4 mixed trace records"
+else
+  fail "mcp-stats bare aggregate expected 4 entries, got: $WF_BARE_N"
+fi
+
+# --workflow-id filter narrows to 2
+(cd "$WF_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=wf-A > "$WF_F" 2>/dev/null) || true
+WF_A_N=$(extract_entries "$WF_F")
+if [ "$WF_A_N" = "2" ]; then
+  pass "mcp-stats --workflow-id=wf-A narrows to the 2 wf-A-tagged records"
+else
+  fail "mcp-stats --workflow-id=wf-A expected 2 entries, got: $WF_A_N"
+fi
+
+# Conjunctive --workflow-type + --phase narrows to 1
+(cd "$WF_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-type=dev --phase=verify > "$WF_F" 2>/dev/null) || true
+WF_CONJ_N=$(extract_entries "$WF_F")
+if [ "$WF_CONJ_N" = "1" ]; then
+  pass "mcp-stats --workflow-type=dev --phase=verify narrows conjunctively to 1 record"
+else
+  fail "mcp-stats --workflow-type=dev --phase=verify expected 1 entry, got: $WF_CONJ_N"
+fi
+
+# Nonexistent workflow_id → 0 entries
+(cd "$WF_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=wf-Z > "$WF_F" 2>/dev/null) || true
+WF_NONE_N=$(extract_entries "$WF_F")
+if [ "$WF_NONE_N" = "0" ]; then
+  pass "mcp-stats --workflow-id=<unknown> returns 0 entries cleanly (no false positives)"
+else
+  fail "mcp-stats --workflow-id=<unknown> expected 0 entries, got: $WF_NONE_N"
+fi
+rm -f "$WF_F"
+
+# Live MCP server test — boot the server in a sandbox with a stamped workflow.yaml,
+# fire a tools/call request, and verify the trace record carries workflow_id.
+MCP_TMP=$(mktemp -d)
+mkdir -p "$MCP_TMP/.devt/state" "$MCP_TMP/.devt/memory"
+(cd "$MCP_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=implement >/dev/null 2>&1)
+(cd "$MCP_TMP" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query_fts","arguments":{"terms":"x"}}}' | node "$ROOT/bin/devt-memory-mcp.cjs" >/dev/null 2>&1) &
+MCP_PID=$!
+sleep 1
+kill $MCP_PID 2>/dev/null || true
+wait $MCP_PID 2>/dev/null || true
+if [ -f "$MCP_TMP/.devt/memory/_mcp-trace.jsonl" ] && head -1 "$MCP_TMP/.devt/memory/_mcp-trace.jsonl" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.workflow_id && j.workflow_type==='dev' && j.phase==='implement' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "MCP server stamps workflow_id + workflow_type + phase on trace records under an active workflow"
+else
+  fail "MCP server trace record missing workflow context fields"
+fi
+
+rm -rf "$WF_TMP" "$MCP_TMP"
+
 echo "== v0.38.1 — JSON_INPUT_SCHEMAS + handoff.json validation =="
 
 # Registry present
