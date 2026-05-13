@@ -158,8 +158,8 @@ function listItems(opts) {
   if (opts.status && VALID_STATUS.includes(opts.status)) {
     items = items.filter(i => i.status === opts.status);
   }
-  if (opts.tag) {
-    items = items.filter(i => i.tags && i.tags.includes(opts.tag));
+  if (Array.isArray(opts.tags) && opts.tags.length > 0) {
+    items = items.filter(i => Array.isArray(i.tags) && opts.tags.some(t => i.tags.includes(t)));
   }
   if (opts.limit && opts.limit > 0) {
     items = items.slice(0, opts.limit);
@@ -238,9 +238,11 @@ function run(subcommand, args) {
     }
     case "list": {
       const limitRaw = flag("limit");
+      const tagsRaw = flag("tags");
+      const tags = tagsRaw ? tagsRaw.split(",").map(t => t.trim()).filter(Boolean) : [];
       json(listItems({
         status: flag("status"),
-        tag: flag("tag"),
+        tags,
         limit: limitRaw ? parseInt(limitRaw, 10) : 0,
       }));
       return 0;

@@ -598,6 +598,15 @@ if [[ "$DEF_LIST_COUNT" == "2" ]]; then
 else
   fail "deferred list: expected 2 items, got $DEF_LIST_COUNT"
 fi
+# --tags filter — DEF-001 has security,api; DEF-002 has refactor
+DEF_TAG_API=$(node "$CLI" deferred list --tags=api 2>/dev/null | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).length))")
+DEF_TAG_BOTH=$(node "$CLI" deferred list --tags=api,refactor 2>/dev/null | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).length))")
+DEF_TAG_NONE=$(node "$CLI" deferred list --tags=unknownXYZ 2>/dev/null | node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(0,'utf8')).length))")
+if [[ "$DEF_TAG_API" == "1" && "$DEF_TAG_BOTH" == "2" && "$DEF_TAG_NONE" == "0" ]]; then
+  pass "deferred list --tags=CSV: OR-filter on tag membership (1 / 2 / 0)"
+else
+  fail "deferred list --tags filter wrong: api=$DEF_TAG_API both=$DEF_TAG_BOTH none=$DEF_TAG_NONE"
+fi
 
 # Close: flips status, sets closed_at + closed_by
 DEF_CLOSE_OUT=$(node "$CLI" deferred close DEF-001 --by=programmer 2>/dev/null)
