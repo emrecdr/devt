@@ -390,6 +390,30 @@ function synthesizeRecommendations(governing, rejected, blast) {
   return recs;
 }
 
+// Tier detection for the Memory-Graph lane budget. Keywords classify first
+// (explicit signal beats length); length-based bands are conservative fallbacks
+// so most tasks land in "standard" unless they're clearly trivial or complex.
+// `preflight.max_triples` in config overrides tier resolution entirely.
+function detectTier(taskText) {
+  if (!taskText || typeof taskText !== "string") return "standard";
+  const t = taskText.toLowerCase();
+  if (/\b(refactor|architecture|migration|cross-cutting|rewrite)\b/.test(t)) return "complex";
+  if (/\b(small fix|tweak|adjust|patch|hotfix)\b/.test(t)) return "simple";
+  if (/\b(typo|rename|one-line|trivial|whitespace)\b/.test(t)) return "trivial";
+  if (taskText.length < 40) return "trivial";
+  if (taskText.length >= 500) return "complex";
+  return "standard";
+}
+
+function resolveTripleBudget(taskText, cfg, opts) {
+  // Precedence: explicit CLI override → config max_triples → tier-based budget → 50
+  if (opts && opts.budget != null) return opts.budget;
+  const pre = cfg && cfg.preflight;
+  if (pre && pre.max_triples != null) return pre.max_triples;
+  const tier = detectTier(taskText);
+  return (pre && pre.lane_budget && pre.lane_budget[tier]) || 50;
+}
+
 /**
  * Generate the Brief end-to-end and write it to .devt/state/preflight-brief.md.
  * Returns { brief_path, topic, counts, blast }.
@@ -431,9 +455,12 @@ function generate(taskText, opts) {
   // Memory Graph triples — depth-2 subgraph rooted at governing union.
   // Cheap to compute since getLinks already does the heavy lifting; the helper
   // just reshapes per-seed results into flat triples and dedupes across seeds.
+  // Budget resolves from cfg.preflight (config) → tier heuristic over taskText
+  // → default 50. Trivial tasks get a smaller subgraph; complex tasks get more.
   let triples = [];
   try {
-    triples = memory.getSubgraphTriples(governingUnion.map(d => d.id), opts.depth || 2);
+    const budget = resolveTripleBudget(taskText, cfg, opts);
+    triples = memory.getSubgraphTriples(governingUnion.map(d => d.id), opts.depth || 2, budget);
   } catch { /* memory layer not initialized — empty triples is the correct degradation */ }
 
   const lanes = { A, B, C, D, E, F };
@@ -506,9 +533,15 @@ function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
   switch (subcommand) {
     case "generate": {
-      const task = args.join(" ").trim();
-      if (!task) { process.stderr.write("Usage: preflight generate <task description>\n"); return 2; }
-      json(generate(task));
+      const budgetArg = args.find(a => a.startsWith("--budget="));
+      const task = args.filter(a => !a.startsWith("--")).join(" ").trim();
+      if (!task) { process.stderr.write("Usage: preflight generate <task description> [--budget=N]\n"); return 2; }
+      const opts = {};
+      if (budgetArg) {
+        const n = parseInt(budgetArg.split("=")[1], 10);
+        if (Number.isFinite(n) && n > 0) opts.budget = n;
+      }
+      json(generate(task, opts));
       return 0;
     }
     case "topic": {
@@ -543,4 +576,6 @@ module.exports = {
   markStale,
   // Lanes exported for testing
   laneA, laneB, laneC, laneD, laneE, laneF,
+  // Tier budget — exported for smoke-test gates and CLI override paths
+  detectTier, resolveTripleBudget,
 };

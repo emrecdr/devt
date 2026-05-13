@@ -35,6 +35,9 @@ Gather all available context:
 # Workflow state
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null || echo '{"active": false}'
 
+# Stuck-signal — guardrail-deny loop detection in current session
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check 2>/dev/null || echo '{"stuck": false, "deny_count": 0}'
+
 # Available artifacts
 ls .devt/state/*.md .devt/state/*.yaml .devt/state/*.json 2>/dev/null || echo "NO_ARTIFACTS"
 
@@ -87,7 +90,11 @@ when the routing block specifies them; they are not "doing the work.")
 <step name="route" gate="next action is determined and executed">
 ## Step 2: Route to Next Action
 
-> **PRIORITY GUARD.** Before evaluating any of the routing branches below, check `workflow.yaml.validation_status`. If it is `"warned"`, jump straight to the **"Active workflow, validation_status='warned'"** branch later in this list and follow that flow. Do NOT match the generic "Active workflow, phase known" branch first — the warned-state branch is more specific and the generic branch would silently advance past the warning. The branches below are ordered presentation-of-options, not strict priority; this guard is the one exception that overrides ordering.
+> **PRIORITY GUARDS.** Before evaluating any routing branch below, check both early-exit conditions: `workflow.yaml.validation_status="warned"` (content drift) and `stuck check` reporting `stuck: true` (≥3 deny records in current session). These two override generic branch ordering.
+> 1. **Stuck-signal first**: if `stuck check` from Step 1 reports `stuck: true`, jump straight to the **"Active workflow, stuck signal"** branch. The deny chain must be reviewed before any other phase routing — the agent is fighting policy, not progressing.
+> 2. **`validation_status="warned"` second**: if the flag is set, jump straight to the **"Active workflow, validation_status='warned'"** branch. The warned-state branch is more specific than the generic "phase known" branch and the generic branch would silently advance past the warning.
+>
+> The branches below are otherwise ordered presentation-of-options, not strict priority. These two guards are the only exceptions that override ordering.
 
 Based on detected state, execute the appropriate action (per the dispatch mechanic above):
 
@@ -194,6 +201,25 @@ Route based on `workflow_type`:
 - `specify` → Execute `/devt:specify` to continue spec generation
 - `clarify` → Execute `/devt:clarify` to continue decision capture
 - missing/unknown → Execute `/devt:workflow` (default)
+
+### Active workflow, stuck signal
+If `stuck check` reports `stuck: true`, the agent has hit ≥3 deny records in the current workflow session (combined across `preflight`, `bash_destroy`, and `no_verify` sources). Surface the deny chain BEFORE any other routing:
+
+```
+Stuck signal: {deny_count} guardrail denies in current session
+  {sources_breakdown}
+Recent denies:
+  {ts}  {source}  {reason}
+  {ts}  {source}  {reason}
+  ...
+```
+
+Walk the user through the chain (top 5 records from `denies[]`). Then ask via AskUserQuestion:
+- "Review the offending pattern in `.devt/state/preflight-denies.jsonl`" → present the full deny chain; the user decides whether to adjust the agent's plan, narrow the destructive command's scope, or grant the `--no-verify` flag.
+- "Cancel and start over" → execute `/devt:cancel-workflow` (clears the workflow but the deny log persists thanks to RESET_EXEMPT, so the user can still review post-cancel).
+- "Continue anyway (acknowledge the chain)" → the user has read the chain and accepts the pattern; route to the generic phase-known branch below. The signal will re-trigger if more denies accumulate.
+
+Do NOT silently advance past a stuck signal — the gate exists so guardrail loops surface to the user rather than burn iterations.
 
 ### Active workflow, validation_status="warned"
 If `validation_status` is `warned` in state, a prior phase's artifact has an invalid `## Status` value. Surface this to the user before routing further:

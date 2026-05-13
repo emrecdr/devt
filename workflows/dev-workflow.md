@@ -19,6 +19,7 @@ When the task description contains `--autonomous`, the workflow operates in auto
 - Review score < 50 (BLOCKED — likely architectural issue)
 - Any agent returns BLOCKED or NEEDS_CONTEXT
 - Repair operator reaches PRUNE stage (deferred findings need user awareness)
+- Stuck-signal: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check` reports `stuck: true` (≥3 deny records in current workflow session across sources `preflight`, `bash_destroy`, `no_verify`). Surface the chain via the returned `denies[]` array and pause — repeated guardrail denies signal the agent is fighting policy rather than progressing.
 - Risk & simplicity warning triggers (simpler approach detected)
 - Max iteration limits exceeded
 
@@ -681,6 +682,14 @@ When building the programmer's prompt, omit the `<arch_review>` and `<research>`
 
 **Autonomous worktree isolation**: when `workflow.yaml.autonomous_chain` is non-null (i.e. this dispatch is part of an autonomous chain), pass `isolation: "worktree"` to the Task tool so the programmer's edits land in a temporary git worktree. Claude Code auto-cleans the worktree if the agent makes no changes; on success the diff is presented to the user before merge. Prevents an autonomous fix loop from clobbering an unrelated in-flight checkout. For interactive (non-autonomous) invocations, omit `isolation` — direct edits to the user's checkout are the expected behavior.
 
+**Orchestrator-prep — compute the memory signal**. Before dispatching the programmer, fetch a compact aggregate of relevant memory hits so the agent doesn't burn per-doc `memory query` round trips on its initial scan:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
+Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. The signal is keyed on the task description so it's stable across retry iterations within a workflow run — same byte content cache-hits across dispatches.
+
 Dispatch the programmer agent:
 
 ```
@@ -698,6 +707,11 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
     </guardrails_inline>
     <spec>Read .devt/state/spec.md (if it exists — from /devt:specify). This is the primary requirements source with user stories, API design, and detailed acceptance criteria.</spec>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated across programmer + code-reviewer + verifier dispatches
+         in dev-workflow.md, code-review.md, and quick-implement.md. When the
+         CLI shape or block position changes, update all five. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <!-- STANDARD+: include scan_results and plan -->
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
@@ -835,6 +849,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify stat
 
 _Skip this step if `review` is listed in `skipped_phases` from workflow state._
 
+**Orchestrator-prep — compute the memory signal**. Before dispatching the code-reviewer, fetch the same compact aggregate the programmer received so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
+Substitute into the `<memory_signal>` block below.
+
 Dispatch the code-reviewer agent:
 
 ```
@@ -852,6 +874,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated across programmer + code-reviewer + verifier dispatches
+         in dev-workflow.md, code-review.md, and quick-implement.md. When the
+         CLI shape or block position changes, update all five. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
          programmer and code-reviewer dispatch templates. When one changes,
          update the other. inline_guardrails comes from the init payload;
@@ -923,7 +950,15 @@ If ANY of these are missing: **STOP with BLOCKED**. Report to the user:
 
 Do NOT dispatch the verifier with incomplete context — it will waste a subagent turn and produce unreliable results.
 
-If all three exist, dispatch the verifier agent:
+**Orchestrator-prep — compute the memory signal**. Before dispatching the verifier, fetch a compact aggregate of relevant memory hits in a single CLI call so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
+Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
+
+If all three artifacts exist, dispatch the verifier agent:
 
 ```
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
@@ -936,6 +971,10 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          files (dev.v2.md) without breaking projects pinned to v1. -->
     <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
     <original_task>{task_description}</original_task>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated in workflows/code-review.md verifier dispatch. When the
+         CLI shape or block position changes, update both. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one

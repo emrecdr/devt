@@ -88,6 +88,20 @@ const DEFAULTS = {
     // Verifier-loop iteration cap before PRUNE (no opt-in flag — ships final).
     max_iterations: 3,
   },
+  // Topic Pre-Flight Brief generation. Distinct from memory.preflight_mode
+  // (which governs the PreToolUse hook). lane_budget caps the Memory-Graph
+  // lane size by task tier — trivial flows get a tight Brief; complex flows
+  // get more breadth. max_triples is an explicit override that wins over
+  // tier-based resolution; null means use the tier budget.
+  preflight: {
+    max_triples: null,
+    lane_budget: {
+      trivial: 10,
+      simple: 25,
+      standard: 50,
+      complex: 75,
+    },
+  },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug
   // contexts, plans, etc. survive a workflow restart and can be inspected for

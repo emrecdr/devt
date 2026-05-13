@@ -70,6 +70,14 @@ The CLI:
 
 JSON returned on stdout includes `brief_path`, `topic`, `counts` (per lane),
 `blast` (effect_size + source), and `generated_at`.
+
+**Memory-Graph lane budget.** The depth-2 subgraph Lane D produces is capped to keep the Brief scannable. Resolution precedence (highest priority first):
+1. `--budget=N` CLI flag — explicit per-call override (e.g., `preflight generate "<task>" --budget=20`).
+2. `preflight.max_triples` in `.devt/config.json` — explicit per-project override.
+3. Tier-based budget from `preflight.lane_budget` — keyword + length heuristic over the task string maps to `{trivial: 10, simple: 25, standard: 50, complex: 75}`.
+4. Built-in fallback of 50 when no config exists.
+
+A trivial task ("fix typo in README") gets a 10-triple cap; a complex task ("refactor auth architecture migration") gets 75. Override per project by editing `.devt/config.json::preflight.lane_budget` or pinning `preflight.max_triples`.
 </step>
 
 <step name="state" gate="workflow.yaml updated">

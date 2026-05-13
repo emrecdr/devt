@@ -3,7 +3,7 @@ name: debugger
 model: inherit
 color: red
 effort: high
-maxTurns: 40
+maxTurns: 60
 description: |
   Systematic debugging specialist. Use when encountering bugs, test failures, or unexpected behavior.
   Follows 4-phase investigation protocol. Isolates in fresh context to preserve the workflow's context window.
@@ -35,6 +35,8 @@ genuine constraint conflict rather than silently working around the rejection.
 
 <context_loading>
 
+**Recovering from a guardrail deny.** If a hook denies your tool call (Write, Edit, or Bash), the deny record lands in `.devt/state/preflight-denies.jsonl` as one JSON line. Read the `source` field for the recovery path: `preflight` → add the missing PREFLIGHT line to scratchpad; `bash_destroy` → narrow the destructive scope; `no_verify` → stop and ask the user. Three denies in one session trips the stuck-signal and pauses autonomous mode — don't repeat a denied command.
+
 1. Read .devt/rules/coding-standards.md
 2. Read .devt/rules/quality-gates.md
 3. Read CLAUDE.md if exists
@@ -56,6 +58,8 @@ Be aware of these traps during investigation:
 </cognitive_biases>
 
 <execution_flow>
+
+**Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
 <step name="phase1_investigate">
 ## Phase 1: Root Cause Investigation (MANDATORY — cannot skip)

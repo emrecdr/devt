@@ -3,7 +3,7 @@ name: retro
 model: inherit
 color: yellow
 effort: medium
-maxTurns: 20
+maxTurns: 35
 description: |
   Lesson extraction specialist. Triggered after a workflow completes to capture what
   was learned. Examples: "extract lessons from this implementation", "run a retro on

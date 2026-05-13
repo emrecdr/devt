@@ -3,7 +3,7 @@ name: architect
 model: inherit
 color: blue
 effort: high
-maxTurns: 20
+maxTurns: 35
 description: |
   Structural review specialist. Triggered when code needs architectural assessment
   before or after implementation. READ-ONLY — inspects but never modifies code.
@@ -53,6 +53,8 @@ Do NOT skip any of these. Architectural review without loading the architecture 
 </context_loading>
 
 <execution_flow>
+
+**Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
 <step name="map">
 Build a mental model of the affected modules:

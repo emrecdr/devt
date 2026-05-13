@@ -3,7 +3,7 @@ name: tester
 model: inherit
 color: yellow
 effort: high
-maxTurns: 40
+maxTurns: 60
 description: |
   Testing specialist. Triggered when the workflow requires writing, updating, or validating
   tests. Examples: "write tests for the payment service", "add edge case coverage for
@@ -38,6 +38,8 @@ Do NOT skip any of these. Writing tests without reading the implementation leads
 </context_loading>
 
 <execution_flow>
+
+**Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
 <step name="understand">
 Read the implementation summary and source code. Identify:

@@ -6,6 +6,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-05-13
+
+Small composing additions: memory signal extended to more dispatches, narrow git destructive patterns added to the Bash safety hook, and a new input-JSON schema registry validates `handoff.json` for resume reliability.
+
+### Added
+
+- **`<memory_signal>` extended to programmer + code-reviewer dispatches** across `workflows/dev-workflow.md`, `workflows/code-review.md`, and `workflows/quick-implement.md` — five new dispatch sites total. Each uses the same orchestrator-prep `memory query --signal=3` pattern shipped earlier for verifiers, so programmer and code-reviewer skip per-doc memory round trips on their initial scan. `agents/programmer.md` and `agents/code-reviewer.md` instruct preferring the inline block over fresh queries; programmer uses it to confirm which ADRs/CONs apply to the code path, code-reviewer uses it to flag REJ-tombstone matches and ADR violations. KEEP-IN-SYNC discipline extended to cover the 5-site cluster.
+- **Git-destructive Bash patterns** (`source: "git_destructive"`) in `bin/modules/bash-guard.cjs`. Three narrow patterns with zero legitimate dev use: (1) force-push to a protected branch (`main`, `master`, `release/*`, `prod*`, `develop`) — `--force-with-lease` to the same branches is explicitly allowed as the safer variant; (2) `git clean -x` (any flag combo containing `x`) — nukes gitignored files including `.env`; (3) `git checkout -- .` or `git checkout -- *` mass-discard. `git reset --hard` is deliberately NOT denied so devt's own self-update flow in `workflows/update.md` continues to work.
+- **`JSON_INPUT_SCHEMAS` registry** in `bin/modules/state.cjs` with a `validateInputJson(body, schema)` helper. Distinct from `JSON_SIDECAR_SCHEMAS` — sidecars validate enum membership (status/verdict/agent); input schemas validate required + recommended top-level fields. `handoff.json` is the first registered entry: `required = [task, phase, paused_at]`, `recommended = [tier, iteration, last_commit, remaining_tasks, next_action]`. `state validate` now surfaces a `missing_required_field` mismatch when `handoff.json` exists but lacks a required field, catching resume-after-pause breakage before it silently corrupts a routing decision.
+
+### Internal
+
+- 9 new smoke-test gates covering the 5 `<memory_signal>` dispatch sites, 3 orchestrator-prep step invocations, agent guidance presence in programmer + code-reviewer, force-push deny + `--force-with-lease` allow, `git clean -fdx` deny, mass-discard deny, devt self-update compatibility (regression guard), JSON_INPUT_SCHEMAS registry export, `validateInputJson` happy path, and end-to-end `state validate` surfacing missing required field.
+- New `MISMATCH_REASONS.MISSING_REQUIRED_FIELD` entry — used by `validateConsistency` when an input JSON parses but lacks a contractually required field.
+
+## [0.38.0] - 2026-05-13
+
+Safety + token-efficiency wave with three pre-existing schema fixes. New Bash deny hook covers filesystem-wipe and `--no-verify` patterns. A stuck-agent detector pauses autonomous flows after three denies in one session. The verifier dispatches now pre-fetch a memory signal so the agent skips per-doc round trips. Preflight Brief size now scales by task tier. Smoke: **363 passed**, **0 failed**. Locking: **3/3**.
+
+### Added
+
+- **Bash safety hook (`hooks/bash-guard.sh` + `bin/modules/bash-guard.cjs`).** PreToolUse matcher on `Bash` that denies a narrow set of patterns with zero legitimate dev use: filesystem-wipe commands targeting root, `$HOME`, parent dirs, or raw block devices (`source: "bash_destroy"`); and git operations carrying `--no-verify` or `--no-gpg-sign` (`source: "no_verify"`). Returns `{decision:"deny", source, rule_id, reason, hookSpecificOutput}` per the Claude Code hook contract. Active in `standard` and `full` profiles; kill switch via `DEVT_DISABLED_HOOKS=bash-guard.sh`. Adjacency-safe — `rm -rf ./dist` allowed, `echo "rm -rf /"` allowed (quoted segments stripped before pattern test), `git commit -m "discuss --no-verify scenario"` allowed.
+- **Stuck-agent detector (`bin/modules/stuck-detector.cjs` + `node bin/devt-tools.cjs stuck check`).** Counts deny records in the current workflow session (filtered by `workflow.yaml::created_at` with `mtime` fallback for pre-stamp files). Reports `stuck:true` at the 3-deny threshold. Wired into `workflows/dev-workflow.md` autonomous-mode pause block, `workflows/next.md` PRIORITY GUARDS + new "Active workflow, stuck signal" routing branch, and `workflows/status.md` conditional surface line (mirrors the deferred-queue pattern).
+- **`memory query --signal[=N]` aggregate mode** in `bin/modules/memory.cjs`. Returns `{counts: {<domain>: N}, top: [{id, title, doc_type}]}` in a single CLI call. Bypasses the mutually-exclusive precedence trap of the existing `--count > --domain-counts > --top > --json-compact` flags.
+- **`<memory_signal>` block in verifier dispatches** for `workflows/dev-workflow.md` and `workflows/code-review.md`. Orchestrator-prep step computes the signal via the new CLI and substitutes it into the dispatch prompt. `agents/verifier.md` prefers the inline block over fresh `memory query` calls — saves 3–4 per-doc round trips per verify iteration. KEEP-IN-SYNC marker keeps both verifier dispatches aligned.
+- **Tier-aware Memory-Graph lane budget** in `bin/modules/preflight.cjs`. New `preflight.lane_budget` config (`{trivial: 10, simple: 25, standard: 50, complex: 75}`) plus a `detectTier(taskText)` heuristic — keyword-first (refactor/architecture/migration → complex; small fix/hotfix → simple; typo/rename → trivial), length-based fallback. Override per-call via `preflight generate "<task>" --budget=N` or per-project via `preflight.max_triples`. Trivial flows now produce ~5× smaller Briefs; complex flows get more breadth.
+- **CI gate for cache-friendliness drift.** New `token-report-regression` job in `.github/workflows/ci.yml` runs `token-report --regression --fail-on-regression`. Soft-fail (`continue-on-error: true`) — reports without blocking releases until soak telemetry confirms zero false-positives. Promote to required by dropping `continue-on-error`.
+- **Stub-first protocol** in 8 output-writing agent bodies (programmer, tester, code-reviewer, verifier, debugger, architect, researcher, docs-writer). Every dispatch instructs the agent to write a stub of its target output file as its first Write/Edit (`# <Artifact> — in progress`), then iterate. Eliminates the failure mode where turn-budget exhaustion leaves the orchestrator unable to distinguish "agent never started" from "agent worked but couldn't finalize".
+
+### Fixed
+
+- **`preflight-denies.jsonl` now in `RESET_EXEMPT`.** Before: file was archived to `.devt/state/.archive/<ts>/` on cancel, leaving the canonical path empty. After: file persists at `.devt/state/preflight-denies.jsonl` across `/devt:cancel-workflow`, mirroring the `deferred.md` pattern. Unblocks the stuck-detector's session-anchored read.
+- **`workflow.yaml::created_at` + `workflow_id` now auto-stamped.** Before: both keys were declared in `KNOWN_STATE_KEYS` (`bin/modules/state.cjs:85`) but no workflow ever wrote them — dead schema. After: `updateState()` stamps `created_at` (ISO-8601) and `workflow_id` (UUID via `crypto.randomUUID`) on the `active=true` transition. Idempotent — subsequent updates preserve the stamps; `resetState()` clears them so the next activation re-stamps.
+- **`memory query` combined-mode footgun documented and bypassed.** Before: combining `--domain-counts --top=N` silently dropped `--top` due to mutually-exclusive precedence. After: the new `--signal` mode returns both counts and top-N atomically; the legacy flags retain their precedence semantics for callers that need a single dimension.
+- **`token-report --regression` gains exit-code semantics.** Before: regression detector ran but never called `process.exit`, so CI couldn't gate on it. After: new `--fail-on-regression` flag returns exit 1 when `sessions_with_regression > 0` (no-op when flag absent — backward-compatible).
+- **Deny log readers gain a `source` field.** The `preflight-denies.jsonl` record schema is additive: pre-existing records (no `source`) are treated as `source: "preflight"`; new records from `bash-guard` carry `source: "bash_destroy"` or `source: "no_verify"`. The `skills/memory-pre-flight/SKILL.md` "Recovering from a deny" section documents the source enum and per-source recovery paths.
+
+### Internal
+
+- **22 new smoke-test gates** in `scripts/smoke-test.sh` covering RESET_EXEMPT membership, auto-stamp first-activation + idempotency, `--fail-on-regression` flag recognition, bash-guard hook profile + hooks.json registration, synthetic destroy + no-verify denies + adjacency safety, stuck-detector threshold + session scoping, perf budget (~50 ms/call), `memory query --signal` payload shape, `<memory_signal>` dispatch wiring in both workflows, orchestrator-prep step grep, agent guidance grep, `preflight.lane_budget` DEFAULTS shape, tier heuristic correctness on 4 cases, `resolveTripleBudget` precedence, and stub-first protocol presence in 8 agent bodies.
+- **`workflows/next.md` PRIORITY GUARDS** expanded from a single validation-status guard to two early-exit conditions (stuck-signal + validation_status). Smoke gate adjusted accordingly.
+
 ## [0.37.0] - 2026-05-12
 
 Cache-friendliness, CI hardening, and a strict documentation discipline pass. Smoke: **340 passed**, **0 failed**. Locking: **3/3**.

@@ -3,7 +3,7 @@ name: curator
 model: inherit
 color: magenta
 effort: medium
-maxTurns: 20
+maxTurns: 35
 description: |
   Memory-layer quality maintenance specialist. Triggered when lessons or
   architectural candidates need to be promoted into permanent .devt/memory/

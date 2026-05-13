@@ -41,6 +41,10 @@ const HOOK_PROFILES = {
   //   when an .devt/memory/**.md file is touched, so subsequent queries are fresh.
   "pre-flight-guard.sh": ["standard", "full"],
   "memory-auto-index.sh": ["standard", "full"],
+  // bash-guard.sh: PreToolUse on Bash — denies filesystem-wipe and --no-verify
+  // patterns with zero legitimate dev use. Same profile coverage as pre-flight-guard;
+  // kill switch via DEVT_DISABLED_HOOKS=bash-guard.sh.
+  "bash-guard.sh": ["standard", "full"],
 };
 
 function getProfile() {

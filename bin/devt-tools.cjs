@@ -103,6 +103,20 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "bash-guard": {
+        // bash-guard — PreToolUse Bash classifier; reads stdin tool-call JSON,
+        // emits hook response. See bin/modules/bash-guard.cjs.
+        const code = require("./modules/bash-guard.cjs").run(subcommand);
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
+      case "stuck": {
+        // stuck — count deny records in current workflow session; reports
+        // stuck=true at ≥3 to trigger autonomous-mode pause.
+        const code = require("./modules/stuck-detector.cjs").run(subcommand);
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),

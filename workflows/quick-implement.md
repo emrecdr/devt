@@ -120,12 +120,23 @@ Initialize iteration tracking:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement iteration=1
 ```
 
+**Orchestrator-prep — compute the memory signal** before the dispatch so the agent's initial scan can use it instead of per-doc `memory query` round trips:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
 Dispatch the programmer agent:
 
 ```
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated across programmer + code-reviewer + verifier dispatches
+         in dev-workflow.md, code-review.md, and quick-implement.md. When the
+         CLI shape or block position changes, update all five. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
@@ -186,6 +197,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 
 <step name="review" gate="review.md is written with verdict APPROVED or APPROVED_WITH_NOTES">
 
+**Orchestrator-prep — compute the memory signal** before dispatch so the reviewer can spot REJ-tombstone matches without per-doc round trips:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
 Dispatch the code-reviewer agent:
 
 ```
@@ -204,6 +221,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated across programmer + code-reviewer + verifier dispatches
+         in dev-workflow.md, code-review.md, and quick-implement.md. When the
+         CLI shape or block position changes, update all five. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

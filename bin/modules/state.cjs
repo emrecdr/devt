@@ -143,6 +143,10 @@ const MISMATCH_REASONS = Object.freeze({
   NO_STATUS_LINE: "no_status_line",
   UNREADABLE: "unreadable",
   INVALID_STATUS: "invalid_status",
+  // Input JSON artifact (handoff.json, etc.) missing a top-level field listed
+  // in JSON_INPUT_SCHEMAS[file].required. The artifact exists and parses but
+  // lacks contractually required content.
+  MISSING_REQUIRED_FIELD: "missing_required_field",
 });
 
 // Allowed `## Status` values per artifact. Used by validateConsistency to detect
@@ -193,6 +197,24 @@ const JSON_SIDECAR_SCHEMAS = {
     status: VERIFICATION_STATUSES,
     verdict: VERIFICATION_VERDICTS,
     agent: ["verifier"],
+  },
+};
+
+// Separate registry for INPUT JSON artifacts — files that workflows consume to
+// drive resume/branching but that don't carry the status/verdict/agent routing
+// triple. Different shape from JSON_SIDECAR_SCHEMAS because the validation
+// surface is different: sidecars validate enum membership; inputs validate
+// presence of required fields. A schema entry declares which top-level fields
+// MUST exist (missing → validation_warning) and which SHOULD exist
+// (missing → soft note). Consumer-facing helpers: validateInputJson() returns
+// {valid, missing_required, missing_recommended}.
+const JSON_INPUT_SCHEMAS = {
+  "handoff.json": {
+    // Minimum fields a pause writer must emit for the next session to resume.
+    required: ["task", "phase", "paused_at"],
+    // Recommended fields — present in well-formed handoffs but a missing one
+    // doesn't break resume; just surfaces as a soft note.
+    recommended: ["tier", "iteration", "last_commit", "remaining_tasks", "next_action"],
   },
 };
 
@@ -344,12 +366,42 @@ function validateConsistency(stateOverride = null) {
   if (state.workflow_type !== "debug") delete PHASE_ARTIFACTS.debug;
 
   const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
-  if (currentPhaseIndex === -1) {
-    // Unknown phase or no phase — return consistent (nothing to validate)
-    return { consistent: true, mismatches: [] };
+  const mismatches = [];
+
+  // Input JSON validation is phase-independent — a malformed handoff.json is
+  // a problem whether the workflow is at phase=implement or just initialized.
+  // We collect these mismatches first so they always surface, then fall through
+  // to phase-gated artifact validation only if a known phase is set.
+  for (const [fileName, schema] of Object.entries(JSON_INPUT_SCHEMAS)) {
+    const filePath = path.join(stateDir, fileName);
+    if (!fs.existsSync(filePath)) continue;
+    let body;
+    try {
+      body = fs.readFileSync(filePath, "utf8");
+    } catch (e) {
+      mismatches.push({ expected_artifact: fileName, reason: MISMATCH_REASONS.UNREADABLE, error: e.message });
+      continue;
+    }
+    const verdict = validateInputJson(body, schema);
+    if (!verdict.parsed) {
+      mismatches.push({ expected_artifact: fileName, reason: MISMATCH_REASONS.UNREADABLE, error: verdict.parse_error });
+      continue;
+    }
+    for (const field of verdict.missing_required) {
+      mismatches.push({
+        expected_artifact: fileName,
+        reason: MISMATCH_REASONS.MISSING_REQUIRED_FIELD,
+        field,
+        note: `required field "${field}" missing from ${fileName}`,
+      });
+    }
   }
 
-  const mismatches = [];
+  if (currentPhaseIndex === -1) {
+    // Unknown phase or no phase — return only the input-JSON mismatches
+    // collected above (no phase-gated artifact checks).
+    return { consistent: mismatches.length === 0, mismatches };
+  }
   for (const [phase, artifact] of Object.entries(PHASE_ARTIFACTS)) {
     const phaseIndex = PHASE_ORDER.indexOf(phase);
     if (phaseIndex === -1) continue;
@@ -407,6 +459,38 @@ function validateConsistency(stateOverride = null) {
   }
 
   return { consistent: mismatches.length === 0, mismatches };
+}
+
+// Parse + schema-check a JSON input artifact. Returns
+// { parsed: bool, parse_error?, missing_required: [], missing_recommended: [] }.
+// Pure — no I/O. Caller reads the file body and passes it in.
+function validateInputJson(body, schema) {
+  const out = { parsed: false, missing_required: [], missing_recommended: [] };
+  if (!schema) {
+    out.parsed = true;
+    return out;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    out.parse_error = e.message;
+    return out;
+  }
+  out.parsed = true;
+  if (!parsed || typeof parsed !== "object") {
+    // JSON parsed but is not an object — treat all required fields as missing.
+    out.missing_required = [...(schema.required || [])];
+    out.missing_recommended = [...(schema.recommended || [])];
+    return out;
+  }
+  for (const field of schema.required || []) {
+    if (!(field in parsed)) out.missing_required.push(field);
+  }
+  for (const field of schema.recommended || []) {
+    if (!(field in parsed)) out.missing_recommended.push(field);
+  }
+  return out;
 }
 
 function describeMismatch(m) {
@@ -518,6 +602,13 @@ function updateState(keyValues) {
       validateStateEntry(key, value);
       current[key] = value;
     }
+    // Auto-stamp session metadata on first activation. Idempotent — subsequent updates
+    // preserve the stamp; resetState() clears workflow.yaml, so the next active=true
+    // re-stamps. Anchors the stuck-detector to a precise session boundary.
+    if (current.active === true && !current.created_at) {
+      current.created_at = new Date().toISOString();
+      current.workflow_id = current.workflow_id || require("crypto").randomUUID();
+    }
     // Run before write so the validation verdict and the data hit disk in a single atomic write —
     // a crash between two writes would leave the flag desynced from the state it describes.
     // `missing` mismatches are filtered: PHASE_ORDER assumes linear progression but TRIVIAL/SIMPLE
@@ -575,6 +666,7 @@ const RESET_EXEMPT = new Set([
   ".lock",                              // active locking — never delete
   ARCHIVE_DIR,                          // ring buffer survives reset (rolls off via pruneArchive)
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
+  "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
 ]);
 
 // Get configured archive ring-buffer size (state.archive_runs). Reads via
@@ -1057,6 +1149,9 @@ module.exports = {
   MISMATCH_REASONS,
   ARTIFACT_SCHEMA,
   JSON_SIDECAR_SCHEMAS,
+  JSON_INPUT_SCHEMAS,
+  validateInputJson,
   VERIFICATION_STATUSES,
   VERIFICATION_VERDICTS,
+  RESET_EXEMPT,
 };

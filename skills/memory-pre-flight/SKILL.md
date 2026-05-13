@@ -162,23 +162,36 @@ can satisfy the hook in order. Each record:
 {"mode":"block","ts":"2026-05-08T18:56:20.800Z","action":"edit","file_path":"/path/to/foo.py","reason":"missing PREFLIGHT line"}
 ```
 
-Fields: `mode` (`block` | `warn`), `ts` (ISO-8601 UTC), `action` (`edit` |
-`write` | `notebookedit`), `file_path` (absolute path), `reason` (always
-`"missing PREFLIGHT line"` today; reserved for future deny reasons).
+Common fields: `mode` (`block` | `warn`), `ts` (ISO-8601 UTC), `action` (`edit` |
+`write` | `notebookedit` | for Bash denies: `Bash`), `file_path` or
+`command_excerpt`, `reason`.
+
+The log also carries a `source` field on records emitted by the Bash safety
+guard. Recovery depends on `source`:
+
+| `source`          | What was denied                                       | Recovery path                                                              |
+|-------------------|-------------------------------------------------------|----------------------------------------------------------------------------|
+| `preflight`       | Edit/Write on a file with no PREFLIGHT scratchpad line   | Append the `PREFLIGHT <ts> <action> <path> :: <governing IDs>` line, retry |
+| `bash_destroy`    | Filesystem-wipe Bash commands targeting root, $HOME, parent dirs, or raw block devices | Narrow the scope to a specific project subdirectory, or ask the user to authorize the wider operation |
+| `no_verify`       | Git commands carrying the hook-skip or signing-bypass flag | Stop and ask the user before retrying with the flag granted               |
+
+Legacy records (written before the `source` field existed) have no `source` —
+treat them as `source: "preflight"`.
 
 Recovery sequence on deny:
 1. **Read** `.devt/state/preflight-denies.jsonl` — parse each line, filter by
-   `mode=="block"` and your current workflow's recent timestamps
-2. **Append** a `PREFLIGHT <ts> edit <path> :: <governing IDs>` line to
-   `.devt/state/scratchpad.md` for each blocked path (one PREFLIGHT line per
-   target — no batching)
-3. **Retry** the original Edit/Write call
+   `ts` after your workflow started, decode `source` for the right recovery
+2. **Apply the source-specific fix** (table above)
+3. **Retry** the original tool call
 
-The log survives `state reset` via the archive ring buffer
-(`.devt/state/.archive/<ts>/preflight-denies.jsonl`), so post-mortem inspection
-of stalled workflows is possible after the workflow finishes. JSONL parsing
-makes the log readable by `jq`, `node -e 'data.split("\n").map(JSON.parse)'`,
+The log survives `state reset` — it's now in `RESET_EXEMPT` at the canonical
+path. JSONL parsing makes the log readable by `jq`, `node -e 'data.split("\n").map(JSON.parse)'`,
 or any structured log tool — same as `_mcp-trace.jsonl`.
+
+**Three denies in one workflow session trip the stuck-signal** — autonomous
+mode pauses and surfaces the chain to the user. Don't repeat a denied tool
+call without addressing the recovery path; the orchestrator will catch the
+loop and stop the workflow.
 
 ## Common pitfalls
 

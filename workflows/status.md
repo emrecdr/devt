@@ -121,10 +121,14 @@ Pre-Flight Brief: {FRESH | STALE | MISSING}  (generated {timestamp})
 
 Deferred queue: {open} open  (use /devt:defer list to review)
 
+Stuck-signal: {deny_count} denies in current session  (review .devt/state/preflight-denies.jsonl)
+
 Next: {description of what comes next}
 ```
 
 **Deferred queue inclusion**: always include the line if `deferred count` reports `open > 0`. Suppress when `open === 0` to avoid noise. The queue persists across `/devt:cancel-workflow`, so a long-running deferred backlog stays visible in every status check.
+
+**Stuck-signal inclusion**: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check` and include the line only when `deny_count > 0`. Suppress when zero (the common case). Surfaces preflight, bash_destroy, and no_verify denies in the current workflow session — gives the user early visibility into guardrail loops before an autonomous flow pauses on the same signal.
 
 **Pre-Flight Brief inclusion**: if `.devt/state/preflight-brief.md` exists, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight status` to get its FRESH/STALE/MISSING status + generated_at, and surface that line in the status output. STALE is a soft warning — suggest re-running `/devt:preflight` if the workflow's scope feels different from the Brief's task.
 

@@ -1567,16 +1567,30 @@ function run(subcommand, args) {
     case "query": {
       const terms = args.filter(a => !a.startsWith("--")).join(" ");
       if (!terms.trim()) {
-        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson] [--count|--top=N|--domain-counts|--json-compact]\n");
+        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson] [--count|--top=N|--domain-counts|--json-compact|--signal[=N]]\n");
         return 2;
       }
       const limitArg = args.find(a => a.startsWith("--limit="));
       const topArg = args.find(a => a.startsWith("--top="));
+      const signalArg = args.find(a => a === "--signal" || a.startsWith("--signal="));
       const docTypeArg = args.find(a => a.startsWith("--doc-type="));
       const docType = docTypeArg ? docTypeArg.split("=")[1] : null;
       if (docType && !DOC_TYPES.includes(docType)) {
         process.stderr.write(`Invalid --doc-type: ${docType}. Allowed: ${DOC_TYPES.join("|")}\n`);
         return 2;
+      }
+      // --signal — combined mode that returns BOTH domain-counts AND top-N rows
+      // in one payload. Wins over the mutually-exclusive aggregate flags below
+      // so verifier-dispatch orchestration can fetch the full memory signal
+      // in a single CLI call. Default N=3; cap at 10 to keep payload small.
+      if (signalArg) {
+        const signalN = signalArg.includes("=")
+          ? Math.max(1, Math.min(10, parseInt(signalArg.split("=")[1], 10) || 3))
+          : 3;
+        const counts = queryFTS(terms, { limit: 50, docType, mode: "domain-counts" });
+        const top = queryFTS(terms, { limit: signalN, docType, mode: "compact" });
+        json({ query: terms, doc_type: docType, mode: "signal", counts: counts.counts, top });
+        return 0;
       }
       // Aggregate modes — at most one wins; precedence:
       // --count > --domain-counts > --top > --json-compact > full.

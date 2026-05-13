@@ -47,6 +47,20 @@ jobs:
             exit 1
           fi
 
+  token-report-regression:
+    # Soft-fail gate: reports regressions but doesn't block releases.
+    # Drop continue-on-error to promote to a required gate once soak telemetry
+    # confirms zero false-positives on the regression heuristic.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Token-report regression check (cache-friendliness invariant)
+        run: node bin/devt-tools.cjs token-report --regression --since=7d --fail-on-regression
+
   workflow-type-registry:
     runs-on: ubuntu-latest
     steps:

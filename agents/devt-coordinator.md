@@ -3,7 +3,7 @@ name: devt-coordinator
 model: inherit
 color: blue
 effort: low
-maxTurns: 30
+maxTurns: 50
 description: |
   Opt-in main-thread router for devt. Classifies each prompt: pass-through casual/general
   questions, route devt-shaped tasks (build/fix/debug/review/research/etc.) to the appropriate

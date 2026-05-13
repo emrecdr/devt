@@ -3263,6 +3263,402 @@ else
 $BAD_DISPATCHES"
 fi
 
+echo "== Pre-existing fix gates (v0.38.0 wave) =="
+
+# Fix 1: preflight-denies.jsonl is in RESET_EXEMPT
+if node -e "const s=require('$ROOT/bin/modules/state.cjs').RESET_EXEMPT||require('$ROOT/bin/modules/state.cjs'); const txt=require('fs').readFileSync('$ROOT/bin/modules/state.cjs','utf8'); process.exit(txt.includes('\"preflight-denies.jsonl\"') ? 0 : 1)"; then
+  pass "RESET_EXEMPT includes preflight-denies.jsonl"
+else
+  fail "RESET_EXEMPT missing preflight-denies.jsonl in bin/modules/state.cjs"
+fi
+
+# Fix 2: auto-stamp on first activation
+F2_TMP=$(mktemp -d)
+mkdir -p "$F2_TMP/.devt/state"
+(cd "$F2_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev >/dev/null 2>&1)
+F2_FIRST=$(cd "$F2_TMP" && cat .devt/state/workflow.yaml 2>/dev/null || echo "")
+if echo "$F2_FIRST" | grep -qE '^created_at:.*[0-9]{4}-[0-9]{2}-[0-9]{2}T' && echo "$F2_FIRST" | grep -qE '^workflow_id:'; then
+  pass "Fix 2: state update active=true stamps created_at + workflow_id"
+else
+  fail "Fix 2: workflow.yaml missing created_at or workflow_id after first activation"
+fi
+# Idempotency
+F2_CA_BEFORE=$(echo "$F2_FIRST" | grep '^created_at:' | head -1)
+(cd "$F2_TMP" && node "$ROOT/bin/devt-tools.cjs" state update phase=context_init >/dev/null 2>&1)
+F2_CA_AFTER=$(cd "$F2_TMP" && grep '^created_at:' .devt/state/workflow.yaml | head -1)
+if [ "$F2_CA_BEFORE" = "$F2_CA_AFTER" ] && [ -n "$F2_CA_BEFORE" ]; then
+  pass "Fix 2: subsequent state update preserves created_at (idempotent)"
+else
+  fail "Fix 2: created_at changed on second update — should be preserved"
+fi
+rm -rf "$F2_TMP"
+
+# Fix 3: --fail-on-regression flag is recognized by token-report.
+# Two-part gate: (a) --regression alone emits a "regression" block; (b) adding
+# --fail-on-regression doesn't crash and stays exit 0 when no regression exists.
+# Uses a temp file instead of a pipe so set -o pipefail can't false-fail the gate.
+F3_OUT=$(mktemp)
+# Run from $ROOT explicitly — token-report uses findProjectRoot(cwd) and we need
+# the live devt project (37+ session logs), not a stray temp-dir cwd leaked by
+# earlier gates that didn't subshell their `cd`.
+(cd "$ROOT" && node "$ROOT/bin/devt-tools.cjs" token-report --regression > "$F3_OUT" 2>/dev/null || true)
+F3_SIZE=$(wc -c < "$F3_OUT" | tr -d ' ')
+if [ "$F3_SIZE" -gt 0 ] && node -e "const j=JSON.parse(require('fs').readFileSync('$F3_OUT','utf8'));process.exit(j.regression && typeof j.regression.sessions_with_regression==='number' ? 0 : 1)" 2>/dev/null; then
+  pass "Fix 3a: token-report --regression emits regression block with sessions_with_regression"
+else
+  fail "Fix 3a: token-report --regression block missing or malformed (size=$F3_SIZE)"
+fi
+rm -f "$F3_OUT"
+node "$ROOT/bin/devt-tools.cjs" token-report --regression --fail-on-regression >/dev/null 2>&1 || true
+F3B_EXIT=$?
+if [ $F3B_EXIT -eq 0 ] || [ $F3B_EXIT -eq 1 ]; then
+  pass "Fix 3b: token-report --fail-on-regression flag recognized (exit $F3B_EXIT)"
+else
+  fail "Fix 3b: token-report --fail-on-regression unexpected exit code $F3B_EXIT"
+fi
+
+echo "== Wave B-slim — bash-guard + stuck-detector =="
+
+# Hook profile registration
+if grep -q '"bash-guard.sh": \["standard", "full"\]' "$ROOT/hooks/run-hook.js"; then
+  pass "bash-guard.sh registered in HOOK_PROFILES with standard+full coverage"
+else
+  fail "bash-guard.sh missing from hooks/run-hook.js HOOK_PROFILES map"
+fi
+
+# hooks.json registration
+if node -e "
+  const h=JSON.parse(require('fs').readFileSync('$ROOT/hooks/hooks.json','utf8'));
+  const pre = (h.hooks && h.hooks.PreToolUse) || [];
+  const hit = pre.some(e => e.matcher === 'Bash' && (e.hooks||[]).some(c => /bash-guard\.sh/.test(c.command||'')));
+  process.exit(hit ? 0 : 1);
+"; then
+  pass "hooks.json PreToolUse has matcher=Bash → bash-guard.sh"
+else
+  fail "hooks.json missing PreToolUse Bash entry for bash-guard.sh"
+fi
+
+# Synthetic destroy deny — parse via Node (bash-guard emits compact JSON, no space after colon,
+# but using Node makes the gate robust to formatter changes).
+BG_DESTROY=$(echo '{"tool_input":{"command":"rm -rf /"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if printf '%s' "$BG_DESTROY" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='bash_destroy' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "bash-guard denies destructive rm with source=bash_destroy"
+else
+  fail "bash-guard failed to deny destructive rm command (got: $BG_DESTROY)"
+fi
+
+# Synthetic no-verify deny
+BG_NOV=$(echo '{"tool_input":{"command":"git commit --no-verify -m foo"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if printf '%s' "$BG_NOV" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='no_verify' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "bash-guard denies git --no-verify with source=no_verify"
+else
+  fail "bash-guard failed to deny git --no-verify command (got: $BG_NOV)"
+fi
+
+# Synthetic allow
+BG_ALLOW=$(echo '{"tool_input":{"command":"npm test"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if [ "$BG_ALLOW" = "{}" ]; then
+  pass "bash-guard allows benign commands (npm test → {})"
+else
+  fail "bash-guard incorrectly intervened on npm test (got: $BG_ALLOW)"
+fi
+
+# Adjacency safety — narrow rm + discussion of --no-verify both pass
+BG_ADJ1=$(echo '{"tool_input":{"command":"rm -rf ./dist"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+BG_ADJ2=$(echo '{"tool_input":{"command":"echo --no-verify is bad"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if [ "$BG_ADJ1" = "{}" ] && [ "$BG_ADJ2" = "{}" ]; then
+  pass "bash-guard adjacency: ./dist scope and quoted/--no-verify discussion both pass"
+else
+  fail "bash-guard adjacency over-blocking (rm ./dist: $BG_ADJ1, echo: $BG_ADJ2)"
+fi
+
+# Stuck-detector — 3 denies in session → stuck:true
+SD_TMP=$(mktemp -d)
+mkdir -p "$SD_TMP/.devt/state"
+(cd "$SD_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev >/dev/null 2>&1)
+node -e "
+const {appendJsonl}=require('$ROOT/bin/modules/logger.cjs');
+for (let i=0;i<3;i++) appendJsonl('$SD_TMP/.devt/state/preflight-denies.jsonl', { source:'bash_destroy', ts:new Date().toISOString(), tool:'Bash', reason:'destroy' });
+"
+SD_STUCK=$(cd "$SD_TMP" && node "$ROOT/bin/devt-tools.cjs" stuck check 2>/dev/null)
+if echo "$SD_STUCK" | grep -q '"stuck":true' && echo "$SD_STUCK" | grep -q '"deny_count":3'; then
+  pass "stuck-detector reports stuck=true at 3 denies in current session"
+else
+  fail "stuck-detector failed to detect 3-deny threshold (got: $SD_STUCK)"
+fi
+rm -rf "$SD_TMP"
+
+# Stuck-detector — pre-session denies excluded
+SD2_TMP=$(mktemp -d)
+mkdir -p "$SD2_TMP/.devt/state"
+# Write 5 stale records BEFORE workflow.yaml exists
+node -e "
+const {appendJsonl}=require('$ROOT/bin/modules/logger.cjs');
+for (let i=0;i<5;i++) appendJsonl('$SD2_TMP/.devt/state/preflight-denies.jsonl', { source:'preflight', ts:'2000-01-01T00:00:00.000Z', tool:'Write', reason:'stale' });
+"
+(cd "$SD2_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev >/dev/null 2>&1)
+SD2_STUCK=$(cd "$SD2_TMP" && node "$ROOT/bin/devt-tools.cjs" stuck check 2>/dev/null)
+if echo "$SD2_STUCK" | grep -q '"stuck":false' && echo "$SD2_STUCK" | grep -q '"deny_count":0'; then
+  pass "stuck-detector excludes pre-session denies (ts < session_started_at)"
+else
+  fail "stuck-detector counted stale pre-session denies (got: $SD2_STUCK)"
+fi
+rm -rf "$SD2_TMP"
+
+# Perf budget — bash-guard <50ms/call avg
+PERF_FIXTURE='{"tool_input":{"command":"npm test"}}'
+PERF_START=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
+for i in $(seq 1 30); do
+  echo "$PERF_FIXTURE" | node "$ROOT/bin/devt-tools.cjs" bash-guard check >/dev/null 2>&1
+done
+PERF_END=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
+PERF_MS=$(( (PERF_END - PERF_START) / 1000000 ))
+# 30 invocations × 50ms budget = 1500ms ceiling. Node spawn-cost dominates so use 4500ms (~150ms/call wall-time including process spawn).
+if [ "$PERF_MS" -lt 4500 ]; then
+  pass "bash-guard perf: 30 invocations in ${PERF_MS}ms (under spawn-inclusive 4500ms budget)"
+else
+  fail "bash-guard perf budget exceeded: 30 invocations in ${PERF_MS}ms (limit 4500ms)"
+fi
+
+echo "== Wave C-slim — memory_signal + lane budget =="
+
+# C1: memory query --signal mode shape
+C1_TMP=$(mktemp -d)
+mkdir -p "$C1_TMP/.devt/memory/decisions" "$C1_TMP/.devt/memory/concepts" "$C1_TMP/.devt/memory/flows" "$C1_TMP/.devt/memory/rejected" "$C1_TMP/.devt/memory/lessons"
+cat > "$C1_TMP/.devt/memory/decisions/ADR-001-test.md" <<'ADR'
+---
+id: ADR-001
+title: Test decision
+doc_type: decision
+status: active
+confidence: verified
+summary: Test summary about preflight
+affects_paths: []
+affects_symbols: []
+links: []
+---
+# ADR-001 — Test
+Body about preflight protocol.
+ADR
+(cd "$C1_TMP" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+C1_SIGNAL=$(cd "$C1_TMP" && node "$ROOT/bin/devt-tools.cjs" memory query "preflight" --signal=3 2>/dev/null)
+# Parse via Node — JSON.stringify pretty-prints with `"key": value` (space after colon),
+# so a literal grep pattern is brittle. Asserting shape directly keeps the gate robust.
+if printf '%s' "$C1_SIGNAL" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.mode==='signal' && j.counts && Array.isArray(j.top) ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "memory query --signal returns {mode:'signal',counts,top:[]} payload"
+else
+  fail "memory query --signal payload missing required keys (got: $C1_SIGNAL)"
+fi
+rm -rf "$C1_TMP"
+
+# C1: dispatch wiring — dev-workflow.md
+if grep -q '<memory_signal>' "$ROOT/workflows/dev-workflow.md"; then
+  pass "dev-workflow.md verifier dispatch contains <memory_signal>"
+else
+  fail "dev-workflow.md missing <memory_signal> in verifier dispatch"
+fi
+
+# C1: dispatch wiring — code-review.md
+if grep -q '<memory_signal>' "$ROOT/workflows/code-review.md"; then
+  pass "code-review.md verifier dispatch contains <memory_signal>"
+else
+  fail "code-review.md missing <memory_signal> in verifier dispatch"
+fi
+
+# C1: orchestrator-prep step present in both workflows
+if grep -q 'memory query .* --signal=3' "$ROOT/workflows/dev-workflow.md" && grep -q 'memory query .* --signal=3' "$ROOT/workflows/code-review.md"; then
+  pass "both verifier dispatches invoke 'memory query --signal=3' in orchestrator-prep step"
+else
+  fail "orchestrator-prep step missing memory query --signal=3 in one or both workflows"
+fi
+
+# C1: agent guidance
+if grep -q "Memory signal preferred" "$ROOT/agents/verifier.md"; then
+  pass "agents/verifier.md instructs preferring <memory_signal> over fresh queries"
+else
+  fail "agents/verifier.md missing 'Memory signal preferred' guidance"
+fi
+
+# C2: config DEFAULTS.preflight.lane_budget
+if node -e "
+  const c=require('$ROOT/bin/modules/config.cjs');
+  const b=c.DEFAULTS.preflight && c.DEFAULTS.preflight.lane_budget;
+  process.exit(b && b.trivial && b.simple && b.standard && b.complex ? 0 : 1);
+"; then
+  pass "config.cjs DEFAULTS.preflight.lane_budget covers trivial/simple/standard/complex"
+else
+  fail "DEFAULTS.preflight.lane_budget missing one or more tier keys"
+fi
+
+# C2: tier heuristic correctness
+if node -e "
+  const {detectTier}=require('$ROOT/bin/modules/preflight.cjs');
+  const cases=[
+    ['fix typo in README','trivial'],
+    ['hotfix for the build','simple'],
+    ['add a new validation rule that checks input shape against schema before processing','standard'],
+    ['refactor the authentication architecture across services','complex'],
+  ];
+  for (const [t,exp] of cases) {
+    const got=detectTier(t);
+    if (got !== exp) { console.error('FAIL:', t, 'expected', exp, 'got', got); process.exit(1); }
+  }
+"; then
+  pass "preflight detectTier classifies trivial/simple/standard/complex correctly"
+else
+  fail "preflight detectTier heuristic miscategorized one or more test cases"
+fi
+
+# C2: --budget=N CLI override resolves
+if node -e "
+  const {resolveTripleBudget}=require('$ROOT/bin/modules/preflight.cjs');
+  const cfg={preflight:{lane_budget:{trivial:10,simple:25,standard:50,complex:75}}};
+  const a=resolveTripleBudget('whatever',cfg,{budget:33});
+  const b=resolveTripleBudget('refactor architecture',cfg,{});
+  const c=resolveTripleBudget('fix typo',cfg,{});
+  process.exit(a===33 && b===75 && c===10 ? 0 : 1);
+"; then
+  pass "resolveTripleBudget: opts.budget overrides; tier resolution otherwise"
+else
+  fail "resolveTripleBudget precedence wrong (opts.budget should win)"
+fi
+
+echo "== Stub-first protocol — agent bodies =="
+
+STUB_AGENTS="programmer tester code-reviewer verifier debugger architect researcher docs-writer"
+STUB_MISS=""
+for a in $STUB_AGENTS; do
+  if ! grep -q "Stub-first protocol" "$ROOT/agents/${a}.md"; then
+    STUB_MISS="$STUB_MISS $a"
+  fi
+done
+if [ -z "$STUB_MISS" ]; then
+  pass "every output-writing agent body carries the Stub-first protocol section"
+else
+  fail "agents missing Stub-first protocol:$STUB_MISS"
+fi
+
+echo "== v0.38.1 — memory_signal across all 5 dispatch sites =="
+
+# Programmer dispatch in dev-workflow.md must include <memory_signal>
+SITE_HITS=0
+for site in \
+  "workflows/dev-workflow.md:programmer" \
+  "workflows/dev-workflow.md:code-reviewer" \
+  "workflows/code-review.md:code-reviewer" \
+  "workflows/quick-implement.md:programmer" \
+  "workflows/quick-implement.md:code-reviewer"; do
+  file="${site%%:*}"
+  agent="${site##*:}"
+  # Find the Task() block for this agent and confirm <memory_signal> appears inside it.
+  # Simplistic check: file has both `subagent_type="devt:$agent"` and `<memory_signal>`.
+  if grep -q "subagent_type=\"devt:$agent\"" "$ROOT/$file" && grep -q "<memory_signal>" "$ROOT/$file"; then
+    SITE_HITS=$((SITE_HITS+1))
+  fi
+done
+if [ "$SITE_HITS" -eq 5 ]; then
+  pass "memory_signal present in all 5 expected dispatch sites (programmer + code-reviewer × 3 workflows)"
+else
+  fail "memory_signal missing from $((5-SITE_HITS))/5 dispatch sites"
+fi
+
+# Orchestrator-prep step (memory query --signal=3) must appear in all 3 workflow files
+PREP_HITS=0
+for f in workflows/dev-workflow.md workflows/code-review.md workflows/quick-implement.md; do
+  if grep -q 'memory query .* --signal=3' "$ROOT/$f"; then
+    PREP_HITS=$((PREP_HITS+1))
+  fi
+done
+if [ "$PREP_HITS" -eq 3 ]; then
+  pass "orchestrator-prep step (memory query --signal=3) present in dev/code-review/quick-implement workflows"
+else
+  fail "orchestrator-prep step missing from $((3-PREP_HITS))/3 workflow files"
+fi
+
+# Agent guidance — programmer + code-reviewer reference memory signal preference
+if grep -q "Memory signal preferred" "$ROOT/agents/programmer.md" && grep -q "Memory signal preferred" "$ROOT/agents/code-reviewer.md"; then
+  pass "agents/programmer.md and agents/code-reviewer.md instruct preferring <memory_signal>"
+else
+  fail "memory_signal guidance missing from programmer or code-reviewer agent body"
+fi
+
+echo "== v0.38.1 — git_destructive bash-guard patterns =="
+
+# Force-push to protected branch
+GD1=$(echo '{"tool_input":{"command":"git push --force origin main"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if printf '%s' "$GD1" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='git_destructive' && j.rule_id==='force-push-protected' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "bash-guard denies force-push to protected branch (source=git_destructive)"
+else
+  fail "bash-guard failed to deny force-push to main (got: $GD1)"
+fi
+
+# Force-with-lease should NOT be denied (safer variant)
+GD2=$(echo '{"tool_input":{"command":"git push --force-with-lease origin main"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if [ "$GD2" = "{}" ]; then
+  pass "bash-guard allows --force-with-lease to protected branch (safe variant)"
+else
+  fail "bash-guard over-blocked --force-with-lease (got: $GD2)"
+fi
+
+# git clean -x denied
+GD3=$(echo '{"tool_input":{"command":"git clean -fdx"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if printf '%s' "$GD3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.source==='git_destructive' && j.rule_id==='clean-ignored-x' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "bash-guard denies git clean -fdx (deletes ignored files including .env)"
+else
+  fail "bash-guard failed to deny git clean -fdx (got: $GD3)"
+fi
+
+# git checkout -- . denied
+GD4=$(echo '{"tool_input":{"command":"git checkout -- ."}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if printf '%s' "$GD4" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.source==='git_destructive' && j.rule_id==='checkout-mass-discard' ? 0 : 1)}catch{process.exit(1)}})"; then
+  pass "bash-guard denies git checkout -- . (mass-discard)"
+else
+  fail "bash-guard failed to deny git checkout -- . (got: $GD4)"
+fi
+
+# Devt's own self-update flow must NOT trip (git reset --hard origin/<branch>)
+GD5=$(echo '{"tool_input":{"command":"git reset --hard origin/main"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
+if [ "$GD5" = "{}" ]; then
+  pass "bash-guard allows git reset --hard origin/<branch> (devt self-update compatibility)"
+else
+  fail "bash-guard regression: git reset --hard origin/main was blocked (got: $GD5) — devt update flow broken"
+fi
+
+echo "== v0.38.1 — JSON_INPUT_SCHEMAS + handoff.json validation =="
+
+# Registry present
+if node -e "const {JSON_INPUT_SCHEMAS}=require('$ROOT/bin/modules/state.cjs');process.exit(JSON_INPUT_SCHEMAS && JSON_INPUT_SCHEMAS['handoff.json'] ? 0 : 1)"; then
+  pass "JSON_INPUT_SCHEMAS registry present with handoff.json entry"
+else
+  fail "JSON_INPUT_SCHEMAS or handoff.json schema entry missing from state.cjs exports"
+fi
+
+# Valid handoff.json passes
+HV=$(node -e "
+const {validateInputJson, JSON_INPUT_SCHEMAS}=require('$ROOT/bin/modules/state.cjs');
+const body=JSON.stringify({task:'x',phase:'implement',paused_at:'2026-05-13T01:00:00Z'});
+const r=validateInputJson(body, JSON_INPUT_SCHEMAS['handoff.json']);
+process.exit(r.parsed && r.missing_required.length===0 ? 0 : 1);
+" && echo ok || echo fail)
+if [ "$HV" = "ok" ]; then
+  pass "validateInputJson accepts handoff.json with all required fields"
+else
+  fail "validateInputJson rejected a well-formed handoff.json"
+fi
+
+# Missing required field surfaces in state validate
+HJ_TMP=$(mktemp -d)
+mkdir -p "$HJ_TMP/.devt/state"
+(cd "$HJ_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev >/dev/null 2>&1)
+echo '{"task":"x","phase":"implement"}' > "$HJ_TMP/.devt/state/handoff.json"
+HJ_OUT=$(cd "$HJ_TMP" && node "$ROOT/bin/devt-tools.cjs" state validate 2>&1)
+if echo "$HJ_OUT" | grep -q "missing_required_field" && echo "$HJ_OUT" | grep -q "paused_at"; then
+  pass "state validate surfaces handoff.json missing_required_field (paused_at)"
+else
+  fail "state validate did not flag missing required field in handoff.json"
+fi
+rm -rf "$HJ_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

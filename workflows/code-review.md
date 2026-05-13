@@ -113,6 +113,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scop
 
 <step name="review" gate="review.md is written to .devt/state/">
 
+**Orchestrator-prep — compute the memory signal**. Before dispatching, fetch a compact memory aggregate keyed on the review scope so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{review_scope_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
+Substitute into the `<memory_signal>` block below.
+
 Dispatch the code-reviewer agent with the identified file scope:
 
 ```
@@ -131,6 +139,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated across programmer + code-reviewer + verifier dispatches
+         in dev-workflow.md, code-review.md, and quick-implement.md. When the
+         CLI shape or block position changes, update all five. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <review_scope>Read .devt/state/review-scope.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
@@ -162,6 +175,14 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 
 **Artifact pre-gate**: confirm `.devt/state/review.md` exists. If missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact.
 
+**Orchestrator-prep — compute the memory signal**. Before dispatching the verifier, fetch a compact aggregate of relevant memory hits in one CLI call so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{review_scope_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+```
+
+Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
+
 Dispatch the verifier:
 
 ```
@@ -170,6 +191,10 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
     <original_task>{review_scope_description}</original_task>
+    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
+         are duplicated in workflows/dev-workflow.md verifier dispatch. When the
+         CLI shape or block position changes, update both. -->
+    <memory_signal>{memory_signal_json}</memory_signal>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
          changes, update the others. -->

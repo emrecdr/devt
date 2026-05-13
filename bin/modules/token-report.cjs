@@ -375,6 +375,15 @@ function run(subcommand, args) {
   }
 
   process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+
+  // CI gate: exit 1 when regressions detected so the cache-friendliness invariant
+  // can be enforced as a workflow step. No-op when the flag is absent.
+  if (opts.fail_on_regression && report.regression && report.regression.sessions_with_regression > 0) {
+    process.stderr.write(
+      `[token-report] regression detected in ${report.regression.sessions_with_regression} session(s); failing.\n`,
+    );
+    return 1;
+  }
   return 0;
 }
 

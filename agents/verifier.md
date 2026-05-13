@@ -3,7 +3,7 @@ name: verifier
 model: inherit
 color: cyan
 effort: high
-maxTurns: 25
+maxTurns: 40
 description: |
   Use after code review passes to verify the implementation actually achieves the task goal.
   Goal-backward verification — starts from what was requested, traces to what was built.
@@ -29,6 +29,9 @@ You work backwards from the goal to the code:
 BEFORE verifying, load the following in order:
 
 1. Read the original task description (provided in the dispatch prompt)
+
+**Memory signal preferred over fresh queries.** If the dispatch prompt contains a `<memory_signal>` block, parse it as `{counts: {<domain>: N, …}, top: [{id, title, doc_type}, …]}`. Use that block as your initial-scan substrate for memory-aware verification (ADR references, REJ tombstone checks, lesson lookups). Drill into a specific doc via `memory get <id>` (or `mcp__devt-memory__memory_get_doc`) only when a finding hinges on that single document. Fall back to fresh `memory query` only when `<memory_signal>` is absent or empty — that means the project has no `.devt/memory/` content or the orchestrator-prep step failed.
+
 2. Read the rubric path from the dispatch's `<rubric_path>` block (preferred — pinned by the workflow from config and immune to mid-session drift). If the block is absent, fall back to `references/rubrics/<workflow_type>.v1.md` (where `<workflow_type>` comes from the `<workflow_type>` context block or `.devt/state/workflow.yaml`). The rubric is the **authoritative grading contract**: verdict vocabulary, status mapping, required levels, `revisions[]` shape, and the decision tree. If no rubric matches, fall back to the default 4-level pattern documented below.
 3. Read `.devt/state/spec.md` if it exists — the structured specification (from `/devt:specify`). This is the richest source of acceptance criteria: user stories, success criteria, scope boundaries, test scenarios, API design
 4. Read `.devt/state/impl-summary.md` — what the programmer claims was built
@@ -44,6 +47,8 @@ Do NOT skip any of these. Verification without understanding the goal is just an
 </context_loading>
 
 <execution_flow>
+
+**Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
 <step name="understand_goal">
 What was the original task? What should a successful implementation look like?
