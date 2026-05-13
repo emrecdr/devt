@@ -82,10 +82,26 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           PRERELEASE_FLAG=""
+          LATEST_FLAG="--latest=false"
           if [ "$PRERELEASE" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
+          else
+            # Promote to "Latest" only when $TAG is the highest semver across
+            # existing stable releases (prereleases excluded). Guards against
+            # retags of older versions or hotfixes of older series stealing
+            # the Latest flag from a higher-versioned release.
+            HIGHEST=$(gh release list --limit 100 --exclude-pre-releases --json tagName \
+              --jq '[.[].tagName] + [env.TAG]
+                    | map(ltrimstr("v"))
+                    | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                    | sort_by(split(".") | map(tonumber))
+                    | last')
+            if [ "v$HIGHEST" = "$TAG" ]; then
+              LATEST_FLAG="--latest=true"
+            fi
           fi
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file "$NOTES_FILE" \
+            $LATEST_FLAG \
             $PRERELEASE_FLAG
