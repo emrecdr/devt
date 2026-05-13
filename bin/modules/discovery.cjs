@@ -193,6 +193,54 @@ function harvestSessionDecisions() {
 }
 
 // ---------------------------------------------------------------------------
+// Source 4: graphify GRAPH_REPORT.md god-nodes
+//
+// Graphify's god-nodes are the most-connected concepts in the project (high
+// fan-in) — exactly the kind of structural concept that belongs in CON-* docs
+// but rarely surfaces through session-time ⚖️/🔵 signals. We propose each as
+// a concept candidate; the curator AskUserQuestion gate decides per-symbol.
+// Symbols already covered by an active CON/ADR are filtered out via
+// memory.affectsSymbol() so we don't re-prompt on every harvest. The REJ
+// tombstone mechanism handles "never propose this again" naturally.
+// ---------------------------------------------------------------------------
+
+function harvestGraphifyGodNodes() {
+  let graphify;
+  try { graphify = require("./graphify.cjs"); } catch { return []; }
+  if (!graphify || graphify.status().state !== "ready") return [];
+
+  const report = graphify.parseReportSections();
+  if (!report.god_nodes.length) return [];
+
+  let memory;
+  try { memory = require("./memory.cjs"); } catch { memory = null; }
+
+  const candidates = [];
+  for (const g of report.god_nodes.slice(0, 10)) {
+    const symbol = g.symbol.replace(/\(\)$/, "");
+    if (!symbol || symbol.startsWith("_") || symbol.includes("/") || symbol.includes(" ")) continue;
+
+    if (memory) {
+      try {
+        const hit = memory.affectsSymbol(symbol);
+        if (hit && Array.isArray(hit.docs) && hit.docs.length > 0) continue;
+      } catch { /* memory not initialized — propose anyway */ }
+    }
+
+    candidates.push({
+      id: null,
+      timestamp: null,
+      tag: "🔵",
+      title: `${symbol} — ${g.edge_count} edges (graphify god-node)`,
+      body: `Graphify identified \`${symbol}\` as a god-node with ${g.edge_count} edges. High-fanin concepts are typical CON-* candidates: define what \`${symbol}\` is, who depends on it, and the invariants callers rely on.`,
+      proposed_type: "concept",
+      source: "graphify-god-node",
+    });
+  }
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
 // REJ tombstone consultation — suppresses candidates matching search_keywords
 // ---------------------------------------------------------------------------
 
@@ -346,6 +394,7 @@ function harvest(options) {
     ...harvestClaudeMem(options),
     ...harvestScratchpadTags(),
     ...harvestSessionDecisions(),
+    ...harvestGraphifyGodNodes(),
   ];
 
   const proposals = [];
@@ -508,6 +557,7 @@ module.exports = {
   harvestClaudeMem,
   harvestScratchpadTags,
   harvestSessionDecisions,
+  harvestGraphifyGodNodes,
   discoverMissingWikiLinks,
   findRejMatch,
   findDuplicate,

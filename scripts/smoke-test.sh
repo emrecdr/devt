@@ -3215,6 +3215,22 @@ if [ "$PRS_EMPTY" = "ok" ]; then
 else
   fail "parseReportSections didn't degrade cleanly on missing report"
 fi
+# Discovery harvest pulls god-nodes when graphify report is present.
+# Probe via discovery.harvestGraphifyGodNodes() against the fixture report.
+# graphify.status() returns "binary_missing" in this temp dir so the function
+# short-circuits to []; we additionally probe the helper with a mocked status
+# by setting graphify-out/graph.json freshness side-effects out of scope —
+# the gate here only asserts the function exports cleanly and degrades to [].
+GN_TEST=$(node -e "
+const d = require('$ROOT/bin/modules/discovery.cjs');
+const out = d.harvestGraphifyGodNodes();
+process.exit(Array.isArray(out) && out.length === 0 ? 0 : 1);
+" 2>/dev/null && echo ok || echo fail)
+if [ "$GN_TEST" = "ok" ]; then
+  pass "harvestGraphifyGodNodes returns [] when graphify is not ready"
+else
+  fail "harvestGraphifyGodNodes failed degraded-path contract"
+fi
 cd "$TMP"
 
 echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
