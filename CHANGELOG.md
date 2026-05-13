@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-05-13
+
+Graphify Cross-Cutting Concerns + god-node candidate seeding + CI hardening. The Pre-Flight Brief and discovery harvest now read `graphify-out/GRAPH_REPORT.md` to surface structural couplings before changes start and to seed the underused CON-* tier with high-fanin concept candidates. Smoke: **383 passed**, **0 failed**.
+
 ### Added
 
 - **Pre-Flight Brief absorbs `GRAPH_REPORT.md` sections.** `bin/modules/graphify.cjs::parseReportSections(reportPath)` is a 4 MB-capped markdown header parser that pulls God Nodes, Surprising Connections, and Knowledge Gaps out of graphify's report. `bin/modules/preflight.cjs::generate` calls it once per Brief and `renderBrief` emits a new `## Cross-Cutting Concerns (graphify)` section between Blast Radius and Recommendations — filtered to entries whose symbols overlap the topic (case-insensitive substring, ≥3 chars), capped at 5 god-nodes and 5 surprising connections. Section is omitted entirely when graphify isn't ready, the report is missing, or no entries overlap — Brief layout stays byte-stable for non-graphify projects.
@@ -15,6 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 - **`token-report --regression` emits a stable JSON contract.** When no Claude Code session logs exist for a project (fresh CI checkout), the missing-session-dir early-return now still emits the top-level `regression` block with zero counts, so the `--fail-on-regression` consumer and downstream automation can rely on the field shape. Previously the block was silently dropped on that branch, causing the smoke gate to fail in CI.
 - **Release workflow promotes Latest by highest semver.** `.github/workflows/release.yml` computes the highest stable tag including the current `$TAG` and passes `--latest=true` only when `$TAG` is that maximum. Prereleases keep their existing `--prerelease` path and are never flagged Latest. Guards against retags of older versions or hotfixes of older series stealing "Latest" from a higher release.
+- **`deferred list --tags=CSV` filter works** (was DEF-017). The list subcommand previously read `--tag` (singular) and only matched the first tag; now `--tags=a,b,c` parses to an array, OR-filters across items whose `tags[]` include any requested tag, and aligns with the documented canonical form.
 
 ## [0.39.0] - 2026-05-13
 
