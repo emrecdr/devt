@@ -973,9 +973,11 @@ GRADE_IS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" grade dev impl-summar
 
 Each call returns one of three envelope shapes — Claude MUST distinguish them, because each represents a different failure class with a different remediation path:
 
-- **`{ok: false, reason: "...", sidecar, rubric?}`** — I/O-level failure (sidecar missing or malformed, rubric file not found, etc.). The `pass` field is ABSENT. **STOP with BLOCKED**. Report to the user the `reason` field verbatim. Do NOT retry the programmer — they cannot fix a missing/corrupt sidecar or a missing rubric. The fix is operator-level (restore artifact, restore rubric, or override the rubric path in `.devt/config.json::rubrics.dev`). Exit the verify step.
+- **`{ok: false, reason: "...", sidecar, rubric?}`** — I/O-level failure (sidecar missing or malformed, rubric file not found, malformed `## Deterministic Gates` JSON, etc.). The `pass` field is ABSENT. **STOP with BLOCKED**. Report to the user the `reason` field verbatim. Do NOT retry the programmer — they cannot fix a missing/corrupt sidecar or a broken rubric. The fix is operator-level (restore artifact, restore/fix rubric, or override `.devt/config.json::rubrics.dev` to point at a project-local rubric in `.devt/rubrics/`). Exit the verify step.
 - **`{ok: true, pass: false, gate_failures: [...], ...}`** — Constraint violation. A real gate the programmer can address. Apply the `verify_iteration` routing below (RETRY/PRUNE). This is the same `verify_iteration` counter the LLM verifier path uses, so deterministic gates participate in the same `workflow.max_iterations` cap — without this, a programmer that can't get tests green would loop forever.
 - **`{ok: true, pass: true, gate_failures: [], ...}`** — Gate passes. Proceed to the LLM verifier dispatch below.
+
+**Merge precedence across both grader calls (test-summary + impl-summary).** Apply each envelope's routing rule independently, then merge with the strictest outcome winning: **`ok:false` (BLOCKED) > `pass:false` (RETRY/PRUNE) > `pass:true` (proceed)**. Concretely: if EITHER `GRADE_TS` or `GRADE_IS` is `ok:false`, the entire verify step routes to BLOCKED regardless of the other call's outcome. If neither is `ok:false` but EITHER is `pass:false`, route to RETRY/PRUNE — merge the `gate_failures` arrays from both calls into the programmer feedback. Only when BOTH calls return `pass:true` does the LLM verifier dispatch fire.
 
 For the `ok=true, pass=false` constraint-violation case, route on the iteration counter:
 

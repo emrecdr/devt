@@ -16,11 +16,15 @@ function extractDeterministicGates(rubricBody) {
   if (idx === -1) return null;
   const after = rubricBody.slice(idx);
   const fence = after.match(/```json\s*\n([\s\S]*?)\n```/);
-  if (!fence) return null;
+  if (!fence) return { error: "Deterministic Gates section missing ```json fence" };
   try {
-    return JSON.parse(fence[1]);
-  } catch {
-    return null;
+    const parsed = JSON.parse(fence[1]);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: `Deterministic Gates JSON must be an object, got ${Array.isArray(parsed) ? "array" : typeof parsed}` };
+    }
+    return parsed;
+  } catch (e) {
+    return { error: `Deterministic Gates JSON malformed: ${e.message}` };
   }
 }
 
@@ -56,7 +60,8 @@ function gradeArtifact(rubricPath, sidecarName, sidecarData) {
   }
   const body = fs.readFileSync(rubricPath, "utf8");
   const gates = extractDeterministicGates(body);
-  if (!gates) return { pass: true, gate_failures: [] };
+  if (gates === null) return { pass: true, gate_failures: [] };
+  if (gates.error) return { pass: false, gate_failures: [], error: gates.error };
   const constraint = gates[sidecarName];
   if (constraint === undefined) return { pass: true, gate_failures: [] };
   const failures = [];
@@ -64,10 +69,24 @@ function gradeArtifact(rubricPath, sidecarName, sidecarData) {
   return { pass: failures.length === 0, gate_failures: failures };
 }
 
+// Resolve a rubric path with three lookup layers, in order:
+//   1. Absolute path in config → use directly (no resolution)
+//   2. Project-local: <projectRoot>/.devt/rubrics/<file> if it exists
+//   3. Plugin default: <PLUGIN_ROOT>/references/rubrics/<file>
+// Layer 2 is the canonical escape hatch for projects that need a
+// customized constraint tree (e.g. no test runner, custom agent without
+// the gates field). Drop a `.md` file there and reference it by name in
+// .devt/config.json::rubrics.<workflow_type>.
 function resolveRubricPath(workflowType) {
   const merged = config.getMergedConfig();
   const rubricFile = merged.rubrics && merged.rubrics[workflowType];
   if (!rubricFile) return null;
+  if (path.isAbsolute(rubricFile)) return rubricFile;
+  const projectRoot = config.findProjectRoot();
+  if (projectRoot) {
+    const projectLocal = path.join(projectRoot, ".devt", "rubrics", rubricFile);
+    if (fs.existsSync(projectLocal)) return projectLocal;
+  }
   return path.join(PLUGIN_ROOT, "references", "rubrics", rubricFile);
 }
 

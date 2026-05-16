@@ -2440,6 +2440,62 @@ else
   fail "dev-workflow.md verify step missing three-way envelope routing instructions"
 fi
 
+# Two-call merge precedence must be documented explicitly. Without it,
+# Claude could misroute when GRADE_TS and GRADE_IS return different
+# envelope shapes (e.g. one ok:false, other ok:true pass:true). The
+# strictest-outcome-wins rule has to be in prose, not inferred.
+if grep -q 'strictest outcome winning' "$DW" \
+   && grep -q 'EITHER.*GRADE_TS.*GRADE_IS' "$DW"; then
+  pass "dev-workflow.md documents two-call merge precedence (strictest outcome wins; either ok:false → BLOCKED)"
+else
+  fail "dev-workflow.md missing two-call merge precedence rule"
+fi
+
+# Project-local rubric path resolution (.devt/rubrics/<file>) must work.
+# Without this, the CLAUDE.md escape-hatch doc is non-functional.
+RUBRIC_TMP=$(mktemp -d)
+mkdir -p "$RUBRIC_TMP/.devt/state" "$RUBRIC_TMP/.devt/rubrics"
+# Lenient rubric — no Deterministic Gates section means no enforcement
+cat > "$RUBRIC_TMP/.devt/rubrics/lenient.md" <<'EOFRUBRIC'
+# Lenient test rubric
+No Deterministic Gates section by design.
+EOFRUBRIC
+echo '{"rubrics":{"dev":"lenient.md"}}' > "$RUBRIC_TMP/.devt/config.json"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":[],"tests_added":[],"requirements_covered":[],"requirements_missing":[],"concerns":[],"next_agent_hints":{}}' > "$RUBRIC_TMP/.devt/state/impl-summary.json"
+cd "$RUBRIC_TMP"
+PROJLOCAL_EC=0; PROJLOCAL_OUT=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || PROJLOCAL_EC=$?
+cd "$ROOT"
+rm -rf "$RUBRIC_TMP"
+if [ "$PROJLOCAL_EC" = "0" ] && echo "$PROJLOCAL_OUT" | grep -q '"pass":true'; then
+  pass "grade: project-local rubric at .devt/rubrics/<file> resolves before plugin default"
+else
+  fail "grade: project-local rubric resolution failed (ec=$PROJLOCAL_EC, out=$PROJLOCAL_OUT)"
+fi
+
+# Malformed Deterministic Gates JSON must surface as ok:false, not silently
+# disable enforcement (silent pass:true was the pre-fix behavior). Operator
+# edits to the rubric file should never silently degrade gate enforcement.
+MALFORMED_TMP=$(mktemp -d)
+mkdir -p "$MALFORMED_TMP/.devt/state" "$MALFORMED_TMP/.devt/rubrics"
+cat > "$MALFORMED_TMP/.devt/rubrics/broken.md" <<'EOFBROKEN'
+# Broken rubric
+## Deterministic Gates
+```json
+{"test-summary.json": {"verdict": "PASS"
+```
+EOFBROKEN
+echo '{"rubrics":{"dev":"broken.md"}}' > "$MALFORMED_TMP/.devt/config.json"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"tester","workflow_type":"dev","iteration":1,"tests":{"added_count":0,"passed_count":0,"failed_count":0,"skipped_count":0},"test_files":[],"failures":[],"concerns":[]}' > "$MALFORMED_TMP/.devt/state/test-summary.json"
+cd "$MALFORMED_TMP"
+MALFORMED_EC=0; MALFORMED_OUT=$(node "$CLI" grade dev test-summary.json 2>/dev/null) || MALFORMED_EC=$?
+cd "$ROOT"
+rm -rf "$MALFORMED_TMP"
+if [ "$MALFORMED_EC" = "1" ] && echo "$MALFORMED_OUT" | grep -q '"ok":false' && echo "$MALFORMED_OUT" | grep -q "Deterministic Gates JSON malformed"; then
+  pass "grade: malformed Deterministic Gates JSON surfaces as ok:false (no silent enforcement disable)"
+else
+  fail "grade: malformed Deterministic Gates JSON wrong shape (ec=$MALFORMED_EC, out=$MALFORMED_OUT)"
+fi
+
 echo "== forensic log unified to JSONL (v0.33.0+) =="
 # : pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared
