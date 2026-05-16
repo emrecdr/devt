@@ -193,6 +193,11 @@ const JSON_SIDECAR_SCHEMAS = {
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["programmer"],
   },
+  "test-summary.json": {
+    status: ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+    verdict: ["PASS", "FAIL", "INDETERMINATE"],
+    agent: ["tester"],
+  },
   "verification.json": {
     status: VERIFICATION_STATUSES,
     verdict: VERIFICATION_VERDICTS,
@@ -227,8 +232,8 @@ const JSON_INPUT_SCHEMAS = {
 // Removed:
 // - "impl-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["impl-summary.json"]
 // - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
+// - "test-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["test-summary.json"]
 const ARTIFACT_SCHEMA = {
-  "test-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
   "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
   "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
@@ -249,6 +254,7 @@ const ARTIFACT_SCHEMA = {
 // pairing here, remove the matching entry from ARTIFACT_SCHEMA above.
 const SIDECAR_FOR_MARKDOWN = {
   "impl-summary.md": "impl-summary.json",
+  "test-summary.md": "test-summary.json",
   "verification.md": "verification.json",
 };
 

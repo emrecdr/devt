@@ -2259,7 +2259,7 @@ mkdir -p "$SC_DIR/.devt/state"
 printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":["src/a.ts"],"tests_added":[],"requirements_covered":["R1"],"requirements_missing":[],"concerns":[],"next_agent_hints":{}}' > "$SC_DIR/.devt/state/impl-summary.json"
 cd "$SC_DIR"
 HAPPY=$(node "$CLI" state read-sidecar impl-summary.json 2>/dev/null || true)
-MISSING=$(node "$CLI" state read-sidecar test-summary.json 2>/dev/null || true)
+MISSING=$(node "$CLI" state read-sidecar not-a-real-sidecar.json 2>/dev/null || true)
 TRAVERSAL=$(node "$CLI" state read-sidecar ../../etc/passwd 2>/dev/null || true)
 cd "$ROOT"
 rm -rf "$SC_DIR"

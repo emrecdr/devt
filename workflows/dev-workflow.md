@@ -756,7 +756,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 
 ## Step 5: Testing
 
-<step name="test" gate="test-summary.md is written with status DONE or DONE_WITH_CONCERNS">
+<step name="test" gate="test-summary.json is written with status DONE or DONE_WITH_CONCERNS">
 
 _Skip this step if `test` is listed in `skipped_phases` from workflow state._
 
@@ -784,11 +784,17 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     Cover happy paths, error paths, edge cases, and boundary conditions.
     If a spec exists, ensure every test scenario from the spec has a corresponding test.
   </task>
-  Write summary to .devt/state/test-summary.md
+  Write summary to .devt/state/test-summary.md AND structured sidecar to .devt/state/test-summary.json (the JSON is authoritative for routing)
 ")
 ```
 
-**Gate check**: Read `.devt/state/test-summary.md` and check status:
+**Gate check**: Read the structured sidecar `.devt/state/test-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar test-summary.json
+```
+
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}` counts. Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to **simplify** (STANDARD/COMPLEX) or **review** (TRIVIAL/SIMPLE)
 - BLOCKED: surface the issue to the user and STOP

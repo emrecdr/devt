@@ -162,7 +162,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 
 </step>
 
-<step name="test" gate="test-summary.md is written with status DONE or DONE_WITH_CONCERNS">
+<step name="test" gate="test-summary.json is written with status DONE or DONE_WITH_CONCERNS">
 
 Dispatch the tester agent:
 
@@ -179,11 +179,17 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     Write tests for the implementation described in .devt/state/impl-summary.md.
     Cover happy paths, error paths, and key edge cases.
   </task>
-  Write summary to .devt/state/test-summary.md
+  Write summary to .devt/state/test-summary.md AND structured sidecar to .devt/state/test-summary.json (the JSON is authoritative for routing)
 ")
 ```
 
-**Gate check**: Read `.devt/state/test-summary.md` and check status:
+**Gate check**: Read the structured sidecar `.devt/state/test-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar test-summary.json
+```
+
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}` counts. Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to review
 - BLOCKED: surface the issue to the user and STOP

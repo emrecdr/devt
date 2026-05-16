@@ -279,9 +279,9 @@ Write `.devt/state/test-summary.md` with:
 ```markdown
 # Test Summary
 
-## Status
-
-DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+<!-- Status / verdict live in the JSON sidecar (test-summary.json) per the
+     sidecar-only routing contract. This markdown is the human-readable
+     narrative; the JSON is authoritative for workflow control flow. -->
 
 ## Coverage
 
@@ -320,5 +320,32 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - Model: {model_used}
 - Timestamp: {ISO 8601}
 ```
+
+**Also write `.devt/state/test-summary.json`** alongside the markdown, with the same logical content in a machine-readable shape. The JSON is the authoritative source for workflow routing (status, verdict, pass/fail counts); the markdown stays for human review. Required fields:
+
+```json
+{
+  "status": "DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+  "verdict": "PASS | FAIL | INDETERMINATE",
+  "agent": "tester",
+  "workflow_type": "<from workflow.yaml>",
+  "iteration": <integer from workflow.yaml>,
+  "tests": {
+    "added": <integer>,
+    "passed": <integer>,
+    "failed": <integer>,
+    "skipped": <integer>
+  },
+  "test_files": ["tests/foo.test.ts", "tests/bar.test.ts"],
+  "failures": [
+    {"test": "fully.qualified.test_name", "file": "tests/foo.test.ts", "msg": "<assertion message>"}
+  ],
+  "concerns": [
+    {"severity": "high|med|low", "msg": "...", "ref": "[Rule N - Type]"}
+  ]
+}
+```
+
+The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
 
 </output_format>
