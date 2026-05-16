@@ -409,11 +409,18 @@ Write `.devt/state/impl-summary.md` with:
   "next_agent_hints": {
     "focus_areas": ["string"],
     "skip_areas": ["string"]
+  },
+  "gates": {
+    "lint":      {"ran": true, "passed": true,  "errors": 0, "warnings": 0},
+    "typecheck": {"ran": true, "passed": true,  "errors": 0},
+    "test":      {"ran": true, "passed": true,  "passed_count": 0, "failed_count": 0, "skipped_count": 0}
   }
 }
 ```
 
 The `verdict` is your own assessment of whether the implementation matches the spec/plan — separate from `status` which is about whether you finished the work. Use `requirements_covered` / `requirements_missing` to declare which numbered requirements from `<scope_requirements>` you addressed; the verifier reads these directly for coverage checks instead of parsing the markdown narrative.
+
+Populate `gates` from the actual command outputs you captured in `<step name="validate">` and `<self_check>` — the deterministic grader inspects these fields to decide whether to dispatch the LLM verifier or short-circuit straight back to a re-dispatch. For each subkey, set `ran: false` if the gate doesn't apply to this project (e.g. no linter configured); never invent green values. Omit the entire `gates` block only when running outside a workflow that exercises quality gates.
 
 </output_format>
 
