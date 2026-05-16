@@ -851,6 +851,14 @@ function readSidecar(fileName) {
   } catch (e) {
     return { ok: false, reason: `not valid JSON: ${e.message}`, path: filePath };
   }
+  // Sidecar payloads must be JSON objects — null/array/scalar payloads
+  // would crash the validation block below on `data.status` access and
+  // produce undefined behavior in the downstream grader. Fail loud with
+  // a structured ok:false envelope instead of letting a TypeError escape.
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    const got = Array.isArray(data) ? "array" : (data === null ? "null" : typeof data);
+    return { ok: false, reason: `sidecar must be a JSON object, got ${got}`, path: filePath };
+  }
   const validation = {
     valid_status: Array.isArray(schema.status) ? schema.status.includes(data.status) : true,
     valid_verdict: Array.isArray(schema.verdict) ? schema.verdict.includes(data.verdict) : true,

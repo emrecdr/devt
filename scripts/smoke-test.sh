@@ -2496,6 +2496,48 @@ else
   fail "grade: malformed Deterministic Gates JSON wrong shape (ec=$MALFORMED_EC, out=$MALFORMED_OUT)"
 fi
 
+# Non-object sidecar payloads (null literal, top-level array, scalar) must
+# fail with structured ok:false instead of crashing the validation block on
+# data.status access. Pre-fix behavior emitted {"error":"Cannot read
+# properties of null"} outside the envelope contract.
+NULLSC_DIR=$(mktemp -d)
+mkdir -p "$NULLSC_DIR/.devt/state"
+echo 'null' > "$NULLSC_DIR/.devt/state/impl-summary.json"
+cd "$NULLSC_DIR"
+NULLSC_EC=0; NULLSC_OUT=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || NULLSC_EC=$?
+echo '[]' > "$NULLSC_DIR/.devt/state/impl-summary.json"
+ARRSC_EC=0; ARRSC_OUT=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || ARRSC_EC=$?
+cd "$ROOT"
+rm -rf "$NULLSC_DIR"
+if [ "$NULLSC_EC" = "1" ] && echo "$NULLSC_OUT" | grep -q '"ok":false' && echo "$NULLSC_OUT" | grep -q "must be a JSON object, got null"; then
+  pass "grade: null-literal sidecar surfaces as ok:false (no crash on data.status access)"
+else
+  fail "grade: null sidecar wrong shape (ec=$NULLSC_EC, out=$NULLSC_OUT)"
+fi
+if [ "$ARRSC_EC" = "1" ] && echo "$ARRSC_OUT" | grep -q '"ok":false' && echo "$ARRSC_OUT" | grep -q "must be a JSON object, got array"; then
+  pass "grade: array-shaped sidecar surfaces as ok:false (object-shape enforced)"
+else
+  fail "grade: array sidecar wrong shape (ec=$ARRSC_EC, out=$ARRSC_OUT)"
+fi
+
+# Path-traversal in the rubrics config must be rejected before the file is
+# read. Relative paths with .. that escape both trusted roots
+# (.devt/rubrics/ and PLUGIN_ROOT/references/rubrics/) are rejected with a
+# distinct error message that points the user at the absolute-path opt-in.
+TRAV_DIR=$(mktemp -d)
+mkdir -p "$TRAV_DIR/.devt/state"
+echo '{"rubrics":{"dev":"../../../../../../etc/passwd"}}' > "$TRAV_DIR/.devt/config.json"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":[],"tests_added":[],"requirements_covered":[],"requirements_missing":[],"concerns":[],"next_agent_hints":{}}' > "$TRAV_DIR/.devt/state/impl-summary.json"
+cd "$TRAV_DIR"
+TRAV_EC=0; TRAV_OUT=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || TRAV_EC=$?
+cd "$ROOT"
+rm -rf "$TRAV_DIR"
+if [ "$TRAV_EC" = "1" ] && echo "$TRAV_OUT" | grep -q '"ok":false' && echo "$TRAV_OUT" | grep -q "did not resolve to a path within trusted roots"; then
+  pass "grade: path-traversal in rubrics config rejected (relative .. escaping trusted roots → ok:false)"
+else
+  fail "grade: path-traversal not blocked (ec=$TRAV_EC, out=$TRAV_OUT)"
+fi
+
 echo "== forensic log unified to JSONL (v0.33.0+) =="
 # : pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared

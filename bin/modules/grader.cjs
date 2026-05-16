@@ -70,13 +70,16 @@ function gradeArtifact(rubricPath, sidecarName, sidecarData) {
 }
 
 // Resolve a rubric path with three lookup layers, in order:
-//   1. Absolute path in config → use directly (no resolution)
+//   1. Absolute path in config → use directly (explicit operator opt-in)
 //   2. Project-local: <projectRoot>/.devt/rubrics/<file> if it exists
 //   3. Plugin default: <PLUGIN_ROOT>/references/rubrics/<file>
 // Layer 2 is the canonical escape hatch for projects that need a
 // customized constraint tree (e.g. no test runner, custom agent without
 // the gates field). Drop a `.md` file there and reference it by name in
 // .devt/config.json::rubrics.<workflow_type>.
+// Relative paths are checked for traversal — they must normalize to stay
+// within their target directory. Absolute paths bypass this check because
+// they're an explicit operator choice (the user owns their own machine).
 function resolveRubricPath(workflowType) {
   const merged = config.getMergedConfig();
   const rubricFile = merged.rubrics && merged.rubrics[workflowType];
@@ -84,10 +87,18 @@ function resolveRubricPath(workflowType) {
   if (path.isAbsolute(rubricFile)) return rubricFile;
   const projectRoot = config.findProjectRoot();
   if (projectRoot) {
-    const projectLocal = path.join(projectRoot, ".devt", "rubrics", rubricFile);
-    if (fs.existsSync(projectLocal)) return projectLocal;
+    const projectRubricsDir = path.join(projectRoot, ".devt", "rubrics");
+    const projectCandidate = path.normalize(path.join(projectRubricsDir, rubricFile));
+    const projectScoped = projectCandidate === projectRubricsDir || projectCandidate.startsWith(projectRubricsDir + path.sep);
+    if (projectScoped && fs.existsSync(projectCandidate)) return projectCandidate;
   }
-  return path.join(PLUGIN_ROOT, "references", "rubrics", rubricFile);
+  const pluginRubricsDir = path.join(PLUGIN_ROOT, "references", "rubrics");
+  const pluginCandidate = path.normalize(path.join(pluginRubricsDir, rubricFile));
+  const pluginScoped = pluginCandidate === pluginRubricsDir || pluginCandidate.startsWith(pluginRubricsDir + path.sep);
+  if (pluginScoped) return pluginCandidate;
+  // Relative path escaped both trusted roots via .. — reject. Caller
+  // surfaces this as ok:false via the "no rubric registered" path.
+  return null;
 }
 
 function run(subcommand, args) {
@@ -99,7 +110,15 @@ function run(subcommand, args) {
   }
   const rubricPath = resolveRubricPath(workflowType);
   if (!rubricPath) {
-    process.stdout.write(JSON.stringify({ ok: false, reason: `no rubric registered for workflow_type "${workflowType}"` }) + "\n");
+    // Distinguish "no rubric configured" from "configured but the relative
+    // path escaped both trusted roots via .. traversal". Latter is a
+    // structural problem the user can fix by adjusting their config.
+    const merged = config.getMergedConfig();
+    const configured = merged.rubrics && merged.rubrics[workflowType];
+    const reason = configured
+      ? `rubric "${configured}" did not resolve to a path within trusted roots (.devt/rubrics/ or plugin defaults); use an absolute path if pointing outside`
+      : `no rubric registered for workflow_type "${workflowType}"`;
+    process.stdout.write(JSON.stringify({ ok: false, reason }) + "\n");
     return 1;
   }
   const sidecar = state.readSidecar(sidecarName);
