@@ -233,17 +233,20 @@ function parseSkillIndex(pluginRoot) {
 // loaded; `skills_standard` adds when tier ≥ STANDARD; `skills_complex` adds
 // only at COMPLEX. A null/unknown tier returns the union of all buckets —
 // preserves prior behavior for callers that haven't classified yet.
+//
+// Two case conventions reach this function: `state.tier` is uppercase
+// (state.cjs::VALID_TIERS) while `detectTier` returns lowercase. Normalize
+// once via `.toLowerCase()` so the lookup key matches one shape.
+const TIER_DEPTH = { trivial: 1, simple: 1, standard: 2, complex: 3 };
+const BUCKET_KEYS = ["skills", "skills_standard", "skills_complex"];
+
 function mergeSkillsForTier(buckets, tier) {
-  const always = Array.isArray(buckets.skills) ? buckets.skills : [];
-  const std = Array.isArray(buckets.skills_standard) ? buckets.skills_standard : [];
-  const cmx = Array.isArray(buckets.skills_complex) ? buckets.skills_complex : [];
-  const norm = tier ? String(tier).toUpperCase() : null;
-  let out;
-  if (norm === "TRIVIAL" || norm === "SIMPLE") out = [...always];
-  else if (norm === "STANDARD") out = [...always, ...std];
-  else if (norm === "COMPLEX") out = [...always, ...std, ...cmx];
-  else out = [...always, ...std, ...cmx];
-  return Array.from(new Set(out));
+  const key = tier ? String(tier).toLowerCase() : null;
+  const depth = TIER_DEPTH[key] ?? BUCKET_KEYS.length;
+  const merged = BUCKET_KEYS.slice(0, depth).flatMap(
+    k => Array.isArray(buckets[k]) ? buckets[k] : [],
+  );
+  return Array.from(new Set(merged));
 }
 
 /**
@@ -352,6 +355,11 @@ function initWorkflow(task, pluginRoot) {
     }
   }
 
+  // Tier seed: prefer the workflow's already-classified tier (set by
+  // complexity-assessment); fall back to detectTier(task) so the first
+  // dispatch in a fresh workflow still gets tier-aware skill loading.
+  const seededTier = state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null);
+
   return {
     task: sanitizedTask,
     project_root: projectRoot,
@@ -370,11 +378,8 @@ function initWorkflow(task, pluginRoot) {
     config_exists: configExists,
     state_dir: path.join(projectRoot, ".devt", "state"),
     tdd_mode: state.tdd_mode || false,
-    // Tier seed: prefer the workflow's already-classified tier (set by
-    // complexity-assessment); fall back to detectTier(task) so the first
-    // dispatch in a new workflow still gets tier-aware skill loading.
-    tier: state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null),
-    resolved_skills: resolveSkills(pluginRoot, config, state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null)),
+    tier: seededTier,
+    resolved_skills: resolveSkills(pluginRoot, config, seededTier),
     inline_guardrails: (() => {
       const r = loadInlineGuardrails(pluginRoot);
       warnings.push(...r.warnings);

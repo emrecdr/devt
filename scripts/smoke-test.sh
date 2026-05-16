@@ -3121,15 +3121,9 @@ else
 fi
 
 echo "== Tier-aware skill resolution =="
-# init.cjs::resolveSkills accepts a tier and merges three buckets per agent
-# from skill-index.yaml — `skills` (always), `skills_standard` (+STANDARD),
-# `skills_complex` (+COMPLEX). The init payload exposes `tier` so dispatch
-# templates can reason about it.
-#
-# Empirical check: a trivially-phrased task seeds tier=trivial and the
-# programmer's resolved_skills shrinks below the COMPLEX-tier union. A
-# refactor-phrased task seeds tier=complex and the programmer load matches
-# the full union.
+# Trivial-phrased task must prune complex-tier skills; complex-phrased
+# task must load the full union. Guards against detectTier or bucket-merge
+# drift in init.cjs.
 TMP_TIER=$(mktemp -d)
 cd "$TMP_TIER"
 mkdir -p .devt
