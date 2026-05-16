@@ -3187,7 +3187,7 @@ echo "== Agent IO Contracts registry drift =="
 # buckets, and (c) state.cjs JSON_SIDECAR_SCHEMAS. Catches the class of drift
 # where memory-pre-flight was preloaded by 9 agents via frontmatter but missing
 # from skill-index.yaml.
-CONTRACTS_DRIFT=$(node -e "
+CONTRACTS_DRIFT=$(ROOT="$ROOT" node -e "
   const fs = require('fs');
   const path = require('path');
   const root = process.env.ROOT;

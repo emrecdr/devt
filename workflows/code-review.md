@@ -75,6 +75,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${REVIEW_SCO
 
 The second call auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
 
+**Compute the memory signal once and cache it for downstream dispatches.** The same `memory query --signal=3` aggregate keyed on the review scope is consumed by both the code-reviewer and verifier dispatches — compute once here, cache in `workflow.yaml`, read back in each orchestrator-prep step below:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${REVIEW_SCOPE}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
+```
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -113,10 +120,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scop
 
 <step name="review" gate="review.md is written to .devt/state/">
 
-**Orchestrator-prep — compute the memory signal**. Before dispatching, fetch a compact memory aggregate keyed on the review scope so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
+**Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{review_scope_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Substitute into the `<memory_signal>` block below.
@@ -175,10 +182,10 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 
 **Artifact pre-gate**: confirm `.devt/state/review.md` exists. If missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact.
 
-**Orchestrator-prep — compute the memory signal**. Before dispatching the verifier, fetch a compact aggregate of relevant memory hits in one CLI call so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
+**Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{review_scope_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.

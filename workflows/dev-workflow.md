@@ -186,6 +186,15 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCR
 
 This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn or block edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
 
+**Compute the memory signal once and cache it for all downstream dispatches.** The same `memory query --signal=3` aggregate is consumed by the programmer, code-reviewer, and verifier dispatches — running it once at context_init eliminates 2 redundant subprocess calls per workflow and keeps the `<memory_signal>` block byte-stable across iterations (better prompt-cache hits on retries):
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
+```
+
+The cached value is read back via `state read | jq -r '.memory_signal_json // "{}"'` in each dispatch's orchestrator-prep step below — substituted into the `<memory_signal>` template variable.
+
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
 
 If `--to <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update stop_at_phase=<phase>`
@@ -682,10 +691,10 @@ When building the programmer's prompt, omit the `<arch_review>` and `<research>`
 
 **Autonomous worktree isolation**: when `workflow.yaml.autonomous_chain` is non-null (i.e. this dispatch is part of an autonomous chain), pass `isolation: "worktree"` to the Task tool so the programmer's edits land in a temporary git worktree. Claude Code auto-cleans the worktree if the agent makes no changes; on success the diff is presented to the user before merge. Prevents an autonomous fix loop from clobbering an unrelated in-flight checkout. For interactive (non-autonomous) invocations, omit `isolation` — direct edits to the user's checkout are the expected behavior.
 
-**Orchestrator-prep — compute the memory signal**. Before dispatching the programmer, fetch a compact aggregate of relevant memory hits so the agent doesn't burn per-doc `memory query` round trips on its initial scan:
+**Orchestrator-prep — read cached memory signal**. The signal was computed once at context_init and cached in `workflow.yaml::memory_signal_json`. Read it back so the agent doesn't burn per-doc `memory query` round trips on its initial scan:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. The signal is keyed on the task description so it's stable across retry iterations within a workflow run — same byte content cache-hits across dispatches.
@@ -696,6 +705,18 @@ Dispatch the programmer agent:
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         programmer, code-reviewer, verifier, and researcher dispatch templates
+         in workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
+         When one changes, update the others. governing_rules comes from the
+         init payload; omit this block entirely when content is empty (agent
+         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+    </governing_rules>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
          programmer and code-reviewer dispatch templates. When one changes,
          update the other. inline_guardrails comes from the init payload;
@@ -861,10 +882,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify stat
 
 _Skip this step if `review` is listed in `skipped_phases` from workflow state._
 
-**Orchestrator-prep — compute the memory signal**. Before dispatching the code-reviewer, fetch the same compact aggregate the programmer received so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
+**Orchestrator-prep — read cached memory signal**. The signal was cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Substitute into the `<memory_signal>` block below.
@@ -993,10 +1014,10 @@ For the `ok=true, pass=false` constraint-violation case, route on the iteration 
 
 If BOTH gates pass, proceed to the memory_signal prep and LLM verifier dispatch below. The verifier's job under deterministic-gating narrows to **semantic verification** — does the implementation solve the user's task? — rather than re-checking test results and gate execution that the grader already proved.
 
-**Orchestrator-prep — compute the memory signal**. Before dispatching the verifier, fetch a compact aggregate of relevant memory hits in a single CLI call so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
+**Orchestrator-prep — read cached memory signal**. The signal was cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.

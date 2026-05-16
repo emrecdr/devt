@@ -29,10 +29,7 @@ BEFORE starting any work, load the following in order:
 
 **Recovering from a guardrail deny.** If a hook denies your tool call (Write, Edit, or Bash), the deny record lands in `.devt/state/preflight-denies.jsonl` as one JSON line. Read the `source` field to find the recovery path: `preflight` → add the missing `PREFLIGHT` line to scratchpad; `bash_destroy` → narrow the destructive path (e.g., `rm -rf ./dist` instead of `rm -rf .`); `no_verify` → stop and ask the user before retrying with the flag. Do not repeat the same denied command — three denies in one session triggers the autonomous-mode pause and surfaces the chain to the user.
 
-1. Read `.devt/rules/coding-standards.md` — naming, style, structural conventions
-2. Read `.devt/rules/architecture.md` — layer boundaries, dependency rules, module structure
-3. Read `.devt/rules/quality-gates.md` — exact validation commands you must run before finishing
-4. Read `CLAUDE.md` — project-specific rules and constraints that override defaults
+1-4. Load the four governing-rule sources — `.devt/rules/coding-standards.md` (naming, style, structural conventions), `.devt/rules/architecture.md` (layer boundaries, dependency rules, module structure), `.devt/rules/quality-gates.md` (exact validation commands you must run before finishing), and `CLAUDE.md` (project-specific rules that override defaults). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from disk when the block is absent or a specific sub-tag is empty (the workflow inlines them when they fit the 96 KB cap; oversized files surface in `governing_rules.paths_excluded` and require disk Read).
 5. Read all files listed in the `<files_to_read>` block from the task prompt
 6. Read `.devt/state/` artifacts from prior workflow phases (arch-review.md, etc.)
 7. If the task touches an existing module, read its module documentation file

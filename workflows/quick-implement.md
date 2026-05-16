@@ -86,6 +86,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCR
 
 Produces `.devt/state/preflight-brief.md`. The programmer agent reads it before edits. Skip silently if the call fails.
 
+**Compute the memory signal once and cache it for downstream dispatches.** Same aggregate is consumed by the programmer and code-reviewer dispatches — compute once here, cache in `workflow.yaml`, read back in each orchestrator-prep step below:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
+```
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -120,10 +127,10 @@ Initialize iteration tracking:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement iteration=1
 ```
 
-**Orchestrator-prep — compute the memory signal** before the dispatch so the agent's initial scan can use it instead of per-doc `memory query` round trips:
+**Orchestrator-prep — read cached memory signal.** Computed once at context_init; re-read here so the agent's initial scan can use it instead of per-doc `memory query` round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Dispatch the programmer agent:
@@ -132,6 +139,28 @@ Dispatch the programmer agent:
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         programmer, code-reviewer, verifier, and researcher dispatch templates
+         in workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
+         When one changes, update the others. governing_rules comes from the
+         init payload; omit this block entirely when content is empty (agent
+         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+    </governing_rules>
+    <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
+         programmer and code-reviewer dispatch templates. When one changes,
+         update the other. inline_guardrails comes from the init payload;
+         omit this block entirely when it is null (agent falls back to on-disk
+         Reads of the three guardrail files). -->
+    <guardrails_inline>
+      <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
+      <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
+      <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
+    </guardrails_inline>
     <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
          are duplicated across programmer + code-reviewer + verifier dispatches
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
@@ -209,10 +238,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 
 <step name="review" gate="review.md is written with verdict APPROVED or APPROVED_WITH_NOTES">
 
-**Orchestrator-prep — compute the memory signal** before dispatch so the reviewer can spot REJ-tombstone matches without per-doc round trips:
+**Orchestrator-prep — read cached memory signal.** Cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches without per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "{task_description}" --signal=3 --json-compact 2>/dev/null || echo '{}')
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
 ```
 
 Dispatch the code-reviewer agent:
