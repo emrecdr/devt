@@ -291,7 +291,7 @@ The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` so the nex
 Report to the user:
 
 - **Implementation**: files modified/created (from impl-summary.md)
-- **Tests**: pass/fail counts (from test-summary.md)
+- **Tests**: pass/fail counts (from `test-summary.json::tests.{passed,failed}_count`)
 - **Review verdict**: APPROVED / APPROVED_WITH_NOTES
 - **Review score**: N/100
 - **Iterations**: how many implement-review cycles occurred
@@ -316,7 +316,7 @@ Agents follow Rules 1-4 from the programmer agent's deviation framework (see `ag
 <success_criteria>
 
 - Implementation is complete (impl-summary.md status is DONE or DONE_WITH_CONCERNS)
-- All tests pass (test-summary.md shows zero failures)
+- All tests pass (`test-summary.json::tests.failed_count = 0`)
 - Code review is APPROVED or APPROVED_WITH_NOTES (score >= 80)
 - Final status: **DONE** or **DONE_WITH_CONCERNS**
   </success_criteria>

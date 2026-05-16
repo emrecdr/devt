@@ -1286,7 +1286,7 @@ Report to the user:
 - **Complexity tier**: SIMPLE / STANDARD / COMPLEX
 - **Steps executed**: list of steps that ran
 - **Implementation**: files modified/created (from impl-summary.md)
-- **Tests**: pass/fail counts (from test-summary.md)
+- **Tests**: pass/fail counts (from `test-summary.json::tests.{passed,failed}_count`)
 - **Review verdict**: APPROVED / APPROVED_WITH_NOTES (from review.md)
 - **Review score**: N/100
 - **Verification**: VERIFIED / GAPS_FOUND / FAILED (from verification.md, if applicable)
@@ -1342,7 +1342,7 @@ Agents follow Rules 1-4 from the programmer agent's deviation framework (see `ag
 <success_criteria>
 
 - Implementation is complete (impl-summary.md status is DONE or DONE_WITH_CONCERNS)
-- All tests pass (test-summary.md shows zero failures)
+- All tests pass (`test-summary.json::tests.failed_count = 0`)
 - Code review is APPROVED or APPROVED_WITH_NOTES (score >= 80)
 - Verification passed (verification.md status is VERIFIED) — if STANDARD or COMPLEX
 - Documentation is updated (if STANDARD or COMPLEX)
