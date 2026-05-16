@@ -795,14 +795,33 @@ SKILL_AUDIT=$(node -e "
     const nameMatch=fm.match(/^name:\s*(.+?)\s*\$/m);
     if(!nameMatch)issues.push('name field missing');
     else if(nameMatch[1].trim()!==name)issues.push('name field \"'+nameMatch[1].trim()+'\" != folder \"'+name+'\"');
-    const descMatch=fm.match(/^description:\s*(>-?\s*)?([\s\S]+?)(?=^[a-z_-]+:|\$)/m);
-    if(!descMatch)issues.push('description field missing');
+    // Walk the frontmatter line-by-line so YAML folded scalars
+    // (description: >- followed by indented continuation lines) get
+    // measured correctly. The earlier regex stopped the lazy capture at
+    // the first end-of-line via the multiline \$ alternative, silently
+    // under-reporting lengths for folded-scalar descriptions.
+    let descText=null;
+    {
+      const lines=fm.split('\n');
+      let inDesc=false;
+      const acc=[];
+      for(const line of lines){
+        const km=line.match(/^([a-z_-]+):\s*(>-?|\|-?)?\s*(.*)\$/);
+        if(km && !line.startsWith(' ')){
+          if(inDesc) break;
+          if(km[1]==='description'){ inDesc=true; if(km[3]) acc.push(km[3]); continue; }
+        } else if(inDesc && line.startsWith(' ')){
+          acc.push(line.trim());
+        }
+      }
+      if(inDesc) descText=acc.join(' ').replace(/\s+/g,' ').trim();
+    }
+    if(descText===null)issues.push('description field missing');
     if(/<[a-zA-Z][a-zA-Z0-9_-]*\s*>|<\/[a-zA-Z]/.test(fm))issues.push('XML tags in frontmatter');
     if(issues.length){hard.push(name+': '+issues.join('; '));continue;}
     const softIssues=[];
-    if(descMatch){
-      const descText=descMatch[2].replace(/^\s*/gm,' ').trim();
-      if(descText.length>1024)softIssues.push('description '+descText.length+' chars (soft cap 1024)');
+    if(descText!==null && descText.length>1024){
+      softIssues.push('description '+descText.length+' chars (soft cap 1024)');
     }
     const bodyOnly=body.slice(m[0].length);
     const wordCount=bodyOnly.split(/\s+/).filter(Boolean).length;
