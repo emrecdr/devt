@@ -15,6 +15,7 @@ const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
 const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
 const { sanitizeForPrompt, scanForInjection, validatePath, maskSecrets } = require("./security.cjs");
+const { detectTier } = require("./preflight.cjs");
 
 const REQUIRED_DEV_RULES = [
   "coding-standards.md",
@@ -228,19 +229,42 @@ function parseSkillIndex(pluginRoot) {
   return result;
 }
 
+// Merge tier buckets into a single deduped skill list. `skills` is always
+// loaded; `skills_standard` adds when tier ≥ STANDARD; `skills_complex` adds
+// only at COMPLEX. A null/unknown tier returns the union of all buckets —
+// preserves prior behavior for callers that haven't classified yet.
+function mergeSkillsForTier(buckets, tier) {
+  const always = Array.isArray(buckets.skills) ? buckets.skills : [];
+  const std = Array.isArray(buckets.skills_standard) ? buckets.skills_standard : [];
+  const cmx = Array.isArray(buckets.skills_complex) ? buckets.skills_complex : [];
+  const norm = tier ? String(tier).toUpperCase() : null;
+  let out;
+  if (norm === "TRIVIAL" || norm === "SIMPLE") out = [...always];
+  else if (norm === "STANDARD") out = [...always, ...std];
+  else if (norm === "COMPLEX") out = [...always, ...std, ...cmx];
+  else out = [...always, ...std, ...cmx];
+  return Array.from(new Set(out));
+}
+
 /**
  * Resolve which skills the workflow orchestrator should inject as
  * `<agent_skills>` for a given agent type. Two sources, last-wins:
  *
- * 1. `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml`'s `agents.<type>.skills` —
- * ships with devt, single source of truth for defaults.
+ * 1. `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml`'s `agents.<type>` — ships with
+ *    devt, supports tier-bucketed loading via `skills` (always),
+ *    `skills_standard`, and `skills_complex` keys.
  * 2. `.devt/config.json`'s `agent_skills.<type>` — per-project override.
+ *    Flat array shape preserved (= always loaded, ignores tier) so existing
+ *    project configs don't break.
+ *
+ * `tier` is the workflow's complexity classification — TRIVIAL/SIMPLE get
+ * only the `skills` bucket, STANDARD adds `skills_standard`, COMPLEX adds
+ * both. Null/unknown returns the full union (safe default).
  *
  * Returns `{ <agent_type>: [...skill-names...], ... }`. Agents absent from
- * BOTH sources do not appear in the result — callers fall back to "no
- * runtime skill injection beyond the agent's preloaded frontmatter."
+ * BOTH sources do not appear in the result.
  */
-function resolveSkills(pluginRoot, config) {
+function resolveSkills(pluginRoot, config, tier) {
   const index = parseSkillIndex(pluginRoot);
   const indexAgents = (index && index.agents) || {};
   const configAgents = (config && config.agent_skills) || {};
@@ -256,10 +280,9 @@ function resolveSkills(pluginRoot, config) {
       resolved[agent] = configAgents[agent].slice();
       continue;
     }
-    const fromIndex = indexAgents[agent] && Array.isArray(indexAgents[agent].skills)
-      ? indexAgents[agent].skills
-      : null;
-    if (fromIndex) resolved[agent] = fromIndex.slice();
+    if (indexAgents[agent]) {
+      resolved[agent] = mergeSkillsForTier(indexAgents[agent], tier);
+    }
   }
   return resolved;
 }
@@ -347,7 +370,11 @@ function initWorkflow(task, pluginRoot) {
     config_exists: configExists,
     state_dir: path.join(projectRoot, ".devt", "state"),
     tdd_mode: state.tdd_mode || false,
-    resolved_skills: resolveSkills(pluginRoot, config),
+    // Tier seed: prefer the workflow's already-classified tier (set by
+    // complexity-assessment); fall back to detectTier(task) so the first
+    // dispatch in a new workflow still gets tier-aware skill loading.
+    tier: state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null),
+    resolved_skills: resolveSkills(pluginRoot, config, state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null)),
     inline_guardrails: (() => {
       const r = loadInlineGuardrails(pluginRoot);
       warnings.push(...r.warnings);

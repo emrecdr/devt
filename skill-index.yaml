@@ -2,6 +2,16 @@
 # Skills are auto-discovered by Claude via descriptions, but this
 # provides explicit guidance for the workflow orchestrator.
 #
+# Tier buckets (resolved by init.cjs::resolveSkills against state.tier
+# or detectTier(task) as initial seed):
+#   skills          — always loaded, every dispatch regardless of tier
+#   skills_standard — added when state.tier is STANDARD or COMPLEX
+#   skills_complex  — added only when state.tier is COMPLEX
+# Buckets are deduped on merge. User overrides at
+# `.devt/config.json::agent_skills.<agent>` accept a flat array
+# (= always loaded, ignores tier) — that path is preserved for stable
+# project config.
+#
 # Memory boundary (do not blur these):
 # - scratchpad → EPHEMERAL within-workflow notes. Resets between
 # workflows. Cross-agent handoff inside one run only.
@@ -18,10 +28,13 @@ agents:
     skills:
       - codebase-scan
       - scratchpad
-      - api-docs-fetcher
-      - strategic-analysis
+      - memory-pre-flight
+    skills_standard:
       - tdd-patterns
       - verification-patterns
+    skills_complex:
+      - strategic-analysis
+      - api-docs-fetcher
     reads:
       - .devt/rules/coding-standards.md
       - .devt/rules/architecture.md
@@ -30,6 +43,8 @@ agents:
   tester:
     skills:
       - scratchpad
+      - memory-pre-flight
+    skills_standard:
       - tdd-patterns
     reads:
       - .devt/rules/testing-patterns.md
@@ -38,8 +53,10 @@ agents:
   code-reviewer:
     skills:
       - code-review-guide
-      - codebase-scan
       - scratchpad
+      - memory-pre-flight
+    skills_standard:
+      - codebase-scan
     reads:
       - .devt/rules/coding-standards.md
       - CLAUDE.md
@@ -47,14 +64,19 @@ agents:
   docs-writer:
     skills:
       - scratchpad
+      - memory-pre-flight
     reads:
       - .devt/rules/documentation.md
 
   architect:
     skills:
       - codebase-scan
-      - architecture-health-scanner
+      - memory-pre-flight
+      - graphify-helpers
+    skills_standard:
       - api-docs-fetcher
+    skills_complex:
+      - architecture-health-scanner
       - strategic-analysis
       - complexity-assessment
     reads:
@@ -63,14 +85,17 @@ agents:
   retro:
     skills:
       - lesson-extraction
+    skills_complex:
       - autoskill
     reads:
       - .devt/state/*.md
 
   verifier:
     skills:
-      - codebase-scan
+      - memory-pre-flight
       - verification-patterns
+    skills_standard:
+      - codebase-scan
     reads:
       - .devt/rules/quality-gates.md
       - .devt/state/impl-summary.md
@@ -82,6 +107,8 @@ agents:
   researcher:
     skills:
       - codebase-scan
+      - memory-pre-flight
+    skills_standard:
       - strategic-analysis
     reads:
       - .devt/rules/coding-standards.md
@@ -92,6 +119,7 @@ agents:
   debugger:
     skills:
       - codebase-scan
+      - memory-pre-flight
     reads:
       - .devt/rules/coding-standards.md
       - .devt/rules/quality-gates.md
@@ -100,6 +128,7 @@ agents:
   curator:
     skills:
       - memory-curation
+    skills_complex:
       - autoskill
 
 workflows:

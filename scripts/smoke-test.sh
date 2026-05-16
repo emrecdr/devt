@@ -3120,6 +3120,193 @@ else
   fail "found lingering 'consult skill-index.yaml' phrasing — should reference resolved_skills instead"
 fi
 
+echo "== Tier-aware skill resolution =="
+# init.cjs::resolveSkills accepts a tier and merges three buckets per agent
+# from skill-index.yaml — `skills` (always), `skills_standard` (+STANDARD),
+# `skills_complex` (+COMPLEX). The init payload exposes `tier` so dispatch
+# templates can reason about it.
+#
+# Empirical check: a trivially-phrased task seeds tier=trivial and the
+# programmer's resolved_skills shrinks below the COMPLEX-tier union. A
+# refactor-phrased task seeds tier=complex and the programmer load matches
+# the full union.
+TMP_TIER=$(mktemp -d)
+cd "$TMP_TIER"
+mkdir -p .devt
+TRIVIAL_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "fix typo in readme" 2>/dev/null || true)
+COMPLEX_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "design and implement comprehensive refactor of authentication architecture" 2>/dev/null || true)
+cd "$ROOT"
+rm -rf "$TMP_TIER"
+
+# Trivial path: tier surfaced + programmer load shorter than complex
+if echo "$TRIVIAL_OUT" | node -e "
+  let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try{
+      const j=JSON.parse(d);
+      if(j.tier!=='trivial'){console.error('tier not trivial:',j.tier);process.exit(1);}
+      const p=j.resolved_skills&&j.resolved_skills.programmer;
+      if(!Array.isArray(p)||p.length===0){console.error('programmer empty');process.exit(2);}
+      if(p.includes('strategic-analysis')){console.error('complex skill leaked into trivial');process.exit(3);}
+      process.exit(0);
+    }catch(e){console.error('parse:',e.message);process.exit(4);}
+  });
+" 2>/dev/null; then
+  pass "trivial task seeds tier=trivial and prunes complex-tier skills"
+else
+  fail "trivial-tier skill resolution regression"
+fi
+
+# Complex path: tier surfaced + programmer load matches full union
+if echo "$COMPLEX_OUT" | node -e "
+  let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try{
+      const j=JSON.parse(d);
+      if(j.tier!=='complex'){console.error('tier not complex:',j.tier);process.exit(1);}
+      const p=j.resolved_skills&&j.resolved_skills.programmer;
+      const required=['codebase-scan','scratchpad','memory-pre-flight','tdd-patterns','verification-patterns','strategic-analysis','api-docs-fetcher'];
+      const missing=required.filter(k=>!p.includes(k));
+      if(missing.length){console.error('missing complex skills:',missing.join(','));process.exit(2);}
+      process.exit(0);
+    }catch(e){console.error('parse:',e.message);process.exit(3);}
+  });
+" 2>/dev/null; then
+  pass "complex task seeds tier=complex and loads full skill union"
+else
+  fail "complex-tier skill resolution regression"
+fi
+
+echo "== Agent IO Contracts registry drift =="
+# agents/io-contracts.yaml is the single source of truth that asserts agreement
+# between (a) agents/<name>.md frontmatter `skills:`, (b) skill-index.yaml
+# buckets, and (c) state.cjs JSON_SIDECAR_SCHEMAS. Catches the class of drift
+# where memory-pre-flight was preloaded by 9 agents via frontmatter but missing
+# from skill-index.yaml.
+CONTRACTS_DRIFT=$(node -e "
+  const fs = require('fs');
+  const path = require('path');
+  const root = process.env.ROOT;
+
+  function parseYamlContracts(text) {
+    const out = { agents: {} };
+    const lines = text.split('\n');
+    let agent = null, key = null, listAcc = null;
+    for (const raw of lines) {
+      const line = raw.replace(/\s+\$/, '');
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const indent = line.length - line.replace(/^\s+/, '').length;
+      // agents:
+      if (indent === 0 && trimmed === 'agents:') { continue; }
+      // <agent>:
+      if (indent === 2 && trimmed.endsWith(':')) {
+        agent = trimmed.slice(0, -1);
+        out.agents[agent] = {};
+        key = null; listAcc = null;
+        continue;
+      }
+      if (!agent) continue;
+      // top-level keys per agent
+      if (indent === 4) {
+        // inline list: frontmatter_skills: [a, b]
+        const m = trimmed.match(/^([a-z_]+):\s*\[(.*)\]\$/);
+        if (m) {
+          const items = m[2].split(',').map(s => s.trim()).filter(Boolean);
+          out.agents[agent][m[1]] = items;
+          key = null; listAcc = null;
+          continue;
+        }
+        // scalar: key: value (incl null)
+        const m2 = trimmed.match(/^([a-z_]+):\s*(.+)\$/);
+        if (m2) {
+          let v = m2[2].trim();
+          if (v === 'null') v = null;
+          out.agents[agent][m2[1]] = v;
+          key = null; listAcc = null;
+          continue;
+        }
+        // nested object: outputs: / inputs:
+        if (trimmed.endsWith(':')) {
+          key = trimmed.slice(0, -1);
+          out.agents[agent][key] = {};
+          listAcc = null;
+          continue;
+        }
+      }
+      // nested key under outputs/inputs
+      if (indent === 6 && key) {
+        const m = trimmed.match(/^([a-z_]+):\s*\[(.*)\]\$/);
+        if (m) {
+          out.agents[agent][key][m[1]] = m[2].split(',').map(s => s.trim()).filter(Boolean);
+          continue;
+        }
+        const m2 = trimmed.match(/^([a-z_]+):\s*(.+)\$/);
+        if (m2) {
+          let v = m2[2].trim();
+          if (v === 'null') v = null;
+          out.agents[agent][key][m2[1]] = v;
+          continue;
+        }
+      }
+    }
+    return out;
+  }
+
+  function parseFrontmatterSkills(agentMdPath) {
+    if (!fs.existsSync(agentMdPath)) return null;
+    const lines = fs.readFileSync(agentMdPath, 'utf8').split('\n');
+    if (lines[0].trim() !== '---') return [];
+    let inSkills = false;
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === '---') break;
+      if (/^skills:\s*\$/.test(line)) { inSkills = true; continue; }
+      if (inSkills) {
+        const m = line.match(/^\s+-\s+(.+)\$/);
+        if (m) { out.push(m[1].trim()); continue; }
+        if (/^[a-z]/.test(line)) { inSkills = false; }
+      }
+    }
+    return out;
+  }
+
+  const contracts = parseYamlContracts(fs.readFileSync(path.join(root, 'agents/io-contracts.yaml'), 'utf8'));
+  const initMod = require(path.join(root, 'bin/modules/init.cjs'));
+  const stateMod = require(path.join(root, 'bin/modules/state.cjs'));
+  const issues = [];
+
+  for (const [agent, c] of Object.entries(contracts.agents)) {
+    // 1) Every agent in the contract has a corresponding agents/<name>.md
+    const mdPath = path.join(root, 'agents', agent + '.md');
+    if (!fs.existsSync(mdPath)) { issues.push(agent + ': agents/' + agent + '.md missing'); continue; }
+
+    // 2) Frontmatter skills agree with contract
+    const fm = parseFrontmatterSkills(mdPath);
+    const declared = (c.frontmatter_skills || []).slice().sort();
+    const actual = (fm || []).slice().sort();
+    if (declared.join(',') !== actual.join(',')) {
+      issues.push(agent + ': frontmatter skills drift — contract=' + JSON.stringify(declared) + ' actual=' + JSON.stringify(actual));
+    }
+
+    // 3) Sidecar declared exists in JSON_SIDECAR_SCHEMAS
+    const sidecar = c.outputs && c.outputs.sidecar;
+    if (sidecar && !stateMod.JSON_SIDECAR_SCHEMAS[sidecar]) {
+      issues.push(agent + ': sidecar ' + sidecar + ' not registered in JSON_SIDECAR_SCHEMAS');
+    }
+  }
+
+  if (issues.length) {
+    console.log(issues.join('\n'));
+    process.exit(1);
+  }
+  process.exit(0);
+" 2>&1)
+if [ -z "$CONTRACTS_DRIFT" ]; then
+  pass "agents/io-contracts.yaml: no drift vs frontmatter + JSON_SIDECAR_SCHEMAS"
+else
+  fail "io-contracts.yaml drift detected: $CONTRACTS_DRIFT"
+fi
+
 echo "== next.md PRIORITY GUARD for validation_status=warned (v0.31.0+) =="
 # : next.md Step 2 must lead with an explicit PRIORITY GUARD instruction
 # that surfaces validation_status="warned" BEFORE any other routing branch.

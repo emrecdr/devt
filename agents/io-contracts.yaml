@@ -1,0 +1,121 @@
+# Agent IO Contracts — single source of truth for per-agent inputs/outputs/skills.
+#
+# Three drift-prone surfaces currently live in three places:
+#   1. agents/<name>.md frontmatter `skills:` field — what gets injected at agent startup
+#   2. skill-index.yaml `agents.<name>.skills*` buckets — what the workflow orchestrator
+#      adds via the `<agent_skills>` dispatch block
+#   3. bin/modules/state.cjs::JSON_SIDECAR_SCHEMAS — which sidecar each agent owns
+#
+# This file declares the contract once. scripts/smoke-test.sh asserts the three
+# surfaces agree with what's here. Adding a new agent means: append an entry,
+# create agents/<name>.md, and the smoke test catches any miss.
+#
+# Schema per agent:
+#   frontmatter_skills — list of `devt:<skill>` entries that MUST appear in
+#                        agents/<name>.md frontmatter `skills:` (preloaded at
+#                        agent startup; cannot be tier-filtered)
+#   index_buckets      — list of bucket names (`skills`, `skills_standard`,
+#                        `skills_complex`) the agent declares in skill-index.yaml.
+#                        Smoke test asserts each declared bucket is non-empty in
+#                        skill-index.yaml.
+#   outputs:
+#     primary          — the markdown artifact the agent writes (canonical
+#                        human-readable record). Empty when the agent is a
+#                        router/classifier and writes no artifact.
+#     sidecar          — the JSON sidecar (if any) — MUST exist in state.cjs
+#                        JSON_SIDECAR_SCHEMAS and SIDECAR_FOR_MARKDOWN
+#   inputs:
+#     context_blocks   — static blocks the workflow dispatch template MUST inject
+#                        into <context>. Smoke test (future) asserts the dispatch
+#                        actually references them.
+
+agents:
+  programmer:
+    frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
+    index_buckets: [skills, skills_standard, skills_complex]
+    outputs:
+      primary: impl-summary.md
+      sidecar: impl-summary.json
+    inputs:
+      context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task, plan]
+
+  tester:
+    frontmatter_skills: [devt:memory-pre-flight, devt:tdd-patterns]
+    index_buckets: [skills, skills_standard]
+    outputs:
+      primary: test-summary.md
+      sidecar: test-summary.json
+    inputs:
+      context_blocks: [governing_rules, agent_skills, task]
+
+  code-reviewer:
+    frontmatter_skills: [devt:memory-pre-flight, devt:code-review-guide]
+    index_buckets: [skills, skills_standard]
+    outputs:
+      primary: review.md
+      sidecar: null
+    inputs:
+      context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
+
+  docs-writer:
+    frontmatter_skills: [devt:memory-pre-flight]
+    index_buckets: [skills]
+    outputs:
+      primary: docs-summary.md
+      sidecar: null
+    inputs:
+      context_blocks: [agent_skills, task]
+
+  architect:
+    frontmatter_skills: [devt:memory-pre-flight, devt:graphify-helpers]
+    index_buckets: [skills, skills_standard, skills_complex]
+    outputs:
+      primary: arch-review.md
+      sidecar: null
+    inputs:
+      context_blocks: [governing_rules, agent_skills, task]
+
+  retro:
+    frontmatter_skills: []
+    index_buckets: [skills, skills_complex]
+    outputs:
+      primary: lessons.yaml
+      sidecar: null
+    inputs:
+      context_blocks: [agent_skills]
+
+  verifier:
+    frontmatter_skills: [devt:memory-pre-flight, devt:verification-patterns]
+    index_buckets: [skills, skills_standard]
+    outputs:
+      primary: verification.md
+      sidecar: verification.json
+    inputs:
+      context_blocks: [governing_rules, memory_signal, agent_skills, rubric_path, workflow_type, task]
+
+  researcher:
+    frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
+    index_buckets: [skills, skills_standard]
+    outputs:
+      primary: research.md
+      sidecar: null
+    inputs:
+      context_blocks: [governing_rules, agent_skills, task]
+
+  debugger:
+    frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
+    index_buckets: [skills]
+    outputs:
+      primary: debug-summary.md
+      sidecar: null
+    inputs:
+      context_blocks: [agent_skills, bug]
+
+  curator:
+    frontmatter_skills: [devt:memory-curation]
+    index_buckets: [skills, skills_complex]
+    outputs:
+      primary: curation-summary.md
+      sidecar: null
+    inputs:
+      context_blocks: [agent_skills]
