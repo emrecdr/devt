@@ -3,16 +3,14 @@ name: council
 description: >-
   Pressure-test high-stakes engineering decisions through 5 advisors with distinct thinking
   styles. They independently analyze, peer-review each other anonymously, and a chairman
-  synthesizes a verdict. Adapted from Karpathy's LLM Council methodology, retuned for
-  engineering trade-offs. MANDATORY TRIGGERS: 'council this', 'run the council', 'pressure-test
-  this', 'stress-test this', 'red team this', 'devil's advocate', 'second opinion on this',
-  'war room this', 'debate this'. STRONG TRIGGERS (only when paired with a real engineering
-  trade-off): 'should I use X or Y', 'is this the right approach', 'I'm torn between',
-  'which pattern fits', 'audit this approach', 'I can't decide'. Do NOT trigger on factual
-  lookups, syntax questions, single-line fixes, or when the user has already decided and
-  just wants confirmation. Distinct from strategic-analysis (which produces a trade-off
-  table for named options) — the council adds adversarial peer review and chairman
-  synthesis for decisions where the user suspects their first instinct is biased.
+  synthesizes a verdict. MANDATORY TRIGGERS: 'council this', 'run the council', 'pressure-test',
+  'stress-test', 'red team this', "devil's advocate", 'second opinion on this', 'war room',
+  'debate this'. STRONG TRIGGERS (only when paired with a real engineering trade-off):
+  'should I use X or Y', 'is this the right approach', "I'm torn between", "I can't decide".
+  Do NOT trigger on factual lookups, syntax questions, single-line fixes, or when the user has
+  already decided and just wants confirmation. Distinct from strategic-analysis — the council
+  adds adversarial peer review and chairman synthesis for decisions where the user suspects
+  their first instinct is biased.
 allowed-tools: Bash Read Write Edit Grep Glob Skill Task
 ---
 

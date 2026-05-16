@@ -1,17 +1,14 @@
 ---
 name: verification-patterns
 description: >-
-  Use to verify that finished implementation is REAL and CONNECTED — not stubs, placeholders, or dead code.
-  4-level verification: exists, substantive, wired, functional. Trigger on "is this actually working",
-  "verify everything is connected", "check completeness", "detect stubs", "any TODO markers or empty
-  functions", "is it wired up", "are these real implementations or placeholders", "confirm it's not dead
-  code", "check if imported anywhere", "is the route registered", "returning placeholder objects",
-  "hardcoded test values", "before I mark this done", "before I tell the team it's ready", "before we ship",
-  "double-check that claim", "is the function called from anywhere", "still stubbed", "half-done",
-  "NotImplementedError hiding", "empty function bodies", "return null where real data expected." This is
-  about checking if COMPLETED work is genuine and connected — not about scanning for existing code before
-  building (use codebase-scan), not about scoring code quality or finding security issues (use
-  code-review-guide), and not about writing tests (just write them).
+  Use to verify that finished implementation is REAL and CONNECTED — not stubs, placeholders, or
+  dead code. 4-level verification: exists, substantive, wired, functional. Trigger on "is this
+  actually working", "verify everything is connected", "detect stubs", "is it wired up", "are
+  these real implementations or placeholders", "is the route registered", "is the function called
+  from anywhere", "before we ship", "still stubbed", "half-done", "NotImplementedError hiding",
+  "empty function bodies", "return null where real data expected". Checks if COMPLETED work is
+  genuine and connected — not for scanning before building (use codebase-scan), not for scoring
+  code quality (use code-review-guide), not for writing tests (just write them).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 

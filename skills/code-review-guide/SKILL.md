@@ -1,17 +1,14 @@
 ---
 name: code-review-guide
 description: >-
-  Use to review code for quality, security, performance, and architecture compliance with a 100-point
-  scoring framework and verdicts (APPROVED/APPROVED_WITH_NOTES/NEEDS_WORK). Trigger on "review this code",
-  "review my changes", "check for issues", "code quality", "score the code", "is this ready to ship",
-  "PR review", "pre-merge review", "second pair of eyes", "check against our coding standards", "check
-  for security issues", "architecture violations", "honest score", "give me a score and verdict", "apply
-  deductions", "before I open the PR", "check for N+1 queries", "missing error handling", "input
-  validation", "test coverage", "accessibility issues", "code smells", "ready to ship", "approve their PR",
-  "review every file they touched", "pre-review before the team looks." This is about EVALUATING code
-  quality with structured findings and scoring — not about verifying stubs or wiring (use
-  verification-patterns), not about searching for existing code (use codebase-scan), and not about
-  assessing task complexity (use complexity-assessment).
+  Review code for quality, security, performance, and architecture compliance with a 100-point
+  scoring framework and verdicts (APPROVED/APPROVED_WITH_NOTES/NEEDS_WORK). Trigger on "review
+  this code/my changes", "check for issues", "score the code", "is this ready to ship", "PR
+  review", "pre-merge review", "second pair of eyes", "honest score and verdict", "before I open
+  the PR", "check for N+1 queries", "missing error handling", "input validation", "code smells",
+  "review every file they touched". EVALUATES code quality with structured findings + scoring —
+  not for verifying stubs/wiring (use verification-patterns), not for searching existing code
+  (use codebase-scan), not for assessing task complexity (use complexity-assessment).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 

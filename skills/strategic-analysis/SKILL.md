@@ -1,17 +1,14 @@
 ---
 name: strategic-analysis
 description: >-
-  Use when the user must CHOOSE between two or more named approaches, technologies, or design decisions
-  before committing. Compares options with explicit trade-off tables and a recommendation. Trigger on
-  "X or Y", "should we use A or B", "compare approaches", "trade-offs", "pros and cons", "which is better",
-  "best option for our case", "what do you recommend", "I'm torn between", "the team is split on",
-  "compare the trade-offs", "objective comparison with a recommendation", "which approach makes the most
-  sense", "I need to decide between", "keep X or switch to Y", "both approaches have supporters",
-  "evaluate options for", "hybrid approach", "vendor lock-in vs", "monorepo vs separate repos",
-  "REST vs GraphQL", "SPA vs SSR." This is about DECIDING between named alternatives with trade-off
-  analysis — not about sizing task complexity (use complexity-assessment), not about reviewing code quality
-  (use code-review-guide), not about creating implementation plans, and not about searching for existing
-  code (use codebase-scan).
+  Use when the user must CHOOSE between two or more named approaches, technologies, or design
+  decisions before committing. Compares options with explicit trade-off tables and a recommendation.
+  Trigger on "X or Y", "should we use A or B", "compare approaches", "trade-offs", "pros and cons",
+  "which is better", "what do you recommend", "I'm torn between", "the team is split on", "I need
+  to decide between", "keep X or switch to Y", "evaluate options for", "monorepo vs separate
+  repos", "REST vs GraphQL". DECIDES between named alternatives with trade-off analysis — not for
+  sizing complexity (use complexity-assessment), not for code review (use code-review-guide), not
+  for creating plans, not for searching existing code (use codebase-scan).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 

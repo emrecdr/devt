@@ -447,6 +447,19 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         programmer, tester, code-reviewer, verifier, researcher, and architect
+         dispatch templates. When one changes, update the others. -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+    </governing_rules>
+    <!-- KEEP IN SYNC: architect preloads golden-rules + engineering-principles
+         from the guardrails set (not generative-debt-checklist). -->
+    <guardrails_inline>
+      <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
+      <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
+    </guardrails_inline>
     <scan_results>Read .devt/state/scan-results.md for affected modules — the plan does not exist yet, so scope from the scan.</scan_results>
     <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -612,6 +625,19 @@ Dispatch the architect agent to review the proposed approach before implementati
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         programmer, tester, code-reviewer, verifier, researcher, and architect
+         dispatch templates. When one changes, update the others. -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+    </governing_rules>
+    <!-- KEEP IN SYNC: architect preloads golden-rules + engineering-principles
+         from the guardrails set (not generative-debt-checklist). -->
+    <guardrails_inline>
+      <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
+      <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
+    </guardrails_inline>
     <scan_results>Read .devt/state/scan-results.md</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Review intended design against architecture rules.</spec>
     <plan>Read .devt/state/plan.md (if exists)</plan>
@@ -801,6 +827,18 @@ Dispatch the tester agent:
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
+         programmer, tester, code-reviewer, verifier, and researcher dispatch
+         templates. When one changes, update the others. -->
+    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+      <testing_patterns>{governing_rules.content[\".devt/rules/testing-patterns.md\"]}</testing_patterns>
+    </governing_rules>
+    <!-- KEEP IN SYNC: tester preloads only golden-rules.md from the guardrails set. -->
+    <guardrails_inline>
+      <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
+    </guardrails_inline>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use the "Test Scenarios" section as required coverage targets.</spec>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
@@ -1034,6 +1072,10 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          the path from <workflow_type>, so we can ship rubric updates as new
          files (dev.v2.md) without breaking projects pinned to v1. -->
     <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
+    <!-- Inline rubric body from init payload — verifier prefers this over the
+         on-disk Read at <rubric_path> when present. Falls back to path when
+         omitted (oversized rubric → init returns null inline_rubrics). -->
+    <rubric_content>{inline_rubrics.dev}</rubric_content>
     <original_task>{task_description}</original_task>
     <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
          are duplicated in workflows/code-review.md verifier dispatch. When the

@@ -44,6 +44,58 @@ const INLINE_GUARDRAILS = [
 ];
 const MAX_INLINE_BYTES = 64 * 1024;
 
+// Pinned-rubric content inlined into the init payload. The verifier reads
+// `references/rubrics/<filename>` on every iteration; inlining keeps the
+// dispatch prompt byte-stable across retries and saves one Read per iter.
+// Mirrors loadInlineGuardrails: small files (~5 KB each); cap at 32 KB total
+// so a future multi-rubric project still fits before falling back to
+// path-only via `<rubric_path>`.
+const MAX_INLINE_RUBRIC_BYTES = 32 * 1024;
+
+function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
+  if (!pluginRoot || !rubrics) return { content: null, bytes: 0, warnings: [] };
+  const result = {};
+  const warnings = [];
+  let totalBytes = 0;
+  for (const [workflowType, filename] of Object.entries(rubrics)) {
+    if (!filename || typeof filename !== "string") continue;
+    // Resolution order mirrors grader.cjs::resolveRubricPath:
+    // absolute path → project-local .devt/rubrics/<f> → plugin defaults.
+    // Each candidate is confined to its trusted root.
+    let resolved = null;
+    if (path.isAbsolute(filename)) {
+      resolved = filename;
+    } else if (projectRoot) {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const projectDir = path.join(projectRoot, ".devt", "rubrics");
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const cand = path.normalize(path.join(projectDir, filename));
+      const scoped = cand === projectDir || cand.startsWith(projectDir + path.sep);
+      if (scoped && fs.existsSync(cand)) resolved = cand;
+    }
+    if (!resolved) {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const pluginDir = path.join(pluginRoot, "references", "rubrics");
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const cand = path.normalize(path.join(pluginDir, filename));
+      const scoped = cand === pluginDir || cand.startsWith(pluginDir + path.sep);
+      if (scoped && fs.existsSync(cand)) resolved = cand;
+    }
+    if (!resolved) {
+      warnings.push(`rubric missing on disk for workflow_type=${workflowType}: ${filename}`);
+      continue;
+    }
+    const buf = fs.readFileSync(resolved);
+    totalBytes += buf.length;
+    if (totalBytes > MAX_INLINE_RUBRIC_BYTES) {
+      warnings.push(`inline-rubrics over ${MAX_INLINE_RUBRIC_BYTES} bytes — falling back to path-only`);
+      return { content: null, bytes: totalBytes, warnings };
+    }
+    result[workflowType] = buf.toString("utf8");
+  }
+  return { content: result, bytes: totalBytes, warnings };
+}
+
 function loadInlineGuardrails(pluginRoot) {
   if (!pluginRoot) return { content: null, bytes: 0, warnings: [] };
   const result = {};
@@ -401,6 +453,11 @@ function initWorkflow(task, pluginRoot) {
     // rather than nested `{config.rubrics.dev}` access. Defaults to
     // `dev.v1.md`; override in `.devt/config.json` to bump version.
     rubrics: config.rubrics || {},
+    inline_rubrics: (() => {
+      const r = loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {});
+      warnings.push(...r.warnings);
+      return r.content;
+    })(),
     warnings: warnings.concat(injectionWarning),
   };
 }

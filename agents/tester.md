@@ -23,15 +23,13 @@ Your tests serve two purposes: verification (does the code work?) and documentat
 <context_loading>
 BEFORE starting any work, load the following in order:
 
-1. Read `.devt/rules/testing-patterns.md` — test structure, naming, fixtures, and conventions
-2. Read `.devt/rules/quality-gates.md` — exact test commands and pass criteria
-3. Read `CLAUDE.md` — project-specific rules and constraints
+1-3. Load the three governing-rule sources — `.devt/rules/testing-patterns.md` (test structure, naming, fixtures, conventions), `.devt/rules/quality-gates.md` (exact test commands and pass criteria), and `CLAUDE.md` (project-specific rules and constraints). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<quality_gates>`, `<testing_patterns>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from disk when the block is absent or a specific sub-tag is empty.
 4. Read `.devt/state/impl-summary.md` — what was implemented and what needs testing
 5. Read `.devt/state/spec.md` if it exists — the spec's "Test Scenarios" section defines expected test coverage. Each scenario should have a corresponding test.
 6. Read the source files listed in the impl-summary — understand the actual implementation
 7. Read existing tests in the same module — follow established patterns
 8. Read files listed in `<files_to_read>` block from the task prompt
-9. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules: scan before implementing (applies to test utilities too), no duplicates, no backward compat code
+9. Load `golden-rules.md` — universal rules: scan before implementing (applies to test utilities too), no duplicates, no backward compat code. **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with a `<golden_rules>` sub-tag, treat its contents as authoritative and SKIP the on-disk Read. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` when the inline block is absent.
 10. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant testing lessons from past workflows. Apply them to avoid repeating known gaps.
 
 Do NOT skip any of these. Writing tests without reading the implementation leads to tautological tests that verify nothing.

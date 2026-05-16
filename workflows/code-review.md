@@ -197,6 +197,10 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <!-- Inline rubric body from init payload — verifier prefers this over the
+         on-disk Read at <rubric_path> when present. Falls back to path when
+         omitted (oversized rubric → init returns null inline_rubrics). -->
+    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
     <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
          are duplicated in workflows/dev-workflow.md verifier dispatch. When the

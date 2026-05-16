@@ -38,10 +38,8 @@ work. Your reviews must:
 <context_loading>
 BEFORE starting the review, load the following in order:
 
-1. Read `.devt/rules/architecture.md` — layer definitions, boundary rules, dependency direction, module structure
-2. Read `CLAUDE.md` — project-specific architectural rules and constraints
-3. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — universal rules that apply to all architectural decisions
-4. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/engineering-principles.md` — SOLID, DRY, KISS, SoC principles for evaluating architectural decisions
+1-2. Load the two governing-rule sources — `.devt/rules/architecture.md` (layer definitions, boundary rules, dependency direction, module structure) and `CLAUDE.md` (project-specific architectural rules and constraints). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<architecture>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from disk when the block is absent or a specific sub-tag is empty.
+3-4. Load the two guardrails — `golden-rules.md` (universal rules that apply to all architectural decisions) and `engineering-principles.md` (SOLID, DRY, KISS, SoC). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles}.md` when the inline block is absent.
 5. Read `.devt/state/impl-summary.md` if available — what was changed and why
 6. Read `.devt/state/review.md` if available — code-level findings for context
 7. Read `.devt/state/scan-results.md` if it exists — codebase scan informs boundary analysis
