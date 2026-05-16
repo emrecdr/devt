@@ -89,6 +89,14 @@ function run(subcommand, args) {
     return 1;
   }
   const result = gradeArtifact(rubricPath, sidecarName, sidecar.data);
+  // I/O-level errors from gradeArtifact (rubric file missing on disk, etc.)
+  // surface as ok:false so the workflow's BLOCKED path engages instead of
+  // retrying the programmer on a problem they cannot fix. Constraint
+  // violations (pass:false with gate_failures) remain ok:true.
+  if (result.error) {
+    process.stdout.write(JSON.stringify({ ok: false, reason: result.error, sidecar: sidecarName, rubric: path.relative(PLUGIN_ROOT, rubricPath) }) + "\n");
+    return 1;
+  }
   const payload = {
     ok: true,
     pass: result.pass,

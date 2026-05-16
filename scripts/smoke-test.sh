@@ -2408,6 +2408,38 @@ else
   fail "grade: unregistered workflow_type response wrong (ec=$UNREG_EC, out=$GRADE_UNREG)"
 fi
 
+# I/O failures (missing sidecar, missing rubric file) must surface as ok:false,
+# NOT as pass:false with gate_failures. The workflow distinguishes I/O failures
+# (route to BLOCKED, never retry the programmer) from constraint violations
+# (route to RETRY/PRUNE under verify_iteration cap). If the grader silently
+# coerces an I/O failure into pass:false, the workflow loses the discrimination
+# and dispatches the programmer on something they can't fix.
+GRADE_MISS_DIR=$(mktemp -d)
+mkdir -p "$GRADE_MISS_DIR/.devt/state"
+# Sidecar file truly missing
+cd "$GRADE_MISS_DIR"
+MISS_EC=0; GRADE_MISS=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || MISS_EC=$?
+cd "$ROOT"
+rm -rf "$GRADE_MISS_DIR"
+if [ "$MISS_EC" = "1" ] && echo "$GRADE_MISS" | grep -q '"ok":false' && ! echo "$GRADE_MISS" | grep -q '"pass":'; then
+  pass "grade: missing sidecar returns ok:false (no pass field) — workflow can route to BLOCKED, not RETRY"
+else
+  fail "grade: missing sidecar wrong shape (ec=$MISS_EC, out=$GRADE_MISS)"
+fi
+
+# Workflow text MUST distinguish the three envelope shapes for the routing
+# discipline to hold. If the verify step's text loses these distinctions,
+# Claude (the orchestrator) can't tell I/O failures from constraint violations.
+DW="$ROOT/workflows/dev-workflow.md"
+if grep -q '`{ok: false' "$DW" \
+   && grep -q '`{ok: true, pass: false' "$DW" \
+   && grep -q '`{ok: true, pass: true' "$DW" \
+   && grep -q 'STOP with BLOCKED' "$DW"; then
+  pass "dev-workflow.md verify step documents three-way envelope routing (ok:false → BLOCKED; ok:true,pass:false → RETRY/PRUNE; ok:true,pass:true → verifier)"
+else
+  fail "dev-workflow.md verify step missing three-way envelope routing instructions"
+fi
+
 echo "== forensic log unified to JSONL (v0.33.0+) =="
 # : pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared

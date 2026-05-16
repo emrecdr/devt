@@ -953,8 +953,8 @@ _Skip this step if `verify` is listed in `skipped_phases` from workflow state._
 
 **Artifact pre-gate**: Before dispatching the verifier, confirm required context artifacts exist:
 
-- Check that `.devt/state/impl-summary.md` exists
-- Check that `.devt/state/test-summary.md` exists
+- Check that `.devt/state/impl-summary.md` AND `.devt/state/impl-summary.json` exist
+- Check that `.devt/state/test-summary.md` AND `.devt/state/test-summary.json` exist
 - Check that `.devt/state/review.md` exists
 
 If ANY of these are missing: **STOP with BLOCKED**. Report to the user:
@@ -971,7 +971,13 @@ GRADE_TS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" grade dev test-summar
 GRADE_IS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" grade dev impl-summary.json 2>/dev/null || true)
 ```
 
-Each call returns `{ok, pass, gate_failures[], workflow_type, sidecar, rubric}`. If EITHER `pass` is false, the LLM verifier dispatch is SKIPPED and routing proceeds as follows (note: this is the same `verify_iteration` counter the LLM verifier path uses, so the deterministic gate participates in the same `max_iterations` cap — without this, a programmer that can't get tests green would loop forever):
+Each call returns one of three envelope shapes — Claude MUST distinguish them, because each represents a different failure class with a different remediation path:
+
+- **`{ok: false, reason: "...", sidecar, rubric?}`** — I/O-level failure (sidecar missing or malformed, rubric file not found, etc.). The `pass` field is ABSENT. **STOP with BLOCKED**. Report to the user the `reason` field verbatim. Do NOT retry the programmer — they cannot fix a missing/corrupt sidecar or a missing rubric. The fix is operator-level (restore artifact, restore rubric, or override the rubric path in `.devt/config.json::rubrics.dev`). Exit the verify step.
+- **`{ok: true, pass: false, gate_failures: [...], ...}`** — Constraint violation. A real gate the programmer can address. Apply the `verify_iteration` routing below (RETRY/PRUNE). This is the same `verify_iteration` counter the LLM verifier path uses, so deterministic gates participate in the same `workflow.max_iterations` cap — without this, a programmer that can't get tests green would loop forever.
+- **`{ok: true, pass: true, gate_failures: [], ...}`** — Gate passes. Proceed to the LLM verifier dispatch below.
+
+For the `ok=true, pass=false` constraint-violation case, route on the iteration counter:
 
 - **`VITER + 1 >= MAX_ITER` → PRUNE**: cap reached. Write the combined `gate_failures` from both grader calls to `.devt/state/scratchpad.md` under a `## Deferred Verification Gaps` section (mirroring the LLM-verifier PRUNE path), set `status=DONE_WITH_CONCERNS`, exit the retry loop, surface to the user:
   ```bash
