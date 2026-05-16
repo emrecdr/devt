@@ -80,7 +80,7 @@ node -e "
     if (covered) process.exit(0);
 
     // Build the advisory / block message
-    const reason = 'Pre-Flight Protocol: no PREFLIGHT line found in .devt/state/scratchpad.md for \"' + fp + '\". Before editing, append a line like \"PREFLIGHT <ISO-timestamp> edit ' + fp + ' :: <governing ADR/CON/FLOW ids or \\'no governance found\\'>\" — see skills/memory-pre-flight/SKILL.md. If this file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" or perform the 5-Lane File Pre-Flight (memory affects + memory query + memory active).';
+    const reason = 'DENIED: edit to \"' + fp + '\" requires a PREFLIGHT line in .devt/state/scratchpad.md.\n\nAppend this line to scratchpad.md BEFORE retrying:\n  PREFLIGHT <ISO-8601-timestamp> edit ' + fp + ' :: <governing-ADR/CON/FLOW-IDs>\n\nIf no memory doc governs this path, use the keyword \\'ungoverned\\':\n  PREFLIGHT <ISO-8601-timestamp> edit ' + fp + ' :: ungoverned\n\nSee skills/memory-pre-flight/SKILL.md for the full protocol. If the file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" to regenerate the Brief.';
 
     // Forensic logging: append every deny/warn as one JSON record per line
     // via bin/modules/logger.cjs::appendJsonl. Survives state reset via the

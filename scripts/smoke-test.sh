@@ -702,6 +702,17 @@ if echo "$HOOK_OUT" | grep -q '"decision":"deny"'; then
 else
   fail "pre-flight-guard: deny JSON missing — hook contract broken: $HOOK_OUT"
 fi
+# Deny message must contain explicit recovery template: literal PREFLIGHT line
+# format + 'ungoverned' fallback keyword. Agents that haven't preloaded the
+# memory-pre-flight skill recover from the message alone instead of looping
+# on the bare 'missing PREFLIGHT line' diagnosis.
+if echo "$HOOK_OUT" | grep -q "PREFLIGHT <ISO-8601-timestamp> edit" \
+   && echo "$HOOK_OUT" | grep -q ":: ungoverned" \
+   && echo "$HOOK_OUT" | grep -q "Append this line to scratchpad.md BEFORE retrying"; then
+  pass "pre-flight-guard: deny message contains explicit recovery template"
+else
+  fail "pre-flight-guard: recovery template missing from deny message: $HOOK_OUT"
+fi
 # Cleanup placeholder so subsequent assertions have a clean state dir
 rm -f .devt/state/preflight-denies.jsonl .devt/state/workflow.yaml .devt/config.json
 
