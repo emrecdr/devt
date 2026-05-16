@@ -636,7 +636,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=architect sta
 
 ## Step 4: Implementation
 
-<step name="implement" gate="impl-summary.md is written with status DONE or DONE_WITH_CONCERNS">
+<step name="implement" gate="impl-summary.json is written with status DONE or DONE_WITH_CONCERNS">
 
 **TDD Mode Check**: If `tdd_mode=true` in workflow state, SKIP this step for now — proceed directly to Step 5 (Testing) first. The tester will write failing tests based on the spec/task. After Step 5 completes, return here to implement code that makes the tests pass.
 
@@ -740,7 +740,13 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ")
 ```
 
-**Gate check**: Read `.devt/state/impl-summary.md` and check status:
+**Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar impl-summary.json
+```
+
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), `requirements_covered[]`, and `requirements_missing[]`. Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to test
 - BLOCKED: surface the issue to the user and STOP

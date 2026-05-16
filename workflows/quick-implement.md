@@ -112,7 +112,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scan status=D
 
 </step>
 
-<step name="implement" gate="impl-summary.md is written with status DONE or DONE_WITH_CONCERNS">
+<step name="implement" gate="impl-summary.json is written with status DONE or DONE_WITH_CONCERNS">
 
 Initialize iteration tracking:
 
@@ -150,7 +150,13 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 ")
 ```
 
-**Gate check**: Read `.devt/state/impl-summary.md` and check status:
+**Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar impl-summary.json
+```
+
+Route on `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`):
 
 - DONE or DONE_WITH_CONCERNS: proceed to test
 - BLOCKED: surface the issue to the user and STOP
