@@ -794,7 +794,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar test-summary.json
 ```
 
-The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}` counts. Route on `status`:
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}_count` fields. Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to **simplify** (STANDARD/COMPLEX) or **review** (TRIVIAL/SIMPLE)
 - BLOCKED: surface the issue to the user and STOP
@@ -955,6 +955,29 @@ If ANY of these are missing: **STOP with BLOCKED**. Report to the user:
 "Verification cannot proceed — missing artifacts: {list the missing files}. The upstream phase may have failed silently or returned BLOCKED without writing its output. Check /devt:status for details."
 
 Do NOT dispatch the verifier with incomplete context — it will waste a subagent turn and produce unreliable results.
+
+**Deterministic pre-verifier gate**. Run `bin/modules/grader.cjs` against the test-summary + impl-summary sidecars BEFORE dispatching the LLM verifier. Saves the verifier round-trip on red-test cycles where the test runner or quality gates already proved failure:
+
+```bash
+MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.workflow.max_iterations // 3')
+VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
+GRADE_TS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" grade dev test-summary.json 2>/dev/null || true)
+GRADE_IS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" grade dev impl-summary.json 2>/dev/null || true)
+```
+
+Each call returns `{ok, pass, gate_failures[], workflow_type, sidecar, rubric}`. If EITHER `pass` is false, the LLM verifier dispatch is SKIPPED and routing proceeds as follows (note: this is the same `verify_iteration` counter the LLM verifier path uses, so the deterministic gate participates in the same `max_iterations` cap — without this, a programmer that can't get tests green would loop forever):
+
+- **`VITER + 1 >= MAX_ITER` → PRUNE**: cap reached. Write the combined `gate_failures` from both grader calls to `.devt/state/scratchpad.md` under a `## Deferred Verification Gaps` section (mirroring the LLM-verifier PRUNE path), set `status=DONE_WITH_CONCERNS`, exit the retry loop, surface to the user:
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) status=DONE_WITH_CONCERNS repair=PRUNE
+  ```
+- **`VITER + 1 < MAX_ITER` → RETRY**: increment counter, re-dispatch programmer with the `gate_failures` JSON as `<review_feedback>`, return to **Step 4 (implement)**:
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GATES_FAILED repair=RETRY
+  ```
+  Pass the structured `gate_failures` array verbatim into the next programmer dispatch's `<review_feedback>` block — each entry is `{field, expected, got}` with a clear field path (e.g. `gates.test.passed`) the programmer can act on directly.
+
+If BOTH gates pass, proceed to the memory_signal prep and LLM verifier dispatch below. The verifier's job under deterministic-gating narrows to **semantic verification** — does the implementation solve the user's task? — rather than re-checking test results and gate execution that the grader already proved.
 
 **Orchestrator-prep — compute the memory signal**. Before dispatching the verifier, fetch a compact aggregate of relevant memory hits in a single CLI call so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 

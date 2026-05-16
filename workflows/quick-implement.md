@@ -189,7 +189,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar test-summary.json
 ```
 
-The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}` counts. Route on `status`:
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), and `tests.{added,passed,failed,skipped}_count` fields. Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to review
 - BLOCKED: surface the issue to the user and STOP

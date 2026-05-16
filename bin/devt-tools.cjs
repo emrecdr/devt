@@ -117,6 +117,14 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "grade": {
+        // grade <workflow_type> <sidecar.json> — deterministic pre-verifier
+        // gate. Reads ## Deterministic Gates JSON from the rubric and walks
+        // constraints against the sidecar; exits 0 on pass, 1 on fail.
+        const code = require("./modules/grader.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),

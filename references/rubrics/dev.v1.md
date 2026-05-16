@@ -107,3 +107,31 @@ Verifier ─────┤
 - **Test design quality** — owned by the tester agent; verifier confirms tests RAN, not that they were the right tests.
 
 The verifier's sole job under this rubric is to answer: *did the implementation achieve the goal?*
+
+## Deterministic Gates
+
+Pre-verifier gates enforced by `bin/modules/grader.cjs`. These run BEFORE the LLM verifier dispatch — if any constraint fails, the workflow short-circuits back to the programmer with the failing fields surfaced as `<review_feedback>` (saving an LLM verifier round-trip on red-test cycles). The grader walks each sidecar's constraint tree: scalars demand equality, arrays demand membership (oneOf), nested objects recurse.
+
+```json
+{
+  "test-summary.json": {
+    "verdict": "PASS",
+    "tests": {
+      "failed_count": 0
+    }
+  },
+  "impl-summary.json": {
+    "verdict": "PASS",
+    "gates": {
+      "test":      {"ran": true, "passed": true},
+      "lint":      {"ran": true, "passed": true},
+      "typecheck": {"ran": true, "passed": true}
+    }
+  }
+}
+```
+
+Notes on intent:
+- `verdict: "PASS"` blocks the verifier dispatch when the agent's own self-assessment is negative — no point asking the verifier to re-grade work the agent already flagged as failing.
+- `tests.failed_count: 0` catches the asymmetric case where verdict is INDETERMINATE but failure counts are non-zero (test runner crashed mid-run).
+- `gates.{lint,typecheck,test}.{ran,passed}` verifies the programmer actually ran each gate. If a project doesn't have a linter configured the programmer should emit `gates.lint.ran: false` and the grader will surface that as a `gate_failures` entry — fail closed by design. To opt a project out of a gate, override the rubric in `.devt/config.json::rubrics.dev` with a customized constraint tree.

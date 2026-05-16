@@ -331,10 +331,10 @@ Write `.devt/state/test-summary.md` with:
   "workflow_type": "<from workflow.yaml>",
   "iteration": <integer from workflow.yaml>,
   "tests": {
-    "added": <integer>,
-    "passed": <integer>,
-    "failed": <integer>,
-    "skipped": <integer>
+    "added_count": <integer>,
+    "passed_count": <integer>,
+    "failed_count": <integer>,
+    "skipped_count": <integer>
   },
   "test_files": ["tests/foo.test.ts", "tests/bar.test.ts"],
   "failures": [
@@ -346,6 +346,6 @@ Write `.devt/state/test-summary.md` with:
 }
 ```
 
-The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
+The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}_count` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
 
 </output_format>

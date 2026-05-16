@@ -2284,6 +2284,60 @@ else
   fail "programmer.md missing impl-summary.json documentation (D-15)"
 fi
 
+echo "== deterministic grader (Phase 3) =="
+# Rubric must contain a ## Deterministic Gates section with parseable JSON.
+if node -e "
+  const fs=require('fs');
+  const body=fs.readFileSync('$ROOT/references/rubrics/dev.v1.md','utf8');
+  const idx=body.search(/^##\s+Deterministic Gates\s*\$/m);
+  if(idx===-1) process.exit(2);
+  const fence=body.slice(idx).match(/\`\`\`json\s*\n([\s\S]*?)\n\`\`\`/);
+  if(!fence) process.exit(3);
+  const g=JSON.parse(fence[1]);
+  if(!g['test-summary.json']||!g['impl-summary.json']) process.exit(4);
+  process.exit(0);
+" 2>/dev/null; then
+  pass "dev.v1.md: ## Deterministic Gates section parses + covers test-summary.json + impl-summary.json"
+else
+  fail "dev.v1.md: ## Deterministic Gates section missing or malformed"
+fi
+
+# End-to-end grader: green-path sidecars → pass:true, exit 0.
+GRADE_DIR=$(mktemp -d)
+mkdir -p "$GRADE_DIR/.devt/state"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"tester","workflow_type":"dev","iteration":1,"tests":{"added_count":1,"passed_count":2,"failed_count":0,"skipped_count":0},"test_files":[],"failures":[],"concerns":[]}' > "$GRADE_DIR/.devt/state/test-summary.json"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":["a.ts"],"tests_added":[],"requirements_covered":["R1"],"requirements_missing":[],"concerns":[],"next_agent_hints":{},"gates":{"lint":{"ran":true,"passed":true,"errors":0,"warnings":0},"typecheck":{"ran":true,"passed":true,"errors":0},"test":{"ran":true,"passed":true,"passed_count":2,"failed_count":0,"skipped_count":0}}}' > "$GRADE_DIR/.devt/state/impl-summary.json"
+cd "$GRADE_DIR"
+GREEN_TS_EC=0; GRADE_GREEN_TS=$(node "$CLI" grade dev test-summary.json 2>/dev/null) || GREEN_TS_EC=$?
+GREEN_IS_EC=0; GRADE_GREEN_IS=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || GREEN_IS_EC=$?
+# Red path: flip impl-summary test gate to failed.
+printf '%s' '{"status":"DONE_WITH_CONCERNS","verdict":"FAIL","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":["a.ts"],"tests_added":[],"requirements_covered":[],"requirements_missing":[],"concerns":[],"next_agent_hints":{},"gates":{"lint":{"ran":true,"passed":true,"errors":0,"warnings":0},"typecheck":{"ran":true,"passed":true,"errors":0},"test":{"ran":true,"passed":false,"passed_count":1,"failed_count":1,"skipped_count":0}}}' > "$GRADE_DIR/.devt/state/impl-summary.json"
+RED_EC=0; GRADE_RED=$(node "$CLI" grade dev impl-summary.json 2>/dev/null) || RED_EC=$?
+# Unregistered workflow_type
+UNREG_EC=0; GRADE_UNREG=$(node "$CLI" grade nope test-summary.json 2>/dev/null) || UNREG_EC=$?
+cd "$ROOT"
+rm -rf "$GRADE_DIR"
+if [ "$GREEN_TS_EC" = "0" ] && echo "$GRADE_GREEN_TS" | grep -q '"pass":true'; then
+  pass "grade: test-summary.json green path → pass:true, exit 0"
+else
+  fail "grade: test-summary.json green path failed (ec=$GREEN_TS_EC, out=$GRADE_GREEN_TS)"
+fi
+if [ "$GREEN_IS_EC" = "0" ] && echo "$GRADE_GREEN_IS" | grep -q '"pass":true'; then
+  pass "grade: impl-summary.json green path → pass:true, exit 0"
+else
+  fail "grade: impl-summary.json green path failed (ec=$GREEN_IS_EC, out=$GRADE_GREEN_IS)"
+fi
+if [ "$RED_EC" = "1" ] && echo "$GRADE_RED" | grep -q '"pass":false' && echo "$GRADE_RED" | grep -q '"field":"verdict"' && echo "$GRADE_RED" | grep -q '"field":"gates.test.passed"'; then
+  pass "grade: impl-summary.json red path → pass:false, exit 1, gate_failures includes verdict + gates.test.passed"
+else
+  fail "grade: impl-summary.json red path wrong (ec=$RED_EC, out=$GRADE_RED)"
+fi
+if [ "$UNREG_EC" = "1" ] && echo "$GRADE_UNREG" | grep -q "no rubric registered"; then
+  pass "grade: unregistered workflow_type returns no rubric registered"
+else
+  fail "grade: unregistered workflow_type response wrong (ec=$UNREG_EC, out=$GRADE_UNREG)"
+fi
+
 echo "== forensic log unified to JSONL (v0.33.0+) =="
 # : pre-flight-guard's deny log migrated from preflight-denies.log (plain
 # text) to preflight-denies.jsonl (one JSON record per line). The new shared
