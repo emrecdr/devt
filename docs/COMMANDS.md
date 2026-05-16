@@ -576,10 +576,13 @@ specify     --> spec.md          --> programmer, tester, verifier, architect, re
 research    --> research.md      --> programmer (approach guidance)
 clarify     --> decisions.md     --> programmer, reviewer, verifier
 plan        --> plan.md          --> programmer, architect, verifier
-programmer  --> impl-summary.md  --> tester, reviewer, verifier, docs-writer, retro
-tester      --> test-summary.md  --> reviewer, verifier, docs-writer, retro
-reviewer    --> review.md        --> programmer (if NEEDS_WORK in dev), verifier, retro
-verifier    --> verification.md  --> programmer (if GAPS_FOUND in dev) | reviewer
+programmer  --> impl-summary.{md,json}  --> tester, reviewer, verifier, docs-writer, retro
+tester      --> test-summary.{md,json}  --> reviewer, verifier, docs-writer, retro
+reviewer    --> review.md               --> programmer (if NEEDS_WORK in dev), verifier, retro
+verifier    --> verification.{md,json}  --> programmer (if GAPS_FOUND in dev) | reviewer
+                                            (deterministic grader runs against impl-summary.json
+                                             + test-summary.json BEFORE LLM verifier dispatch;
+                                             .json is authoritative for status routing, .md is narrative)
 scan        --> scan-results.md  --> programmer, architect
 baseline    --> baseline-gates.md --> verifier (regression detection)
 architect   --> arch-review.md   --> programmer

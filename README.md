@@ -317,6 +317,10 @@ The execution model follows a **Command → Workflow → Agent** architecture:
 
 You never need to pick a tier. Override the auto-detection if needed.
 
+### Verify gate (STANDARD + COMPLEX)
+
+Workflow-routing artifacts come in pairs: a human-readable `.md` (narrative) and a machine-readable `.json` sidecar (authoritative for status routing). Three artifacts use this pattern today: `impl-summary`, `test-summary`, and `verification`. Before dispatching the LLM verifier, the workflow runs a zero-dep deterministic grader (`bin/modules/grader.cjs`) against the test-summary and impl-summary sidecars. The grader walks the `## Deterministic Gates` JSON block in `references/rubrics/dev.v1.md` and returns one of three envelope shapes — `ok:false` (I/O failure → BLOCKED), `ok:true, pass:false` (constraint violation → RETRY or PRUNE under `workflow.max_iterations`), `ok:true, pass:true` (greens → LLM verifier dispatches). The LLM verifier is skipped entirely on red-test cycles, saving ~5–15K input tokens per failed iteration. Projects can ship lenient rubrics at `.devt/rubrics/<file>.md` to override gate strictness per workflow_type.
+
 ### Agent–skill mapping
 
 Skills inject into agents at dispatch time based on `skill-index.yaml` (or `.devt/config.json` overrides):
