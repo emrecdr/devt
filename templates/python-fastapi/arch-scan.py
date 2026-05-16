@@ -33,7 +33,7 @@ import json
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TextIO
 
 # ---------------------------------------------------------------------------
 # Configuration — override via CLI
@@ -368,7 +368,7 @@ def scan_file(
     return visitor, findings
 
 
-def emit_text(report: Report, stream) -> None:
+def emit_text(report: Report, stream: TextIO) -> None:
     if not report.findings:
         print(f"OK — scanned {report.scanned_files} files, no findings.", file=stream)
         return
