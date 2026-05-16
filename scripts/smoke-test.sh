@@ -760,6 +760,76 @@ for wf in clarify-task specify research-task lesson-extraction debug code-review
   fi
 done
 
+echo "== Skill frontmatter — Anthropic Skills guide structural rules =="
+# Per "The Complete Guide to Building Skills for Claude" (Anthropic, 2026):
+# HARD rules — violating these breaks Claude's skill loader:
+#   - SKILL.md present (case-sensitive)
+#   - No README.md inside skill folder
+#   - YAML frontmatter present with name + description fields
+#   - name = folder name, kebab-case, no underscores/spaces/caps
+#   - Name not prefixed with "claude" or "anthropic" (reserved)
+#   - No XML angle brackets in frontmatter (security: frontmatter injects
+#     into Claude's system prompt; <tag> content could redirect behavior)
+# SOFT rules — guidelines, warn but don't fail:
+#   - Description ≤ 1024 chars
+#   - SKILL.md body ≤ 5000 words
+SKILL_AUDIT=$(node -e "
+  const fs=require('fs');
+  const path=require('path');
+  const dir='$ROOT/skills';
+  if(!fs.existsSync(dir)){console.log(JSON.stringify({hard:[],soft:[],ok:[]}));process.exit(0);}
+  const skills=fs.readdirSync(dir).filter(d=>fs.statSync(path.join(dir,d)).isDirectory());
+  const hard=[],soft=[],ok=[];
+  for(const name of skills){
+    const skillDir=path.join(dir,name);
+    const issues=[];
+    const filesInDir=fs.readdirSync(skillDir);
+    if(!filesInDir.includes('SKILL.md')){hard.push(name+': SKILL.md missing or wrong case');continue;}
+    if(filesInDir.includes('README.md'))issues.push('has README.md (forbidden)');
+    if(!/^[a-z][a-z0-9-]*[a-z0-9]\$|^[a-z]\$/.test(name))issues.push('folder name not kebab-case');
+    if(/^(claude|anthropic)/i.test(name))issues.push('reserved name prefix');
+    const body=fs.readFileSync(path.join(skillDir,'SKILL.md'),'utf8');
+    const m=body.match(/^---\n([\s\S]*?)\n---/);
+    if(!m){issues.push('no YAML frontmatter delimiters');hard.push(name+': '+issues.join('; '));continue;}
+    const fm=m[1];
+    const nameMatch=fm.match(/^name:\s*(.+?)\s*\$/m);
+    if(!nameMatch)issues.push('name field missing');
+    else if(nameMatch[1].trim()!==name)issues.push('name field \"'+nameMatch[1].trim()+'\" != folder \"'+name+'\"');
+    const descMatch=fm.match(/^description:\s*(>-?\s*)?([\s\S]+?)(?=^[a-z_-]+:|\$)/m);
+    if(!descMatch)issues.push('description field missing');
+    if(/<[a-zA-Z][a-zA-Z0-9_-]*\s*>|<\/[a-zA-Z]/.test(fm))issues.push('XML tags in frontmatter');
+    if(issues.length){hard.push(name+': '+issues.join('; '));continue;}
+    const softIssues=[];
+    if(descMatch){
+      const descText=descMatch[2].replace(/^\s*/gm,' ').trim();
+      if(descText.length>1024)softIssues.push('description '+descText.length+' chars (soft cap 1024)');
+    }
+    const bodyOnly=body.slice(m[0].length);
+    const wordCount=bodyOnly.split(/\s+/).filter(Boolean).length;
+    if(wordCount>5000)softIssues.push('body '+wordCount+' words (soft cap 5000)');
+    if(softIssues.length)soft.push(name+': '+softIssues.join('; '));
+    else ok.push(name);
+  }
+  console.log(JSON.stringify({hard,soft,ok}));
+" 2>/dev/null)
+HARD_COUNT=$(echo "$SKILL_AUDIT" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).hard.length)" 2>/dev/null || echo "?")
+SOFT_COUNT=$(echo "$SKILL_AUDIT" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).soft.length)" 2>/dev/null || echo "?")
+OK_COUNT=$(echo "$SKILL_AUDIT" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).ok.length)" 2>/dev/null || echo "?")
+if [ "$HARD_COUNT" = "0" ]; then
+  pass "skill frontmatter: 0 hard-rule violations ($OK_COUNT clean, $SOFT_COUNT soft-warn)"
+else
+  HARD_LIST=$(echo "$SKILL_AUDIT" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).hard.join(' | '))" 2>/dev/null)
+  fail "skill frontmatter hard-rule violations ($HARD_COUNT): $HARD_LIST"
+fi
+# Soft warnings surface as informational lines (don't fail) so authors see
+# them without blocking ship. PDF says these are guidelines, not loader
+# requirements; verbose descriptions are sometimes the right call for
+# trigger reliability per the PDF's own examples.
+if [ "$SOFT_COUNT" != "0" ] && [ "$SOFT_COUNT" != "?" ]; then
+  SOFT_LIST=$(echo "$SKILL_AUDIT" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).soft.join(' | '))" 2>/dev/null)
+  echo "  WARN: $SOFT_COUNT skill(s) exceed PDF soft caps (informational): $SOFT_LIST"
+fi
+
 echo "== Council structured-output contract =="
 # Council advisor template must enforce Options + Validated Reasoning structure.
 # Free-form advisor output is the regression this guards against.
