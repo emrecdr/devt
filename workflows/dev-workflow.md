@@ -38,14 +38,14 @@ These flags provide fine-grained control over which phases execute. They are par
 - Example: `--to test` runs context_init, scan, plan, implement, test — then stops before review.
 - Store `stop_at_phase=<phase>` in workflow state.
 - At each phase transition, check: if the just-completed phase matches `stop_at_phase`, stop the workflow gracefully (set `active=false`, report progress, do NOT proceed to the next phase).
-- Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete.
+- Valid phases: context_init, scan, regression_baseline, plan, implement, test, review, verify, docs, retro, complete.
 
 **`--only <phase>`** — Run only the named phase in isolation.
 - Example: `--only review` runs only the review phase (skipping implement, test, etc.).
 - Store `only_phase=<phase>` in workflow state.
 - Skip all phases except `context_init` (always required for setup) and the named phase.
 - At each phase transition, check: if the current phase is not `context_init` and not `only_phase`, skip it silently.
-- Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete.
+- Valid phases: context_init, scan, regression_baseline, plan, implement, test, review, verify, docs, retro, complete.
 
 **`--chain`** — After completing the workflow, auto-invoke the next logical workflow step.
 - Store `autonomous_chain=next` in workflow state (this field is a string enum, not boolean).
@@ -69,7 +69,7 @@ These flags provide fine-grained control over which phases execute. They are par
 3. Check for `--chain` — strip from task description.
 4. Check for `--tdd` — strip from task description.
 5. Check for `--dry-run` — strip from task description.
-6. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, plan, implement, test, review, verify, docs, retro, complete."
+6. If an invalid phase name is provided to `--to` or `--only`, STOP with error: "Invalid phase '{phase}'. Valid phases: context_init, scan, regression_baseline, plan, implement, test, review, verify, docs, retro, complete."
 7. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
 </autonomous_mode>
 

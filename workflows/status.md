@@ -190,6 +190,7 @@ Based on current state, suggest the appropriate next command:
 | No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:fast"              |
 | No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:cancel-workflow" (mention the workflow_type if available, e.g., "Interrupted research workflow") |
 | Active, phase=scan                       | "Continue with /devt:workflow to proceed to implementation"              |
+| Active, phase=regression_baseline        | "Continue with /devt:workflow to proceed to implementation"              |
 | Active, phase=implement                  | "Continue with /devt:workflow to proceed to testing"                     |
 | Active, phase=test                       | "Continue with /devt:workflow to proceed to simplify/review"             |
 | Active, phase=simplify                   | "Continue with /devt:workflow to proceed to review"                      |
