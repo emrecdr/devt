@@ -544,6 +544,14 @@ This step is recommended but not mandatory. Skip for well-defined tasks with cle
 
 ## Step 2: Codebase Scan (STANDARD + COMPLEX)
 
+<!-- parallel-bash: scan + regression_baseline (Step 2.5) are independent
+     (scan is read-only Grep/Read; regression_baseline runs project test/lint/
+     typecheck commands and writes a distinct artifact). When regression_baseline
+     would run a slow test suite, kick its bash off first with
+     run_in_background=true, then immediately do this scan in the foreground.
+     Await background completion before Step 3 (implement). See Step 2.5 for the
+     pairing note. -->
+
 <step name="scan" gate="scan-results.md is written to .devt/state/">
 
 _Skip this step if complexity is SIMPLE._
@@ -583,6 +591,8 @@ _Skip this step if complexity is SIMPLE._
 _Skip this step if `config.workflow.regression_baseline` is `false`._
 
 Run quality gates **before** implementation to establish a baseline. This captures the current pass/fail state so that any regressions introduced by the implementation can be detected.
+
+**Parallel-bash pairing with Step 2 (scan)**: when the test suite from `.devt/rules/quality-gates.md` is slow (minutes), launch it with `run_in_background=true` and proceed to Step 2's scan in the foreground. The two steps share no state (different artifacts, no overlapping `state update` writes) so they cannot race. Await background completion before the implement step.
 
 ```bash
 # Read quality gate commands from .devt/rules/quality-gates.md and run them
