@@ -122,7 +122,9 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries + Graphify god-nodes (when available) so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
+Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries + Graphify god-nodes (when available) + claude-mem MCP observations (when persisted by the orchestrator pre-step below) so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
+
+**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__observation_search` is available, call it with `query=${task}` and `limit=50`. Write the response to `.devt/state/claude-mem-harvest.md` with one line per observation in the canonical format `- [decision|discovery] <title>: <body>` — only those two `obs_type` values are promotion-eligible. Skip silently when unavailable or empty.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true

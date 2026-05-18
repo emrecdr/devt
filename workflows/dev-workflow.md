@@ -1266,9 +1266,18 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries + Graphify god-nodes (when graphify-out/GRAPH_REPORT.md exists) into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
+This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries + Graphify god-nodes (when graphify-out/GRAPH_REPORT.md exists) + claude-mem MCP observations (when persisted by the orchestrator pre-step below) into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
 
-Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
+**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__observation_search` is available in this session, call it with `query=${task}` and `limit=50`. Parse the response and Write `.devt/state/claude-mem-harvest.md` with one line per observation in this canonical format:
+
+```
+- [decision] <title>: <body>
+- [discovery] <title>: <body>
+```
+
+Only `obs_type` values `decision` and `discovery` are promotion-eligible (the others — `bugfix`, `feature`, `refactor`, `change` — are session telemetry, not memory candidates). Skip silently when the MCP tool is unavailable or returns no observations. The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
+
+Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report/claude-mem harvest). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true

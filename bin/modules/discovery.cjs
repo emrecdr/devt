@@ -7,6 +7,10 @@
  * 1. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
  * 2. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
  * 3. Graphify god-nodes via parseReportSections (when graphify-out/GRAPH_REPORT.md exists)
+ * 4. claude-mem MCP observations via `.devt/state/claude-mem-harvest.md` (when the
+ *    orchestrator's pre-harvest step persisted them — workflows invoke
+ *    mcp__plugin_claude-mem_mcp-search__observation_search since devt's Node code
+ *    cannot reach MCP directly)
  *
  * For each candidate, the engine:
  * - Fetches the FULL original reasoning (verbatim — no AI summarization)
@@ -95,7 +99,7 @@ function harvestScratchpadTags() {
 }
 
 // ---------------------------------------------------------------------------
-// Source 3: .devt/state/decisions.md DEC-xxx entries
+// Source 2: .devt/state/decisions.md DEC-xxx entries
 // ---------------------------------------------------------------------------
 
 function harvestSessionDecisions() {
@@ -127,7 +131,7 @@ function harvestSessionDecisions() {
 }
 
 // ---------------------------------------------------------------------------
-// Source 4: graphify GRAPH_REPORT.md god-nodes
+// Source 3: graphify GRAPH_REPORT.md god-nodes
 //
 // Graphify's god-nodes are the most-connected concepts in the project (high
 // fan-in) — exactly the kind of structural concept that belongs in CON-* docs
@@ -169,6 +173,52 @@ function harvestGraphifyGodNodes() {
       body: `Graphify identified \`${symbol}\` as a god-node with ${g.edge_count} edges. High-fanin concepts are typical CON-* candidates: define what \`${symbol}\` is, who depends on it, and the invariants callers rely on.`,
       proposed_type: "concept",
       source: "graphify-god-node",
+    });
+  }
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Source 4: claude-mem MCP observations
+//
+// devt's Node code cannot reach MCP servers directly (zero-dep invariant).
+// Workflows (dev / quick-implement / lesson-extraction) instruct the
+// orchestrator — which runs in the main Claude session and has the
+// project's MCP allowlist — to call `mcp__plugin_claude-mem_mcp-search__observation_search`
+// before invoking `memory suggest`. The orchestrator writes the result to
+// `.devt/state/claude-mem-harvest.md` in this canonical format:
+//   - [decision] <title>: <body>
+//   - [discovery] <title>: <body>
+//
+// Modern claude-mem (v13.x) categorizes observations with `obs_type` ∈
+// {bugfix, feature, refactor, change, discovery, decision}; only `decision`
+// and `discovery` map to promotion-eligible candidates (⚖️ / 🔵).
+//
+// This function is no-op when the file is missing (the harvest step skipped
+// silently because claude-mem MCP wasn't loaded or the call failed).
+// ---------------------------------------------------------------------------
+
+function harvestClaudeMemFromMcp() {
+  const harvestPath = path.join(getStateDir(), "claude-mem-harvest.md");
+  if (!fs.existsSync(harvestPath)) return [];
+
+  let content;
+  try { content = fs.readFileSync(harvestPath, "utf8"); }
+  catch { return []; }
+
+  const candidates = [];
+  for (const line of content.split("\n")) {
+    const m = line.match(/^-\s+\[(\w+)\]\s+(.+?):\s+(.+)$/);
+    if (!m) continue;
+    const obsType = m[1].toLowerCase();
+    if (obsType !== "decision" && obsType !== "discovery") continue;
+    candidates.push({
+      id: null,
+      timestamp: null,
+      tag: obsType === "decision" ? "⚖️" : "🔵",
+      title: m[2].trim(),
+      body: m[3].trim(),
+      source: "claude-mem-mcp",
     });
   }
   return candidates;
@@ -326,6 +376,7 @@ function harvest(_options) {
     ...harvestScratchpadTags(),
     ...harvestSessionDecisions(),
     ...harvestGraphifyGodNodes(),
+    ...harvestClaudeMemFromMcp(),
   ];
 
   const proposals = [];
@@ -484,6 +535,7 @@ module.exports = {
   harvestScratchpadTags,
   harvestSessionDecisions,
   harvestGraphifyGodNodes,
+  harvestClaudeMemFromMcp,
   discoverMissingWikiLinks,
   findRejMatch,
   findDuplicate,

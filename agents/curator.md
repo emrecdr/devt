@@ -25,7 +25,7 @@ A bloated memory layer is useless. A stale one is dangerous. When in doubt, reje
 BEFORE starting curation, load the following:
 
 1. Read `.devt/state/lessons.yaml` (if present) — incoming lesson drafts from the retro agent
-2. Read `.devt/memory/_suggestions.md` (if present) — harvested candidates from the discovery engine (`#KNOWLEDGE-CANDIDATE` scratchpad tags, `.devt/state/decisions.md` DEC-xxx entries, Graphify god-nodes when available)
+2. Read `.devt/memory/_suggestions.md` (if present) — harvested candidates from the discovery engine (`#KNOWLEDGE-CANDIDATE` scratchpad tags, `.devt/state/decisions.md` DEC-xxx entries, Graphify god-nodes when available, claude-mem MCP observations when the claude-mem plugin is installed)
 3. Read existing files in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` — for dedup detection
 4. Read `CLAUDE.md` — project context for evaluating relevance
 5. Read `.devt/rules/` files relevant to the candidates — to validate accuracy

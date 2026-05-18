@@ -4392,6 +4392,41 @@ fi
 rm -rf "$HJ_TMP"
 
 echo
+echo "== Claude-mem MCP harvest wiring (Phase C-2) =="
+if grep -q "harvestClaudeMemFromMcp" "$ROOT/bin/modules/discovery.cjs" && grep -q "claude-mem-harvest.md" "$ROOT/bin/modules/discovery.cjs"; then
+  pass "discovery.cjs has harvestClaudeMemFromMcp reading .devt/state/claude-mem-harvest.md"
+else
+  fail "discovery.cjs missing harvestClaudeMemFromMcp or claude-mem-harvest.md reference"
+fi
+PHASE_C2_WORKFLOW_MISS=""
+for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/lesson-extraction.md; do
+  if ! grep -q "mcp__plugin_claude-mem_mcp-search__observation_search" "$ROOT/$wf"; then
+    PHASE_C2_WORKFLOW_MISS="$PHASE_C2_WORKFLOW_MISS $wf"
+  fi
+done
+if [ -z "$PHASE_C2_WORKFLOW_MISS" ]; then
+  pass "all 3 harvest workflows instruct orchestrator to call mcp__plugin_claude-mem_mcp-search__observation_search"
+else
+  fail "workflows missing claude-mem MCP fetch step:$PHASE_C2_WORKFLOW_MISS"
+fi
+# Functional test: a fixture harvest file produces matching candidates
+PHASE_C2_TMP=$(mktemp -d)
+mkdir -p "$PHASE_C2_TMP/.devt/state" "$PHASE_C2_TMP/.devt/memory/decisions" "$PHASE_C2_TMP/.devt/memory/concepts" "$PHASE_C2_TMP/.devt/memory/flows" "$PHASE_C2_TMP/.devt/memory/rejected" "$PHASE_C2_TMP/.devt/memory/lessons" "$PHASE_C2_TMP/.git"
+echo '{}' > "$PHASE_C2_TMP/.devt/config.json"
+cat > "$PHASE_C2_TMP/.devt/state/claude-mem-harvest.md" <<'EOFC2'
+- [decision] Pinned Node 22 LTS for CI: avoids the v23 SQLite breakage we hit last week
+- [discovery] cache hit rate dropped 8% after the dispatch reorder: dispatch_scope warnings spiked simultaneously
+- [bugfix] retry loop was eating exceptions: not a memory candidate
+EOFC2
+(cd "$PHASE_C2_TMP" && node "$ROOT/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true)
+if [ -f "$PHASE_C2_TMP/.devt/memory/_suggestions.md" ] && grep -q "Pinned Node 22 LTS" "$PHASE_C2_TMP/.devt/memory/_suggestions.md" && grep -q "cache hit rate" "$PHASE_C2_TMP/.devt/memory/_suggestions.md" && ! grep -q "retry loop was eating" "$PHASE_C2_TMP/.devt/memory/_suggestions.md"; then
+  pass "claude-mem-harvest.md observations flow into _suggestions.md (decision + discovery promoted, bugfix filtered)"
+else
+  fail "Phase C-2 harvest end-to-end broken — see $PHASE_C2_TMP/.devt/memory/_suggestions.md"
+fi
+rm -rf "$PHASE_C2_TMP"
+
+echo
 echo "== Claude-mem CLI shellout removed (Phase C-1) =="
 if grep -q 'spawnSync("claude-mem"' "$ROOT/bin/modules/discovery.cjs" 2>/dev/null; then
   fail "discovery.cjs still spawns claude-mem subprocess (claude-mem v13+ has no \`query\` command)"

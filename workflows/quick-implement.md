@@ -332,6 +332,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 Even though quick-implement skips retro+curator for speed, the harvest itself is unconditional — observations from this workflow are buffered into `.devt/memory/_suggestions.md` for the next dev-workflow's curator to review. This prevents the "fast workflow drops all knowledge candidates on the floor" footgun. Cost: ~10ms (pure filesystem reads).
 
+**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__observation_search` is available, call it with `query=${task}` and `limit=50`. Write the response to `.devt/state/claude-mem-harvest.md` with one line per observation in the canonical format `- [decision|discovery] <title>: <body>` (only those two `obs_type` values are promotion-eligible). Skip silently when unavailable or empty.
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
 ```
