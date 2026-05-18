@@ -86,7 +86,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json=
 
 ```bash
 SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
 **Fetch Graphify PR impact when reviewing a GitHub PR.** If `${REVIEW_SCOPE}` mentions a PR number (e.g. "PR #123", "pull request 456", or the user invoked `/devt:review` with a PR arg), call the `mcp__graphify__get_pr_impact` MCP tool with that `pr_number` and Write the response verbatim to `.devt/state/pr-impact.md`. The code-reviewer agent Reads this file when present — Graphify's structured impact map (files changed, communities affected, blast radius) is higher-signal than the raw diff file list and lets the agent prioritize review depth where the graph signal concentrates. Skip silently when no PR number is detectable, when graphify MCP is not registered in `.mcp.json`, or when the call errors — the workflow proceeds without PR-impact context. The companion MCP tools `mcp__graphify__list_prs` and `mcp__graphify__triage_prs` apply at the review-selection layer ("which PR should I review next?") and are not called from this workflow.
@@ -135,6 +136,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scop
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute into the `<memory_signal>` block below.
@@ -163,6 +165,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <review_scope>Read .devt/state/review-scope.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
@@ -200,6 +203,7 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
@@ -221,6 +225,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          CLI shape or block position changes, update both. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
          changes, update the others. -->

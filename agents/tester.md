@@ -27,6 +27,8 @@ BEFORE starting any work, load the following in order:
 
 **Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Use as the high-signal starting set when deciding which tests to write — these are the paths most likely to need coverage. Empty `[]` means no governing docs matched; fall back to the impl-summary file list.
 
+**Scope trust signal.** When the dispatch carries a `<scope_trust>` block, parse it as `{trust, lag_commits, fresh}`. Treat `<scope_hint>` as low-confidence when `trust === "sparse"` or `"empty"` (graphify graph too small to anchor reliable dependents), OR when `lag_commits` is non-null AND > 10 (graph is behind HEAD; paths may reflect deleted/renamed code). In low-trust mode, prioritize coverage of files in the impl-summary directly over scope_hint paths.
+
 4. Read `.devt/state/impl-summary.md` — what was implemented and what needs testing
 5. Read `.devt/state/spec.md` if it exists — the spec's "Test Scenarios" section defines expected test coverage. Each scenario should have a corresponding test.
 6. Read the source files listed in the impl-summary — understand the actual implementation

@@ -97,7 +97,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json=
 
 ```bash
 SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
 **Gate**: If compound init fails, STOP with BLOCKED.
@@ -140,6 +141,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement ite
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Dispatch the programmer agent:
@@ -176,6 +178,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
@@ -228,6 +231,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <learning_context>{learning_context from context_init — relevant testing lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
@@ -267,6 +271,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Dispatch the code-reviewer agent:
@@ -293,6 +298,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

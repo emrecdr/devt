@@ -4401,6 +4401,31 @@ fi
 rm -rf "$HJ_TMP"
 
 echo
+echo "== scope_trust signal wiring (Phase B-3) =="
+PHASE_B3_WORKFLOW_MISS=""
+for wf in workflows/dev-workflow.md workflows/code-review.md workflows/quick-implement.md workflows/debug.md workflows/research-task.md; do
+  if ! grep -q "scope_trust_json" "$ROOT/$wf"; then
+    PHASE_B3_WORKFLOW_MISS="$PHASE_B3_WORKFLOW_MISS $wf"
+  fi
+done
+if [ -z "$PHASE_B3_WORKFLOW_MISS" ]; then
+  pass "all 5 workflows cache scope_trust_json + inject <scope_trust> alongside <scope_hint>"
+else
+  fail "workflows missing scope_trust wiring:$PHASE_B3_WORKFLOW_MISS"
+fi
+PHASE_B3_AGENT_MISS=""
+for ag in agents/programmer.md agents/tester.md agents/code-reviewer.md agents/verifier.md agents/researcher.md agents/architect.md agents/debugger.md; do
+  if ! grep -q "Scope trust signal" "$ROOT/$ag"; then
+    PHASE_B3_AGENT_MISS="$PHASE_B3_AGENT_MISS $ag"
+  fi
+done
+if [ -z "$PHASE_B3_AGENT_MISS" ]; then
+  pass "all 7 dev agents carry the 'Scope trust signal' paragraph (low-confidence guidance for sparse/stale graphs)"
+else
+  fail "agents missing scope_trust guidance:$PHASE_B3_AGENT_MISS"
+fi
+
+echo
 echo "== Claude-mem MCP harvest wiring (Phase C-2) =="
 if grep -q "harvestClaudeMemFromMcp" "$ROOT/bin/modules/discovery.cjs" && grep -q "claude-mem-harvest.md" "$ROOT/bin/modules/discovery.cjs"; then
   pass "discovery.cjs has harvestClaudeMemFromMcp reading .devt/state/claude-mem-harvest.md"

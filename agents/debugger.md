@@ -39,6 +39,8 @@ genuine constraint conflict rather than silently working around the rejection.
 
 **Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Read these FIRST during Phase 1 (Isolate) — these are the paths most likely to host the bug's failure mode. REJ tombstones in the Pre-Flight Brief explain past failed approaches; cross-reference your hypotheses. Empty `[]` means no governing docs matched; fall back to following the stack trace from the symptom.
 
+**Scope trust signal.** When the dispatch carries a `<scope_trust>` block, parse it as `{trust, lag_commits, fresh}`. Treat `<scope_hint>` as low-confidence when `trust === "sparse"` or `"empty"` (graphify graph too small to anchor reliable dependents), OR when `lag_commits` is non-null AND > 10 (graph is behind HEAD; paths may reflect deleted/renamed code). In low-trust mode, trust the actual stack trace and reproduction over scope_hint paths.
+
 1. Read .devt/rules/coding-standards.md
 2. Read .devt/rules/quality-gates.md
 3. Read CLAUDE.md if exists

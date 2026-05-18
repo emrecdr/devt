@@ -42,6 +42,8 @@ BEFORE starting the review, load the following in order:
 
 **Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Read these FIRST when assessing structural impact — these are the paths most likely to anchor existing architectural boundaries. Empty `[]` means no governing docs matched; fall back to scan-results.md and broader Glob/Grep.
 
+**Scope trust signal.** When the dispatch carries a `<scope_trust>` block, parse it as `{trust, lag_commits, fresh}`. Treat `<scope_hint>` as low-confidence when `trust === "sparse"` or `"empty"` (graphify graph too small to anchor reliable dependents), OR when `lag_commits` is non-null AND > 10 (graph is behind HEAD; paths may reflect deleted/renamed code). In low-trust mode, weight architectural boundary detection toward scan-results.md and CLAUDE.md/architecture.md rather than the scope_hint paths.
+
 3-4. Load the two guardrails — `golden-rules.md` (universal rules that apply to all architectural decisions) and `engineering-principles.md` (SOLID, DRY, KISS, SoC). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles}.md` when the inline block is absent.
 5. Read `.devt/state/impl-summary.md` if available — what was changed and why
 6. Read `.devt/state/review.md` if available — code-level findings for context

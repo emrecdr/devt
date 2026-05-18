@@ -38,6 +38,8 @@ BEFORE starting the review, load the following in order:
    **Memory signal preferred over fresh queries.** If the dispatch contains a `<memory_signal>` block, parse it as `{counts: {<domain>: N, …}, top: [{id, title, doc_type}, …]}`. Use it as your REJ-tombstone awareness substrate and to confirm which ADRs apply to the changed files. Flag findings that contradict an active ADR or echo a REJ pattern. Drill into a specific doc via `memory get <id>` only when a finding hinges on its body. Fall back to fresh `memory query` only when the block is absent or empty.
 
    **Scope hint preferred over discovery.** If the dispatch contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Use as the high-signal starting set when cross-referencing changed code against governing rules — these are the paths most likely to carry ADR/CON constraints. Empty `[]` means no governing docs matched; fall back to the review-scope file list.
+
+   **Scope trust signal.** When the dispatch carries a `<scope_trust>` block, parse it as `{trust, lag_commits, fresh}`. Treat `<scope_hint>` as low-confidence when `trust === "sparse"` or `"empty"` (graphify graph too small to anchor reliable dependents), OR when `lag_commits` is non-null AND > 10 (graph is behind HEAD; paths may reflect deleted/renamed code). In low-trust mode, rely on the explicit review-scope file list as authoritative and treat the scope_hint as advisory only.
 2. Read `.devt/state/impl-summary.md` — what was changed and why
 3. Read `.devt/state/test-summary.md` — test coverage context
 4. Read all files listed in the impl-summary as modified or created

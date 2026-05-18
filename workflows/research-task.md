@@ -33,7 +33,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=research phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
 The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
@@ -75,6 +76,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
 </governing_rules>
 <scope_hint>{scope_hint_json}</scope_hint>
+<scope_trust>{scope_trust_json}</scope_trust>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>
 <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>

@@ -43,7 +43,8 @@ This produces `.devt/state/preflight-brief.md` so the debugger reads governing r
 
 ```bash
 SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
 <step name="init" gate="project context loaded">
@@ -74,6 +75,7 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <scope_hint>{scope_hint_json}</scope_hint>
+<scope_trust>{scope_trust_json}</scope_trust>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>

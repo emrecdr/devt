@@ -199,7 +199,8 @@ The cached value is read back via `state read | jq -r '.memory_signal_json // "{
 
 ```bash
 SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
 The cached value is read back in each dispatch's orchestrator-prep step — substituted into the `<scope_hint>` template variable. When empty (no governing docs, or Graphify disabled, or preflight call failed), the block renders as `[]` and agents fall back to discovering scope from the task description.
@@ -442,6 +443,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
     </governing_rules>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <spec>Read .devt/state/spec.md (if exists)</spec>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
@@ -471,6 +473,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
       <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <scan_results>Read .devt/state/scan-results.md for affected modules — the plan does not exist yet, so scope from the scan.</scan_results>
     <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -660,6 +663,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
       <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <scan_results>Read .devt/state/scan-results.md</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Review intended design against architecture rules.</spec>
     <plan>Read .devt/state/plan.md (if exists)</plan>
@@ -745,6 +749,7 @@ When building the programmer's prompt, omit the `<arch_review>` and `<research>`
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. Both blocks are byte-stable across retry iterations within a workflow run, so the cache hits across dispatches.
@@ -790,6 +795,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
          context_init from preflight-brief.json::suggested_reading. Empty `[]`
          when preflight had no governing docs or Graphify is disabled. -->
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <!-- STANDARD+: include scan_results and plan -->
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
@@ -871,6 +877,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use the "Test Scenarios" section as required coverage targets.</spec>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
@@ -958,6 +965,7 @@ _Skip this step if `review` is listed in `skipped_phases` from workflow state._
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below.
@@ -985,6 +993,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
          programmer and code-reviewer dispatch templates. When one changes,
          update the other. inline_guardrails comes from the init payload;
@@ -1093,6 +1102,7 @@ If BOTH gates pass, proceed to the memory_signal prep and LLM verifier dispatch 
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. If `.devt/memory/` is empty or either query fails, the `{}`/`[]` fallbacks keep the blocks well-formed and the agent falls back to fresh queries.
@@ -1119,6 +1129,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          CLI shape or block position changes, update both. -->
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
