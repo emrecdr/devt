@@ -147,14 +147,14 @@ function harvestGraphifyGodNodes() {
   try { graphify = require("./graphify.cjs"); } catch { return []; }
   if (!graphify || graphify.status().state !== "ready") return [];
 
-  const report = graphify.parseReportSections();
-  if (!report.god_nodes.length) return [];
+  const gods = graphify.godNodes(10);
+  if (!gods.length) return [];
 
   let memory;
   try { memory = require("./memory.cjs"); } catch { memory = null; }
 
   const candidates = [];
-  for (const g of report.god_nodes.slice(0, 10)) {
+  for (const g of gods) {
     const symbol = g.symbol.replace(/\(\)$/, "");
     if (!symbol || symbol.startsWith("_") || symbol.includes("/") || symbol.includes(" ")) continue;
 

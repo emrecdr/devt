@@ -521,10 +521,16 @@ function generate(taskText, opts) {
   // Blast radius
   const blast = blastRadius(topic);
 
-  // Parse GRAPH_REPORT.md once for cross-cutting concerns (god nodes,
-  // surprising connections, knowledge gaps). Empty sections when graphify
-  // is not ready or the report is missing — the renderer omits the block.
+  // Parse GRAPH_REPORT.md once for surprising connections + knowledge gaps.
+  // Empty sections when graphify is not ready or the report is missing —
+  // the renderer omits the block.
   const report = graphify.parseReportSections();
+  // Overlay live god-nodes from graph.json adjacency. Post-`graphify update`
+  // rebuilds without `cluster-only` don't rewrite GRAPH_REPORT.md, so the
+  // text-scraped god_nodes field can lag the actual graph; godNodes() reads
+  // the live loader cache.
+  const liveGods = graphify.godNodes(50);
+  if (liveGods.length > 0) report.god_nodes = liveGods;
 
   // Memory Graph triples — depth-2 subgraph rooted at governing union.
   // Cheap to compute since getLinks already does the heavy lifting; the helper

@@ -664,6 +664,23 @@ function _topByDegree(adj, n = 10) {
 }
 
 /**
+ * Top-N god-nodes as [{symbol, edge_count}] — shape-compatible with the
+ * legacy parseReportSections().god_nodes field, but sourced from graph.json
+ * adjacency rather than regex-scraping GRAPH_REPORT.md. Reads stay live with
+ * the graph: post-`graphify update` rebuilds without `cluster-only` don't
+ * rewrite GRAPH_REPORT.md, so the text-scrape path can lag the actual graph
+ * by a commit or two.
+ */
+function godNodes(limit = 10) {
+  const loaded = loadGraph();
+  if (!loaded.ok) return [];
+  return _topByDegree(loaded.cache.adj, limit).map(item => ({
+    symbol: (item.node && item.node.label) || item.id,
+    edge_count: item.degree,
+  }));
+}
+
+/**
  * Summary statistics over graph.json for the trust-gate consumer. Uses the
  * Phase A loader cache so this is O(1) after the first parse. Trust thresholds:
  *   - empty: 0 nodes (graph generation never ran or produced nothing)
@@ -745,10 +762,16 @@ function run(subcommand, args) {
       json(blastRadius(args));
       return 0;
     }
+    case "god-nodes": {
+      const limitArg = args.find(a => a.startsWith("--limit="));
+      const limit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 10) : 10;
+      json(godNodes(limit));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes\n`
       );
       return 2;
   }
@@ -780,6 +803,7 @@ module.exports = {
   getNeighbors,
   shortestPath,
   blastRadius,
+  godNodes,
   parseReportSections,
   getGraphifyOutDir,
   probeBinary,

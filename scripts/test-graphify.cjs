@@ -432,6 +432,75 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── god-nodes CLI (Phase 3: public godNodes wrapper around _topByDegree) ──
+{
+  const fixture = {
+    nodes: [
+      { id: "core_dispatch", label: "Dispatch", source_file: "src/core/dispatch.py", file_type: "code" },
+      { id: "h1", label: "HandlerA", source_file: "src/h/a.py", file_type: "code" },
+      { id: "h2", label: "HandlerB", source_file: "src/h/b.py", file_type: "code" },
+      { id: "h3", label: "HandlerC", source_file: "src/h/c.py", file_type: "code" },
+      { id: "h4", label: "HandlerD", source_file: "src/h/d.py", file_type: "code" },
+      { id: "dispatch_module", label: "dispatch.py", source_file: "src/core/dispatch.py", file_type: "code" },
+      { id: "concept_authz", label: "Authorization", source_file: "", file_type: "concept" },
+    ],
+    links: [
+      { source: "h1", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h2", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h3", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h4", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h1", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h2", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h3", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h4", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h1", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h2", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h3", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h4", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+    ],
+  };
+  const { tmp } = setupFixture({ graph: fixture });
+  const r = run(tmp, "god-nodes", "--limit=5");
+  const j = parseJson(r.stdout);
+  if (Array.isArray(j) && j.length > 0
+      && j.every(e => typeof e.symbol === "string" && typeof e.edge_count === "number")) {
+    pass("god-nodes returns [{symbol, edge_count}] array shape");
+  } else {
+    fail("god-nodes output shape", `got: ${JSON.stringify(j)}`);
+  }
+  if (Array.isArray(j) && j.find(e => e.symbol === "Dispatch")) {
+    pass("god-nodes surfaces real god-node (Dispatch)");
+  } else {
+    fail("god-nodes real god-node", `Dispatch missing from: ${JSON.stringify(j)}`);
+  }
+  if (Array.isArray(j) && !j.find(e => e.symbol === "dispatch.py")) {
+    pass("god-nodes filters file-named hub (dispatch.py)");
+  } else {
+    fail("god-nodes file-name filter", `dispatch.py leaked into: ${JSON.stringify(j)}`);
+  }
+  if (Array.isArray(j) && !j.find(e => e.symbol === "Authorization")) {
+    pass("god-nodes filters concept node (Authorization, no source_file)");
+  } else {
+    fail("god-nodes concept-node filter", `Authorization leaked into: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// godNodes() returns [] when graph is not ready — degradation is graceful.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "graphify-godnodes-empty-"));
+  fs.mkdirSync(path.join(tmp, ".devt"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".devt", "config.json"), JSON.stringify({ graphify: { enabled: true } }));
+  const r = run(tmp, "god-nodes");
+  const j = parseJson(r.stdout);
+  if (Array.isArray(j) && j.length === 0) {
+    pass("god-nodes returns [] when graph.json is missing");
+  } else {
+    fail("god-nodes empty-state", `expected [], got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── malformed graph.json (Phase A degradation paths) ──────────────────────
 {
   // Invalid JSON syntax — safeJsonParse returns ok:false; loader degrades.
