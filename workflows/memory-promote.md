@@ -1,7 +1,7 @@
 # Memory Promote — Curator-Gated DEC → ADR/CON/FLOW Promotion
 
 Workflow that promotes a candidate (a DEC-xxx from `.devt/state/decisions.md`, a
-`#KNOWLEDGE-CANDIDATE` tag in scratchpad, a claude-mem ⚖️/🔵 entry, or a fresh
+`#KNOWLEDGE-CANDIDATE` tag in scratchpad, a `.devt/state/decisions.md` DEC-xxx entry, or a fresh
 proposal in `_suggestions.md`) into a permanent `.devt/memory/` doc through the
 curator's AskUserQuestion approval flow.
 

@@ -122,13 +122,13 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from claude-mem ⚖️/🔵 + `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
+Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries + Graphify god-nodes (when available) so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
 ```
 
-Best-effort: harvest gracefully no-ops when claude-mem is absent or no observations matched. Failure here MUST NOT fail the retro flow.
+Best-effort: harvest gracefully no-ops when no observations matched. Failure here MUST NOT fail the retro flow.
 
 </step>
 

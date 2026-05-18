@@ -330,7 +330,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-Even though quick-implement skips retro+curator for speed, the harvest itself is unconditional — observations from this workflow are buffered into `.devt/memory/_suggestions.md` for the next dev-workflow's curator to review. This prevents the "fast workflow drops all knowledge candidates on the floor" footgun. Cost: ~50ms when claude-mem is absent.
+Even though quick-implement skips retro+curator for speed, the harvest itself is unconditional — observations from this workflow are buffered into `.devt/memory/_suggestions.md` for the next dev-workflow's curator to review. This prevents the "fast workflow drops all knowledge candidates on the floor" footgun. Cost: ~10ms (pure filesystem reads).
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true

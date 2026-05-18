@@ -42,7 +42,6 @@ echo "=== Project devt footprint ==="
 grep -q "^\.devt/" .gitignore 2>/dev/null && echo ".gitignore has devt entries" || true
 [ -f .git/hooks/post-commit ] && grep -q "devt\|CLAUDE_PLUGIN_ROOT" .git/hooks/post-commit 2>/dev/null && echo ".git/hooks/post-commit is devt-managed" || true
 [ -d graphify-out ] && echo "graphify-out/ present (cache)" || true
-[ -d .claude-mem ] && echo ".claude-mem/ present (mid-session capture db)" || true
 ```
 
 Show the inventory to the user — they need to know what each mode will remove.
@@ -63,7 +62,7 @@ options:
   - label: "Project reset — wipe all .devt/ in this project (Recommended for fresh start)"
     description: "Destructive — removes .devt/ entirely (config, rules, state, memory, lessons, deferred). Leaves files outside .devt/ alone (.mcp.json, .claude/, .gitignore entries, git hooks). Backs up to .devt.bak.YYYYMMDD first."
   - label: "Full reset — wipe .devt/ AND scattered files outside .devt/"
-    description: "Most destructive project-local option. Also removes .mcp.json, .claude/agent-memory/devt-debugger, devt-managed git hooks, devt entries from .gitignore. Optional: graphify-out/ and .claude-mem/ caches. Backs up first."
+    description: "Most destructive project-local option. Also removes .mcp.json, .claude/agent-memory/devt-debugger, devt-managed git hooks, devt entries from .gitignore. Optional: graphify-out/ cache. Backs up first."
   - label: "Plugin uninstall — remove the devt plugin itself (does not touch any project's .devt/)"
     description: "Removes the plugin code from your Claude Code install. Project .devt/ directories are owned by your repos and stay untouched — uninstall those separately with one of the modes above if needed."
   - label: "Cancel — exit without changes"
@@ -139,7 +138,6 @@ fi
 echo ""
 echo "Optional integration caches (NOT removed by default — uncomment if desired):"
 echo "  rm -rf graphify-out/   # only if you don't want the Graphify cache"
-echo "  rm -rf .claude-mem/    # only if you don't use claude-mem elsewhere"
 echo ""
 echo "Full reset complete. Run /devt:init to start fresh."
 ```

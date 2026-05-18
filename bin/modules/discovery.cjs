@@ -4,9 +4,9 @@
  * Discovery engine — harvests session signals into curator-reviewable proposals.
  *
  * Sources of candidate proposals (in priority order):
- * 1. claude-mem ⚖️ decision and 🔵 discovery tagged entries (when claude-mem is installed)
- * 2. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
- * 3. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
+ * 1. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
+ * 2. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
+ * 3. Graphify god-nodes via parseReportSections (when graphify-out/GRAPH_REPORT.md exists)
  *
  * For each candidate, the engine:
  * - Fetches the FULL original reasoning (verbatim — no AI summarization)
@@ -25,8 +25,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const child_process = require("node:child_process");
-const { safeJsonParse } = require("./security.cjs");
 const { atomicWriteFileSync } = require("./io.cjs");
 
 // ---------------------------------------------------------------------------
@@ -50,71 +48,7 @@ function getStateDir() {
 }
 
 // ---------------------------------------------------------------------------
-// Source 1: claude-mem ⚖️/🔵 tag harvest (when claude-mem is installed)
-//
-// claude-mem auto-categorizes observations during a session. Per the project
-// memory legend at session start: ⚖️ decisions / 🔵 discoveries / 🎯 session /
-// 🔴 bugfix / 🟣 feature / etc. Only ⚖️ and 🔵 are eligible for promotion.
-// ---------------------------------------------------------------------------
-
-function claudeMemAvailable() {
-  try {
-    const r = child_process.spawnSync("claude-mem", ["--help"], {
-      timeout: 2000,
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return r.status === 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Query claude-mem for tagged observations from the recent session window.
- * Returns [] if claude-mem is not installed (callers fall back to scratchpad tags).
- *
- * Returns array of:
- * { id, timestamp, tag: "⚖️" | "🔵", title, body, source: "claude-mem" }
- */
-function harvestClaudeMem(options) {
-  options = options || {};
-  if (!claudeMemAvailable()) return [];
-
-  // claude-mem's CLI surface varies; we use a defensive query that works across
-  // recent versions. If the call fails or returns non-JSON, we degrade silently.
-  const args = ["query", "--tags", "decision,discovery", "--json"];
-  if (options.window_hours) args.push(`--since-hours=${options.window_hours}`);
-
-  let proc;
-  try {
-    proc = child_process.spawnSync("claude-mem", args, {
-      cwd: findProjectRoot(),
-      timeout: 5000,
-      encoding: "utf8",
-    });
-  } catch {
-    return [];
-  }
-  if (proc.status !== 0) return [];
-
-  // 10MB cap — claude-mem outputs are bounded by N (max ~50) ⚖️/🔵 entries.
-  const result = safeJsonParse(proc.stdout || "[]", "claude-mem output", 10 * 1024 * 1024);
-  if (!result.ok) return [];
-  const parsed = result.value;
-
-  const entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
-  return entries.map(e => ({
-    id: e.id || e.observation_id || null,
-    timestamp: e.timestamp || e.created_at || null,
-    tag: e.type === "decision" ? "⚖️" : "🔵",
-    title: e.title || e.summary || "",
-    body: e.body || e.content || e.text || "",
-    source: "claude-mem",
-  }));
-}
-
-// ---------------------------------------------------------------------------
-// Source 2: #KNOWLEDGE-CANDIDATE inline tags in scratchpad.md
+// Source 1: #KNOWLEDGE-CANDIDATE inline tags in scratchpad.md
 //
 // Format: `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] one-line summary`
 // Followed optionally by indented body lines until the next non-indented line or another tag.
@@ -370,9 +304,7 @@ function discoverMissingWikiLinks() {
 // Main: harvest from all sources, filter, dedup, write _suggestions.md
 // ---------------------------------------------------------------------------
 
-function harvest(options) {
-  options = options || {};
-
+function harvest(_options) {
   // Master switch — when memory.enabled=false, harvest is a no-op so we don't
   // write to .devt/memory/_suggestions.md (a memory-layer artifact). Returns
   // the same envelope shape callers expect, with empty arrays + a state marker.
@@ -391,7 +323,6 @@ function harvest(options) {
   const existing = loadExistingMemoryDocs();
 
   const allCandidates = [
-    ...harvestClaudeMem(options),
     ...harvestScratchpadTags(),
     ...harvestSessionDecisions(),
     ...harvestGraphifyGodNodes(),
@@ -537,14 +468,10 @@ function run(subcommand, _args) {
       json({ proposals: discoverMissingWikiLinks() });
       return 0;
     }
-    case "claude-mem-status": {
-      json({ available: claudeMemAvailable() });
-      return 0;
-    }
     default:
       process.stderr.write(
         `Unknown discovery subcommand: ${subcommand}\n` +
-        `Valid: harvest | wiki-links | claude-mem-status\n`
+        `Valid: harvest | wiki-links\n`
       );
       return 2;
   }
@@ -554,7 +481,6 @@ module.exports = {
   run,
   harvest,
   writeSuggestionsReport,
-  harvestClaudeMem,
   harvestScratchpadTags,
   harvestSessionDecisions,
   harvestGraphifyGodNodes,
@@ -563,5 +489,4 @@ module.exports = {
   findDuplicate,
   loadRejectedKeywords,
   loadExistingMemoryDocs,
-  claudeMemAvailable,
 };

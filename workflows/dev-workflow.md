@@ -1266,15 +1266,15 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 <step name="harvest_observations" gate="memory suggest exits 0">
 
-This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests claude-mem ⚖️/🔵 entries + `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
+This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries + Graphify god-nodes (when graphify-out/GRAPH_REPORT.md exists) into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
 
-Harvest is cheap (~50ms when claude-mem is absent, bounded by claude-mem-CLI timeout otherwise). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
+Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
 ```
 
-The `|| true` is intentional: harvest is best-effort. A missing `.devt/memory/` directory, missing claude-mem, or empty observation set ALL produce a 0-issue report. We never fail a workflow because harvest had nothing to find.
+The `|| true` is intentional: harvest is best-effort. A missing `.devt/memory/` directory or empty observation set produces a 0-issue report. We never fail a workflow because harvest had nothing to find.
 
 </step>
 

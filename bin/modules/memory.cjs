@@ -1807,7 +1807,7 @@ function run(subcommand, args) {
       return 0;
     }
     case "suggest": {
-      // Discovery engine — harvests claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE + DEC-xxx
+      // Discovery engine — harvests #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-nodes
       // entries into _suggestions.md for curator review. NEVER writes permanent doc files.
       const discovery = require("./discovery.cjs");
       const result = discovery.harvest({});

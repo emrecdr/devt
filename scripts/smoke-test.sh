@@ -414,14 +414,6 @@ else
   fail "graphify warm-cache unexpected path: $WARM_CACHE"
 fi
 
-# discovery.cjs detects claude-mem availability
-CLAUDEMEM_AVAIL=$(node "$CLI" discovery claude-mem-status 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.available)")
-if [ "$CLAUDEMEM_AVAIL" = "true" ] || [ "$CLAUDEMEM_AVAIL" = "false" ]; then
-  pass "discovery claude-mem-status returns boolean (available: $CLAUDEMEM_AVAIL)"
-else
-  fail "discovery claude-mem-status unexpected: $CLAUDEMEM_AVAIL"
-fi
-
 # Memory backlinks/orphans/stale-links/affects-symbol all wired
 MEMTMP2=$(mktemp -d)
 mkdir -p "$MEMTMP2/.git" "$MEMTMP2/.devt"
@@ -1013,9 +1005,9 @@ else
   fail "plugin-root .mcp.json missing or malformed devt-memory entry"
 fi
 
-# Gitignore additions for Graphify + claude-mem
-if grep -q "graphify-out/cache/" .gitignore && grep -q ".claude-mem/mem.db" .gitignore; then
-  pass "gitignore manifest extended (graphify-out/cache, claude-mem/mem.db)"
+# Gitignore additions for Graphify
+if grep -q "graphify-out/cache/" .gitignore; then
+  pass "gitignore manifest extended (graphify-out/cache)"
 else
   fail "gitignore manifest incomplete"
 fi
@@ -4398,6 +4390,19 @@ else
   fail "state validate did not flag missing required field in handoff.json"
 fi
 rm -rf "$HJ_TMP"
+
+echo
+echo "== Claude-mem CLI shellout removed (Phase C-1) =="
+if grep -q 'spawnSync("claude-mem"' "$ROOT/bin/modules/discovery.cjs" 2>/dev/null; then
+  fail "discovery.cjs still spawns claude-mem subprocess (claude-mem v13+ has no \`query\` command)"
+else
+  pass "discovery.cjs does not spawn claude-mem subprocess"
+fi
+if grep -E 'claude-mem.*(--db|"mcp")' "$ROOT/bin/modules/setup.cjs" 2>/dev/null | grep -v '^[[:space:]]*//' >/dev/null 2>&1; then
+  fail "setup.cjs still scaffolds a claude-mem MCP server entry"
+else
+  pass "setup.cjs does not scaffold a per-project claude-mem MCP entry (claude-mem v13+ self-registers as a plugin)"
+fi
 
 echo
 echo "== Graphify PR-impact MCP wiring =="

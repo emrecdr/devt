@@ -74,7 +74,7 @@ function main() {
         break;
       }
       case "discovery": {
-        // discovery subcommand — claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
+        // discovery subcommand — #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-node harvest
         const code = require("./modules/discovery.cjs").run(subcommand, args.slice(2));
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
@@ -180,7 +180,7 @@ Commands:
   memory orphans            Docs with no incoming or outgoing links (possibly stale)
   memory stale-links        Links pointing to non-existent target docs
   memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
-  memory suggest            Run discovery: claude-mem ⚖️/🔵 + #KNOWLEDGE-CANDIDATE harvest
+  memory suggest            Run discovery: #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-node harvest
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
   deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md (v0.29.0+)
                             [--context="..."] [--tags=a,b,c] [--by=<agent>]
@@ -200,7 +200,6 @@ Commands:
   graphify blast-radius <s> Effect-size estimate for editing a symbol (small|medium|large)
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
-  discovery claude-mem-status  Whether claude-mem CLI is installed and reachable
   preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md
   preflight topic <task>    Just extract domains/symbols/keywords from a task description
   preflight status          Read current brief metadata (FRESH/STALE/MISSING + timestamp)

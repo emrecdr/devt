@@ -302,7 +302,6 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // .devt/memory/index.db (FTS5 index — rebuild from .md)
   // graphify-out/cache/ (Graphify ephemeral cache)
   // graphify-out/manifest.json (Graphify per-machine manifest)
-  // .claude-mem/mem.db (claude-mem session DB — local only)
   //
   // ALWAYS-COMMIT (NOT in this list — kept by default):
   // .devt/memory/{decisions,concepts,flows,rejected}/*.md team-shared truth
@@ -321,7 +320,6 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     { path: ".devt/memory/export-*.json", header: "# devt memory export bundles (transient — share via explicit channel)" },
     { path: "graphify-out/cache/", header: "# Graphify ephemeral cache" },
     { path: "graphify-out/manifest.json", header: "# Graphify per-machine manifest" },
-    { path: ".claude-mem/mem.db", header: "# claude-mem local session DB" },
   ];
   try {
     let content = fs.readFileSync(gitignorePath, "utf8");
@@ -345,11 +343,12 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     }
   }
 
-  // Scaffold project .mcp.json — conditional graphify + claude-mem only.
+  // Scaffold project .mcp.json — conditional graphify only.
   // The devt-memory MCP server is registered by the plugin's own .mcp.json at the plugin root
   // (resolved by Claude Code via ${CLAUDE_PLUGIN_ROOT} when devt is loaded as a plugin). Project-level
   // .mcp.json does NOT receive ${CLAUDE_PLUGIN_ROOT} substitution — it is reserved for project-relative
-  // MCP servers (graphify, claude-mem) whose args reference the project working directory.
+  // MCP servers (graphify) whose args reference the project working directory. claude-mem v13+ self-
+  // registers as a Claude Code plugin under ~/.claude/plugins/ — no per-project entry needed.
   const mcpJsonPath = path.join(projectRoot, ".mcp.json");
   const mcpHints = [];
   const probedServers = {};
@@ -388,20 +387,6 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     mcpHints.push("graphify is on PATH but neither `uv` nor a system `python3` with graphifyy+mcp importable was found — either install uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`) for the recommended launch path, or `pip install graphifyy[mcp]` into the system Python for the pip path. Then re-run setup to register the Graphify MCP server.");
   } else {
     mcpHints.push("graphify not detected on PATH — install with `uv tool install graphifyy[mcp]` (recommended) or `pip install graphifyy[mcp]`, then re-run setup to register the Graphify MCP server.");
-  }
-  try {
-    const probe = require("child_process").spawnSync("claude-mem", ["--help"], { timeout: 1500, stdio: "ignore" });
-    if (probe && probe.status === 0) {
-      probedServers["claude-mem"] = {
-        command: "claude-mem",
-        args: ["mcp", "--db", ".claude-mem/mem.db"],
-        env: {},
-      };
-    } else {
-      mcpHints.push("claude-mem not detected — install for richer mid-session capture.");
-    }
-  } catch {
-    mcpHints.push("claude-mem probe failed — claude-mem MCP not registered.");
   }
   if (!fs.existsSync(mcpJsonPath)) {
     if (Object.keys(probedServers).length > 0) {
