@@ -74,6 +74,9 @@ Nine-commit wave layering four concerns on top of v0.43.0's graphify integration
 - `CLAUDE.md` memory-module description updated to reflect the three-file split with sibling-module contract. Lists `bin/modules/memory-graph.cjs` and `bin/modules/memory-bundle.cjs` alongside the slimmed `memory.cjs` core.
 - `docs/MEMORY.md` and `docs/COMMANDS.md` synced to the worker-mode `search` MCP tool. The Phase-1 fix (26033b9) updated the workflow prose and code comments but missed the user-facing docs, which were still describing the now-deprecated `observation_search` invocation. Memory-layer integration prose now reflects the actual harvest call path including the markdown row-type filtering the orchestrator performs.
 - `scripts/smoke-test.sh` `observation_search` negative gate scope extended to include `docs/` (was `agents/workflows/skills/bin`) so future docs drift on this surface is caught at CI time.
+- `README.md` sidecar paragraph updated from "Three artifacts" to "Four artifacts" with the new `review` sidecar's status/verdict split described inline.
+- `CLAUDE.md` Topic Pre-Flight Brief stanza rewritten so the god-nodes path points at `graphify.godNodes()` (live `graph.json` adjacency, post-X-3 refactor) rather than the prior `parseReportSections()`-only description; SC + knowledge-gaps remain on the report-parse path.
+- `CLAUDE.md` Forensic deny log stanza enumerates the new `"graph_loader"` source value alongside `"preflight"` / `"bash_destroy"` / `"no_verify"`, so the source-field enum matches what `loadGraph` now writes on `GRAPH_SIZE_CAP` exceedance.
 
 ## [0.43.0] - 2026-05-18
 
