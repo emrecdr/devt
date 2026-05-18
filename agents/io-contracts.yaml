@@ -53,7 +53,7 @@ agents:
     index_buckets: [skills, skills_standard]
     outputs:
       primary: review.md
-      sidecar: null
+      sidecar: review.json
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
 

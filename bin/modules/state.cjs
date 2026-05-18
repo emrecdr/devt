@@ -203,6 +203,15 @@ const JSON_SIDECAR_SCHEMAS = {
     verdict: VERIFICATION_VERDICTS,
     agent: ["verifier"],
   },
+  // review.md emits "## Verdict" instead of "## Status", so the legacy
+  // extractStatus parser returned null on every code-review verify advance
+  // and validateConsistency persisted a NO_STATUS_LINE warning. Sidecar
+  // routing via SIDECAR_FOR_MARKDOWN bypasses extractStatus entirely.
+  "review.json": {
+    status: ["DONE", "BLOCKED"],
+    verdict: ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
+    agent: ["code-reviewer"],
+  },
 };
 
 // Separate registry for INPUT JSON artifacts — files that workflows consume to
@@ -233,8 +242,8 @@ const JSON_INPUT_SCHEMAS = {
 // - "impl-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["impl-summary.json"]
 // - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
 // - "test-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["test-summary.json"]
+// - "review.md" — superseded by JSON_SIDECAR_SCHEMAS["review.json"]
 const ARTIFACT_SCHEMA = {
-  "review.md": ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
   "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
   "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
   "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
@@ -256,6 +265,7 @@ const SIDECAR_FOR_MARKDOWN = {
   "impl-summary.md": "impl-summary.json",
   "test-summary.md": "test-summary.json",
   "verification.md": "verification.json",
+  "review.md": "review.json",
 };
 
 // Always preserved by prune — cross-cutting artifacts not tied to a single phase

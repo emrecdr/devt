@@ -2965,22 +2965,28 @@ for i in "${!AGENT_NAMES[@]}"; do
   # Extract status values from the "Status field is one of: X | Y | Z" line.
   # Min 3 chars on [A-Z_] to skip the lone "S" that grep would otherwise pick
   # from "Status" before the lowercase letters break the match.
+  # Try Status field first, then Verdict field (review.md uses Verdict).
+  emitted_kind="status"
   emitted=$(grep -oE "Status field is one of\*?\*?:?\s*[A-Z_]+(\s*\|\s*[A-Z_]+)+" "$ROOT/agents/$agent.md" | head -1 | grep -oE "[A-Z_]{3,}" || true)
   if [ -z "$emitted" ]; then
-    # No "Status field is one of" — agent may use a different documentation style; skip rather than fail
+    emitted=$(grep -oE "Verdict field is one of\*?\*?:?\s*[A-Z_]+(\s*\|\s*[A-Z_]+)+" "$ROOT/agents/$agent.md" | head -1 | grep -oE "[A-Z_]{3,}" || true)
+    emitted_kind="verdict"
+  fi
+  if [ -z "$emitted" ]; then
+    # Neither pattern present — agent uses a different doc style; skip rather than fail.
     continue
   fi
-  # Resolve the whitelist for this artifact. for artifacts
-  # whose status now lives in a JSON sidecar (impl-summary.md, verification.md),
-  # pull from JSON_SIDECAR_SCHEMAS[sidecar].status. Otherwise fall back to the
-  # legacy ARTIFACT_SCHEMA[markdown] whitelist.
+  # Resolve the whitelist for this artifact. Sidecar-routed artifacts (impl-summary.md,
+  # test-summary.md, verification.md, review.md) pull from JSON_SIDECAR_SCHEMAS using
+  # the field-kind (status vs verdict) that matched the agent's documented enum.
+  # Legacy markdown-only artifacts fall back to ARTIFACT_SCHEMA.
   whitelist=$(node -e "
     const s = require('$ROOT/bin/modules/state.cjs');
-    const sidecarMap = { 'impl-summary.md': 'impl-summary.json', 'verification.md': 'verification.json' };
+    const sidecarMap = { 'impl-summary.md': 'impl-summary.json', 'test-summary.md': 'test-summary.json', 'verification.md': 'verification.json', 'review.md': 'review.json' };
     const sidecar = sidecarMap['$artifact'];
     let allowed = null;
     if (sidecar && s.JSON_SIDECAR_SCHEMAS && s.JSON_SIDECAR_SCHEMAS[sidecar]) {
-      allowed = s.JSON_SIDECAR_SCHEMAS[sidecar].status;
+      allowed = s.JSON_SIDECAR_SCHEMAS[sidecar]['$emitted_kind'];
     } else if (s.ARTIFACT_SCHEMA && Array.isArray(s.ARTIFACT_SCHEMA['$artifact'])) {
       allowed = s.ARTIFACT_SCHEMA['$artifact'];
     }
@@ -4498,6 +4504,55 @@ if node "$ROOT/scripts/test-graphify.cjs" >/dev/null 2>&1; then
 else
   fail "graphify fixture tests — run 'node scripts/test-graphify.cjs' to see details"
 fi
+
+echo
+echo "== review.json sidecar wiring =="
+if grep -q '"review.json": {' "$ROOT/bin/modules/state.cjs"; then
+  pass "JSON_SIDECAR_SCHEMAS registers review.json"
+else
+  fail "state.cjs missing review.json schema entry"
+fi
+if grep -q '"review.md": "review.json"' "$ROOT/bin/modules/state.cjs"; then
+  pass "SIDECAR_FOR_MARKDOWN maps review.md → review.json"
+else
+  fail "state.cjs SIDECAR_FOR_MARKDOWN missing review.md → review.json pairing"
+fi
+if grep -qE '^\s*"review\.md":\s*\[' "$ROOT/bin/modules/state.cjs"; then
+  fail "ARTIFACT_SCHEMA still contains review.md — should be sidecar-routed via SIDECAR_FOR_MARKDOWN"
+else
+  pass "ARTIFACT_SCHEMA no longer contains review.md (sidecar-routed)"
+fi
+if grep -A6 '^  code-reviewer:' "$ROOT/agents/io-contracts.yaml" | grep -q "sidecar: review.json"; then
+  pass "io-contracts.yaml declares code-reviewer.outputs.sidecar: review.json"
+else
+  fail "io-contracts.yaml code-reviewer.outputs.sidecar not set to review.json"
+fi
+if grep -q '\.devt/state/review\.json' "$ROOT/agents/code-reviewer.md" && \
+   grep -qi "stub-first" "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer.md instructs writing review.json with stub-first protocol"
+else
+  fail "code-reviewer.md missing review.json write instruction or stub-first protocol"
+fi
+if grep -q 'read-sidecar review.json' "$ROOT/workflows/next.md"; then
+  pass "next.md routes via read-sidecar review.json"
+else
+  fail "next.md still routes via text match on review.md"
+fi
+# Functional gate: read-sidecar accepts a well-formed review.json with all three validation flags green
+REVIEW_TMP=$(mktemp -d)
+mkdir -p "$REVIEW_TMP/.devt/state" "$REVIEW_TMP/.git"
+echo '{}' > "$REVIEW_TMP/.devt/config.json"
+cat > "$REVIEW_TMP/.devt/state/review.json" <<'EOFRJ'
+{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer"}
+EOFRJ
+if (cd "$REVIEW_TMP" && node "$CLI" state read-sidecar review.json 2>/dev/null | grep -qE '"valid_status":\s*true' && \
+    cd "$REVIEW_TMP" && node "$CLI" state read-sidecar review.json 2>/dev/null | grep -qE '"valid_verdict":\s*true' && \
+    cd "$REVIEW_TMP" && node "$CLI" state read-sidecar review.json 2>/dev/null | grep -qE '"valid_agent":\s*true'); then
+  pass "read-sidecar review.json validates status+verdict+agent against schema"
+else
+  fail "review.json schema validation broken — see $REVIEW_TMP"
+fi
+rm -rf "$REVIEW_TMP"
 
 echo
 echo "== Documentation discipline: no devt-internal version refs =="

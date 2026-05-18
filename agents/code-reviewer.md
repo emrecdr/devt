@@ -211,7 +211,7 @@ Before writing the final review.md, verify your own work:
 2. **Score math checks out** — sum the deductions; the result must equal `100 - score`. The math must be auditable.
 3. **Verdict matches the score band** — 90-100 → APPROVED, 80-89 → APPROVED_WITH_NOTES, 0-79 → NEEDS_WORK. No rounding up.
 4. **Spec compliance came first** — if spec compliance failed, verdict is NEEDS_WORK regardless of score.
-5. **Status field is one of**: APPROVED | APPROVED_WITH_NOTES | NEEDS_WORK. No other values are valid.
+5. **Verdict field is one of**: APPROVED | APPROVED_WITH_NOTES | NEEDS_WORK. No other values are valid. (The sidecar's separate `status` field is DONE for a finished review or BLOCKED for an unrecoverable upstream gap.)
 
 **Banned phrases** in review.md:
 - "looks fine" → cite specifically what is fine and why
@@ -242,7 +242,37 @@ Never let a turn limit expire silently. Partial output > no output.
 </turn_limit_awareness>
 
 <output_format>
-Write `.devt/state/review.md` with:
+Write TWO files: the human-readable `.devt/state/review.md` AND the machine-routable `.devt/state/review.json` sidecar. The sidecar is the single source of truth for workflow routing — `/devt:next` and the code-review workflow's verifier dispatch both read from it via `readSidecar`.
+
+**Stub-first protocol**: as your very FIRST Write, emit `review.json` with placeholder values so downstream consumers can detect "agent started but hasn't finalized" vs "agent never ran":
+
+```json
+{
+  "status": "DONE",
+  "verdict": "NEEDS_WORK",
+  "agent": "code-reviewer",
+  "timestamp": "<ISO 8601 of stub write>",
+  "note": "stub — analysis in progress"
+}
+```
+
+Then proceed with the analysis. As your LAST Write, replace the sidecar with the final values:
+
+```json
+{
+  "status": "DONE",                                         // or "BLOCKED" if review-scope.md missing or unreadable
+  "verdict": "APPROVED | APPROVED_WITH_NOTES | NEEDS_WORK", // matches the ## Verdict section of review.md
+  "agent": "code-reviewer",
+  "score": 87,                                              // optional, matches the ## Score section
+  "critical_count": 0,                                      // optional, count of Critical findings
+  "important_count": 2,                                     // optional, count of Important findings
+  "timestamp": "<ISO 8601 of final write>"
+}
+```
+
+The `verdict` field in the JSON MUST agree with the `## Verdict` value in the markdown. Mismatches surface as state-validation warnings.
+
+Now write `.devt/state/review.md` with:
 
 ```markdown
 # Code Review

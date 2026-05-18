@@ -162,13 +162,21 @@ Implementation exists but no review yet. Starting code review...
 ```
 Execute `/devt:review` to review the existing implementation.
 
-### No workflow, has impl-summary.md and review.md with NEEDS_WORK
+#### When review.md exists, read the verdict from review.json (single source of truth):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar review.json
+```
+
+Route on the sidecar's `verdict` field. The three branches below are mutually exclusive.
+
+### No workflow, review.json verdict=NEEDS_WORK
 ```
 Review found issues. Restarting workflow to address feedback...
 ```
-Execute `/devt:workflow` with the original task — the workflow restarts from context_init and proceeds through to the implement phase, where the programmer reads `.devt/state/review.md` as `<review_feedback>` and addresses the findings. **Do not delete review.md** before invoking.
+Execute `/devt:workflow` with the original task — the workflow restarts from context_init and proceeds through to the implement phase, where the programmer reads `.devt/state/review.md` as `<review_feedback>` and addresses the findings. **Do not delete review.md or review.json** before invoking.
 
-### No workflow, has impl-summary.md and review.md with APPROVED or APPROVED_WITH_NOTES
+### No workflow, review.json verdict=APPROVED or APPROVED_WITH_NOTES
 ```
 Implementation complete and approved. Ready to ship.
 ```
@@ -178,11 +186,11 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=nu
 ```
 Otherwise: Ask "Create PR now?" → if yes, execute `/devt:ship`.
 
-### No workflow, has impl-summary.md and review.md but verdict unreadable
+### No workflow, review.md exists but review.json missing or verdict unreadable
 ```
-Review file exists but verdict is missing or unrecognized (possible interrupted review).
+Review file exists but sidecar is missing or unrecognized (possible interrupted review).
 ```
-Ask: "Re-run the review from scratch, or cancel and start over?" → if re-run, execute `/devt:review`; if cancel, execute `/devt:cancel-workflow`.
+`read-sidecar` returns `{ok: false}` when the file is missing or invalid. Ask: "Re-run the review from scratch, or cancel and start over?" → if re-run, execute `/devt:review`; if cancel, execute `/devt:cancel-workflow`.
 
 ### Active workflow, phase known
 ```
