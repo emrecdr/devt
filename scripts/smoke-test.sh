@@ -4485,6 +4485,11 @@ if grep -q "pr-impact.md" "$ROOT/agents/code-reviewer.md" && grep -q "get_pr_imp
 else
   fail "code-reviewer.md missing PR-impact Read instruction"
 fi
+if grep -q "Community filter for large reviews" "$ROOT/agents/code-reviewer.md" && grep -q "Out-of-Scope Files (Deferred)" "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer applies community-filter scope-narrowing for large PRs (Phase B-4 budget protection)"
+else
+  fail "code-reviewer.md missing community-filter / deferred-files mechanism"
+fi
 
 echo
 echo "== graphify wrapper fixture tests =="
