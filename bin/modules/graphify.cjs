@@ -569,35 +569,21 @@ function blastRadius(symbols, _options) {
     }
   }
 
-  // god-node detection via GRAPH_REPORT.md word-boundary scan. Preserves
-  // the cross-validated XOR pattern (`\b`-style transition at both edges).
+  // god-node detection via direct degree-sort over the loaded adjacency.
+  // Replaces the prior regex-scrape of graphify-out/GRAPH_REPORT.md — degree
+  // is what defines god-nodes (per upstream graphify/analyze.py::god_nodes),
+  // and graph.json carries the structural data directly. Works even when
+  // GRAPH_REPORT.md hasn't been generated yet.
   let godNodeMatch = false;
-  try {
-    const s = status();
-    const reportPath = path.join(s.out_dir, "GRAPH_REPORT.md");
-    if (fs.existsSync(reportPath)) {
-      const report = fs.readFileSync(reportPath, "utf8");
-      const godSection = report.match(/##\s*God Nodes[\s\S]*?(?=\n##\s|$)/i);
-      if (godSection) {
-        const haystack = godSection[0];
-        const isWord = c => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
-        for (const sym of symbols) {
-          if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
-          const symStartWord = isWord(sym.charCodeAt(0));
-          const symEndWord = isWord(sym.charCodeAt(sym.length - 1));
-          let idx = 0;
-          let found = false;
-          while ((idx = haystack.indexOf(sym, idx)) !== -1) {
-            const beforeWord = idx > 0 ? isWord(haystack.charCodeAt(idx - 1)) : false;
-            const afterWord = idx + sym.length < haystack.length ? isWord(haystack.charCodeAt(idx + sym.length)) : false;
-            if (symStartWord !== beforeWord && symEndWord !== afterWord) { found = true; break; }
-            idx += sym.length;
-          }
-          if (found) { godNodeMatch = true; break; }
-        }
-      }
-    }
-  } catch { /* swallow */ }
+  const topNodes = _topByDegree(adj, 10);
+  const topIds = new Set(topNodes.map(item => item.id));
+  const topLabels = new Set(topNodes.map(item => (item.node.label || item.id).toLowerCase()));
+  for (const sym of symbols) {
+    if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
+    const resolvedId = _resolveOne(adj, sym);
+    if (resolvedId && topIds.has(resolvedId)) { godNodeMatch = true; break; }
+    if (topLabels.has(sym.toLowerCase())) { godNodeMatch = true; break; }
+  }
 
   let effect_size;
   if (godNodeMatch || direct.size + indirect.size > 20 || modules.size >= 4) effect_size = "large";
@@ -614,6 +600,67 @@ function blastRadius(symbols, _options) {
     ambiguous_details: ambiguous,
     source: "graphify",
   };
+}
+
+// "JSON-key noise" labels excluded from god-node detection. Mirrors upstream
+// graphify/analyze.py::_JSON_NOISE_LABELS — purely structural JSON keys that
+// accumulate edges mechanically and don't represent architectural concepts.
+const _JSON_NOISE_LABELS = new Set([
+  "start", "end", "name", "id", "type", "properties",
+  "value", "key", "data", "items", "title", "description", "version",
+  "dependencies", "devdependencies", "peerdependencies",
+  "optionaldependencies", "bundleddependencies", "bundledependencies",
+]);
+
+function _isFileNode(node, degree) {
+  const label = node && typeof node.label === "string" ? node.label : "";
+  if (!label) return false;
+  const src = node.source_file || "";
+  if (src) {
+    const basename = src.split(/[/\\]/).pop();
+    if (label === basename) return true;
+  }
+  if (label.startsWith(".") && label.endsWith("()")) return true;
+  if (label.endsWith("()") && degree <= 1) return true;
+  return false;
+}
+
+function _isConceptNode(node) {
+  const src = (node && node.source_file) || "";
+  if (!src) return true;
+  const lastSeg = src.split(/[/\\]/).pop();
+  return !lastSeg.includes(".");
+}
+
+function _isJsonKeyNode(node) {
+  const src = ((node && node.source_file) || "").toLowerCase();
+  if (!src.endsWith(".json")) return false;
+  const label = ((node && node.label) || "").trim().toLowerCase();
+  return _JSON_NOISE_LABELS.has(label);
+}
+
+/**
+ * Top-N nodes by degree, filtered to match upstream graphify/analyze.py::god_nodes
+ * (file-level hubs, method stubs, concept nodes, and JSON-key noise excluded).
+ * Used by blastRadius for god-node detection — replaces the prior approach
+ * that regex-scraped graphify-out/GRAPH_REPORT.md.
+ */
+function _topByDegree(adj, n = 10) {
+  const items = [];
+  for (const [id, node] of adj.nodeMap) {
+    const degree = (adj.inc.get(id) || []).length + (adj.out.get(id) || []).length;
+    items.push({ id, node, degree });
+  }
+  items.sort((a, b) => b.degree - a.degree);
+  const result = [];
+  for (const item of items) {
+    if (_isFileNode(item.node, item.degree)) continue;
+    if (_isConceptNode(item.node)) continue;
+    if (_isJsonKeyNode(item.node)) continue;
+    result.push(item);
+    if (result.length >= n) break;
+  }
+  return result;
 }
 
 /**

@@ -352,6 +352,81 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── god-node detection via degree-sort (X-3: replaces GRAPH_REPORT.md regex) ─
+// Fixture: 6 nodes, one is a clear god-node by degree (4 inbound edges),
+// one is a file-named hub that MUST be filtered, one is a concept node
+// (no source_file) that MUST be filtered.
+{
+  const fixture = {
+    nodes: [
+      { id: "core_dispatch", label: "Dispatch", source_file: "src/core/dispatch.py", file_type: "code" },
+      { id: "h1", label: "HandlerA", source_file: "src/h/a.py", file_type: "code" },
+      { id: "h2", label: "HandlerB", source_file: "src/h/b.py", file_type: "code" },
+      { id: "h3", label: "HandlerC", source_file: "src/h/c.py", file_type: "code" },
+      { id: "h4", label: "HandlerD", source_file: "src/h/d.py", file_type: "code" },
+      // File-named hub — same label as basename of its source_file → must be filtered
+      { id: "dispatch_module", label: "dispatch.py", source_file: "src/core/dispatch.py", file_type: "code" },
+      // Concept node — no source_file → must be filtered
+      { id: "concept_authz", label: "Authorization", source_file: "", file_type: "concept" },
+    ],
+    links: [
+      { source: "h1", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h2", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h3", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      { source: "h4", target: "core_dispatch", relation: "calls", confidence: "EXTRACTED" },
+      // Give file-named hub + concept node high degree to test the filter
+      { source: "h1", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h2", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h3", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h4", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h1", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h2", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h3", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+      { source: "h4", target: "concept_authz", relation: "references", confidence: "INFERRED" },
+    ],
+  };
+  const { tmp } = setupFixture({ graph: fixture });
+  const r = run(tmp, "blast-radius", "Dispatch");
+  const j = parseJson(r.stdout);
+  if (j && j.god_node_match === true) {
+    pass("blast-radius detects real god-node (Dispatch with 4 inbound edges)");
+  } else {
+    fail("god-node detection (real)", `expected god_node_match=true, got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  // Same fixture, but query the file-named hub label — must NOT match.
+  const fixture = {
+    nodes: [
+      { id: "core_dispatch", label: "Dispatch", source_file: "src/core/dispatch.py", file_type: "code" },
+      { id: "h1", label: "HandlerA", source_file: "src/h/a.py", file_type: "code" },
+      { id: "h2", label: "HandlerB", source_file: "src/h/b.py", file_type: "code" },
+      { id: "h3", label: "HandlerC", source_file: "src/h/c.py", file_type: "code" },
+      { id: "h4", label: "HandlerD", source_file: "src/h/d.py", file_type: "code" },
+      { id: "dispatch_module", label: "dispatch.py", source_file: "src/core/dispatch.py", file_type: "code" },
+    ],
+    links: [
+      // Give dispatch_module 4 inbound edges → would be #1 by raw degree
+      // but file-name filter must exclude it from top-N.
+      { source: "h1", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h2", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h3", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+      { source: "h4", target: "dispatch_module", relation: "references", confidence: "INFERRED" },
+    ],
+  };
+  const { tmp } = setupFixture({ graph: fixture });
+  const r = run(tmp, "blast-radius", "dispatch.py");
+  const j = parseJson(r.stdout);
+  if (j && j.god_node_match === false) {
+    pass("blast-radius filters file-named hubs from god-node detection (matches upstream _is_file_node)");
+  } else {
+    fail("god-node file-name filter", `expected god_node_match=false, got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── degraded path: graph missing ───────────────────────────────────────────
 {
   const { tmp } = setupFixture({ withGraph: false });

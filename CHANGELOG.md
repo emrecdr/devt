@@ -82,6 +82,23 @@ Graphify wrapper migration to direct `graph.json` reads (`bin/modules/graphify.c
 - This phase consolidates the "Phase A loader as in-process graph engine" pattern: trust signals are now Node-side computations over `graph.json` directly, with no GRAPH_REPORT.md regex dependency and no graphify CLI shellout.
 - Net code delta: +90 / -3 across 4 files (graphify.cjs, preflight.cjs, scripts/test-graphify.cjs, scripts/smoke-test.sh). Smoke: 435 passed, 0 failed.
 
+### Changed (Phase X-3 — blastRadius god-node detection via degree-sort)
+
+- **`graphify.cjs::blastRadius` no longer regex-scrapes `graphify-out/GRAPH_REPORT.md`** for god-node detection. The prior implementation read the report, sliced the "## God Nodes" section, and ran an XOR-pattern word-boundary scan to detect whether any seed symbol appeared in the section. The XOR scan was cross-validated (48/48 parity per prior soak telemetry) but coupled blastRadius to GRAPH_REPORT.md's text format AND required the report to exist (a separate graphify generation step from `graph.json`).
+- **New approach**: direct degree-sort over the Phase A loader's adjacency cache via `_topByDegree(adj, n=10)`. Mirrors upstream `graphify/analyze.py::god_nodes()` definition exactly — top-N by degree, with file-level hubs, method stubs, concept nodes, and JSON-key noise filtered out per the upstream predicates (`_is_file_node`, `_is_concept_node`, `_is_json_key_node`). Now works when `graph.json` exists even if `GRAPH_REPORT.md` hasn't been regenerated.
+- **Net code change**: removed 27-line XOR scan + GRAPH_REPORT.md read; added 75-line filter+degree-sort helper. Slight LOC increase, but the new path is testable in fixtures (no report file dependency) and more authoritative (degree IS what defines god-nodes, not report-text presence).
+
+### Added (Phase X-3)
+
+- **2 new fixture tests** in `scripts/test-graphify.cjs`: positive (real god-node by degree → `god_node_match: true`) and filter (file-named hub with high degree → must be excluded per upstream's `_is_file_node`). Total fixture count: 21.
+- **`_JSON_NOISE_LABELS`** constant in `graphify.cjs` — the exact 20-label set from upstream `graphify/analyze.py::_JSON_NOISE_LABELS` (`start`, `end`, `name`, `id`, `type`, `properties`, `value`, `key`, `data`, `items`, `title`, `description`, `version`, plus the 7 npm dependency-array keys). Used by `_isJsonKeyNode` to suppress structural JSON noise from god-node candidates.
+
+### Notes (Phase X-3)
+
+- **`parseReportSections()` is intentionally NOT migrated**. It returns three sections from `GRAPH_REPORT.md` — god-nodes (could be degree-sorted) plus surprising-connections + knowledge-gaps (LLM-derived insights with NO in-graph equivalent — must stay regex-scraped). Mixing sources would be inconsistent for the agents that consume Cross-Cutting Concerns; keeping `parseReportSections` whole means agents see report-derived data uniformly, and `blastRadius` gets the degree-sort path for its single seed-symbol check.
+- **Filter parity verified against upstream source** (`graphify/analyze.py:3627-3742` and `:3672-3691`). Ports `_is_file_node` (basename match + method-stub pattern + isolated function pattern), `_is_concept_node` (empty source_file OR no file extension), `_is_json_key_node` (json source_file + noise-label list). The smoke gate proves that a high-degree file-named hub IS filtered out of the god-node set.
+- Net code delta: +75 / -27 across 2 files (graphify.cjs, scripts/test-graphify.cjs). Smoke: 435 passed, 0 failed (smoke count unchanged — new fixture assertions are inside the existing "graphify fixture tests" gate).
+
 ---
 
 Pre-Flight Brief JSON sidecar + `<scope_hint>` dispatch injection + advisory dispatch-scope guard hook. The Brief data plane already carried governing docs' `affects_paths` and blast-radius `direct_dependents` paths — the markdown surface rendered the dependent count but not the paths themselves, and there was no machine-readable interface for orchestrators. This wave surfaces those paths as a deduped `suggested_reading` array (capped at 8) in both the markdown (new `## Suggested Reading Set` section) and a new `preflight-brief.json` sidecar. Five workflows cache the array at context_init and inject it as a `<scope_hint>` block into 11+ dispatch sites so subagents start with high-signal paths instead of discovering scope from the task description. The companion PreToolUse hook on `Task` warns (advisory, never blocks) when a dispatch prompt or scope_hint count exceeds the configurable cap, with forensic appends to `.devt/state/dispatch-warnings.jsonl`. Smoke: **427 passed**, **0 failed** (was 401/401 baseline; +26 gates added for new surfaces).

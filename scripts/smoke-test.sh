@@ -4464,7 +4464,7 @@ fi
 echo
 echo "== graphify wrapper fixture tests =="
 if node "$ROOT/scripts/test-graphify.cjs" >/dev/null 2>&1; then
-  pass "graphify fixture tests (19 assertions over status / query / neighbors / path / blast-radius / stats / legacy 'edges' / degraded)"
+  pass "graphify fixture tests (21 assertions over status / query / neighbors / path / blast-radius / stats / god-node detection / legacy 'edges' / degraded)"
 else
   fail "graphify fixture tests — run 'node scripts/test-graphify.cjs' to see details"
 fi
