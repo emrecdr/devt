@@ -89,6 +89,8 @@ SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
 ```
 
+**Fetch Graphify PR impact when reviewing a GitHub PR.** If `${REVIEW_SCOPE}` mentions a PR number (e.g. "PR #123", "pull request 456", or the user invoked `/devt:review` with a PR arg), call the `mcp__graphify__get_pr_impact` MCP tool with that `pr_number` and Write the response verbatim to `.devt/state/pr-impact.md`. The code-reviewer agent Reads this file when present — Graphify's structured impact map (files changed, communities affected, blast radius) is higher-signal than the raw diff file list and lets the agent prioritize review depth where the graph signal concentrates. Skip silently when no PR number is detectable, when graphify MCP is not registered in `.mcp.json`, or when the call errors — the workflow proceeds without PR-impact context. The companion MCP tools `mcp__graphify__list_prs` and `mcp__graphify__triage_prs` apply at the review-selection layer ("which PR should I review next?") and are not called from this workflow.
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -317,4 +319,5 @@ severity for violations). For each diff hunk:
 2. Verify diff respects each (treat violations as Critical)
 3. `node bin/devt-tools.cjs memory rejected-keywords` — flag any diff text matching a REJ
 4. When Graphify enabled, enumerate affected callers via graphify-helpers and verify caller behavior is preserved
+5. When reviewing a GitHub PR and `.devt/state/pr-impact.md` exists, read its `mcp__graphify__get_pr_impact` payload — it identifies which graph communities the PR touches, so reviewers can weight findings by structural blast radius rather than file count
 ADRs are constitutional — same severity as security findings.

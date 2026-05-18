@@ -4400,6 +4400,19 @@ fi
 rm -rf "$HJ_TMP"
 
 echo
+echo "== Graphify PR-impact MCP wiring =="
+if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "pr-impact.md" "$ROOT/workflows/code-review.md"; then
+  pass "code-review workflow instructs orchestrator to fetch mcp__graphify__get_pr_impact and persist to .devt/state/pr-impact.md"
+else
+  fail "code-review.md missing get_pr_impact fetch step or pr-impact.md persistence"
+fi
+if grep -q "pr-impact.md" "$ROOT/agents/code-reviewer.md" && grep -q "get_pr_impact" "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer agent instructs reading .devt/state/pr-impact.md when present"
+else
+  fail "code-reviewer.md missing PR-impact Read instruction"
+fi
+
+echo
 echo "== graphify wrapper fixture tests =="
 if node "$ROOT/scripts/test-graphify.cjs" >/dev/null 2>&1; then
   pass "graphify fixture tests (16 assertions over status / query / neighbors / path / blast-radius / legacy 'edges' / degraded)"
