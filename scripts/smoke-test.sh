@@ -4554,6 +4554,49 @@ else
 fi
 rm -rf "$REVIEW_TMP"
 
+# End-to-end: validateConsistency must NOT emit no_status_line for review.md
+# when review.json exists. The markdown intentionally has no ## Status heading
+# (matches the code-reviewer.md template which uses ## Verdict). Before the
+# sidecar was wired, extractStatus returned null here and validateConsistency
+# silently persisted a NO_STATUS_LINE warning on every code-review run.
+VC_TMP=$(mktemp -d)
+mkdir -p "$VC_TMP/.devt/state" "$VC_TMP/.git"
+echo '{}' > "$VC_TMP/.devt/config.json"
+cat > "$VC_TMP/.devt/state/workflow.yaml" <<'EOFVC'
+active: true
+phase: verify
+workflow_type: code_review
+status: DONE
+task: smoke
+EOFVC
+echo '# Code Review' > "$VC_TMP/.devt/state/review.md"
+echo '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer"}' > "$VC_TMP/.devt/state/review.json"
+echo '# impl' > "$VC_TMP/.devt/state/impl-summary.md"
+echo '{"status":"DONE","verdict":"PASS","agent":"programmer"}' > "$VC_TMP/.devt/state/impl-summary.json"
+echo '# test' > "$VC_TMP/.devt/state/test-summary.md"
+echo '{"status":"DONE","verdict":"PASS","agent":"tester"}' > "$VC_TMP/.devt/state/test-summary.json"
+VC_OUT=$(cd "$VC_TMP" && node "$CLI" state validate 2>&1 || true)
+if echo "$VC_OUT" | node -e '
+  let raw = "";
+  process.stdin.on("data", c => raw += c);
+  process.stdin.on("end", () => {
+    try {
+      const data = JSON.parse(raw);
+      const bad = (data.mismatches || []).find(m =>
+        (m.expected_artifact === "review.md" || m.expected_artifact === "review.json") &&
+        m.reason === "no_status_line"
+      );
+      process.exit(bad ? 1 : 0);
+    } catch (e) { process.exit(2); }
+  });
+' 2>/dev/null; then
+  pass "validateConsistency does not flag review.md no_status_line — sidecar routing active end-to-end"
+else
+  fail "validateConsistency still emits no_status_line for review.md — sidecar routing broken"
+  echo "$VC_OUT" | sed 's/^/    /'
+fi
+rm -rf "$VC_TMP"
+
 echo
 echo "== Documentation discipline: no devt-internal version refs =="
 # devt's version range is v0.X.Y; "since v[0-9]" catches future-proofing language.

@@ -216,7 +216,9 @@ Unresolved items needing user input
 ## Confidence
 Overall HIGH/MEDIUM/LOW with reasoning
 
-Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+## Status
+
+DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 ## Provenance
 - Agent: {agent_type}
