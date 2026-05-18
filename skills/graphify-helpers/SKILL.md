@@ -8,11 +8,20 @@ allowed-tools: Bash Read Grep Glob
 
 ## Overview
 
-devt is Node-stdlib-only. Graphify (`pip install graphifyy[mcp]`) is an OPTIONAL
-project-level dependency that supercharges code search by replacing grep's text-match
-results with AST-anchored symbol nodes. When enabled, Graphify reduces token cost on
-typical code-search operations by ~10×; when disabled, devt falls back to grep with
-identical output shape.
+devt is Node-stdlib-only. Graphify (`uv tool install graphifyy[mcp]` or equivalent)
+is an OPTIONAL project-level dependency that supercharges code search by replacing
+grep's text-match results with AST-anchored symbol nodes from `graphify-out/graph.json`.
+When enabled, Graphify reduces token cost on typical code-search operations by ~10×;
+when disabled, devt falls back to grep with identical output shape.
+
+**Architecture note**: devt's CLI wrappers (`node bin/devt-tools.cjs graphify <subcmd>`)
+read `graphify-out/graph.json` **directly** — they do NOT shell out to the upstream
+`graphify` binary at the read path. The binary is needed only to *generate* the graph
+via `graphify update .`; projects with a checked-in or CI-built `graph.json` work
+without the binary on PATH. This decouples devt from upstream CLI flag drift (upstream's
+`graphify query` accepts only `--dfs`/`--budget`/`--context`/`--graph` — no `--json`,
+no `--neighbors`, no `--direction`). The wrappers parse `graph.json` in-process,
+build an adjacency map, and run BFS/lookup natively in Node.
 
 This skill is the canonical wrapper. Other developer skills (codebase-scan,
 code-review-guide, etc.) MUST route through this skill rather than calling Graphify
