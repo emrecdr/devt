@@ -37,6 +37,8 @@ genuine constraint conflict rather than silently working around the rejection.
 
 **Recovering from a guardrail deny.** If a hook denies your tool call (Write, Edit, or Bash), the deny record lands in `.devt/state/preflight-denies.jsonl` as one JSON line. Read the `source` field for the recovery path: `preflight` → add the missing PREFLIGHT line to scratchpad; `bash_destroy` → narrow the destructive scope; `no_verify` → stop and ask the user. Three denies in one session trips the stuck-signal and pauses autonomous mode — don't repeat a denied command.
 
+**Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Read these FIRST during Phase 1 (Isolate) — these are the paths most likely to host the bug's failure mode. REJ tombstones in the Pre-Flight Brief explain past failed approaches; cross-reference your hypotheses. Empty `[]` means no governing docs matched; fall back to following the stack trace from the symptom.
+
 1. Read .devt/rules/coding-standards.md
 2. Read .devt/rules/quality-gates.md
 3. Read CLAUDE.md if exists

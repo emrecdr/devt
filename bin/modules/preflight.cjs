@@ -31,7 +31,7 @@ const path = require("path");
 const memory = require("./memory.cjs");
 const graphify = require("./graphify.cjs");
 const { findProjectRoot, getMergedConfig, isMemoryEnabled } = require("./config.cjs");
-const { atomicWriteFileSync } = require("./io.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 
 const STATE_DIR = path.join(".devt", "state");
 const BRIEF_FILE = "preflight-brief.md";
@@ -39,6 +39,23 @@ const BRIEF_FILE = "preflight-brief.md";
 // Graph staleness threshold for Pre-Flight warnings — balances actionable signal
 // vs noise after every minor commit.
 const STALE_LAG_COMMITS = 10;
+
+// Suggested-reading caps: keep the orchestrator's <scope_hint> payload bounded
+// so a topic with many governing docs can't balloon dispatch prefix bytes.
+const MAX_DIRECT_DEPS = 12;
+const MAX_SUGGESTED_READING = 8;
+
+function dedupeCap(items, cap) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
 
 // Topic extraction — pragmatic keyword + symbol parsing. Not NLP-grade, but
 // deterministic and zero-deps. The intent: pull domain hints, capitalized
@@ -250,7 +267,7 @@ function blastRadius(topic) {
 /**
  * Render the markdown Brief from lane outputs.
  */
-function renderBrief({ task, topic, lanes, governing, triples, blast, report, generatedAt }) {
+function renderBrief({ task, topic, lanes, governing, triples, blast, report, generatedAt, suggestedReading }) {
   const lines = [];
   lines.push(`# Pre-Flight Brief: ${task || "(unspecified task)"}`);
   lines.push("");
@@ -350,6 +367,17 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
     } catch { /* freshness probe is advisory; never fail the Brief */ }
   }
   lines.push("");
+
+  // Suggested Reading Set — paths derived from governing docs' affects_paths
+  // and blast-radius direct_dependents. Consumed by workflows via the JSON
+  // sidecar's `suggested_reading` field for <scope_hint> dispatch injection.
+  if (Array.isArray(suggestedReading) && suggestedReading.length > 0) {
+    lines.push("## Suggested Reading Set (auto-derived)");
+    for (const p of suggestedReading) {
+      lines.push(`- ${p}`);
+    }
+    lines.push("");
+  }
 
   // Cross-Cutting Concerns — surfaces god-nodes / surprising-connections /
   // knowledge-gaps from graphify-out/GRAPH_REPORT.md that overlap the topic.
@@ -509,9 +537,21 @@ function generate(taskText, opts) {
     triples = memory.getSubgraphTriples(governingUnion.map(d => d.id), opts.depth || 2, budget);
   } catch { /* memory layer not initialized — empty triples is the correct degradation */ }
 
+  // Aggregate task-relevant code paths for the orchestrator's <scope_hint>
+  // injection: governing docs' affects_paths (frontmatter-declared) plus
+  // blast-radius direct_dependents (depth-1 incoming). Capped at
+  // MAX_SUGGESTED_READING so the Brief stays scannable and the hint inflates
+  // dispatch prefixes by at most a few hundred bytes.
+  let affectsPaths = [];
+  try {
+    affectsPaths = memory.getAffectsPathsByIds(governingUnion.map(d => d.id));
+  } catch { /* memory layer not initialized — empty list is correct */ }
+  const directDeps = (blast.direct_dependents || []).slice(0, MAX_DIRECT_DEPS);
+  const suggestedReading = dedupeCap([...affectsPaths, ...directDeps], MAX_SUGGESTED_READING);
+
   const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
-  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt });
+  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
 
   // Write atomically to .devt/state/preflight-brief.md
   const root = findProjectRoot();
@@ -520,14 +560,34 @@ function generate(taskText, opts) {
   const dest = path.join(stateDir, BRIEF_FILE);
   atomicWriteFileSync(dest, brief);
 
+  // Emit JSON sidecar for deterministic orchestrator consumption. The .md is
+  // the human-readable surface; .json is the machine interface workflows read
+  // via jq for scope_hint injection without parsing markdown.
+  const sidecarDest = path.join(stateDir, BRIEF_FILE.replace(/\.md$/, ".json"));
+  atomicWriteJsonSync(sidecarDest, {
+    status: "FRESH",
+    topic,
+    governing_ids: governingUnion.map(d => d.id),
+    suggested_reading: suggestedReading,
+    blast: {
+      effect_size: blast.effect_size,
+      source: blast.source,
+      direct_dependents_count: (blast.direct_dependents || []).length,
+    },
+    rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
+    generated_at: generatedAt,
+  });
+
   return {
     brief_path: dest,
+    sidecar_path: sidecarDest,
     topic,
     counts: {
       lane_a: A.length, lane_b: B.length, lane_c: C.length,
       lane_d: D.length, lane_e: E.length, lane_f: F.length,
       governing: governingUnion.length,
       triples: triples.length,
+      suggested_reading: suggestedReading.length,
     },
     blast: {
       effect_size: blast.effect_size,

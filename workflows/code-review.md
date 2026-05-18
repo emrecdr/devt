@@ -82,6 +82,13 @@ MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
 ```
 
+**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
+
+```bash
+SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+```
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -123,7 +130,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scop
 **Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
 Substitute into the `<memory_signal>` block below.
@@ -151,6 +160,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <review_scope>Read .devt/state/review-scope.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
@@ -185,7 +195,9 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 **Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
@@ -206,6 +218,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          are duplicated in workflows/dev-workflow.md verifier dispatch. When the
          CLI shape or block position changes, update both. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
          changes, update the others. -->

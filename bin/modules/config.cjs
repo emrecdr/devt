@@ -102,6 +102,15 @@ const DEFAULTS = {
       complex: 75,
     },
   },
+  // Dispatch scope advisory thresholds — consumed by hooks/dispatch-scope-guard.sh
+  // (PreToolUse on Task). Advisory only: warnings append to
+  // .devt/state/dispatch-warnings.jsonl, the dispatch never blocks. Tune higher
+  // when a project consistently runs over-cap dispatches for legitimate reasons;
+  // lower when the warnings should fire earlier as a discipline signal.
+  dispatch: {
+    max_prompt_bytes: 24576,
+    max_files_hint: 8,
+  },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug
   // contexts, plans, etc. survive a workflow restart and can be inspected for

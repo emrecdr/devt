@@ -45,6 +45,11 @@ const HOOK_PROFILES = {
   // patterns with zero legitimate dev use. Same profile coverage as pre-flight-guard;
   // kill switch via DEVT_DISABLED_HOOKS=bash-guard.sh.
   "bash-guard.sh": ["standard", "full"],
+  // dispatch-scope-guard.sh: PreToolUse on Task — advisory warning when a
+  // subagent dispatch's prompt bytes or scope_hint path count exceeds the
+  // configured cap (.devt/config.json::dispatch.{max_prompt_bytes,max_files_hint}).
+  // Forensic trail appended to .devt/state/dispatch-warnings.jsonl. Never blocks.
+  "dispatch-scope-guard.sh": ["standard", "full"],
 };
 
 function getProfile() {

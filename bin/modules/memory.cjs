@@ -794,6 +794,20 @@ function getDoc(id) {
   });
 }
 
+// Batch fetch of affects_paths for a list of doc IDs. One SQLite call instead
+// of N×getDoc round trips when only the path projection is needed (preflight
+// suggested-reading aggregation). Returns a flat deduped array of patterns.
+function getAffectsPathsByIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  return withDb(db => {
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT DISTINCT pattern FROM affects WHERE doc_id IN (${placeholders}) AND pattern IS NOT NULL`
+    ).all(...ids);
+    return rows.map(r => r.pattern);
+  });
+}
+
 function matchesGlob(filePath, pattern) {
   if (pattern === filePath) return true;
   if (pattern.endsWith("/**")) {
@@ -1835,6 +1849,7 @@ module.exports = {
   rebuildIndex,
   validate,
   getDoc,
+  getAffectsPathsByIds,
   getByPath,
   getBySymbol,
   listActive,

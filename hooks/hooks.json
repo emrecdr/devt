@@ -111,6 +111,17 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" dispatch-scope-guard.sh",
+            "timeout": 3,
+            "async": true
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

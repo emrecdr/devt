@@ -93,6 +93,13 @@ MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
 ```
 
+**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
+
+```bash
+SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+```
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -127,10 +134,12 @@ Initialize iteration tracking:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement iteration=1
 ```
 
-**Orchestrator-prep — read cached memory signal.** Computed once at context_init; re-read here so the agent's initial scan can use it instead of per-doc `memory query` round trips:
+**Orchestrator-prep — read cached signals.** Both `memory_signal_json` and `scope_hint_json` computed once at context_init; re-read here so the agent's initial scan can use pre-resolved data instead of per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
 Dispatch the programmer agent:
@@ -166,6 +175,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
@@ -217,6 +227,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <learning_context>{learning_context from context_init — relevant testing lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
@@ -250,10 +261,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 
 <step name="review" gate="review.md is written with verdict APPROVED or APPROVED_WITH_NOTES">
 
-**Orchestrator-prep — read cached memory signal.** Cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches without per-doc round trips:
+**Orchestrator-prep — read cached signals.** `memory_signal_json` and `scope_hint_json` cached at context_init; re-read both here:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
 Dispatch the code-reviewer agent:
@@ -279,6 +292,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

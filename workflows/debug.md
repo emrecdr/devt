@@ -39,6 +39,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${BUG_DESCRI
 
 This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails.
 
+**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8 — high-leverage starting set for the debugger's hypothesis search:
+
+```bash
+SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+```
+
 <step name="init" gate="project context loaded">
 ## Step 1: Initialize
 
@@ -66,6 +73,7 @@ Write to `.devt/state/debug-context.md`
 Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
+<scope_hint>{scope_hint_json}</scope_hint>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>

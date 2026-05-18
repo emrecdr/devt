@@ -24,6 +24,9 @@ Your tests serve two purposes: verification (does the code work?) and documentat
 BEFORE starting any work, load the following in order:
 
 1-3. Load the three governing-rule sources — `.devt/rules/testing-patterns.md` (test structure, naming, fixtures, conventions), `.devt/rules/quality-gates.md` (exact test commands and pass criteria), and `CLAUDE.md` (project-specific rules and constraints). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<quality_gates>`, `<testing_patterns>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from disk when the block is absent or a specific sub-tag is empty.
+
+**Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Use as the high-signal starting set when deciding which tests to write — these are the paths most likely to need coverage. Empty `[]` means no governing docs matched; fall back to the impl-summary file list.
+
 4. Read `.devt/state/impl-summary.md` — what was implemented and what needs testing
 5. Read `.devt/state/spec.md` if it exists — the spec's "Test Scenarios" section defines expected test coverage. Each scenario should have a corresponding test.
 6. Read the source files listed in the impl-summary — understand the actual implementation

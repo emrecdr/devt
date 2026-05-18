@@ -195,6 +195,15 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json=
 
 The cached value is read back via `state read | jq -r '.memory_signal_json // "{}"'` in each dispatch's orchestrator-prep step below — substituted into the `<memory_signal>` template variable.
 
+**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` array is the deduped union of governing docs' `affects_paths` (frontmatter-declared file globs) plus blast-radius `direct_dependents` (Graphify depth-1 incoming), capped at 8. Cache once at context_init so the block is byte-stable across iterations:
+
+```bash
+SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
+```
+
+The cached value is read back in each dispatch's orchestrator-prep step — substituted into the `<scope_hint>` template variable. When empty (no governing docs, or Graphify disabled, or preflight call failed), the block renders as `[]` and agents fall back to discovering scope from the task description.
+
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
 
 If `--to <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update stop_at_phase=<phase>`
@@ -432,6 +441,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
     </governing_rules>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <spec>Read .devt/state/spec.md (if exists)</spec>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
@@ -460,6 +470,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
       <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
     </guardrails_inline>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <scan_results>Read .devt/state/scan-results.md for affected modules — the plan does not exist yet, so scope from the scan.</scan_results>
     <skill>${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/</skill>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -648,6 +659,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
       <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
     </guardrails_inline>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <scan_results>Read .devt/state/scan-results.md</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Review intended design against architecture rules.</spec>
     <plan>Read .devt/state/plan.md (if exists)</plan>
@@ -727,13 +739,15 @@ When building the programmer's prompt, omit the `<arch_review>` and `<research>`
 
 **Autonomous worktree isolation**: when `workflow.yaml.autonomous_chain` is non-null (i.e. this dispatch is part of an autonomous chain), pass `isolation: "worktree"` to the Task tool so the programmer's edits land in a temporary git worktree. Claude Code auto-cleans the worktree if the agent makes no changes; on success the diff is presented to the user before merge. Prevents an autonomous fix loop from clobbering an unrelated in-flight checkout. For interactive (non-autonomous) invocations, omit `isolation` — direct edits to the user's checkout are the expected behavior.
 
-**Orchestrator-prep — read cached memory signal**. The signal was computed once at context_init and cached in `workflow.yaml::memory_signal_json`. Read it back so the agent doesn't burn per-doc `memory query` round trips on its initial scan:
+**Orchestrator-prep — read cached signals**. Both `memory_signal_json` and `scope_hint_json` were computed once at context_init and cached in `workflow.yaml`. Read them back so the agent's initial scan can use pre-resolved data instead of per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
-Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. The signal is keyed on the task description so it's stable across retry iterations within a workflow run — same byte content cache-hits across dispatches.
+Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. Both blocks are byte-stable across retry iterations within a workflow run, so the cache hits across dispatches.
 
 Dispatch the programmer agent:
 
@@ -769,6 +783,13 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <!-- KEEP IN SYNC: the <scope_hint> block + its context_init cache step are
+         duplicated across programmer + tester + code-reviewer + verifier +
+         researcher + architect dispatches in dev-workflow.md, code-review.md,
+         quick-implement.md, debug.md, research-task.md. Cached once at
+         context_init from preflight-brief.json::suggested_reading. Empty `[]`
+         when preflight had no governing docs or Graphify is disabled. -->
+    <scope_hint>{scope_hint_json}</scope_hint>
     <!-- STANDARD+: include scan_results and plan -->
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
@@ -849,6 +870,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use the "Test Scenarios" section as required coverage targets.</spec>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
@@ -930,13 +952,15 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify stat
 
 _Skip this step if `review` is listed in `skipped_phases` from workflow state._
 
-**Orchestrator-prep — read cached memory signal**. The signal was cached at context_init; re-read here so the reviewer can spot REJ-tombstone matches and ADR violations without per-doc round trips:
+**Orchestrator-prep — read cached signals**. `memory_signal_json` and `scope_hint_json` were cached at context_init; re-read both here so the reviewer can spot REJ-tombstone matches, ADR violations, and the implementation's likely paths without per-doc round trips:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
-Substitute into the `<memory_signal>` block below.
+Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below.
 
 Dispatch the code-reviewer agent:
 
@@ -960,6 +984,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
          in dev-workflow.md, code-review.md, and quick-implement.md. When the
          CLI shape or block position changes, update all five. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
          programmer and code-reviewer dispatch templates. When one changes,
          update the other. inline_guardrails comes from the init payload;
@@ -1062,13 +1087,15 @@ For the `ok=true, pass=false` constraint-violation case, route on the iteration 
 
 If BOTH gates pass, proceed to the memory_signal prep and LLM verifier dispatch below. The verifier's job under deterministic-gating narrows to **semantic verification** — does the implementation solve the user's task? — rather than re-checking test results and gate execution that the grader already proved.
 
-**Orchestrator-prep — read cached memory signal**. The signal was cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
+**Orchestrator-prep — read cached signals**. `memory_signal_json` and `scope_hint_json` were cached at context_init; re-read both here so the verifier doesn't burn per-doc round trips or rediscover the implementation's likely paths:
 
 ```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
+MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 ```
 
-Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
+Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. If `.devt/memory/` is empty or either query fails, the `{}`/`[]` fallbacks keep the blocks well-formed and the agent falls back to fresh queries.
 
 If all three artifacts exist, dispatch the verifier agent:
 
@@ -1091,6 +1118,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          are duplicated in workflows/code-review.md verifier dispatch. When the
          CLI shape or block position changes, update both. -->
     <memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one

@@ -36,6 +36,9 @@ Populate the `links:` field of your recommendations with related ADR/CON/FLOW ID
 BEFORE researching:
 
 1. **Governing rules (project)** — If the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<coding_standards>`, `<architecture>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads of `CLAUDE.md` and `.devt/rules/{coding-standards,architecture}.md`. Only Read from disk when the block is absent or a specific sub-tag is empty.
+
+   **Scope hint preferred over discovery.** If the dispatch contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Read these FIRST when looking for existing patterns to recommend or pitfalls to flag. Empty `[]` means no governing docs matched; fall back to broad Glob/Grep discovery.
+
 2. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — validate proposals against universal rules
 3. Read .devt/state/decisions.md if it exists — respect user decisions from /devt:clarify
 4. Read the task description carefully — understand WHAT needs to be built

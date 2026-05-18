@@ -32,9 +32,13 @@ Before dispatching the researcher agent, read `resolved_skills.researcher` from 
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=research phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
+SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}"
 ```
 
 The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
+
+The fourth call caches `scope_hint_json` for the researcher dispatch — paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
 
 Read .devt/rules/ for project conventions.
 Read CLAUDE.md if it exists.
@@ -70,6 +74,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
   <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
 </governing_rules>
+<scope_hint>{scope_hint_json}</scope_hint>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>
 <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>

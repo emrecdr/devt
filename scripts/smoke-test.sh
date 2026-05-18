@@ -917,6 +917,27 @@ else
   fail "preflight mark-stale did not flip status"
 fi
 
+# preflight-brief.json sidecar: every generate must write both .md and .json
+# alongside, with valid suggested_reading array and matching topic — the JSON
+# is the deterministic interface workflows read via jq for scope_hint injection.
+node "$CLI" preflight generate "test sidecar emission" >/dev/null 2>&1
+if [ -f .devt/state/preflight-brief.json ]; then
+  pass "preflight-brief.json sidecar created alongside .md"
+  if node -e "
+    const j = JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));
+    if (!Array.isArray(j.suggested_reading)) process.exit(1);
+    if (!Array.isArray(j.governing_ids)) process.exit(1);
+    if (typeof j.status !== 'string') process.exit(1);
+    if (!j.blast || typeof j.blast.direct_dependents_count !== 'number') process.exit(1);
+  " 2>/dev/null; then
+    pass "preflight-brief.json has expected shape (suggested_reading, governing_ids, status, blast.*)"
+  else
+    fail "preflight-brief.json shape validation failed"
+  fi
+else
+  fail "preflight-brief.json sidecar not written"
+fi
+
 # MCP server SELECT-only validator self-test
 if node "$ROOT/bin/devt-memory-mcp.cjs" --self-test >/dev/null 2>&1; then
   pass "devt-memory-mcp SELECT-only validator (15/15)"
@@ -4011,6 +4032,109 @@ if grep -q "Memory signal preferred" "$ROOT/agents/verifier.md"; then
   pass "agents/verifier.md instructs preferring <memory_signal> over fresh queries"
 else
   fail "agents/verifier.md missing 'Memory signal preferred' guidance"
+fi
+
+# scope_hint dispatch coverage — every workflow that auto-fires preflight must
+# also cache scope_hint_json at context_init and inject <scope_hint> into
+# at least one dispatch. Coverage matches dev/quick/code-review/debug/research.
+SCOPE_HINT_WORKFLOWS="dev-workflow.md quick-implement.md code-review.md debug.md research-task.md"
+for WF in $SCOPE_HINT_WORKFLOWS; do
+  if grep -q 'scope_hint_json=' "$ROOT/workflows/$WF"; then
+    pass "$WF caches scope_hint_json at context_init"
+  else
+    fail "$WF missing scope_hint_json cache step"
+  fi
+  if grep -q '<scope_hint>' "$ROOT/workflows/$WF"; then
+    pass "$WF contains <scope_hint> in at least one dispatch"
+  else
+    fail "$WF missing <scope_hint> dispatch injection"
+  fi
+done
+
+# scope_hint agent guidance — agents that receive <scope_hint> blocks must
+# instruct preferring it over discovery (mirrors memory_signal pattern).
+SCOPE_HINT_AGENTS="programmer.md tester.md code-reviewer.md verifier.md researcher.md architect.md debugger.md"
+for A in $SCOPE_HINT_AGENTS; do
+  if grep -q "Scope hint preferred" "$ROOT/agents/$A"; then
+    pass "agents/$A instructs preferring <scope_hint> over discovery"
+  else
+    fail "agents/$A missing 'Scope hint preferred' guidance"
+  fi
+done
+
+# dispatch-scope-guard hook: registered in hooks.json + run-hook.js profile,
+# behaves as advisory (never blocks), appends to dispatch-warnings.jsonl when
+# over cap, silent under cap.
+if grep -q "dispatch-scope-guard.sh" "$ROOT/hooks/hooks.json"; then
+  pass "dispatch-scope-guard registered in hooks.json (PreToolUse matcher=Task)"
+else
+  fail "dispatch-scope-guard.sh not registered in hooks.json"
+fi
+if grep -q "dispatch-scope-guard.sh" "$ROOT/hooks/run-hook.js"; then
+  pass "dispatch-scope-guard.sh declared in run-hook.js profile registry"
+else
+  fail "dispatch-scope-guard.sh missing from run-hook.js HOOK_PROFILES"
+fi
+# End-to-end: over-cap dispatch fires warning + JSONL record + non-blocking exit.
+# JSON payload built via Node to avoid shell-escape fragility — printf-based
+# heredocs in a `bash -c` context silently mangle JSON quoting and the hook
+# returns empty when its JSON.parse fails on the input.
+HOOK_TMP=$(mktemp -d)
+mkdir -p "$HOOK_TMP/.devt/state"
+printf '{"dispatch":{"max_prompt_bytes":50,"max_files_hint":1}}' > "$HOOK_TMP/.devt/config.json"
+OVER_INPUT=$(node -e '
+  const big = "x".repeat(80);
+  process.stdout.write(JSON.stringify({
+    tool_name: "Task",
+    tool_input: {
+      subagent_type: "devt:programmer",
+      prompt: `<scope_hint>["a","b","c"]</scope_hint><task>${big}</task>`,
+    },
+  }));
+')
+HOOK_OUT=$(cd "$HOOK_TMP" && printf '%s' "$OVER_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+if echo "$HOOK_OUT" | grep -q '"additionalContext"' && echo "$HOOK_OUT" | grep -q 'DISPATCH-SCOPE'; then
+  pass "dispatch-scope-guard emits PreToolUse additionalContext when over cap"
+else
+  fail "dispatch-scope-guard did not emit expected warning context (got: $HOOK_OUT)"
+fi
+if [ -f "$HOOK_TMP/.devt/state/dispatch-warnings.jsonl" ] && grep -q 'dispatch_scope' "$HOOK_TMP/.devt/state/dispatch-warnings.jsonl"; then
+  pass "dispatch-scope-guard appends forensic record to dispatch-warnings.jsonl"
+else
+  fail "dispatch-scope-guard did not write forensic JSONL record"
+fi
+UNDER_INPUT=$(node -e '
+  process.stdout.write(JSON.stringify({
+    tool_name: "Task",
+    tool_input: { subagent_type: "x", prompt: "<scope_hint>[]</scope_hint><task>tiny</task>" },
+  }));
+')
+UNDER_OUT=$(cd "$HOOK_TMP" && printf '%s' "$UNDER_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+if [ -z "$UNDER_OUT" ]; then
+  pass "dispatch-scope-guard silent under cap (no false positives)"
+else
+  fail "dispatch-scope-guard produced output under cap: $UNDER_OUT"
+fi
+SKIP_INPUT=$(node -e '
+  process.stdout.write(JSON.stringify({
+    tool_name: "Edit",
+    tool_input: { file_path: "foo.txt" },
+  }));
+')
+SKIP_OUT=$(cd "$HOOK_TMP" && printf '%s' "$SKIP_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+if [ -z "$SKIP_OUT" ]; then
+  pass "dispatch-scope-guard ignores non-Task tool calls"
+else
+  fail "dispatch-scope-guard fired on non-Task tool: $SKIP_OUT"
+fi
+rm -rf "$HOOK_TMP"
+
+# config DEFAULTS.dispatch present with both caps
+DISPATCH_CFG=$(node "$CLI" config get 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(JSON.stringify(j.dispatch||{}))}catch{process.exit(1)}})")
+if echo "$DISPATCH_CFG" | grep -q '"max_prompt_bytes"' && echo "$DISPATCH_CFG" | grep -q '"max_files_hint"'; then
+  pass "config DEFAULTS.dispatch has max_prompt_bytes + max_files_hint"
+else
+  fail "config DEFAULTS.dispatch missing required keys (got: $DISPATCH_CFG)"
 fi
 
 # C2: config DEFAULTS.preflight.lane_budget
