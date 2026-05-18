@@ -314,7 +314,7 @@ Checks: config valid, state directory exists, hooks registered, required files p
 
 The memory layer is the permanent knowledge surface — distinct from per-workflow ephemeral state (`.devt/state/decisions.md`). It holds **all five doc types** under one canonical store: ADR-xxx (decisions), CON-xxx (concepts/domain models), FLOW-xxx (business processes), REJ-xxx (rejected ideas / tombstones), and LES-xxx (operational lessons — "when X happens, do Y"). Lessons live in `.devt/memory/lessons/` alongside the architectural docs and are FTS5-indexed in the same `index.db`.
 
-Phase 1 ships the data layer — file format, FTS5 unified index, query CLI. Agent integrations (Topic Pre-Flight Brief auto-fired from dev workflows, curator-gated promotion of session DECs to permanent ADRs, Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence, claude-mem ⚖️ decision and 🔵 discovery tag harvest, vendored MCP query layer for read-only agent access, PreToolUse pre-flight enforcement) land in Phases 2-4.
+The memory layer integrates with: Topic Pre-Flight Brief auto-fired from dev workflows; curator-gated promotion of session DECs to permanent ADRs; Graphify symbol anchoring with EXTRACTED/INFERRED/AMBIGUOUS confidence (read directly from `graphify-out/graph.json`); claude-mem observation harvest via the `mcp__plugin_claude-mem_mcp-search__observation_search` MCP tool (orchestrator-mediated; persisted to `.devt/state/claude-mem-harvest.md` then folded into `_suggestions.md`); vendored MCP query layer (`bin/devt-memory-mcp.cjs`) for read-only agent access; and PreToolUse pre-flight enforcement.
 
 ```bash
 /devt:memory init                       # scaffold .devt/memory/{decisions,concepts,flows,rejected}/ + first FTS5 index

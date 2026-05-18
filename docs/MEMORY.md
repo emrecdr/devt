@@ -159,7 +159,6 @@ node bin/devt-tools.cjs memory diff <root-a> <root-b>  # added/removed/changed a
 node bin/devt-tools.cjs memory suggest           # writes _suggestions.md
 node bin/devt-tools.cjs discovery harvest        # full discovery sweep
 node bin/devt-tools.cjs discovery wiki-links     # just wiki-link enrichment
-node bin/devt-tools.cjs discovery claude-mem-status
 
 # Pre-Flight
 node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius
@@ -238,11 +237,10 @@ Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Regis
 
 The curator agent gates ALL writes to `.devt/memory/`. Discovery engine (`bin/modules/discovery.cjs`) harvests:
 
-- **claude-mem ⚖️ decision tags** → ADR/REJ candidates
-- **claude-mem 🔵 discovery tags** → Concept/Lesson candidates
 - **`#KNOWLEDGE-CANDIDATE` scratchpad tags** → typed candidates per the inline tag
 - **`.devt/state/decisions.md` DEC entries** → ADR candidates
 - **graphify god-nodes** (when graphify is ready) → Concept candidates for the highest-fanin entities in `graphify-out/GRAPH_REPORT.md`, filtered to skip symbols already covered by an active CON/ADR
+- **claude-mem observations via MCP** (when the claude-mem Claude Code plugin is installed) → ADR/Concept candidates. The dev / quick-implement / lesson-extraction workflows instruct the orchestrator to call `mcp__plugin_claude-mem_mcp-search__observation_search` with the workflow task as query; the response is persisted to `.devt/state/claude-mem-harvest.md` in the canonical format `- [decision|discovery] <title>: <body>`. Only `obs_type` values `decision` (⚖️ → ADR/REJ candidates) and `discovery` (🔵 → Concept/Lesson candidates) are promotion-eligible; the other four `obs_type` values upstream uses (`bugfix`, `feature`, `refactor`, `change`) are session telemetry and filtered out. `discovery.cjs::harvestClaudeMemFromMcp()` reads the file and folds its observations into `_suggestions.md`.
 
 All candidates flow into `.devt/memory/_suggestions.md` (NEVER auto-promoted). Curator presents each via `AskUserQuestion` with the FULL original reasoning verbatim — no AI summarization. Only on user approval (Promote active | Promote candidate | Reject as REJ | Defer | Edit before promoting) does the markdown file get written.
 
