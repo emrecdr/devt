@@ -21,8 +21,13 @@
 
 const fs = require("fs");
 const path = require("path");
-const { safeJsonParse } = require("./security.cjs");
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
+// Sub-modules lazy-require this file inside their function bodies (for shared
+// utilities like withDb / parseYamlSubset / serializeFrontmatter), so requiring
+// them here at load time is safe — their top-level eval has no dependency on
+// memory.cjs yet.
+const { getLinks, getSubgraphTriples, getBacklinks, findOrphans, findStaleLinks } = require("./memory-graph.cjs");
+const { resolveExportPath, resolveImportPath, exportBundle, importBundle } = require("./memory-bundle.cjs");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -978,69 +983,9 @@ function queryFTS(terms, opts) {
   });
 }
 
-function getLinks(docId, depth) {
-  const maxDepth = Math.max(1, Math.min(depth || 1, 5));
-  return withDb(db => {
-    const visited = new Set([docId]);
-    const result = [];
-    let frontier = [docId];
-    for (let d = 1; d <= maxDepth; d++) {
-      const next = [];
-      const stmt = db.prepare("SELECT target_id, link_type FROM links WHERE source_id = ?");
-      for (const id of frontier) {
-        const links = stmt.all(id);
-        for (const l of links) {
-          if (visited.has(l.target_id)) continue;
-          visited.add(l.target_id);
-          const targetDoc = db.prepare("SELECT * FROM documents WHERE id = ?").get(l.target_id);
-          result.push({ from: id, target_id: l.target_id, link_type: l.link_type, depth: d, target_exists: !!targetDoc, target: targetDoc || null });
-          next.push(l.target_id);
-        }
-      }
-      frontier = next;
-      if (frontier.length === 0) break;
-    }
-    return result;
-  });
-}
-
-/**
- * Flatten transitive link expansion into `{source, predicate, target}` triples
- * for the Pre-Flight Brief subgraph section.
- *
- * Reuses `getLinks` so depth-capping, visited-set tracking, and the existing
- * `links` table query are inherited unchanged. The output is deduplicated
- * across seeds and capped at `maxTriples` (default 50) to keep the Brief
- * scannable — agents that need fuller graph data should call `getLinks`
- * directly via the MCP query layer.
- *
- * Triples come back sorted by `source` then `target` for byte-stable Brief
- * output (the renderer relies on this for cache-eligible re-dispatches).
- */
-function getSubgraphTriples(seedIds, depth = 2, maxTriples = 50) {
-  if (!Array.isArray(seedIds) || seedIds.length === 0) return [];
-  const seen = new Set();
-  const triples = [];
-  for (const seedId of seedIds) {
-    let links;
-    try { links = getLinks(seedId, depth); } catch { links = []; }
-    if (!Array.isArray(links)) continue;
-    for (const row of links) {
-      const source = row.from;
-      const predicate = row.link_type;
-      const target = row.target_id;
-      if (!source || !predicate || !target) continue;
-      const key = `${source}|${predicate}|${target}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      triples.push({ source, predicate, target });
-      if (triples.length >= maxTriples) break;
-    }
-    if (triples.length >= maxTriples) break;
-  }
-  triples.sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
-  return triples;
-}
+// Graph traversal lives in ./memory-graph.cjs (getLinks, getSubgraphTriples,
+// getBacklinks, findOrphans, findStaleLinks). Re-exported below for the
+// existing public API; consumers don't need to know the split.
 
 function listDocs(docType) {
   return withDb(db => {
@@ -1051,58 +996,9 @@ function listDocs(docType) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Phase 2 helpers — backlinks, orphans, stale-links, affects-symbol
-// ---------------------------------------------------------------------------
-
-/**
- * Find all docs that link TO the given doc_id. Load-bearing for safe ADR
- * supersession: before retiring ADR-007, see what depends on it.
- */
-function getBacklinks(docId) {
-  return withDb(db => db.prepare(`
-    SELECT l.source_id, l.link_type, d.title AS source_title, d.doc_type AS source_type, d.status AS source_status, d.file_path
-    FROM links l JOIN documents d ON d.id = l.source_id
-    WHERE l.target_id = ?
-    ORDER BY d.doc_type, d.id
-  `).all(docId));
-}
-
-/**
- * Detect docs that have NO incoming links AND no outgoing links — possibly stale,
- * surface for curator review.
- */
-function findOrphans() {
-  return withDb(db => db.prepare(`
-    SELECT d.id, d.title, d.doc_type, d.status, d.file_path
-    FROM documents d
-    WHERE NOT EXISTS (SELECT 1 FROM links WHERE source_id = d.id)
-      AND NOT EXISTS (SELECT 1 FROM links WHERE target_id = d.id)
-      AND d.status IN ('active', 'candidate')
-    ORDER BY d.doc_type, d.id
-  `).all());
-}
-
-/**
- * Detect links pointing to non-existent target docs (forward refs that never got
- * created, OR refs to docs that were deleted).
- */
-function findStaleLinks() {
-  return withDb(db => db.prepare(`
-    SELECT l.source_id, l.target_id, l.link_type,
-           d.title AS source_title, d.file_path AS source_path
-    FROM links l
-    JOIN documents d ON d.id = l.source_id
-    LEFT JOIN documents t ON t.id = l.target_id
-    WHERE t.id IS NULL
-    ORDER BY l.source_id, l.target_id
-  `).all());
-}
-
-/**
- * Symbol-anchored docs lookup. Routes through graphify.cjs when available;
- * otherwise returns a payload with degraded=true so callers fall back to grep.
- */
+// affectsSymbol below — symbol-anchored docs lookup. Routes through
+// graphify.cjs when available; otherwise returns degraded=true so callers
+// fall back to grep.
 // ---------------------------------------------------------------------------
 // Portable bundle export / import
 //
@@ -1122,100 +1018,7 @@ function findStaleLinks() {
 // --prefix=X-: remap every id to X-ORIGINAL_ID (multi-source bundling)
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve a user-supplied --out= path. Rules:
- * - relative paths: resolved against project root, MUST stay inside project root
- * - absolute paths: allowed (user explicitly chose external destination)
- * - reject `..` segments after normalization on relative paths
- * - reject null bytes
- */
-function resolveExportPath(p) {
-  if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
-    throw new Error("--out path is invalid (empty or too long)");
-  }
-  if (p.includes("\0")) throw new Error("--out path contains null bytes");
-  if (path.isAbsolute(p)) return path.normalize(p);
-  const root = findProjectRoot();
-  const joined = path.normalize(path.join(root, p));
-  // Containment check — joined must remain inside (or equal to) the project root
-  const rel = path.relative(root, joined);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("--out path resolves outside project root after normalization");
-  }
-  return joined;
-}
-
-/**
- * Resolve a user-supplied bundle path for import.
- * - relative resolved against cwd
- * - absolute allowed
- * - reject null bytes; reject if file doesn't exist
- */
-function resolveImportPath(p) {
-  if (typeof p !== "string" || p.length === 0 || p.length > 4096) {
-    throw new Error("import path is invalid (empty or too long)");
-  }
-  if (p.includes("\0")) throw new Error("import path contains null bytes");
-  const resolved = path.isAbsolute(p) ? path.normalize(p) : path.normalize(path.join(process.cwd(), p));
-  if (!fs.existsSync(resolved)) throw new Error(`bundle file not found: ${resolved}`);
-  return resolved;
-}
-
-function readDocFile(filePath) {
-  const content = fs.readFileSync(filePath, "utf8");
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fmMatch) return null;
-  const fm = parseYamlSubset(fmMatch[1]);
-  const body = fmMatch[2];
-  return { frontmatter: fm, body };
-}
-
-function exportBundle(opts) {
-  opts = opts || {};
-  const includeTypes = opts.includeTypes || DOC_TYPES.slice();
-  // By default, bundle ONLY the project-local root. Shared roots are
-  // typically maintained as their own repos with their own bundling — exporting
-  // them here would be a copy that drifts from upstream. Pass allRoots:true to
-  // bundle the union (last-wins-deduped) for multi-root archival use cases.
-  const allRoots = !!opts.allRoots;
-  const roots = allRoots ? getMemoryRoots() : [getMemoryRoot()];
-  const docsById = new Map();
-  for (const root of roots) {
-    if (!fs.existsSync(root)) continue;
-    for (const docType of includeTypes) {
-      const subdir = getSubdirPathFor(root, docType);
-      if (!fs.existsSync(subdir)) continue;
-      for (const entry of fs.readdirSync(subdir)) {
-        if (entry.startsWith("_")) continue;
-        if (!entry.endsWith(".md")) continue;
-        const full = path.join(subdir, entry);
-        const parsed = readDocFile(full);
-        if (!parsed || !parsed.frontmatter || !parsed.frontmatter.id) continue;
-        // Last-wins: later root in the list overwrites earlier. Project-local
-        // is always last (per getMemoryRoots), so it wins.
-        docsById.set(parsed.frontmatter.id, {
-          id: parsed.frontmatter.id,
-          doc_type: docType,
-          filename: entry,
-          source_root: root,
-          frontmatter: parsed.frontmatter,
-          body: parsed.body,
-        });
-      }
-    }
-  }
-  const docs = Array.from(docsById.values()).sort((a, b) => a.id.localeCompare(b.id));
-  return {
-    schema_version: SCHEMA_VERSION,
-    exported_at: new Date().toISOString(),
-    exported_from: findProjectRoot(),
-    exported_roots: roots,
-    all_roots_mode: allRoots,
-    doc_count: docs.length,
-    include_types: includeTypes,
-    docs,
-  };
-}
+// Export/import bundle operations live in ./memory-bundle.cjs.
 
 function serializeFrontmatter(fm) {
   // Subset YAML emitter — handles strings, numbers, booleans, arrays of scalars,
@@ -1253,127 +1056,6 @@ function serializeScalar(v) {
   const s = String(v);
   if (/[:#]|^-|^\s|\s$/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
   return s;
-}
-
-function importBundle(bundlePath, opts) {
-  opts = opts || {};
-  const overwrite = !!opts.overwrite;
-  const prefix = opts.prefix || null;
-
-  let bundle;
-  let raw;
-  try {
-    raw = fs.readFileSync(bundlePath, "utf8");
-  } catch (e) {
-    throw new Error(`bundle file unreadable: ${e.message}`);
-  }
-  // 50MB cap — legitimate bundles can aggregate hundreds of ADR docs.
-  const parseResult = safeJsonParse(raw, "bundle file", 50 * 1024 * 1024);
-  if (!parseResult.ok) {
-    throw new Error(`bundle file unreadable: ${parseResult.error}`);
-  }
-  bundle = parseResult.value;
-  if (!bundle || !Array.isArray(bundle.docs)) {
-    throw new Error("bundle missing required `docs` array");
-  }
-  if (bundle.schema_version && bundle.schema_version !== SCHEMA_VERSION) {
-    throw new Error(`bundle schema_version=${bundle.schema_version} does not match current SCHEMA_VERSION=${SCHEMA_VERSION}`);
-  }
-  // Validate prefix shape: alphanumeric + dash, ≤16 chars, ends with -
-  if (prefix !== null) {
-    if (!/^[A-Z][A-Z0-9]{0,14}-$/.test(prefix)) {
-      throw new Error("--prefix must match /^[A-Z][A-Z0-9]{0,14}-$/ (e.g. 'TEAM-' or 'OSS-')");
-    }
-  }
-
-  const created = [];
-  const skipped = [];
-  const overwritten = [];
-  const errors = [];
-
-  for (const doc of bundle.docs) {
-    try {
-      if (!doc || !doc.id || !doc.doc_type || !doc.frontmatter || typeof doc.body !== "string") {
-        errors.push({ id: (doc && doc.id) || "(unknown)", reason: "doc missing required fields" });
-        continue;
-      }
-      if (!DOC_TYPES.includes(doc.doc_type)) {
-        errors.push({ id: doc.id, reason: `unknown doc_type: ${doc.doc_type}` });
-        continue;
-      }
-
-      // Compute the new id (with optional prefix remap) and corresponding filename
-      const originalId = doc.id;
-      const newId = prefix ? `${prefix}${originalId}` : originalId;
-      const fm = { ...doc.frontmatter, id: newId };
-      // Validate the resulting frontmatter. validateFrontmatter returns an array of
-      // {filePath, error} entries (truthy when invalid). When a prefix is applied,
-      // the ID pattern check is relaxed because the prefix is by design a namespace
-      // marker that breaks the canonical ADR-NNN / CON-NNN / FLOW-NNN / REJ-NNN shape.
-      const validationErrors = validateFrontmatter(fm, "(bundle import)");
-      const filteredErrors = prefix
-        ? validationErrors.filter(e => !/does not match pattern/.test(e.error || ""))
-        : validationErrors;
-      if (filteredErrors.length > 0) {
-        errors.push({ id: newId, reason: "frontmatter invalid: " + filteredErrors.map(e => e.error || String(e)).join("; ") });
-        continue;
-      }
-
-      const subdir = getSubdirPath(doc.doc_type);
-      if (!fs.existsSync(subdir)) fs.mkdirSync(subdir, { recursive: true });
-
-      // Filename: derive from original or use newId-slug (lowercase, dashes)
-      const baseName = (doc.filename && !prefix) ? doc.filename : `${newId}.md`;
-      // Reject filenames with separators (defense against bundle-supplied paths)
-      if (baseName.includes("/") || baseName.includes("\\") || baseName.includes("..")) {
-        errors.push({ id: newId, reason: `unsafe filename in bundle: ${baseName}` });
-        continue;
-      }
-      const filePath = path.join(subdir, baseName);
-
-      if (fs.existsSync(filePath)) {
-        if (!overwrite) {
-          skipped.push({ id: newId, file: filePath, reason: "exists; pass --overwrite to replace" });
-          continue;
-        }
-        overwritten.push({ id: newId, file: filePath });
-      } else {
-        created.push({ id: newId, file: filePath });
-      }
-
-      const fmYaml = serializeFrontmatter(fm);
-      const body = doc.body.startsWith("\n") ? doc.body : "\n" + doc.body;
-      const md = `---\n${fmYaml}\n---${body}`;
-      atomicWriteFileSync(filePath, md);
-    } catch (e) {
-      errors.push({ id: (doc && doc.id) || "(unknown)", reason: e.message });
-    }
-  }
-
-  // Rebuild index after any successful writes
-  if (created.length + overwritten.length > 0) {
-    try { rebuildIndex(); } catch (e) {
-      errors.push({ id: "(index rebuild)", reason: e.message });
-    }
-  }
-
-  return {
-    bundle_from: bundle.exported_from || null,
-    bundle_exported_at: bundle.exported_at || null,
-    schema_version: bundle.schema_version || null,
-    prefix_applied: prefix,
-    overwrite_mode: overwrite,
-    counts: {
-      created: created.length,
-      overwritten: overwritten.length,
-      skipped: skipped.length,
-      errors: errors.length,
-    },
-    created,
-    overwritten,
-    skipped,
-    errors,
-  };
 }
 
 function affectsSymbol(symbol) {
@@ -1867,7 +1549,6 @@ module.exports = {
   getSubdirPathFor,
   getDbPath,
   getSubdirPath,
-  // Phase 2 additions
   getBacklinks,
   findOrphans,
   findStaleLinks,
@@ -1877,8 +1558,19 @@ module.exports = {
   CONFIDENCE_VALUES,
   LINK_TYPES,
   SCHEMA_VERSION,
-  // Option 2 (MCP write surface)
   upsertDoc,
   ID_PATTERN_BY_TYPE,
   SUBDIR_BY_TYPE,
+  // Exported so sibling sub-modules (memory-graph.cjs, memory-bundle.cjs) can
+  // lazy-require them for shared DB access, YAML parsing, project-root lookup,
+  // and frontmatter serialization without duplicating logic across files.
+  withDb,
+  findProjectRoot,
+  parseYamlSubset,
+  serializeFrontmatter,
+  // Bundle re-exports (live in ./memory-bundle.cjs).
+  resolveExportPath,
+  resolveImportPath,
+  exportBundle,
+  importBundle,
 };
