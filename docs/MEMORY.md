@@ -1,7 +1,6 @@
 # The Memory Layer
 
 > Comprehensive guide to devt's two-layer knowledge persistence model.
-> Last updated for v0.28.0 (lessons consolidation: operational lessons gain a 5th doc type `LES-NNNN` in `.devt/memory/lessons/`, alongside ADR/CON/FLOW/REJ. Legacy `learning-playbook.md` + `lessons.db` + `bin/modules/semantic.cjs` removed. Single FTS5 index, single curation skill, single approval gate.).
 
 devt persists structured knowledge across **two distinct layers**, each with a different lifetime and write authority. Understanding which layer to use for which fact is critical — putting an architectural decision in `.devt/state/` (ephemeral) or a transient debug note in `.devt/memory/` (permanent) is the most common authoring mistake.
 
@@ -45,7 +44,7 @@ Every ADR/Concept/Flow/REJ markdown file starts with strict YAML frontmatter:
 ---
 id: ADR-001                    # required, unique across all four folders
 title: "Switch to Argon2"      # required
-doc_type: decision             # required: decision | concept | flow | rejected
+doc_type: decision             # required: decision | concept | flow | rejected | lesson
 domain: security               # optional, free-form tag
 status: active                 # required: candidate | active | superseded | rejected
 confidence: explicit           # required: verified | explicit | inferred | observed | speculative
@@ -315,7 +314,7 @@ When `memory.paths` is set:
 
 ### Backward compat
 
-When `memory.paths` is `null` or absent (the default), devt uses `[<projectRoot>/.devt/memory]` as a single root — exactly the v0.16.0–behavior. Existing projects see zero change.
+When `memory.paths` is `null` or absent (the default), devt uses `[<projectRoot>/.devt/memory]` as a single root. Existing projects see zero change.
 
 ### Conflict reporting
 
@@ -376,9 +375,6 @@ The curator agent (memory-curation skill) writes promoted ADRs/Concepts/Flows/RE
 ```
 
 Precedence: rightmost (project-local) wins, leftmost loses. Mid-tier overrides global; project overrides mid-tier.
-
-## Version Notes
-
 
 ## Related Documentation
 

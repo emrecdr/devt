@@ -673,6 +673,7 @@ const RESET_EXEMPT = new Set([
   ARCHIVE_DIR,                          // ring buffer survives reset (rolls off via pruneArchive)
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
+  "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
 ]);
 
 // Get configured archive ring-buffer size (state.archive_runs). Reads via

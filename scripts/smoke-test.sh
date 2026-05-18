@@ -4500,5 +4500,39 @@ else
 fi
 
 echo
+echo "== Documentation discipline: no devt-internal version refs =="
+# devt's version range is v0.X.Y; "since v[0-9]" catches future-proofing language.
+# Exclusions: CHANGELOG.md (release notes are the canonical home for version refs)
+# and docs/superpowers/plans/ (immutable historical plan archives).
+VERSION_REF_HITS=$(grep -rnE "v0\.[0-9]+\.[0-9]+|\bsince v[0-9]" \
+  "$ROOT/agents" "$ROOT/workflows" "$ROOT/skills" "$ROOT/docs" \
+  --include="*.md" \
+  2>/dev/null | grep -vE "/docs/superpowers/plans/|/CHANGELOG\.md" || true)
+if [ -z "$VERSION_REF_HITS" ]; then
+  pass "no devt-internal version refs in agents/workflows/skills/docs"
+else
+  fail "devt-internal version refs found (move to CHANGELOG.md):"
+  echo "$VERSION_REF_HITS" | sed 's/^/    /'
+fi
+
+echo
+echo "== RESET_EXEMPT preserves forensic JSONL files =="
+RESET_TMP=$(mktemp -d)
+mkdir -p "$RESET_TMP/.devt/state" "$RESET_TMP/.git"
+echo '{}' > "$RESET_TMP/.devt/config.json"
+echo '{"source":"preflight","ts":1}' > "$RESET_TMP/.devt/state/preflight-denies.jsonl"
+echo '{"source":"dispatch_scope","ts":1}' > "$RESET_TMP/.devt/state/dispatch-warnings.jsonl"
+(cd "$RESET_TMP" && node "$CLI" state reset >/dev/null 2>&1) || true
+RESET_OK=1
+[ -f "$RESET_TMP/.devt/state/preflight-denies.jsonl" ] || RESET_OK=0
+[ -f "$RESET_TMP/.devt/state/dispatch-warnings.jsonl" ] || RESET_OK=0
+if [ $RESET_OK -eq 1 ]; then
+  pass "preflight-denies.jsonl + dispatch-warnings.jsonl survive state reset"
+else
+  fail "RESET_EXEMPT missing forensic JSONL — files lost on state reset"
+fi
+rm -rf "$RESET_TMP"
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
