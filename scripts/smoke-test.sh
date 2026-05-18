@@ -926,6 +926,15 @@ if [ -f .devt/state/preflight-brief.json ]; then
   else
     fail "preflight-brief.json shape validation failed"
   fi
+  if node -e "
+    const j = JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));
+    if (!j.graph_stats || !['empty','sparse','dense'].includes(j.graph_stats.trust)) process.exit(1);
+    if (!j.staleness || typeof j.staleness.fresh !== 'boolean') process.exit(1);
+  " 2>/dev/null; then
+    pass "preflight-brief.json carries graph_stats.trust + staleness (B-2 trust/freshness signals)"
+  else
+    fail "preflight-brief.json missing graph_stats or staleness fields"
+  fi
 else
   fail "preflight-brief.json sidecar not written"
 fi
@@ -4455,7 +4464,7 @@ fi
 echo
 echo "== graphify wrapper fixture tests =="
 if node "$ROOT/scripts/test-graphify.cjs" >/dev/null 2>&1; then
-  pass "graphify fixture tests (16 assertions over status / query / neighbors / path / blast-radius / legacy 'edges' / degraded)"
+  pass "graphify fixture tests (19 assertions over status / query / neighbors / path / blast-radius / stats / legacy 'edges' / degraded)"
 else
   fail "graphify fixture tests — run 'node scripts/test-graphify.cjs' to see details"
 fi

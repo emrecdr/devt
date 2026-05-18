@@ -67,6 +67,21 @@ Graphify wrapper migration to direct `graph.json` reads (`bin/modules/graphify.c
 - **C-2 restores the claude-mem signal source that C-1 removed**, via the correct interface. Net feature parity with the pre-C-1 design intent, but built on the actually-working surface (`mcp__plugin_claude-mem_mcp-search__observation_search`) rather than the never-existed CLI shellout.
 - Net code delta: +56 / -0 lines across 5 files. Smoke: 434 passed, 0 failed (+3 over the 431 Phase C-1 baseline).
 
+### Added (Phase B-2 — graph_stats trust gate + freshness in scope_hint sidecar)
+
+- **`graphify.cjs::graphStats()`**: new Node-side computation over the Phase A loader cache. Returns `{state, node_count, edge_count, density, trust}` where `trust ∈ {empty, sparse, dense}` per a simple heuristic — empty when 0 nodes, sparse when `node_count < 50` OR `density < 1`, dense otherwise. Reuses the memoized graph.json parse (O(1) after first call). Returns `{state: "not_ready", trust: "empty"}` gracefully when graphify is disabled or graph.json is absent.
+- **`graph_stats` and `staleness` fields in `.devt/state/preflight-brief.json`**: every `preflight generate` now populates the sidecar with the new trust signal AND the existing `freshness()` output (built_at, head, lag_commits, fresh flag). Agents reading the sidecar via `<scope_hint>` injection or direct read can de-weight blast-radius signals on sparse graphs and de-weight derived findings when the graph is N commits stale. Backward-compatible — existing consumers see the new fields without disruption.
+- **`graphify stats` CLI subcommand** (`node bin/devt-tools.cjs graphify stats`): user-facing diagnostic that emits the JSON output of `graphStats()`. Useful when triaging "why is graphify not helping" — surfaces node/edge counts and the trust verdict.
+- **3 new graphStats fixture tests** in `scripts/test-graphify.cjs` (sparse path with 4-node fixture, empty path with no graph.json, dense path with synthetic 60-node graph at density=2). Total fixture count: 19.
+- **1 new smoke gate**: preflight sidecar must include both `graph_stats.trust` (enum) and `staleness.fresh` (boolean). Prevents silent regression of the trust+freshness signals.
+
+### Notes (Phase B-2)
+
+- **Trust thresholds are heuristic, not declarative**: 50 nodes / density 1 are reasonable defaults for a typical OOP/imperative codebase. Projects with unusual graph shapes (graph DBs, declarative configs) may legitimately have lower density and still be useful. The trust verdict is advisory — workflows decide whether to act on it; sidecar consumers can override.
+- **`staleness` data is copied verbatim from `freshness()`** — no new graphify queries. `freshness()` already does an 8KB header read + one `git rev-parse` call per preflight; adding it to the sidecar is free.
+- This phase consolidates the "Phase A loader as in-process graph engine" pattern: trust signals are now Node-side computations over `graph.json` directly, with no GRAPH_REPORT.md regex dependency and no graphify CLI shellout.
+- Net code delta: +90 / -3 across 4 files (graphify.cjs, preflight.cjs, scripts/test-graphify.cjs, scripts/smoke-test.sh). Smoke: 435 passed, 0 failed.
+
 ---
 
 Pre-Flight Brief JSON sidecar + `<scope_hint>` dispatch injection + advisory dispatch-scope guard hook. The Brief data plane already carried governing docs' `affects_paths` and blast-radius `direct_dependents` paths — the markdown surface rendered the dependent count but not the paths themselves, and there was no machine-readable interface for orchestrators. This wave surfaces those paths as a deduped `suggested_reading` array (capped at 8) in both the markdown (new `## Suggested Reading Set` section) and a new `preflight-brief.json` sidecar. Five workflows cache the array at context_init and inject it as a `<scope_hint>` block into 11+ dispatch sites so subagents start with high-signal paths instead of discovering scope from the task description. The companion PreToolUse hook on `Task` warns (advisory, never blocks) when a dispatch prompt or scope_hint count exceeds the configurable cap, with forensic appends to `.devt/state/dispatch-warnings.jsonl`. Smoke: **427 passed**, **0 failed** (was 401/401 baseline; +26 gates added for new surfaces).

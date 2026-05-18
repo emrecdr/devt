@@ -302,6 +302,56 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── stats (B-2 trust gate) ─────────────────────────────────────────────────
+{
+  const { tmp } = setupFixture();
+  const r = run(tmp, "stats");
+  const j = parseJson(r.stdout);
+  // 4-node fixture is below the 50-node sparse threshold
+  if (j && j.state === "ready"
+      && j.node_count === 4
+      && j.edge_count === 4
+      && j.density === 1
+      && j.trust === "sparse") {
+    pass("stats reports trust=sparse for small fixture (node_count<50)");
+  } else {
+    fail("stats sparse fixture", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  const { tmp } = setupFixture({ withGraph: false });
+  const r = run(tmp, "stats");
+  const j = parseJson(r.stdout);
+  if (j && j.trust === "empty" && j.node_count === 0) {
+    pass("stats reports trust=empty when graph.json absent");
+  } else {
+    fail("stats empty graph", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  // Dense-graph fixture: 60 nodes, 120 edges → 50+ nodes AND density >= 1
+  const denseGraph = { nodes: [], links: [] };
+  for (let i = 0; i < 60; i++) {
+    denseGraph.nodes.push({ id: `n${i}`, label: `Node ${i}`, source_file: `src/m${i % 6}/f${i}.py`, file_type: "code" });
+  }
+  for (let i = 0; i < 120; i++) {
+    denseGraph.links.push({ source: `n${i % 60}`, target: `n${(i + 7) % 60}`, relation: "calls", confidence: "EXTRACTED" });
+  }
+  const { tmp } = setupFixture({ graph: denseGraph });
+  const r = run(tmp, "stats");
+  const j = parseJson(r.stdout);
+  if (j && j.trust === "dense" && j.node_count === 60 && j.edge_count === 120) {
+    pass("stats reports trust=dense for 60-node graph with density=2");
+  } else {
+    fail("stats dense graph", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── degraded path: graph missing ───────────────────────────────────────────
 {
   const { tmp } = setupFixture({ withGraph: false });

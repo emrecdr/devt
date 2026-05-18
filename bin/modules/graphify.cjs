@@ -616,6 +616,39 @@ function blastRadius(symbols, _options) {
   };
 }
 
+/**
+ * Summary statistics over graph.json for the trust-gate consumer. Uses the
+ * Phase A loader cache so this is O(1) after the first parse. Trust thresholds:
+ *   - empty: 0 nodes (graph generation never ran or produced nothing)
+ *   - sparse: < 50 nodes OR density (edges/nodes) < 1
+ *   - dense:  ≥ 50 nodes AND density ≥ 1
+ *
+ * Agents and workflows consume `trust` to decide whether to weight blast_radius
+ * and scope_hint signals. Sparse graphs typically reflect partial indexing
+ * (graphify hasn't finished, or language coverage is poor) — derived signals
+ * are unreliable in that state.
+ */
+function graphStats() {
+  const loaded = loadGraph();
+  if (!loaded.ok) {
+    return {
+      state: loaded.degraded.state || "not_ready",
+      node_count: 0,
+      edge_count: 0,
+      density: null,
+      trust: "empty",
+    };
+  }
+  const nodeCount = loaded.cache.adj.nodeMap.size;
+  const edgeCount = (loaded.cache.links || []).length;
+  const density = nodeCount > 0 ? edgeCount / nodeCount : 0;
+  let trust;
+  if (nodeCount === 0) trust = "empty";
+  else if (nodeCount < 50 || density < 1) trust = "sparse";
+  else trust = "dense";
+  return { state: "ready", node_count: nodeCount, edge_count: edgeCount, density, trust };
+}
+
 // ---------------------------------------------------------------------------
 // CLI dispatcher
 // ---------------------------------------------------------------------------
@@ -632,6 +665,9 @@ function run(subcommand, args) {
       return 0;
     case "warm-cache":
       json({ path: warmCachePath() });
+      return 0;
+    case "stats":
+      json(graphStats());
       return 0;
     case "query": {
       if (!args[0]) { process.stderr.write("Usage: graphify query <text>\n"); return 2; }
@@ -665,7 +701,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | query | node | neighbors | path | blast-radius\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius\n`
       );
       return 2;
   }
@@ -691,6 +727,7 @@ module.exports = {
   status,
   freshness,
   warmCachePath,
+  graphStats,
   queryGraph,
   getNode,
   getNeighbors,

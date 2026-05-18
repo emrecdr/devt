@@ -564,6 +564,18 @@ function generate(taskText, opts) {
   // the human-readable surface; .json is the machine interface workflows read
   // via jq for scope_hint injection without parsing markdown.
   const sidecarDest = path.join(stateDir, BRIEF_FILE.replace(/\.md$/, ".json"));
+  // graph_stats + staleness give agents trust + freshness signals so they can
+  // de-weight scope_hint / blast-radius when the underlying graph is sparse
+  // (graphify not done indexing) or stale (built_at >> N commits behind HEAD).
+  // Cheap — graph_stats reuses the Phase A loader cache; freshness reads ~8KB
+  // of graph.json + 1 git call. Both surface state="not_ready" gracefully when
+  // graphify is disabled or graph.json is absent.
+  let graphStats, staleness;
+  try { graphStats = graphify.graphStats(); }
+  catch { graphStats = { state: "not_ready", trust: "empty" }; }
+  try { staleness = graphify.freshness(); }
+  catch { staleness = { state: "not_ready", fresh: false, built_at: null, head: null, lag_commits: null }; }
+
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
     topic,
@@ -574,6 +586,8 @@ function generate(taskText, opts) {
       source: blast.source,
       direct_dependents_count: (blast.direct_dependents || []).length,
     },
+    graph_stats: graphStats,
+    staleness,
     rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
     generated_at: generatedAt,
   });
