@@ -124,7 +124,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 
 Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from `#KNOWLEDGE-CANDIDATE` scratchpad tags + DEC-xxx entries + Graphify god-nodes (when available) + claude-mem MCP observations (when persisted by the orchestrator pre-step below) so the curator below can run the dual-path review. NEVER writes permanent memory docs; that's curator's gated job below.
 
-**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__observation_search` is available, call it with `query=${task}` and `limit=50`. Write the response to `.devt/state/claude-mem-harvest.md` with one line per observation in the canonical format `- [decision|discovery] <title>: <body>` — only those two `obs_type` values are promotion-eligible. Skip silently when unavailable or empty.
+**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__search` is registered, call it with `query=${task}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index mixing observations (`#NNNN` numeric ID), sessions (`#SNNN`), and prompts — extract only observation rows. Write `.devt/state/claude-mem-harvest.md` with one line per observation as `- [decision|discovery] <title>: <body>`, mapping the emoji column to obs_type (⚖️ → decision, 🔵 → discovery) and dropping any other emoji. Skip silently when the tool is unavailable, returns zero observations, or errors.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true

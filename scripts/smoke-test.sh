@@ -4440,12 +4440,12 @@ else
 fi
 PHASE_C2_WORKFLOW_MISS=""
 for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/lesson-extraction.md; do
-  if ! grep -q "mcp__plugin_claude-mem_mcp-search__observation_search" "$ROOT/$wf"; then
+  if ! grep -q "mcp__plugin_claude-mem_mcp-search__search" "$ROOT/$wf"; then
     PHASE_C2_WORKFLOW_MISS="$PHASE_C2_WORKFLOW_MISS $wf"
   fi
 done
 if [ -z "$PHASE_C2_WORKFLOW_MISS" ]; then
-  pass "all 3 harvest workflows instruct orchestrator to call mcp__plugin_claude-mem_mcp-search__observation_search"
+  pass "all 3 harvest workflows instruct orchestrator to call mcp__plugin_claude-mem_mcp-search__search"
 else
   fail "workflows missing claude-mem MCP fetch step:$PHASE_C2_WORKFLOW_MISS"
 fi
@@ -4630,6 +4630,22 @@ else
   fail "RESET_EXEMPT missing forensic JSONL — files lost on state reset"
 fi
 rm -rf "$RESET_TMP"
+
+echo
+echo "== No legacy observation_search refs (server-beta runtime, breaks worker default) =="
+# observation_search routes to /v1/search and is server-beta runtime only;
+# default installs run worker mode where the call errors and the orchestrator
+# pre-step silently no-ops. Workers must use the search MCP instead.
+# scripts/smoke-test.sh excluded because this gate's own grep pattern matches itself.
+OBS_SEARCH_HITS=$(grep -rnE "mcp__plugin_claude-mem_mcp-search__observation_search" \
+  "$ROOT/agents" "$ROOT/workflows" "$ROOT/skills" "$ROOT/bin" \
+  2>/dev/null || true)
+if [ -z "$OBS_SEARCH_HITS" ]; then
+  pass "no observation_search refs in agents/workflows/skills/bin"
+else
+  fail "observation_search refs found (use search instead — worker-mode):"
+  echo "$OBS_SEARCH_HITS" | sed 's/^/    /'
+fi
 
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="

@@ -9,7 +9,7 @@
  * 3. Graphify god-nodes via parseReportSections (when graphify-out/GRAPH_REPORT.md exists)
  * 4. claude-mem MCP observations via `.devt/state/claude-mem-harvest.md` (when the
  *    orchestrator's pre-harvest step persisted them — workflows invoke
- *    mcp__plugin_claude-mem_mcp-search__observation_search since devt's Node code
+ *    mcp__plugin_claude-mem_mcp-search__search since devt's Node code
  *    cannot reach MCP directly)
  *
  * For each candidate, the engine:
@@ -184,7 +184,7 @@ function harvestGraphifyGodNodes() {
 // devt's Node code cannot reach MCP servers directly (zero-dep invariant).
 // Workflows (dev / quick-implement / lesson-extraction) instruct the
 // orchestrator — which runs in the main Claude session and has the
-// project's MCP allowlist — to call `mcp__plugin_claude-mem_mcp-search__observation_search`
+// project's MCP allowlist — to call `mcp__plugin_claude-mem_mcp-search__search`
 // before invoking `memory suggest`. The orchestrator writes the result to
 // `.devt/state/claude-mem-harvest.md` in this canonical format:
 //   - [decision] <title>: <body>

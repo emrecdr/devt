@@ -1279,14 +1279,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries + Graphify god-nodes (when graphify-out/GRAPH_REPORT.md exists) + claude-mem MCP observations (when persisted by the orchestrator pre-step below) into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
 
-**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__observation_search` is available in this session, call it with `query=${task}` and `limit=50`. Parse the response and Write `.devt/state/claude-mem-harvest.md` with one line per observation in this canonical format:
+**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session, call it with `query=${task}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with three row types: observations (numeric `#NNNN` ID), sessions (`#SNNN` ID), and prompts. Extract ONLY observation rows and Write `.devt/state/claude-mem-harvest.md` with one line each in this canonical format:
 
 ```
 - [decision] <title>: <body>
 - [discovery] <title>: <body>
 ```
 
-Only `obs_type` values `decision` and `discovery` are promotion-eligible (the others — `bugfix`, `feature`, `refactor`, `change` — are session telemetry, not memory candidates). Skip silently when the MCP tool is unavailable or returns no observations. The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
+Map the `T` emoji column to obs_type: ⚖️ → `decision`, 🔵 → `discovery`. Drop rows with any other emoji (those are bugfix / feature / refactor / change — session telemetry, not memory candidates). Skip silently when the MCP tool is unavailable, returns zero observations, or errors. The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
 
 Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report/claude-mem harvest). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
 
