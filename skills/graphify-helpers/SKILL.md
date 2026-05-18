@@ -65,28 +65,27 @@ downstream agents and the user know how the result was obtained.
 ## Decision Tree
 
 ```
-1. Read .devt/config.json -> is graphify.enabled true?
-     NO   -> jump to step 5 (grep, source: "grep", reason: "disabled in config")
-     YES  -> continue
+1. Check graphify status -> `node bin/devt-tools.cjs graphify status`
+     state != "ready" -> jump to step 4 (grep, source: "grep", reason from state)
+     state == "ready" -> continue
+   The status state combines `graphify.enabled` in config AND `graph.json` existence.
+   No separate binary probe — devt's wrappers read graph.json in-process, the
+   `graphify` binary is needed only to regenerate the graph offline.
 
-2. Probe `graphify --help` -> exit 0?
-     NO   -> jump to step 5 (grep, source: "grep", reason: "binary missing")
-     YES  -> continue
-
-3. Run the appropriate Graphify subcommand:
+2. Run the appropriate Graphify subcommand:
      - codebase-scan     -> `node bin/devt-tools.cjs graphify query "<text>"`
      - get-caller-set    -> `node bin/devt-tools.cjs graphify neighbors <symbol> --direction=in`
      - get-dependent-set -> `node bin/devt-tools.cjs graphify neighbors <symbol> --direction=out`
      - find-path         -> `node bin/devt-tools.cjs graphify path <from> <to>`
      - blast-radius      -> `node bin/devt-tools.cjs graphify blast-radius <sym1> [<sym2>...]`
 
-4. Inspect Graphify result:
-     ERROR or non-JSON output  -> jump to step 5 (grep, source: "grep")
-     0 results                 -> jump to step 5 (grep, source: "grep")
+3. Inspect Graphify result:
+     ERROR or non-JSON output  -> jump to step 4 (grep, source: "grep")
+     0 results                 -> jump to step 4 (grep, source: "grep")
      < min_results_threshold   -> run grep AND merge (source: "merged")
      ≥ min_results_threshold   -> return Graphify results (source: "graphify")
 
-5. Grep fallback (always available):
+4. Grep fallback (always available):
      - For symbol queries: `grep -rn --include="*.{ts,tsx,js,jsx,py,go,rs,java}" "<symbol>" .`
      - For text queries:   `grep -rn "<text>" <relevant-paths>`
      - Cap result size at 200 hits to bound token cost
@@ -181,19 +180,22 @@ following features become approximations rather than precise:
 | Blast radius effect_size | LARGE/MEDIUM/SMALL from AST + god_node detection | Approximation: file count + module spread |
 | AMBIGUOUS binding flagging | Surfaced from Graphify's confidence taxonomy | n/a (no binding confidence available) |
 
-## Upstream MCP tool surface (Graphify ≥ recent)
+## Upstream MCP tool surface
 
-When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:init`), the upstream MCP server exposes 7 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 3 are reachable by the AI agent via the Claude Code MCP system but devt's helper code does not call them.
+When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:init`), the upstream MCP server exposes 10 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 6 are reachable by the AI agent via the Claude Code MCP system. One of them (`get_pr_impact`) is already wired into PR-scoped code review; the other 5 are available for ad-hoc agent use.
 
-| MCP tool | devt wrapper | When to use |
+| MCP tool | devt wrapper / wiring | When to use |
 |---|---|---|
 | `query_graph` | `graphify.queryGraph(text)` | Free-text symbol/concept search across the graph |
 | `get_node` | `graphify.getNode(nodeId)` | Fetch a single node's definition + references |
 | `get_neighbors` | `graphify.getNeighbors(sym, {direction, depth})` | Callers/dependents traversal |
 | `shortest_path` | `graphify.shortestPath(from, to)` | Cross-module relationship discovery |
-| `god_nodes` | (no wrapper — call MCP directly) | Top-N most-connected core abstractions. Better than parsing GRAPH_REPORT.md text |
+| `god_nodes` | (no wrapper — call MCP directly) | Top-N most-connected core abstractions. devt computes the same data locally via `graphify.godNodes()` from graph.json |
 | `get_community` | (no wrapper — call MCP directly) | All nodes in a community by ID — feature-cluster traversal |
-| `graph_stats` | (no wrapper — call MCP directly) | Node/edge counts + confidence breakdown — useful for assessing graph density before relying on it |
+| `graph_stats` | (no wrapper — call MCP directly) | Node/edge/community counts + EXTRACTED/INFERRED/AMBIGUOUS confidence breakdown — devt's `graphify.graphStats()` covers density+trust locally but not confidence percentages |
+| `get_pr_impact` | **wired** in `workflows/code-review.md` — orchestrator writes the response to `.devt/state/pr-impact.md` when reviewing a PR | Blast-radius per PR: which graph communities the PR touches, files affected, node-impact list |
+| `list_prs` | (not wired) | Graph-aware PR dashboard — open PRs with CI/review state and blast-radius |
+| `triage_prs` | (not wired) | Actionable PRs sorted by blast-radius — useful for "which PR should I review next?" surfacing |
 
 For tools without a devt wrapper, call them via the registered `graphify` MCP server directly. The `blast_radius` tool exposed by devt's vendored `bin/devt-memory-mcp.cjs` aggregates `get_neighbors` calls — it is NOT a Graphify-native tool, but a devt-specific composition.
 
