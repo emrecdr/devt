@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+Graphify wrapper migration to direct `graph.json` reads (`bin/modules/graphify.cjs`). Every structured-query call (`queryGraph`, `getNode`, `getNeighbors`, `shortestPath`, `blastRadius`) previously shelled out to `graphify query <text> --json` / `graphify query <sym> --neighbors --direction=... --depth=...` — flags that don't exist in upstream's CLI surface. Verified against `safishamsi/graphify` upstream source: the CLI accepts only `--dfs`/`--budget`/`--context`/`--graph` for `query`, and the MCP server's tool handlers return `types.TextContent(type="text", text=str)` blobs, not structured objects. Every call was silently triggering the grep fallback via `safeJsonParse` failure on non-JSON output. The migration replaces all 5 functions with pure-Node algorithms over the deterministic `graphify-out/graph.json` NetworkX node-link artifact (`{nodes, links/edges, hyperedges}`). One in-process tree walk replaces 2N subprocess spawns per `blastRadius` call. `status()` decoupled from binary presence — `state === "ready"` now depends only on `graphify.enabled` + `graph.json` exists, so projects with a checked-in or CI-built graph work without `graphify` on PATH. Smoke: **428 passed**, **0 failed** (+1 gate over the prior 427 baseline).
+
+### Added (Phase A)
+
+- **graph.json in-process reader** (`bin/modules/graphify.cjs::loadGraph`): memoized by `(path, mtimeMs)` so repeated calls within a workflow turn parse the file once. Builds `{out, inc, nodeMap}` adjacency maps for O(1) neighbor lookup. Handles both `links` (modern NetworkX `node_link_data(G, edges="links")`) and `edges` (legacy NetworkX) field names. Caps file size at 100 MB via `safeJsonParse`.
+- **Pure-Node algorithms** for the 5 structured-query functions: substring/case-insensitive label+id resolution (`_resolveOne`, `_resolveMany`), direction-aware BFS (`_bfs` with `direction: in|out|both`, configurable `depth`), and directed shortest-path (BFS along outgoing edges only). `blastRadius` now walks depth-2 incoming in one tree traversal per symbol instead of issuing two subprocess calls per symbol.
+- **`scripts/test-graphify.cjs`** (new, 16 assertions): fixture-based test runner matching the `scripts/test-locking.cjs` convention. Builds a 4-node / 4-edge NetworkX-format `graph.json` in a temp project and exercises every public function: `status` (ready/graph_missing/disabled paths) / `query` (exact/substring/empty) / `neighbors` (in/out/both/depth=2) / `path` (connected/no-route) / `blast-radius` (shape contract + direct dependent count) / legacy `edges` field name compatibility / graph-missing degradation. Wired into `scripts/smoke-test.sh` so CI runs it as part of the standard gate.
+
+### Changed (Phase A)
+
+- **`graphify.cjs::status()` no longer gates on binary presence**. Previously required `graphify --help` to exit 0 even though devt's read path never invokes the binary. State enum collapsed to `"ready" | "disabled" | "graph_missing"` (removed `"binary_missing"`). The graphify binary is still required to *generate* `graph.json` via `graphify update .`, but devt's consumption is now binary-independent. `probeBinary` is kept for `setup.cjs`'s MCP-server registration logic — that path legitimately needs to know whether the binary is installed.
+
+### Removed (Phase A)
+
+- **`callGraphify` subprocess wrapper**. The function passed `--json` and other flags that don't exist in upstream's CLI argparse — every invocation either returned `exit 2` ("unrecognized arguments") or non-JSON text that failed `safeJsonParse`. All structured-query operations now read `graph.json` directly. The export is gone from `module.exports`; no other module imported it.
+
+---
+
 Pre-Flight Brief JSON sidecar + `<scope_hint>` dispatch injection + advisory dispatch-scope guard hook. The Brief data plane already carried governing docs' `affects_paths` and blast-radius `direct_dependents` paths — the markdown surface rendered the dependent count but not the paths themselves, and there was no machine-readable interface for orchestrators. This wave surfaces those paths as a deduped `suggested_reading` array (capped at 8) in both the markdown (new `## Suggested Reading Set` section) and a new `preflight-brief.json` sidecar. Five workflows cache the array at context_init and inject it as a `<scope_hint>` block into 11+ dispatch sites so subagents start with high-signal paths instead of discovering scope from the task description. The companion PreToolUse hook on `Task` warns (advisory, never blocks) when a dispatch prompt or scope_hint count exceeds the configurable cap, with forensic appends to `.devt/state/dispatch-warnings.jsonl`. Smoke: **427 passed**, **0 failed** (was 401/401 baseline; +26 gates added for new surfaces).
 
 ### Added

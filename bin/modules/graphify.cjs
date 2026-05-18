@@ -1,28 +1,29 @@
 "use strict";
 
 /**
- * Graphify integration — optional, with graceful degradation.
+ * Graphify integration — reads graphify-out/graph.json directly.
  *
- * Wraps the `graphify` CLI binary (https://github.com/safishamsi/graphify) as an
- * optional dependency. Project owners install via `uv tool install graphifyy[mcp]`
- * (or pipx / pip equivalent) and set `graphify.enabled: true` in
- * .devt/config.json. devt itself stays Node-stdlib-only. Note: graphify v0.7.10+
- * launches its MCP server via `uv run -m graphify.serve`, so `uv` on PATH is
- * required even when graphifyy is installed via pip/pipx.
+ * Graphify (https://github.com/safishamsi/graphify) is an optional code-graph
+ * extractor. Project owners install it (`uv tool install graphifyy[mcp]` or
+ * equivalent), run `graphify update .` to produce graphify-out/graph.json, and
+ * devt then consumes that JSON artifact in-process. devt itself stays
+ * Node-stdlib-only.
  *
- * Core invariant (locked decision): the system is fully functional WITHOUT
- * Graphify. Every method returns a structured `{ source, results, degraded?,
- * error? }` payload so callers can transparently fall back to grep/path-based
- * heuristics when Graphify is disabled, missing, or fails.
+ * Architecture note: devt does NOT shell out to graphify subcommands for
+ * structured queries. graphify's CLI is text-output and its MCP tools return
+ * text blobs (TextContent) — neither emits the structured shape devt's
+ * consumers need. graph.json is the structured contract; devt parses it.
+ *
+ * Core invariant: the system is fully functional WITHOUT Graphify. Every
+ * method returns a structured `{source, results, degraded?, error?}` payload
+ * so callers can transparently fall back when graph.json is absent, disabled,
+ * or malformed.
  *
  * Four fallback triggers (per the Graphify-First Skill Protocol):
  * 1. Graphify returns empty
  * 2. Graphify errors out
- * 3. Graphify is not setup (config disabled OR binary missing)
+ * 3. Graphify is not setup (config disabled OR graph.json missing)
  * 4. Graphify returns too few results (< caller's min_results_threshold)
- *
- * Phase 2. Phase 3 will add the vendored MCP query layer
- * that exposes these functions to agents over stdio.
  */
 
 const fs = require("fs");
@@ -31,7 +32,7 @@ const child_process = require("node:child_process");
 const { safeJsonParse } = require("./security.cjs");
 
 // ---------------------------------------------------------------------------
-// Config + binary discovery
+// Config + path discovery
 // ---------------------------------------------------------------------------
 
 function getConfig() {
@@ -55,38 +56,21 @@ function getGraphifyOutDir() {
 }
 
 /**
- * Returns one of: "ready" | "disabled" | "binary_missing" | "graph_missing"
- * Callers use this to skip MCP attempts entirely when Graphify isn't usable.
+ * Returns one of: "ready" | "disabled" | "graph_missing"
+ * Ready when config enables graphify AND graphify-out/graph.json exists.
+ * The graphify binary is needed only to *generate* the graph; devt's read
+ * path does not invoke it, so binary presence does not gate "ready".
  */
 function status() {
   const cfg = getConfig();
   if (!cfg.enabled) return { state: "disabled", reason: "graphify.enabled is false in .devt/config.json" };
-
-  const cmd = cfg.command || "graphify";
-  // Probe the binary cheaply via `--help`; capture exit code only.
-  let probeOk = false;
-  try {
-    const r = child_process.spawnSync(cmd, ["--help"], {
-      timeout: 2000,
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    probeOk = r.status === 0;
-  } catch (e) {
-    probeOk = false;
-  }
-  if (!probeOk) {
-    return {
-      state: "binary_missing",
-      reason: `command "${cmd}" not found on PATH. Install: pip install graphifyy[mcp] (or uv tool / pipx equivalent)`,
-    };
-  }
 
   const outDir = getGraphifyOutDir();
   const graphPath = path.join(outDir, "graph.json");
   if (!fs.existsSync(graphPath)) {
     return {
       state: "graph_missing",
-      reason: `${graphPath} not found. Run: ${cmd} update . to extract`,
+      reason: `${graphPath} not found. Run: ${cfg.command || "graphify"} update . to extract`,
     };
   }
   return { state: "ready", out_dir: outDir, graph_path: graphPath };
@@ -149,7 +133,7 @@ function freshness() {
 }
 
 // ---------------------------------------------------------------------------
-// Lane 0 warm-cache discovery
+// Warm-cache + report discovery
 // ---------------------------------------------------------------------------
 
 /**
@@ -170,100 +154,153 @@ function warmCachePath() {
 }
 
 // ---------------------------------------------------------------------------
-// Generic invocation helper
+// graph.json loader — memoized by (path, mtime). One read per workflow turn.
 // ---------------------------------------------------------------------------
 
-/**
- * Run a graphify subcommand and parse its JSON output. Returns a structured
- * result that callers can branch on. Never throws — always returns a payload.
- *
- * { source: "graphify" | "grep" | "merged", results: any[], degraded?, error? }
- */
-function callGraphify(subargs, options) {
-  options = options || {};
-  const minResults = options.min_results_threshold || 0;
-  const cfg = getConfig();
+const GRAPH_SIZE_CAP = 100 * 1024 * 1024;
+
+let _graphCache = null;
+
+function _degraded(reason, state, trigger) {
+  return {
+    source: "grep",
+    results: [],
+    degraded: true,
+    reason: reason || "graphify not ready",
+    state: state || "unknown",
+    fallback_trigger: trigger || "not_setup",
+  };
+}
+
+function loadGraph() {
   const s = status();
+  if (s.state !== "ready") return { ok: false, degraded: _degraded(s.reason, s.state, "not_setup") };
 
-  if (s.state !== "ready") {
-    return {
-      source: "grep", // Caller should fall back
-      results: [],
-      degraded: true,
-      reason: s.reason,
-      state: s.state,
-      fallback_trigger: "not_setup",
-    };
+  let stat;
+  try { stat = fs.statSync(s.graph_path); }
+  catch (e) { return { ok: false, degraded: _degraded(`stat failed: ${e.message}`, s.state, "error") }; }
+
+  if (_graphCache && _graphCache.path === s.graph_path && _graphCache.mtimeMs === stat.mtimeMs) {
+    return { ok: true, cache: _graphCache };
   }
 
-  let proc;
-  try {
-    proc = child_process.spawnSync(cfg.command || "graphify", subargs, {
-      cwd: findProjectRoot(),
-      timeout: options.timeout_ms || 10000,
-      encoding: "utf8",
-    });
-  } catch (e) {
-    return {
-      source: "grep",
-      results: [],
-      degraded: true,
-      error: String(e && e.message ? e.message : e),
-      fallback_trigger: "error",
-    };
-  }
+  let raw;
+  try { raw = fs.readFileSync(s.graph_path, "utf8"); }
+  catch (e) { return { ok: false, degraded: _degraded(`read failed: ${e.message}`, s.state, "error") }; }
 
-  if (proc.status !== 0) {
-    return {
-      source: "grep",
-      results: [],
-      degraded: true,
-      error: (proc.stderr || "").toString().trim() || `graphify exited with ${proc.status}`,
-      fallback_trigger: "error",
-    };
+  // safeJsonParse enforces a byte cap and returns {ok, value, error}.
+  const parsed = safeJsonParse(raw, "graphify graph.json", GRAPH_SIZE_CAP);
+  if (!parsed.ok) {
+    return { ok: false, degraded: _degraded(`parse failed: ${parsed.error}`, s.state, "error") };
   }
+  const graph = parsed.value;
+  // NetworkX writes via node_link_data(G, edges="links") in modern versions
+  // and via the legacy "edges" key in older versions. We accept either.
+  const links = Array.isArray(graph.links) ? graph.links
+              : (Array.isArray(graph.edges) ? graph.edges : []);
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
 
-  // 100MB cap — Graphify subprocess output for blast-radius can be large on big graphs.
-  const parseResult = safeJsonParse(proc.stdout || "[]", "graphify subprocess", 100 * 1024 * 1024);
-  if (!parseResult.ok) {
-    // Graphify CLI sometimes emits human-readable text — return raw stdout
-    return {
-      source: "graphify",
-      results: [],
-      degraded: true,
-      raw_output: (proc.stdout || "").trim(),
-      error: "non-JSON output (graphify version may not support --json)",
-      fallback_trigger: "error",
-    };
+  const adj = _buildAdjacency(nodes, links);
+  _graphCache = { path: s.graph_path, mtimeMs: stat.mtimeMs, graph, nodes, links, adj };
+  return { ok: true, cache: _graphCache };
+}
+
+function _buildAdjacency(nodes, links) {
+  const out = new Map();      // nodeId -> [edge]
+  const inc = new Map();      // nodeId -> [edge]
+  const nodeMap = new Map();  // nodeId -> nodeData
+  for (const n of nodes) {
+    if (!n || typeof n.id !== "string") continue;
+    nodeMap.set(n.id, n);
+    out.set(n.id, []);
+    inc.set(n.id, []);
   }
-
-  const parsed = parseResult.value;
-  const results = Array.isArray(parsed) ? parsed : (parsed.results || parsed.nodes || []);
-
-  if (results.length === 0) {
-    return {
-      source: "grep",
-      results: [],
-      degraded: true,
-      reason: "graphify returned 0 results",
-      fallback_trigger: "empty",
+  for (const l of links) {
+    if (!l || typeof l.source !== "string" || typeof l.target !== "string") continue;
+    const edge = {
+      source: l.source,
+      target: l.target,
+      relation: l.relation || "",
+      confidence: l.confidence || "",
+      weight: typeof l.weight === "number" ? l.weight : 1,
     };
+    if (out.has(l.source)) out.get(l.source).push(edge);
+    if (inc.has(l.target)) inc.get(l.target).push(edge);
   }
-  if (results.length < minResults) {
-    return {
-      source: "merged",  // Caller should supplement with grep
-      results,
-      degraded: true,
-      reason: `graphify returned ${results.length} results, below min_results_threshold=${minResults}`,
-      fallback_trigger: "below_threshold",
-    };
-  }
+  return { out, inc, nodeMap };
+}
 
-  return { source: "graphify", results };
+/**
+ * Resolve a free-text query to a node id. Precedence: exact id, exact label
+ * (case-insensitive), label substring, id substring. Returns null on no match.
+ */
+function _resolveOne(adj, query) {
+  if (!query) return null;
+  const q = String(query).toLowerCase();
+  if (adj.nodeMap.has(query)) return query;
+  for (const [id, node] of adj.nodeMap) {
+    if (typeof node.label === "string" && node.label.toLowerCase() === q) return id;
+  }
+  for (const [id, node] of adj.nodeMap) {
+    if (typeof node.label === "string" && node.label.toLowerCase().includes(q)) return id;
+  }
+  for (const id of adj.nodeMap.keys()) {
+    if (id.toLowerCase().includes(q)) return id;
+  }
+  return null;
+}
+
+/** Return all node ids whose label or id contains query (case-insensitive). */
+function _resolveMany(adj, query, limit = 20) {
+  if (!query) return [];
+  const q = String(query).toLowerCase();
+  const hits = new Set();
+  // Exact label/id first so the top result is the most specific match.
+  if (adj.nodeMap.has(query)) hits.add(query);
+  for (const [id, node] of adj.nodeMap) {
+    if (typeof node.label === "string" && node.label.toLowerCase() === q) hits.add(id);
+    if (hits.size >= limit) break;
+  }
+  for (const [id, node] of adj.nodeMap) {
+    if (hits.size >= limit) break;
+    if (typeof node.label === "string" && node.label.toLowerCase().includes(q)) hits.add(id);
+  }
+  for (const id of adj.nodeMap.keys()) {
+    if (hits.size >= limit) break;
+    if (id.toLowerCase().includes(q)) hits.add(id);
+  }
+  return Array.from(hits);
+}
+
+/**
+ * BFS from `fromId` along `direction` ("in" | "out" | "both") up to `depth`.
+ * Returns { visited: Map<id, {depth, edge}>, order: [id...] } where `edge` is
+ * the edge that first reached this node (null for the seed).
+ */
+function _bfs(adj, fromId, direction, depth) {
+  const visited = new Map();
+  if (!adj.nodeMap.has(fromId)) return { visited, order: [] };
+  visited.set(fromId, { depth: 0, edge: null });
+  const order = [fromId];
+  const queue = [[fromId, 0]];
+  while (queue.length > 0) {
+    const [cur, d] = queue.shift();
+    if (d >= depth) continue;
+    const edges = [];
+    if (direction === "out" || direction === "both") edges.push(...(adj.out.get(cur) || []).map(e => ({ ...e, _next: e.target })));
+    if (direction === "in" || direction === "both") edges.push(...(adj.inc.get(cur) || []).map(e => ({ ...e, _next: e.source })));
+    for (const e of edges) {
+      if (visited.has(e._next)) continue;
+      visited.set(e._next, { depth: d + 1, edge: e });
+      order.push(e._next);
+      queue.push([e._next, d + 1]);
+    }
+  }
+  return { visited, order };
 }
 
 // ---------------------------------------------------------------------------
-// MCP-style helpers (these mirror Graphify's own MCP tool names)
+// GRAPH_REPORT.md section parser (no graphify shellout — file-based)
 // ---------------------------------------------------------------------------
 
 /**
@@ -337,55 +374,166 @@ function parseReportSections(reportPath) {
   return { god_nodes: god, surprising_connections: sc, knowledge_gaps_summary: gapSummary };
 }
 
+// ---------------------------------------------------------------------------
+// Structured query API — pure Node, reads graph.json directly
+// ---------------------------------------------------------------------------
+
 /**
- * Search for concepts/symbols by name or text. Mirrors Graphify's `query_graph`.
+ * Search for concepts/symbols by label/id. Returns up to `limit` matches.
  */
 function queryGraph(text, options) {
-  return callGraphify(["query", text, "--json"], options || {});
+  options = options || {};
+  const loaded = loadGraph();
+  if (!loaded.ok) return loaded.degraded;
+
+  const ids = _resolveMany(loaded.cache.adj, text, options.limit || 20);
+  if (ids.length === 0) {
+    return { source: "grep", results: [], degraded: true, reason: "no matching nodes", fallback_trigger: "empty" };
+  }
+
+  const results = ids.map(id => {
+    const node = loaded.cache.adj.nodeMap.get(id);
+    return {
+      id,
+      label: node.label || id,
+      source_file: node.source_file || "",
+      file_type: node.file_type || "",
+      confidence_score: typeof node.confidence_score === "number" ? node.confidence_score : null,
+      in_degree: (loaded.cache.adj.inc.get(id) || []).length,
+      out_degree: (loaded.cache.adj.out.get(id) || []).length,
+    };
+  });
+  return { source: "graphify", results };
 }
 
 /**
- * Fetch a single node's details (definition, references). Mirrors `get_node`.
+ * Fetch a single node's details. Mirrors upstream `get_node` MCP tool but
+ * with structured output instead of formatted text.
  */
-function getNode(nodeId, options) {
-  return callGraphify(["explain", nodeId, "--json"], options || { min_results_threshold: 1 });
+function getNode(nodeId, _options) {
+  const loaded = loadGraph();
+  if (!loaded.ok) return loaded.degraded;
+
+  const id = _resolveOne(loaded.cache.adj, nodeId);
+  if (!id) {
+    return { source: "grep", results: [], degraded: true, reason: `no node matching "${nodeId}"`, fallback_trigger: "empty" };
+  }
+  const node = loaded.cache.adj.nodeMap.get(id);
+  return {
+    source: "graphify",
+    results: [{
+      id,
+      label: node.label || id,
+      source_file: node.source_file || "",
+      source_location: node.source_location || null,
+      file_type: node.file_type || "",
+      confidence_score: typeof node.confidence_score === "number" ? node.confidence_score : null,
+      in_degree: (loaded.cache.adj.inc.get(id) || []).length,
+      out_degree: (loaded.cache.adj.out.get(id) || []).length,
+      degree: (loaded.cache.adj.inc.get(id) || []).length + (loaded.cache.adj.out.get(id) || []).length,
+    }],
+  };
 }
 
 /**
- * Find connected concepts. Mirrors `get_neighbors`. Direction can be "in" / "out" / "both".
+ * Walk neighbors of a symbol with direction + depth control.
+ * direction: "in" (callers) | "out" (dependents) | "both" (default)
+ * depth: 1 (default) | 2 | ...
  */
 function getNeighbors(symbol, options) {
   options = options || {};
-  const args = ["query", symbol, "--neighbors", "--json"];
-  if (options.direction === "in") args.push("--direction=in");
-  if (options.direction === "out") args.push("--direction=out");
-  if (options.depth) args.push(`--depth=${options.depth}`);
-  return callGraphify(args, options);
+  const direction = ["in", "out", "both"].includes(options.direction) ? options.direction : "both";
+  const depth = Number.isInteger(options.depth) && options.depth > 0 ? options.depth : 1;
+
+  const loaded = loadGraph();
+  if (!loaded.ok) return loaded.degraded;
+
+  const fromId = _resolveOne(loaded.cache.adj, symbol);
+  if (!fromId) {
+    return { source: "grep", results: [], degraded: true, reason: `symbol not found: "${symbol}"`, fallback_trigger: "empty" };
+  }
+
+  const { visited } = _bfs(loaded.cache.adj, fromId, direction, depth);
+  visited.delete(fromId);
+
+  const results = [];
+  for (const [id, info] of visited) {
+    const node = loaded.cache.adj.nodeMap.get(id);
+    results.push({
+      id,
+      label: node.label || id,
+      source_file: node.source_file || "",
+      relation: info.edge ? info.edge.relation : "",
+      confidence: info.edge ? info.edge.confidence : "",
+      depth: info.depth,
+    });
+  }
+  return { source: "graphify", results };
 }
 
 /**
- * Shortest path between two symbols. Mirrors `shortest_path`.
+ * Shortest directed path from source label to target label.
+ * Returns the sequence of edges (hops). Empty results when no path exists.
  */
 function shortestPath(from, to, options) {
-  return callGraphify(["path", from, to, "--json"], options || {});
+  options = options || {};
+  const maxHops = Number.isInteger(options.max_hops) && options.max_hops > 0 ? options.max_hops : 8;
+
+  const loaded = loadGraph();
+  if (!loaded.ok) return loaded.degraded;
+
+  const fromId = _resolveOne(loaded.cache.adj, from);
+  const toId = _resolveOne(loaded.cache.adj, to);
+  if (!fromId || !toId) {
+    return { source: "grep", results: [], degraded: true, reason: "source or target not found", fallback_trigger: "empty" };
+  }
+
+  // BFS along outgoing edges only — preserves directed semantics
+  const prev = new Map();
+  prev.set(fromId, null);
+  const queue = [[fromId, 0]];
+  let found = false;
+  while (queue.length > 0) {
+    const [cur, d] = queue.shift();
+    if (cur === toId) { found = true; break; }
+    if (d >= maxHops) continue;
+    for (const e of (loaded.cache.adj.out.get(cur) || [])) {
+      if (prev.has(e.target)) continue;
+      prev.set(e.target, e);
+      queue.push([e.target, d + 1]);
+    }
+  }
+  if (!found) {
+    return { source: "graphify", results: [], reason: `no path within ${maxHops} hops` };
+  }
+  const hops = [];
+  let cursor = toId;
+  while (cursor !== fromId) {
+    const e = prev.get(cursor);
+    if (!e) break;
+    hops.unshift({ source: e.source, target: e.target, relation: e.relation, confidence: e.confidence });
+    cursor = e.source;
+  }
+  return { source: "graphify", results: hops };
 }
 
 /**
  * Compute blast radius for a set of subject symbols. Returns:
- * { effect_size: 'small' | 'medium' | 'large',
- * direct_dependents: [...], // depth-1 incoming
- * indirect_dependents: [...], // depth-2 incoming
- * modules_touched: number,
- * god_node_match: boolean,
- * ambiguous_bindings: number,
- * source: 'graphify' | 'grep' }
+ * { effect_size: 'small' | 'medium' | 'large' | null,
+ *   direct_dependents: [...],      // depth-1 incoming labels/ids
+ *   indirect_dependents: [...],    // depth-2 incoming (excluding direct)
+ *   modules_touched: number,
+ *   god_node_match: boolean,
+ *   ambiguous_bindings: number,
+ *   ambiguous_details: [{symbol, node}],
+ *   source: 'graphify' | 'grep',
+ *   degraded?, reason? }
  *
- * When Graphify is disabled, returns a degraded payload with effect_size estimated
- * from path heuristics and grep counts (callers fall back per the protocol).
+ * Used by preflight to populate the JSON sidecar's suggested_reading field.
  */
 function blastRadius(symbols, _options) {
-  const s = status();
-  if (s.state !== "ready") {
+  const loaded = loadGraph();
+  if (!loaded.ok) {
     return {
       effect_size: null,
       direct_dependents: [],
@@ -393,47 +541,45 @@ function blastRadius(symbols, _options) {
       modules_touched: 0,
       god_node_match: false,
       ambiguous_bindings: 0,
+      ambiguous_details: [],
       source: "grep",
       degraded: true,
-      reason: s.reason,
+      reason: loaded.degraded.reason,
     };
   }
-
-  // Fetch direct + depth-2 neighbors per symbol. Aggregate.
+  const adj = loaded.cache.adj;
   const direct = new Set();
   const indirect = new Set();
   const modules = new Set();
   const ambiguous = [];
-  let godNodeMatch = false;
 
   for (const sym of symbols) {
-    const r1 = getNeighbors(sym, { direction: "in", depth: 1 });
-    if (r1.results) {
-      for (const n of r1.results) {
-        if (n.id || n.label) direct.add(n.id || n.label);
-        if (n.source_file) modules.add(path.dirname(n.source_file));
-        if (n.confidence === "AMBIGUOUS") ambiguous.push({ symbol: sym, node: n });
-      }
-    }
-    const r2 = getNeighbors(sym, { direction: "in", depth: 2 });
-    if (r2.results) {
-      for (const n of r2.results) {
-        if (n.id || n.label) indirect.add(n.id || n.label);
-      }
+    const seedId = _resolveOne(adj, sym);
+    if (!seedId) continue;
+    // depth-2 incoming: visited.depth in {1, 2}; direct = depth 1, indirect = depth 2
+    const { visited } = _bfs(adj, seedId, "in", 2);
+    for (const [id, info] of visited) {
+      if (id === seedId) continue;
+      const node = adj.nodeMap.get(id);
+      const label = node && node.label ? node.label : id;
+      if (info.depth === 1) direct.add(label);
+      else if (info.depth === 2) indirect.add(label);
+      if (node && node.source_file) modules.add(path.dirname(node.source_file));
+      if (info.edge && info.edge.confidence === "AMBIGUOUS") ambiguous.push({ symbol: sym, node: { id, label } });
     }
   }
 
-  // Detect god_node match by reading GRAPH_REPORT.md's god-nodes section if available
+  // god-node detection via GRAPH_REPORT.md word-boundary scan. Preserves
+  // the cross-validated XOR pattern (`\b`-style transition at both edges).
+  let godNodeMatch = false;
   try {
+    const s = status();
     const reportPath = path.join(s.out_dir, "GRAPH_REPORT.md");
     if (fs.existsSync(reportPath)) {
       const report = fs.readFileSync(reportPath, "utf8");
-      // Coarse detection: any subject symbol mentioned in the "God Nodes" section
       const godSection = report.match(/##\s*God Nodes[\s\S]*?(?=\n##\s|$)/i);
       if (godSection) {
         const haystack = godSection[0];
-        // Whole-word match without dynamic RegExp. `\b` = word/non-word transition;
-        // we check that condition at both edges of each indexOf hit.
         const isWord = c => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
         for (const sym of symbols) {
           if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
@@ -442,10 +588,8 @@ function blastRadius(symbols, _options) {
           let idx = 0;
           let found = false;
           while ((idx = haystack.indexOf(sym, idx)) !== -1) {
-            // Treat "off the ends of haystack" as non-word (matches regex `\b` at boundaries).
             const beforeWord = idx > 0 ? isWord(haystack.charCodeAt(idx - 1)) : false;
             const afterWord = idx + sym.length < haystack.length ? isWord(haystack.charCodeAt(idx + sym.length)) : false;
-            // `\b` matches when exactly one side is a word char (XOR transition).
             if (symStartWord !== beforeWord && symEndWord !== afterWord) { found = true; break; }
             idx += sym.length;
           }
@@ -527,9 +671,8 @@ function run(subcommand, args) {
   }
 }
 
-// Config-independent binary probe used during setup/health before .devt/config.json
-// exists. Returns true when `<command> --help` (or `<command> <subcommand> --help`
-// if `subcommand` is set) exits 0 within the timeout. The subcommand variant is
+// Config-independent binary probe used during setup/health. Returns true when
+// `<command> --help` exits 0 within the timeout. The subcommand variant is
 // needed because `graphifyy` ships without the `mcp` subcommand unless the
 // `[mcp]` extra was installed — bare-binary detection alone is not sufficient
 // to know whether the MCP server can actually start.
@@ -548,7 +691,6 @@ module.exports = {
   status,
   freshness,
   warmCachePath,
-  callGraphify,
   queryGraph,
   getNode,
   getNeighbors,

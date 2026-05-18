@@ -4400,5 +4400,13 @@ fi
 rm -rf "$HJ_TMP"
 
 echo
+echo "== graphify wrapper fixture tests =="
+if node "$ROOT/scripts/test-graphify.cjs" >/dev/null 2>&1; then
+  pass "graphify fixture tests (16 assertions over status / query / neighbors / path / blast-radius / legacy 'edges' / degraded)"
+else
+  fail "graphify fixture tests — run 'node scripts/test-graphify.cjs' to see details"
+fi
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
