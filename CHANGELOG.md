@@ -112,6 +112,17 @@ Graphify wrapper migration to direct `graph.json` reads (`bin/modules/graphify.c
 - **Pattern coupling**: this phase couples 5 workflows + 7 agents but does it uniformly — same caching bash, same dispatch tag, same agent paragraph structure. Future changes to the trust schema need to ripple across both layers; the smoke gates pin the wiring.
 - Net code delta: +27 / -5 across 12 files (5 workflows, 7 agents, smoke-test). Smoke: 437 passed, 0 failed (+2 over the 435 Phase X-3 baseline).
 
+### Added (Phase A test gap — malformed graph.json fixtures)
+
+- **3 new fixture tests** in `scripts/test-graphify.cjs` covering the Phase A loader's degradation paths: (1) **invalid JSON** in `graph.json` — `safeJsonParse` returns `ok:false`, loader emits `{source: "grep", degraded: true, reason: "parse failed: ..."}`. (2) **Empty schema** — `graph.json` is valid JSON but has no `nodes`/`links` keys; loader defaults to empty arrays, `queryGraph` returns `{source: "grep", results: [], fallback_trigger: "empty"}`. (3) **Schema mismatch** — `links` is a string instead of an array; loader's `Array.isArray()` guards prevent `.map`/`for...of` crashes, returns empty results.
+- **`setupFixture({graphRaw})` option** for fixture tests that need to write raw bytes (e.g. malformed JSON) instead of `JSON.stringify(graph)`. Pure-Node test util change, no production impact.
+- Total fixture count: 24 (was 21). Smoke gate label updated to `"24 assertions over ... degraded / malformed-JSON"`.
+
+### Notes (Phase A test gap)
+
+- This closes the last remaining item from this investigation arc — all 7 prior phases shipped and the degradation paths of the Phase A loader are now fixture-covered. The tests assert the *contract* (`source: "grep"`, `degraded: true`, parse-failed reason surfaced) rather than the internal error format, so future hardening of `safeJsonParse` or `loadGraph` won't churn the tests.
+- Net code delta: +47 / -1 across 2 files (test-graphify.cjs, smoke-test.sh). Smoke: 437 passed, 0 failed (count unchanged — new fixture assertions are inside the bundled "graphify fixture tests" gate).
+
 ---
 
 Pre-Flight Brief JSON sidecar + `<scope_hint>` dispatch injection + advisory dispatch-scope guard hook. The Brief data plane already carried governing docs' `affects_paths` and blast-radius `direct_dependents` paths — the markdown surface rendered the dependent count but not the paths themselves, and there was no machine-readable interface for orchestrators. This wave surfaces those paths as a deduped `suggested_reading` array (capped at 8) in both the markdown (new `## Suggested Reading Set` section) and a new `preflight-brief.json` sidecar. Five workflows cache the array at context_init and inject it as a `<scope_hint>` block into 11+ dispatch sites so subagents start with high-signal paths instead of discovering scope from the task description. The companion PreToolUse hook on `Task` warns (advisory, never blocks) when a dispatch prompt or scope_hint count exceeds the configurable cap, with forensic appends to `.devt/state/dispatch-warnings.jsonl`. Smoke: **427 passed**, **0 failed** (was 401/401 baseline; +26 gates added for new surfaces).

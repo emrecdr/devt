@@ -87,7 +87,12 @@ function setupFixture(opts = {}) {
   }, null, 2));
   if (opts.withGraph !== false) {
     fs.mkdirSync(graphDir, { recursive: true });
-    fs.writeFileSync(graphFile, JSON.stringify(opts.graph || FIXTURE));
+    // opts.graphRaw lets a test write malformed bytes for degradation coverage.
+    if (typeof opts.graphRaw === "string") {
+      fs.writeFileSync(graphFile, opts.graphRaw);
+    } else {
+      fs.writeFileSync(graphFile, JSON.stringify(opts.graph || FIXTURE));
+    }
   }
   return { tmp, graphFile };
 }
@@ -423,6 +428,52 @@ function setupFixture(opts = {}) {
     pass("blast-radius filters file-named hubs from god-node detection (matches upstream _is_file_node)");
   } else {
     fail("god-node file-name filter", `expected god_node_match=false, got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// ── malformed graph.json (Phase A degradation paths) ──────────────────────
+{
+  // Invalid JSON syntax — safeJsonParse returns ok:false; loader degrades.
+  const { tmp } = setupFixture({ graphRaw: "{ this is not valid JSON" });
+  const r = run(tmp, "query", "anything");
+  const j = parseJson(r.stdout);
+  if (j && j.degraded === true && j.source === "grep"
+      && typeof j.reason === "string" && j.reason.includes("parse failed")) {
+    pass("query degrades gracefully when graph.json is malformed JSON (parse failed reason surfaced)");
+  } else {
+    fail("malformed JSON degradation", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  // Empty schema — graph.json is valid JSON but has no nodes/links keys.
+  // Loader defaults both to []; queryGraph returns empty results via the
+  // "empty" fallback_trigger.
+  const { tmp } = setupFixture({ graph: {} });
+  const r = run(tmp, "query", "anything");
+  const j = parseJson(r.stdout);
+  if (j && j.source === "grep" && Array.isArray(j.results) && j.results.length === 0
+      && j.fallback_trigger === "empty") {
+    pass("query handles empty graph.json (no nodes/links keys) — degraded with fallback_trigger=empty");
+  } else {
+    fail("empty schema", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  // Schema mismatch — links is a string instead of an array. The loader's
+  // Array.isArray() guards default to [] so we don't crash on
+  // .map / .filter / for...of over a non-array value.
+  const { tmp } = setupFixture({ graph: { nodes: [{ id: "a", label: "A", source_file: "src/a.py" }], links: "not_an_array" } });
+  const r = run(tmp, "neighbors", "A");
+  const j = parseJson(r.stdout);
+  if (j && Array.isArray(j.results) && j.results.length === 0) {
+    pass("neighbors handles schema mismatch (links is non-array) without crashing — returns empty");
+  } else {
+    fail("schema mismatch (links non-array)", `got: ${JSON.stringify(j)}`);
   }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
