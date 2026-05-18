@@ -172,6 +172,28 @@ function _degraded(reason, state, trigger) {
   };
 }
 
+// One forensic record per process invocation per oversize graph.json. Without
+// this dedupe a single workflow that calls multiple graphify wrappers would
+// fan out N identical records into the JSONL log.
+const _loggedSizeCap = new Set();
+
+function _logGraphSizeCap(graphPath, size) {
+  if (_loggedSizeCap.has(graphPath)) return;
+  _loggedSizeCap.add(graphPath);
+  try {
+    const { appendJsonl } = require("./logger.cjs");
+    const logPath = path.join(findProjectRoot(), ".devt", "state", "preflight-denies.jsonl");
+    appendJsonl(logPath, {
+      source: "graph_loader",
+      ts: new Date().toISOString(),
+      reason: "graph.json exceeds GRAPH_SIZE_CAP",
+      path: graphPath,
+      size,
+      cap: GRAPH_SIZE_CAP,
+    });
+  } catch { /* logger missing or .devt/state/ uncreatable — degrade silently */ }
+}
+
 function loadGraph() {
   const s = status();
   if (s.state !== "ready") return { ok: false, degraded: _degraded(s.reason, s.state, "not_setup") };
@@ -184,11 +206,19 @@ function loadGraph() {
     return { ok: true, cache: _graphCache };
   }
 
+  // Stat the file before reading so monorepo graphs over the 100MB cap fail
+  // fast with a forensic trail instead of degrading silently. Without this,
+  // affected projects see blast_radius=small and effect_size=null for every
+  // call and have no signal that the graph is too big to consume.
+  if (stat.size > GRAPH_SIZE_CAP) {
+    _logGraphSizeCap(s.graph_path, stat.size);
+    return { ok: false, degraded: _degraded(`graph.json exceeds ${GRAPH_SIZE_CAP} byte cap (size: ${stat.size})`, s.state, "error") };
+  }
+
   let raw;
   try { raw = fs.readFileSync(s.graph_path, "utf8"); }
   catch (e) { return { ok: false, degraded: _degraded(`read failed: ${e.message}`, s.state, "error") }; }
 
-  // safeJsonParse enforces a byte cap and returns {ok, value, error}.
   const parsed = safeJsonParse(raw, "graphify graph.json", GRAPH_SIZE_CAP);
   if (!parsed.ok) {
     return { ok: false, degraded: _degraded(`parse failed: ${parsed.error}`, s.state, "error") };

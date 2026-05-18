@@ -501,6 +501,39 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── graph.json size cap: log forensic record + return degraded envelope ──
+{
+  // Sparse 101 MB graph.json — fs.truncate sets the apparent size without
+  // burning disk. Pre-read stat check trips and the loader returns degraded
+  // with a forensic JSONL record at .devt/state/preflight-denies.jsonl.
+  const { tmp } = setupFixture({ graph: { nodes: [], links: [] } });
+  const graphPath = path.join(tmp, "graphify-out", "graph.json");
+  fs.truncateSync(graphPath, 101 * 1024 * 1024);
+  const r = run(tmp, "query", "anything");
+  const j = parseJson(r.stdout);
+  if (j && j.degraded === true && /exceeds.*byte cap/.test(j.reason || "")) {
+    pass("size-cap exceedance returns degraded envelope with reason");
+  } else {
+    fail("size-cap degraded envelope", `got: ${JSON.stringify(j)}`);
+  }
+  const denyLogPath = path.join(tmp, ".devt", "state", "preflight-denies.jsonl");
+  if (fs.existsSync(denyLogPath)) {
+    const denyLog = fs.readFileSync(denyLogPath, "utf8");
+    const records = denyLog.split("\n").filter(Boolean).map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+    const sizeRec = records.find(rec => rec.source === "graph_loader");
+    if (sizeRec && sizeRec.cap && sizeRec.size > sizeRec.cap) {
+      pass("size-cap forensic record appended to preflight-denies.jsonl (source=graph_loader)");
+    } else {
+      fail("size-cap forensic record", `expected graph_loader source with size>cap, got: ${JSON.stringify(records)}`);
+    }
+  } else {
+    fail("size-cap forensic record", "preflight-denies.jsonl not created");
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── malformed graph.json (Phase A degradation paths) ──────────────────────
 {
   // Invalid JSON syntax — safeJsonParse returns ok:false; loader degrades.
