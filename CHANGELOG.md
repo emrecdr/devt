@@ -6,6 +6,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-05-18
+
+Nine-commit wave layering four concerns on top of v0.43.0's graphify integration: alignment-drift cleanup, JSON-sidecar contract completion for the highest-traffic markdown-only artifact, memory-layer module split, and post-integration polish for graphify + claude-mem MCP routing. Two silent failure modes closed: `validateConsistency` was recording `NO_STATUS_LINE` warnings on every code-review verify-phase advance because `code-reviewer.md` emits `## Verdict` while `extractStatus()` only matched `## Status`; `loadGraph` silently degraded when `graph.json` exceeded the 100MB cap with no signal in `/devt:forensics`. One forensic-preservation gap closed: `dispatch-warnings.jsonl` was being deleted by `state reset` despite CLAUDE.md promising it survives. Plus the `claude-mem` harvest pre-step was routing to a tool that errors out for the canonical (worker-mode) install. Twelve new smoke gates added across the wave. Smoke: **454 passed**, **0 failed** (was 438 at the start of the wave).
+
+### Added — alignment cleanup (a9ecfdf)
+
+- **Documentation-discipline smoke gate** in `scripts/smoke-test.sh`: scans `agents/`, `workflows/`, `skills/`, and `docs/` for devt-internal version refs (`v0.X.Y` patterns and `since v[0-9]` markers), excluding `CHANGELOG.md` and `docs/superpowers/plans/` as legitimate historical homes. Catches the class of drift where version refs leak into source-of-truth surfaces despite the existing rule.
+- **`RESET_EXEMPT` preservation smoke gate**: state-reset functional test asserts both `preflight-denies.jsonl` and `dispatch-warnings.jsonl` survive a reset, locking in the forensic-preservation contract.
+
+### Fixed — alignment cleanup (a9ecfdf)
+
+- `bin/modules/state.cjs::RESET_EXEMPT` now preserves `dispatch-warnings.jsonl` alongside `preflight-denies.jsonl`. The forensic-preservation claim for `/devt:forensics` already promised this; the implementation now honours it.
+- `agents/retro.md` frontmatter adds `skills: []` for contract consistency with `agents/io-contracts.yaml` (where `retro.frontmatter_skills` already declared `[]`).
+- `docs/MEMORY.md`: removed two devt-internal version refs (header note and multi-root prose), added `lesson` to the `doc_type` enum comment, deleted the empty `## Version Notes` section header.
+
+### Added — review.json JSON sidecar (8dff301)
+
+- **`review.json` sidecar** completes the JSON-sidecar contract for the highest-traffic markdown-only artifact. Joins the existing `impl-summary.json`, `test-summary.json`, and `verification.json`. Schema split mirrors `impl-summary`: `status ∈ {DONE, BLOCKED}` for workflow routing, `verdict ∈ {APPROVED, APPROVED_WITH_NOTES, NEEDS_WORK}` for the review outcome.
+- **Wired end-to-end**: `bin/modules/state.cjs` (JSON_SIDECAR_SCHEMAS entry + SIDECAR_FOR_MARKDOWN mapping + review.md removed from ARTIFACT_SCHEMA), `agents/io-contracts.yaml` (`code-reviewer.outputs.sidecar = review.json`), `agents/code-reviewer.md` (stub-first protocol writing `review.json` first, finalizing with status+verdict+agent+score+counts+timestamp), `workflows/code-review.md` (artifact pre-gate requires both `.md` and `.json`), `workflows/next.md` (three review-routing branches now `state read-sidecar review.json` instead of text-matching the markdown).
+- **Seven smoke gates** covering registry presence, mapping presence, ARTIFACT_SCHEMA absence, io-contracts declaration, agent emission, workflow consumption, and end-to-end schema validation of all three flags.
+
+### Fixed — review.json JSON sidecar (8dff301)
+
+- **Silent `extractStatus` warnings on `review.md` eliminated as side effect**. Before the sidecar wire, `validateConsistency` ran `extractStatus()` on `review.md`, which only matched `## Status` headings — but the code-reviewer template emits `## Verdict`. Every code-review verify-phase advance silently persisted `NO_STATUS_LINE` to `workflow.yaml::validation_warnings`. Sidecar routing via `SIDECAR_FOR_MARKDOWN` bypasses `extractStatus` entirely.
+- **Generalized the ARTIFACT_SCHEMA drift gate** to recognize both "Status field is one of" and "Verdict field is one of" agent doc patterns, with the sidecar field-kind resolved from whichever matched. Prevents the same class of drift across all sidecar-routed artifacts going forward.
+
+### Added — polish pass (867c005)
+
+- **docs/COMMANDS.md scope_trust + graph_stats coverage** added in the preflight section. The JSON sidecar fields (`scope_hint`, `scope_trust`, `graph_stats`) were documented in CLAUDE.md (dev-facing) but absent from COMMANDS.md (user-facing). Three new paragraphs covering: sidecar shape, `<scope_trust>` dispatch signal semantics (low-confidence treatment when `trust ∈ {sparse, empty}` or `lag_commits > 10`), and `graph_stats` source.
+- **End-to-end smoke gate for review.json sidecar routing**: constructs the exact scenario the silent bug occurred in (review.md without `## Status` heading, valid review.json) and asserts `state validate`'s JSON output contains no `review.md no_status_line` mismatch. Exercises the SIDECAR_FOR_MARKDOWN code path in `validateConsistency`, not just wiring presence.
+
+### Fixed — polish pass (867c005)
+
+- `agents/researcher.md` status pattern: template wrote `Status: DONE | ...` as plain text under `## Confidence` heading. `extractStatus()` only matches `## Status` headings, so the status line was unparseable. `research.md` is in `ARTIFACT_SCHEMA` and consumed by `workflows/dev-workflow.md`; misalignment was latent because `research` is not in `PHASE_ARTIFACT_MAP`, but adding research as a routed phase would have re-introduced the same silent-warning class fixed for `review.md`. Promoted to a proper `## Status` heading with block-form value.
+
+### Changed — memory module split (af90cf0)
+
+- **`bin/modules/memory.cjs` extracted into three files**. The 1884-line module was well past the 700-line informal threshold. Two clean extraction boundaries identified after dependency mapping:
+  - **`bin/modules/memory-graph.cjs`** (135 lines): graph traversal over the `links` table — `getLinks`, `getSubgraphTriples`, `getBacklinks`, `findOrphans`, `findStaleLinks`. Only needs the DB handle, obtained via `withDb`.
+  - **`bin/modules/memory-bundle.cjs`** (251 lines): portable JSON bundle export/import — `resolveExportPath`, `resolveImportPath`, `readDocFile`, `exportBundle`, `importBundle`. Uses parser/validation helpers from the core module.
+  - **`bin/modules/memory.cjs`** (1576 lines, was 1884): everything else — paths, frontmatter parsing/validation, DB lifecycle, queries, `upsertDoc`, symbol validation, CLI dispatcher.
+- **Lazy-require pattern** breaks the load-time circular dep: sub-modules `require("./memory.cjs")` inside function bodies, so memory.cjs's top-level require of the sub-modules resolves cleanly. Public API unchanged via re-exports; existing consumers (`devt-tools.cjs`, `devt-memory-mcp.cjs`, `discovery.cjs`, `preflight.cjs`, `health.cjs`) need zero call-site changes.
+- **Four helpers now formally exported** from `memory.cjs` to support the sibling-module contract: `withDb`, `findProjectRoot`, `parseYamlSubset`, `serializeFrontmatter`. These are internal-but-shared utilities that sub-modules need; the export is the contract that lets them stay in their natural homes instead of being moved to a shared base module.
+- Net: -308 lines from `memory.cjs` (-16%), +386 lines across two sibling modules, +78 lines total codebase (import boilerplate cost — acceptable tradeoff for module health).
+
+### Fixed — claude-mem MCP harvest routing (26033b9)
+
+- `claude-mem` harvest pre-step in three workflows (`dev-workflow.md`, `quick-implement.md`, `lesson-extraction.md`) was routing to `observation_search`, which requires `CLAUDE_MEM_RUNTIME=server-beta` and silently no-ops in the canonical worker-mode install. Re-targeted to `search` — the worker-mode equivalent exposed identically by both runtimes. Parsing instructions refined to extract only numeric-ID rows from the markdown index (the `search` tool returns observations + sessions + prompts under the same result count) and to map the emoji column (⚖️ → decision, 🔵 → discovery) to `obs_type`, dropping session-telemetry types that don't promote.
+- Negative smoke gate added; existing positive harvest gate retargeted to the new tool name.
+
+### Added — graphify polish (6ec5cf3 / 7d1f080 / 667f50b)
+
+- **`loadGraph` size-cap forensic record** (6ec5cf3): when `graph.json` exceeds the 100MB cap, appends one JSONL record to `.devt/state/preflight-denies.jsonl` with `source="graph_loader"`, path, size, cap, and ISO timestamp. Per-process dedupe via a path set so one workflow that calls multiple graphify wrappers writes one record, not N. Skipping the full `readFileSync` on oversize files is a side benefit. Two new fixture-test assertions.
+- **`graphify.godNodes()` public function** (7d1f080): `discovery.cjs::harvestGraphifyGodNodes` and `preflight.cjs`'s Cross-Cutting Concerns renderer were both reading god-nodes by regex-scraping `graphify-out/GRAPH_REPORT.md`. That path lags the actual graph because `graphify update` rewrites `graph.json` but leaves `GRAPH_REPORT.md` alone unless `cluster-only` also runs. The local `_topByDegree()` already computes god-nodes from `graph.json` adjacency with matching filters; wrapping it as a public `godNodes()` lets both consumers read live data. CLI: new `graphify god-nodes [--limit=N]` subcommand. Five new fixture-test assertions.
+- **`docs/graphify-helpers/SKILL.md` MCP table aligned to v0.8.11** (667f50b): upstream graphify v0.8.11 ships 10 MCP tools; the skill's table listed 7 (pre-v0.8.8). Now lists all 10 (`query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `god_nodes`, `get_community`, `graph_stats`, `get_pr_impact`, `list_prs`, `triage_prs`). Decision-tree step "Probe `graphify --help` -> exit 0?" was dead text (devt reads `graph.json` directly in-process); consolidated to `graphify status` which combines enabled-flag + `graph.json` existence in one call.
+
+### Fixed — setup reinit reconcile (12860c3)
+
+- `setup.cjs` MCP-scaffolding block consulted no mode flag; re-running setup with `--mode=reinit` refreshed `.devt/rules/` and `config.json` but left the graphify entry in `.mcp.json` pinned to whatever install method was first detected. A user who later installed `uv` after an initial `pip`-based setup would silently keep the suboptimal `python3` launch path.
+- Extracts pure `reconcileMcpServers(existing, probed, mode)` helper that respects mode semantics: probed entry not present → add (any mode); probed entry present + `mode=reinit` + content differs → replace command + args, preserve user env keys (user keys win over probe env); probed entry present + `mode ∈ {create, update}` → leave untouched; identical entries under reinit → no-op; empty probed under reinit → no-op (no destructive removal).
+- `files_updated` message now distinguishes "added X" from "reconciled X" so the user knows when an install-method delta just landed.
+- Five new behavioral smoke gates inline in `smoke-test.sh` covering each branch of the mode semantics.
+
+### Updated — documentation
+
+- `CLAUDE.md` memory-module description updated to reflect the three-file split with sibling-module contract. Lists `bin/modules/memory-graph.cjs` and `bin/modules/memory-bundle.cjs` alongside the slimmed `memory.cjs` core.
+
 ## [0.43.0] - 2026-05-18
 
 Eleven-commit wave addressing structural integration drift against upstream graphify and claude-mem. Three silent failure modes closed: graphify wrappers shelling out to subcommands with `--json` flags that don't exist upstream; code-reviewer never consuming `mcp__graphify__get_pr_impact` during PR reviews; `claude-mem mcp --db` invocation invalid against claude-mem v13 (produced "Unknown IDE: --db" error every Claude Code session). Two new agent signals added end-to-end: graph trust verdict + freshness lag in the preflight sidecar, with workflow caching + 7 agent body paragraphs implementing low-confidence treatment on sparse / stale graphs. One budget-protection mechanism: code-reviewer applies a community filter for large PR reviews when `pr-impact.md` is present, deferring out-of-community files to a follow-up dispatch. Smoke: **438 passed**, **0 failed** (was 427 at the start of the wave). Architectural through-line: devt's Node code never reaches into upstream MCP/CLI directly — file artifacts for Node, orchestrator-mediated MCP for agents, deletion when a path is unrecoverable.
