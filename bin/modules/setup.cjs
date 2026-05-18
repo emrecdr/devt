@@ -400,16 +400,15 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
       if (!mcpParse.ok) throw new Error(mcpParse.error);
       const existing = mcpParse.value;
       if (!existing.mcpServers) existing.mcpServers = {};
-      let mutated = false;
-      for (const [name, cfg] of Object.entries(probedServers)) {
-        if (!existing.mcpServers[name]) {
-          existing.mcpServers[name] = cfg;
-          mutated = true;
-        }
-      }
-      if (mutated) {
+      const reconciled = reconcileMcpServers(existing.mcpServers, probedServers, mode);
+      if (reconciled.mutated) {
+        existing.mcpServers = reconciled.mcpServers;
         atomicWriteJson(mcpJsonPath, existing);
-        results.files_updated.push(`.mcp.json (added ${Object.keys(probedServers).join(", ")})`);
+        const added = Object.keys(probedServers).filter(n => !reconciled.replacements.includes(n));
+        const parts = [];
+        if (added.length) parts.push(`added ${added.join(", ")}`);
+        if (reconciled.replacements.length) parts.push(`reconciled ${reconciled.replacements.join(", ")}`);
+        results.files_updated.push(`.mcp.json (${parts.join(", ")})`);
       }
     } catch (e) {
       results.warnings.push(`.mcp.json present but unreadable: ${e.message}`);
@@ -545,6 +544,43 @@ function copyMissingFiles(src, dest, prefix) {
   return added;
 }
 
+// Reconcile probed MCP server entries against an existing .mcp.json mcpServers map.
+// Behavior:
+//   - probed entry not in existing  -> add (any mode)
+//   - probed entry already present, mode === "reinit"  -> replace command + args
+//     when they differ from probed; preserve user-set env keys (probe env merged
+//     under the existing env, so user customizations win on conflict)
+//   - probed entry already present, mode !== "reinit"  -> leave untouched
+//   - identical entries under reinit  -> no-op (avoid spurious writes)
+//
+// Pure function: no I/O, no probes. Easily testable. Exported for smoke gates.
+function reconcileMcpServers(existingMcpServers, probedServers, mode) {
+  const out = { ...existingMcpServers };
+  let mutated = false;
+  const replacements = [];
+  for (const [name, cfg] of Object.entries(probedServers)) {
+    const cur = out[name];
+    if (!cur) {
+      out[name] = cfg;
+      mutated = true;
+      continue;
+    }
+    if (mode !== "reinit") continue;
+    const cmdSame = cur.command === cfg.command;
+    const argsSame = JSON.stringify(cur.args) === JSON.stringify(cfg.args);
+    if (cmdSame && argsSame) continue;
+    out[name] = {
+      ...cur,
+      command: cfg.command,
+      args: cfg.args,
+      env: { ...(cfg.env || {}), ...(cur.env || {}) },
+    };
+    mutated = true;
+    replacements.push(name);
+  }
+  return { mcpServers: out, mutated, replacements };
+}
+
 function run(args, pluginRoot) {
   let templateName = "blank";
   let extraConfig = null;
@@ -577,4 +613,4 @@ function run(args, pluginRoot) {
   return setupProject(templateName, pluginRoot, extraConfig, { mode });
 }
 
-module.exports = { run, AVAILABLE_TEMPLATES };
+module.exports = { run, AVAILABLE_TEMPLATES, reconcileMcpServers };

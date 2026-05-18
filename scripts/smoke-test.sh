@@ -4632,6 +4632,57 @@ fi
 rm -rf "$RESET_TMP"
 
 echo
+echo "== setup.cjs::reconcileMcpServers honors mode semantics =="
+# Pure helper, no I/O — assert all 5 behavioral cases inline. Covers
+# DEF-020: setup --mode=reinit reconciles graphify MCP entry when the
+# user's install method changed (pip → uv or vice versa).
+RECONCILE_OUT=$(node -e '
+  const { reconcileMcpServers } = require("'"$ROOT"'/bin/modules/setup.cjs");
+  const stalePip = { graphify: { command: "python3", args: ["-m", "graphify.serve", "graphify-out/graph.json"], env: {} } };
+  const probedUv = { graphify: { command: "uv", args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "graphify-out/graph.json"], env: {} } };
+
+  // Case 1: reinit + stale pip + uv probe → replace command + args
+  const r1 = reconcileMcpServers(stalePip, probedUv, "reinit");
+  if (!r1.mutated) throw new Error("case1: expected mutated=true");
+  if (r1.mcpServers.graphify.command !== "uv") throw new Error("case1: expected command=uv, got " + r1.mcpServers.graphify.command);
+  if (!r1.replacements.includes("graphify")) throw new Error("case1: replacements should include graphify");
+  console.log("case1");
+
+  // Case 2: update + stale pip + uv probe → no change (mode-respecting)
+  const r2 = reconcileMcpServers({ ...stalePip }, probedUv, "update");
+  if (r2.mutated) throw new Error("case2: update mode should not reconcile");
+  if (r2.mcpServers.graphify.command !== "python3") throw new Error("case2: existing entry should survive");
+  console.log("case2");
+
+  // Case 3: reinit + identical entries → no spurious write
+  const r3 = reconcileMcpServers({ graphify: probedUv.graphify }, probedUv, "reinit");
+  if (r3.mutated) throw new Error("case3: identical entries should not trigger mutation");
+  console.log("case3");
+
+  // Case 4: reinit + stale entry + user env → user env survives
+  const withUserEnv = { graphify: { ...stalePip.graphify, env: { GRAPHIFY_OUT: "custom/path" } } };
+  const r4 = reconcileMcpServers(withUserEnv, probedUv, "reinit");
+  if (!r4.mutated) throw new Error("case4: expected reconciliation");
+  if (r4.mcpServers.graphify.env.GRAPHIFY_OUT !== "custom/path") throw new Error("case4: user env keys should survive reinit");
+  if (r4.mcpServers.graphify.command !== "uv") throw new Error("case4: command should still be replaced");
+  console.log("case4");
+
+  // Case 5: empty probedServers (graphify not on PATH) → no destructive change
+  const r5 = reconcileMcpServers(stalePip, {}, "reinit");
+  if (r5.mutated) throw new Error("case5: empty probe should not mutate (no removal)");
+  console.log("case5");
+' 2>&1)
+if [ "$(echo "$RECONCILE_OUT" | wc -l | tr -d " ")" = "5" ]; then
+  pass "reconcileMcpServers: case 1 — reinit replaces stale install-method entry"
+  pass "reconcileMcpServers: case 2 — update mode does NOT reconcile"
+  pass "reconcileMcpServers: case 3 — identical entries no-op (no spurious write)"
+  pass "reconcileMcpServers: case 4 — user env keys survive reinit reconciliation"
+  pass "reconcileMcpServers: case 5 — empty probe leaves entry intact (no removal)"
+else
+  fail "reconcileMcpServers cases — output: $RECONCILE_OUT"
+fi
+
+echo
 echo "== No legacy observation_search refs (server-beta runtime, breaks worker default) =="
 # observation_search routes to /v1/search and is server-beta runtime only;
 # default installs run worker mode where the call errors and the orchestrator
