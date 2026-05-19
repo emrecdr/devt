@@ -694,16 +694,17 @@ if echo "$HOOK_OUT" | grep -q '"decision":"deny"'; then
 else
   fail "pre-flight-guard: deny JSON missing — hook contract broken: $HOOK_OUT"
 fi
-# Deny message must contain explicit recovery template: literal PREFLIGHT line
-# format + 'ungoverned' fallback keyword. Agents that haven't preloaded the
-# memory-pre-flight skill recover from the message alone instead of looping
-# on the bare 'missing PREFLIGHT line' diagnosis.
-if echo "$HOOK_OUT" | grep -q "PREFLIGHT <ISO-8601-timestamp> edit" \
-   && echo "$HOOK_OUT" | grep -q ":: ungoverned" \
-   && echo "$HOOK_OUT" | grep -q "Append this line to scratchpad.md BEFORE retrying"; then
-  pass "pre-flight-guard: deny message contains explicit recovery template"
+# Deny message must contain the load-bearing recovery cue: literal PREFLIGHT
+# line format hint + 'ungoverned' fallback keyword. Agents that haven't
+# preloaded the memory-pre-flight skill recover from the message alone instead
+# of looping on the bare 'missing PREFLIGHT line' diagnosis. The message body
+# is compact — assertions are on substance, not length.
+if echo "$HOOK_OUT" | grep -q "PREFLIGHT <ts> edit" \
+   && echo "$HOOK_OUT" | grep -q "ungoverned" \
+   && echo "$HOOK_OUT" | grep -q "PREFLIGHT MISSING"; then
+  pass "pre-flight-guard: deny message contains compact recovery cue (literal format hint + 'ungoverned' escape)"
 else
-  fail "pre-flight-guard: recovery template missing from deny message: $HOOK_OUT"
+  fail "pre-flight-guard: recovery cue missing from deny message: $HOOK_OUT"
 fi
 # Cleanup placeholder so subsequent assertions have a clean state dir
 rm -f .devt/state/preflight-denies.jsonl .devt/state/workflow.yaml .devt/config.json
@@ -4915,6 +4916,100 @@ if echo "$E2E_OUT" | grep -q "raw_dispatch\|Raw devt"; then
 else
   fail "dispatch-hygiene-guard.sh advisory missing via run-hook.js path (output: $(echo "$E2E_OUT" | head -1))"
 fi
+
+echo
+echo "== Hook-overhead minimization (token-cost reduction without quality regression) =="
+# D3: read-before-edit message is compact (~25 tokens instead of ~80). Keeps
+# the protection (still emits a reminder); just stops re-explaining the runtime's
+# own enforcement.
+RB_OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$ROOT"'/README.md"}}' | bash "$ROOT/hooks/read-before-edit-guard.sh" 2>&1 || true)
+RB_LEN=$(echo "$RB_OUT" | wc -c | tr -d ' ')
+if echo "$RB_OUT" | grep -q "Reminder: if" && [ "$RB_LEN" -lt 280 ]; then
+  pass "read-before-edit-guard emits compact reminder ($RB_LEN bytes, <280 cap)"
+else
+  fail "read-before-edit-guard message regressed in length ($RB_LEN bytes; want compact <280) or missing 'Reminder:' cue"
+fi
+
+# B1: workflow-context-injector emits compact active-line format. Format is
+# human-facing only (no programmatic consumer) — assert compactness without
+# pinning exact bytes.
+WCI_TMP=$(mktemp -d)
+mkdir -p "$WCI_TMP/.devt/state"
+cat > "$WCI_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+tier: STANDARD
+phase: implement
+iteration: 2
+task: smoke active-state probe with a moderately long task description
+autonomous: true
+tdd_mode: true
+EOF
+WCI_OUT=$(( cd "$WCI_TMP" && bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1 ) || true)
+if echo "$WCI_OUT" | grep -qE '\[devt\] STANDARD/implement·i2·auto\+tdd'; then
+  pass "workflow-context-injector emits compact active line (STANDARD/implement·i2·auto+tdd)"
+else
+  fail "workflow-context-injector active-line format regressed (output: $WCI_OUT)"
+fi
+rm -rf "$WCI_TMP"
+
+# B2a: workflow-context-injector stays SILENT on idle state (no active workflow
+# but workflow.yaml exists from prior completion). Eliminates the long-tail
+# per-prompt cost of pinning idle context.
+WCI_IDLE_TMP=$(mktemp -d)
+mkdir -p "$WCI_IDLE_TMP/.devt/state"
+cat > "$WCI_IDLE_TMP/.devt/state/workflow.yaml" <<EOF
+active: false
+phase: complete
+tier: STANDARD
+task: prior work that completed
+EOF
+WCI_IDLE_OUT=$(( cd "$WCI_IDLE_TMP" && bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1 ) || true)
+if [ -z "$(echo "$WCI_IDLE_OUT" | tr -d ' \n')" ]; then
+  pass "workflow-context-injector stays silent on idle state (active=false; no per-prompt token cost)"
+else
+  fail "workflow-context-injector emitting idle context (should be silent): $WCI_IDLE_OUT"
+fi
+rm -rf "$WCI_IDLE_TMP"
+
+# A1: pre-flight-guard exits silently when workflow.yaml exists but active=false.
+# Eliminates the failure mode where a completed workflow's stale workflow.yaml
+# kept the guard firing on every Edit indefinitely.
+PFG_INACTIVE_TMP=$(mktemp -d)
+mkdir -p "$PFG_INACTIVE_TMP/.devt/state"
+cat > "$PFG_INACTIVE_TMP/.devt/state/workflow.yaml" <<EOF
+active: false
+phase: complete
+EOF
+PFG_INACTIVE_OUT=$(( cd "$PFG_INACTIVE_TMP" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$PFG_INACTIVE_TMP"'/foo.md"}}' | bash "$ROOT/hooks/pre-flight-guard.sh" 2>&1 ) || true)
+if [ -z "$(echo "$PFG_INACTIVE_OUT" | tr -d ' \n')" ]; then
+  pass "pre-flight-guard stays silent when workflow.yaml exists but active=false (post-workflow idle state)"
+else
+  fail "pre-flight-guard firing on inactive workflow (should be silent): $PFG_INACTIVE_OUT"
+fi
+rm -rf "$PFG_INACTIVE_TMP"
+
+# A2: pre-flight-guard emits COMPACT deny/warn message that still carries the
+# load-bearing recovery cue (literal PREFLIGHT line format hint + escape
+# keyword 'ungoverned'). Agents on raw-dispatch paths without memory-pre-flight
+# skill loaded need the recovery instructions inline.
+PFG_ACTIVE_TMP=$(mktemp -d)
+mkdir -p "$PFG_ACTIVE_TMP/.devt/state"
+cat > "$PFG_ACTIVE_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: implement
+EOF
+echo "no preflight here" > "$PFG_ACTIVE_TMP/.devt/state/scratchpad.md"
+PFG_ACTIVE_OUT=$(( cd "$PFG_ACTIVE_TMP" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$PFG_ACTIVE_TMP"'/foo.md"}}' | bash "$ROOT/hooks/pre-flight-guard.sh" 2>&1 ) || true)
+PFG_LEN=$(echo "$PFG_ACTIVE_OUT" | wc -c | tr -d ' ')
+if echo "$PFG_ACTIVE_OUT" | grep -q "PREFLIGHT MISSING" && \
+   echo "$PFG_ACTIVE_OUT" | grep -q "PREFLIGHT <ts> edit" && \
+   echo "$PFG_ACTIVE_OUT" | grep -q "ungoverned" && \
+   [ "$PFG_LEN" -lt 900 ]; then
+  pass "pre-flight-guard emits compact warn message with literal format hint + 'ungoverned' escape ($PFG_LEN bytes, <900 cap, recovery cue preserved)"
+else
+  fail "pre-flight-guard warn message regressed (length=$PFG_LEN want <900; must contain 'PREFLIGHT MISSING', literal format hint, and 'ungoverned' escape keyword)"
+fi
+rm -rf "$PFG_ACTIVE_TMP"
 
 echo
 echo "== Pre-Flight: memory_index_missing alert + sidecar field =="

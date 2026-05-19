@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-05-19
+
+Hook-overhead minimization. Surfaced by greenfield-api's self-assessment: every Edit, every UserPromptSubmit, every Read-after-touched-file pays a token tax from the broader memory/preflight integration. Deep audit identified five hook-message and gating improvements that preserve quality protection while cutting per-fire token cost. No functionality removed; every hook keeps its quality role, the messaging just becomes right-sized. Estimated net saving: **~4,500 tokens per active dev session.** Smoke: **509 passed**, **0 failed** (+5 new gates, +1 updated gate to match new compact format).
+
+### Changed
+
+- **`hooks/pre-flight-guard.sh`** — two improvements. (1) Exit silently when `workflow.yaml` exists but `active=false`. Prior implementation only checked file existence, so completed workflows left the guard firing on every Edit indefinitely (state.cjs never deletes workflow.yaml on completion — it sets `active=false`). (2) Compacted the deny/warn message from ~150 tokens to ~35 tokens. The compact message preserves the load-bearing recovery cue (literal `PREFLIGHT <ts> edit <path> :: <ADR-ids|ungoverned>` format hint + `ungoverned` escape keyword) so agents without the memory-pre-flight skill loaded — e.g., raw-dispatched agents that bypassed the workflow — can still recover from the message alone. Verbose protocol re-explanation removed; agents with the skill loaded already know the protocol from their system prompt.
+- **`hooks/workflow-context-injector.sh`** — two improvements. (1) Compacted the active-workflow context line: `[devt] STANDARD · implement (iter 2) [autonomous, tdd] · "task..."` (~80 tokens) → `[devt] STANDARD/implement·i2·auto+tdd · "task..."` (~50 tokens). The line is human-facing only (no programmatic consumer — validated via codebase grep), so compactness wins without breaking contracts. (2) Removed the idle-state context line. Prior implementation emitted `[devt] idle · last: <phase> · "<task>"` on every UserPromptSubmit when `active=false` but `phase` was set — pinning idle context into every prompt long after workflow completion. `/devt:status` and `/devt:next` provide explicit resume paths; the implicit per-prompt reminder is pure overhead.
+- **`hooks/read-before-edit-guard.sh`** — compacted the reminder from ~80 tokens to ~25 tokens. The hook duplicates the CC harness's own read-before-edit enforcement; the advisory is a preemptive reminder, not a guard. Compact form: `Reminder: if "X" has not been Read in this session, Read it first — the runtime requires it before Edit.` Verbose form removed.
+
+### Added
+
+- **Five new smoke gates** under `== Hook-overhead minimization ==`: read-before-edit compact reminder (byte budget), workflow-context-injector compact active line format, workflow-context-injector silent on idle, pre-flight-guard silent on active=false, pre-flight-guard compact warn message with format hint + `ungoverned` escape preserved.
+
+### Context
+
+- **What's NOT in this release** (intentionally deferred):
+    - **Directory-level PREFLIGHT coverage** (would let one PREFLIGHT line cover edits to multiple files under a directory). Investigated, but `skills/memory-pre-flight/SKILL.md` documents the protocol as PER-FILE — loosening it would be a spec change, not just an optimization. Requires a `/devt:council` decision before encoding.
+    - **PostToolUse:Read recent-Read tracking** (would eliminate read-before-edit false-positives when agent just-Read the file). Race-condition risk with the existing async PostToolUse hooks; the simpler compact-message fix in this release captures most of the win without the new hook.
+    - **Memory-auto-index incremental updates** (full FTS5 rebuild replaced with single-doc index). Already debounced at 5s; the marginal complexity isn't worth the wall-time saving for this release.
+- **Where the actual token cost goes** (full attribution, audited from greenfield-api field data): claude-mem's PreToolUse:Read injection (~300-700 tokens per Read on touched files) is the dominant per-edit cost and not under devt's control. devt's per-edit contribution after this release is ~25 tokens (read-before-edit reminder) + 0-35 tokens (compact preflight warn when triggered). The "Security Guidance" UserPromptSubmit injection (~470 tokens/turn observed in field) comes from an external/global hook, not devt.
+
 ## [0.47.0] - 2026-05-19
 
 Workflow contract recovery. Surfaced by a live greenfield-api forensic run that proved the Wave 1-4 graphify integration was systemically bypassed: the slash command's `@${CLAUDE_PLUGIN_ROOT}/workflows/<name>.md` reference does not deterministically inline the workflow body into the orchestrator's context, sub-agents have no `mcp__*graphify*` tool grant yet their bodies + dispatch templates instructed MCP calls, stale `.devt/state/graphify-impact-plan.json` from prior sessions silently masked context_init skipping, and `hooks/dispatch-hygiene-guard.sh` smoke-passes in isolation but provides no trace evidence of whether the CC harness actually invokes it in production. Five aligned failures, four direct fixes + universal hook trace logging. Smoke: **504 passed**, **0 failed** (+5 net new gates, 3 obsolete gates updated to match new architecture).

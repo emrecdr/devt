@@ -63,9 +63,18 @@ node -e "
 
     if (mode === 'off') process.exit(0);
 
-    // No active workflow → no Brief expected → skip
+    // No active workflow → no Brief expected → skip.
+    // state.cjs::updateState never deletes workflow.yaml on completion — it
+    // sets active=false. Without this active check the hook keeps firing on
+    // every Edit indefinitely after a workflow completes, spending tokens on
+    // a Brief that no longer applies.
     const wfPath = path.join(dir, '.devt', 'state', 'workflow.yaml');
     if (!fs.existsSync(wfPath)) process.exit(0);
+    try {
+      const wfBody = fs.readFileSync(wfPath, 'utf8');
+      const activeLine = wfBody.split('\\n').find((l) => /^active\\s*:/.test(l));
+      if (activeLine && /:\\s*(false|null|~|''|\"\")\\s*\$/.test(activeLine)) process.exit(0);
+    } catch { /* malformed YAML — fall through, keep guarding */ }
 
     // Read scratchpad and check for a PREFLIGHT line that mentions this file
     const scratch = path.join(dir, '.devt', 'state', 'scratchpad.md');
@@ -79,8 +88,12 @@ node -e "
 
     if (covered) process.exit(0);
 
-    // Build the advisory / block message
-    const reason = 'DENIED: edit to \"' + fp + '\" requires a PREFLIGHT line in .devt/state/scratchpad.md.\n\nAppend this line to scratchpad.md BEFORE retrying:\n  PREFLIGHT <ISO-8601-timestamp> edit ' + fp + ' :: <governing-ADR/CON/FLOW-IDs>\n\nIf no memory doc governs this path, use the keyword \\'ungoverned\\':\n  PREFLIGHT <ISO-8601-timestamp> edit ' + fp + ' :: ungoverned\n\nSee skills/memory-pre-flight/SKILL.md for the full protocol. If the file is outside the current Brief\\'s scope, run /devt:preflight \"<refined task>\" to regenerate the Brief.';
+    // Build the advisory / block message. Compact — agents with the
+    // memory-pre-flight skill loaded already know the protocol; the message
+    // needs the action cue + literal format hint for recovery, not the full
+    // re-explanation. Recovery cue stays load-bearing for agents that lack
+    // the skill (e.g. raw-dispatched code-reviewer).
+    const reason = 'PREFLIGHT MISSING for \"' + fp + '\". Add to .devt/state/scratchpad.md then retry:\\n  PREFLIGHT <ts> edit ' + fp + ' :: <ADR/CON/FLOW-ids|ungoverned>\\nIf scope drifted, re-run /devt:preflight \"<refined task>\".';
 
     // Forensic logging: append every deny/warn as one JSON record per line
     // via bin/modules/logger.cjs::appendJsonl. Survives state reset via the

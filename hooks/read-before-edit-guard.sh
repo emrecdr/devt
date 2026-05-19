@@ -22,7 +22,7 @@ node -e "
     const fp = (d.tool_input || {}).file_path || '';
     if (!fp || !fs.existsSync(fp)) process.exit(0);
     const name = require('path').basename(fp);
-    const ctx = 'READ-BEFORE-EDIT REMINDER: You are about to modify \"' + name + '\" which already exists. If you have not already used the Read tool to read this file in the current session, you MUST Read it first before editing. The runtime will reject edits to files that have not been read. Use the Read tool on this file path, then retry your edit.';
+    const ctx = 'Reminder: if \"' + name + '\" has not been Read in this session, Read it first — the runtime requires it before Edit.';
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: ctx } }));
   } catch { process.exit(0); }
 " "$INPUT" 2>/dev/null

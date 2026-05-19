@@ -43,19 +43,21 @@ fi
 RESULT=$(node -e "
   const state = JSON.parse(process.argv[1]);
 
-  // Active workflow — compact status line
+  // Active workflow — compact status line.
+  // Format is human-facing only (no programmatic consumers). Compactness wins
+  // tokens on every UserPromptSubmit during an active workflow.
   if (state.active) {
     const tier = state.tier || '?';
     const phase = state.phase || '?';
     const iter = state.iteration || 0;
-    const task = state.task ? (state.task.length > 60 ? state.task.slice(0, 57) + '...' : state.task) : 'none';
+    const task = state.task ? (state.task.length > 50 ? state.task.slice(0, 47) + '...' : state.task) : 'none';
     const flags = [];
-    if (state.autonomous) flags.push('autonomous');
+    if (state.autonomous) flags.push('auto');
     if (state.tdd_mode) flags.push('tdd');
-    if (state.stop_at_phase) flags.push('--to ' + state.stop_at_phase);
-    if (state.only_phase) flags.push('--only ' + state.only_phase);
-    const flagStr = flags.length > 0 ? ' [' + flags.join(', ') + ']' : '';
-    const context = '[devt] ' + tier + ' · ' + phase + (iter > 1 ? ' (iter ' + iter + ')' : '') + flagStr + ' · \"' + task + '\"';
+    if (state.stop_at_phase) flags.push('to=' + state.stop_at_phase);
+    if (state.only_phase) flags.push('only=' + state.only_phase);
+    const flagStr = flags.length > 0 ? '·' + flags.join('+') : '';
+    const context = '[devt] ' + tier + '/' + phase + (iter > 1 ? '·i' + iter : '') + flagStr + ' · \"' + task + '\"';
     const output = {
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
@@ -64,20 +66,9 @@ RESULT=$(node -e "
     };
     process.stdout.write(JSON.stringify(output));
   }
-  // Idle — show last known state if available
-  else if (state.phase && state.phase !== 'null') {
-    const tier = state.tier || '';
-    const task = state.task ? (state.task.length > 50 ? state.task.slice(0, 47) + '...' : state.task) : '';
-    const context = '[devt] idle · last: ' + (tier ? tier + ' · ' : '') + state.phase + (task ? ' · \"' + task + '\"' : '');
-    const output = {
-      hookSpecificOutput: {
-        hookEventName: 'UserPromptSubmit',
-        additionalContext: context
-      }
-    };
-    process.stdout.write(JSON.stringify(output));
-  }
-  // No workflow state at all — silent (don't inject noise)
+  // No active workflow — silent. Idle state is reachable via explicit
+  // /devt:status or /devt:next; pinning it into every prompt costs tokens
+  // long after the workflow ended without adding load-bearing context.
 " "$STATE_JSON" 2>/dev/null) || exit 0
 
 # printf avoids echo's flag interpretation (-n, -e) regardless of JSON content
