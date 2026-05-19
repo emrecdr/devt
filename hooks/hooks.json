@@ -120,6 +120,11 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" dispatch-scope-guard.sh",
             "timeout": 3,
             "async": true
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" dispatch-hygiene-guard.sh",
+            "timeout": 3
           }
         ]
       }

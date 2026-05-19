@@ -63,6 +63,56 @@ Do NOT skip any of these. Reviewing without loading the project's rules means re
 
 **Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
+<step name="workflow_context_assertion">
+## Workflow context assertion (HARD GATE — must pass before any other work)
+
+Before you do ANYTHING else, inspect your dispatch task prompt for the workflow-managed context blocks: `<scope_trust>`, `<scope_hint>`, and `<memory_signal>`. If ALL THREE are missing, you were dispatched OUTSIDE of a devt workflow (e.g., the orchestrator called `Task(subagent_type="devt:code-reviewer", ...)` directly instead of running `/devt:review`). The Wave 1-4 graphify/memory/scope-trust integration only fires when those blocks are injected by the workflow's dispatch template — without them, you have no graphify-first directive, no scope hint, no memory signal, no Pre-Flight Brief reference.
+
+**Refuse the dispatch.** Write `.devt/state/review.md` and `.devt/state/review.json` with the following exact shape, then STOP. Do not attempt a degraded review — silently producing a shallow review without telling the orchestrator perpetuates the failure mode this assertion exists to surface.
+
+`review.md` body:
+```
+# Code Review
+
+## Status: BLOCKED
+
+## Verdict: NEEDS_WORK
+
+## Score: 0 / 100
+
+## Findings
+
+### Critical 1 — Dispatched outside of workflow context
+- File: (agent context, not a code file)
+- Severity: Critical
+- Issue: This code-reviewer was dispatched via raw `Task()` call without the `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` context blocks that devt workflows inject. The Wave 1-4 graphify + memory integration is silent without those blocks.
+- Why it matters: A review produced without scope-trust + memory signals defaults to grep-first discovery, has no Pre-Flight Brief reference, no caller-set verification, no ADR/REJ compliance check, and no graphify telemetry. The result looks superficially like a review but bypasses every load-bearing protection.
+- Remediation: Orchestrator should re-dispatch via `/devt:review` (or `/devt:workflow` for an implementation pass), which routes through `workflows/code-review.md::context_init` and injects the full set of context blocks per the dispatch template. The hygiene hook at `hooks/dispatch-hygiene-guard.sh` surfaced an advisory for this dispatch — check `.devt/state/dispatch-warnings.jsonl` for the matching `raw_dispatch` record.
+
+## Score breakdown
+- No review performed (BLOCKED).
+```
+
+`review.json` sidecar:
+```json
+{
+  "status": "BLOCKED",
+  "verdict": "NEEDS_WORK",
+  "agent": "code-reviewer",
+  "score": 0,
+  "critical_count": 1,
+  "important_count": 0,
+  "minor_count": 0,
+  "reason": "raw_dispatch_no_workflow_context",
+  "timestamp": "<ISO-8601 now>"
+}
+```
+
+After writing both files, STOP — emit a final user-visible message: `Code-reviewer dispatched without workflow context. See review.md for the BLOCKED finding. Re-run via /devt:review to invoke the full workflow.`
+
+This assertion is intentionally strict: even one of the three blocks being present means you're workflow-dispatched (the heuristic is forgiving). All three missing is the unambiguous "rogue orchestration" signal — exactly the failure mode the greenfield-api pass-9 evidence surfaced where 6 parallel slice agents ran with no context injection and silently fell back to grep-first review.
+</step>
+
 <step name="spec_compliance">
 ## Spec Compliance Check (BEFORE code quality)
 

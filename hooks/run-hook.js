@@ -50,6 +50,13 @@ const HOOK_PROFILES = {
   // configured cap (.devt/config.json::dispatch.{max_prompt_bytes,max_files_hint}).
   // Forensic trail appended to .devt/state/dispatch-warnings.jsonl. Never blocks.
   "dispatch-scope-guard.sh": ["standard", "full"],
+  // dispatch-hygiene-guard.sh: PreToolUse on Task — advisory warning when a
+  // devt:* subagent is dispatched WITHOUT the workflow-managed context blocks
+  // (<scope_trust>, <scope_hint>, <memory_signal>). Detects "rogue orchestration"
+  // where the orchestrator hand-rolls Task() calls bypassing /devt:review and
+  // strips all the Wave 1-4 graphify protections. Forensic trail tagged
+  // source: "raw_dispatch" in dispatch-warnings.jsonl. Never blocks.
+  "dispatch-hygiene-guard.sh": ["standard", "full"],
 };
 
 function getProfile() {

@@ -4790,6 +4790,53 @@ else
 fi
 
 echo
+echo "== Wave 5: rogue-orchestration defense (hook + agent assertion + CLAUDE.md) =="
+# Hook file exists + executable
+if [ -x "$ROOT/hooks/dispatch-hygiene-guard.sh" ]; then
+  pass "hooks/dispatch-hygiene-guard.sh exists + is executable"
+else
+  fail "hooks/dispatch-hygiene-guard.sh missing or not executable"
+fi
+# Registered in hooks.json under PreToolUse Task matcher
+if node -e "const h=require('$ROOT/hooks/hooks.json');const taskMatchers=h.hooks.PreToolUse.filter(b=>b.matcher==='Task');const all=taskMatchers.flatMap(b=>b.hooks.map(x=>x.command));process.exit(all.some(c=>c.includes('dispatch-hygiene-guard.sh')) ? 0 : 1)" 2>/dev/null; then
+  pass "hooks.json registers dispatch-hygiene-guard.sh under PreToolUse Task matcher"
+else
+  fail "dispatch-hygiene-guard.sh not registered in hooks.json"
+fi
+# Registered in run-hook.js profile registry (standard + full)
+if grep -q '"dispatch-hygiene-guard.sh": \["standard", "full"\]' "$ROOT/hooks/run-hook.js"; then
+  pass "run-hook.js declares dispatch-hygiene-guard.sh in standard + full profiles"
+else
+  fail "dispatch-hygiene-guard.sh not declared in run-hook.js profile registry"
+fi
+# Functional: raw dispatch (no context) triggers the advisory
+RAW_OUT=$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review files X Y Z"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+if echo "$RAW_OUT" | grep -q "raw_dispatch\|Raw devt"; then
+  pass "dispatch-hygiene-guard.sh emits advisory on raw devt:* dispatch (no <scope_trust>/<scope_hint>/<memory_signal>)"
+else
+  fail "dispatch-hygiene-guard.sh missed a raw dispatch (output: $(echo "$RAW_OUT" | head -1))"
+fi
+# Functional: workflow-managed dispatch is silent
+MGD_OUT=$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<scope_trust>{}</scope_trust>\nReview files"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+if [ -z "$MGD_OUT" ]; then
+  pass "dispatch-hygiene-guard.sh stays silent on workflow-managed dispatches (has <scope_trust>)"
+else
+  fail "dispatch-hygiene-guard.sh false-positive on workflow-managed dispatch (output: $MGD_OUT)"
+fi
+# Code-reviewer agent body carries workflow_context_assertion step
+if grep -q 'name="workflow_context_assertion"' "$ROOT/agents/code-reviewer.md" && grep -q "raw_dispatch_no_workflow_context" "$ROOT/agents/code-reviewer.md"; then
+  pass "agents/code-reviewer.md carries workflow_context_assertion step that refuses raw dispatches with BLOCKED+NEEDS_WORK"
+else
+  fail "code-reviewer.md missing workflow_context_assertion step"
+fi
+# CLAUDE.md amendment present
+if grep -q "Never raw-dispatch devt agents" "$ROOT/CLAUDE.md"; then
+  pass "CLAUDE.md documents the never-raw-dispatch rule + the bolt-graphify-onto-fan-out recovery pattern"
+else
+  fail "CLAUDE.md missing rogue-orchestration guidance"
+fi
+
+echo
 echo "== Pre-Flight: memory_index_missing alert + sidecar field =="
 # Positive path: drop the index, run preflight, expect alert + sidecar=true
 TMP_INDEX_BAK=""
