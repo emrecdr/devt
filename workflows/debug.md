@@ -84,14 +84,7 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <bug>{bug_description}</bug>
 Follow the 4-phase investigation protocol. Write findings to .devt/state/debug-summary.md.
 
-Graphify-first investigation protocol (when `<scope_trust>.trust` is `dense` or `sparse`):
-Use `mcp__devt-graphify__*` PROACTIVELY during the hypothesis-formation phase:
-  1. `mcp__devt-graphify__query_graph({text: "<bug_topic>"})` to anchor candidate symbols from the symptom description.
-  2. `mcp__devt-graphify__shortest_path({source, target})` when the symptom names two endpoints (e.g. "HTTP request to DB write" — find the call path).
-  3. `mcp__devt-graphify__get_neighbors({symbol, direction:"in"})` on the suspect symbol — the caller set tells you which call sites would have hit the bug.
-  4. `mcp__devt-graphify__blast_radius({symbols: [suspect]})` once a fix candidate is forming, to size the regression surface.
-Use `Grep`/`Read` to VALIDATE graph findings (line content, comments), NOT to discover the call topology from scratch. A fix proposal that doesn't enumerate callers via graphify is leaving fixed-but-broken-elsewhere risk on the table.
-Empty/degraded responses (`{degraded: true}`) are normal signals to fall back — proceed with Grep+Read for that query. When `<scope_trust>.trust` is `empty`, skip the protocol entirely.
+Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` block (derived from preflight Brief blast-radius) as the high-signal starting set for hypothesis formation, then validate with Grep/Read. When `<scope_trust>.trust` is `empty`, fall back to following the stack trace from the symptom.
 ")
 </step>
 

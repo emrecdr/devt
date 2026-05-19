@@ -16,6 +16,10 @@ Run the interactive project setup wizard to configure devt for the current proje
 </execution_context>
 
 <process>
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/project-init.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+
+Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
+
 Execute the project initialization workflow from the referenced file end-to-end.
 
 In addition to scaffolding `.devt/rules/`, the wizard automatically runs `node bin/devt-tools.cjs memory init` to create the FTS5 index at `.devt/memory/index.db` and scaffold `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`. The vendored read-only MCP server (`bin/devt-memory-mcp.cjs`) and the vendored read-only Graphify relay (`bin/devt-graphify-mcp.cjs`) both ship with the plugin and are auto-registered via the plugin-root `.mcp.json` whenever devt is loaded — no project-level scaffolding required. Project `.mcp.json` is reserved for project-relative servers like the upstream `graphify` Python MCP and `claude-mem` (registered conditionally if their binaries are detected on PATH). When Graphify is detected and enabled, the wizard also prompts to build the first `graphify-out/graph.json` so graph-derived signals are live from the first workflow onward. Optional configuration:

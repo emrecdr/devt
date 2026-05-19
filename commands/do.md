@@ -14,6 +14,10 @@ Acts as a smart dispatcher — never does work itself.
 </execution_context>
 
 <process>
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/do.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+
+Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
+
 Execute the do workflow from the referenced file. The workflow is a pure dispatcher — read the routing table, pick the matching command, invoke it via the Skill tool. devt slash commands are addressable as skills with the `devt:` prefix (e.g., `/devt:debug` ↔ `Skill tool: name=devt:debug`).
 
 **Hard contract — the only valid final action is the Skill tool call.**

@@ -4486,10 +4486,10 @@ if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "graph-im
 else
   fail "code-review.md missing layered impact trigger or graph-impact.md persistence or devt-graphify MCP refs"
 fi
-if grep -q "graph-impact.md" "$ROOT/agents/code-reviewer.md" && grep -q "mcp__devt-graphify__" "$ROOT/agents/code-reviewer.md"; then
-  pass "code-reviewer agent reads .devt/state/graph-impact.md and may call mcp__devt-graphify__* for caller verification"
+if grep -q "graph-impact.md" "$ROOT/agents/code-reviewer.md" && ! grep -qE 'mcp__devt-graphify|mcp__graphify' "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer agent reads .devt/state/graph-impact.md as consume-only data (no direct MCP calls — agent has no MCP tool grant)"
 else
-  fail "code-reviewer.md missing graph-impact.md Read instruction or devt-graphify MCP references"
+  fail "code-reviewer.md must read graph-impact.md AND must not instruct MCP graphify calls (agent has no tool grant)"
 fi
 if grep -q "Community filter for large reviews" "$ROOT/agents/code-reviewer.md" && grep -q "Out-of-Scope Files (Deferred)" "$ROOT/agents/code-reviewer.md"; then
   pass "code-reviewer applies community-filter scope-narrowing for large reviews (budget protection)"
@@ -4556,34 +4556,26 @@ if echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_com
 else
   fail "get_community failed to degrade on invalid community_id"
 fi
-if grep -q 'name="caller_verification"' "$ROOT/agents/code-reviewer.md" && grep -q "## Caller Verification" "$ROOT/agents/code-reviewer.md"; then
-  pass "code-reviewer agent declares caller_verification step + Caller Verification section format"
-else
-  fail "code-reviewer.md missing caller_verification step or Caller Verification section format"
-fi
-if grep -q "Caller Verification" "$ROOT/workflows/code-review.md" && grep -q "caller-0" "$ROOT/workflows/code-review.md"; then
-  pass "code-review verifier dispatch validates Caller Verification section presence"
-else
-  fail "code-review.md verifier dispatch missing Caller Verification validation directive"
-fi
 if grep -q "graphify-out/wiki/index.md" "$ROOT/bin/modules/preflight.cjs"; then
   pass "preflight.cjs prepends graphify-out/wiki/index.md to suggested_reading when present"
 else
   fail "preflight.cjs missing wiki-first reading injection"
 fi
-# Graphify-first dispatch directive: active instruction (not passive availability) in the
-# task block of dispatches that benefit most from graph queries. Catches the regression
-# where agents have access but aren't told to use it — they default to grep.
-GRAPHIFY_FIRST_MISSING=""
+# Sub-agent dispatches must NOT instruct MCP calls — sub-agents have no MCP tool grant.
+# We assert by checking for the unique signature strings of the prior dead instructions:
+# "Graphify-first discovery protocol" and "PROACTIVELY" — these only appeared inside
+# Task() dispatch task blocks telling sub-agents to use MCP. Their presence anywhere in
+# the 3 affected workflows is dead code that misleads the agent.
+DEAD_SIGNATURES_FOUND=""
 for wf in code-review debug research-task; do
-  if ! grep -q "Graphify-first" "$ROOT/workflows/$wf.md"; then
-    GRAPHIFY_FIRST_MISSING="$GRAPHIFY_FIRST_MISSING $wf"
+  if grep -qE 'Graphify-first (discovery|investigation) protocol|PROACTIVELY' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    DEAD_SIGNATURES_FOUND="$DEAD_SIGNATURES_FOUND $wf"
   fi
 done
-if [ -z "$GRAPHIFY_FIRST_MISSING" ]; then
-  pass "code-review / debug / research-task dispatch tasks all carry the Graphify-first protocol directive (active instruction, not passive availability)"
+if [ -z "$DEAD_SIGNATURES_FOUND" ]; then
+  pass "no workflow sub-agent dispatch instructs the dead Graphify-first protocol (sub-agents have no MCP tool grant)"
 else
-  fail "workflows missing Graphify-first protocol directive in dispatch task:${GRAPHIFY_FIRST_MISSING}"
+  fail "workflows still carry dead Graphify-first sub-agent instructions:${DEAD_SIGNATURES_FOUND}"
 fi
 
 echo
@@ -4834,6 +4826,80 @@ if grep -q "Never raw-dispatch devt agents" "$ROOT/CLAUDE.md"; then
   pass "CLAUDE.md documents the never-raw-dispatch rule + the bolt-graphify-onto-fan-out recovery pattern"
 else
   fail "CLAUDE.md missing rogue-orchestration guidance"
+fi
+
+echo
+echo "== Workflow contract enforcement (loading + recency + agent dead-code) =="
+# Every command that @-references a workflow file MUST also instruct an explicit Read.
+# The @-resolution in CC slash-command bodies is not guaranteed when ${CLAUDE_PLUGIN_ROOT}
+# expansion order differs from `@` resolution — explicit Read makes the workflow body
+# deterministically present in context.
+MISSING_READ_INSTR=()
+for cmd_file in "$ROOT"/commands/*.md; do
+  if grep -F '@${CLAUDE_PLUGIN_ROOT}/workflows/' "$cmd_file" >/dev/null 2>&1; then
+    if ! grep -q 'Mandatory first action.*[Rr]ead' "$cmd_file"; then
+      MISSING_READ_INSTR+=("$(basename "$cmd_file")")
+    fi
+  fi
+done
+if [ ${#MISSING_READ_INSTR[@]} -eq 0 ]; then
+  pass "every command with @workflow reference also instructs an explicit Read of the workflow body"
+else
+  fail "commands with @-ref but no explicit Read instruction: ${MISSING_READ_INSTR[*]}"
+fi
+
+# Dead MCP-call instructions in AGENT BODIES are banned. The orchestrator owns MCP;
+# sub-agents consume graph-impact.md. Their `tools:` frontmatter excludes mcp__*graphify*,
+# so any agent body that tells the agent to call those tools is dead code that misleads
+# both readers and the agent.
+DEAD_MCP_AGENTS=$( (grep -lE 'mcp__devt-graphify|mcp__graphify' "$ROOT"/agents/*.md 2>/dev/null || true) | (xargs -n1 basename 2>/dev/null || true) | tr '\n' ' ' )
+if [ -z "${DEAD_MCP_AGENTS// /}" ]; then
+  pass "no agent body instructs MCP graphify calls (sub-agents consume graph-impact.md only)"
+else
+  fail "agent bodies still carry dead MCP instructions: $DEAD_MCP_AGENTS"
+fi
+
+# code-review.md context_init MUST evict stale graphify artifacts before regen.
+# Without this, a prior session's graph-impact.md silently masks whether the
+# current orchestrator ran the plan or skipped context_init.
+if grep -q 'rm -f .devt/state/graphify-impact-plan.json .devt/state/graph-impact.md .devt/state/graphify-skip-reason.txt' "$ROOT/workflows/code-review.md"; then
+  pass "workflows/code-review.md evicts stale graphify artifacts before regenerating the impact plan"
+else
+  fail "workflows/code-review.md missing stale-artifact eviction in context_init"
+fi
+
+# run-hook.js writes a trace record on every invocation (enabled or disabled).
+# Without this, debugging "did the CC harness actually invoke this hook?" requires
+# adding ad-hoc logging mid-incident.
+TRACE_TMP="$ROOT/.devt/state/hook-trace/run-hook.jsonl"
+TRACE_BAK=""
+if [ -f "$TRACE_TMP" ]; then
+  TRACE_BAK="/tmp/devt-smoke-trace-bak-$$.jsonl"
+  mv "$TRACE_TMP" "$TRACE_BAK"
+fi
+( echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"smoke-trace probe"}}' | \
+  ( cd "$ROOT" && node hooks/run-hook.js dispatch-hygiene-guard.sh >/dev/null 2>&1 ) ) || true
+if [ -f "$TRACE_TMP" ] && grep -q '"script":"dispatch-hygiene-guard.sh"' "$TRACE_TMP"; then
+  pass "run-hook.js writes trace record to .devt/state/hook-trace/run-hook.jsonl on every invocation"
+else
+  fail "run-hook.js failed to write trace record (file: $TRACE_TMP)"
+fi
+# Restore the prior trace file if any, so we don't pollute devt's working tree.
+rm -f "$TRACE_TMP"
+if [ -n "$TRACE_BAK" ] && [ -f "$TRACE_BAK" ]; then
+  mv "$TRACE_BAK" "$TRACE_TMP"
+fi
+
+# End-to-end: dispatch-hygiene-guard via run-hook.js (matches the CC harness path,
+# not the bash-direct shortcut the existing Wave 5 functional gate uses). This
+# catches runner-layer regressions (profile registry, stdin passthrough, env env)
+# that the direct-bash test would miss.
+E2E_OUT=$( ( echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review files X Y Z"}}' | \
+  ( cd "$ROOT" && node hooks/run-hook.js dispatch-hygiene-guard.sh 2>&1 ) ) || true)
+if echo "$E2E_OUT" | grep -q "raw_dispatch\|Raw devt"; then
+  pass "dispatch-hygiene-guard.sh emits advisory when invoked via run-hook.js (production path, not just bash-direct)"
+else
+  fail "dispatch-hygiene-guard.sh advisory missing via run-hook.js path (output: $(echo "$E2E_OUT" | head -1))"
 fi
 
 echo

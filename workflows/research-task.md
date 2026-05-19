@@ -88,13 +88,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 Research implementation approaches for: {task_description}
 Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
 
-Graphify-first discovery protocol (when `<scope_trust>.trust` is `dense` or `sparse`):
-Use `mcp__devt-graphify__*` PROACTIVELY as your primary discovery mechanism, not as a fallback:
-  1. `mcp__devt-graphify__query_graph({text: "<topic>"})` to anchor existing symbols in the area.
-  2. `mcp__devt-graphify__god_nodes({limit: 20})` to identify the abstractions a new feature would touch.
-  3. `mcp__devt-graphify__get_neighbors` on candidate anchor points — establishes which patterns the area already uses.
-Use `Grep`/`Read` to VALIDATE graph findings against actual implementation (semantics, comments),
-NOT to enumerate symbols from scratch. Grep on a graph-indexed project re-discovers what the AST extractor already knows. Research that ignores the graph produces "patterns" that only describe what was easy to grep for. Empty/degraded responses (`{degraded: true}`) signal fall back to grep; proceed normally for that query. When `<scope_trust>.trust` is `empty`, skip the protocol.
+Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` block (derived from preflight Brief blast-radius and governing-doc affects_paths) as the high-signal starting set when looking for existing patterns or pitfalls to flag. Validate with Grep/Read against the actual implementation. When `<scope_trust>.trust` is `empty`, broaden Glob/Grep exploration and don't claim "no prior art exists" based on scope_hint alone.
 </task>
 Write findings to .devt/state/research.md
 ")

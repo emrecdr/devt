@@ -10,4 +10,6 @@ Use `--force` to bypass the 4-hour cache and check GitHub immediately.
 
 @${CLAUDE_PLUGIN_ROOT}/workflows/update.md
 
-Execute the update workflow from the referenced file end-to-end.
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/update.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+
+Then execute every `<step>` block in the file in order.

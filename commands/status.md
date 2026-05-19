@@ -16,6 +16,10 @@ Display the current workflow's progress: completed steps, pending steps, availab
 </execution_context>
 
 <process>
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/status.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+
+Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
+
 Execute the status workflow from the referenced file end-to-end. Reads workflow state and artifacts, then reports progress.
 
 The status output also surfaces the Pre-Flight Brief state (FRESH | STALE | MISSING with generated_at timestamp) when `.devt/state/preflight-brief.md` exists — see `workflows/status.md` for the integration point. STALE means a prior File Pre-Flight detected scope expansion; re-run `/devt:preflight "<refined task>"` to refresh.

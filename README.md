@@ -298,11 +298,11 @@ User → Command (thin) → Workflow (orchestration) → Agent (worker)
 
 The execution model follows a **Command → Workflow → Agent** architecture:
 
-- **Commands** (32 files): thin entry points. Parse arguments, delegate to a workflow. No business logic.
-- **Workflows** (31 files): orchestration. Determine tier, coordinate agents, manage state transitions.
-- **Agents** (11 files): 10 focused workers (programmer/tester/code-reviewer/docs-writer/architect/retro/curator/verifier/researcher/debugger) plus the opt-in `devt-coordinator` main-thread router.
+- **Commands** (35 files): thin entry points. Parse arguments, delegate to a workflow. Each `commands/*.md` that delegates to a workflow file pairs the `@${CLAUDE_PLUGIN_ROOT}/workflows/<name>.md` reference with an explicit `Read` instruction in its `<process>` block — the workflow body is deterministically present in the orchestrator's context.
+- **Workflows** (34 files): orchestration. Determine tier, coordinate agents, manage state transitions. Orchestrator owns MCP calls — sub-agents consume the produced `.devt/state/*.md` files READ-ONLY.
+- **Agents** (11 files): 10 focused workers (programmer/tester/code-reviewer/docs-writer/architect/retro/curator/verifier/researcher/debugger) plus the opt-in `devt-coordinator` main-thread router. Every sub-agent's `tools:` is stdlib-only (`Read, Bash, Glob, Grep` + optional `Write, Edit`) — no `mcp__*` grants. MCP belongs to the orchestrator.
 - **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
-- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`).
+- **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`). `run-hook.js` writes a forensic trace record per invocation to `.devt/state/hook-trace/run-hook.jsonl` — the diagnostic source-of-truth for "did the harness invoke this hook?".
 
 ### Workflow tiers
 
@@ -428,10 +428,15 @@ The setting is **declarative** — no enforcement code reads it. Agents self-reg
 | `workflow-context-injector.sh` | – | ✓ | ✓ |
 | `subagent-status.sh` | – | ✓ | ✓ |
 | `read-before-edit-guard.sh` | – | ✓ | ✓ |
+| `pre-flight-guard.sh` | – | ✓ | ✓ |
+| `memory-auto-index.sh` | – | ✓ | ✓ |
+| `bash-guard.sh` | – | ✓ | ✓ |
+| `dispatch-scope-guard.sh` | – | ✓ | ✓ |
+| `dispatch-hygiene-guard.sh` | – | ✓ | ✓ |
 | `context-monitor.sh` | – | – | ✓ |
 | `prompt-guard.sh` | – | – | ✓ |
 
-Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`.
+Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`. Disable the universal hook trace (advanced): `DEVT_HOOK_TRACE=0`.
 
 ---
 
