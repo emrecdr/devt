@@ -203,6 +203,13 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30, set via `.devt/config.json::graphify.stale_threshold`; `null` disables), prompt the user via AskUserQuestion BEFORE any dispatch in this workflow:
+
+- Question: "Graphify graph is {lag_commits} commits behind HEAD; scope_hint signals may reflect stale call graph. Refresh now?"
+- Options: **Refresh (recommended)** — pause, ask the user to run `graphify update .` in another terminal, then re-run `preflight generate "${TASK_DESCRIPTION}"` and re-cache; **Proceed with stale graph** — continue dispatch; downstream agents see `scope_trust.fresh=false` and de-weight `scope_hint`; **Cancel** — STOP with BLOCKED.
+
+When `workflow.yaml::autonomous=true`, skip the prompt and proceed silently with `scope_trust.trust` forced to `"sparse"` so downstream agents fall back to discovery. Skip the gate entirely when graphify is disabled (`scope_trust.trust == "empty"`) or `staleness.lag_commits` is null (no git context).
+
 The cached value is read back in each dispatch's orchestrator-prep step — substituted into the `<scope_hint>` template variable. When empty (no governing docs, or Graphify disabled, or preflight call failed), the block renders as `[]` and agents fall back to discovering scope from the task description.
 
 If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
@@ -839,6 +846,13 @@ The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
+
+**Post-implementation graphify refresh** — When `graphify.enabled=true` AND the implementation phase wrote new code (`impl-summary.json::files_modified` non-empty), the graph is now N commits behind reality for the rest of this workflow. Branch on `config.graphify.auto_refresh_post_impl` (default `false`):
+
+- `auto_refresh_post_impl=true` OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`. Surface a one-line confirmation to the user: `🔄 Refreshed graphify graph after impl (Xs)` on success, or `⚠️ Graphify refresh skipped: <reason>` on timeout/error. Continue regardless — refresh is best-effort.
+- `auto_refresh_post_impl=false` (default) AND interactive mode: emit a one-line tip to the user: `💡 Code changes made — run `graphify update .` (or `node bin/devt-tools.cjs graphify maybe-refresh --force`) to refresh the project graph so downstream review/debug agents see the new symbols. Skip if you'll re-review immediately; the next preflight will catch staleness via the W1.3 gate.`
+
+Skip the step entirely when graphify is disabled (`config.graphify.enabled=false`) — emit nothing. Skip when `files_modified` is empty (impl phase made no code changes, e.g. docs-only).
 
 </step>
 

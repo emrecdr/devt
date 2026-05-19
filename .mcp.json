@@ -8,6 +8,12 @@
       "env": {
         "DEVT_MCP_ALLOW_WRITES": "1"
       }
+    },
+    "devt-graphify": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/devt-graphify-mcp.cjs"
+      ]
     }
   }
 }

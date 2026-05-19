@@ -177,6 +177,29 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory index
 This is idempotent — safe to run even when the curator already triggered it. The index drives Pre-Flight Brief lookups, so any drift here means lessons silently disappear from future Briefs.
 </step>
 
+<step name="graphify_feedback" gate="best-effort — never blocks the workflow">
+
+Write the workflow's Q&A summary back to graphify's memory feedback loop. On the next `graphify update .` run, graphify re-extracts these files into the project graph — closing the loop so the graph learns from what devt's agents discovered. Best-effort: skipped silently when graphify is disabled, when `graphify-out/` doesn't exist, or when the write fails. Never blocks the workflow.
+
+```bash
+WID=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.workflow_id // empty')
+WTYPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.workflow_type // "unknown"')
+TASK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')
+SUMMARY=$(cat .devt/state/curation-summary.md 2>/dev/null || echo "")
+REFS=$(jq -r '.topic.symbols // [] | join(",")' .devt/state/preflight-brief.json 2>/dev/null || echo "")
+if [ -n "$WID" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify write-memory \
+    --workflow-id "$WID" \
+    --workflow-type "$WTYPE" \
+    --task "$TASK" \
+    --summary "$SUMMARY" \
+    --references="$REFS" >/dev/null 2>&1 || true
+fi
+```
+
+The CLI returns one of: `{action: "written", path}`, `{action: "skip", reason: "disabled"|"no_graphify_out"|"missing_workflow_id"}`, or `{action: "skip", reason: "<error>"}`. We discard the output (best-effort contract) but the trace lands in `.devt/memory/_mcp-trace.jsonl` for `/devt:forensics` to surface if write-memory starts failing.
+</step>
+
 <step name="report" gate="results are presented to the user">
 
 Read `.devt/state/curation-summary.md` and report to the user:

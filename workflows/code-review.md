@@ -90,9 +90,52 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
-**Fetch Graphify PR impact when reviewing a GitHub PR.** If `${REVIEW_SCOPE}` mentions a PR number (e.g. "PR #123", "pull request 456", or the user invoked `/devt:review` with a PR arg), call the `mcp__graphify__get_pr_impact` MCP tool with that `pr_number` and Write the response verbatim to `.devt/state/pr-impact.md`. The code-reviewer agent Reads this file when present — Graphify's structured impact map (files changed, communities affected, blast radius) is higher-signal than the raw diff file list and lets the agent prioritize review depth where the graph signal concentrates. Skip silently when no PR number is detectable, when graphify MCP is not registered in `.mcp.json`, or when the call errors — the workflow proceeds without PR-impact context. The companion MCP tools `mcp__graphify__list_prs` and `mcp__graphify__triage_prs` apply at the review-selection layer ("which PR should I review next?") and are not called from this workflow.
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30; `null` disables), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip when graphify disabled or lag_commits is null.
 
-**Gate**: If compound init fails, STOP with BLOCKED.
+**Compute the Graphify impact-map plan.** This bash step decides which tier the orchestrator MUST execute next. It writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.
+
+```bash
+GIT_PROVIDER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get git.provider 2>/dev/null | jq -r '.value // ""')
+PR_NUM=$(echo "${REVIEW_SCOPE}" | grep -oE '(PR|pull request) ?#?[0-9]+' | grep -oE '[0-9]+' | head -1)
+GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
+GRAPHIFY_TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
+TOPIC_SYMBOLS=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
+SCOPE_FILE_COUNT=$(wc -l < .devt/state/review-scope.md 2>/dev/null | tr -d ' ' || echo 0)
+IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
+
+# Decision tree — explicit, no implicit fallbacks. The recommended tier is the
+# first one whose preconditions all hold. Bitbucket projects skip PR-scoped
+# because the upstream mcp__graphify__get_pr_impact tool is GitHub-only and
+# returns "PR not found on GitHub" — the workflow would waste a call.
+if [ "$GRAPHIFY_STATE" != "ready" ]; then
+  TIER="skip"; SKIP_REASON="graphify state=$GRAPHIFY_STATE"; TOOL=""; ARGS_JSON='{}'
+elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
+  TIER="pr_scoped"; SKIP_REASON=""; TOOL="mcp__graphify__get_pr_impact"; ARGS_JSON="$(jq -nc --arg n "$PR_NUM" '{pr_number: ($n|tonumber)}')"
+elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
+  TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
+elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
+  TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
+else
+  TIER="skip"; SKIP_REASON="no PR (or non-GitHub), scope below threshold, no topic symbols"; TOOL=""; ARGS_JSON='{}'
+fi
+
+jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --arg provider "$GIT_PROVIDER" --argjson args "$ARGS_JSON" \
+  '{tier: $tier, tool: $tool, args: $args, skip_reason: $skip_reason, git_provider: $provider}' \
+  > .devt/state/graphify-impact-plan.json
+echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
+```
+
+**EXECUTE THE PLAN.** Read `.devt/state/graphify-impact-plan.json`. This is not optional and not a "consider running it" — the next step gates on the output existing:
+
+- If `tier == "skip"`: write `.devt/state/graphify-skip-reason.txt` containing the `skip_reason` field verbatim. Do NOT call any MCP tool. The reviewer falls back to `<scope_hint>` plus raw file list and graph-impact analysis is correctly absent.
+- If `tier == "pr_scoped"`: call `mcp__graphify__get_pr_impact(args)` using the args from the plan. **For Bitbucket projects this tier never fires** — the bash step routed past it. If the call errors (e.g. PR not found because the user-installed graphify MCP cannot reach the repo), fall back: write `graphify-skip-reason.txt` with the error and continue. Otherwise write the response verbatim to `.devt/state/graph-impact.md`.
+- If `tier == "bulk_scoped"`: call `mcp__devt-graphify__query_graph(args)`. From the response's top-5 nodes (highest degree), call `mcp__devt-graphify__get_neighbors({symbol: <label>, direction: "in", depth: 2})` for each. Concatenate into `graph-impact.md` with one `## <symbol>` heading per block.
+- If `tier == "symbol_anchored"`: call `mcp__devt-graphify__blast_radius(args)`. Write the response verbatim to `graph-impact.md`.
+
+After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. The verifier audit (line 257-267 below) checks this and emits `caller-0` revision when both are missing despite `graphify.status == "ready"`.
+
+**Gate**: If compound init fails, STOP with BLOCKED. If neither `graph-impact.md` nor `graphify-skip-reason.txt` exists after the orchestrator runs the plan above, STOP with BLOCKED — the orchestrator skipped the step.
 </step>
 
 <step name="identify_scope" gate="file list is determined">
@@ -177,6 +220,24 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review the following files for quality, correctness, and standards compliance.
     Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
     Every valid finding must be reported with file, line, severity, and rule reference.
+
+    Graphify-first discovery protocol (when `<scope_trust>.trust` is `dense` or `sparse`):
+    Use `mcp__devt-graphify__*` PROACTIVELY, not just as a fallback. Default discovery order:
+      1. `mcp__devt-graphify__query_graph({text: "<topic>"})` to anchor candidate symbols from review-scope.
+      2. `mcp__devt-graphify__get_neighbors({symbol, direction:"in", depth:2})` for each touched symbol
+         — produces the caller set grep can't reliably enumerate (cross-language, dynamic dispatch).
+      3. `mcp__devt-graphify__blast_radius({symbols: [...]})` once before scoring to gauge structural risk.
+    Use `Grep`/`Read` to VALIDATE graph findings against the actual code (line content, comments),
+    NOT to discover affected symbols from scratch. Grep-first review on a graph-indexed project
+    leaves negative-space gaps ("no other consumer exists at depth-2" cannot be proved by grep).
+    Empty/degraded responses (`{degraded: true}`) are signals to fall back to grep, not errors —
+    proceed with Grep+Read normally for that query.
+
+    When `<scope_trust>.trust` is `empty` (graphify unavailable), skip the protocol entirely and
+    proceed with Grep+Read. Do not stall on missing graphify.
+
+    The `caller_verification` step in your execution_flow specifies the `## Caller Verification`
+    section format your review.md must carry for the top-5 Critical/Important findings.
   </task>
   Write review to .devt/state/review.md
 ")
@@ -244,6 +305,15 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     Spot-check the review's thoroughness, specificity, severity calibration, and remediation
     concreteness using the rubric in <rubric_path>. Read review.md as the artifact under review.
     If axes fail, emit revisions[] keyed by axis-letter (A-1, B-3, etc.) for the reviewer to address.
+
+    When review.md contains a `## Caller Verification` section (emitted by code-reviewer's
+    `caller_verification` step when graphify is available), validate that section's structured
+    blocks against the findings list — every Critical or Important finding's primary symbol
+    SHOULD have a corresponding `### finding-N` block unless flagged `n/a` or capped at 5.
+    Treat `Risk: High` entries as gap signals worth re-dispatching the reviewer for tighter
+    fix proposals (revision keyed `caller-N` with the finding id). When the section is absent
+    AND graphify status is `{state: "ready"}`, that itself is a gap — emit revision `caller-0`
+    requesting the section. When graphify is disabled or graph_missing, absence is correct.
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
 ")
@@ -288,6 +358,28 @@ Read `.devt/state/review.md` and present to the user:
 - **Summary**: 2-3 sentence overview
 - **Findings by severity**: Critical, Important, Minor (with file and line references)
 - **Score breakdown**: by category (architecture, security, performance, etc.)
+- **Graphify activity** (one line; the telemetry surface below populates it)
+
+**Graphify activity surface** — surface what graphify tools were actually invoked during this workflow. Without this line, the user has no way to verify the integration was used vs. silently fell back to grep. Reads `.devt/memory/_mcp-trace.jsonl` filtered by the current `workflow_id`:
+
+```bash
+WID=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.workflow_id // empty')
+if [ -n "$WID" ]; then
+  GRAPHIFY_SUMMARY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__devt-graphify__*' --by=calls 2>/dev/null || echo "")
+  GRAPHIFY_UPSTREAM=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__graphify__*' --by=calls 2>/dev/null || echo "")
+  PLAN_TIER=$(jq -r '.tier // "unknown"' .devt/state/graphify-impact-plan.json 2>/dev/null || echo "unknown")
+  if [ -f .devt/state/graphify-skip-reason.txt ]; then
+    SKIP_REASON=$(cat .devt/state/graphify-skip-reason.txt)
+    echo "Graphify activity: SKIPPED (plan=$PLAN_TIER, reason: $SKIP_REASON)"
+  else
+    echo "Graphify activity: tier=$PLAN_TIER"
+    echo "$GRAPHIFY_SUMMARY"
+    echo "$GRAPHIFY_UPSTREAM"
+  fi
+fi
+```
+
+Surface the output verbatim in the user report under "Graphify activity". When the trace file is missing or `workflow_id` is unset (legacy workflow.yaml predating auto-stamp), emit `Graphify activity: telemetry unavailable` and continue — best-effort.
 
 This is a READ-ONLY workflow. Do NOT offer to fix findings. If the user wants fixes applied, they should run `/implement` or `/workflow` with the review findings as input.
 
@@ -323,6 +415,6 @@ severity for violations). For each diff hunk:
 1. `node bin/devt-tools.cjs memory affects <changed-file>` enumerates governing ADRs/CONs/FLOWs
 2. Verify diff respects each (treat violations as Critical)
 3. `node bin/devt-tools.cjs memory rejected-keywords` — flag any diff text matching a REJ
-4. When Graphify enabled, enumerate affected callers via graphify-helpers and verify caller behavior is preserved
-5. When reviewing a GitHub PR and `.devt/state/pr-impact.md` exists, read its `mcp__graphify__get_pr_impact` payload — it identifies which graph communities the PR touches, so reviewers can weight findings by structural blast radius rather than file count
+4. When Graphify enabled, enumerate affected callers via graphify-helpers (or directly via `mcp__devt-graphify__get_neighbors` when the reviewer prefers MCP) and verify caller behavior is preserved
+5. When `.devt/state/graph-impact.md` exists, read it — it carries the impact map from one of the three trigger tiers (PR-scoped via upstream `mcp__graphify__get_pr_impact`, bulk-scoped via vendored `mcp__devt-graphify__query_graph`+`get_neighbors`, or symbol-anchored via `mcp__devt-graphify__blast_radius`). Communities/dependents listed there get priority over unrelated files in the scope list, and finding severity is weighted by structural blast radius rather than file count
 ADRs are constitutional — same severity as security findings.

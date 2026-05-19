@@ -686,6 +686,65 @@ const RESET_EXEMPT = new Set([
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
 ]);
 
+// ---------------------------------------------------------------------------
+// State directory contract — declares which filenames are LEGITIMATE in
+// .devt/state/. Used by `state audit` and `state cleanup` to surface
+// ad-hoc files agents (or users) have dumped over time, without enforcing
+// at write time (too disruptive — agents may legitimately need slug variants
+// during sliced workflows). Three buckets:
+//
+//  - `additional_canonical`: exact filenames not covered by ARTIFACT_SCHEMA /
+//    SIDECAR_FOR_MARKDOWN / JSON_SIDECAR_SCHEMAS / JSON_INPUT_SCHEMAS but
+//    still part of the documented contract (workflow.yaml, scratchpad.md, etc.).
+//  - `allowed_patterns`: regex strings for permitted slug variants — review-X.md,
+//    impl-summary-X.md/.json, slice-X.md. Anchored. Files matching these are
+//    legitimate but flagged for archival when mtime > stale_days_default.
+//  - `ephemeral_patterns`: temp files that should never persist (orphaned .tmp).
+//
+// Files matching NONE of the above (and not in canonical) are AD-HOC — surfaced
+// by `state audit` as candidates for manual review or `state cleanup` archival.
+// ---------------------------------------------------------------------------
+const STATE_FILE_CONTRACT = {
+  additional_canonical: [
+    "workflow.yaml",            // active workflow state — auto-stamped
+    "scratchpad.md",            // ephemeral cross-agent notes
+    "plan.md", "spec.md", "scope.md", "decisions.md", "research.md",
+    "review-scope.md", "scan-results.md", "scan-delta.md",
+    "test-summary.md",          // markdown side of test-summary sidecar
+    "lessons.yaml",             // retro hand-off draft
+    "debug-context.md", "debug-investigation.md", "debug-summary.md",
+    "arch-review.md", "arch-health-scan.md", "arch-baseline.json",
+    "arch-triage.json", "scanner-output.txt",
+    "docs-summary.md", "curation-summary.md", "session-report.md",
+    "autoskill-proposals.md", "baseline-gates.md",
+    "claude-mem-harvest.md", "memory-suggestions.md",
+    "continue-here.md",         // /devt:pause output (paired with handoff.json)
+    "graph-impact.md", "pr-impact.md",
+    "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
+    "graphify-skip-reason.txt", // explicit-skip artifact when the impact step's plan == "skip"
+    "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
+    "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
+    "regression-baseline.md", "review.md",
+  ],
+  allowed_patterns: [
+    "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
+    "^impl-summary-[A-Za-z0-9_.-]+\\.(md|json)$",   // impl-summary-cr3.{md,json}
+    "^test-summary-[A-Za-z0-9_.-]+\\.(md|json)$",
+    "^verification-[A-Za-z0-9_.-]+\\.(md|json)$",
+    "^slice-[A-Za-z0-9_.-]+\\.md$",
+    "^[a-z]+-summary\\.md$",                        // module-md-update-summary.md
+  ],
+  ephemeral_patterns: [
+    "^\\..*\\.tmp$",       // hidden temp files
+    "^.*\\.tmp$",          // orphaned atomic-write temps
+    "^.*~$",               // editor backups
+  ],
+  // Default freshness window for pattern-allowed artifacts before audit flags
+  // them as stale. Canonical files never go stale by mtime. Override per-run
+  // with `state cleanup --stale-days=N`.
+  stale_days_default: 21,
+};
+
 // Get configured archive ring-buffer size (state.archive_runs). Reads via
 // require() at call time to avoid circular deps with config.cjs at module load.
 function getArchiveRuns() {
@@ -1140,9 +1199,21 @@ function run(subcommand, args) {
       return syncState();
     case "prune":
       return pruneState(args.includes("--dry-run"));
+    case "audit": {
+      const audit = require("./state-audit.cjs");
+      return audit.auditStateFiles();
+    }
+    case "cleanup": {
+      const audit = require("./state-audit.cjs");
+      const dryRun = !args.includes("--apply");
+      const staleArg = _getFlag(args, "--stale-days");
+      const opts = { dryRun };
+      if (staleArg) opts.staleDays = parseInt(staleArg, 10);
+      return audit.cleanupStateFiles(opts);
+    }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup`,
       );
   }
 }
@@ -1179,4 +1250,6 @@ module.exports = {
   VERIFICATION_STATUSES,
   VERIFICATION_VERDICTS,
   RESET_EXEMPT,
+  STATE_FILE_CONTRACT,
+  SIDECAR_FOR_MARKDOWN,
 };

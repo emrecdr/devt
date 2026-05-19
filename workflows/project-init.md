@@ -181,6 +181,21 @@ This command:
 **If the command fails**: Report the error verbatim to the user and STOP with status BLOCKED.
 </step>
 
+<step name="init_memory_index" gate="index.db exists at .devt/memory/index.db">
+
+Initialize the memory FTS5 index. Without this, every `memory query` returns "not initialized", governance lanes in the Pre-Flight Brief silently render empty, and the Brief now surfaces a ⚠️ headline alert telling the user to run this command. Running it automatically here closes the gap — the project is fully usable from the moment init finishes.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory init 2>&1 | tail -5
+```
+
+Idempotent — running on an already-initialized project re-creates index.db cleanly with whatever docs exist in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`. Failure is non-fatal but unusual — report the error and continue. The verify_and_report step at the end will flag a missing index.db.
+
+After the index builds, surface a tip to the user about the discovery pipeline:
+
+> 💡 Memory index ready. As you work, claude-mem ⚖️/🔵 observations and decision logs collect candidate ADRs/CONs in `.devt/memory/_suggestions.md`. Run `/devt:retro` after workflows to have the curator promote them, or `/devt:memory promote` interactively.
+</step>
+
 <step name="prompt_graphify_setup" gate="graphify install/enable prompt resolved">
 
 Probe Graphify availability and the project's effective `graphify.enabled` value. The aim is to surface install instructions when Graphify is absent (strongly recommended — ~10× lower-token code search across all dev agents) and to offer to flip `graphify.enabled=true` when Graphify is present but devt isn't yet configured to use it. Without this prompt, a fully-installed Graphify silently sits unused because the default in `bin/modules/config.cjs` is `enabled: false`.
@@ -283,6 +298,77 @@ graphify hook install 2>&1 | tail -5 || echo "(graphify hook install failed — 
 This is best-effort: failures NEVER fail the init workflow. Report which path was taken so the user has a record.
 </step>
 
+<step name="prompt_graphify_first_build" gate="graphify-out/graph.json exists OR user declined">
+
+If `graphify_available=yes` AND `graphify.enabled=true` AND `graphify-out/graph.json` does NOT yet exist, offer to build the graph for the first time. Without this, the project has graphify wired but ALL graphify-derived signals (blast radius, scope_hint augmentation, get_neighbors caller sets) silently degrade until the user remembers to run `graphify update .` themselves.
+
+```bash
+GRAPHIFY_AVAILABLE=$(command -v graphify >/dev/null 2>&1 && echo yes || echo no)
+GRAPHIFY_ENABLED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.enabled 2>/dev/null | jq -r '.value // false')
+GRAPH_EXISTS=$([ -f "graphify-out/graph.json" ] && echo yes || echo no)
+echo "graphify_available=$GRAPHIFY_AVAILABLE graphify_enabled=$GRAPHIFY_ENABLED graph_exists=$GRAPH_EXISTS"
+```
+
+If any of (`available=no`, `enabled=false`, `graph_exists=yes`): skip this step. Otherwise AskUserQuestion:
+
+```yaml
+question: "Graphify is enabled but no graph has been built yet. Run the first build now? (One-time, may take 30s–2min depending on repo size; uses AST only — no LLM/API cost.)"
+header: "First Graph Build"
+multiSelect: false
+options:
+  - label: "Yes, build now"
+    description: "Runs `graphify update .` once. Subsequent updates are incremental (~seconds). After this, every preflight/review/debug dispatch gets blast-radius + caller-set signals."
+  - label: "No, I'll build manually later"
+    description: "Run `graphify update .` whenever ready. Until then, preflight scope_trust will report 'empty' and downstream agents fall back to grep-first discovery."
+```
+
+On "Yes":
+
+```bash
+graphify update . 2>&1 | tail -10 || echo "(graphify update failed — non-fatal, you can retry manually with: graphify update .)"
+```
+
+Best-effort: failures NEVER fail init. Report which path was taken.
+</step>
+
+<step name="prompt_claude_mem_setup" gate="claude-mem presence detected and user informed">
+
+Detect whether claude-mem (cross-session memory plugin) is available and surface install guidance if not. claude-mem is an OPTIONAL but high-leverage integration — when present, devt workflows query its MCP search tool (`mcp__plugin_claude-mem_mcp-search__search`) to harvest ⚖️ (decision) and 🔵 (discovery) observations from PRIOR sessions into the curator's candidate pool. Without claude-mem, harvest falls back to scratchpad-only sources and the curator sees a strictly smaller candidate set every retro.
+
+```bash
+CLAUDE_MEM_AVAILABLE=$(command -v claude-mem >/dev/null 2>&1 && echo yes || echo no)
+echo "claude_mem_available=$CLAUDE_MEM_AVAILABLE"
+```
+
+**Case A — `claude_mem_available=no`**: surface install hint via AskUserQuestion:
+
+```yaml
+question: "claude-mem is not installed. It's an optional Claude Code plugin that gives devt cross-session memory — ⚖️ decisions and 🔵 discoveries from past sessions become curator-eligible ADR/CON candidates. Install now? (Separate plugin; devt cannot install it for you.)"
+header: "claude-mem"
+multiSelect: false
+options:
+  - label: "Show me the install command"
+    description: "Surface the one-liner. claude-mem registers its own MCP server in your global Claude config; devt detects it automatically at workflow time."
+  - label: "Skip — I'll set it up later"
+    description: "Curator runs without claude-mem. Harvest pool is strictly smaller (scratchpad + decisions.md + graphify god-nodes only). Re-run /devt:init or check claude-mem docs when ready."
+```
+
+On "Show me the install command", emit verbatim:
+
+> Install via the Claude Code plugin system. From any Claude Code session:
+> ```
+> /plugin marketplace add anthropics/claude-code-plugins
+> /plugin install claude-mem
+> ```
+> Restart Claude Code after install. Verify with `command -v claude-mem` and re-run `/devt:init` to re-detect.
+
+**Case B — `claude_mem_available=yes`**: emit a confirmation line so the user knows the integration is live:
+
+> ✓ claude-mem detected on PATH. devt workflows will harvest its ⚖️/🔵 observations into the curator candidate pool automatically — no further setup needed. The MCP tool `mcp__plugin_claude-mem_mcp-search__search` is consulted by `dev-workflow.md`, `quick-implement.md`, and `lesson-extraction.md` orchestrator pre-steps.
+
+This step is best-effort and informational: failures NEVER fail init. Report which case was taken.
+</step>
+
 <step name="verify_and_report" gate="all expected files exist">
 
 Verify the setup created everything expected:
@@ -291,6 +377,8 @@ Verify the setup created everything expected:
 test -f .devt/config.json && echo "OK: .devt/config.json" || echo "MISSING: .devt/config.json"
 test -d .devt/rules && echo "OK: .devt/rules/" || echo "MISSING: .devt/rules/"
 test -d .devt/state && echo "OK: .devt/state/" || echo "MISSING: .devt/state/"
+test -d .devt/memory && echo "OK: .devt/memory/" || echo "MISSING: .devt/memory/"
+test -f .devt/memory/index.db && echo "OK: .devt/memory/index.db (FTS5 index)" || echo "MISSING: .devt/memory/index.db — run 'node bin/devt-tools.cjs memory init'"
 test -f .devt/rules/coding-standards.md && echo "OK: coding-standards.md" || echo "MISSING: coding-standards.md"
 test -f .devt/rules/architecture.md && echo "OK: architecture.md" || echo "MISSING: architecture.md"
 test -f .devt/rules/quality-gates.md && echo "OK: quality-gates.md" || echo "MISSING: quality-gates.md"
@@ -298,6 +386,10 @@ test -f .devt/rules/testing-patterns.md && echo "OK: testing-patterns.md" || ech
 test -f .devt/rules/golden-rules.md && echo "OK: golden-rules.md" || echo "INFO: golden-rules.md not present (optional)"
 test -f .devt/rules/git-workflow.md && echo "OK: git-workflow.md" || echo "INFO: git-workflow.md not present (optional)"
 test -f .gitignore && grep -q ".devt/state" .gitignore && echo "OK: .gitignore includes .devt/state/" || echo "WARNING: .devt/state/ not in .gitignore"
+# Graphify-conditional check — only emit when graphify is enabled
+if [ "$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.enabled 2>/dev/null | jq -r '.value // false')" = "true" ]; then
+  test -f graphify-out/graph.json && echo "OK: graphify-out/graph.json (graph built)" || echo "INFO: graphify-out/graph.json not yet built — run 'graphify update .' to enable graph-derived signals"
+fi
 ```
 
 Report to the user:
@@ -324,6 +416,8 @@ Report to the user:
 - `.devt/config.json` exists in the project root with valid JSON and auto-detected git config
 - `.devt/rules/` directory exists with at least `coding-standards.md`, `architecture.md`, `quality-gates.md`
 - `.devt/state/` directory exists
+- `.devt/memory/index.db` exists (FTS5 index initialized — closes the "memory layer silently empty" failure mode)
 - `.gitignore` includes `.devt/state/`
+- If graphify is enabled: `graphify-out/graph.json` exists OR user explicitly declined the first-build prompt
 - Status: **DONE**
 </success_criteria>

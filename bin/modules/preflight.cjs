@@ -273,6 +273,20 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   lines.push("");
   lines.push("## Status: FRESH");
   lines.push("");
+
+  // Memory FTS5 index missing → governance lanes A/B/D/F return empty even
+  // when ADR/CON/FLOW/REJ/LES docs exist on disk. The signal is invisible to
+  // a reader who doesn't know the database had to be built. Surface it
+  // explicitly at the top so the next action ("run `/devt:memory init`") is
+  // unambiguous.
+  try {
+    const dbPath = path.join(findProjectRoot(), ".devt", "memory", "index.db");
+    if (!fs.existsSync(dbPath)) {
+      lines.push("> ⚠️ **Memory index not built** — governing-doc lanes (A/B/D/F) will be empty even if `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` contain docs. Run `node bin/devt-tools.cjs memory init` then re-run preflight to enable ADR/CON/FLOW/REJ/LES discovery.");
+      lines.push("");
+    }
+  } catch { /* findProjectRoot may throw in tests — skip the check */ }
+
   lines.push("## Topic Extracted");
   lines.push(`- **Domains:** ${topic.domains.length ? topic.domains.join(", ") : "_(none)_"}`);
   lines.push(`- **Symbols:** ${topic.symbols.length ? topic.symbols.join(", ") : "_(none)_"}`);
@@ -553,7 +567,18 @@ function generate(taskText, opts) {
     affectsPaths = memory.getAffectsPathsByIds(governingUnion.map(d => d.id));
   } catch { /* memory layer not initialized — empty list is correct */ }
   const directDeps = (blast.direct_dependents || []).slice(0, MAX_DIRECT_DEPS);
-  const suggestedReading = dedupeCap([...affectsPaths, ...directDeps], MAX_SUGGESTED_READING);
+
+  // Graphify wiki output (when the project ran `graphify <path> --wiki`) is the
+  // agent-crawlable curated navigation surface. When present, prepend it to the
+  // suggested reading so agents land on the wiki entry point before raw source.
+  // Hidden behind existsSync — projects that never built a wiki see no change.
+  const wikiPaths = [];
+  try {
+    const wikiIndex = path.join(findProjectRoot(), "graphify-out", "wiki", "index.md");
+    if (fs.existsSync(wikiIndex)) wikiPaths.push("graphify-out/wiki/index.md");
+  } catch { /* findProjectRoot may throw — skip */ }
+
+  const suggestedReading = dedupeCap([...wikiPaths, ...affectsPaths, ...directDeps], MAX_SUGGESTED_READING);
 
   const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
@@ -582,6 +607,11 @@ function generate(taskText, opts) {
   try { staleness = graphify.freshness(); }
   catch { staleness = { state: "not_ready", fresh: false, built_at: null, head: null, lag_commits: null }; }
 
+  let memoryIndexMissing = false;
+  try {
+    memoryIndexMissing = !fs.existsSync(path.join(findProjectRoot(), ".devt", "memory", "index.db"));
+  } catch { memoryIndexMissing = false; }
+
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
     topic,
@@ -594,6 +624,7 @@ function generate(taskText, opts) {
     },
     graph_stats: graphStats,
     staleness,
+    memory_index_missing: memoryIndexMissing,
     rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
     generated_at: generatedAt,
   });

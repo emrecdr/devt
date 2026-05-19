@@ -37,6 +37,8 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30; `null` disables), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip when graphify disabled or lag_commits is null.
+
 The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
 
 The fourth call caches `scope_hint_json` for the researcher dispatch — paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
@@ -85,6 +87,14 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 <task>
 Research implementation approaches for: {task_description}
 Investigate the codebase for existing patterns, recommend an approach, identify pitfalls.
+
+Graphify-first discovery protocol (when `<scope_trust>.trust` is `dense` or `sparse`):
+Use `mcp__devt-graphify__*` PROACTIVELY as your primary discovery mechanism, not as a fallback:
+  1. `mcp__devt-graphify__query_graph({text: "<topic>"})` to anchor existing symbols in the area.
+  2. `mcp__devt-graphify__god_nodes({limit: 20})` to identify the abstractions a new feature would touch.
+  3. `mcp__devt-graphify__get_neighbors` on candidate anchor points — establishes which patterns the area already uses.
+Use `Grep`/`Read` to VALIDATE graph findings against actual implementation (semantics, comments),
+NOT to enumerate symbols from scratch. Grep on a graph-indexed project re-discovers what the AST extractor already knows. Research that ignores the graph produces "patterns" that only describe what was easy to grep for. Empty/degraded responses (`{degraded: true}`) signal fall back to grep; proceed normally for that query. When `<scope_trust>.trust` is `empty`, skip the protocol.
 </task>
 Write findings to .devt/state/research.md
 ")

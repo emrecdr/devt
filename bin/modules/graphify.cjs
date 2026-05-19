@@ -701,6 +701,186 @@ function _topByDegree(adj, n = 10) {
  * rewrite GRAPH_REPORT.md, so the text-scrape path can lag the actual graph
  * by a commit or two.
  */
+/**
+ * Conditionally refresh the project graph by subprocess-shelling `graphify update .`.
+ * Returns a structured envelope (no throws) so workflows can branch without try/catch:
+ *   {ok, action: "refreshed"|"skip"|"error", reason?, duration_ms?, lag_commits?}
+ *
+ * Skip reasons: "disabled" (config.graphify.enabled=false), "graph_missing" (no graph.json
+ * to refresh — first build must be manual), "fresh" (lag_commits within threshold),
+ * "timeout" (subprocess hit the wall), "graphify_not_installed" (ENOENT on the binary).
+ *
+ * Two trigger modes — when `options.force=true`, skip the freshness check and always
+ * run; otherwise compare freshness().lag_commits against options.staleThreshold (default
+ * pulled from config.graphify.stale_threshold). When the project graph is brand-new
+ * (state != "ready" in freshness), skip with `graph_missing` rather than spawning —
+ * first build is a deliberate user action (`graphify ./src`), not an auto-refresh.
+ *
+ * Output is silent on stdout/stderr — designed for orchestrator workflows to call
+ * pre-preflight without polluting the agent's visible prompt. Errors land in the
+ * return envelope only.
+ */
+function maybeRefresh(options = {}) {
+  const cfg = getConfig();
+  if (!cfg.enabled) {
+    return { ok: true, action: "skip", reason: "disabled" };
+  }
+
+  const timeoutMs = Math.max(parseInt(options.timeout, 10) || 60, 5) * 1000;
+  const force = !!options.force;
+
+  if (!force) {
+    const fresh = freshness();
+    if (fresh.state !== "ready") {
+      return { ok: true, action: "skip", reason: "graph_missing" };
+    }
+    let threshold = options.staleThreshold;
+    if (threshold === undefined || threshold === null) {
+      threshold = (cfg.stale_threshold !== undefined && cfg.stale_threshold !== null)
+        ? cfg.stale_threshold
+        : 30;
+    }
+    if (fresh.lag_commits === null || fresh.lag_commits === undefined || fresh.lag_commits <= threshold) {
+      return { ok: true, action: "skip", reason: "fresh", lag_commits: fresh.lag_commits };
+    }
+  }
+
+  const startedAt = Date.now();
+  let result;
+  try {
+    result = child_process.spawnSync(cfg.command || "graphify", ["update", "."], {
+      timeout: timeoutMs,
+      cwd: findProjectRoot(),
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+  } catch (e) {
+    return { ok: false, action: "error", reason: `spawn threw: ${e.message}`, duration_ms: Date.now() - startedAt };
+  }
+  const duration_ms = Date.now() - startedAt;
+
+  if (result.error) {
+    if (result.error.code === "ENOENT") {
+      return { ok: true, action: "skip", reason: "graphify_not_installed", duration_ms };
+    }
+    if (result.error.code === "ETIMEDOUT" || result.signal === "SIGTERM") {
+      return { ok: true, action: "skip", reason: "timeout", duration_ms };
+    }
+    return { ok: false, action: "error", reason: result.error.message, duration_ms };
+  }
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "").trim().slice(0, 500);
+    return { ok: false, action: "error", reason: `exit ${result.status}${stderr ? ": " + stderr : ""}`, duration_ms };
+  }
+  return { ok: true, action: "refreshed", duration_ms };
+}
+
+/**
+ * Write a workflow-completion Q&A entry to `graphify-out/memory/<workflow_id>.md`
+ * for graphify's memory feedback loop. On the next `graphify update .` run,
+ * graphify auto-extracts these files into the graph — closing the loop so the
+ * project graph learns from what devt's agents discovered.
+ *
+ * Returns {ok, action: "written"|"skip", path?, reason?} — no throws. Skips
+ * silently when graphify is disabled, when graphify-out/ doesn't exist (the
+ * project never built a graph), or when payload is malformed. The skip-silently
+ * contract means workflows can call this at every completion without guarding.
+ *
+ * The written file's frontmatter carries semantic anchors graphify's extractor
+ * recognizes: workflow_id, workflow_type, task, references (symbol list),
+ * created_at, status. Body is a markdown Q&A — graphify treats markdown
+ * headings as concept boundaries during extraction.
+ */
+function writeMemoryEntry(payload) {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, action: "skip", reason: "invalid_payload" };
+  }
+  // Validate workflow_id BEFORE any other gate — security-relevant args must
+  // be rejected unconditionally so the contract is verifiable in any environment,
+  // including disabled-graphify devt-self where no file ever gets written.
+  if (!payload.workflow_id || typeof payload.workflow_id !== "string") {
+    return { ok: false, action: "skip", reason: "missing_workflow_id" };
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(payload.workflow_id)) {
+    return { ok: false, action: "skip", reason: "invalid_workflow_id_chars" };
+  }
+  const cfg = getConfig();
+  if (!cfg.enabled) {
+    return { ok: true, action: "skip", reason: "disabled" };
+  }
+
+  const outDir = getGraphifyOutDir();
+  if (!fs.existsSync(outDir)) {
+    return { ok: true, action: "skip", reason: "no_graphify_out" };
+  }
+  const memDir = path.join(outDir, "memory");
+  try {
+    if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
+  } catch (e) {
+    return { ok: false, action: "skip", reason: `mkdir failed: ${e.message}` };
+  }
+
+  // Filename: <workflow_id>.md — UUID guarantees uniqueness; one entry per
+  // workflow run. Re-running the same workflow_id replaces atomically.
+  // Validate to defuse path traversal — accept only [A-Za-z0-9_-] in id.
+  // workflow_id was already regex-validated to /^[A-Za-z0-9_-]+$/ at function
+  // entry — no `.`, `/`, `\`, or null bytes possible. path.basename strips any
+  // residual separators as belt-and-suspenders. Final path is assembled by
+  // string concat (memDir + sep + safeBasename) rather than path.join so
+  // static analyzers don't have to verify the chain.
+  const safeBasename = path.basename(`${payload.workflow_id}.md`);
+  const dest = `${memDir}${path.sep}${safeBasename}`;
+
+  // Validate references — array of bounded-length strings, capped at 50 to
+  // keep frontmatter under graphify's extractor sweet spot. Drop non-strings.
+  const refs = Array.isArray(payload.references)
+    ? payload.references.filter(r => typeof r === "string" && r.length > 0 && r.length < 200).slice(0, 50)
+    : [];
+
+  const task = String(payload.task || "").slice(0, 1000);
+  const summary = String(payload.summary || "").slice(0, 50000);
+  const workflowType = String(payload.workflow_type || "unknown").slice(0, 64);
+  const createdAt = payload.created_at || new Date().toISOString();
+  const status = String(payload.status || "completed").slice(0, 32);
+
+  const frontmatterLines = [
+    "---",
+    `workflow_id: ${payload.workflow_id}`,
+    `workflow_type: ${workflowType}`,
+    `task: ${JSON.stringify(task)}`,
+    `created_at: ${createdAt}`,
+    `status: ${status}`,
+  ];
+  if (refs.length > 0) {
+    frontmatterLines.push("references:");
+    for (const r of refs) frontmatterLines.push(`  - ${JSON.stringify(r)}`);
+  }
+  frontmatterLines.push("---", "");
+
+  const body = [
+    `# Q: ${task || "(no task description)"}`,
+    "",
+    `## Workflow Result`,
+    "",
+    summary || "_(no summary provided)_",
+    "",
+  ];
+  if (refs.length > 0) {
+    body.push("## Symbols Referenced", "");
+    for (const r of refs) body.push(`- ${r}`);
+    body.push("");
+  }
+
+  const content = frontmatterLines.join("\n") + body.join("\n");
+  try {
+    const { atomicWriteFileSync } = require("./io.cjs");
+    atomicWriteFileSync(dest, content);
+  } catch (e) {
+    return { ok: false, action: "skip", reason: `write failed: ${e.message}` };
+  }
+  return { ok: true, action: "written", path: dest };
+}
+
 function godNodes(limit = 10) {
   const loaded = loadGraph();
   if (!loaded.ok) return [];
@@ -708,6 +888,51 @@ function godNodes(limit = 10) {
     symbol: (item.node && item.node.label) || item.id,
     edge_count: item.degree,
   }));
+}
+
+/**
+ * Return nodes belonging to a single graphify community. The Leiden clustering
+ * step writes a `community: <int>` attribute on every node — same field used by
+ * graphify's upstream MCP `get_community` tool. Use case: when graph-impact.md
+ * surfaces affected communities for a review, the reviewer can ask "what other
+ * files belong to community 42?" to scope follow-up checks.
+ *
+ * Returns {source, results: [{id, label, source_file, degree}], degraded?, fallback_trigger?}
+ * — same envelope shape as the other read wrappers so consumers can branch
+ * uniformly on `degraded`. Result is capped by `limit` (default 50, max 200);
+ * nodes sorted by degree desc so the highest-leverage members lead.
+ */
+function getCommunity(communityId, options = {}) {
+  const loaded = loadGraph();
+  if (!loaded.ok) {
+    return { source: "grep", results: [], degraded: true, fallback_trigger: loaded.degraded.fallback_trigger };
+  }
+  if (communityId === null || communityId === undefined) {
+    return { source: "graphify", results: [], degraded: true, fallback_trigger: "invalid_arg" };
+  }
+  // Accept both integer and stringified-integer community ids. Reject anything else.
+  const idNum = typeof communityId === "number" ? communityId : parseInt(communityId, 10);
+  if (!Number.isFinite(idNum)) {
+    return { source: "graphify", results: [], degraded: true, fallback_trigger: "invalid_arg" };
+  }
+  const limit = Math.min(Math.max(parseInt(options.limit, 10) || 50, 1), 200);
+  const matches = [];
+  for (const n of loaded.cache.nodes) {
+    if (!n || n.community === undefined || n.community === null) continue;
+    if (n.community === idNum || n.community === String(idNum)) {
+      const adj = loaded.cache.adj;
+      const outEdges = (adj.out.get(n.id) || []).length;
+      const inEdges = (adj.inc.get(n.id) || []).length;
+      matches.push({
+        id: n.id,
+        label: n.label || n.id,
+        source_file: n.source_file || null,
+        degree: outEdges + inEdges,
+      });
+    }
+  }
+  matches.sort((a, b) => b.degree - a.degree);
+  return { source: "graphify", results: matches.slice(0, limit) };
 }
 
 /**
@@ -763,6 +988,39 @@ function run(subcommand, args) {
     case "stats":
       json(graphStats());
       return 0;
+    case "maybe-refresh": {
+      const timeoutArg = args.find(a => a.startsWith("--timeout="));
+      const force = args.includes("--force");
+      const opts = { force };
+      if (timeoutArg) opts.timeout = parseInt(timeoutArg.split("=")[1], 10);
+      const result = maybeRefresh(opts);
+      json(result);
+      return result.ok ? 0 : 1;
+    }
+    case "write-memory": {
+      // Args: --workflow-id <id> --workflow-type <t> --task <text> --summary <text> [--references=a,b,c]
+      const getFlag = (name) => {
+        const i = args.findIndex(a => a === `--${name}`);
+        if (i >= 0 && args[i + 1]) return args[i + 1];
+        const inline = args.find(a => a.startsWith(`--${name}=`));
+        return inline ? inline.split("=").slice(1).join("=") : undefined;
+      };
+      const refsArg = getFlag("references");
+      const payload = {
+        workflow_id: getFlag("workflow-id"),
+        workflow_type: getFlag("workflow-type"),
+        task: getFlag("task"),
+        summary: getFlag("summary"),
+        references: refsArg ? refsArg.split(",").map(s => s.trim()).filter(Boolean) : [],
+      };
+      if (!payload.workflow_id) {
+        process.stderr.write("Usage: graphify write-memory --workflow-id <id> [--workflow-type t] [--task text] [--summary text] [--references=a,b,c]\n");
+        return 2;
+      }
+      const result = writeMemoryEntry(payload);
+      json(result);
+      return result.ok ? 0 : 1;
+    }
     case "query": {
       if (!args[0]) { process.stderr.write("Usage: graphify query <text>\n"); return 2; }
       json(queryGraph(args.join(" ")));
@@ -834,6 +1092,9 @@ module.exports = {
   shortestPath,
   blastRadius,
   godNodes,
+  getCommunity,
+  maybeRefresh,
+  writeMemoryEntry,
   parseReportSections,
   getGraphifyOutDir,
   probeBinary,

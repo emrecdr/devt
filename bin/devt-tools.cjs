@@ -159,6 +159,9 @@ devt-tools — CLI for the devt plugin
 Commands:
   init <workflow|review> [task]  Compound init — returns JSON context blob
   state read|update|reset   Manage .devt/state/ workflow state
+  state audit               Classify .devt/state/ files: canonical | pattern_allowed | ephemeral | ad_hoc
+  state cleanup [--apply] [--stale-days=N]
+                            Archive ad_hoc + ephemeral + stale pattern_allowed files to .archive/cleanup-<ts>/
   config get|set            Config resolution (defaults ← global ← project)
   models get <profile>      Agent→model mapping for a profile
   setup --template <name>   Scaffold .devt/rules/ for a project

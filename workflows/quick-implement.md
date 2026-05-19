@@ -101,6 +101,8 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30; `null` disables), prompt the user via AskUserQuestion BEFORE the programmer dispatch: "Graphify graph is {lag_commits} commits behind HEAD; symbol-to-file mappings may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip when graphify disabled or lag_commits is null.
+
 **Gate**: If compound init fails, STOP with BLOCKED.
 </step>
 
@@ -207,6 +209,13 @@ Route on `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`):
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
+
+**Post-implementation graphify refresh** — When `graphify.enabled=true` AND `impl-summary.json::files_modified` is non-empty, branch on `config.graphify.auto_refresh_post_impl` (default `false`):
+
+- `auto_refresh_post_impl=true` OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60` and surface a one-line confirmation (`🔄 Refreshed graphify graph after impl (Xs)` or `⚠️ Graphify refresh skipped: <reason>`).
+- Default: surface a one-line tip to the user: `💡 Code changes made — run `graphify update .` to refresh the project graph; downstream review/debug agents see the new symbols. Skip if you'll re-review immediately.`
+
+Skip entirely when graphify is disabled or `files_modified` is empty.
 
 </step>
 

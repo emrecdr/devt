@@ -46,9 +46,11 @@ BEFORE starting the review, load the following in order:
 5. Read adjacent code in the same module to understand context
 6. **Plugin guardrails** — Load `golden-rules.md` (universal rules the code must follow: scan before implementing, no duplicates, no backward compat code, no TODOs), `generative-debt-checklist.md` (over-engineering, dead code, unnecessary abstractions from AI), and `engineering-principles.md` (SOLID, DRY, KISS, SoC). **Prefer the inline content when present**: if the dispatch prompt includes a `<guardrails_inline>` block with `<golden_rules>`, `<engineering_principles>`, and `<generative_debt_checklist>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from `${CLAUDE_PLUGIN_ROOT}/guardrails/{golden-rules,engineering-principles,generative-debt-checklist}.md` when the inline block is absent.
 7. If a `<learning_context>` block was provided in the task prompt, read it — these are relevant quality/review lessons from past workflows. Check whether current code repeats known issues.
-8. **PR-impact map** — If `.devt/state/pr-impact.md` exists, Read it. The orchestrator populates this from `mcp__graphify__get_pr_impact` when the review is scoped to a GitHub PR. It carries Graphify's structured impact (files changed, communities affected, blast radius) and is the authoritative "what does this PR actually touch in the graph" source. Prioritize files in the affected communities ahead of unrelated files in the scope list, and weight finding severity by structural impact rather than diff size alone. Absence of the file means either no PR context or Graphify MCP wasn't registered — fall back to the scope_hint + raw file list.
+8. **Graph-impact map** — If `.devt/state/graph-impact.md` exists, Read it. The orchestrator populates this via the layered impact trigger (PR-scoped → bulk-scoped → symbol-anchored → skip; see workflows/code-review.md context_init step). It carries either upstream Graphify's structured PR impact (files changed, communities affected, blast radius) OR the vendored relay's neighbor/blast-radius payload — both formats name graph regions affected by the review. Prioritize files/symbols listed there ahead of unrelated files in the scope list, and weight finding severity by structural impact rather than diff size alone. Absence of the file means no graph anchor was available (no PR, sparse graph, no topic symbols, or graphify disabled) — fall back to the scope_hint + raw file list.
 
-   **Community filter for large reviews (budget protection)**: when `pr-impact.md` lists a non-empty `affected_communities` AND the review-scope file count exceeds 10, **restrict the initial-pass deep review to files in those communities only**. Files outside the affected communities go into an `## Out-of-Scope Files (Deferred)` section in `review.md` with one line per file: `<path> — deferred (outside community: <community names>)`. The orchestrator can dispatch a follow-up review for the deferred set if needed. Rationale: a single code-reviewer dispatch has a turn budget; reviewing 30+ files deeply exhausts it before findings can be written. Community-filtered initial-pass keeps the dispatch within budget and surfaces the highest-leverage findings first. When `pr-impact.md` is absent OR `affected_communities` is empty OR scope ≤10 files, review every file in scope normally (no deferral).
+   **Direct MCP access for caller verification**: when more depth is needed on a specific finding, call `mcp__devt-graphify__get_neighbors({symbol: "<name>", direction: "in", depth: 2})` to enumerate callers and verify a fix won't break upstream consumers. Use sparingly — one call per Critical+Important finding, capped at 5 calls per review to stay within turn budget. Tool returns `{degraded: true, fallback_trigger: "..."}` when graphify is unavailable — handle gracefully and proceed with file-level review.
+
+   **Community filter for large reviews (budget protection)**: when `graph-impact.md` lists a non-empty `affected_communities` AND the review-scope file count exceeds 10, **restrict the initial-pass deep review to files in those communities only**. Files outside the affected communities go into an `## Out-of-Scope Files (Deferred)` section in `review.md` with one line per file: `<path> — deferred (outside community: <community names>)`. The orchestrator can dispatch a follow-up review for the deferred set if needed. Rationale: a single code-reviewer dispatch has a turn budget; reviewing 30+ files deeply exhausts it before findings can be written. Community-filtered initial-pass keeps the dispatch within budget and surfaces the highest-leverage findings first. When `graph-impact.md` is absent OR `affected_communities` is empty OR scope ≤10 files, review every file in scope normally (no deferral).
 
 **DISTRUST PRINCIPLE**: Read impl-summary.md for ORIENTATION only — what files were touched,
 what the programmer claims. Then VERIFY every claim by reading the actual code.
@@ -129,8 +131,30 @@ Calculate the score using `code-reviewer/scoring-guide.md`:
   - 0-79: NEEDS_WORK
 </step>
 
+<step name="caller_verification">
+When graphify is available (i.e. `mcp__devt-graphify__status` returns `{state: "ready"}`), enumerate callers for the **top 5 Critical+Important findings** (severity-ordered) and emit a `## Caller Verification` section in review.md. Skip the section entirely when graphify is disabled, graph_missing, or the review has zero Critical/Important findings.
+
+Protocol per finding:
+1. Identify the primary symbol from the finding's `file:line` (the function/class/method whose change would propagate). When the finding targets a configuration line, data declaration, or test file with no callable symbol, write `Symbol: n/a (configuration/data/test)` and SKIP the get_neighbors call for that entry.
+2. Call `mcp__devt-graphify__get_neighbors({symbol: "<name>", direction: "in", depth: 2})`. The tool returns `{source, results: [{id, label, depth, relation, confidence}], degraded?}`. When `degraded: true`, write `Callers: unavailable (fallback_trigger: <reason>)` and move on.
+3. Inspect the caller list (capped at 200 by the wrapper). Categorize: how many callers pass arguments that the fix would change? How many would silently break?
+4. Emit a structured `### finding-<N>` block (one per finding) with the lines below, in this exact order — the verifier reads this section to validate fix safety, so format consistency is load-bearing:
+
+```
+### finding-<N>: <one-line finding title>
+- Severity: Critical | Important
+- File: <path>:<line>
+- Symbol: <primary symbol name> | n/a (configuration/data/test)
+- Callers checked: <N> (depth 2, direction in)
+- Risk: Low | Medium | High — <one sentence: why this risk level>
+- Notes: <optional: edge cases worth verifier follow-up>
+```
+
+Hard cap: at most 5 findings get this treatment per review, prioritized by severity then by file count in their caller set (more callers = more leverage = check first). Findings 6+ get a single rolled-up line at the bottom: `> Caller verification skipped for {N} additional findings — budget cap of 5 reached. Verifier should opt into deeper checks if warranted.`
+</step>
+
 <step name="summarize">
-Write `.devt/state/review.md` with the complete review. Every finding must appear. Every deduction must trace to a finding. The math must be auditable.
+Write `.devt/state/review.md` with the complete review. Every finding must appear. Every deduction must trace to a finding. The math must be auditable. When the `caller_verification` step ran, the `## Caller Verification` section follows the findings list and precedes the verdict.
 </step>
 
 </execution_flow>

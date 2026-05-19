@@ -67,6 +67,20 @@ const DEFAULTS = {
   graphify: {
     enabled: false,
     command: "graphify",
+    // When review-scope file count meets/exceeds this AND graph_stats.trust is
+    // "dense", the code-review workflow fires the bulk-scoped impact lane
+    // (query_graph + get_neighbors). Below the threshold, the workflow falls
+    // back to the symbol-anchored blast_radius tier.
+    impact_threshold: 10,
+    // When freshness().lag_commits exceeds this, dispatch context_init prompts
+    // the user to refresh the graph before proceeding. Set to null to disable
+    // the staleness gate entirely (warning still surfaces in the Brief).
+    stale_threshold: 30,
+    // After an implementation phase writes new code (impl-summary.json with
+    // non-empty files_modified), the workflow surfaces a refresh nudge to the
+    // user by default. Set true to silently auto-invoke `maybe-refresh --force`
+    // instead — useful in autonomous flows where there's no user to nudge.
+    auto_refresh_post_impl: false,
   },
   git: {
     provider: null,

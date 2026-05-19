@@ -4480,21 +4480,338 @@ else
 fi
 
 echo
-echo "== Graphify PR-impact MCP wiring =="
-if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "pr-impact.md" "$ROOT/workflows/code-review.md"; then
-  pass "code-review workflow instructs orchestrator to fetch mcp__graphify__get_pr_impact and persist to .devt/state/pr-impact.md"
+echo "== Graphify impact-map wiring (layered trigger: PR / bulk / symbol-anchored) =="
+if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "graph-impact.md" "$ROOT/workflows/code-review.md" && grep -q "mcp__devt-graphify__" "$ROOT/workflows/code-review.md"; then
+  pass "code-review workflow defines layered impact trigger (PR / bulk / symbol-anchored) persisting to .devt/state/graph-impact.md via vendored relay"
 else
-  fail "code-review.md missing get_pr_impact fetch step or pr-impact.md persistence"
+  fail "code-review.md missing layered impact trigger or graph-impact.md persistence or devt-graphify MCP refs"
 fi
-if grep -q "pr-impact.md" "$ROOT/agents/code-reviewer.md" && grep -q "get_pr_impact" "$ROOT/agents/code-reviewer.md"; then
-  pass "code-reviewer agent instructs reading .devt/state/pr-impact.md when present"
+if grep -q "graph-impact.md" "$ROOT/agents/code-reviewer.md" && grep -q "mcp__devt-graphify__" "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer agent reads .devt/state/graph-impact.md and may call mcp__devt-graphify__* for caller verification"
 else
-  fail "code-reviewer.md missing PR-impact Read instruction"
+  fail "code-reviewer.md missing graph-impact.md Read instruction or devt-graphify MCP references"
 fi
 if grep -q "Community filter for large reviews" "$ROOT/agents/code-reviewer.md" && grep -q "Out-of-Scope Files (Deferred)" "$ROOT/agents/code-reviewer.md"; then
-  pass "code-reviewer applies community-filter scope-narrowing for large PRs (Phase B-4 budget protection)"
+  pass "code-reviewer applies community-filter scope-narrowing for large reviews (budget protection)"
 else
   fail "code-reviewer.md missing community-filter / deferred-files mechanism"
+fi
+
+echo
+echo "== Vendored devt-graphify MCP relay (.mcp.json + self-test) =="
+if node -e "const m=require('$ROOT/.mcp.json');process.exit(m.mcpServers && m.mcpServers['devt-graphify'] ? 0 : 1)" 2>/dev/null; then
+  pass ".mcp.json registers devt-graphify relay alongside devt-memory"
+else
+  fail ".mcp.json missing devt-graphify entry"
+fi
+if [ -f "$ROOT/bin/devt-graphify-mcp.cjs" ] && node "$ROOT/bin/devt-graphify-mcp.cjs" --self-test >/dev/null 2>&1; then
+  pass "bin/devt-graphify-mcp.cjs self-test passes (9 tools, 0 throws)"
+else
+  fail "bin/devt-graphify-mcp.cjs missing or self-test failed"
+fi
+# JSON-RPC protocol smoke: initialize + tools/list must return both protocol envelope and 9 tool definitions
+GRAPHIFY_MCP_RPC=$(printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null)
+if echo "$GRAPHIFY_MCP_RPC" | grep -q '"serverInfo"' && echo "$GRAPHIFY_MCP_RPC" | grep -q '"name":"get_neighbors"' && echo "$GRAPHIFY_MCP_RPC" | grep -q '"name":"blast_radius"'; then
+  pass "devt-graphify MCP responds to initialize + tools/list with expected tool surface"
+else
+  fail "devt-graphify MCP stdio protocol broken (initialize or tools/list missing required fields)"
+fi
+
+echo
+echo "== Graphify staleness gate (lag_commits > stale_threshold) wiring =="
+GATE_PHRASE="Staleness gate"
+GATE_MISSING=""
+for wf in dev-workflow code-review debug research-task quick-implement; do
+  if ! grep -q "$GATE_PHRASE" "$ROOT/workflows/$wf.md"; then
+    GATE_MISSING="$GATE_MISSING $wf"
+  fi
+done
+if [ -z "$GATE_MISSING" ]; then
+  pass "all 5 preflight-consuming workflows carry the Staleness gate directive (dev / code-review / debug / research-task / quick-implement)"
+else
+  fail "workflows missing Staleness gate directive:${GATE_MISSING}"
+fi
+# Config default surface
+if node -e "const c=require('$ROOT/bin/modules/config.cjs').DEFAULTS;process.exit(c.graphify && typeof c.graphify.stale_threshold==='number' && typeof c.graphify.impact_threshold==='number' ? 0 : 1)" 2>/dev/null; then
+  pass "config.cjs DEFAULTS exposes graphify.stale_threshold + graphify.impact_threshold"
+else
+  fail "config.cjs DEFAULTS missing graphify.stale_threshold or graphify.impact_threshold"
+fi
+
+echo
+echo "== Wave 2: get_community wrapper + caller_verification step + wiki-first reading =="
+if node -e "const g=require('$ROOT/bin/modules/graphify.cjs');process.exit(typeof g.getCommunity==='function' ? 0 : 1)" 2>/dev/null; then
+  pass "graphify.cjs exports getCommunity wrapper"
+else
+  fail "graphify.cjs missing getCommunity export"
+fi
+if echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q '"name":"get_community"'; then
+  pass "devt-graphify MCP relay exposes get_community tool"
+else
+  fail "devt-graphify MCP relay missing get_community tool"
+fi
+# Functional: invalid id returns degraded payload (defense)
+if echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_community","arguments":{"community_id":"not-a-number"}}}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q 'degraded.*true'; then
+  pass "get_community gracefully degrades on invalid community_id (non-integer string)"
+else
+  fail "get_community failed to degrade on invalid community_id"
+fi
+if grep -q 'name="caller_verification"' "$ROOT/agents/code-reviewer.md" && grep -q "## Caller Verification" "$ROOT/agents/code-reviewer.md"; then
+  pass "code-reviewer agent declares caller_verification step + Caller Verification section format"
+else
+  fail "code-reviewer.md missing caller_verification step or Caller Verification section format"
+fi
+if grep -q "Caller Verification" "$ROOT/workflows/code-review.md" && grep -q "caller-0" "$ROOT/workflows/code-review.md"; then
+  pass "code-review verifier dispatch validates Caller Verification section presence"
+else
+  fail "code-review.md verifier dispatch missing Caller Verification validation directive"
+fi
+if grep -q "graphify-out/wiki/index.md" "$ROOT/bin/modules/preflight.cjs"; then
+  pass "preflight.cjs prepends graphify-out/wiki/index.md to suggested_reading when present"
+else
+  fail "preflight.cjs missing wiki-first reading injection"
+fi
+# Graphify-first dispatch directive: active instruction (not passive availability) in the
+# task block of dispatches that benefit most from graph queries. Catches the regression
+# where agents have access but aren't told to use it — they default to grep.
+GRAPHIFY_FIRST_MISSING=""
+for wf in code-review debug research-task; do
+  if ! grep -q "Graphify-first" "$ROOT/workflows/$wf.md"; then
+    GRAPHIFY_FIRST_MISSING="$GRAPHIFY_FIRST_MISSING $wf"
+  fi
+done
+if [ -z "$GRAPHIFY_FIRST_MISSING" ]; then
+  pass "code-review / debug / research-task dispatch tasks all carry the Graphify-first protocol directive (active instruction, not passive availability)"
+else
+  fail "workflows missing Graphify-first protocol directive in dispatch task:${GRAPHIFY_FIRST_MISSING}"
+fi
+
+echo
+echo "== Wave 3: maybe-refresh + write-memory + post-impl refresh suggestion =="
+# Module exports
+if node -e "const g=require('$ROOT/bin/modules/graphify.cjs');process.exit(typeof g.maybeRefresh==='function' && typeof g.writeMemoryEntry==='function' ? 0 : 1)" 2>/dev/null; then
+  pass "graphify.cjs exports maybeRefresh + writeMemoryEntry wrappers"
+else
+  fail "graphify.cjs missing maybeRefresh or writeMemoryEntry export"
+fi
+# CLI: maybe-refresh subcommand exists and returns valid JSON envelope
+MR_OUT=$(node "$ROOT/bin/devt-tools.cjs" graphify maybe-refresh 2>&1)
+if echo "$MR_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);process.exit(typeof j.ok==='boolean' && typeof j.action==='string' ? 0 : 1)}catch(e){process.exit(1)}})"; then
+  pass "graphify maybe-refresh CLI returns valid {ok, action} envelope"
+else
+  fail "graphify maybe-refresh CLI broken (output: $(echo "$MR_OUT" | head -3))"
+fi
+# CLI: write-memory subcommand validates required arg
+WM_USAGE_OUT=$(node "$ROOT/bin/devt-tools.cjs" graphify write-memory 2>&1 || true)
+if echo "$WM_USAGE_OUT" | grep -q "workflow-id"; then
+  pass "graphify write-memory CLI surfaces usage when required arg missing"
+else
+  fail "graphify write-memory CLI did not surface usage on missing arg (got: $(echo "$WM_USAGE_OUT" | head -1))"
+fi
+# CLI: write-memory with valid workflow_id returns valid envelope (will skip with disabled in devt)
+WM_OUT=$(node "$ROOT/bin/devt-tools.cjs" graphify write-memory --workflow-id smoke-test-w3 --workflow-type dev --task "x" --summary "y" 2>&1)
+if echo "$WM_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);process.exit(typeof j.ok==='boolean' && typeof j.action==='string' ? 0 : 1)}catch(e){process.exit(1)}})"; then
+  pass "graphify write-memory CLI returns valid {ok, action} envelope"
+else
+  fail "graphify write-memory CLI broken (output: $(echo "$WM_OUT" | head -3))"
+fi
+# Security: write-memory rejects path-traversal workflow_ids
+# `|| true` because the CLI exits 1 on validation-rejection — this is the
+# success path for the test, but set -e would kill the smoke script.
+PT_OUT=$(node "$ROOT/bin/devt-tools.cjs" graphify write-memory --workflow-id "../etc/passwd" 2>&1 || true)
+if echo "$PT_OUT" | grep -q "invalid_workflow_id_chars"; then
+  pass "graphify write-memory rejects path-traversal workflow_id"
+else
+  fail "graphify write-memory accepted path-traversal workflow_id (security regression)"
+fi
+# Config default for auto_refresh_post_impl
+if node -e "const c=require('$ROOT/bin/modules/config.cjs').DEFAULTS;process.exit(c.graphify && c.graphify.auto_refresh_post_impl === false ? 0 : 1)" 2>/dev/null; then
+  pass "config.cjs DEFAULTS exposes graphify.auto_refresh_post_impl=false"
+else
+  fail "config.cjs DEFAULTS missing graphify.auto_refresh_post_impl=false"
+fi
+# Post-impl refresh suggestion present in both impl workflows
+POST_IMPL_MISSING=""
+for wf in dev-workflow quick-implement; do
+  if ! grep -q "Post-implementation graphify refresh" "$ROOT/workflows/$wf.md"; then
+    POST_IMPL_MISSING="$POST_IMPL_MISSING $wf"
+  fi
+done
+if [ -z "$POST_IMPL_MISSING" ]; then
+  pass "dev-workflow + quick-implement carry the Post-implementation graphify refresh directive"
+else
+  fail "workflows missing Post-implementation graphify refresh directive:${POST_IMPL_MISSING}"
+fi
+# graphify_feedback step in lesson-extraction
+if grep -q 'name="graphify_feedback"' "$ROOT/workflows/lesson-extraction.md" && grep -q "graphify write-memory" "$ROOT/workflows/lesson-extraction.md"; then
+  pass "lesson-extraction.md wires graphify_feedback step that calls write-memory"
+else
+  fail "lesson-extraction.md missing graphify_feedback step"
+fi
+
+echo
+echo "== /devt:init auto-initialization completeness =="
+# Auto memory init step (closes the gap where user runs /devt:init but memory layer stays empty)
+if grep -q 'name="init_memory_index"' "$ROOT/workflows/project-init.md" && grep -q "memory init" "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md auto-runs memory init (no manual /devt:memory init required)"
+else
+  fail "project-init.md missing init_memory_index step — users will get an empty memory layer after /devt:init"
+fi
+# First graphify build prompt
+if grep -q 'name="prompt_graphify_first_build"' "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md offers first graphify build when graphify is enabled but no graph exists"
+else
+  fail "project-init.md missing prompt_graphify_first_build step"
+fi
+# verify_and_report covers index.db and graphify-out/graph.json
+if grep -q ".devt/memory/index.db" "$ROOT/workflows/project-init.md" && grep -q "graphify-out/graph.json" "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md verify_and_report checks index.db AND graphify graph existence"
+else
+  fail "project-init.md verify_and_report doesn't cover index.db or graphify graph"
+fi
+# Success criteria mentions index.db
+if grep -q "index.db.*FTS5\|FTS5 index initialized" "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md success_criteria requires index.db"
+else
+  fail "project-init.md success_criteria doesn't require index.db — init can succeed with broken memory layer"
+fi
+# claude-mem detection step
+if grep -q 'name="prompt_claude_mem_setup"' "$ROOT/workflows/project-init.md" && grep -q "command -v claude-mem" "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md detects claude-mem availability and surfaces install hint when absent"
+else
+  fail "project-init.md missing prompt_claude_mem_setup step"
+fi
+
+echo
+echo "== state directory contract: audit + cleanup CLIs =="
+if node -e "const s=require('$ROOT/bin/modules/state.cjs');process.exit(s.STATE_FILE_CONTRACT && Array.isArray(s.STATE_FILE_CONTRACT.additional_canonical) && Array.isArray(s.STATE_FILE_CONTRACT.allowed_patterns) ? 0 : 1)" 2>/dev/null; then
+  pass "state.cjs exports STATE_FILE_CONTRACT with additional_canonical + allowed_patterns + ephemeral_patterns"
+else
+  fail "state.cjs missing STATE_FILE_CONTRACT export"
+fi
+if node -e "const a=require('$ROOT/bin/modules/state-audit.cjs');process.exit(typeof a.auditStateFiles==='function' && typeof a.cleanupStateFiles==='function' ? 0 : 1)" 2>/dev/null; then
+  pass "state-audit.cjs exports auditStateFiles + cleanupStateFiles"
+else
+  fail "state-audit.cjs missing required exports"
+fi
+# state audit CLI returns valid envelope
+AUDIT_OUT=$(node "$ROOT/bin/devt-tools.cjs" state audit 2>&1 || true)
+if echo "$AUDIT_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);process.exit(j.ok && j.counts && typeof j.counts.canonical==='number' ? 0 : 1)}catch(e){process.exit(1)}})"; then
+  pass "state audit CLI returns {ok, counts: {canonical, pattern_allowed, ephemeral, ad_hoc, total}}"
+else
+  fail "state audit CLI broken (output: $(echo "$AUDIT_OUT" | head -3))"
+fi
+# state cleanup CLI is dry-run by default
+CLEANUP_OUT=$(node "$ROOT/bin/devt-tools.cjs" state cleanup 2>&1 || true)
+if echo "$CLEANUP_OUT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);process.exit(j.ok && j.dryRun === true ? 0 : 1)}catch(e){process.exit(1)}})"; then
+  pass "state cleanup CLI is dry-run by default (safe — requires --apply to actually move files)"
+else
+  fail "state cleanup CLI not dry-run by default (DESTRUCTIVE REGRESSION)"
+fi
+# Functional: in an isolated temp project, audit must classify canonical/pattern/ad_hoc correctly
+ISO_OUT=$(node -e "
+const fs=require('fs'), os=require('os'), path=require('path');
+const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'devt-audit-'));
+const sd=path.join(tmp,'.devt','state');
+fs.mkdirSync(sd,{recursive:true});
+fs.writeFileSync(path.join(sd,'scratchpad.md'),'x');         // canonical
+fs.writeFileSync(path.join(sd,'review-foo.md'),'x');         // pattern_allowed
+fs.writeFileSync(path.join(sd,'random-junk.md'),'x');        // ad_hoc
+fs.writeFileSync(path.join(sd,'tmp.tmp'),'x');               // ephemeral
+const audit=require('$ROOT/bin/modules/state-audit.cjs').auditStateFiles({projectRoot:tmp});
+console.log(JSON.stringify({
+  scratchpad: audit.buckets.canonical.some(f=>f.name==='scratchpad.md'),
+  review_pattern: audit.buckets.pattern_allowed.some(f=>f.name==='review-foo.md'),
+  ad_hoc: audit.buckets.ad_hoc.some(f=>f.name==='random-junk.md'),
+  ephemeral: audit.buckets.ephemeral.some(f=>f.name==='tmp.tmp'),
+}));
+fs.rmSync(tmp,{recursive:true,force:true});
+" 2>&1)
+if echo "$ISO_OUT" | grep -q '\"scratchpad\":true' && echo "$ISO_OUT" | grep -q '\"review_pattern\":true' && echo "$ISO_OUT" | grep -q '\"ad_hoc\":true' && echo "$ISO_OUT" | grep -q '\"ephemeral\":true'; then
+  pass "audit classifies scratchpad.md=canonical, review-foo.md=pattern_allowed, random-junk.md=ad_hoc, tmp.tmp=ephemeral (isolated temp fixture)"
+else
+  fail "audit misclassifies one of the test fixtures (got: $ISO_OUT)"
+fi
+
+# Default staleness window — locked at 21 days (3 weeks)
+if node -e "const s=require('$ROOT/bin/modules/state.cjs');process.exit(s.STATE_FILE_CONTRACT.stale_days_default === 21 ? 0 : 1)" 2>/dev/null; then
+  pass "STATE_FILE_CONTRACT.stale_days_default is 21 (3 weeks)"
+else
+  fail "STATE_FILE_CONTRACT.stale_days_default drifted from 21"
+fi
+
+# STRICT enforcement: scan agents/workflows for non-contract state references.
+# Implementation moved to scripts/check-state-contract.cjs so it can be re-used.
+if node "$ROOT/scripts/check-state-contract.cjs" >/dev/null 2>&1; then
+  pass "STRICT: every .devt/state/<filename> reference in agents/* + workflows/* matches the contract"
+else
+  STATE_REF_VIOLATIONS=$(node "$ROOT/scripts/check-state-contract.cjs" 2>&1 | head -5 || true)
+  fail "agent/workflow source references non-contract state filenames: $STATE_REF_VIOLATIONS"
+fi
+
+# Documentation parity
+if [ -f "$ROOT/docs/STATE-RULES.md" ] && grep -q "STATE_FILE_CONTRACT" "$ROOT/docs/STATE-RULES.md" && grep -q "ALLOWED_PATTERNS" "$ROOT/docs/STATE-RULES.md"; then
+  pass "docs/STATE-RULES.md exists and points to STATE_FILE_CONTRACT + ALLOWED_PATTERNS as source of truth"
+else
+  fail "docs/STATE-RULES.md missing or doesn't reference the contract source modules"
+fi
+
+echo
+echo "== Wave 4: imperative graphify impact-plan + bitbucket detection + telemetry surface =="
+# Imperative plan step in code-review.md
+if grep -q "graphify-impact-plan.json" "$ROOT/workflows/code-review.md" && grep -q "EXECUTE THE PLAN" "$ROOT/workflows/code-review.md"; then
+  pass "code-review.md replaces prose-only impact step with bash-computed plan + imperative EXECUTE THE PLAN directive"
+else
+  fail "code-review.md impact step still prose-only — orchestrator can skip without consequence"
+fi
+# Bitbucket awareness: the bash plan branches on git.provider
+if grep -q 'GIT_PROVIDER.*git\.provider' "$ROOT/workflows/code-review.md" && grep -q 'GIT_PROVIDER" = "github"' "$ROOT/workflows/code-review.md"; then
+  pass "code-review impact plan branches on git.provider — Bitbucket projects skip GitHub-only PR-scoped tier"
+else
+  fail "code-review impact plan missing Bitbucket-aware provider check (PR-scoped tier would silently fail for non-GitHub projects)"
+fi
+# Hard gate: workflow blocks when neither output file is present
+if grep -q "EXACTLY ONE.*graph-impact.md.*graphify-skip-reason.txt.*MUST exist" "$ROOT/workflows/code-review.md"; then
+  pass "code-review enforces 'exactly one of graph-impact.md OR graphify-skip-reason.txt MUST exist' contract"
+else
+  fail "code-review missing the hard gate that catches orchestrator skip"
+fi
+# Telemetry surface in present_findings
+if grep -q "Graphify activity surface" "$ROOT/workflows/code-review.md" && grep -q "mcp-stats --workflow-id" "$ROOT/workflows/code-review.md"; then
+  pass "code-review present_findings step surfaces graphify tool invocation telemetry to user"
+else
+  fail "code-review present_findings missing graphify activity surface"
+fi
+# Contract registration for the new state files
+if node -e "const s=require('$ROOT/bin/modules/state.cjs');const c=s.STATE_FILE_CONTRACT.additional_canonical;process.exit(c.includes('graphify-impact-plan.json') && c.includes('graphify-skip-reason.txt') ? 0 : 1)" 2>/dev/null; then
+  pass "STATE_FILE_CONTRACT registers graphify-impact-plan.json + graphify-skip-reason.txt as canonical"
+else
+  fail "new Wave 4 state files not registered in STATE_FILE_CONTRACT (would trigger check-state-contract.cjs violation)"
+fi
+
+echo
+echo "== Pre-Flight: memory_index_missing alert + sidecar field =="
+# Positive path: drop the index, run preflight, expect alert + sidecar=true
+TMP_INDEX_BAK=""
+if [ -f "$ROOT/.devt/memory/index.db" ]; then
+  TMP_INDEX_BAK="/tmp/devt-smoke-index-bak-$$.db"
+  mv "$ROOT/.devt/memory/index.db" "$TMP_INDEX_BAK"
+fi
+( cd "$ROOT" && node bin/devt-tools.cjs preflight generate "memory alert smoke" >/dev/null 2>&1 )
+if grep -q "Memory index not built" "$ROOT/.devt/state/preflight-brief.md" 2>/dev/null && [ "$(node -e "const j=require('$ROOT/.devt/state/preflight-brief.json');process.stdout.write(String(j.memory_index_missing))" 2>/dev/null)" = "true" ]; then
+  pass "preflight surfaces memory-index headline alert AND sets sidecar memory_index_missing=true when index.db absent"
+else
+  fail "preflight memory-index alert not surfaced or sidecar field missing"
+fi
+if [ -n "$TMP_INDEX_BAK" ] && [ -f "$TMP_INDEX_BAK" ]; then
+  mv "$TMP_INDEX_BAK" "$ROOT/.devt/memory/index.db"
+fi
+# Negative path: with index present, sidecar must be false
+( cd "$ROOT" && node bin/devt-tools.cjs preflight generate "memory alert negative" >/dev/null 2>&1 )
+if [ "$(node -e "const j=require('$ROOT/.devt/state/preflight-brief.json');process.stdout.write(String(j.memory_index_missing))" 2>/dev/null)" = "false" ]; then
+  pass "preflight sidecar memory_index_missing=false when index.db present (no false alerts)"
+else
+  fail "preflight emits memory_index_missing=true when index.db is present (false positive)"
 fi
 
 echo
