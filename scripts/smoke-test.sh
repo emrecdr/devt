@@ -4806,12 +4806,25 @@ fi
 if [ -n "$TMP_INDEX_BAK" ] && [ -f "$TMP_INDEX_BAK" ]; then
   mv "$TMP_INDEX_BAK" "$ROOT/.devt/memory/index.db"
 fi
-# Negative path: with index present, sidecar must be false
+# Negative path: with index present, sidecar must be false.
+# CI runs from a clean checkout where .devt/memory/index.db doesn't exist yet
+# (it's gitignored). Build the index explicitly so we're testing the case the
+# gate claims to test (index present → sidecar=false), not a stale local state.
+NEG_INDEX_PRECREATED=0
+if [ ! -f "$ROOT/.devt/memory/index.db" ]; then
+  ( cd "$ROOT" && node bin/devt-tools.cjs memory init >/dev/null 2>&1 ) || true
+  NEG_INDEX_PRECREATED=1
+fi
 ( cd "$ROOT" && node bin/devt-tools.cjs preflight generate "memory alert negative" >/dev/null 2>&1 )
 if [ "$(node -e "const j=require('$ROOT/.devt/state/preflight-brief.json');process.stdout.write(String(j.memory_index_missing))" 2>/dev/null)" = "false" ]; then
   pass "preflight sidecar memory_index_missing=false when index.db present (no false alerts)"
 else
   fail "preflight emits memory_index_missing=true when index.db is present (false positive)"
+fi
+# Clean up the precreated index so we don't leak state into devt's working tree.
+# The index is gitignored, so this only matters for tidiness on the dev machine.
+if [ "$NEG_INDEX_PRECREATED" = "1" ] && [ -f "$ROOT/.devt/memory/index.db" ]; then
+  rm -f "$ROOT/.devt/memory/index.db"
 fi
 
 echo
