@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-05-19
+
+Smoke-gate patch: the negative-path assertion for `memory_index_missing` assumed the local FTS5 index existed before the test ran. CI's clean checkout has no `.devt/memory/index.db` (it's gitignored), so the negative path ran preflight against a missing index, the sidecar correctly emitted `memory_index_missing=true`, and the gate failed with a false-positive "false positive" failure. No runtime behavior changed — purely a test-setup fix.
+
+### Fixed
+
+- `scripts/smoke-test.sh`: precreate the FTS5 index via `node bin/devt-tools.cjs memory init` before the negative-path preflight when `.devt/memory/index.db` is absent. Clean up the precreated index after the assertion so the test is idempotent on developer machines (the index is gitignored, so this only matters for tidiness). Smoke now passes both in local environments where the index exists AND in fresh CI checkouts. Verified via `rm -f .devt/memory/index.db && bash scripts/smoke-test.sh` → 494/0.
+
 ## [0.45.0] - 2026-05-19
 
 Graphify integration deepening — Waves 1-4 of a 6-wave plan that takes devt's graphify usage from "scope-hint backdrop signal" to "agents actively query the graph mid-dispatch." Wave 1 makes graphify reachable from agents (vendored MCP relay, layered impact trigger, staleness gate). Wave 2 makes them actually USE it (Graphify-first dispatch directive, per-finding caller verification, `get_community` tool, wiki-first reading). Wave 3 closes the freshness/feedback loop (`maybe-refresh` + `write-memory` CLIs, post-impl refresh suggestion, lesson-extraction `graphify_feedback` step). Wave 4 closes the orchestrator-opt-out gap surfaced in greenfield-api evidence (bash-computed `graphify-impact-plan.json`, Bitbucket-aware routing, "Graphify activity" telemetry in present_findings). Plus two adjacent bundles: **`/devt:init` completeness** (auto `memory init`, first-graph-build prompt, claude-mem detection, verify_and_report extension) and the **`.devt/state/` directory contract** (`STATE_FILE_CONTRACT` declaration, `state audit` + `state cleanup` CLIs, static `check-state-contract.cjs` enforcer, `docs/STATE-RULES.md` authoritative spec). Smoke: **494 passed**, **0 failed** (+33 new gates from v0.44.0 baseline).
