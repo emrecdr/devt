@@ -4870,9 +4870,17 @@ fi
 
 # run-hook.js writes a trace record on every invocation (enabled or disabled).
 # Without this, debugging "did the CC harness actually invoke this hook?" requires
-# adding ad-hoc logging mid-incident.
+# adding ad-hoc logging mid-incident. CI runs from a clean checkout where
+# .devt/state/ doesn't exist yet (gitignored), so pre-create it explicitly —
+# the trace function performs an upward search and silently no-ops when no
+# state dir is found (intentional: trace failures must never break hooks).
 TRACE_TMP="$ROOT/.devt/state/hook-trace/run-hook.jsonl"
 TRACE_BAK=""
+TRACE_STATE_PRECREATED=0
+if [ ! -d "$ROOT/.devt/state" ]; then
+  mkdir -p "$ROOT/.devt/state" 2>/dev/null || true
+  TRACE_STATE_PRECREATED=1
+fi
 if [ -f "$TRACE_TMP" ]; then
   TRACE_BAK="/tmp/devt-smoke-trace-bak-$$.jsonl"
   mv "$TRACE_TMP" "$TRACE_BAK"
@@ -4888,6 +4896,12 @@ fi
 rm -f "$TRACE_TMP"
 if [ -n "$TRACE_BAK" ] && [ -f "$TRACE_BAK" ]; then
   mv "$TRACE_BAK" "$TRACE_TMP"
+fi
+# Remove the precreated state dir on CI to keep devt's working tree pristine.
+if [ "$TRACE_STATE_PRECREATED" = "1" ]; then
+  rmdir "$ROOT/.devt/state/hook-trace" 2>/dev/null || true
+  rmdir "$ROOT/.devt/state" 2>/dev/null || true
+  rmdir "$ROOT/.devt" 2>/dev/null || true
 fi
 
 # End-to-end: dispatch-hygiene-guard via run-hook.js (matches the CC harness path,
