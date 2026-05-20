@@ -340,6 +340,7 @@ Write `.devt/state/test-summary.md` with:
     "skipped_count": <integer>
   },
   "test_files": ["tests/foo.test.ts", "tests/bar.test.ts"],
+  "coverage_files": ["src/foo.ts", "src/bar.ts"],
   "failures": [
     {"test": "fully.qualified.test_name", "file": "tests/foo.test.ts", "msg": "<assertion message>"}
   ],
@@ -350,5 +351,7 @@ Write `.devt/state/test-summary.md` with:
 ```
 
 The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}_count` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
+
+**`coverage_files` is the source files your tests actually exercise** — not the test files themselves (those go in `test_files`). Derive it from the imports + mock targets + system-under-test references in your test bodies. This field is the load-bearing input to the deterministic grader's coverage-completeness check: the grader compares `coverage_files` against `impl-summary.json::files_changed` and fails the workflow if any modified file lacks test coverage. Populate it accurately — a missing entry here causes the grader to retry the tester dispatch with the gap as `<review_feedback>`. When tests only exercise a subset of `files_changed` (legitimate — e.g. type-only changes, config-only edits, or generated-code updates), include all the files you DID cover and rely on the rubric's allow-list for the categorically-untestable subset.
 
 </output_format>

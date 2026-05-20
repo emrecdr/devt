@@ -5398,6 +5398,23 @@ else
 fi
 
 echo
+echo "== Tester coverage_files field (silent-skip gate prerequisite) =="
+# Tester must emit coverage_files in test-summary.json so the deterministic
+# grader can compare it against impl-summary.json::files_changed and catch
+# silent-skip where a JSON-first tester would loop over a truncated
+# files_changed list and report DONE while testing nothing.
+if grep -q '"coverage_files"' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "agents/tester.md emits coverage_files in test-summary.json"
+else
+  fail "agents/tester.md does NOT emit coverage_files — silent-skip gate cannot be enforced"
+fi
+if grep -qE 'coverage_files.*source files|files actually exercise|not the test files themselves' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "tester.md documents coverage_files semantics (source files vs test files)"
+else
+  fail "tester.md does not clarify coverage_files vs test_files distinction"
+fi
+
+echo
 echo "== Graphify decision gate (state assert-graphify-decision) =="
 # Process gate that turns the prose "EXACTLY ONE artifact MUST exist" rule
 # into hard enforcement. Catches orchestrator-skip of the graphify decision
