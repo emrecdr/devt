@@ -341,6 +341,7 @@ Write `.devt/state/test-summary.md` with:
   },
   "test_files": ["tests/foo.test.ts", "tests/bar.test.ts"],
   "coverage_files": ["src/foo.ts", "src/bar.ts"],
+  "coverage_complete": true,
   "failures": [
     {"test": "fully.qualified.test_name", "file": "tests/foo.test.ts", "msg": "<assertion message>"}
   ],
@@ -352,6 +353,8 @@ Write `.devt/state/test-summary.md` with:
 
 The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}_count` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
 
-**`coverage_files` is the source files your tests actually exercise** — not the test files themselves (those go in `test_files`). Derive it from the imports + mock targets + system-under-test references in your test bodies. This field is the load-bearing input to the deterministic grader's coverage-completeness check: the grader compares `coverage_files` against `impl-summary.json::files_changed` and fails the workflow if any modified file lacks test coverage. Populate it accurately — a missing entry here causes the grader to retry the tester dispatch with the gap as `<review_feedback>`. When tests only exercise a subset of `files_changed` (legitimate — e.g. type-only changes, config-only edits, or generated-code updates), include all the files you DID cover and rely on the rubric's allow-list for the categorically-untestable subset.
+**`coverage_files` is the source files your tests actually exercise** — not the test files themselves (those go in `test_files`). Derive it from the imports + mock targets + system-under-test references in your test bodies. Populate it accurately — a missing entry here causes the grader to retry the tester dispatch with the gap as `<review_feedback>`.
+
+**`coverage_complete` is the boolean you compute** from comparing `coverage_files` against `impl-summary.json::files_changed`: read the upstream sidecar first, then set `coverage_complete: true` IFF every entry in `impl-summary.json::files_changed` appears in your `coverage_files`. Set `false` when any modified file lacks test coverage. The deterministic grader gates on this boolean BEFORE the LLM verifier dispatches — `false` short-circuits to a tester re-dispatch with the missing files surfaced as `<review_feedback>`. This catches the silent-skip failure mode where a JSON-first tester would loop over a truncated upstream `files_changed` and report `status=DONE` while testing nothing. When `files_changed` legitimately contains untestable entries (type-only changes, config-only edits, generated code), still set `coverage_complete: false` and surface the rationale in `concerns[]` with severity `low` — the rubric's allow-list handles the categorically-untestable subset.
 
 </output_format>

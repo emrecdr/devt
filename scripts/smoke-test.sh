@@ -2410,7 +2410,7 @@ fi
 # End-to-end grader: green-path sidecars → pass:true, exit 0.
 GRADE_DIR=$(mktemp -d)
 mkdir -p "$GRADE_DIR/.devt/state"
-printf '%s' '{"status":"DONE","verdict":"PASS","agent":"tester","workflow_type":"dev","iteration":1,"tests":{"added_count":1,"passed_count":2,"failed_count":0,"skipped_count":0},"test_files":[],"failures":[],"concerns":[]}' > "$GRADE_DIR/.devt/state/test-summary.json"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"tester","workflow_type":"dev","iteration":1,"tests":{"added_count":1,"passed_count":2,"failed_count":0,"skipped_count":0},"test_files":[],"coverage_files":["a.ts"],"coverage_complete":true,"failures":[],"concerns":[]}' > "$GRADE_DIR/.devt/state/test-summary.json"
 printf '%s' '{"status":"DONE","verdict":"PASS","agent":"programmer","workflow_type":"dev","iteration":1,"files_changed":["a.ts"],"tests_added":[],"requirements_covered":["R1"],"requirements_missing":[],"concerns":[],"next_agent_hints":{},"gates":{"lint":{"ran":true,"passed":true,"errors":0,"warnings":0},"typecheck":{"ran":true,"passed":true,"errors":0},"test":{"ran":true,"passed":true,"passed_count":2,"failed_count":0,"skipped_count":0}}}' > "$GRADE_DIR/.devt/state/impl-summary.json"
 cd "$GRADE_DIR"
 GREEN_TS_EC=0; GRADE_GREEN_TS=$(node "$CLI" grade dev test-summary.json 2>/dev/null) || GREEN_TS_EC=$?
@@ -5412,6 +5412,35 @@ if grep -qE 'coverage_files.*source files|files actually exercise|not the test f
   pass "tester.md documents coverage_files semantics (source files vs test files)"
 else
   fail "tester.md does not clarify coverage_files vs test_files distinction"
+fi
+# coverage_complete boolean is the load-bearing silent-skip gate input.
+if grep -q '"coverage_complete"' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "agents/tester.md emits coverage_complete in test-summary.json"
+else
+  fail "agents/tester.md does NOT emit coverage_complete — gate cannot enforce"
+fi
+if grep -qE 'coverage_complete.*IFF|coverage_complete.*comparing|coverage_complete.*every entry' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "tester.md documents coverage_complete computation rule"
+else
+  fail "tester.md does not document how coverage_complete is computed"
+fi
+# Rubric must require coverage_complete: true.
+if grep -qE '"coverage_complete"\s*:\s*true' "$ROOT/references/rubrics/dev.v1.md" 2>/dev/null; then
+  pass "rubrics/dev.v1.md requires coverage_complete: true in deterministic gates"
+else
+  fail "rubrics/dev.v1.md does NOT require coverage_complete: true — silent-skip risk unaddressed"
+fi
+# Grader silent-skip gate: tester with coverage_complete=false must fail the gate.
+# Uses the same cd-into-tmp-project pattern as the existing grader green-path test.
+COV_DIR=$(mktemp -d)
+mkdir -p "$COV_DIR/.devt/state"
+printf '%s' '{"status":"DONE","verdict":"PASS","agent":"tester","workflow_type":"dev","iteration":1,"tests":{"added_count":1,"passed_count":2,"failed_count":0,"skipped_count":0},"test_files":[],"coverage_files":[],"coverage_complete":false,"failures":[],"concerns":[]}' > "$COV_DIR/.devt/state/test-summary.json"
+COV_EC=0; COV_OUT=$(cd "$COV_DIR" && node "$CLI" grade dev test-summary.json 2>/dev/null) || COV_EC=$?
+cd "$ROOT"; rm -rf "$COV_DIR"
+if [ "$COV_EC" = "1" ] && echo "$COV_OUT" | grep -q '"pass":false' && echo "$COV_OUT" | grep -q '"field":"coverage_complete"'; then
+  pass "grade: test-summary.json coverage_complete=false → pass:false, exit 1 (silent-skip gate)"
+else
+  fail "silent-skip gate did not catch coverage_complete=false (ec=$COV_EC, out=$COV_OUT)"
 fi
 
 echo

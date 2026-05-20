@@ -118,7 +118,8 @@ Pre-verifier gates enforced by `bin/modules/grader.cjs`. These run BEFORE the LL
     "verdict": "PASS",
     "tests": {
       "failed_count": 0
-    }
+    },
+    "coverage_complete": true
   },
   "impl-summary.json": {
     "verdict": "PASS",
@@ -134,4 +135,5 @@ Pre-verifier gates enforced by `bin/modules/grader.cjs`. These run BEFORE the LL
 Notes on intent:
 - `verdict: "PASS"` blocks the verifier dispatch when the agent's own self-assessment is negative — no point asking the verifier to re-grade work the agent already flagged as failing.
 - `tests.failed_count: 0` catches the asymmetric case where verdict is INDETERMINATE but failure counts are non-zero (test runner crashed mid-run).
+- `coverage_complete: true` catches the silent-skip failure mode where a JSON-first tester loops over a truncated upstream `impl-summary.json::files_changed` and reports `status=DONE` while testing nothing. The tester computes this boolean by comparing its `coverage_files` to the upstream sidecar's `files_changed` (see `agents/tester.md`); `false` short-circuits to a tester re-dispatch with the missing files as `<review_feedback>`. Converts a previously-invisible truncation propagation into a hard process gate.
 - `gates.{lint,typecheck,test}.{ran,passed}` verifies the programmer actually ran each gate. If a project doesn't have a linter configured the programmer should emit `gates.lint.ran: false` and the grader will surface that as a `gate_failures` entry — fail closed by design. To opt a project out of a gate, override the rubric in `.devt/config.json::rubrics.dev` with a customized constraint tree.
