@@ -5442,6 +5442,25 @@ if [ "$COV_EC" = "1" ] && echo "$COV_OUT" | grep -q '"pass":false' && echo "$COV
 else
   fail "silent-skip gate did not catch coverage_complete=false (ec=$COV_EC, out=$COV_OUT)"
 fi
+# Tester body must instruct JSON-first read of impl-summary.json with .md as fallback.
+if grep -qE 'Read .devt/state/impl-summary.json.* first|impl-summary.json.*authoritative file list' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "agents/tester.md instructs JSON-first read of impl-summary.json"
+else
+  fail "agents/tester.md does NOT read impl-summary.json first — JSON-first mitigation not landed"
+fi
+if grep -qE 'impl-summary.md.*ONLY when|impl-summary.md.*fall back' "$ROOT/agents/tester.md" 2>/dev/null; then
+  pass "agents/tester.md keeps impl-summary.md as on-demand fallback (degraded sidecar path)"
+else
+  fail "agents/tester.md missing .md fallback rule — degraded-sidecar path uncovered"
+fi
+# Both tester dispatch sites must inject <impl_summary_sidecar> before <impl_summary>.
+for wf in quick-implement.md dev-workflow.md; do
+  if grep -q '<impl_summary_sidecar>' "$ROOT/workflows/$wf" 2>/dev/null; then
+    pass "$wf tester dispatch injects <impl_summary_sidecar>"
+  else
+    fail "$wf tester dispatch missing <impl_summary_sidecar> — tester reads .md narrative directly"
+  fi
+done
 
 echo
 echo "== Graphify decision gate (state assert-graphify-decision) =="
