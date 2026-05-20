@@ -77,12 +77,31 @@ function readJsonlLines(filePath) {
 function loadEntries(opts) {
   opts = opts || {};
   const tracePath = getTracePath();
+  // Builds a tool-name matcher. Pattern with `*` → glob (anchored regex);
+  // no `*` → exact equality. Glob supports `*` only (no `?`, no character classes).
+  function buildToolMatcher(pat) {
+    if (!pat.includes("*")) return (t) => t === pat;
+    // Cap pattern length to prevent ReDoS on hostile input. Real tool names
+    // are short (mcp__plugin_<name>__<tool>), 200 chars is well above any
+    // legitimate use. Special regex metachars are escaped before `*` → `.*`
+    // substitution so only the literal `*` becomes a wildcard.
+    if (pat.length > 200) return () => false;
+    const esc = pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+    const re = new RegExp("^" + esc + "$");
+    return (t) => typeof t === "string" && re.test(t);
+  }
   const parsed = readJsonlLines(tracePath);
   if (!parsed.exists) return { entries: [], path: tracePath, exists: false };
   const sinceMs = opts.since ? new Date(opts.since).getTime() : 0;
+  // Tool filter: exact match when no `*` wildcard, glob match otherwise.
+  // Wildcards already in active use by workflows/code-review.md present_findings
+  // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
+  // returning 0 entries for every wildcard query and breaking the telemetry surface.
+  const toolMatcher = opts.tool ? buildToolMatcher(opts.tool) : null;
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;
-    if (opts.tool && e.tool !== opts.tool) return false;
+    if (toolMatcher && !toolMatcher(e.tool)) return false;
     // Workflow-context filters. Trace records pre-v0.39.0 (and any emitted
     // outside an active workflow) lack these fields → excluded when the
     // corresponding filter is set. Bare aggregate (no filters) still includes them.

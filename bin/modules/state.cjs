@@ -603,6 +603,13 @@ function updateState(keyValues) {
 
   try {
     const current = readState();
+    // Snapshot workflow_type BEFORE merging updates. If a workflow switches
+    // (e.g. user runs /devt:review mid-/devt:workflow), workflow_type changes
+    // while active stays true — this is a NEW logical workflow that deserves
+    // a fresh workflow_id + created_at stamp. Without this snapshot the
+    // mcp-trace records would silently attribute the new workflow's MCP calls
+    // to the old workflow_id, breaking telemetry attribution across boundaries.
+    const previousWorkflowType = current.workflow_type;
     for (const kv of keyValues) {
       const eqIndex = kv.indexOf("=");
       if (eqIndex === -1) {
@@ -624,6 +631,17 @@ function updateState(keyValues) {
     if (current.active === true && !current.created_at) {
       current.created_at = new Date().toISOString();
       current.workflow_id = current.workflow_id || require("crypto").randomUUID();
+    } else if (
+      current.active === true &&
+      previousWorkflowType &&
+      current.workflow_type &&
+      previousWorkflowType !== current.workflow_type
+    ) {
+      // workflow_type transition while active — new logical workflow, fresh stamps.
+      // Closes the attribution bug where /devt:review running on top of an active
+      // /devt:workflow would write trace records with the old workflow_id.
+      current.created_at = new Date().toISOString();
+      current.workflow_id = require("crypto").randomUUID();
     }
     // Run before write so the validation verdict and the data hit disk in a single atomic write —
     // a crash between two writes would leave the flag desynced from the state it describes.

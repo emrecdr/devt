@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-05-20
+
+Telemetry attribution + wildcard queries. Surfaced by greenfield-api's live `/devt:review` output: `Graphify activity: tier=bulk_scoped … | direct MCP calls during context_init: query_graph×3, blast_radius×1, get_neighbors×1 | telemetry trace: 0 entries captured (surface broken for this session)`. Deep probe revealed two distinct root causes that both manifested as the "0 entries captured" symptom: (a) `state.cjs::updateState` only stamped a fresh `workflow_id` on the false→true `active` transition, so a `/devt:review` running on top of an active `/devt:workflow` wrote trace records with the prior workflow's id; (b) `mcp-stats` filtered the `--tool` flag via literal string equality, but `workflows/code-review.md::present_findings` queries with the glob `mcp__devt-graphify__*` — always returning 0 entries. Smoke: **518 passed**, **0 failed** (+2 new gates).
+
+### Changed
+
+- **`bin/modules/state.cjs::updateState`** — snapshot `workflow_type` before the keyValues merge, then detect `workflow_type` change while `active=true` and stamp a fresh `workflow_id` + `created_at`. Closes the cross-workflow attribution leak where `/devt:review` (or any workflow_type switch) inherited the previous workflow's id, breaking telemetry filters, `/devt:forensics` analysis, and stuck-detector session boundaries.
+- **`bin/modules/mcp-stats.cjs::loadEntries`** — `--tool` filter accepts glob patterns. Pattern containing `*` becomes an anchored regex (special regex chars escaped, `*` becomes `.*`); pattern without `*` stays exact-match. Cap input at 200 chars to prevent ReDoS on hostile patterns (real tool names are ≤80 chars). Behavior already assumed by `workflows/code-review.md::present_findings`, which has been querying with `mcp__devt-graphify__*` and silently receiving 0 results until now.
+
+### Added
+
+- **Two new smoke gates** under `== Telemetry attribution + wildcard queries ==`: workflow_id reset on workflow_type change (uses a temp .devt/state/, reads workflow_id before+after a type transition, asserts they differ), mcp-stats wildcard match (synthetic trace with 3 records, queries `mcp__devt-graphify__*`, asserts 2 matches).
+
+### Context
+
+- **Direct causal chain for greenfield's symptom**: `/devt:workflow` (May 15) set `active=true`, stamped `workflow_id=1b1855ad-…`. `/devt:review` (May 20) ran `state update active=true workflow_type=code_review …` — the existing logic preserved the prior `workflow_id`. `bin/devt-memory-mcp.cjs` correctly wrote 5 trace records with `workflow_id=1b1855ad-…`. `present_findings` then ran `mcp-stats --workflow-id=1b1855ad-… --tool=mcp__devt-graphify__*`. The workflow-id filter matched correctly, but the literal `mcp__devt-graphify__*` filter found zero tools named exactly that string — actual tool names are `mcp__devt-graphify__blast_radius` etc. Both fixes were needed; either alone wouldn't have closed the surface.
+- **Items NOT in this release** (deferred to v0.51.0+): `preflight generate --from-state` (read review-scope.md/impl-summary.md file paths for symbol extraction), `memory_index_state` tri-state field, `dispatch-prep` CLI for substitution-as-tool. All validated as worthwhile; sized for separate releases.
+- **Originally proposed v0.50.0 = 4 items** (`from-state` + tri-state + workflow_id reset + prefix normalization). Deep validation reframed `prefix normalization` as the actual wildcard-support gap (bigger UX win, no normalization needed — just glob support). Tightened to 2 items targeting greenfield's exact reported symptom; the larger 2 items (`from-state` + tri-state) ride a separate release for tighter blast radius per ship.
+
 ## [0.49.0] - 2026-05-20
 
 Graphify integration completeness. Surfaced by greenfield-api field evidence on two consecutive days: (1) `/devt:workflow` and `/devt:implement` runs that should have benefited from graphify orchestration didn't — those workflows had no orchestrator-level MCP calls (only `/devt:review`, `/devt:debug`, `/devt:research` did); (2) stale graphify artifacts from prior `/devt:review` sessions persisted into unrelated `/devt:workflow` runs, producing cross-workflow contamination (PR-#367 sibling-context blast radius lingering during GFBUGS-133 license-details work); (3) the post-implementation graphify refresh defaulted to silent tip-only, so users had to remember to refresh manually. Four complementary changes close the integration gap end-to-end. Smoke: **516 passed**, **0 failed** (+7 new gates, 2 updated old gates).

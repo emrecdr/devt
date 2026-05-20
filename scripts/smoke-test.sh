@@ -4920,6 +4920,51 @@ else
 fi
 
 echo
+echo "== Telemetry attribution + wildcard queries =="
+# Item 6: workflow_type transition while active=true stamps a fresh workflow_id.
+# Closes the bug where /devt:review running on top of an active /devt:workflow
+# would write mcp-trace records with the old workflow_id, breaking telemetry.
+ATTR_TMP=$(mktemp -d)
+mkdir -p "$ATTR_TMP/.devt/state"
+( cd "$ATTR_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init >/dev/null 2>&1 )
+ATTR_WID1=$( cd "$ATTR_TMP" && node "$ROOT/bin/devt-tools.cjs" state read | command grep -oE '"workflow_id":"[^"]+"' | head -1 | sed 's/.*"workflow_id":"\([^"]*\)".*/\1/' )
+( cd "$ATTR_TMP" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=code_review phase=context_init >/dev/null 2>&1 )
+ATTR_WID2=$( cd "$ATTR_TMP" && node "$ROOT/bin/devt-tools.cjs" state read | command grep -oE '"workflow_id":"[^"]+"' | head -1 | sed 's/.*"workflow_id":"\([^"]*\)".*/\1/' )
+if [ -n "$ATTR_WID1" ] && [ -n "$ATTR_WID2" ] && [ "$ATTR_WID1" != "$ATTR_WID2" ]; then
+  pass "workflow_id resets when workflow_type changes while active (attribution boundary respected)"
+else
+  fail "workflow_id did not reset on workflow_type change (WID1=$ATTR_WID1, WID2=$ATTR_WID2)"
+fi
+rm -rf "$ATTR_TMP"
+
+# Item 3a: mcp-stats --tool accepts wildcard patterns. Existing workflow prose
+# (code-review.md present_findings) queries with `mcp__devt-graphify__*` which
+# was previously matched literally → 0 results. Glob support closes the gap.
+WC_OUT=$(node -e "
+const { loadEntries } = require('$ROOT/bin/modules/mcp-stats.cjs');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wc-'));
+fs.mkdirSync(path.join(tmp, '.devt', 'memory'), { recursive: true });
+const trace = path.join(tmp, '.devt', 'memory', '_mcp-trace.jsonl');
+fs.writeFileSync(trace, [
+  '{\"workflow_id\":\"x\",\"tool\":\"mcp__devt-graphify__blast_radius\",\"ts\":\"2026-05-20T10:00:00Z\"}',
+  '{\"workflow_id\":\"x\",\"tool\":\"mcp__devt-graphify__get_neighbors\",\"ts\":\"2026-05-20T10:01:00Z\"}',
+  '{\"workflow_id\":\"x\",\"tool\":\"mcp__claude-mem__search\",\"ts\":\"2026-05-20T10:02:00Z\"}',
+].join('\n') + '\n');
+process.chdir(tmp);
+const r = loadEntries({ tool: 'mcp__devt-graphify__*' });
+console.log('matched:', r.entries.length);
+fs.rmSync(tmp, { recursive: true, force: true });
+" 2>&1 || true)
+if echo "$WC_OUT" | command grep -q "matched: 2"; then
+  pass "mcp-stats --tool='<prefix>__*' wildcard matches both devt-graphify tools, excludes unrelated tool (closes the 'telemetry: 0 entries' surface bug)"
+else
+  fail "mcp-stats wildcard support broken (output: $WC_OUT)"
+fi
+
+echo
 echo "== Graphify integration completeness (eviction + scan-prep + symbol filter + refresh control) =="
 # state evict-graphify CLI exists + returns expected envelope
 EVICT_OUT=$(node "$ROOT/bin/devt-tools.cjs" state evict-graphify --dry-run 2>&1 || true)
