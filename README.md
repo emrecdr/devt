@@ -31,6 +31,30 @@ The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, or anything
 
 ---
 
+## Why devt?
+
+Standard AI coding has three concrete failure modes that compound over time.
+
+### 1. Amnesia between sessions
+
+A monolithic prompt forgets every architectural decision the moment the context window rolls over. You end up re-explaining "we use Argon2id for hashing, never bcrypt" in every session, and the AI silently re-proposes rejected approaches.
+
+**devt fixes this** with a permanent memory layer at `.devt/memory/` — markdown docs with strict frontmatter, FTS5-indexed, queried at every workflow start. REJ tombstones suppress re-proposals across all agents.
+
+### 2. Surface understanding, no judgment
+
+A single prompt either over-engineers a one-line fix or under-thinks a refactor. There's no orchestration that matches effort to complexity.
+
+**devt fixes this** with auto-tier selection. TRIVIAL tasks run inline; STANDARD tasks add scan/test/review; COMPLEX tasks add research, plan, architecture review, verification, and curated lesson capture. You never pick a tier — devt detects it.
+
+### 3. No accumulating expertise
+
+Even within a single project, lessons are lost the moment a session ends. The team's hard-won "the integration tests fail when fixture seed order changes" insight gets re-discovered three weeks later.
+
+**devt fixes this** with a closed learning loop: retro extracts → curator gates approval → LES-NNNN docs land in `.devt/memory/lessons/` → Pre-Flight Brief surfaces them at the next workflow start. Knowledge accumulates instead of evaporating.
+
+---
+
 ## Install
 
 ### devt
@@ -263,30 +287,6 @@ For detailed walkthroughs, see [Workflows & use cases in detail](#workflows--use
 
 ---
 
-## Why devt?
-
-Standard AI coding has three concrete failure modes that compound over time.
-
-### 1. Amnesia between sessions
-
-A monolithic prompt forgets every architectural decision the moment the context window rolls over. You end up re-explaining "we use Argon2id for hashing, never bcrypt" in every session, and the AI silently re-proposes rejected approaches.
-
-**devt fixes this** with a permanent memory layer at `.devt/memory/` — markdown docs with strict frontmatter, FTS5-indexed, queried at every workflow start. REJ tombstones suppress re-proposals across all agents.
-
-### 2. Surface understanding, no judgment
-
-A single prompt either over-engineers a one-line fix or under-thinks a refactor. There's no orchestration that matches effort to complexity.
-
-**devt fixes this** with auto-tier selection. TRIVIAL tasks run inline; STANDARD tasks add scan/test/review; COMPLEX tasks add research, plan, architecture review, verification, and curated lesson capture. You never pick a tier — devt detects it.
-
-### 3. No accumulating expertise
-
-Even within a single project, lessons are lost the moment a session ends. The team's hard-won "the integration tests fail when fixture seed order changes" insight gets re-discovered three weeks later.
-
-**devt fixes this** with a closed learning loop: retro extracts → curator gates approval → LES-NNNN docs land in `.devt/memory/lessons/` → Pre-Flight Brief surfaces them at the next workflow start. Knowledge accumulates instead of evaporating.
-
----
-
 ## How it works (architecture)
 
 ```
@@ -444,111 +444,24 @@ Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`. Disable the uni
 
 ### The memory layer — bridges three sources of truth
 
-A self-evolving knowledge graph that joins:
+A self-evolving knowledge graph that joins **the code that exists** (Graphify AST), **the conversation happening now** (claude-mem ⚖️/🔵 captures), and **the permanent rules of the project** (Markdown + SQLite FTS5). Every dev workflow consults it before touching code; curator-gated promotion ensures only validated knowledge lands.
 
-1. **The code that exists** — what functions, classes, modules actually live in the repo (Graphify AST). When the graph is built, `graphify-out/GRAPH_REPORT.md` god-nodes also seed concept (CON-*) candidates and feed the Pre-Flight Brief's Cross-Cutting Concerns section so structural couplings surface before any change starts.
-2. **The conversation happening now** — ephemeral observations captured mid-session (claude-mem ⚖️ decisions / 🔵 discoveries)
-3. **The permanent rules of the project** — what we always do and what we said no to (Markdown + SQLite FTS5)
+Two layers, two lifetimes:
 
-The layer is **ground truth**: every dev workflow consults it before touching code, and curator-gated promotion ensures only validated knowledge lands.
-
-#### Two layers, two lifetimes
-
-```
-.devt/state/                    LAYER 1 — ephemeral (per-workflow)
-├── decisions.md                    DEC-xxx — clarify/specify/research scratch
-├── lessons.yaml                    retro draft hand-off → curator promotes to LES-NNNN
-├── deferred.md                     DEF-NNN cross-workflow TODO queue (reset-exempted)
-├── preflight-brief.md              Topic Pre-Flight Brief (auto-fired)
-├── scratchpad.md                   cross-agent handoff (#KNOWLEDGE-CANDIDATE)
-└── …                               reset on /devt:cancel-workflow
-
-.devt/memory/                   LAYER 2 — permanent (canonical knowledge)
-├── decisions/                      ADR-xxx — constitutional decisions
-├── concepts/                       CON-xxx — durable mental models
-├── flows/                          FLOW-xxx — named sequences (auth, deploy, …)
-├── rejected/                       REJ-xxx — tombstones (we said no, here's why)
-├── lessons/                        LES-xxx — operational lessons ("when X, do Y")
-├── _suggestions.md                 discovery proposals (curator-only writes)
-└── index.db                        FTS5 unified index (gitignored, regenerable)
-```
-
-#### The five doc types
-
-Each doc is markdown with strict YAML frontmatter — `id`, `doc_type`, `status`, `confidence`, `title`, `summary`, `affects_paths`, `affects_symbols`, `links`, `created_at`. ID prefixes enforced: `ADR-001`, `CON-042`, `FLOW-007`, `REJ-013`, `LES-001`.
+- `.devt/state/` — ephemeral per-workflow scratch (DEC-, lessons.yaml, scratchpad, Pre-Flight Brief). Reset on `/devt:cancel-workflow`.
+- `.devt/memory/` — permanent canonical knowledge, five doc types:
 
 | Type | Use for | Example |
 |------|---------|---------|
 | **ADR** (decision) | Constitutional rules — "we always do X, never Y" | "Auth uses HMAC-SHA256, never plain JWT" |
-| **CON** (concept) | Durable mental models — "this is what X means here" | "A 'session' here is a request chain bound by trace_id" |
-| **FLOW** (sequence) | Named multi-step processes | "Production deploy: PR→smoke→canary→staged rollout→pagerduty hold" |
-| **REJ** (rejected) | Tombstones — "we considered X, here's why it's a no" | "Server-Sent Events: rejected (cors_workarounds, mobile_battery_drain)" |
-| **LES** (lesson) | Operational tactics — "when X happens, do Y" | "When integration tests flake on first run, check fixture seed order" |
+| **CON** (concept) | Durable mental models | "A 'session' here is a request chain bound by trace_id" |
+| **FLOW** (sequence) | Named multi-step processes | "Production deploy: PR→smoke→canary→staged rollout" |
+| **REJ** (rejected) | Tombstones — "we considered X, here's why no" | "Server-Sent Events: rejected (cors, mobile battery)" |
+| **LES** (lesson) | Operational tactics — "when X, do Y" | "When integration tests flake, check fixture seed order" |
 
-Confidence: `verified` > `explicit` > `inferred` > `observed` > `speculative`. Status: `candidate` → `active` → `superseded` → `rejected`.
+Every dev workflow auto-fires `/devt:preflight "<task>"` at context_init. A 6-lane Topic Pre-Flight Brief surfaces governing ADRs/CONs/FLOWs/LES + REJ tombstones for the task before any code is touched. A PreToolUse guard (`memory.preflight_mode = block`) blocks Edits that aren't justified by a governing ID.
 
-#### Memory CLI — full subcommand reference
-
-```bash
-node bin/devt-tools.cjs memory init                              # scaffold .devt/memory/{decisions,concepts,flows,rejected,lessons}/
-node bin/devt-tools.cjs memory index                             # rebuild FTS5 index from markdown
-node bin/devt-tools.cjs memory query <terms> [--doc-type=…]      # full-text search
-node bin/devt-tools.cjs memory get <id>                          # fetch by id (e.g. ADR-007)
-node bin/devt-tools.cjs memory list [--doc-type=… --status=…]    # filtered listing
-node bin/devt-tools.cjs memory active [--domain=…]               # active docs only
-node bin/devt-tools.cjs memory affects <glob>                    # docs governing path
-node bin/devt-tools.cjs memory affects-symbol <symbol>           # docs governing symbol
-node bin/devt-tools.cjs memory links <id> [--depth=N]            # transitive link traversal
-node bin/devt-tools.cjs memory orphans                           # docs with no inbound links
-node bin/devt-tools.cjs memory stale-links                       # broken wiki-link targets
-node bin/devt-tools.cjs memory rejected-keywords                 # all REJ search_keywords (used for AI suppression)
-node bin/devt-tools.cjs memory validate                          # frontmatter + path + symbol checks
-node bin/devt-tools.cjs memory paths [--validate]                # multi-root path config inspection
-node bin/devt-tools.cjs memory diff <root-a> <root-b>            # cross-root diff
-node bin/devt-tools.cjs memory bundle export --out=… --filter=…  # portable JSON export
-node bin/devt-tools.cjs memory bundle import <file> [--prefix=…] # import with optional ID remap
-```
-
-#### Two-Tier Pre-Flight Protocol
-
-- **Tier 1 — Topic Brief (automatic)**: every dev workflow auto-fires `/devt:preflight "<task>"` at context_init. The 6-lane orchestrator (`bin/modules/preflight.cjs`) writes `.devt/state/preflight-brief.md`:
-  - Lane A — `affects_paths` glob match
-  - Lane B — FTS5 keyword expansion
-  - Lane C — `affects_symbols` AST match (Graphify-anchored when enabled)
-  - Lane D — wiki-link transitive closure (depth 2) from A∪B∪C seeds
-  - Lane E — REJ tombstone overlap on `search_keywords`
-  - Lane F — filters governing docs for `doc_type='lesson'` to render LES-NNNN entries
-
-  All 8 dev agents preload `devt:memory-pre-flight` and read the Brief first.
-
-- **Tier 2 — File guard (PreToolUse)**: agents append `PREFLIGHT <ts> edit <path> :: <governing IDs>` to scratchpad before each Edit/Write. `hooks/pre-flight-guard.sh` checks the line. `memory.preflight_mode`: `off` / `warn` / `block` (default **block**).
-
-The PostToolUse `hooks/memory-auto-index.sh` rebuilds the FTS5 index whenever `.devt/memory/**.md` is touched (debounced; collapses curator batch-promotions into a single rebuild).
-
-#### Vendored MCP server (10 tools, read-only)
-
-`bin/devt-memory-mcp.cjs` ships with the plugin and is registered via the plugin-root `.mcp.json` — Claude Code resolves `${CLAUDE_PLUGIN_ROOT}` at MCP-server launch and starts the server automatically whenever the devt plugin is loaded (no per-project scaffolding). JSON-RPC 2.0 stdio, zero external dependencies, three layers of defense (`OPEN_READONLY` + SELECT-only validator + multi-statement guard) on the `query_index` SQL escape hatch. Tools: `get_context_for_path`, `get_context_for_symbol`, `query_fts`, `get_doc`, `list_active`, `list_rejected_keywords`, `list_links`, `preflight`, `blast_radius`, `query_index`.
-
-Per-call telemetry lands in `.devt/memory/_mcp-trace.jsonl` (privacy-safe — sizes + 12-char fingerprints, no raw args). Aggregate via `node bin/devt-tools.cjs mcp-stats`.
-
-#### Multi-root memory
-
-Set `memory.paths` in `.devt/config.json` to index company-wide ADRs alongside project-local ones:
-
-```json
-{ "memory": { "paths": ["../engineering-adrs", ".devt/memory"] } }
-```
-
-Last-wins precedence: project-local overrides shared on ID collision. `source_root` column tracks provenance. Conflicts are explicit (`memory index` returns a `conflicts[]` array) — never silent.
-
-#### Bundle export/import
-
-```bash
-node bin/devt-tools.cjs memory bundle export --out=acme-memory.json --filter=domain:auth
-node bin/devt-tools.cjs memory bundle import acme-memory.json --prefix=ACME-
-```
-
-Round-trip-safe portable JSON with optional ID prefix remapping for cross-org sharing.
+**Full reference:** → [`docs/MEMORY.md`](docs/MEMORY.md) — frontmatter schema, 6 lanes, JSON sidecar, tier-aware budget, verifier memory_signal, MCP server (14 tools), multi-root config, bundle export/import, curator promotion flow, SQL views, native health checks.
 
 ### Workflow modes
 
@@ -653,6 +566,8 @@ For users who installed Graphify, here's the surface-by-surface benefit comparis
 | Code-search agents (programmer/debugger/researcher/code-reviewer/verifier/architect) | grep + path patterns | Graphify-first protocol → ~200–400 tokens per query vs ~3–5K with grep |
 
 Concrete savings vary by codebase size; the ~10× claim is conservative for medium codebases (500+ files).
+
+**Full reference:** → [`docs/GRAPHIFY.md`](docs/GRAPHIFY.md) — config, scan-prep gate, eviction CLI, post-impl refresh prompt, graph-impact map flow.
 
 ### Hooks & guardrails
 
@@ -831,6 +746,8 @@ node bin/devt-tools.cjs mcp-stats [--since=DATE --tool=NAME --workflow-id=ID --w
 node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|clear-cache|changelog
 ```
 
+Full module-by-module breakdown: → [`docs/INTERNALS.md`](docs/INTERNALS.md) (CLI Modules).
+
 ### Hooks
 
 | Event              | What it does                                          |
@@ -843,7 +760,7 @@ node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|cle
 | `PreToolUse`       | Prompt guard (Write/Edit), pre-flight guard, bash safety guard (destructive rm, `--no-verify`, force-push, mass-discard) |
 | `UserPromptSubmit` | Injects workflow context and statusline               |
 
-Profile control: see [Configuration reference → Hook profile](#hook-profile).
+Profile control: see [Configuration reference → Hook profile](#hook-profile). Full subsystem details (runner, deny log, scope guards, bash safety, stuck detector): → [`docs/HOOKS.md`](docs/HOOKS.md).
 
 ### Directory structure
 
@@ -870,6 +787,8 @@ devt/
                          CHANGELOG coverage, tag-driven GitHub releases
   skill-index.yaml       Agent-to-skill mapping
 ```
+
+For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](docs/STATE-RULES.md); for contributor-facing internals see [`docs/INTERNALS.md`](docs/INTERNALS.md).
 
 ### Troubleshooting
 
