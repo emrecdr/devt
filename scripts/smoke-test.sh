@@ -5398,5 +5398,30 @@ else
 fi
 
 echo
+echo "== CLAUDE.md pointer integrity (→ docs/X.md (Section) anchors resolve) =="
+# Every "→ docs/X.md (Section Name)" pointer in CLAUDE.md must resolve to a
+# real heading in the target file. Catches drift when a section is renamed
+# in docs/ without updating the inbound pointer from CLAUDE.md.
+POINTER_FAILURES=""
+while IFS= read -r ptr; do
+  pfile=$(echo "$ptr" | sed -E 's|→ (docs/[A-Z-]+\.md).*|\1|')
+  psection=$(echo "$ptr" | sed -E 's|.*\((.+)\)$|\1|')
+  if [ ! -f "$ROOT/$pfile" ]; then
+    POINTER_FAILURES="${POINTER_FAILURES}MISSING FILE: $ptr"$'\n'
+    continue
+  fi
+  esc_psection=$(printf '%s' "$psection" | sed 's/[][\.*^$(){}?+|/]/\\&/g')
+  if ! grep -qE "^#{1,4} .*${esc_psection}" "$ROOT/$pfile" 2>/dev/null; then
+    POINTER_FAILURES="${POINTER_FAILURES}MISSING SECTION: $ptr"$'\n'
+  fi
+done < <(grep -oE '→ docs/[A-Z-]+\.md \([^)]+\)' "$ROOT/CLAUDE.md" | sort -u)
+if [ -z "$POINTER_FAILURES" ]; then
+  pass "all CLAUDE.md → docs/ section pointers resolve"
+else
+  fail "CLAUDE.md pointer anchors broken:"
+  echo "$POINTER_FAILURES" | sed 's/^/    /'
+fi
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

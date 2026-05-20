@@ -161,19 +161,19 @@ The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:ne
 
 **Adding a new workflow.** When a new workflow sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` AND routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
 
-### Autonomous chaining
+### Autonomous Chaining
 
 The `autonomous_chain` field in `workflow.yaml` enables cross-workflow autonomous chaining — e.g., implement → test → review without manual `/devt:next` invocations.
 
-### Shadow-mode state validation
+### Shadow-mode State Validation
 
 `state update` runs `validateConsistency()` on every call, warns on stderr, and persists `validation_status="warned"` + `validation_warnings=N` to `workflow.yaml`. Disable with `DEVT_VALIDATE_SHADOW=0`. `next.md` routes on the persisted flag so resume-after-pause surfaces drift.
 
-### State validate subcommand
+### State Validate Subcommand
 
 `state validate` checks artifact consistency: verifies expected files exist for the current workflow phase, flags orphaned artifacts, and detects state/artifact mismatches. Also runs content-schema checks via `ARTIFACT_SCHEMA` (per-artifact `## Status:` whitelists), surfacing reasons `invalid_status`, `no_status_line`, `unreadable`, `missing`.
 
-### Parallel researcher + arch_health dispatch
+### Parallel Researcher + arch_health Dispatch
 
 COMPLEX-tier `dev` flows dispatch the researcher and (when arch_health is opted-in via risk-signal AskUserQuestion) the architect in **one message with two `Task` tool calls** from Step 2.5 (`Auto-Research & Auto-Plan`).
 
@@ -189,7 +189,7 @@ COMPLEX-tier `dev` flows dispatch the researcher and (when arch_health is opted-
 
 **Win.** One serial subagent hop saved on COMPLEX flows with arch_health enabled.
 
-### MCP trace workflow context
+### MCP Trace Workflow Context
 
 `bin/devt-memory-mcp.cjs::readWorkflowContext()` reads `.devt/state/workflow.yaml` on demand with mtime-invalidated caching (one `stat()` syscall per MCP call when stable; full re-read on workflow transitions).
 
