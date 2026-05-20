@@ -105,7 +105,20 @@ const SYMBOL_DENYLIST = new Set([
   // Common short labels
   "api", "ui", "cli", "db", "url", "http", "https", "json", "yaml", "xml",
   "css", "html", "sql",
+  // Doc / repo / spec filenames commonly capitalized in task text
+  "readme", "changelog", "license", "notice", "authors", "maintainers",
+  "module", "modules", "package", "packages", "openapi", "swagger",
+  "graphql", "restful", "sdk", "mvp",
 ]);
+
+// Tokens of pure ALL-CAPS letters (≥4 chars, no lowercase) are usually
+// project labels (CHANGELOG, MODULE), issue prefixes (GFBUGS, ENG, JIRA-NNN),
+// or file/doc names — rarely code identifiers. Mixed-case PascalCase names
+// like DeviceSummary, LicenseResponse, OpenAPI keep flowing through.
+function isAllCapsNoise(token) {
+  if (token.length < 4) return false;
+  return /^[A-Z][A-Z0-9_-]*$/.test(token);
+}
 
 /**
  * Extract topic structure from a free-form task description.
@@ -117,10 +130,13 @@ function extractTopic(taskText) {
   }
   const text = taskText.trim();
 
-  // Symbols: PascalCase identifiers ≥3 chars, deduped, denylist-filtered
+  // Symbols: PascalCase identifiers ≥3 chars, deduped, denylist-filtered,
+  // ALL-CAPS noise filtered. Preserves mixed-case identifiers
+  // (DeviceSummary) while rejecting project labels (CHANGELOG, GFBUGS).
   const symbolMatches = text.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
   const symbols = Array.from(new Set(symbolMatches))
     .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
+    .filter(s => !isAllCapsNoise(s))
     .sort();
 
   // Lowercased word stream for domain + keyword extraction

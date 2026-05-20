@@ -77,10 +77,14 @@ const DEFAULTS = {
     // the staleness gate entirely (warning still surfaces in the Brief).
     stale_threshold: 30,
     // After an implementation phase writes new code (impl-summary.json with
-    // non-empty files_modified), the workflow surfaces a refresh nudge to the
-    // user by default. Set true to silently auto-invoke `maybe-refresh --force`
-    // instead — useful in autonomous flows where there's no user to nudge.
-    auto_refresh_post_impl: false,
+    // non-empty files_modified), the workflow decides how to handle the now-
+    // stale graph. Three accepted values:
+    //   "ask"   — prompt user via AskUserQuestion: refresh now / skip / always-on (default)
+    //   true    — silently auto-invoke `maybe-refresh --force` (autonomous flows)
+    //   false   — emit a one-line tip and continue without prompting or refreshing
+    // The "ask" default keeps freshness visible without forcing a choice into
+    // config — power users can opt to true (auto) or false (silent tip).
+    auto_refresh_post_impl: "ask",
   },
   git: {
     provider: null,

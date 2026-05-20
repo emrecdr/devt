@@ -178,6 +178,12 @@ Store the task description in workflow state for reference by status, forensics,
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
+**Evict stale Graphify artifacts** before regenerating preflight + impact data. Prevents cross-workflow contamination (a prior `/devt:review` or sibling workflow's `graph-impact.md` would otherwise persist and mislead this session — observed in field as PR-#367 artifacts persisting into an unrelated GFBUGS-XXX dev session):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
+```
+
 **Auto-fire Pre-Flight Brief**:
 
 ```bash
@@ -231,6 +237,28 @@ Parse the init output JSON:
 - If `warnings` array is non-empty: report each warning
 - Store `models` for agent dispatch (use model values in Task() prompts)
 - Store `config` for workflow behavior (model_profile, agent_skills)
+
+**Graphify scan-prep gate** — When the task is non-trivial AND the graph is dense AND blast radius is substantial, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Field-validated threshold (greenfield-api forensic): `direct_dependents_count >= 10 AND graph_stats.trust == "dense"`. Below the threshold (or graphify disabled): skip; agents fall back to grep + scope_hint. The decision tree is bash; the MCP calls are the orchestrator's responsibility:
+
+```bash
+DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
+TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
+SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
+if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
+  CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
+else
+  echo "graphify_scan_prep: SKIP — dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+fi
+```
+
+When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
+
+1. `mcp__devt-graphify__get_neighbors({symbol: "<CENTRAL_SYMBOL>", direction: "in", depth: 2})` — caller set grep can't reliably enumerate (cross-language, dynamic dispatch).
+2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk.
+
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. The subsequent scan / architect / implement steps will Read this file. When the bash printed `SKIP`, do NOT call any MCP — graph-impact.md stays absent and downstream agents fall back to grep+scope_hint.
 
 **Gate**: If compound init fails, STOP with BLOCKED — the project is not configured.
 </step>
@@ -847,10 +875,14 @@ The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), 
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
 
-**Post-implementation graphify refresh** — When `graphify.enabled=true` AND the implementation phase wrote new code (`impl-summary.json::files_modified` non-empty), the graph is now N commits behind reality for the rest of this workflow. Branch on `config.graphify.auto_refresh_post_impl` (default `false`):
+**Post-implementation graphify refresh** — When `graphify.enabled=true` AND the implementation phase wrote new code (`impl-summary.json::files_modified` non-empty), the graph is now N commits behind reality for the rest of this workflow. Branch on `config.graphify.auto_refresh_post_impl` (default `"ask"`):
 
-- `auto_refresh_post_impl=true` OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`. Surface a one-line confirmation to the user: `🔄 Refreshed graphify graph after impl (Xs)` on success, or `⚠️ Graphify refresh skipped: <reason>` on timeout/error. Continue regardless — refresh is best-effort.
-- `auto_refresh_post_impl=false` (default) AND interactive mode: emit a one-line tip to the user: `💡 Code changes made — run `graphify update .` (or `node bin/devt-tools.cjs graphify maybe-refresh --force`) to refresh the project graph so downstream review/debug agents see the new symbols. Skip if you'll re-review immediately; the next preflight will catch staleness via the W1.3 gate.`
+- **`"ask"` (default)** AND interactive (non-autonomous) mode: emit AskUserQuestion with header "Graphify refresh", question "Code changes landed. The graph is now N commits behind reality. Refresh now?", three options:
+    1. **Refresh now (recommended)** — runs `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`, surfaces one-line confirmation. Downstream review/verify/docs phases see the new symbols.
+    2. **Skip — I'll refresh manually later** — emits the `💡` tip and continues; user retains control. Next preflight will catch staleness via the staleness gate.
+    3. **Always auto-refresh for this project** — runs the refresh AND writes `auto_refresh_post_impl: true` into `.devt/config.json` so future workflows in this project skip the prompt.
+- **`true`** OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`. Surface a one-line confirmation: `🔄 Refreshed graphify graph after impl (Xs)` or `⚠️ Graphify refresh skipped: <reason>`. Continue regardless — refresh is best-effort.
+- **`false`**: emit only the one-line tip — `💡 Code changes made — run `graphify update .` (or `node bin/devt-tools.cjs graphify maybe-refresh --force`) to refresh the project graph. The staleness gate will catch drift on the next workflow.` No prompt, no refresh.
 
 Skip the step entirely when graphify is disabled (`config.graphify.enabled=false`) — emit nothing. Skip when `files_modified` is empty (impl phase made no code changes, e.g. docs-only).
 

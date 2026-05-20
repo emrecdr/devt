@@ -1211,9 +1211,16 @@ function run(subcommand, args) {
       if (staleArg) opts.staleDays = parseInt(staleArg, 10);
       return audit.cleanupStateFiles(opts);
     }
+    case "evict-graphify": {
+      const audit = require("./state-audit.cjs");
+      const opts = { dryRun: args.includes("--dry-run") };
+      const ageArg = _getFlag(args, "--max-age-minutes");
+      if (ageArg) opts.maxAgeMinutes = parseInt(ageArg, 10);
+      return audit.evictGraphifyArtifacts(opts);
+    }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify`,
       );
   }
 }

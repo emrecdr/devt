@@ -4617,11 +4617,13 @@ if echo "$PT_OUT" | grep -q "invalid_workflow_id_chars"; then
 else
   fail "graphify write-memory accepted path-traversal workflow_id (security regression)"
 fi
-# Config default for auto_refresh_post_impl
-if node -e "const c=require('$ROOT/bin/modules/config.cjs').DEFAULTS;process.exit(c.graphify && c.graphify.auto_refresh_post_impl === false ? 0 : 1)" 2>/dev/null; then
-  pass "config.cjs DEFAULTS exposes graphify.auto_refresh_post_impl=false"
+# Config default for auto_refresh_post_impl — accepts "ask" | true | false.
+# Default is "ask" (user gets the choice each workflow); the workflows then
+# branch accordingly. true = silent auto-refresh, false = tip-only.
+if node -e "const c=require('$ROOT/bin/modules/config.cjs').DEFAULTS;const v=c.graphify && c.graphify.auto_refresh_post_impl;process.exit((v === 'ask' || v === true || v === false) ? 0 : 1)" 2>/dev/null; then
+  pass "config.cjs DEFAULTS exposes graphify.auto_refresh_post_impl with valid value (ask | true | false)"
 else
-  fail "config.cjs DEFAULTS missing graphify.auto_refresh_post_impl=false"
+  fail "config.cjs DEFAULTS missing or invalid graphify.auto_refresh_post_impl (need: ask | true | false)"
 fi
 # Post-impl refresh suggestion present in both impl workflows
 POST_IMPL_MISSING=""
@@ -4863,10 +4865,10 @@ fi
 # code-review.md context_init MUST evict stale graphify artifacts before regen.
 # Without this, a prior session's graph-impact.md silently masks whether the
 # current orchestrator ran the plan or skipped context_init.
-if grep -q 'rm -f .devt/state/graphify-impact-plan.json .devt/state/graph-impact.md .devt/state/graphify-skip-reason.txt' "$ROOT/workflows/code-review.md"; then
-  pass "workflows/code-review.md evicts stale graphify artifacts before regenerating the impact plan"
+if grep -q 'state evict-graphify' "$ROOT/workflows/code-review.md"; then
+  pass "workflows/code-review.md evicts stale graphify artifacts via state evict-graphify CLI before regenerating the impact plan"
 else
-  fail "workflows/code-review.md missing stale-artifact eviction in context_init"
+  fail "workflows/code-review.md missing state evict-graphify call in context_init"
 fi
 
 # run-hook.js writes a trace record on every invocation (enabled or disabled).
@@ -4915,6 +4917,106 @@ if echo "$E2E_OUT" | grep -q "raw_dispatch\|Raw devt"; then
   pass "dispatch-hygiene-guard.sh emits advisory when invoked via run-hook.js (production path, not just bash-direct)"
 else
   fail "dispatch-hygiene-guard.sh advisory missing via run-hook.js path (output: $(echo "$E2E_OUT" | head -1))"
+fi
+
+echo
+echo "== Graphify integration completeness (eviction + scan-prep + symbol filter + refresh control) =="
+# state evict-graphify CLI exists + returns expected envelope
+EVICT_OUT=$(node "$ROOT/bin/devt-tools.cjs" state evict-graphify --dry-run 2>&1 || true)
+if echo "$EVICT_OUT" | command grep -q '"evicted"' && echo "$EVICT_OUT" | command grep -q '"skipped"' && echo "$EVICT_OUT" | command grep -q '"counts"'; then
+  pass "state evict-graphify CLI returns {ok, evicted, skipped, counts} envelope"
+else
+  fail "state evict-graphify CLI output regressed: $(echo "$EVICT_OUT" | head -1)"
+fi
+
+# All 5 workflows call state evict-graphify in their context_init (single source of truth)
+EVICT_MISSING=""
+for wf in code-review debug research-task quick-implement dev-workflow; do
+  if ! command grep -q 'state evict-graphify' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    EVICT_MISSING="$EVICT_MISSING $wf"
+  fi
+done
+if [ -z "$EVICT_MISSING" ]; then
+  pass "all 5 graphify-touching workflows call state evict-graphify in context_init"
+else
+  fail "workflows missing eviction call:${EVICT_MISSING}"
+fi
+
+# quick-implement + dev-workflow have the graphify_scan_prep gate with the
+# field-validated threshold (direct_dependents_count >= 10 + trust = dense)
+SCAN_PREP_MISSING=""
+for wf in quick-implement dev-workflow; do
+  if ! command grep -q 'graphify_scan_prep' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'direct_dependents_count' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'graph_stats.trust' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    SCAN_PREP_MISSING="$SCAN_PREP_MISSING $wf"
+  fi
+done
+if [ -z "$SCAN_PREP_MISSING" ]; then
+  pass "quick-implement + dev-workflow carry the graphify_scan_prep gate with dependents+trust thresholds"
+else
+  fail "workflows missing graphify_scan_prep gate or threshold checks:${SCAN_PREP_MISSING}"
+fi
+
+# Both scan_prep gates instruct the orchestrator to call get_neighbors + blast_radius
+# when ACTIVE. Verbose dispatch protocol prose required for the orchestrator to know
+# what to do.
+SCAN_PREP_PROTOCOL_MISSING=""
+for wf in quick-implement dev-workflow; do
+  if ! command grep -q 'mcp__devt-graphify__get_neighbors' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'mcp__devt-graphify__blast_radius' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    SCAN_PREP_PROTOCOL_MISSING="$SCAN_PREP_PROTOCOL_MISSING $wf"
+  fi
+done
+if [ -z "$SCAN_PREP_PROTOCOL_MISSING" ]; then
+  pass "scan_prep gates specify both get_neighbors + blast_radius MCP calls for ACTIVE branch"
+else
+  fail "scan_prep gates missing MCP call instructions:${SCAN_PREP_PROTOCOL_MISSING}"
+fi
+
+# Symbol-filter: extractTopic rejects ALL-CAPS noise + denylisted file/spec names
+# without breaking mixed-case identifier extraction.
+SYMBOL_FILTER_OUT=$(node -e "
+const { extractTopic } = require('$ROOT/bin/modules/preflight.cjs');
+const t = 'GFBUGS-133: edit DeviceSummary in LicenseDetailResponse; OpenAPI examples + MODULE.md + CHANGELOG fold';
+const topic = extractTopic(t);
+const got = topic.symbols.join(',');
+const wantNot = ['CHANGELOG','MODULE','GFBUGS','OpenAPI'].filter(s => topic.symbols.includes(s));
+const wantHas = ['DeviceSummary','LicenseDetailResponse'].filter(s => !topic.symbols.includes(s));
+if (wantNot.length === 0 && wantHas.length === 0) {
+  console.log('OK symbols=[' + got + ']');
+} else {
+  console.log('FAIL got=[' + got + '] noise-leaked=[' + wantNot.join(',') + '] real-missing=[' + wantHas.join(',') + ']');
+  process.exit(1);
+}
+" 2>&1 || true)
+if echo "$SYMBOL_FILTER_OUT" | command grep -q "^OK "; then
+  pass "preflight extractTopic filters ALL-CAPS noise (CHANGELOG, MODULE, GFBUGS) + denylisted names (OpenAPI), keeps mixed-case identifiers (DeviceSummary, LicenseDetailResponse)"
+else
+  fail "preflight extractTopic symbol filter regressed: $SYMBOL_FILTER_OUT"
+fi
+
+# Refresh control: config default is "ask", both workflows handle all 3 values
+REFRESH_DEFAULT=$(node -e "const c = require('$ROOT/bin/modules/config.cjs'); console.log(c.DEFAULTS.graphify.auto_refresh_post_impl)" 2>&1 || true)
+if [ "$REFRESH_DEFAULT" = "ask" ]; then
+  pass "config.cjs DEFAULTS.graphify.auto_refresh_post_impl is 'ask' (user gets the choice per workflow)"
+else
+  fail "config.cjs default for auto_refresh_post_impl regressed (got: $REFRESH_DEFAULT, want: ask)"
+fi
+
+REFRESH_ASK_MISSING=""
+for wf in quick-implement dev-workflow; do
+  # Both workflows must handle "ask" with AskUserQuestion (3 options) AND keep true/false branches
+  if ! command grep -q 'auto_refresh_post_impl.*"ask"\|"ask".*default' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'AskUserQuestion\|Refresh now' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'Always auto-refresh' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+    REFRESH_ASK_MISSING="$REFRESH_ASK_MISSING $wf"
+  fi
+done
+if [ -z "$REFRESH_ASK_MISSING" ]; then
+  pass "quick-implement + dev-workflow handle the 'ask' branch with 3-option AskUserQuestion (Refresh now / Skip / Always auto-refresh)"
+else
+  fail "workflows missing 'ask' branch handling:${REFRESH_ASK_MISSING}"
 fi
 
 echo

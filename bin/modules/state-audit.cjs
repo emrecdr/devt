@@ -180,9 +180,82 @@ function cleanupStateFiles(opts = {}) {
   };
 }
 
+// Graphify artifacts that workflows regenerate on each context_init. Stale
+// inheritance across workflows produces cross-pollination (pass-N reads pass-(N-1)
+// data thinking it's current). Eviction is called from every workflow's context_init
+// BEFORE any graphify MCP calls — workflows that don't call graphify still benefit
+// (no stale data from a sibling workflow lingers).
+const GRAPHIFY_EVICTABLE = Object.freeze([
+  "graphify-impact-plan.json",
+  "graph-impact.md",
+  "graphify-skip-reason.txt",
+  "pr-impact.md",
+]);
+
+function evictGraphifyArtifacts(opts = {}) {
+  const { dryRun = false, maxAgeMinutes = null } = opts;
+  const root = findProjectRoot();
+  if (!root) {
+    return { ok: false, reason: "no_project_root", evicted: [], skipped: [] };
+  }
+  const stateDir = path.join(root, STATE_DIR_REL);
+  if (!fs.existsSync(stateDir)) {
+    return { ok: true, evicted: [], skipped: GRAPHIFY_EVICTABLE.slice(), reason: "no_state_dir" };
+  }
+
+  const evicted = [];
+  const skipped = [];
+  const nowMs = Date.now();
+  const maxAgeMs = maxAgeMinutes != null ? Number(maxAgeMinutes) * 60 * 1000 : null;
+
+  for (const filename of GRAPHIFY_EVICTABLE) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const fullPath = path.join(stateDir, filename);
+    if (!fs.existsSync(fullPath)) {
+      skipped.push({ file: filename, reason: "absent" });
+      continue;
+    }
+    // mtime gate — when set, only evict files older than the threshold.
+    // Lets concurrent workflows within a session preserve their own fresh state.
+    if (maxAgeMs != null) {
+      try {
+        const ageMs = nowMs - fs.statSync(fullPath).mtimeMs;
+        if (ageMs < maxAgeMs) {
+          skipped.push({ file: filename, reason: "fresh", age_ms: Math.round(ageMs) });
+          continue;
+        }
+      } catch {
+        // stat failed — fall through to eviction attempt
+      }
+    }
+    if (dryRun) {
+      evicted.push({ file: filename, dry_run: true });
+      continue;
+    }
+    try {
+      fs.unlinkSync(fullPath);
+      evicted.push({ file: filename });
+    } catch (e) {
+      skipped.push({ file: filename, reason: "unlink_failed", error: String(e && e.message || e) });
+    }
+  }
+
+  return {
+    ok: true,
+    state_dir: stateDir,
+    dry_run: !!dryRun,
+    max_age_minutes: maxAgeMinutes,
+    evicted,
+    skipped,
+    counts: { evicted: evicted.length, skipped: skipped.length },
+  };
+}
+
 module.exports = {
   auditStateFiles,
   cleanupStateFiles,
+  evictGraphifyArtifacts,
+  GRAPHIFY_EVICTABLE,
   ALLOWED_PATTERNS,
   EPHEMERAL_PATTERNS,
 };
