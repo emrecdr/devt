@@ -351,6 +351,29 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 
 ---
 
+## Scripts
+
+Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gates marked **CI**.
+
+| Script | Purpose | When |
+|---|---|---|
+| `smoke-test.sh` | 500+ CLI smoke checks across all subcommands, agent line budget, content-schema gates, pointer integrity | **CI** + manual pre-commit |
+| `test-locking.cjs` | 20-worker concurrent state-write test — asserts no lost updates, no orphaned `.lock` | **CI** + manual after `state.cjs` changes |
+| `check-dispatch-ordering.cjs` | Enforces `<task>`/`<bug>` AFTER `</context>` in workflow Task dispatches (cache-friendly prefix). Called by `smoke-test.sh`. | **CI** (via smoke-test) |
+| `check-state-contract.cjs` | Static analyzer scanning every `agents/*.md` and `workflows/*.md` for `.devt/state/<filename>` references; flags any that match no `STATE_FILE_CONTRACT` pattern | **CI** (via smoke-test) |
+| `check-docs.sh` | Checks documentation completeness against `.devt/rules/documentation.md` — verifies declared doc paths + sections exist | Manual / quality gate |
+| `prompt-injection-scan.sh` | Scans plugin markdown for injection patterns that could compromise agent behavior | Manual / release gate |
+| `run-quality-gates.sh` | Extracts and executes bash commands from `.devt/rules/quality-gates.md` fenced blocks | Used by `/devt:quality` workflow |
+| `init-dev-rules.sh` | Scaffolds `.devt/rules/` from a template (one-off setup helper) | Manual |
+| `cancel-workflow.sh` | Cancel active devt workflow — delegates to `devt-tools.cjs` | User-facing |
+| `reset-workflow.sh` | Reset devt workflow state — delegates to `devt-tools.cjs` for robust cleanup | User-facing |
+| `extract-changelog.sh` | Pulls a single version's section out of `CHANGELOG.md` for GitHub release notes | Release workflow only |
+| `test-graphify.cjs` | Drives the graphify CLI surface against a fixture `graph.json` | **CI** (via smoke-test) |
+
+**Adding a new script.** If it's a CI gate, wire it into `scripts/smoke-test.sh` so it runs on every push. If it's a quality-gate helper for projects, expose it as a `node bin/devt-tools.cjs <verb>` subcommand instead — projects should not shell out to `scripts/` directly (those are devt-internal tooling).
+
+---
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — agent + workflow contracts (consumed by these mechanisms)
