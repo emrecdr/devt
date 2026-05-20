@@ -1,5 +1,7 @@
 # Grader + Rubrics
 
+> ↑ Entry point: [`CLAUDE.md`](../CLAUDE.md) (orchestrator architecture + critical contracts).
+
 > Outcome-grader, deterministic pre-verifier gate, pinned rubric versions, and the code-review grader. The grader system gates workflow retries with bounded cost — it skips the LLM verifier on red and feeds structured `revisions[]` back into the next dispatch.
 
 ---

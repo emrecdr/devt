@@ -178,3 +178,14 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 | Affects canonical files | Yes (most) | No |
 
 **Rule of thumb**: `state reset` is for "I'm done with this workflow, sweep the workspace." `state cleanup` is for "I want to keep the active workflow but garbage-collect old slices and ad-hoc dumps."
+
+---
+
+## Cross-references
+
+- [`CLAUDE.md`](../CLAUDE.md) — entry point: orchestrator architecture + critical contracts
+- [`docs/AGENT-CONTRACTS.md`](AGENT-CONTRACTS.md) — JSON sidecar contract, sidecar-only status routing (consumes `JSON_SIDECAR_SCHEMAS` referenced here)
+- [`docs/INTERNALS.md`](INTERNALS.md) — `state.cjs` internals: locking, validation, session metadata
+- [`docs/MEMORY.md`](MEMORY.md) — permanent knowledge layer (`.devt/memory/`), distinct from this directory's per-workflow artifacts
+- `bin/modules/state.cjs` — machine-readable contract: `STATE_FILE_CONTRACT` + `ARTIFACT_SCHEMA` + `JSON_SIDECAR_SCHEMAS` + `SIDECAR_FOR_MARKDOWN` + `RESET_EXEMPT`
+- `bin/modules/state-audit.cjs` — regex compilation: `ALLOWED_PATTERNS` + `EPHEMERAL_PATTERNS`

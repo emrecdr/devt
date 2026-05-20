@@ -482,8 +482,13 @@ Precedence: rightmost (project-local) wins, leftmost loses. Mid-tier overrides g
 
 ## Related Documentation
 
-- `guardrails/golden-rules.md` Rule 14 (Pre-Flight Protocol) and Rule 15 (Memory Maintenance)
-- `guardrails/engineering-principles.md` "Sources of Truth" hierarchy
+- [`CLAUDE.md`](../CLAUDE.md) — entry point: orchestrator architecture + critical contracts
+- [`docs/AGENT-CONTRACTS.md`](AGENT-CONTRACTS.md) — scope_hint / scope_trust / verifier memory_signal contracts consumed by agents
+- [`docs/INTERNALS.md`](INTERNALS.md) — `memory.cjs` + `preflight.cjs` module internals
+- [`docs/GRADER.md`](GRADER.md) — verifier outcome-grader (memory-aware rubric)
+- [`docs/GRAPHIFY.md`](GRAPHIFY.md) — graph-impact map flow (consumes preflight sidecar fields)
+- `guardrails/golden-rules.md` — Rule 14 (Pre-Flight Protocol) and Rule 15 (Memory Maintenance)
+- `guardrails/engineering-principles.md` — "Sources of Truth" hierarchy
 - `skills/memory-pre-flight/SKILL.md` — Two-Tier Pre-Flight protocol (preloaded onto all dev agents)
 - `skills/memory-curation/SKILL.md` — curator promotion flow
 - `skills/graphify-helpers/SKILL.md` — Graphify-first protocol

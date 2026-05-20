@@ -1,5 +1,7 @@
 # Hook Subsystem
 
+> ↑ Entry point: [`CLAUDE.md`](../CLAUDE.md) (orchestrator architecture + critical contracts).
+
 > Mechanism reference for `hooks/*.sh`, the `run-hook.js` runner, hook profiles, deny logs, and the forensic trace. For the user-facing hook profile table, see `CLAUDE.md > Architecture > Hook Profiles`.
 
 ---

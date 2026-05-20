@@ -1,5 +1,7 @@
 # Graphify Integration
 
+> ↑ Entry point: [`CLAUDE.md`](../CLAUDE.md) (orchestrator architecture + critical contracts).
+
 > All graphify-specific mechanics in one place: optional-but-recommended config, the `scan_prep` orchestrator gate, cross-workflow eviction, post-implementation refresh prompts, and the graph-impact map flow.
 
 For agent-side Graphify-first protocol details (fallback triggers, min_results_threshold), see `skills/graphify-helpers/SKILL.md`.

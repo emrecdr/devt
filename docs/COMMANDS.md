@@ -600,3 +600,14 @@ debugger    --> debug-summary.md + .claude/agent-memory/devt-debugger/MEMORY.md 
 ```
 
 Each agent gets a **fresh context window** -- no accumulated garbage from prior steps. The workflow reads each artifact, checks the status gate, and decides what happens next.
+
+---
+
+## Cross-references
+
+- [`CLAUDE.md`](../CLAUDE.md) — entry point: orchestrator architecture + critical contracts
+- [`docs/AGENT-CONTRACTS.md`](AGENT-CONTRACTS.md) — rules for modifying the agents these commands dispatch
+- [`docs/INTERNALS.md`](INTERNALS.md) — `init.cjs` compound-init pattern + CLI module reference
+- [`docs/MEMORY.md`](MEMORY.md) — `/devt:memory` and `/devt:preflight` command semantics
+- [`docs/STATE-RULES.md`](STATE-RULES.md) — `.devt/state/` filename contract that commands write to
+- [`docs/HOOKS.md`](HOOKS.md) — lifecycle hooks fired around command invocation

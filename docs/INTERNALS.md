@@ -1,5 +1,7 @@
 # Internals
 
+> ↑ Entry point: [`CLAUDE.md`](../CLAUDE.md) (orchestrator architecture + critical contracts).
+
 > Deep-dive reference for anyone modifying devt itself: CLI modules, workflow mechanics, state validation, the governing-rules + inline-guardrails injection pipeline, deferred queue, plugin internals. For agent-facing rules see `docs/AGENT-CONTRACTS.md`.
 
 ---

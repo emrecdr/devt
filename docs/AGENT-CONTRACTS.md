@@ -1,5 +1,7 @@
 # Agent + Workflow Contracts
 
+> ↑ Entry point: [`CLAUDE.md`](../CLAUDE.md) (orchestrator architecture + critical contracts).
+
 > Contract sheet for anyone modifying `agents/*.md`, `workflows/*.md`, or `skills/*/SKILL.md`. Every rule here is enforced by smoke gates, by hooks, or by both. Violating them silently breaks dispatch quality, telemetry, or resume routing — not in obvious ways.
 
 Source of truth for the rules themselves is the agent and workflow markdown plus the smoke gates in `scripts/smoke-test.sh`. This document is the **explainer**.
