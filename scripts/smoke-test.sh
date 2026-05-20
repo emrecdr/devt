@@ -5398,6 +5398,44 @@ else
 fi
 
 echo
+echo "== Graphify decision gate (state assert-graphify-decision) =="
+# Process gate that turns the prose "EXACTLY ONE artifact MUST exist" rule
+# into hard enforcement. Catches orchestrator-skip of the graphify decision
+# step in context_init.
+ASSERT_OUT=$(node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>&1)
+if echo "$ASSERT_OUT" | jq -e 'has("ok") and has("graphify_state")' >/dev/null 2>&1; then
+  pass "state assert-graphify-decision returns well-formed {ok, graphify_state, ...} envelope"
+else
+  fail "state assert-graphify-decision envelope malformed: $ASSERT_OUT"
+fi
+# Every workflow that has a graphify_scan_prep gate MUST also call the assert.
+# Catches the documentation-vs-enforcement drift class.
+for wf in code-review.md quick-implement.md dev-workflow.md; do
+  if grep -q "state assert-graphify-decision" "$ROOT/workflows/$wf" 2>/dev/null; then
+    pass "$wf wires state assert-graphify-decision into context_init"
+  else
+    fail "$wf has no state assert-graphify-decision call — graphify decision gate not enforced"
+  fi
+done
+# SKIP branches must write graphify-skip-reason.txt so the assert can pass.
+for wf in quick-implement.md dev-workflow.md; do
+  if grep -q "graphify-skip-reason.txt" "$ROOT/workflows/$wf" 2>/dev/null; then
+    pass "$wf SKIP branch writes graphify-skip-reason.txt"
+  else
+    fail "$wf SKIP branch does not write graphify-skip-reason.txt — assert will fail on SKIP path"
+  fi
+done
+# Symbol denylist must include product/platform proper nouns that survived
+# the regex (field-validated: greenfield's topic extractor produced ["Bitbucket"]).
+for noun in bitbucket github gitlab; do
+  if grep -q "\"$noun\"" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null; then
+    pass "SYMBOL_DENYLIST contains \"$noun\""
+  else
+    fail "SYMBOL_DENYLIST missing \"$noun\" — task titles mentioning this platform pollute Lane C"
+  fi
+done
+
+echo
 echo "== Markdown pointer integrity (→ docs/X.md (Section) anchors resolve) =="
 # Every "→ docs/X.md (Section Name)" pointer in CLAUDE.md OR any docs/*.md
 # must resolve to a real heading in the target file. Catches drift when a

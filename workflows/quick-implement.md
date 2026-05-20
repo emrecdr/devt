@@ -120,7 +120,9 @@ if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 
   CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
   echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
 else
-  echo "graphify_scan_prep: SKIP — dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+  echo "graphify_scan_prep: SKIP — $REASON"
+  printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
 fi
 ```
 
@@ -129,9 +131,21 @@ When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP 
 1. `mcp__devt-graphify__get_neighbors({symbol: "<CENTRAL_SYMBOL>", direction: "in", depth: 2})` — caller set grep can't reliably enumerate (cross-language, dynamic dispatch).
 2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk.
 
-Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, do NOT call any MCP — graph-impact.md stays absent and downstream agents fall back to grep+scope_hint.
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
 
-**Gate**: If compound init fails, STOP with BLOCKED.
+**Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
+
+```bash
+ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
+if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+  exit 1
+fi
+```
+
+The assert auto-passes when graphify is disabled or the graph is missing (`graphify_state != "ready"`).
+
+**Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false`, STOP with BLOCKED.
 </step>
 
 <step name="scan" gate="scan-results.md is written to .devt/state/">

@@ -109,6 +109,13 @@ const SYMBOL_DENYLIST = new Set([
   "readme", "changelog", "license", "notice", "authors", "maintainers",
   "module", "modules", "package", "packages", "openapi", "swagger",
   "graphql", "restful", "sdk", "mvp",
+  // Product / platform proper nouns — mixed-case so isAllCapsNoise misses them
+  // but they appear in task titles ("PR #N (Bitbucket feature/X)") where the
+  // PascalCase regex grabs them as symbols. Without this filter they crowd out
+  // real code identifiers and the scan-prep gate fires on noise.
+  "bitbucket", "github", "gitlab", "stripe", "notion", "linear", "slack",
+  "hubspot", "salesforce", "discord", "confluence", "jira", "trello", "asana",
+  "intercom", "segment", "datadog", "sentry", "pagerduty", "cloudflare",
 ]);
 
 // Tokens of pure ALL-CAPS letters (≥4 chars, no lowercase) are usually

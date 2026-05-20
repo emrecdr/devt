@@ -139,9 +139,19 @@ echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 - If `tier == "bulk_scoped"`: call `mcp__devt-graphify__query_graph(args)`. From the response's top-5 nodes (highest degree), call `mcp__devt-graphify__get_neighbors({symbol: <label>, direction: "in", depth: 2})` for each. Concatenate into `graph-impact.md` with one `## <symbol>` heading per block.
 - If `tier == "symbol_anchored"`: call `mcp__devt-graphify__blast_radius(args)`. Write the response verbatim to `graph-impact.md`.
 
-After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. The verifier audit (line 257-267 below) checks this and emits `caller-0` revision when both are missing despite `graphify.status == "ready"`.
+After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
-**Gate**: If compound init fails, STOP with BLOCKED. If neither `graph-impact.md` nor `graphify-skip-reason.txt` exists after the orchestrator runs the plan above, STOP with BLOCKED — the orchestrator skipped the step.
+```bash
+ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
+if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+  exit 1
+fi
+```
+
+The assert auto-passes when graphify is disabled or the graph is missing (`graphify_state != "ready"`) — the gate is about orchestrator obedience to the workflow contract, not about graphify being installed.
+
+**Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false`, STOP with BLOCKED — the orchestrator skipped the EXECUTE THE PLAN step above.
 </step>
 
 <step name="identify_scope" gate="file list is determined">

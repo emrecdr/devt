@@ -1180,6 +1180,56 @@ function pruneState(dryRun) {
   }
 }
 
+// Process-level gate for the graphify decision step. Workflows declare in prose
+// that "EXACTLY ONE of graph-impact.md or graphify-skip-reason.txt MUST exist"
+// after context_init — but with no code enforcement, orchestrators under context
+// pressure silently skip the step. This function turns the prose into a hard gate
+// that workflow bash blocks call after the graphify decision and STOP with
+// BLOCKED on ok:false.
+//
+// When graphify is not ready (disabled or graph missing), the gate auto-passes —
+// the assertion is about orchestrator obedience to the workflow contract, not
+// about graphify being installed.
+function assertGraphifyDecision() {
+  const graphify = require("./graphify.cjs");
+  const status = graphify.status();
+  if (status.state !== "ready") {
+    return {
+      ok: true,
+      reason: `graphify_state=${status.state} — gate does not apply`,
+      graphify_state: status.state,
+    };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const graphImpactPath = path.join(dir, "graph-impact.md");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const skipReasonPath = path.join(dir, "graphify-skip-reason.txt");
+  const haveImpact = fs.existsSync(graphImpactPath);
+  const haveSkipReason = fs.existsSync(skipReasonPath);
+  if (haveImpact && haveSkipReason) {
+    return {
+      ok: false,
+      reason:
+        "both graph-impact.md AND graphify-skip-reason.txt exist — mutually exclusive; orchestrator wrote both",
+      graphify_state: "ready",
+    };
+  }
+  if (!haveImpact && !haveSkipReason) {
+    return {
+      ok: false,
+      reason:
+        "neither graph-impact.md nor graphify-skip-reason.txt exists — orchestrator skipped the graphify decision step in context_init",
+      graphify_state: "ready",
+    };
+  }
+  return {
+    ok: true,
+    file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
+    graphify_state: "ready",
+  };
+}
+
 // Extract --flag <value> from a positional args array. Returns null when absent.
 function _getFlag(args, name) {
   if (!Array.isArray(args)) return null;
@@ -1236,9 +1286,11 @@ function run(subcommand, args) {
       if (ageArg) opts.maxAgeMinutes = parseInt(ageArg, 10);
       return audit.evictGraphifyArtifacts(opts);
     }
+    case "assert-graphify-decision":
+      return assertGraphifyDecision();
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision`,
       );
   }
 }
@@ -1255,6 +1307,7 @@ module.exports = {
   pruneState,
   checkWorkflowLock,
   validateConsistency,
+  assertGraphifyDecision,
   describeMismatch,
   getStateDir,
   ensureStateDir,
