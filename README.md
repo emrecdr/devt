@@ -899,7 +899,14 @@ devt/
 
 ### Where to read more
 
-- **`docs/MEMORY.md`** — comprehensive memory-layer guide (frontmatter reference, authoring conventions, troubleshooting)
+- **`CLAUDE.md`** — orchestrator-facing contract sheet (architecture, conventions, critical rules)
+- **`docs/AGENT-CONTRACTS.md`** — rules for modifying agents/workflows (dispatch, scope hint/trust, sidecar contract)
+- **`docs/INTERNALS.md`** — CLI module deep-dive, governing-rules + inline-guardrails wiring, plugin internals
+- **`docs/MEMORY.md`** — comprehensive memory-layer guide (frontmatter reference, pre-flight, sidecar shape, multi-root, troubleshooting)
+- **`docs/HOOKS.md`** — hook subsystem (run-hook runner, deny log, bash-guard, stuck detector, scope-guard)
+- **`docs/GRADER.md`** — verifier outcome-grader, deterministic gate, pinned rubrics, code-review grader
+- **`docs/GRAPHIFY.md`** — config, scan-prep gate, eviction CLI, post-impl refresh prompt
+- **`docs/STATE-RULES.md`** — `.devt/state/` filename contract (canonical inventory + allowed patterns)
 - **`docs/COMMANDS.md`** — full command reference
 - **`guardrails/golden-rules.md`** — Rules 14 (Pre-Flight Protocol) and 15 (Memory Maintenance)
 - **`skills/memory-pre-flight/SKILL.md`** — the protocol skill loaded by all 8 dev agents

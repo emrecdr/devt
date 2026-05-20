@@ -123,6 +123,109 @@ The PreToolUse `pre-flight-guard.sh` hook scans for this line. Behavior governed
 
 After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expanded to <file>"` so the next agent knows.
 
+## Pre-Flight Brief JSON Sidecar
+
+`bin/modules/preflight.cjs::generate` writes `.devt/state/preflight-brief.json` alongside the markdown via `atomicWriteJsonSync`. This is the **deterministic machine surface** workflows consume via `jq` for scope_hint / scope_trust dispatch injection without parsing markdown.
+
+### Sidecar shape
+
+```jsonc
+{
+  "status": "FRESH",
+  "topic": {
+    "domains": [...],
+    "symbols": [...],          // filtered via SYMBOL_DENYLIST + isAllCapsNoise
+    "keywords": [...]
+  },
+  "governing_ids": [...],      // deduped union of lanes A-D
+  "suggested_reading": [...],  // capped at 8 — see below
+  "blast": {
+    "effect_size": "...",
+    "source": "graphify" | "grep",
+    "direct_dependents_count": N
+  },
+  "graph_stats": {
+    "state": "ready" | "missing",
+    "node_count": N,
+    "edge_count": N,
+    "density": F,
+    "trust": "empty" | "sparse" | "dense"
+  },
+  "staleness": {
+    "state": "fresh" | "stale" | "unknown",
+    "fresh": true | false,
+    "built_at": "...",
+    "head": "...",
+    "lag_commits": N | null
+  },
+  "rej_keyword_matches": [...],
+  "generated_at": "..."
+}
+```
+
+### `suggested_reading` derivation
+
+The deduped union of:
+1. Governing docs' `affects_paths` — frontmatter-declared globs, fetched via `memory.cjs::getAffectsPathsByIds(ids[])` batch helper (avoids N round-trips).
+2. Blast-radius `direct_dependents` — Graphify depth-1 incoming.
+
+Capped at 8 entries. Renders into the Brief markdown as `## Suggested Reading Set (auto-derived)` between Blast Radius and Cross-Cutting Concerns; omitted when empty.
+
+### Consumer wiring (5 workflows)
+
+`dev-workflow.md`, `quick-implement.md`, `code-review.md`, `debug.md`, `research-task.md` cache two derived values at context_init from the sidecar:
+
+| Cache key | Source | Injected as |
+|---|---|---|
+| `scope_hint_json` | `suggested_reading` | `<scope_hint>{...}</scope_hint>` |
+| `scope_trust_json` | jq projection over `graph_stats.trust` + `staleness.lag_commits` + `staleness.fresh` | `<scope_trust>{...}</scope_trust>` (immediately after scope_hint) |
+
+Injected into 11+ dispatch sites covering programmer, tester, code-reviewer, verifier, researcher, architect, and debugger. The 7 affected agents prefer these blocks over independent discovery. See `docs/AGENT-CONTRACTS.md` for agent-side behavior.
+
+## Tier-Aware Lane Budget
+
+`bin/modules/preflight.cjs::detectTier(taskText)` heuristically classifies tasks before the Brief is generated:
+
+| Tier | Signals | Memory-Graph lane cap |
+|---|---|---|
+| `trivial` | typo / rename | 10 triples |
+| `simple` | small fix / hotfix | 25 triples |
+| `standard` | (default fallback) | 50 triples |
+| `complex` | refactor / architecture / migration | 75 triples |
+
+Keyword-first detection with length-based fallback.
+
+**Budget precedence** (`resolveTripleBudget`):
+
+```
+opts.budget → config.preflight.max_triples → config.preflight.lane_budget[tier] → 50
+```
+
+**Per-call override.** `preflight generate "<task>" --budget=N`.
+
+**Outcome.** Trivial flows produce roughly 5× smaller Briefs; complex flows get more breadth.
+
+## Verifier Memory Signal
+
+Every verifier dispatch in `dev-workflow.md` and `code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step:
+
+```bash
+node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact
+```
+
+The `--signal=N` mode returns:
+
+```jsonc
+{
+  "counts": {"<domain>": <n>, ...},
+  "top": [{"id": "...", "title": "...", "doc_type": "..."}]
+}
+```
+
+…in one call — bypassing the mutually-exclusive precedence trap of the standalone `--count` / `--domain-counts` / `--top` flags. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan, saving 3–4 MCP round trips per verify iteration.
+
+A `KEEP IN SYNC` comment in both verifier dispatches keeps the block ordering aligned.
+
 ## CLI Surface
 
 ```bash
@@ -133,6 +236,7 @@ node bin/devt-tools.cjs memory query <terms>     # full-text search
 node bin/devt-tools.cjs memory query <terms> --count           # aggregate: row count only
 node bin/devt-tools.cjs memory query <terms> --top=N           # aggregate: top-N compact rows
 node bin/devt-tools.cjs memory query <terms> --domain-counts   # aggregate: counts grouped by domain
+node bin/devt-tools.cjs memory query <terms> --signal=N        # combined: domain counts + top-N compact rows (verifier signal mode)
 node bin/devt-tools.cjs memory query <terms> --json-compact    # full rows, compact JSON (no formatting)
 node bin/devt-tools.cjs memory get <id>          # fetch single doc
 node bin/devt-tools.cjs memory affects <path>    # path-based pre-flight
