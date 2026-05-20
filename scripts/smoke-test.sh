@@ -5526,5 +5526,57 @@ else
 fi
 
 echo
+echo "== Task truncation detector (PostToolUse on Task → dispatch-warnings.jsonl) =="
+# Hook file exists + executable
+if [ -x "$ROOT/hooks/task-truncation-detector.sh" ]; then
+  pass "hooks/task-truncation-detector.sh exists + is executable"
+else
+  fail "hooks/task-truncation-detector.sh missing or not executable"
+fi
+# Registered in hooks.json under PostToolUse Task matcher
+if node -e "const h=require('$ROOT/hooks/hooks.json');const m=h.hooks.PostToolUse.filter(b=>b.matcher==='Task');const all=m.flatMap(b=>b.hooks.map(x=>x.command));process.exit(all.some(c=>c.includes('task-truncation-detector.sh')) ? 0 : 1)" 2>/dev/null; then
+  pass "hooks.json registers task-truncation-detector.sh under PostToolUse Task matcher"
+else
+  fail "task-truncation-detector.sh not registered in hooks.json"
+fi
+# Registered in run-hook.js profile registry
+if grep -q '"task-truncation-detector.sh": \["standard", "full"\]' "$ROOT/hooks/run-hook.js"; then
+  pass "run-hook.js declares task-truncation-detector.sh in standard + full profiles"
+else
+  fail "task-truncation-detector.sh not declared in run-hook.js profile registry"
+fi
+# Functional smoke — run the hook in an isolated tmp project with .devt/state present.
+TRUNC_TMP=$(mktemp -d)
+mkdir -p "$TRUNC_TMP/.devt/state"
+# Low-byte path: no advisory, but a record IS written tagged near_cliff:false.
+LOW_OUT=$(cd "$TRUNC_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+if [ -z "$LOW_OUT" ]; then
+  pass "task-truncation-detector emits NO advisory on low-byte sub-agent return"
+else
+  fail "task-truncation-detector unexpectedly emitted advisory on low-byte return: $LOW_OUT"
+fi
+if [ -s "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" ] && \
+   tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"source":"task_output_bytes"' && \
+   tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"near_cliff":false'; then
+  pass "task-truncation-detector writes task_output_bytes record (near_cliff:false) on low-byte return"
+else
+  fail "task-truncation-detector failed to write near_cliff:false record"
+fi
+# High-byte path: advisory IS emitted, record tagged near_cliff:true.
+BIG_BLOB=$(node -e "process.stdout.write('x'.repeat(45000))")
+HIGH_OUT=$(cd "$TRUNC_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\"},\"tool_response\":\"$BIG_BLOB\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+if echo "$HIGH_OUT" | grep -q "devt task-truncation\|near_cliff\|approaching the budget cliff"; then
+  pass "task-truncation-detector emits advisory on near-cliff sub-agent return"
+else
+  fail "task-truncation-detector missed near-cliff advisory: $HIGH_OUT"
+fi
+if tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"near_cliff":true'; then
+  pass "task-truncation-detector writes near_cliff:true record on high-byte return"
+else
+  fail "task-truncation-detector failed to write near_cliff:true record"
+fi
+rm -rf "$TRUNC_TMP"
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

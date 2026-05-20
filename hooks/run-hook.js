@@ -57,6 +57,13 @@ const HOOK_PROFILES = {
   // strips all the Wave 1-4 graphify protections. Forensic trail tagged
   // source: "raw_dispatch" in dispatch-warnings.jsonl. Never blocks.
   "dispatch-hygiene-guard.sh": ["standard", "full"],
+  // task-truncation-detector.sh: PostToolUse on Task — emits one
+  // dispatch-warnings.jsonl record per Task call tagged
+  // source: "task_output_bytes" with the sub-agent's return byte count.
+  // Records the comparison against telemetry.task_truncation_warn_bytes so
+  // future calibration can re-bucket historical records. Surfaces an
+  // additionalContext advisory only on near-cliff crossings. Never blocks.
+  "task-truncation-detector.sh": ["standard", "full"],
 };
 
 function getProfile() {
