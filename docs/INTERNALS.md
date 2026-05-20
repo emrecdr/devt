@@ -203,6 +203,51 @@ Each trace record appended to `.devt/memory/_mcp-trace.jsonl` carries `workflow_
 
 ---
 
+## Skills Resolution
+
+**Source.** `skills/*/` directories shipped with the plugin, plus optional user overrides at `.devt/config.json::agent_skills.<agent>`.
+
+**Per-agent bucket structure.** Each agent's entry in `skill-index.yaml` carries up to three sibling buckets:
+
+| Bucket | Loaded when |
+|---|---|
+| `skills` | Always |
+| `skills_standard` | Tier is STANDARD or COMPLEX |
+| `skills_complex` | Tier is COMPLEX only |
+
+**Resolution function.** `init.cjs::resolveSkills(pluginRoot, config, tier)` merges and dedupes the matching buckets. Init seeds `tier` from `state.tier` (set by `complexity-assessment`) or `detectTier(task)` so the first dispatch in a fresh workflow already gets tier-aware loading.
+
+**Outcome.** Trivial-tier programmer load is ~3 skills vs ~7 for COMPLEX — meaningful prefix shrinkage on light flows.
+
+**User overrides.** `.devt/config.json::agent_skills.<agent>` remains a flat array (= always loaded, no tier filter) so existing project configs don't break.
+
+**Fixtures.** Trigger-evaluation fixtures live in `skills-workspace/` (gitignored, used by autoskill).
+
+---
+
+## Agent IO Contracts
+
+**File.** `agents/io-contracts.yaml` — single source of truth declaring per-agent:
+
+| Field | Purpose |
+|---|---|
+| `frontmatter_skills` | Skills declared in the agent's `.md` frontmatter `skills:` array |
+| `index_buckets` | Buckets the agent's `skill-index.yaml` entry uses (skills / skills_standard / skills_complex) |
+| `outputs.{primary,sidecar}` | The artifact(s) the agent writes |
+| `inputs.context_blocks` | Dispatch tags the agent expects (e.g. `<scope_hint>`, `<governing_rules>`, `<memory_signal>`) |
+
+**Three smoke gates** enforce that the contract agrees with reality:
+
+1. Agent `.md` frontmatter matches `frontmatter_skills`.
+2. `skill-index.yaml` buckets match `index_buckets`.
+3. `state.cjs::JSON_SIDECAR_SCHEMAS` includes the declared `outputs.sidecar`.
+
+**Adding a new agent.** Append a contract entry, create `agents/<name>.md`, register any sidecar in `JSON_SIDECAR_SCHEMAS`. The smoke test catches any miss.
+
+**What this prevents.** The class of silent drift where a skill is preloaded via agent frontmatter for several releases while being absent from the index — fixed retroactively, prevented going forward.
+
+---
+
 ## Governing Rules Wiring
 
 **Function.** `init.cjs::loadGoverningRules` returns the PROJECT'S `CLAUDE.md` + `.devt/rules/*.md` contents (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical) inline in the `init` payload:

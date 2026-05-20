@@ -15,8 +15,8 @@ devt is a Claude Code plugin that orchestrates multi-agent development workflows
 3. **Agents** (`agents/*.md`) — Focused workers. Each owns one concern: programmer, tester, code-reviewer, docs-writer, architect, retro, curator, verifier, researcher, debugger.
 
 Supporting layers:
-- **Skills** (`skills/*/`) — Technique libraries injected into agents. `skill-index.yaml` per-agent entries support three sibling buckets — `skills` (always loaded), `skills_standard` (+ STANDARD/COMPLEX), `skills_complex` (+ COMPLEX only). `init.cjs::resolveSkills(pluginRoot, config, tier)` merges and dedupes; init seeds tier from `state.tier` (set by `complexity-assessment`) or `detectTier(task)` so the first dispatch in a fresh workflow already gets tier-aware loading. Trivial-tier programmer load is ~3 skills vs ~7 for COMPLEX — meaningful prefix shrinkage on light flows. User overrides at `.devt/config.json::agent_skills.<agent>` remain a flat array (= always loaded, no tier filter) so existing project configs don't break. Trigger-evaluation fixtures live in `skills-workspace/` (gitignored, used by autoskill).
-- **Agent IO Contracts** (`agents/io-contracts.yaml`) — single source of truth declaring per-agent `frontmatter_skills`, `index_buckets`, `outputs.{primary,sidecar}`, and `inputs.context_blocks`. Three smoke gates enforce that agent `.md` frontmatter, `skill-index.yaml` buckets, and `state.cjs::JSON_SIDECAR_SCHEMAS` all agree with the contract. Adding a new agent = append a contract entry, create `agents/<name>.md`, register any sidecar in `JSON_SIDECAR_SCHEMAS`; the smoke test catches any miss.
+- **Skills** (`skills/*/`) — Technique libraries injected into agents via tier-aware buckets in `skill-index.yaml` (`skills` always / `skills_standard` STANDARD+ / `skills_complex` COMPLEX only). → docs/INTERNALS.md (Skills Resolution).
+- **Agent IO Contracts** (`agents/io-contracts.yaml`) — single source of truth declaring per-agent `frontmatter_skills`, `index_buckets`, `outputs.{primary,sidecar}`, `inputs.context_blocks`. Three smoke gates enforce agreement with reality. → docs/INTERNALS.md (Agent IO Contracts).
 - **Hooks** (`hooks/`) — Lifecycle event handlers (SessionStart, Stop, SubagentStart/Stop, PreToolUse, PostToolUse, UserPromptSubmit). Defined in `hooks/hooks.json`, executed via Node.js `run-hook.js` runner with profile support. Full subsystem reference: → docs/HOOKS.md.
 - **Guardrails** (`guardrails/`) — Protective guidelines (golden rules, engineering principles, contamination prevention, generative debt checklist, incident runbook, skill update guidelines).
 - **References** (`references/`) — Technique libraries for agent workflows. Static guidance documents read by workflows during specify/clarify phases (questioning guide, domain probes).
@@ -52,11 +52,9 @@ Deep-dive per module: → docs/INTERNALS.md (CLI Modules).
 
 ### State Flow
 
-Workflows write artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents: `workflow.yaml` (active state, includes `workflow_type` and `autonomous_chain` for resume routing and cross-workflow autonomous chaining), `impl-summary.md` + `impl-summary.json`, `test-summary.md` + `test-summary.json`, `review.md` + `review.json`, `verification.md` + `verification.json`, `plan.md`, `decisions.md`, `baseline-gates.md`, `lessons.yaml` (retro draft → curator promotes to LES-NNNN), `curation-summary.md`, `debug-context.md`, `debug-summary.md`, `debug-investigation.md`, `scratchpad.md`, `spec.md`, `research.md`, `scan-results.md`, `arch-review.md`, `arch-health-scan.md`, `docs-summary.md`, `handoff.json` (from `/devt:pause`), `continue-here.md`, `review-scope.md`, `session-report.md`, `autoskill-proposals.md`, `arch-baseline.json`, `arch-triage.json`, `scanner-output.txt`, `scan-delta.md`.
+Workflows write per-step artifacts to `.devt/state/` (gitignored). Each file is written by one agent and read by subsequent agents; `workflow.yaml` carries active state (including `workflow_type` + `autonomous_chain` for resume routing). The full canonical filename inventory, allowed slug patterns, and reset semantics live in → docs/STATE-RULES.md.
 
-All permanent knowledge (architectural docs + operational lessons) lives in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` indexed by FTS5 in `.devt/memory/index.db`. Persistent debugger knowledge lives at `.claude/agent-memory/devt-debugger/MEMORY.md` (gitignored, auto-injected at agent startup).
-
-Full state contract: → docs/STATE-RULES.md. Memory layer guide: → docs/MEMORY.md.
+Permanent knowledge (architectural docs + operational lessons) lives in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` indexed by FTS5 in `.devt/memory/index.db` → docs/MEMORY.md. Persistent debugger knowledge lives at `.claude/agent-memory/devt-debugger/MEMORY.md` (gitignored, auto-injected at agent startup).
 
 #### `workflow_type` Registry
 
