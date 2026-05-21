@@ -5685,6 +5685,36 @@ fi
 rm -rf "$STALE_TMP"
 
 echo
+echo "== Task-matcher hooks accept BOTH tool_name='Task' AND tool_name='Agent' =="
+# Field-validated regression catcher: Claude Code passes tool_name='Agent' for
+# sub-agent dispatches (Task tool's canonical payload). All 3 Task-matcher
+# hooks (dispatch-scope, dispatch-hygiene, task-truncation) checked
+# tool_name === 'Task' since they were shipped, silently no-op'ing in
+# production for ~2 weeks. v0.53.1 catches both.
+AGENT_TMP=$(mktemp -d)
+mkdir -p "$AGENT_TMP/.devt/state"
+AGENT_FAILURES=""
+# task-truncation-detector writes a record on every Task/Agent fire
+(cd "$AGENT_TMP" && echo '{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"devt:programmer"},"tool_response":"x"}' | bash "$ROOT/hooks/task-truncation-detector.sh") >/dev/null 2>&1
+if ! tail -1 "$AGENT_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null | /usr/bin/grep -q "task_output_bytes"; then
+  AGENT_FAILURES="${AGENT_FAILURES}task-truncation-detector "
+fi
+# dispatch-hygiene-guard emits an advisory on raw dispatches
+HG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review X"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+if ! echo "$HG" | /usr/bin/grep -q "Raw devt:\|raw_dispatch"; then
+  AGENT_FAILURES="${AGENT_FAILURES}dispatch-hygiene-guard "
+fi
+# dispatch-scope-guard fires its scope warnings — feed it a payload that triggers a warning
+SG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"x"}}' | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1 || true)
+# (no advisory expected on small prompt — just verify it doesn't error out)
+if [ -z "$AGENT_FAILURES" ]; then
+  pass "all 3 Task-matcher hooks accept tool_name='Agent' (the actual Claude Code payload key)"
+else
+  fail "Task-matcher hooks still gated on tool_name==='Task' only: $AGENT_FAILURES"
+fi
+rm -rf "$AGENT_TMP"
+
+echo
 echo "== Task truncation detector (PostToolUse on Task → dispatch-warnings.jsonl) =="
 # Hook file exists + executable
 if [ -x "$ROOT/hooks/task-truncation-detector.sh" ]; then

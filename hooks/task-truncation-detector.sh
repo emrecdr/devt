@@ -28,7 +28,11 @@ fi
 node -e "
   let input;
   try { input = JSON.parse(process.argv[1]); } catch { process.exit(0); }
-  if ((input.tool_name || '') !== 'Task') process.exit(0);
+  // Claude Code passes tool_name='Agent' for sub-agent dispatches (the Task tool's
+  // canonical payload key). Older versions used 'Task'. Accept both — the matcher
+  // in hooks.json filters at the platform layer; this is defensive backstop.
+  const _toolName = input.tool_name || '';
+  if (_toolName !== 'Task' && _toolName !== 'Agent') process.exit(0);
 
   const subagent = (input.tool_input || {}).subagent_type || 'unknown';
 

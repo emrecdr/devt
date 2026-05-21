@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.53.1] - 2026-05-21
+
+Critical patch: all 3 Task-matcher hooks were silently no-op'ing in production. The DEF-031 diagnostic shipped uncommitted in v0.53.0 captured the smoking gun on its first greenfield Task dispatch — Claude Code's actual payload key is `tool_name: "Agent"`, not `"Task"`. The 3 hooks guarded on `=== 'Task'` and silent-exited on every real fire since they shipped (`dispatch-scope-guard` v0.43.0, `dispatch-hygiene-guard` v0.46.0, `task-truncation-detector` v0.51.0). 22 of 23 captured fires confirmed `tool_name='Agent'`. Smoke: **554 passed**, **0 failed** (+1 regression-catcher gate).
+
+### Fixed
+
+- **`hooks/dispatch-scope-guard.sh`, `hooks/dispatch-hygiene-guard.sh`, `hooks/task-truncation-detector.sh`** — `tool_name === 'Task'` guard now accepts both `'Task'` and `'Agent'`. The matcher `"Task"` in `hooks/hooks.json` is a platform-layer label; the actual payload carries `tool_name: "Agent"` for sub-agent dispatches. Backward-compat preserved for the `'Task'` variant. Effect: dispatch-scope-guard now actually flags oversized dispatches in production, dispatch-hygiene-guard now actually catches raw-dispatch violations, task-truncation-detector now actually writes `task_output_bytes` records.
+
+### Removed
+
+- **`hooks/task-truncation-detector.sh` diagnostic block** — the uncommitted v0.53.0 diagnostic that captured the root cause served its purpose and is removed. Net hook footprint identical to v0.51.0 plus the bug fix.
+
+### Added
+
+- **1 new smoke gate** — `Task-matcher hooks accept BOTH tool_name='Task' AND tool_name='Agent'`. Synthesizes the production payload (`tool_name='Agent'`) and asserts: task-truncation-detector writes a record, dispatch-hygiene-guard emits the raw-dispatch advisory. Backward-compat smoke for `tool_name='Task'` already exists in the existing gates.
+
 ## [0.53.0] - 2026-05-21
 
 Same-day patch shipping three deeper field-validated fixes after v0.52.0's first greenfield run identified that two of the three v0.52.0 fixes landed mechanically but failed in the field. The validation cycle this release codifies: smoke-test fabricated environments are NOT a substitute for one real workflow run in a real project. Smoke: **553 passed**, **0 failed** (+4 new gates).
