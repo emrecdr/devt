@@ -209,12 +209,12 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
-**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30, set via `.devt/config.json::graphify.stale_threshold`; `null` disables), prompt the user via AskUserQuestion BEFORE any dispatch in this workflow:
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30, set via `.devt/config.json::graphify.stale_threshold`) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE any dispatch in this workflow:
 
-- Question: "Graphify graph is {lag_commits} commits behind HEAD; scope_hint signals may reflect stale call graph. Refresh now?"
+- Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; scope_hint signals may reflect stale call graph. Refresh now?"
 - Options: **Refresh (recommended)** — pause, ask the user to run `graphify update .` in another terminal, then re-run `preflight generate "${TASK_DESCRIPTION}"` and re-cache; **Proceed with stale graph** — continue dispatch; downstream agents see `scope_trust.fresh=false` and de-weight `scope_hint`; **Cancel** — STOP with BLOCKED.
 
-When `workflow.yaml::autonomous=true`, skip the prompt and proceed silently with `scope_trust.trust` forced to `"sparse"` so downstream agents fall back to discovery. Skip the gate entirely when graphify is disabled (`scope_trust.trust == "empty"`) or `staleness.lag_commits` is null (no git context).
+When `workflow.yaml::autonomous=true`, skip the prompt and proceed silently with `scope_trust.trust` forced to `"sparse"` so downstream agents fall back to discovery. Skip the gate entirely only when graphify is disabled (`scope_trust.trust == "empty"`) — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
 The cached value is read back in each dispatch's orchestrator-prep step — substituted into the `<scope_hint>` template variable. When empty (no governing docs, or Graphify disabled, or preflight call failed), the block renders as `[]` and agents fall back to discovering scope from the task description.
 

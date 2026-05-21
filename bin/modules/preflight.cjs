@@ -127,24 +127,106 @@ function isAllCapsNoise(token) {
   return /^[A-Z][A-Z0-9_-]*$/.test(token);
 }
 
+// File extensions whose contents we'll parse for declaration symbols. Anything
+// outside this set is skipped to avoid binary reads and meaningless lockfile
+// noise. Keep narrow on purpose — false positives from generated/vendored
+// files would crowd out real anchor symbols.
+const DIFF_SYMBOL_EXTENSIONS = new Set([
+  ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+  ".py", ".go", ".rs", ".java", ".kt", ".rb", ".php", ".cs", ".swift",
+  ".vue", ".svelte",
+]);
+
+// Pulls declaration symbols (class/function/interface/etc.) out of changed
+// files in the working tree. These are higher-signal than PascalCase regex on
+// task text because they're grounded in actual code touched right now —
+// unblocks the `symbol_anchored` graphify tier on Bitbucket projects where
+// PR-scoped diffs aren't available.
+//
+// Cheap by design: caps file count + per-file byte read so a large diff can't
+// stall the preflight call. All git/fs failures fall through silently — the
+// caller still gets a topic from the task text.
+function extractDiffSymbols(opts = {}) {
+  const maxFiles = Number.isFinite(opts.maxFiles) ? opts.maxFiles : 30;
+  const maxBytesPerFile = Number.isFinite(opts.maxBytesPerFile) ? opts.maxBytesPerFile : 50000;
+  const refRange = typeof opts.refRange === "string" ? opts.refRange : "HEAD";
+
+  // Defensive whitelist so the git ref can never escape into a shell — also
+  // catches typos that would otherwise turn into a confused `git diff`.
+  if (!/^[A-Za-z0-9_./~^@-]{1,100}$/.test(refRange)) return [];
+
+  try {
+    const { execFileSync } = require("child_process");
+    const fs = require("fs");
+    const path = require("path");
+
+    const out = execFileSync(
+      "git",
+      ["diff", "--name-only", refRange],
+      { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    const files = out.split("\n").filter(Boolean).slice(0, maxFiles);
+
+    const declRe = /(?:^|\n)\s*(?:export\s+(?:default\s+)?(?:async\s+)?)?(?:class|function|interface|type|def|trait|struct|enum|fn)\s+([A-Z][a-zA-Z0-9_]{2,})/g;
+
+    const symbols = new Set();
+    for (const rel of files) {
+      const ext = path.extname(rel).toLowerCase();
+      if (!DIFF_SYMBOL_EXTENSIONS.has(ext)) continue;
+      try {
+        const fd = fs.openSync(rel, "r");
+        const buf = Buffer.alloc(maxBytesPerFile);
+        const n = fs.readSync(fd, buf, 0, maxBytesPerFile, 0);
+        fs.closeSync(fd);
+        const content = buf.subarray(0, n).toString("utf8");
+        let m;
+        declRe.lastIndex = 0;
+        while ((m = declRe.exec(content)) !== null) {
+          const sym = m[1];
+          if (SYMBOL_DENYLIST.has(sym.toLowerCase())) continue;
+          if (isAllCapsNoise(sym)) continue;
+          symbols.add(sym);
+        }
+      } catch { /* unreadable file → skip */ }
+    }
+    return Array.from(symbols);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Extract topic structure from a free-form task description.
  * Returns: { domains, symbols, keywords, raw }
+ *
+ * `opts.gitDiffSymbols` — symbols pre-extracted from the working-tree diff.
+ * When supplied (or auto-fetched by callers via `extractDiffSymbols()`), they
+ * rank ABOVE PascalCase-on-text matches in the returned `symbols` array
+ * because changed-file declarations are higher-signal than NLP-on-task-text.
  */
-function extractTopic(taskText) {
+function extractTopic(taskText, opts = {}) {
   if (!taskText || typeof taskText !== "string") {
     return { domains: [], symbols: [], keywords: [], raw: "" };
   }
   const text = taskText.trim();
+  const diffSymbols = Array.isArray(opts.gitDiffSymbols)
+    ? opts.gitDiffSymbols.filter(s => typeof s === "string" && s.length >= 3 && !SYMBOL_DENYLIST.has(s.toLowerCase()) && !isAllCapsNoise(s))
+    : [];
 
   // Symbols: PascalCase identifiers ≥3 chars, deduped, denylist-filtered,
   // ALL-CAPS noise filtered. Preserves mixed-case identifiers
   // (DeviceSummary) while rejecting project labels (CHANGELOG, GFBUGS).
   const symbolMatches = text.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
-  const symbols = Array.from(new Set(symbolMatches))
+  const textSymbols = Array.from(new Set(symbolMatches))
     .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
-    .filter(s => !isAllCapsNoise(s))
-    .sort();
+    .filter(s => !isAllCapsNoise(s));
+  // Diff symbols come first; text symbols only contribute their delta. Order
+  // matters because downstream consumers (blast_radius args, scope_hint cap)
+  // may truncate to top-N — the higher-signal source wins.
+  const seen = new Set();
+  const symbols = [];
+  for (const s of diffSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); } }
+  for (const s of textSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); } }
 
   // Lowercased word stream for domain + keyword extraction
   const words = (text.toLowerCase().match(/[a-z][a-z0-9_-]{1,30}/g) || []);
@@ -542,7 +624,12 @@ function generate(taskText, opts) {
     };
   }
 
-  const topic = extractTopic(taskText);
+  // Higher-signal source: declaration symbols pulled from changed files in
+  // the working tree. Falls back to empty array when not in a git repo or
+  // when nothing has changed — extractTopic still produces text-derived
+  // symbols in that case.
+  const diffSymbols = extractDiffSymbols();
+  const topic = extractTopic(taskText, { gitDiffSymbols: diffSymbols });
 
   // Run lanes
   const A = laneA(topic);
@@ -752,6 +839,7 @@ module.exports = {
   run,
   generate,
   extractTopic,
+  extractDiffSymbols,
   readBriefMeta,
   markStale,
   // Lanes exported for testing

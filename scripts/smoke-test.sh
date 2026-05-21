@@ -5526,6 +5526,76 @@ else
 fi
 
 echo
+echo "== Graphify tier ordering: symbol_anchored before bulk_scoped =="
+# Field validation in greenfield-api (Bitbucket project) showed bulk_scoped was
+# firing even when topic.symbols was non-empty — symbol-anchored gives cleaner
+# signal so it must take precedence when symbols are available.
+ORDER_OK=$(awk '
+  /elif \[ "\$TOPIC_SYMBOLS_COUNT" -gt 0 \]/ && !sa { sa = NR }
+  /elif \[ "\$SCOPE_FILE_COUNT" -ge "\$IMPACT_THRESHOLD" \]/ && !bs { bs = NR }
+  END { if (sa && bs && sa < bs) print "OK"; else print "BAD" }
+' workflows/code-review.md)
+if [ "$ORDER_OK" = "OK" ]; then
+  pass "workflows/code-review.md fires symbol_anchored BEFORE bulk_scoped"
+else
+  fail "workflows/code-review.md tier order regression — bulk_scoped fires before symbol_anchored"
+fi
+
+echo
+echo "== Staleness gate: null lag_commits no longer silently disables =="
+# Field validation surfaced that 5 workflows skipped the staleness prompt when
+# lag_commits was null (e.g. unreachable SHA, shallow clone) — letting stale
+# graphs slip through. The fix lifts that skip ONLY when graphify is disabled.
+STALENESS_FAILURES=""
+for wf in code-review.md debug.md quick-implement.md research-task.md dev-workflow.md; do
+  if ! /usr/bin/grep -q "now triggers the prompt instead of silently disabling" "workflows/$wf"; then
+    STALENESS_FAILURES="${STALENESS_FAILURES}$wf "
+  fi
+  if /usr/bin/grep -q "null\` disables" "workflows/$wf"; then
+    STALENESS_FAILURES="${STALENESS_FAILURES}$wf(legacy-phrase) "
+  fi
+done
+if [ -z "$STALENESS_FAILURES" ]; then
+  pass "all 5 staleness gates trigger on null lag_commits when state=ready"
+else
+  fail "staleness gate regression in: $STALENESS_FAILURES"
+fi
+
+echo
+echo "== Topic extractor: git-diff symbols ranked above text symbols =="
+# Field validation showed topic.symbols = ["TR2"] (Jira suffix) instead of real
+# class names from the diff. The diff source must be PRESENT and rank above
+# the PascalCase-on-text source.
+if /usr/bin/grep -q "extractDiffSymbols" bin/modules/preflight.cjs && \
+   /usr/bin/grep -q "gitDiffSymbols" bin/modules/preflight.cjs && \
+   /usr/bin/grep -q "extractDiffSymbols," bin/modules/preflight.cjs; then
+  pass "preflight.cjs declares + exports extractDiffSymbols + extractTopic accepts gitDiffSymbols opt"
+else
+  fail "preflight.cjs missing extractDiffSymbols or gitDiffSymbols wiring"
+fi
+# Functional: fabricate a tiny git repo with a PascalCase declaration, run the
+# extractor, assert the symbol shows up first in the merged topic.
+DIFF_TMP=$(mktemp -d)
+(
+  cd "$DIFF_TMP" && git init -q && \
+  printf 'export class LicenseService {}\nexport interface ClientPayload { id: string }\n' > svc.ts && \
+  git add . && git -c user.email=t@t.com -c user.name=t commit -q -m init && \
+  printf '\n// edit\n' >> svc.ts
+)
+DIFF_OUT=$(cd "$DIFF_TMP" && node -e "
+  const pf = require('$ROOT/bin/modules/preflight.cjs');
+  const syms = pf.extractDiffSymbols();
+  const t = pf.extractTopic('add license cache TR2', { gitDiffSymbols: syms });
+  process.stdout.write(JSON.stringify(t.symbols));
+" 2>&1)
+if echo "$DIFF_OUT" | /usr/bin/grep -q "LicenseService" && echo "$DIFF_OUT" | /usr/bin/grep -q "ClientPayload"; then
+  pass "extractDiffSymbols pulls PascalCase declarations from working-tree diff and merges them ahead of text-derived symbols"
+else
+  fail "extractDiffSymbols failed to extract real symbols (output: $DIFF_OUT)"
+fi
+rm -rf "$DIFF_TMP"
+
+echo
 echo "== Task truncation detector (PostToolUse on Task → dispatch-warnings.jsonl) =="
 # Hook file exists + executable
 if [ -x "$ROOT/hooks/task-truncation-detector.sh" ]; then

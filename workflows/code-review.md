@@ -90,7 +90,7 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
-**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30; `null` disables), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip when graphify disabled or lag_commits is null.
+**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
 **Evict any stale Graphify artifacts before regeneration.** A prior session's `graph-impact.md` or `graphify-skip-reason.txt` would otherwise look current and silently mask whether the orchestrator actually ran the plan this session. Targeted — never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The CLI is the single source of truth for the eviction set (also used by `dev-workflow`, `quick-implement`, `debug`, `research-task`):
 
@@ -118,12 +118,12 @@ if [ "$GRAPHIFY_STATE" != "ready" ]; then
   TIER="skip"; SKIP_REASON="graphify state=$GRAPHIFY_STATE"; TOOL=""; ARGS_JSON='{}'
 elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
   TIER="pr_scoped"; SKIP_REASON=""; TOOL="mcp__graphify__get_pr_impact"; ARGS_JSON="$(jq -nc --arg n "$PR_NUM" '{pr_number: ($n|tonumber)}')"
-elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
-  TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
 elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
   TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
+elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
+  TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
 else
-  TIER="skip"; SKIP_REASON="no PR (or non-GitHub), scope below threshold, no topic symbols"; TOOL=""; ARGS_JSON='{}'
+  TIER="skip"; SKIP_REASON="no PR (or non-GitHub), no topic symbols, scope below threshold"; TOOL=""; ARGS_JSON='{}'
 fi
 
 jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --arg provider "$GIT_PROVIDER" --argjson args "$ARGS_JSON" \
