@@ -5596,6 +5596,95 @@ fi
 rm -rf "$DIFF_TMP"
 
 echo
+echo "== Topic extractor: multi-range diff (PR + working tree) =="
+# v0.52.0 shipped extractDiffSymbols with refRange='HEAD' default — but for
+# code-review on a feature branch, the PR diff is base...HEAD, NOT HEAD.
+# Field-validated against greenfield-api: PR branch had 43 files in
+# `development...HEAD` but 0 in `HEAD` (uncommitted). v0.53.0 merges both.
+MULTIRANGE_TMP=$(mktemp -d)
+(
+  cd "$MULTIRANGE_TMP" && git init -q && \
+  git -c user.email=t@t.com -c user.name=t checkout -q -b development && \
+  printf 'export class BaseService {}\n' > base.ts && \
+  git add . && git -c user.email=t@t.com -c user.name=t commit -q -m base && \
+  git -c user.email=t@t.com -c user.name=t checkout -q -b feature/PR-369 && \
+  printf 'export class LicenseService {}\nexport interface ClientPayload { id: string }\n' > svc.ts && \
+  git add . && git -c user.email=t@t.com -c user.name=t commit -q -m feature && \
+  mkdir -p .devt && \
+  printf '{"git":{"primary_branch":"development"}}\n' > .devt/config.json
+)
+MR_OUT=$(cd "$MULTIRANGE_TMP" && node -e "
+  const pf = require('$ROOT/bin/modules/preflight.cjs');
+  process.stdout.write(JSON.stringify(pf.extractDiffSymbols()));
+" 2>&1)
+if echo "$MR_OUT" | /usr/bin/grep -q "LicenseService" && echo "$MR_OUT" | /usr/bin/grep -q "ClientPayload"; then
+  pass "extractDiffSymbols multi-range picks up PR-only commits (development...HEAD path) when working tree is clean"
+else
+  fail "extractDiffSymbols multi-range failed to pull PR-only symbols (output: $MR_OUT)"
+fi
+# Smoke the explicit refRange short-circuit (legacy single-range behavior preserved)
+SR_OUT=$(cd "$MULTIRANGE_TMP" && node -e "
+  const pf = require('$ROOT/bin/modules/preflight.cjs');
+  process.stdout.write(JSON.stringify(pf.extractDiffSymbols({refRange:'HEAD'})));
+" 2>&1)
+if echo "$SR_OUT" | /usr/bin/grep -q "\[\]\|^$"; then
+  pass "extractDiffSymbols opts.refRange='HEAD' short-circuits multi-range (returns empty when working tree is clean — legacy behavior preserved)"
+else
+  fail "extractDiffSymbols opts.refRange short-circuit regression (output: $SR_OUT)"
+fi
+rm -rf "$MULTIRANGE_TMP"
+
+echo
+echo "== Mechanical staleness override + suppression artifact =="
+# v0.52.0 shipped the staleness gate as prose ("In autonomous mode, force
+# scope_trust.trust='sparse'") — field validation showed this prose-only
+# spec was violated (greenfield session had scope_trust.trust='dense' while
+# the gate condition fired). v0.53.0 lifts the override into bash so it's
+# orchestrator-LLM-independent.
+STALENESS_WORKFLOW_FAILURES=""
+for wf in code-review.md debug.md quick-implement.md research-task.md dev-workflow.md; do
+  if ! /usr/bin/grep -q "Mechanical staleness override" "workflows/$wf"; then
+    STALENESS_WORKFLOW_FAILURES="${STALENESS_WORKFLOW_FAILURES}$wf "
+  fi
+  if ! /usr/bin/grep -q "staleness-suppressed.txt" "workflows/$wf"; then
+    STALENESS_WORKFLOW_FAILURES="${STALENESS_WORKFLOW_FAILURES}$wf(no-artifact) "
+  fi
+done
+if [ -z "$STALENESS_WORKFLOW_FAILURES" ]; then
+  pass "all 5 staleness gates carry mechanical override + suppression artifact write"
+else
+  fail "staleness mechanical override missing in: $STALENESS_WORKFLOW_FAILURES"
+fi
+# Functional: synthesize a brief with state=ready + lag_commits=null, run the
+# override bash, assert SCOPE_TRUST.trust transitions from "dense" to "sparse"
+# AND staleness-suppressed.txt is written.
+STALE_TMP=$(mktemp -d)
+(
+  cd "$STALE_TMP" && mkdir -p .devt/state && \
+  printf '{"graph_stats":{"trust":"dense","state":"ready"},"staleness":{"lag_commits":null,"fresh":false}}\n' > .devt/state/preflight-brief.json
+)
+STALE_OUT=$(cd "$STALE_TMP" && \
+  SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json) && \
+  GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json) && \
+  STALE_THRESHOLD=30 && \
+  LAG=$(echo "$SCOPE_TRUST" | jq -r '.lag_commits // "null"') && \
+  SUPPRESS="" && \
+  if [ "$GRAPHIFY_STATE" = "ready" ] && [ "$LAG" = "null" ]; then
+    SUPPRESS="lag_commits=null"
+  fi && \
+  if [ -n "$SUPPRESS" ]; then
+    SCOPE_TRUST=$(echo "$SCOPE_TRUST" | jq '.trust = "sparse"')
+    printf '%s — %s\n' "$(date -u +%FT%TZ)" "$SUPPRESS" > .devt/state/staleness-suppressed.txt
+  fi && \
+  echo "$SCOPE_TRUST")
+if echo "$STALE_OUT" | /usr/bin/grep -q '"trust": "sparse"\|"trust":"sparse"' && [ -s "$STALE_TMP/.devt/state/staleness-suppressed.txt" ]; then
+  pass "mechanical override transitions scope_trust.trust 'dense'->'sparse' AND writes .devt/state/staleness-suppressed.txt on stale-and-ready"
+else
+  fail "mechanical override regression — trust transition or artifact write failed (trust=$STALE_OUT, artifact: $(cat "$STALE_TMP/.devt/state/staleness-suppressed.txt" 2>/dev/null))"
+fi
+rm -rf "$STALE_TMP"
+
+echo
 echo "== Task truncation detector (PostToolUse on Task → dispatch-warnings.jsonl) =="
 # Hook file exists + executable
 if [ -x "$ROOT/hooks/task-truncation-detector.sh" ]; then

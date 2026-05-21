@@ -146,11 +146,10 @@ const DIFF_SYMBOL_EXTENSIONS = new Set([
 // Cheap by design: caps file count + per-file byte read so a large diff can't
 // stall the preflight call. All git/fs failures fall through silently — the
 // caller still gets a topic from the task text.
-function extractDiffSymbols(opts = {}) {
-  const maxFiles = Number.isFinite(opts.maxFiles) ? opts.maxFiles : 30;
-  const maxBytesPerFile = Number.isFinite(opts.maxBytesPerFile) ? opts.maxBytesPerFile : 50000;
-  const refRange = typeof opts.refRange === "string" ? opts.refRange : "HEAD";
-
+// Single-range extraction worker — pulls declaration symbols from files that
+// changed in one git ref range. Caller is responsible for merging across
+// multiple ranges via extractDiffSymbols().
+function _symbolsFromRange(refRange, maxFiles, maxBytesPerFile) {
   // Defensive whitelist so the git ref can never escape into a shell — also
   // catches typos that would otherwise turn into a confused `git diff`.
   if (!/^[A-Za-z0-9_./~^@-]{1,100}$/.test(refRange)) return [];
@@ -169,7 +168,8 @@ function extractDiffSymbols(opts = {}) {
 
     const declRe = /(?:^|\n)\s*(?:export\s+(?:default\s+)?(?:async\s+)?)?(?:class|function|interface|type|def|trait|struct|enum|fn)\s+([A-Z][a-zA-Z0-9_]{2,})/g;
 
-    const symbols = new Set();
+    const symbols = [];
+    const seen = new Set();
     for (const rel of files) {
       const ext = path.extname(rel).toLowerCase();
       if (!DIFF_SYMBOL_EXTENSIONS.has(ext)) continue;
@@ -185,14 +185,48 @@ function extractDiffSymbols(opts = {}) {
           const sym = m[1];
           if (SYMBOL_DENYLIST.has(sym.toLowerCase())) continue;
           if (isAllCapsNoise(sym)) continue;
-          symbols.add(sym);
+          if (!seen.has(sym)) { seen.add(sym); symbols.push(sym); }
         }
       } catch { /* unreadable file → skip */ }
     }
-    return Array.from(symbols);
+    return symbols;
   } catch {
     return [];
   }
+}
+
+function extractDiffSymbols(opts = {}) {
+  const maxFiles = Number.isFinite(opts.maxFiles) ? opts.maxFiles : 30;
+  const maxBytesPerFile = Number.isFinite(opts.maxBytesPerFile) ? opts.maxBytesPerFile : 50000;
+
+  // Explicit refRange opts.refRange short-circuits multi-range — preserves the
+  // smoke-test contract where callers pin a specific ref to verify a behavior.
+  if (typeof opts.refRange === "string") {
+    return _symbolsFromRange(opts.refRange, maxFiles, maxBytesPerFile);
+  }
+
+  // Default: merge two ranges to cover both PR-review (committed diff vs.
+  // primary branch) and in-progress work (uncommitted working tree). The PR
+  // case was missed in v0.52.0 — field-validated against greenfield-api on a
+  // feature/ branch where `git diff HEAD` returns 0 files.
+  const ranges = ["HEAD"];
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    const primary = (cfg && cfg.git && typeof cfg.git.primary_branch === "string" && cfg.git.primary_branch) || "main";
+    // Three-dot syntax: symbols changed on this branch since divergence from
+    // primary. This is the PR diff for typical feature-branch workflows.
+    ranges.push(`${primary}...HEAD`);
+  } catch { /* config unavailable → working-tree-only fallback */ }
+
+  const seen = new Set();
+  const merged = [];
+  for (const range of ranges) {
+    for (const sym of _symbolsFromRange(range, maxFiles, maxBytesPerFile)) {
+      if (!seen.has(sym)) { seen.add(sym); merged.push(sym); }
+    }
+  }
+  return merged;
 }
 
 /**

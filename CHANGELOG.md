@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-05-21
+
+Same-day patch shipping three deeper field-validated fixes after v0.52.0's first greenfield run identified that two of the three v0.52.0 fixes landed mechanically but failed in the field. The validation cycle this release codifies: smoke-test fabricated environments are NOT a substitute for one real workflow run in a real project. Smoke: **553 passed**, **0 failed** (+4 new gates).
+
+### Changed
+
+- **`bin/modules/preflight.cjs::extractDiffSymbols`** — refactored to multi-range. v0.52.0 defaulted to `git diff --name-only HEAD` which only shows uncommitted changes. Field-observed in greenfield-api: PR-review on a `feature/` branch saw 0 files in `HEAD` (because PR commits were already merged into the branch) while `development...HEAD` showed the actual 43-file PR diff. v0.53.0 default: merge symbols from BOTH ranges (working tree AND `${primary_branch}...HEAD`), with `config.git.primary_branch` lazy-read from the project's devt config (default `"main"`). Explicit `opts.refRange` short-circuits to single-range, preserving smoke-test contract.
+- **5 workflow staleness gates** (`code-review.md`, `debug.md`, `quick-implement.md`, `research-task.md`, `dev-workflow.md`) — converted the prose-only "In autonomous mode, force `scope_trust.trust='sparse'`" override into bash-mechanical logic. Field-observed: greenfield's PR-review session showed `scope_trust.trust='dense'` while the staleness condition (state=ready, lag_commits=null) had fired — a spec violation. Root cause: scope_trust was persisted via `state update` BEFORE the prose override could fire, and the orchestrator never re-issued the update. The bash block now reads `graphify.stale_threshold` from config, checks lag against threshold (treating null + ready as stale), rewrites SCOPE_TRUST with `trust='sparse'`, and writes `.devt/state/staleness-suppressed.txt` with the reason — all before the `state update` call.
+
+### Added
+
+- **`.devt/state/staleness-suppressed.txt`** — new canonical state artifact. Written by the 5 workflows whenever the mechanical staleness override fires. Contains a single line: `<ISO timestamp> — <reason>` where reason is either `lag_commits=null, state=ready (unreachable SHA / shallow clone)` or `lag_commits=N > stale_threshold=M`. Registered in `bin/modules/state.cjs::STATE_FILE_CONTRACT.additional_canonical`. RESET-eligible.
+- **`extractDiffSymbols` config-driven primary branch resolution** — lazy require of `./config.cjs` inside the function (avoids load-time circular dep). Whitelist regex on refRange (`/^[A-Za-z0-9_./~^@-]{1,100}$/`) prevents shell escape on the three-dot syntax `${primary_branch}...HEAD`.
+- **4 new smoke gates**: (1) multi-range extractor pulls PR-only commits (`development...HEAD`) when working tree is clean, (2) `opts.refRange='HEAD'` short-circuit preserves legacy single-range behavior, (3) all 5 staleness gates carry the mechanical override + suppression artifact write, (4) functional end-to-end — synthesized brief with state=ready + lag_commits=null triggers `trust='dense'→'sparse'` transition AND writes the artifact.
+
+### Deferred
+
+- **DEF-031 Part B hook still silently writes no records.** 14 fires across 2 days in greenfield, all `exit:0` with `stdout_bytes:0` and no entries in `dispatch-warnings.jsonl`. v0.53.0 ships an uncommitted diagnostic block on `hooks/task-truncation-detector.sh` that writes to `$PLUGIN_ROOT/.devt/state/task-truncation-debug.jsonl` capturing process.cwd, tool_name, hook_event_name, parse status, and raw payload preview. This will reveal the silent-exit branch on the next greenfield Task dispatch. Diagnostic is intentionally NOT committed (working-tree-only); root-cause fix lands in a future patch once data is captured.
+
 ## [0.52.0] - 2026-05-21
 
 Three field-validated fixes from a greenfield-api PR-review audit (Bitbucket project, 4-parallel-reviewer dispatch on a 69-module blast radius). The audit produced a 12-finding meta-analysis with ranked P0/P1/P2/P3 recommendations. Validation against the actual codebase reclassified one P0 (the audit's proposed fix turned out to be wrong) and confirmed three others — those three ship here. Smoke: **549 passed**, **0 failed** (+4 new gates).

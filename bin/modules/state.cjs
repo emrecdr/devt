@@ -740,6 +740,7 @@ const STATE_FILE_CONTRACT = {
     "graph-impact.md", "pr-impact.md",
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
     "graphify-skip-reason.txt", // explicit-skip artifact when the impact step's plan == "skip"
+    "staleness-suppressed.txt", // mechanical-override artifact when staleness gate forces scope_trust='sparse'
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
     "regression-baseline.md", "review.md",
