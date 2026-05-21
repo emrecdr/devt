@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-05-21
+
+Two field-driven fixes closing concrete audit findings from greenfield-api PR-369 review (DEF-034, DEF-035). The third tactical finding (DEF-036, mandatory mcp-stats footer) needs more design work and stays deferred. Smoke: **556 passed**, **0 failed** (+2 new gates).
+
+### Changed
+
+- **`bin/modules/preflight.cjs` scope-hint cap is now tier-aware** (DEF-034). Replaced the hard-coded `MAX_SUGGESTED_READING = 8` with `SCOPE_HINT_CAP_BY_TIER = {TRIVIAL: 8, SIMPLE: 8, STANDARD: 15, COMPLEX: 25}`. A new `resolveScopeHintCap()` helper reads `.devt/state/workflow.yaml::tier` via upward filesystem walk (never throws — fallback is the default 8). Field-observed: the 8-item cap crowded out caller-set anchors on a 61-file COMPLEX-tier PR review; reviewers fell back to grep instead of the structured `<scope_hint>` payload. Default behavior (no workflow.yaml or malformed tier) is unchanged.
+- **`workflows/code-review.md` args VERBATIM contract** (DEF-035). The "EXECUTE THE PLAN" section now opens with an explicit ARGS CONTRACT block: the `args` field in `graphify-impact-plan.json` is the single source of truth; orchestrator MUST use it verbatim — no symbol substitution, narrowing, or "anchor picking" at the call site. Field-observed: greenfield's session showed the orchestrator overriding `args.symbols` (the bash had written 22 diff-derived PascalCase declarations; the orchestrator hand-picked 7 different symbols instead). Each per-tier instruction now reinforces "VERBATIM" at the call site so the rule is unmissable.
+
+### Added
+
+- **`bin/modules/preflight.cjs::resolveScopeHintCap` + `SCOPE_HINT_CAP_BY_TIER`** — exported from preflight module for smoke testing and downstream callers. Tier is read lazily on every call (no caching) so resolveScopeHintCap reflects the current workflow state at the moment the Brief is built.
+- **2 new smoke gates**: (1) `resolveScopeHintCap` returns tier-correct values across TRIVIAL/SIMPLE/STANDARD/COMPLEX + falls back to 8 on missing/malformed tier; (2) `code-review.md` contains all three load-bearing args-verbatim phrases (ARGS CONTRACT section, "args VERBATIM" per-tier reinforcement, "do not re-pick / do NOT substitute" prohibition).
+
+### Deferred
+
+- **DEF-036** — Mandatory `mcp-stats` footer in `review.md`. The bash block already exists at `workflows/code-review.md:388-407` and writes the "Graphify activity" line. Field-observed: orchestrator skipped the whole sub-block. The fix needs runtime gating (sentinel artifact + downstream assertion) rather than just prose strengthening, which is a meaningful design choice — moved to the next cycle.
+- **DEF-037** — `task_truncation_warn_bytes` calibration awaits more samples (5 records currently, need 20+ for distribution analysis).
+
 ## [0.53.1] - 2026-05-21
 
 Critical patch: all 3 Task-matcher hooks were silently no-op'ing in production. The DEF-031 diagnostic shipped uncommitted in v0.53.0 captured the smoking gun on its first greenfield Task dispatch — Claude Code's actual payload key is `tool_name: "Agent"`, not `"Task"`. The 3 hooks guarded on `=== 'Task'` and silent-exited on every real fire since they shipped (`dispatch-scope-guard` v0.43.0, `dispatch-hygiene-guard` v0.46.0, `task-truncation-detector` v0.51.0). 22 of 23 captured fires confirmed `tool_name='Agent'`. Smoke: **554 passed**, **0 failed** (+1 regression-catcher gate).

@@ -43,7 +43,50 @@ const STALE_LAG_COMMITS = 10;
 // Suggested-reading caps: keep the orchestrator's <scope_hint> payload bounded
 // so a topic with many governing docs can't balloon dispatch prefix bytes.
 const MAX_DIRECT_DEPS = 12;
-const MAX_SUGGESTED_READING = 8;
+
+// Tier-aware <scope_hint> cap. Field-validated against greenfield-api: a
+// 61-file PR in COMPLEX-tier review was crowded out by the 8-item ceiling —
+// reviewers fell back to grep. SURGICAL/TRIVIAL keep 8 (scannable Brief),
+// STANDARD bumps to 15, COMPLEX/QUALITY gets 25.
+const SCOPE_HINT_CAP_BY_TIER = {
+  TRIVIAL: 8,
+  SIMPLE: 8,
+  STANDARD: 15,
+  COMPLEX: 25,
+};
+const DEFAULT_SCOPE_HINT_CAP = 8;
+
+// Read the current workflow's complexity tier from workflow.yaml. Returns
+// undefined when no workflow is active or tier is absent — callers fall back
+// to DEFAULT_SCOPE_HINT_CAP. Never throws.
+function readWorkflowTier() {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    let dir = process.cwd();
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, ".devt", "state", "workflow.yaml");
+      if (fs.existsSync(candidate)) {
+        const content = fs.readFileSync(candidate, "utf8");
+        const m = content.match(/^tier:\s*"?(TRIVIAL|SIMPLE|STANDARD|COMPLEX)"?\s*$/m);
+        return m ? m[1] : undefined;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch { /* fall through to default */ }
+  return undefined;
+}
+
+function resolveScopeHintCap() {
+  const tier = readWorkflowTier();
+  if (tier && Object.prototype.hasOwnProperty.call(SCOPE_HINT_CAP_BY_TIER, tier)) {
+    return SCOPE_HINT_CAP_BY_TIER[tier];
+  }
+  return DEFAULT_SCOPE_HINT_CAP;
+}
+
 
 function dedupeCap(items, cap) {
   const seen = new Set();
@@ -722,7 +765,7 @@ function generate(taskText, opts) {
     if (fs.existsSync(wikiIndex)) wikiPaths.push("graphify-out/wiki/index.md");
   } catch { /* findProjectRoot may throw — skip */ }
 
-  const suggestedReading = dedupeCap([...wikiPaths, ...affectsPaths, ...directDeps], MAX_SUGGESTED_READING);
+  const suggestedReading = dedupeCap([...wikiPaths, ...affectsPaths, ...directDeps], resolveScopeHintCap());
 
   const lanes = { A, B, C, D, E, F };
   const generatedAt = new Date().toISOString();
@@ -874,6 +917,8 @@ module.exports = {
   generate,
   extractTopic,
   extractDiffSymbols,
+  resolveScopeHintCap,
+  SCOPE_HINT_CAP_BY_TIER,
   readBriefMeta,
   markStale,
   // Lanes exported for testing

@@ -5685,6 +5685,57 @@ fi
 rm -rf "$STALE_TMP"
 
 echo
+echo "== Scope-hint cap is tier-aware (DEF-034) =="
+# Field-validated against greenfield: 8-item cap crowded out caller-set on a
+# 61-file PR in COMPLEX-tier review. Cap is now SCOPE_HINT_CAP_BY_TIER[tier]
+# with default 8 when tier is absent.
+CAP_FAILURES=""
+CAP_TMP=$(mktemp -d)
+mkdir -p "$CAP_TMP/.devt/state"
+# tier=COMPLEX → 25
+printf 'tier: COMPLEX\n' > "$CAP_TMP/.devt/state/workflow.yaml"
+N=$(cd "$CAP_TMP" && node -e "process.stdout.write(String(require('$ROOT/bin/modules/preflight.cjs').resolveScopeHintCap()))")
+[ "$N" = "25" ] || CAP_FAILURES="${CAP_FAILURES}COMPLEX→$N(expected 25) "
+# tier=STANDARD → 15
+printf 'tier: STANDARD\n' > "$CAP_TMP/.devt/state/workflow.yaml"
+N=$(cd "$CAP_TMP" && node -e "process.stdout.write(String(require('$ROOT/bin/modules/preflight.cjs').resolveScopeHintCap()))")
+[ "$N" = "15" ] || CAP_FAILURES="${CAP_FAILURES}STANDARD→$N(expected 15) "
+# tier=TRIVIAL → 8
+printf 'tier: TRIVIAL\n' > "$CAP_TMP/.devt/state/workflow.yaml"
+N=$(cd "$CAP_TMP" && node -e "process.stdout.write(String(require('$ROOT/bin/modules/preflight.cjs').resolveScopeHintCap()))")
+[ "$N" = "8" ] || CAP_FAILURES="${CAP_FAILURES}TRIVIAL→$N(expected 8) "
+# no workflow.yaml → default 8
+rm -f "$CAP_TMP/.devt/state/workflow.yaml"
+N=$(cd "$CAP_TMP" && node -e "process.stdout.write(String(require('$ROOT/bin/modules/preflight.cjs').resolveScopeHintCap()))")
+[ "$N" = "8" ] || CAP_FAILURES="${CAP_FAILURES}no-yaml→$N(expected 8) "
+# malformed tier → default 8
+printf 'tier: BOGUS\n' > "$CAP_TMP/.devt/state/workflow.yaml"
+N=$(cd "$CAP_TMP" && node -e "process.stdout.write(String(require('$ROOT/bin/modules/preflight.cjs').resolveScopeHintCap()))")
+[ "$N" = "8" ] || CAP_FAILURES="${CAP_FAILURES}BOGUS→$N(expected 8) "
+if [ -z "$CAP_FAILURES" ]; then
+  pass "resolveScopeHintCap returns tier-correct values (TRIVIAL/SIMPLE=8, STANDARD=15, COMPLEX=25, default=8 on missing/malformed)"
+else
+  fail "resolveScopeHintCap regression: $CAP_FAILURES"
+fi
+rm -rf "$CAP_TMP"
+
+echo
+echo "== Impact-plan args VERBATIM contract (DEF-035) =="
+# Field-validated against greenfield: orchestrator substituted hand-picked
+# symbols for the plan's blast_radius args. Workflow now mandates verbatim use.
+ARGS_FAILURES=""
+for term in "args.*VERBATIM|VERBATIM.*args" "ARGS CONTRACT" "do not re-pick|do NOT substitute"; do
+  if ! /usr/bin/grep -qE "$term" workflows/code-review.md; then
+    ARGS_FAILURES="${ARGS_FAILURES}'$term' "
+  fi
+done
+if [ -z "$ARGS_FAILURES" ]; then
+  pass "workflows/code-review.md mandates args-verbatim use (ARGS CONTRACT section + per-tier reinforcement)"
+else
+  fail "workflows/code-review.md missing args-verbatim language: $ARGS_FAILURES"
+fi
+
+echo
 echo "== Task-matcher hooks accept BOTH tool_name='Task' AND tool_name='Agent' =="
 # Field-validated regression catcher: Claude Code passes tool_name='Agent' for
 # sub-agent dispatches (Task tool's canonical payload). All 3 Task-matcher
