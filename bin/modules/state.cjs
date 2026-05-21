@@ -1231,6 +1231,84 @@ function assertGraphifyDecision() {
   };
 }
 
+// Process-level gate that the orchestrator actually ran `preflight generate`
+// in context_init (vs. silently reusing a brief from a prior workflow). Field
+// observed (greenfield-api 2026-05-21): orchestrator started a new workflow at
+// 21:29 UTC but preflight-brief.json mtime was 17:29 UTC — 4 hours older than
+// workflow.yaml::created_at. The orchestrator skipped the regenerate step and
+// the stale topic.symbols caused tier=skip → 0 graphify calls.
+//
+// The gate compares preflight-brief.json mtime against workflow.yaml::created_at.
+// When the brief is older than the workflow start, the orchestrator must have
+// skipped the regenerate — STOP with BLOCKED. When no workflow.yaml exists (no
+// active workflow) OR no brief exists (preflight disabled / failed gracefully),
+// auto-pass: the assertion is about orchestrator obedience, not preflight
+// installation state.
+//
+// Auto-passes are NOT failures — workflows wire this AFTER preflight generate
+// to catch the orchestrator-skipped-the-call case specifically.
+function assertPreflightFresh() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const briefPath = path.join(dir, "preflight-brief.json");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const workflowPath = path.join(dir, "workflow.yaml");
+
+  if (!fs.existsSync(workflowPath)) {
+    return { ok: true, reason: "no workflow.yaml — gate does not apply" };
+  }
+  if (!fs.existsSync(briefPath)) {
+    return { ok: true, reason: "no preflight-brief.json — preflight disabled or failed gracefully" };
+  }
+
+  let createdAt;
+  try {
+    const content = fs.readFileSync(workflowPath, "utf8");
+    const m = content.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) {
+      return { ok: true, reason: "workflow.yaml has no created_at stamp (legacy workflow)" };
+    }
+    createdAt = new Date(m[1]);
+    if (isNaN(createdAt.getTime())) {
+      return { ok: true, reason: `workflow.yaml::created_at unparseable: ${m[1]}` };
+    }
+  } catch (e) {
+    return { ok: true, reason: `workflow.yaml read failure: ${e.message}` };
+  }
+
+  let briefMtime;
+  try {
+    briefMtime = fs.statSync(briefPath).mtime;
+  } catch (e) {
+    return { ok: true, reason: `preflight-brief.json stat failure: ${e.message}` };
+  }
+
+  // Allow a small grace window: the brief can be written up to 30s BEFORE the
+  // workflow.yaml gets its created_at stamp (atomic ordering during workflow
+  // startup is bash-dependent). 30s is well below any sane gap that would
+  // indicate skip-and-reuse.
+  const ageMs = createdAt.getTime() - briefMtime.getTime();
+  const GRACE_MS = 30 * 1000;
+
+  if (ageMs > GRACE_MS) {
+    return {
+      ok: false,
+      reason:
+        `preflight-brief.json is ${Math.round(ageMs / 1000)}s older than workflow.yaml::created_at ` +
+        `— orchestrator skipped preflight generate in context_init`,
+      brief_mtime: briefMtime.toISOString(),
+      workflow_created_at: createdAt.toISOString(),
+      age_seconds: Math.round(ageMs / 1000),
+    };
+  }
+  return {
+    ok: true,
+    brief_mtime: briefMtime.toISOString(),
+    workflow_created_at: createdAt.toISOString(),
+    age_seconds: Math.round(ageMs / 1000),
+  };
+}
+
 // Extract --flag <value> from a positional args array. Returns null when absent.
 function _getFlag(args, name) {
   if (!Array.isArray(args)) return null;
@@ -1289,9 +1367,11 @@ function run(subcommand, args) {
     }
     case "assert-graphify-decision":
       return assertGraphifyDecision();
+    case "assert-preflight-fresh":
+      return assertPreflightFresh();
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh`,
       );
   }
 }
@@ -1309,6 +1389,7 @@ module.exports = {
   checkWorkflowLock,
   validateConsistency,
   assertGraphifyDecision,
+  assertPreflightFresh,
   describeMismatch,
   getStateDir,
   ensureStateDir,

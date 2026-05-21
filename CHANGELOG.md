@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-05-22
+
+Graphify quality + coordination pass — two pareto improvements (positive on both token and quality vectors). Closes DEF-038 (stale preflight brief silently degrades graphify tier selection) + adds explicit skip-context coordination signal to reviewer dispatches. Smoke: **561 passed**, **0 failed** (+5 new gates).
+
+### Added
+
+- **`bin/modules/state.cjs::assertPreflightFresh` + `state assert-preflight-fresh` CLI** (DEF-038). New hard process gate that catches orchestrator-skipped preflight generate at workflow start. Compares `preflight-brief.json` mtime against `workflow.yaml::created_at`; BLOCKs when the brief is older than the workflow with a >30s margin. Auto-passes when workflow.yaml is absent (no active workflow), brief is absent (preflight disabled / failed gracefully), or created_at is absent (legacy workflow). Field-validated: greenfield 2026-05-21 had brief mtime 4h older than workflow.yaml::created_at — orchestrator silently reused a stale brief from a prior session, leading to stale `topic.symbols` cascading to `tier=skip` and 0 graphify MCP calls.
+- **5 workflows wire `assert-preflight-fresh`** after their respective `preflight generate` invocations: `code-review.md`, `dev-workflow.md`, `quick-implement.md` add it alongside the existing `assert-graphify-decision` gate; `debug.md` and `research-task.md` add standalone post-`preflight generate` blocks. All STOP with BLOCKED + reason on `ok:false`.
+- **`<graphify_status>` block in `workflows/code-review.md` reviewer dispatch template + `agents/code-reviewer.md` instruction**. Bash before dispatch reads `.devt/state/graphify-skip-reason.txt` or `graph-impact.md` and emits `{skipped: bool, reason?, impact_map?}` JSON. Reviewer parses block: when `skipped === true`, switches to **deliberate fallback mode** (grep + Read for caller analysis on high-severity findings) instead of hunting for an absent impact map. Eliminates the "did graphify silently fail?" ambiguity that was field-observed in greenfield PR-369 reviews. Token cost per dispatch: ~80 bytes. Coordination win: reviewer knows graphify was intentionally skipped vs accidentally absent.
+- **5 new smoke gates**: (1) `assert-preflight-fresh` envelope shape, (2) functional BLOCK on stale brief (1h-old vs new workflow), (3) all 5 workflows wire the gate, (4) `code-review.md` has the `<graphify_status>` template + bash extraction + placeholder substitution, (5) `agents/code-reviewer.md` has the deliberate-fallback instruction.
+
+### Deferred
+
+- **DEF-039**: notification surface for `staleness-suppressed.txt` — currently invisible to user.
+- **DEF-040**: intra-workflow blast_radius cache — defer until field data shows duplicate calls (audit observed 1 call, not duplicates).
+- **DEF-041**: vendored vs upstream MCP capability matrix doc — pure documentation work.
+- **DEF-042**: retry-with-backoff for transient graphify MCP failures.
+- **DEF-036**: mandatory mcp-stats footer in `review.md` — still needs runtime sentinel design.
+- **DEF-037**: `task_truncation_warn_bytes` calibration — 5 samples, need 20+ for distribution analysis.
+
 ## [0.54.0] - 2026-05-21
 
 Two field-driven fixes closing concrete audit findings from greenfield-api PR-369 review (DEF-034, DEF-035). The third tactical finding (DEF-036, mandatory mcp-stats footer) needs more design work and stays deferred. Smoke: **556 passed**, **0 failed** (+2 new gates).

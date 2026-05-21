@@ -41,9 +41,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${BUG_DESCRIPTION}"
+PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
+if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+  exit 1
+fi
 ```
 
-This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails.
+This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails. The `assert-preflight-fresh` gate catches orchestrators that skip `preflight generate` and reuse a stale brief from a prior workflow — field-validated: greenfield 2026-05-21 ran a code-review workflow where the brief was 4 hours older than `workflow.yaml::created_at`, leading to tier=skip from stale topic.symbols.
 
 **Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8 — high-leverage starting set for the debugger's hypothesis search:
 

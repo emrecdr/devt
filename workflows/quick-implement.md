@@ -157,6 +157,11 @@ Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 
 ```bash
+PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
+if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+  exit 1
+fi
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
 if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
   echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"

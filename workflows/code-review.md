@@ -165,6 +165,11 @@ echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
 ```bash
+PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
+if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+  exit 1
+fi
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
 if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
   echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
@@ -219,6 +224,21 @@ STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+
+# Skip-context injection — when graphify-skip-reason.txt exists, the reviewer
+# should know the impact-map is intentionally absent (not "graphify failed").
+# Coordination signal: tiny prompt cost, eliminates accidental over-reliance on
+# absent graph data. Field-observed: greenfield 2026-05-21 session had tier=skip
+# fire silently; reviewers fell back to grep without knowing graphify was the
+# wrong tool for the workflow (Bitbucket + stale brief). Explicit signal beats
+# implicit file-presence checks.
+if [ -f .devt/state/graphify-skip-reason.txt ]; then
+  GRAPHIFY_STATUS=$(jq -nc --arg r "$(cat .devt/state/graphify-skip-reason.txt)" '{skipped: true, reason: $r}')
+elif [ -f .devt/state/graph-impact.md ]; then
+  GRAPHIFY_STATUS='{"skipped":false,"impact_map":".devt/state/graph-impact.md"}'
+else
+  GRAPHIFY_STATUS='{"skipped":null,"reason":"no decision artifact"}'
+fi
 ```
 
 Substitute into the `<memory_signal>` block below.
@@ -248,6 +268,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <graphify_status>{graphify_status_json}</graphify_status>
     <review_scope>Read .devt/state/review-scope.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>

@@ -5685,6 +5685,66 @@ fi
 rm -rf "$STALE_TMP"
 
 echo
+echo "== Preflight-fresh gate (DEF-038): assert-preflight-fresh CLI + 5-workflow wiring =="
+# Field-validated against greenfield 2026-05-21: orchestrator skipped preflight
+# generate at workflow start; brief mtime was 4h older than workflow.yaml::created_at.
+# The new gate catches this design-time, not by accident.
+PFRESH_OUT=$(node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh 2>&1)
+if echo "$PFRESH_OUT" | jq -e '.ok' >/dev/null 2>&1; then
+  pass "state assert-preflight-fresh returns well-formed envelope with .ok field"
+else
+  fail "state assert-preflight-fresh malformed: $PFRESH_OUT"
+fi
+# Functional: synthesize stale brief + fresh workflow, expect ok:false
+PFRESH_TMP=$(mktemp -d)
+(
+  cd "$PFRESH_TMP" && mkdir -p .devt/state && \
+  NOW=$(node -e "console.log(new Date().toISOString())") && \
+  printf 'active: true\ncreated_at: "%s"\n' "$NOW" > .devt/state/workflow.yaml && \
+  echo '{}' > .devt/state/preflight-brief.json && \
+  # touch brief to 1 hour ago — well outside the 30s grace
+  touch -t $(date -v-1H +%Y%m%d%H%M) .devt/state/preflight-brief.json 2>/dev/null || \
+  touch -d "1 hour ago" .devt/state/preflight-brief.json
+)
+STALE_RESULT=$(cd "$PFRESH_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh)
+if echo "$STALE_RESULT" | jq -e '.ok == false and (.reason | contains("orchestrator skipped"))' >/dev/null 2>&1; then
+  pass "assert-preflight-fresh BLOCKS when brief mtime is well older than workflow.yaml::created_at"
+else
+  fail "assert-preflight-fresh failed to detect stale brief (result: $STALE_RESULT)"
+fi
+rm -rf "$PFRESH_TMP"
+# All 5 workflows wire the gate
+PFRESH_WIRING_FAILURES=""
+for wf in code-review.md debug.md quick-implement.md research-task.md dev-workflow.md; do
+  if ! /usr/bin/grep -q "state assert-preflight-fresh" "workflows/$wf"; then
+    PFRESH_WIRING_FAILURES="${PFRESH_WIRING_FAILURES}$wf "
+  fi
+done
+if [ -z "$PFRESH_WIRING_FAILURES" ]; then
+  pass "all 5 workflows call state assert-preflight-fresh after preflight generate"
+else
+  fail "preflight-fresh gate not wired in: $PFRESH_WIRING_FAILURES"
+fi
+
+echo
+echo "== Skip-context injection: <graphify_status> block coordinates reviewer fallback =="
+# Coordination signal: when graphify was deliberately skipped, the reviewer
+# knows to fall back to grep instead of hunting for an absent impact map.
+if /usr/bin/grep -q "<graphify_status>" workflows/code-review.md && \
+   /usr/bin/grep -q "graphify_status_json" workflows/code-review.md && \
+   /usr/bin/grep -q "GRAPHIFY_STATUS=" workflows/code-review.md; then
+  pass "code-review.md dispatches reviewer with <graphify_status> block + bash extraction"
+else
+  fail "code-review.md missing <graphify_status> wiring (template, bash, OR placeholder)"
+fi
+if /usr/bin/grep -q "<graphify_status>" agents/code-reviewer.md && \
+   /usr/bin/grep -q "skipped.*true\|deliberate fallback mode" agents/code-reviewer.md; then
+  pass "agents/code-reviewer.md parses <graphify_status> + deliberate-fallback instruction present"
+else
+  fail "code-reviewer.md missing graphify_status instruction"
+fi
+
+echo
 echo "== Scope-hint cap is tier-aware (DEF-034) =="
 # Field-validated against greenfield: 8-item cap crowded out caller-set on a
 # 61-file PR in COMPLEX-tier review. Cap is now SCOPE_HINT_CAP_BY_TIER[tier]
