@@ -195,6 +195,10 @@ If you find issues, fix them and re-run quality gates before writing the summary
 Write `.devt/state/impl-summary.md` with the implementation results. This artifact is consumed by the tester, code-reviewer, and docs-writer agents. Be precise and complete — they depend on your accuracy.
 </step>
 
+<step name="knowledge_candidates">
+If implementation surfaced non-obvious patterns worth promoting (hidden constraint discovered mid-flight, "we must always do X" verified empirically, an existing invariant that took grep-archaeology to find), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md` (NOT impl-summary.md — the harvester scans scratchpad). Each tag must pass: specificity, durability, non-obviousness, evidence, actionability.
+</step>
+
 </execution_flow>
 
 <deviation_rules>

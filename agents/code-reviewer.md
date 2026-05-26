@@ -187,6 +187,10 @@ Write `.devt/state/review.md` with the complete review. Every finding must appea
 When `.devt/state/graph-impact.md` carries caller-set data for symbols touched by your findings, cross-reference it as you write each finding's remediation — call out high-blast-radius symbols and structural risks. You consume that file as data; you do NOT call graphify MCP yourself.
 </step>
 
+<step name="knowledge_candidates">
+If your review surfaced non-obvious patterns worth promoting to permanent memory (recurring code smell, undocumented invariant, "we always do X because Y" rule, a REJ-tombstone-worthy anti-pattern), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md` (NOT to review.md — the harvester scans scratchpad). Skip trivial findings or anything already in CLAUDE.md / .devt/rules/. Each tag should pass the 5-filter test: specificity, durability, non-obviousness, evidence, actionability.
+</step>
+
 </execution_flow>
 
 <anti_rationalization>

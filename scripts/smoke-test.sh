@@ -5877,6 +5877,21 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F5: #KNOWLEDGE-CANDIDATE prompt addition in 5 agent files
+F5_OK=0
+for ag in agents/researcher.md agents/code-reviewer.md agents/debugger.md agents/architect.md agents/programmer.md; do
+  if /usr/bin/grep -q "#KNOWLEDGE-CANDIDATE:" "$ROOT/$ag" \
+     && /usr/bin/grep -q "scratchpad.md" "$ROOT/$ag" \
+     && /usr/bin/grep -q "specificity.*durability.*non-obviousness" "$ROOT/$ag"; then
+    F5_OK=$((F5_OK + 1))
+  fi
+done
+if [ "$F5_OK" -eq 5 ]; then
+  pass "F5: #KNOWLEDGE-CANDIDATE prompt + scratchpad.md target + 5-filter test in all 5 agent files"
+else
+  fail "F5: knowledge-candidate instruction missing in $((5 - F5_OK)) of 5 agent files"
+fi
+
 # F4: state assert-claude-mem-harvest gate + workflow wiring
 # 4a — CLI gate: missing artifacts → ok:false; either artifact present → ok:true
 F4_TMP=$(mktemp -d)

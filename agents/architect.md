@@ -110,6 +110,10 @@ Trace data flows through the system:
 Write `.devt/state/arch-review.md` with the architectural assessment.
 </step>
 
+<step name="knowledge_candidates">
+If your assessment surfaced architectural rules / patterns worth promoting to permanent memory (cross-component invariants, "this layer cannot depend on that layer", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md` (NOT arch-review.md — the harvester scans scratchpad). Each tag must pass: specificity, durability, non-obviousness, evidence, actionability.
+</step>
+
 </execution_flow>
 
 <red_flags>

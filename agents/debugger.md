@@ -82,6 +82,7 @@ Be aware of these traps during investigation:
    ```
    This reveals WHERE the chain breaks (e.g., secrets → workflow ✓, workflow → build ✗).
 6. Write findings to .devt/state/debug-investigation.md
+7. **Knowledge candidates** — when debugging surfaces a non-obvious pattern (recurring bug class, hidden invariant the bug violated, environmental gotcha worth documenting), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md` (NOT debug-investigation.md — the harvester scans scratchpad). Skip if trivial or already documented. Each tag must pass: specificity, durability, non-obviousness, evidence, actionability.
 
 **Evidence quality**: Only act on STRONG evidence:
 - Strong: Directly observable, repeatable, unambiguous, independent

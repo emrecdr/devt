@@ -125,6 +125,23 @@ Write .devt/state/research.md following the template at:
 ${CLAUDE_PLUGIN_ROOT}/templates/research-template.md
 </step>
 
+<step name="knowledge_candidates">
+## Surface Knowledge Candidates
+
+If your investigation surfaced non-obvious facts worth promoting to permanent memory — a recurring trap, a constraint not documented anywhere, a verified-by-evidence rule of thumb, a pattern that explains "why does the codebase do it this way" — append a `#KNOWLEDGE-CANDIDATE:` line to `.devt/state/scratchpad.md` (NOT to research.md — the harvester scans scratchpad).
+
+Format:
+```
+#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>
+  <optional indented body line 1>
+  <optional indented body line 2>
+```
+
+Types: `decision` (architectural choice), `concept` (domain primitive / invariant), `flow` (cross-component sequence), `rejected` (we evaluated and ruled out — REJ tombstone candidate).
+
+Only tag findings that pass the 5-filter test: specificity (concrete, not generic), durability (still true in 6mo), non-obviousness (not derivable from reading the code), evidence (you can cite a file:line or commit), actionability (changes future behavior). Skip if the finding is trivial or already in CLAUDE.md / .devt/rules/.
+</step>
+
 </execution_flow>
 
 <research_principles>
