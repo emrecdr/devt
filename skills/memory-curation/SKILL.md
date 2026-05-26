@@ -91,7 +91,7 @@ options:
   - label: "Promote (active)"
     description: "Write {ADR-xxx} to .devt/memory/decisions/ with status: active. Becomes immediately governing for future agent edits."
   - label: "Promote (candidate)"
-    description: "Write {ADR-xxx} with status: candidate. Documented but not yet enforcing — you can promote to active later via the same flow."
+    description: "Write {ADR-xxx} with status: candidate. Documented but not yet enforcing — promote to active later via the same flow."
   - label: "Reject — capture as REJ tombstone"
     description: "This idea was considered and explicitly NOT chosen. Write to .devt/memory/rejected/ with search_keywords so AI re-proposals are suppressed."
   - label: "Defer"

@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.57.2] - 2026-05-26
+
+Skill best-practice compliance — converts 6 second-person language instances across 4 skills to imperative form per the [official skill-writing guidance](https://docs.claude.com/en/docs/claude-code/skills) (page 12-13 of *The Complete Guide to Building Skills for Claude*). Smoke: **596 passed**, **0 failed** (+1 F20 gate).
+
+### Changed (second-person → imperative)
+
+- **`codebase-scan`** — "Search before you build" → "Search before building"; "No you will not. Deduplicate now." → "Refactor-later never happens. Deduplicate now."
+- **`lesson-extraction`** — "You will not. In 3 months, you will make the same mistake." → "Memory is unreliable. The same mistake recurs in 3 months."
+- **`memory-curation`** — "you can promote to active later" → "promote to active later"
+- **`memory-pre-flight`** — "If you must propose it anyway" → "To propose it anyway"; "assuming you know the governance is expensive" → "assuming the governance is already known is expensive"; "When you cite a Brief entry... you can include the source root" → "When citing a Brief entry... include the source root"
+
+### Added
+
+- **F20 smoke gate** — enforces zero "you should/need/can/must/will" patterns in any `skills/*/SKILL.md` body. Catches future drift back to second-person phrasing.
+
+### Validated (no action taken)
+
+- **`allowed-tools` frontmatter** in 16 skills — grep of `bin/`, `hooks/`, `scripts/` confirms no devt code reads this field. Likely vestigial. Left in place this release; removal deferred to a verification wave once Claude Code's harness contract is confirmed (per `[[feedback-validate-external-schema]]`).
+- **`council` SKILL.md body at 2,729 words** — 37% over the 2,000-word ideal but well under the 5,000-word hard max. Proper trim requires `references/` split (move 5 advisor briefs out). Deferred to v0.58.0+ as architectural-disclosure work, not in-place trim.
+
 ## [0.57.1] - 2026-05-26
 
 Skill description refactor — trims 8 verbose SKILL.md descriptions to follow the official [`What it does` + `When to use it` + `Key capabilities`] structure documented in *The Complete Guide to Building Skills for Claude* (page 11). Smoke: **595 passed**, **0 failed** (+1 new gate enforcing the 800-char limit).

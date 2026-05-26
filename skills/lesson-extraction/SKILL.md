@@ -156,7 +156,7 @@ Skip for sessions with no implementation, no bugs, and no surprises — not ever
 | "Everyone knows this" | If everyone knew it, the mistake would not have happened | Record it with evidence |
 | "This is too specific to our project" | The specific example is evidence; the principle generalizes | Extract the general principle |
 | "This is obvious" | Obvious lessons still get violated | If it caused a bug, record it |
-| "I'll remember this" | You will not. In 3 months, you will make the same mistake. | Write it down with evidence and decay date |
+| "I'll remember this" | Memory is unreliable. The same mistake recurs in 3 months. | Write it down with evidence and decay date |
 | "The lesson is just 'be more careful'" | That is not a lesson | Identify the specific check that would have caught it |
 
 ## Integration

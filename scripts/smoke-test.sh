@@ -5877,6 +5877,26 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F20: SKILL.md bodies use imperative form (no second-person "you should/need/can/must/will" patterns).
+# Per The Complete Guide to Building Skills for Claude (page 13): "Be Specific and Actionable" with
+# verb-first instructions; per plugin-dev:skill-development: "Use imperative/infinitive form, not second
+# person." Catches drift back to "You should..." phrasing.
+F20_HITS=""
+for skill_dir in "$ROOT"/skills/*/; do
+  f="$skill_dir/SKILL.md"
+  [ -f "$f" ] || continue
+  # Only scan body (after second `---` line) — frontmatter description can use any voice
+  HITS=$(/usr/bin/awk '/^---$/{c++; next} c>=2' "$f" | /usr/bin/grep -cE "\\byou (should|need|can|must|will)\\b" || true)
+  if [ "$HITS" -gt 0 ]; then
+    F20_HITS="$F20_HITS $(basename "$skill_dir")=$HITS"
+  fi
+done
+if [ -z "$F20_HITS" ]; then
+  pass "F20: all SKILL.md bodies use imperative form (no 'you should/need/can/must/will' patterns)"
+else
+  fail "F20: second-person language in SKILL.md bodies —$F20_HITS"
+fi
+
 # F19: all SKILL.md descriptions stay under 800 chars (22% margin under the official 1024-char hard
 # limit per The Complete Guide to Building Skills for Claude, page 10). Catches verbose-description
 # drift that loads on every session via level-1 progressive disclosure (metadata always in context).

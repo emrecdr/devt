@@ -200,13 +200,13 @@ loop and stop the workflow.
    write the line, even if the summary is one ADR id.
 
 2. **Treating REJ tombstones as advisory** — they are NOT. A matching REJ in the
-   Brief means the team explicitly said no to that approach. If you must propose
+   Brief means the team explicitly said no to that approach. To propose
    it anyway, capture the new motivation as a DEC and ask the user to override
    the tombstone via `/devt:memory promote` (which can supersede the REJ).
 
 3. **Stale Brief → blind plowing ahead** — STALE means coverage is incomplete,
    not that the Brief is wrong. Re-running `/devt:preflight` is cheap; assuming
-   you know the governance is expensive when it bites at code-review time.
+   the governance is already known is expensive when it bites at code-review time.
 
 4. **Forgetting to mark stale on scope expansion** — without the mark, the next
    agent thinks the Brief is still authoritative. The five-lane lookup is wasted
@@ -249,7 +249,7 @@ org-wide ADR-007 in `../engineering-adrs/decisions/` constrains your work just a
 forcefully as a project-local ADR-007 would.
 
 The `source_root` field on every Brief entry tells the agent where the rule came
-from. When you cite a Brief entry in your scratchpad PREFLIGHT line, you can include
+from. When citing a Brief entry in a scratchpad PREFLIGHT line, include
 the source root for clarity:
 
 ```

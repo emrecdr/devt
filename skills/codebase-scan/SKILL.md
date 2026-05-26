@@ -12,7 +12,7 @@ allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 
 ## Overview
 
-Search before you build. Every new implementation must be preceded by a thorough scan for existing code that already solves the problem, partially solves it, or establishes a pattern you must follow.
+Search before building. Every new implementation must be preceded by a thorough scan for existing code that already solves the problem, partially solves it, or establishes a pattern to follow.
 
 Skipping this step is the single most common cause of duplicate code, inconsistent patterns, and wasted effort. A 5-minute scan prevents hours of rework.
 
@@ -117,7 +117,7 @@ If the scan found existing code:
 | "This is definitely new"                    | Unproven assumptions create duplicates             | Show search results for name, concept, and pattern      |
 | "I'll just create a quick version"          | Quick versions become permanent duplicates         | Search first, create only if truly new                  |
 | "The existing one is different enough"      | "Different enough" is not quantified               | State exactly what differs and why reuse fails          |
-| "I'll refactor later to deduplicate"        | No you will not. Deduplicate now.                  | Extend or fix existing code before creating new         |
+| "I'll refactor later to deduplicate"        | Refactor-later never happens. Deduplicate now.     | Extend or fix existing code before creating new         |
 | "I searched and found nothing"              | Searched by name only, not by concept or pattern   | Run all 4 search steps before declaring "nothing found" |
 | "The existing one is in a different module" | Cross-module reuse is the entire point of scanning | Import from the owning module                           |
 | "The existing implementation is bad"        | Two bad versions is worse than one fixed version   | Fix the existing code. Do not fork it.                  |
