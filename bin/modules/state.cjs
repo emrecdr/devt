@@ -160,7 +160,7 @@ const MISMATCH_REASONS = Object.freeze({
 // arch-triage.json, lessons.yaml) — validated structurally elsewhere or have
 // no Status convention.
 // - Persistent cross-phase artifacts in PERSISTENT_ARTIFACTS (scratchpad.md,
-// baseline-gates.md, debug-context.md, debug-investigation.md, review-scope.md,
+// baseline-gates.md, debug-context.md, debug-investigation.md, code-review-input.md,
 // session-report.md, autoskill-proposals.md, scanner-output.txt, scan-delta.md)
 // — content varies, no status enum.
 // - Free-form artifacts (plan.md, decisions.md, spec.md, scan-results.md,
@@ -272,7 +272,7 @@ const SIDECAR_FOR_MARKDOWN = {
 const PERSISTENT_ARTIFACTS = [
   "scratchpad.md", "baseline-gates.md",
   "debug-context.md", "debug-investigation.md",
-  "review-scope.md", "session-report.md", "autoskill-proposals.md",
+  "code-review-input.md", "session-report.md", "autoskill-proposals.md",
   "arch-baseline.json", "arch-triage.json", "scanner-output.txt", "scan-delta.md",
 ];
 
@@ -743,7 +743,7 @@ const STATE_FILE_CONTRACT = {
     "workflow.yaml",            // active workflow state — auto-stamped
     "scratchpad.md",            // ephemeral cross-agent notes
     "plan.md", "spec.md", "scope.md", "decisions.md", "research.md",
-    "review-scope.md", "scan-results.md", "scan-delta.md",
+    "scan-results.md", "scan-delta.md",
     "test-summary.md",          // markdown side of test-summary sidecar
     "lessons.yaml",             // retro hand-off draft
     "debug-context.md", "debug-investigation.md", "debug-summary.md",
@@ -759,7 +759,7 @@ const STATE_FILE_CONTRACT = {
     "staleness-suppressed.txt", // mechanical-override artifact when staleness gate forces scope_trust='sparse'
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
-    "review.md",
+    "review.md", "code-review-input.md",
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -767,7 +767,15 @@ const STATE_FILE_CONTRACT = {
     "^test-summary-[A-Za-z0-9_.-]+\\.(md|json)$",
     "^verification-[A-Za-z0-9_.-]+\\.(md|json)$",
     "^slice-[A-Za-z0-9_.-]+\\.md$",
-    "^[a-z]+-summary\\.md$",                        // module-md-update-summary.md
+    // F10 — slug variants for plan-class / research-class / spec-class / debug-class.
+    // Use case: multi-phase tasks where one workflow produces multiple plan/research/debug
+    // artifacts. Each variant carries a task-derived slug so archived snapshots are
+    // browseable via `state history`. NOT for parallel-concurrent workflows — single-tenant
+    // is preserved; only the within-workflow slice case is enabled.
+    "^plan-[A-Za-z0-9_.-]+\\.md$",
+    "^research-[A-Za-z0-9_.-]+\\.md$",
+    "^spec-[A-Za-z0-9_.-]+\\.md$",
+    "^debug-(context|investigation|summary)-[A-Za-z0-9_.-]+\\.md$",
   ],
   ephemeral_patterns: [
     "^\\..*\\.tmp$",       // hidden temp files
@@ -1390,6 +1398,45 @@ function assertClaudeMemHarvest() {
   };
 }
 
+// F10 — list archived workflows by walking .devt/state/.archive/<ts>/ snapshots.
+// Each archive snapshot may contain a workflow.yaml whose `task` field carries the
+// human-readable description. Returns most-recent first. Caps at `limit` (default 20)
+// to keep the output scannable. Snapshots missing workflow.yaml are silently skipped.
+function stateHistory(limit) {
+  const cap = Number.isInteger(limit) && limit > 0 ? limit : 20;
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const archiveDir = path.join(dir, ARCHIVE_DIR);
+  if (!fs.existsSync(archiveDir)) return [];
+  let snapshots;
+  try {
+    snapshots = fs.readdirSync(archiveDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+      .sort()
+      .reverse();
+  } catch { return []; }
+  const out = [];
+  for (const ts of snapshots) {
+    if (out.length >= cap) break;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(archiveDir, ts, "workflow.yaml");
+    if (!fs.existsSync(wfPath)) continue;
+    try {
+      const parsed = parseSimpleYaml(fs.readFileSync(wfPath, "utf8"));
+      out.push({
+        timestamp: ts,
+        workflow_type: parsed.workflow_type || null,
+        workflow_id: parsed.workflow_id || null,
+        task: parsed.task || null,
+        phase: parsed.phase || null,
+        status: parsed.status || null,
+      });
+    } catch { /* unreadable workflow.yaml — skip */ }
+  }
+  return out;
+}
+
 // Extract --flag <value> from a positional args array. Returns null when absent.
 function _getFlag(args, name) {
   if (!Array.isArray(args)) return null;
@@ -1452,9 +1499,14 @@ function run(subcommand, args) {
       return assertPreflightFresh();
     case "assert-claude-mem-harvest":
       return assertClaudeMemHarvest();
+    case "history": {
+      const limitArg = _getFlag(args, "--limit");
+      const lim = limitArg ? parseInt(limitArg, 10) : 20;
+      return stateHistory(lim);
+    }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, history`,
       );
   }
 }
@@ -1474,6 +1526,7 @@ module.exports = {
   assertGraphifyDecision,
   assertPreflightFresh,
   assertClaudeMemHarvest,
+  stateHistory,
   describeMismatch,
   getStateDir,
   ensureStateDir,

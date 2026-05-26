@@ -76,7 +76,7 @@ const DEFAULTS = {
   graphify: {
     enabled: false,
     command: "graphify",
-    // When review-scope file count meets/exceeds this AND graph_stats.trust is
+    // When code-review-input file count meets/exceeds this AND graph_stats.trust is
     // "dense", the code-review workflow fires the bulk-scoped impact lane
     // (query_graph + get_neighbors). Below the threshold, the workflow falls
     // back to the symbol-anchored blast_radius tier.

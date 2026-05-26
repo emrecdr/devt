@@ -5877,6 +5877,76 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F10: slug-variant patterns + review-scope rename + state history CLI + collision gate
+# 10a — 4 new slug patterns present in STATE_FILE_CONTRACT.allowed_patterns
+F10A_OK=0
+/usr/bin/grep -qF '"^plan-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^research-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^spec-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^debug-(context|investigation|summary)-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
+if [ "$F10A_OK" -eq 4 ]; then
+  pass "F10a: slug-variant patterns added for plan / research / spec / debug-(context|investigation|summary)"
+else
+  fail "F10a: missing $((4 - F10A_OK)) of 4 slug patterns"
+fi
+# 10b — review-scope.md fully renamed: zero references remain in non-archive code
+if /usr/bin/grep -rq "review-scope" "$ROOT/workflows/" "$ROOT/agents/" "$ROOT/bin/modules/" 2>/dev/null; then
+  fail "F10b: stale review-scope refs remain in workflows/agents/bin"
+else
+  pass "F10b: review-scope.md rename complete (0 references in workflows/agents/bin)"
+fi
+# 10c — code-review-input.md is the new canonical name + workflows write to it
+if /usr/bin/grep -q '"code-review-input\.md"' "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "code-review-input.md" "$ROOT/workflows/code-review.md"; then
+  pass "F10c: code-review-input.md is canonical + referenced by code-review.md workflow"
+else
+  fail "F10c: rename target missing in canonical / workflow"
+fi
+# 10d — state history CLI: synth 2 archive snapshots, verify history returns them
+F10D_TMP=$(mktemp -d)
+mkdir -p "$F10D_TMP/.devt/state/.archive/2026-01-01-00-00-00" "$F10D_TMP/.devt/state/.archive/2026-02-02-00-00-00"
+cat > "$F10D_TMP/.devt/state/.archive/2026-01-01-00-00-00/workflow.yaml" <<'F10DEOF'
+active: false
+phase: complete
+workflow_type: dev
+task: "add user auth"
+workflow_id: abc123
+F10DEOF
+cat > "$F10D_TMP/.devt/state/.archive/2026-02-02-00-00-00/workflow.yaml" <<'F10DEOF'
+active: false
+phase: complete
+workflow_type: code_review
+task: "review PR #100"
+workflow_id: def456
+F10DEOF
+F10D=$(cd "$F10D_TMP" && node "$ROOT/bin/devt-tools.cjs" state history --limit 5 2>/dev/null)
+if echo "$F10D" | /usr/bin/grep -q "add user auth" \
+   && echo "$F10D" | /usr/bin/grep -q "review PR #100" \
+   && echo "$F10D" | /usr/bin/grep -q "2026-02-02-00-00-00"; then
+  pass "F10d: state history CLI lists archived workflows with task description (most-recent first)"
+else
+  fail "F10d: state history CLI output wrong — got: $(echo "$F10D" | /usr/bin/head -c 200)"
+fi
+rm -rf "$F10D_TMP"
+# 10e — collision gate: no canonical filename matches any active slug pattern
+# (prevents future drift where a new canonical name accidentally matches an existing slug regex)
+F10E=$(node -e '
+const { STATE_FILE_CONTRACT } = require("'"$ROOT"'/bin/modules/state.cjs");
+const c = STATE_FILE_CONTRACT.additional_canonical;
+const patterns = STATE_FILE_CONTRACT.allowed_patterns.map(p => new RegExp(p));
+const collisions = [];
+for (const fname of c) {
+  for (const re of patterns) {
+    if (re.test(fname)) { collisions.push(fname + " ~ " + re.source); break; }
+  }
+}
+console.log(JSON.stringify(collisions));')
+if [ "$F10E" = "[]" ]; then
+  pass "F10e: collision gate — no canonical filename matches any active slug pattern (zero drift)"
+else
+  fail "F10e: canonical/pattern collision detected — $F10E"
+fi
+
 # F6: conditional auto-curator wiring — config flag + threshold + cooldown + workflow steps
 # 6a — config DEFAULTS expose the 3 new memory.auto_curator_* keys
 F6A_OK=0

@@ -128,7 +128,7 @@ GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight
 GRAPHIFY_TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
 TOPIC_SYMBOLS=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
 TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
-SCOPE_FILE_COUNT=$(wc -l < .devt/state/review-scope.md 2>/dev/null | tr -d ' ' || echo 0)
+SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
 IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
 
 # Decision tree — explicit, no implicit fallbacks. The recommended tier is the
@@ -216,7 +216,7 @@ Determine which files to review. Use ONE of these strategies (in priority order)
 3. **Impl-summary**: If `.devt/state/impl-summary.md` exists from a prior workflow, extract the file list from it.
 4. **User prompt**: If none of the above yields results, ask the user which files to review.
 
-Write the file list to `.devt/state/review-scope.md`:
+Write the file list to `.devt/state/code-review-input.md`:
 
 ```markdown
 # Review Scope
@@ -291,7 +291,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
-    <review_scope>Read .devt/state/review-scope.md</review_scope>
+    <review_scope>Read .devt/state/code-review-input.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
@@ -375,7 +375,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <files_to_read>.devt/state/review.md, .devt/state/review-scope.md</files_to_read>
+    <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -420,7 +420,7 @@ Route on `verdict`:
     ```bash
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=DONE_WITH_CONCERNS verdict=GAPS_FOUND repair=PRUNE
     ```
-- **`verdict=failed`** (status=FAILED) — STOP with BLOCKED. Surface the verifier's failure reason (missing review.md, missing review-scope.md, REJ tombstone match, or 3+ axes failing simultaneously) to the user. No retry — this is a structural problem requiring human attention.
+- **`verdict=failed`** (status=FAILED) — STOP with BLOCKED. Surface the verifier's failure reason (missing review.md, missing code-review-input.md, REJ tombstone match, or 3+ axes failing simultaneously) to the user. No retry — this is a structural problem requiring human attention.
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
   ```
