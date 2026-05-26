@@ -33,6 +33,7 @@ const CHECKS = {
   W010: { severity: "warning", message: "Workflow missing <available_agent_types> section", repairable: false, fix: "Add <available_agent_types> to the workflow to prevent post-/clear silent fallback to general-purpose" },
   I001: { severity: "info", message: "CLAUDE.md not found (recommended)", repairable: false, fix: "Create a CLAUDE.md with project-specific guidance for Claude Code" },
   I003: { severity: "info", message: "No active workflow", repairable: false, fix: "No action needed — start a workflow with /devt:workflow" },
+  I004: { severity: "info", message: "Memory promotion candidates pending in _suggestions.md", repairable: false, fix: "Run /devt:retro or /devt:memory promote to triage candidates into permanent memory" },
   W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:health --repair to clear invalid state, or /devt:cancel-workflow" },
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
   W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Re-run the phase to regenerate the artifact, fix the offending `## Status` line, or /devt:cancel-workflow to reset" },
@@ -82,7 +83,10 @@ function runChecks(pluginRoot) {
     }
   }
 
-  // Update check (read cache — non-blocking, no network)
+  // Update check (read cache — non-blocking, no network).
+  // Drop the cache when its `installed` field doesn't match the freshly-read
+  // VERSION — local version may have been bumped since last `update check`,
+  // and surfacing the stale installed/latest pair confuses users.
   let update = null;
   try {
     const cachePath = path.join(require("os").tmpdir(), "devt-cache", "update-check.json");
@@ -90,6 +94,7 @@ function runChecks(pluginRoot) {
     const cacheParse = safeJsonParse(cacheRaw, "update-check.json");
     if (!cacheParse.ok) throw new Error(cacheParse.error);
     const cached = cacheParse.value;
+    if (version && cached.installed !== version) throw new Error("cache stale: installed mismatch");
     if (cached.update_available) {
       update = { available: true, installed: cached.installed, latest: cached.latest };
     } else if (cached.ahead) {
@@ -98,7 +103,7 @@ function runChecks(pluginRoot) {
       update = { available: false, installed: cached.installed, latest: cached.latest };
     }
   } catch {
-    // No cache — update check hasn't run yet
+    // No cache, or cache stale relative to local VERSION — update check hasn't run since the bump
   }
 
   function buildResult(status) {
@@ -311,6 +316,18 @@ function runChecks(pluginRoot) {
   if (!state.active) {
     add("I003");
   }
+
+  // I004: Pending promotion candidates in _suggestions.md — surface count so the
+  // discovery harvest doesn't rot silently between curator runs.
+  try {
+    const suggPath = path.join(devtDir, "memory", "_suggestions.md");
+    if (fs.existsSync(suggPath)) {
+      const sugg = fs.readFileSync(suggPath, "utf8");
+      const matches = sugg.match(/^###\s+[⚖️🔵]/gm);
+      const n = matches ? matches.length : 0;
+      if (n > 0) add("I004", `${n} candidate${n === 1 ? "" : "s"}`, { count: n });
+    }
+  } catch { /* memory dir absent or unreadable — silent skip */ }
 
   // Memory layer checks — native, deterministic, no agent in the loop.
   // Skip cleanly when memory layer hasn't been initialized.

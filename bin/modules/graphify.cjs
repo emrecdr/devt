@@ -84,17 +84,25 @@ function freshness() {
   const s = status();
   if (s.state !== "ready") return { state: s.state, fresh: false, built_at: null, head: null };
 
-  // Read only the first 8KB to extract built_at_commit. graph.json is a top-level
-  // object emitted by graphify with built_at_commit near the start, and full JSON
-  // parse on a 50MB+ graph would dominate freshness() cost.
+  // graphify emits built_at_commit as a JSON trailer (end of file) in current
+  // versions; older versions emitted it near the start. Scan both head (8KB)
+  // and tail (16KB) — full parse on a 50MB+ graph would dominate freshness() cost.
+  const BUILT_AT_RE = /"built_at_commit"\s*:\s*"([0-9a-fA-F]{4,64})"/;
   let builtAt = null;
   try {
+    const stat = fs.statSync(s.graph_path);
     const fd = fs.openSync(s.graph_path, "r");
-    const buf = Buffer.alloc(8192);
-    const bytesRead = fs.readSync(fd, buf, 0, 8192, 0);
+    const headLen = Math.min(8192, stat.size);
+    const headBuf = Buffer.alloc(headLen);
+    fs.readSync(fd, headBuf, 0, headLen, 0);
+    let m = headBuf.toString("utf8", 0, headLen).match(BUILT_AT_RE);
+    if (!m && stat.size > headLen) {
+      const tailLen = Math.min(16384, stat.size - headLen);
+      const tailBuf = Buffer.alloc(tailLen);
+      fs.readSync(fd, tailBuf, 0, tailLen, stat.size - tailLen);
+      m = tailBuf.toString("utf8", 0, tailLen).match(BUILT_AT_RE);
+    }
     fs.closeSync(fd);
-    const head = buf.toString("utf8", 0, bytesRead);
-    const m = head.match(/"built_at_commit"\s*:\s*"([0-9a-fA-F]{4,64})"/);
     if (m) builtAt = m[1];
   } catch {
     return { state: "ready", fresh: false, built_at: null, head: null, error: "graph.json unreadable" };

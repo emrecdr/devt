@@ -5877,6 +5877,77 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F1: health drops update field when cached.installed != current VERSION
+F1_TMP=$(mktemp -d)
+mkdir -p "$F1_TMP/.devt/rules" "$F1_TMP/.devt/state"
+echo '{}' > "$F1_TMP/.devt/config.json"
+echo ".devt/state" > "$F1_TMP/.gitignore"
+for r in coding-standards.md testing-patterns.md quality-gates.md architecture.md; do echo "$r" > "$F1_TMP/.devt/rules/$r"; done
+CACHE_DIR="$F1_TMP/cache"; mkdir -p "$CACHE_DIR"
+echo '{"installed":"0.0.0","latest":"0.0.0","update_available":false,"ahead":false,"checked":0}' > "$CACHE_DIR/update-check.json"
+F1_OUT=$(cd "$F1_TMP" && TMPDIR="$F1_TMP/notreal" node "$ROOT/bin/devt-tools.cjs" health 2>/dev/null)
+if echo "$F1_OUT" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit(j.update === null || j.update === undefined ? 0 : 1);' 2>/dev/null; then
+  pass "F1: health update cache dropped when cache.installed != local VERSION (stale)"
+else
+  STAGED=$(mktemp); echo '{"installed":"0.0.0","latest":"0.0.0","update_available":false,"ahead":false,"checked":0}' > "$STAGED"
+  mkdir -p "$(node -e 'console.log(require("os").tmpdir())')/devt-cache"
+  cp "$STAGED" "$(node -e 'console.log(require("os").tmpdir())')/devt-cache/update-check.json"
+  F1_OUT2=$(cd "$F1_TMP" && node "$ROOT/bin/devt-tools.cjs" health 2>/dev/null)
+  if echo "$F1_OUT2" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit((j.update == null) ? 0 : 1);' 2>/dev/null; then
+    pass "F1: health update cache dropped when cache.installed != local VERSION (stale)"
+  else
+    fail "F1: health did not drop stale update cache — got: $(echo "$F1_OUT2" | head -c 200)"
+  fi
+  rm -f "$STAGED"
+fi
+rm -rf "$F1_TMP"
+
+# F2: graphify.freshness() finds built_at_commit when emitted as a JSON trailer (at EOF)
+F2_TMP=$(mktemp -d)
+mkdir -p "$F2_TMP/.devt" "$F2_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$F2_TMP/.devt/config.json"
+# Fake graph.json: 20KB of padding + built_at_commit at the end. Head-only scan must miss.
+node -e '
+const fs=require("fs"); const p="'"$F2_TMP"'/graphify-out/graph.json";
+const pad="x".repeat(20000);
+fs.writeFileSync(p, "{\"meta\":{\"pad\":\""+pad+"\"},\"built_at_commit\":\"abc1234567890def\"}");'
+F2_OUT=$(cd "$F2_TMP" && node -e '
+const g=require("'"$ROOT"'/bin/modules/graphify.cjs");
+const f=g.freshness();
+console.log(JSON.stringify(f));')
+if echo "$F2_OUT" | /usr/bin/grep -q '"built_at":"abc1234567890def"'; then
+  pass "F2: graphify.freshness() finds built_at_commit when emitted as JSON trailer (tail scan works)"
+else
+  fail "F2: tail-scan did not find built_at_commit — got: $F2_OUT"
+fi
+rm -rf "$F2_TMP"
+
+# F3: health I004 surfaces pending candidate count from _suggestions.md
+F3_TMP=$(mktemp -d)
+mkdir -p "$F3_TMP/.devt/rules" "$F3_TMP/.devt/state" "$F3_TMP/.devt/memory"
+echo '{}' > "$F3_TMP/.devt/config.json"
+echo ".devt/state" > "$F3_TMP/.gitignore"
+for r in coding-standards.md testing-patterns.md quality-gates.md architecture.md; do echo "$r" > "$F3_TMP/.devt/rules/$r"; done
+cat > "$F3_TMP/.devt/memory/_suggestions.md" <<'F3EOF'
+# Memory Layer — Discovery Suggestions
+
+### 🔵 First candidate
+- Source: graphify-god-node
+
+### ⚖️ Second candidate
+- Source: claude-mem-mcp
+
+### 🔵 Third candidate
+- Source: graphify-god-node
+F3EOF
+F3_OUT=$(cd "$F3_TMP" && node "$ROOT/bin/devt-tools.cjs" health 2>/dev/null)
+if echo "$F3_OUT" | /usr/bin/grep -q '"code":"I004"' && echo "$F3_OUT" | /usr/bin/grep -q '"count":3'; then
+  pass "F3: health I004 surfaces pending candidate count from _suggestions.md (count=3)"
+else
+  fail "F3: I004 missing or wrong count — got: $(echo "$F3_OUT" | head -c 300)"
+fi
+rm -rf "$F3_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

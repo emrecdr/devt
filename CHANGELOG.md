@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-05-26
+
+Three bug-fix patches discovered during deep diagnostic of two greenfield field audits (research-phase + implementation-phase). All fixes address silent failure modes that were degrading graphify integration and confusing health output. Smoke: **564 passed**, **0 failed** (+3 new gates).
+
+### Fixed
+
+- **Graphify staleness gate false positive — root cause: `built_at_commit` scan window too small.** `bin/modules/graphify.cjs::freshness()` only scanned the first 8KB of `graph.json`, but newer graphify versions emit `built_at_commit` as a JSON **trailer** at end-of-file. On greenfield's 42MB graph the field sits at byte 42,576,276 of 42,576,339 — the head scan never reached it. Result: `built_at: null` cascaded into `lag_commits: null`, which workflow staleness gates interpreted as "graph unreachable", forcing `scope_trust.trust='sparse'` on a graph that was literally at HEAD. Fix scans BOTH first 8KB AND last 16KB. Eliminates the false-positive at root; no special-case logic needed in the 5 workflow gates that consume staleness.
+- **Health `update` field showed stale `installed` version when local VERSION was bumped between update-check runs.** `bin/modules/health.cjs:88-102` read `update-check.json` from tmpdir without comparing `cached.installed` against the freshly-read `version`. Surfaced as `version: 0.55.0` (correct) alongside `update.installed: 0.49.0` (stale cache snapshot). Fix drops the entire `update` field when `cached.installed !== version`. `update.cjs::check()` already validates `cached.installed === local` before returning cached data; this aligns health's read path with that contract.
+
+### Added
+
+- **`I004` health info code surfaces pending memory-promotion candidates.** New `/devt:health` info-level signal counts `### ⚖️` and `### 🔵` headings in `.devt/memory/_suggestions.md` and reports `N candidates pending` with fix hint `/devt:retro` or `/devt:memory promote`. Closes the silent-rot pattern where discovery harvests accumulated unpromoted candidates between curator runs and users had no surface to notice. Adds telemetry signal for future auto-curator dispatch design (Wave 3 deferred work).
+
+### Diagnostic notes (field validation)
+
+- Greenfield's `graph.json::built_at_commit` matched current `git rev-parse HEAD` perfectly (`fef0f27...`) — graph WAS fresh; only the freshness extraction was broken.
+- F2 fix preserves the existing 8KB head-scan path; tail-scan runs only when head match fails. Backward-compatible with older graphify versions that emit `built_at_commit` near the start.
+
 ## [0.55.0] - 2026-05-22
 
 Graphify quality + coordination pass — two pareto improvements (positive on both token and quality vectors). Closes DEF-038 (stale preflight brief silently degrades graphify tier selection) + adds explicit skip-context coordination signal to reviewer dispatches. Smoke: **561 passed**, **0 failed** (+5 new gates).
