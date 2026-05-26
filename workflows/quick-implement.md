@@ -151,10 +151,10 @@ fi
 
 When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
 
-1. `mcp__devt-graphify__get_neighbors({symbol: "<CENTRAL_SYMBOL>", direction: "in", depth: 2})` — caller set grep can't reliably enumerate (cross-language, dynamic dispatch).
-2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk.
+1. **`mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, returns the impact map with `direct_dependents` array.
+2. **Drill-down on top-3 direct dependents** (F16 — multi-tier follow-up). Parse `direct_dependents` from blast_radius response, take top-3 by impact_size, and for each call `mcp__devt-graphify__get_neighbors({symbol: "<DEPENDENT_NAME>", direction: "in", depth: 2})`. Drills DOWN the impact tree so the programmer/code-reviewer sees which callers each high-risk dependent has.
 
-Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1>` / `## Drill-down: <dep2>` / `## Drill-down: <dep3>`. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
 
 **When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the F12 snake_case fallback also missed). Orchestrator MUST first call `mcp__devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
 

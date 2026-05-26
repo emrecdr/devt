@@ -162,6 +162,8 @@ echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 - If `tier == "bulk_scoped"`: call `mcp__devt-graphify__query_graph(args)` using the `args` object from the plan VERBATIM. From the response's top-5 nodes (highest degree), call `mcp__devt-graphify__get_neighbors({symbol: <label>, direction: "in", depth: 2})` for each. Concatenate into `graph-impact.md` with one `## <symbol>` heading per block.
 - If `tier == "symbol_anchored"`: call `mcp__devt-graphify__blast_radius(args)` using the `args` object from the plan VERBATIM — the `symbols` array is computed from the diff in the bash step above; do not re-pick. Write the response verbatim to `graph-impact.md`.
 
+**F16 — Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 highest-impact dependents from the response. Append each as a `## Drill-down: <DEP>` section to `graph-impact.md`. Field rationale (greenfield 2026-05-26 PR #370): one blast_radius call alone left 5 lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Skip the drill-down when fewer than 3 dependents are returned (small graph or leaf central symbol) — the appended section may be empty or partial. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
+
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
 ```bash

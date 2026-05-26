@@ -5877,6 +5877,24 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F16: multi-tier follow-up (post-blast_radius drill-down on top-3 dependents) in all 5 graphify workflows
+F16_OK=0
+F16_WORKFLOWS="workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md workflows/code-review.md"
+F16_COUNT=$(echo $F16_WORKFLOWS | /usr/bin/wc -w | /usr/bin/tr -d ' ')
+for wf in $F16_WORKFLOWS; do
+  if /usr/bin/grep -q "Drill-down" "$ROOT/$wf" \
+     && /usr/bin/grep -q "top-3" "$ROOT/$wf" \
+     && /usr/bin/grep -q "direct_dependents" "$ROOT/$wf" \
+     && /usr/bin/grep -q "get_neighbors" "$ROOT/$wf"; then
+    F16_OK=$((F16_OK + 1))
+  fi
+done
+if [ "$F16_OK" -eq "$F16_COUNT" ]; then
+  pass "F16: multi-tier drill-down (top-3 dependents via get_neighbors) wired in all $F16_COUNT graphify workflows"
+else
+  fail "F16: drill-down missing in $((F16_COUNT - F16_OK)) of $F16_COUNT workflows"
+fi
+
 # F18: content-quality signal in assert-graphify-decision response
 F18_TMP=$(mktemp -d)
 mkdir -p "$F18_TMP/.devt/state" "$F18_TMP/graphify-out"
