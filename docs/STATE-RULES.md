@@ -56,12 +56,10 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `autoskill-proposals.md` | autoskill | Skill/agent improvement proposals | (not status-gated) |
 | `baseline-gates.md` | orchestrator | Regression baseline | (not status-gated) |
 | `claude-mem-harvest.md` | orchestrator pre-step | claude-mem MCP harvest | (not status-gated) |
-| `memory-suggestions.md` | discovery engine | Curator candidate pool | (not status-gated) |
-| `regression-baseline.md` | orchestrator | Pre-impl test baseline | (not status-gated) |
+| `claude-mem-skipped.txt` | orchestrator pre-step | claude-mem decision-artifact (skip) | (not status-gated) |
 | `review-scope.md` | orchestrator | Code-review file list | (not status-gated) |
 | `review.md` | code-reviewer | Code review body | Sidecar (review.json) |
 | `graph-impact.md` | orchestrator | Graphify-derived impact map | (not status-gated) |
-| `pr-impact.md` | orchestrator | Legacy alias for graph-impact | (not status-gated) |
 | `continue-here.md` | `/devt:pause` | Session-resume narrative | (not status-gated) |
 
 ### Per-workflow artifacts (markdown + JSON sidecar pairs)

@@ -5877,6 +5877,29 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F15: dead-file cleanup — confirm 3 retired canonical entries are gone from contract + state-audit evict list
+F15_DEAD="regression-baseline.md memory-suggestions.md pr-impact.md"
+F15_FAILS=""
+for f in $F15_DEAD; do
+  if /usr/bin/grep -q "\"$f\"" "$ROOT/bin/modules/state.cjs"; then
+    F15_FAILS="$F15_FAILS $f(state.cjs)"
+  fi
+done
+if /usr/bin/grep -q '"pr-impact.md"' "$ROOT/bin/modules/state-audit.cjs"; then
+  F15_FAILS="$F15_FAILS pr-impact(state-audit.cjs)"
+fi
+if /usr/bin/grep -q "pr-impact.md" "$ROOT/docs/STATE-RULES.md" "$ROOT/docs/GRAPHIFY.md" 2>/dev/null; then
+  F15_FAILS="$F15_FAILS pr-impact(docs)"
+fi
+if /usr/bin/grep -q "pr-impact.md" "$ROOT/docs/AGENT-CONTRACTS.md" "$ROOT/skills/graphify-helpers/SKILL.md"; then
+  F15_FAILS="$F15_FAILS pr-impact(rule-or-skill)"
+fi
+if [ -z "$F15_FAILS" ]; then
+  pass "F15: dead state-file canonical entries removed (regression-baseline, memory-suggestions, pr-impact) + docs updated"
+else
+  fail "F15: stale references still present —$F15_FAILS"
+fi
+
 # F14: state read deep-parses _json-suffixed keys so echo "$STATE" | jq doesn't break on shell escape interp
 F14_TMP=$(mktemp -d)
 mkdir -p "$F14_TMP/.devt/state"

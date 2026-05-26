@@ -193,7 +193,7 @@ When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt
 | `god_nodes` | (no wrapper — call MCP directly) | Top-N most-connected core abstractions. devt computes the same data locally via `graphify.godNodes()` from graph.json |
 | `get_community` | (no wrapper — call MCP directly) | All nodes in a community by ID — feature-cluster traversal |
 | `graph_stats` | (no wrapper — call MCP directly) | Node/edge/community counts + EXTRACTED/INFERRED/AMBIGUOUS confidence breakdown — devt's `graphify.graphStats()` covers density+trust locally but not confidence percentages |
-| `get_pr_impact` | **wired** in `workflows/code-review.md` — orchestrator writes the response to `.devt/state/pr-impact.md` when reviewing a PR | Blast-radius per PR: which graph communities the PR touches, files affected, node-impact list |
+| `get_pr_impact` | **wired** in `workflows/code-review.md` — orchestrator writes the response to `.devt/state/graph-impact.md` when reviewing a PR | Blast-radius per PR: which graph communities the PR touches, files affected, node-impact list |
 | `list_prs` | (not wired) | Graph-aware PR dashboard — open PRs with CI/review state and blast-radius |
 | `triage_prs` | (not wired) | Actionable PRs sorted by blast-radius — useful for "which PR should I review next?" surfacing |
 

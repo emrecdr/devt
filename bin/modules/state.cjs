@@ -750,15 +750,15 @@ const STATE_FILE_CONTRACT = {
     "arch-triage.json", "scanner-output.txt",
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
-    "claude-mem-harvest.md", "claude-mem-skipped.txt", "memory-suggestions.md",
+    "claude-mem-harvest.md", "claude-mem-skipped.txt",
     "continue-here.md",         // /devt:pause output (paired with handoff.json)
-    "graph-impact.md", "pr-impact.md",
+    "graph-impact.md",
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
     "graphify-skip-reason.txt", // explicit-skip artifact when the impact step's plan == "skip"
     "staleness-suppressed.txt", // mechanical-override artifact when staleness gate forces scope_trust='sparse'
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
-    "regression-baseline.md", "review.md",
+    "review.md",
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md

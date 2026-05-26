@@ -89,7 +89,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### Community-filter for large reviews
 
-**Rule.** When `.devt/state/pr-impact.md` lists a non-empty `affected_communities` AND review scope exceeds 10 files, the code-reviewer restricts its initial-pass deep review to files in those communities. Files outside go into an `## Out-of-Scope Files (Deferred)` section in `review.md` so the orchestrator can dispatch a follow-up.
+**Rule.** When `.devt/state/graph-impact.md` lists a non-empty `affected_communities` AND review scope exceeds 10 files, the code-reviewer restricts its initial-pass deep review to files in those communities. Files outside go into an `## Out-of-Scope Files (Deferred)` section in `review.md` so the orchestrator can dispatch a follow-up.
 
 **Why.** Budget protection — converts PR-impact data from a prioritization hint into an enforcing filter so a single dispatch fits within the turn budget on 30+ file PRs.
 

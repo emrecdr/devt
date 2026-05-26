@@ -38,7 +38,6 @@ Graphify is a multi-language tree-sitter AST extractor: `pip install graphifyy[m
 | `graphify-impact-plan.json` | Orchestrator pre-flight |
 | `graph-impact.md` | Orchestrator MCP scan |
 | `graphify-skip-reason.txt` | Orchestrator when skipping |
-| `pr-impact.md` | Legacy alias for graph-impact |
 
 **Wiring.** All five graphify-touching workflows call eviction at the top of `context_init`:
 
