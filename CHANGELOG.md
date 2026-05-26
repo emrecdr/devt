@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-05-26
+
+Graphify completion wave (Wave 2). Closes the four orchestrator-skip + cascade-failure patterns that left subagents flying blind on healthy graphs across greenfield field audits. Architecturally bounded — sub-agents remain MCP-blind by design; all fixes route through orchestrator-prose pre-steps + CLI-side fallbacks + hard decision-artifact gates. Smoke: **569 passed**, **0 failed** (+5 new gates over v0.55.1's 564 baseline).
+
+### Added
+
+- **`graphify_scan_prep` gate now active in research-task + debug workflows.** Both workflows previously evicted graphify artifacts at init but never regenerated them — sub-agents dispatched without `graph-impact.md` even on dense graphs. Now both workflows run the same bash decision tree as `dev-workflow` / `quick-implement` (threshold: trust=dense + dependents≥10 + symbols>0), instruct the orchestrator to write `graph-impact.md` via `get_neighbors` + `blast_radius` MCP calls, and hard-fail via `state assert-graphify-decision` if the artifact is missing. Researcher + debugger dispatch templates gain a `<graph_impact>` block pointing to the file. Field rationale: greenfield-api GF-543 researcher solved an RBAC topic via grep on a fresh 43k-node graph because research-task had no scan_prep step.
+- **Top-3 god-nodes in `preflight-brief.json` sidecar.** New `god_nodes: [{symbol, edge_count}]` field surfaces structured god-node data so workflows can extract programmatically without parsing the markdown brief. Sourced via `graphify.godNodes(3)`, reuses the existing adjacency cache.
+- **Operational guidance in preflight brief for >=50 edge god-nodes.** Cross-Cutting Concerns section now appends `"— prefer adding new methods over modifying signatures; any signature change ripples to all callers"` to god-nodes above the edge threshold. Reifies the implication so agents adopt safer change patterns instead of reading raw edge counts as data.
+- **`extractTopic` FTS fallback for snake_case service names.** When text + diff symbol extraction returns 0 symbols, `preflight.cjs::extractTopic` falls back to `graphify.queryGraph()` against snake_case keywords in the task text (`foo_bar`, `foo_bar_baz` patterns). Field root cause: greenfield-api GF-543 task `"tablet_communication permission"` returned 0 symbols because the PascalCase regex misses directory/module names; cascade: no symbols → blast=skip → graph-impact=skip → subagent blind. Cap at 3 candidate queries to bound cost. Design: dependency-injected via `opts.graphifyQuery` so `extractTopic` stays pure-testable.
+- **`RECOVERY` branch in `graphify_scan_prep` across all 4 workflows.** When topic extraction returns 0 symbols on a dense graph (i.e., F12 snake_case fallback also missed), bash echoes `RECOVERY` instead of `SKIP`. Prose instructs orchestrator to call `mcp__devt-graphify__query_graph(task_text, limit=5)` directly, use top result as CENTRAL_SYMBOL, then proceed with the standard `get_neighbors` + `blast_radius` calls. Wired across `dev-workflow`, `quick-implement`, `research-task`, `debug`. Defense in depth — F12 catches the common case in-process, F13 catches the truly opaque case via orchestrator MCP.
+
+### Architectural notes
+
+- **Sub-agents remain MCP-blind by design.** The greenfield audit's #1 recommendation ("grant graphify tools to programmer/researcher") was deliberately rejected per the documented contract in `CLAUDE.md` (Orchestrator owns MCP; file-based handoff is load-bearing for resume/replay/telemetry). All Wave 2 fixes route through orchestrator-prose pre-steps + CLI-side fallbacks + hard decision-artifact gates. The architectural contract is preserved; the workflows are just better instrumented.
+- **Three-layer defense against empty-symbol cascade**: (1) `extractTopic` PascalCase extraction (existing); (2) `extractTopic` snake_case FTS fallback (F12, this release); (3) orchestrator `query_graph` recovery branch (F13, this release). Field-validated cases where each layer fires.
+
 ## [0.55.1] - 2026-05-26
 
 Three bug-fix patches discovered during deep diagnostic of two greenfield field audits (research-phase + implementation-phase). All fixes address silent failure modes that were degrading graphify integration and confusing health output. Smoke: **564 passed**, **0 failed** (+3 new gates).
