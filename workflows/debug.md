@@ -81,6 +81,40 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${
 
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the debugger dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; symbol-to-file mappings may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
+**Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar. Below the threshold (or graphify disabled): skip; debugger falls back to grep + stack trace.
+
+```bash
+DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
+TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
+SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
+if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
+  CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
+else
+  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+  echo "graphify_scan_prep: SKIP — $REASON"
+  printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
+fi
+```
+
+When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
+
+1. `mcp__devt-graphify__get_neighbors({symbol: "<CENTRAL_SYMBOL>", direction: "in", depth: 2})` — caller set for the bug's central symbol; debugger uses this to find blast-radius callers that may exhibit the same symptom.
+2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk for fix planning.
+
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. The debugger Reads this file when present. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above — debugger falls back to grep+stack trace.
+
+**Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
+
+```bash
+ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
+if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+  exit 1
+fi
+```
+
 <step name="init" gate="project context loaded">
 ## Step 1: Initialize
 
@@ -110,6 +144,7 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <scope_hint>{scope_hint_json}</scope_hint>
 <scope_trust>{scope_trust_json}</scope_trust>
+<graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed caller set + blast radius for the bug's central symbol. When absent, .devt/state/graphify-skip-reason.txt explains why.</graph_impact>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>

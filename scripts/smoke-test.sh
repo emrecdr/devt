@@ -5877,6 +5877,22 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F7: graphify_scan_prep + assert-graphify-decision present in research-task + debug workflows
+F7_OK=0
+for wf in workflows/research-task.md workflows/debug.md; do
+  if /usr/bin/grep -q "graphify_scan_prep: ACTIVE" "$ROOT/$wf" \
+     && /usr/bin/grep -q "graphify_scan_prep: SKIP" "$ROOT/$wf" \
+     && /usr/bin/grep -q "state assert-graphify-decision" "$ROOT/$wf" \
+     && /usr/bin/grep -q "graph-impact.md if it exists" "$ROOT/$wf"; then
+    F7_OK=$((F7_OK + 1))
+  fi
+done
+if [ "$F7_OK" -eq 2 ]; then
+  pass "F7: graphify_scan_prep + decision-gate + dispatch graph_impact reference in research-task + debug"
+else
+  fail "F7: scan_prep wiring missing in $((2 - F7_OK)) of 2 workflows (research-task, debug)"
+fi
+
 # F1: health drops update field when cached.installed != current VERSION
 F1_TMP=$(mktemp -d)
 mkdir -p "$F1_TMP/.devt/rules" "$F1_TMP/.devt/state"

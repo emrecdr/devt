@@ -72,6 +72,40 @@ The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it
 
 The fourth call caches `scope_hint_json` for the researcher dispatch — paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
 
+**Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar (greenfield-api forensic). Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
+
+```bash
+DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
+TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
+SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
+if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
+  CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
+else
+  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+  echo "graphify_scan_prep: SKIP — $REASON"
+  printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
+fi
+```
+
+When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
+
+1. `mcp__devt-graphify__get_neighbors({symbol: "<CENTRAL_SYMBOL>", direction: "in", depth: 2})` — caller set for the topic's central symbol; researcher uses this to find existing usage patterns instead of grep-discovering them.
+2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk.
+
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. The researcher Reads this file when present. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above and no MCP call is made — researcher falls back to grep+scope_hint.
+
+**Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
+
+```bash
+ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
+if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+  exit 1
+fi
+```
+
 Read .devt/rules/ for project conventions.
 Read CLAUDE.md if it exists.
 Read .devt/state/decisions.md if it exists (from /devt:clarify).
@@ -108,6 +142,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 </governing_rules>
 <scope_hint>{scope_hint_json}</scope_hint>
 <scope_trust>{scope_trust_json}</scope_trust>
+<graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed caller set + blast radius for the topic's central symbol. When absent, .devt/state/graphify-skip-reason.txt explains why (orchestrator already wrote one of these before dispatch).</graph_impact>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>
 <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
