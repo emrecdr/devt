@@ -269,6 +269,8 @@ SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
 if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
   CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
   echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
+elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
+  echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
 else
   REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
   echo "graphify_scan_prep: SKIP — $REASON"
@@ -282,6 +284,8 @@ When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP 
 2. `mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})` — aggregate structural risk.
 
 Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Caller set (get_neighbors)` / `## Blast radius`. The subsequent scan / architect / implement steps will Read this file. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
+
+**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the F12 snake_case fallback also missed). Orchestrator MUST first call `mcp__devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results so the audit trail is explicit about how CENTRAL_SYMBOL was derived. The assert-graphify-decision gate below still requires either graph-impact.md or graphify-skip-reason.txt — recovery succeeds by producing the former.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 

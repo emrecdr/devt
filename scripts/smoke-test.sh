@@ -5877,6 +5877,21 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F13: graphify_scan_prep has RECOVERY branch in all 4 workflows (orchestrator fallback when symbols=0)
+F13_OK=0
+for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md; do
+  if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$ROOT/$wf" \
+     && /usr/bin/grep -q "query_graph(task_text)" "$ROOT/$wf" \
+     && /usr/bin/grep -q "Fuzzy symbol resolution" "$ROOT/$wf"; then
+    F13_OK=$((F13_OK + 1))
+  fi
+done
+if [ "$F13_OK" -eq 4 ]; then
+  pass "F13: RECOVERY branch + orchestrator query_graph fallback wired in all 4 scan_prep workflows"
+else
+  fail "F13: RECOVERY branch missing in $((4 - F13_OK)) of 4 workflows"
+fi
+
 # F12: extractTopic falls back to graphifyQuery for snake_case keywords when symbols are empty
 F12_OUT=$(node -e '
 const pf = require("'"$ROOT"'/bin/modules/preflight.cjs");
