@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-05-26
+
+Wave 3 — memory pipeline + state hygiene + graphify depth. Twelve atomic fixes across two themes: (a) close the silent capture/promotion leak surfaced by greenfield field validation, (b) advance graphify integration depth from "data ingested at workflow boundaries" to "multi-tier drill-down with structural-risk surfacing". Smoke: **594 passed**, **0 failed** (+25 gates over v0.56.0's 569).
+
+### Memory pipeline (capture → harvest → promote)
+
+- **F4** — `state assert-claude-mem-harvest` decision-artifact gate. Mirrors `assertGraphifyDecision` pattern: exactly ONE of `claude-mem-harvest.md` or `claude-mem-skipped.txt` MUST exist after the orchestrator's pre-step in `dev-workflow` / `quick-implement` / `lesson-extraction`. Closes the silent-skip leak where greenfield's `_suggestions.md` accumulated only graphify god-nodes despite dozens of workflows running. Prose clarified to call both `mcp__plugin_claude-mem_mcp-search__search` AND `get_observations` (the bare search returns Title only).
+- **F5** — `#KNOWLEDGE-CANDIDATE` capture instruction added to 5 agent body files (researcher, code-reviewer, debugger, architect, programmer). Target: `.devt/state/scratchpad.md` (NOT primary artifact — discovery.cjs:62 scans scratchpad). Each tag passes the 5-filter test: specificity, durability, non-obviousness, evidence, actionability.
+- **F5b** — Knowledge-candidate dispatch reinforcement in 7 workflow dispatch task blocks. Field-validated necessity: F5 alone produced ZERO tags in greenfield's PR #370 5-lane review because the agent-body instruction wasn't load-bearing in dispatch context. Reinforcement makes it explicit in the `<task>` block.
+- **F6** — Conditional auto-curator on `/devt:review` + `/devt:debug`. Opt-in via `memory.auto_curator_on_review: false` default. Fires curator dispatch at workflow end when `_suggestions.md` has ≥3 candidates AND last curator run ≥7d ago. Cooldown tracked in `.devt/state/last-curator-run.txt` (RESET_EXEMPT — survives `/devt:cancel-workflow`).
+
+### Graphify depth (3-layer defense ladder + structural risk surfacing)
+
+- **F16** — Multi-tier drill-down. Re-orders the existing scan_prep MCP sequence in 4 workflows AND adds post-impact-plan drill-down in code-review.md. After `blast_radius` returns, orchestrator auto-calls `get_neighbors` on the top-3 direct dependents. Field rationale: greenfield's PR #370 review made ONE MCP call total while 5 lane subagents grep-hunted for caller sets that 3 cheap MCP calls would have surfaced.
+- **F17** — God-node auto-check on diff files. New CPU-local CLI `graphify check-large-files <file>... [--edge-threshold=50]` maps diff files back to graph nodes via `source_file` metadata and reports max-degree symbol per file. Catches god-nodes the symbol-anchored anchor list missed (greenfield: routes.py at 2,463 LOC was almost certainly a god-node but missed because the anchor list didn't include module-level identifiers). Workflow appends a `## God-node warning` section to `graph-impact.md` when any file crosses threshold.
+- **F18** — Content-quality signal in `assert-graphify-decision`. Adds `file_bytes`, `section_count`, `thin_content` to the gate response. Signal-only (gate still passes) — workflows/auditors can flag thin payloads without blocking legitimate-empty results.
+
+### Bug fixes from field validation
+
+- **F14** — `state read` deep-parses `_json`-suffixed keys. Field failure (greenfield 2026-05-26): `STATE=$(state read); echo "$STATE" | jq` broke with "control characters from U+0000 through U+001F" because zsh's `echo` interpreted embedded `\n` escapes in nested string values. After F14, `_json` keys are real arrays/objects in the JSON output — no embedded escape sequences for shells to misinterpret.
+
+### State hygiene
+
+- **F15** — Removed 3 dead canonical file entries (`regression-baseline.md`, `memory-suggestions.md`, `pr-impact.md`) after full-codebase grep confirmed zero writers and zero readers. Updated 4 doc/skill references that pointed to the legacy `pr-impact.md` alias.
+- **F10** — Slug-variant patterns + `review-scope.md` rename + `state history` CLI + collision gate. Adds `^plan-<slug>.md`, `^research-<slug>.md`, `^spec-<slug>.md`, `^debug-{context,investigation,summary}-<slug>.md` to `STATE_FILE_CONTRACT.allowed_patterns`. Renames `review-scope.md` → `code-review-input.md` to eliminate collision with `^review-<slug>.md$` pattern. New `state history` subcommand walks `.devt/state/.archive/<ts>/` and emits archived workflow.yaml tasks for browseable history. Collision smoke gate prevents future drift.
+
+### Architectural notes
+
+- All Wave 3 fixes preserve the documented contract: orchestrator owns MCP; sub-agents are MCP-blind by design. F16/F17/F18 add depth via CLI-side functions + orchestrator-prose pre-steps + hard decision-artifact gates — no sub-agent MCP grants.
+- Three-layer defense against empty-symbol cascades is now structurally complete: (1) PascalCase text extraction, (2) snake_case FTS fallback (F12 from v0.56.0), (3) orchestrator `query_graph` recovery (F13 from v0.56.0).
+- Three-layer defense against silent capture leaks: (1) agent prompts request tags (F5), (2) dispatch reinforces (F5b), (3) hard gate catches harvest-skip (F4).
+
 ## [0.56.0] - 2026-05-26
 
 Graphify completion wave (Wave 2). Closes the four orchestrator-skip + cascade-failure patterns that left subagents flying blind on healthy graphs across greenfield field audits. Architecturally bounded — sub-agents remain MCP-blind by design; all fixes route through orchestrator-prose pre-steps + CLI-side fallbacks + hard decision-artifact gates. Smoke: **569 passed**, **0 failed** (+5 new gates over v0.55.1's 564 baseline).
