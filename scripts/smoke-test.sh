@@ -5877,6 +5877,24 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F12: extractTopic falls back to graphifyQuery for snake_case keywords when symbols are empty
+F12_OUT=$(node -e '
+const pf = require("'"$ROOT"'/bin/modules/preflight.cjs");
+// Inject a fake graphifyQuery that resolves "tablet_communication" to a domain symbol.
+const fakeQ = (text, opts) => {
+  if (text === "tablet_communication") {
+    return { source: "graphify", results: [{ label: "TabletCommService", id: "n1" }] };
+  }
+  return { source: "graphify", results: [] };
+};
+const t = pf.extractTopic("audit tablet_communication permission flow", { graphifyQuery: fakeQ });
+console.log(JSON.stringify(t.symbols));')
+if echo "$F12_OUT" | /usr/bin/grep -q "TabletCommService"; then
+  pass "F12: extractTopic FTS fallback resolves snake_case keywords via graphifyQuery injection"
+else
+  fail "F12: snake_case fallback did not resolve — got symbols=$F12_OUT"
+fi
+
 # F8a: preflight sidecar emits god_nodes[] field (presence test — schema contract)
 F8_TMP=$(mktemp -d)
 mkdir -p "$F8_TMP/.devt/rules" "$F8_TMP/.devt/state"

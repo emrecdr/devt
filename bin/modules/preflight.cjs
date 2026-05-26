@@ -316,6 +316,33 @@ function extractTopic(taskText, opts = {}) {
     words.filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !domainSet.has(w) && !symbolLower.has(w))
   )).sort();
 
+  // Service-directory fallback. Field case (greenfield GF-543): "tablet_communication
+  // permission" returned 0 symbols because tablet_communication is a snake_case
+  // directory name, not a PascalCase identifier. Without this fallback the
+  // scan_prep cascade fails (symbols=0 → blast=skip → impact=skip → subagent blind).
+  // When `opts.graphifyQuery` is injected and text+diff symbols are empty, resolve
+  // snake_case keywords (foo_bar / foo_bar_baz) via FTS against the live graph.
+  // Cap at 3 candidate queries — too many pollutes scope_hint and dominates cost.
+  const graphifyQuery = typeof opts.graphifyQuery === "function" ? opts.graphifyQuery : null;
+  if (symbols.length === 0 && graphifyQuery) {
+    const candidates = Array.from(new Set(
+      words.filter(w => /^[a-z][a-z0-9]+(_[a-z0-9]+)+$/.test(w) && !STOP_WORDS.has(w))
+    )).slice(0, 3);
+    for (const cand of candidates) {
+      let r;
+      try { r = graphifyQuery(cand, { limit: 2 }); } catch { continue; }
+      if (!r || !Array.isArray(r.results)) continue;
+      for (const node of r.results) {
+        const label = (node && (node.label || node.id)) || null;
+        if (!label) continue;
+        if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
+          seen.add(label);
+          symbols.push(label);
+        }
+      }
+    }
+  }
+
   return { domains, symbols, keywords, raw: text };
 }
 
@@ -713,7 +740,10 @@ function generate(taskText, opts) {
   // when nothing has changed — extractTopic still produces text-derived
   // symbols in that case.
   const diffSymbols = extractDiffSymbols();
-  const topic = extractTopic(taskText, { gitDiffSymbols: diffSymbols });
+  const topic = extractTopic(taskText, {
+    gitDiffSymbols: diffSymbols,
+    graphifyQuery: (text, qOpts) => graphify.queryGraph(text, qOpts),
+  });
 
   // Run lanes
   const A = laneA(topic);
