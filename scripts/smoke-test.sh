@@ -5877,6 +5877,58 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F4: state assert-claude-mem-harvest gate + workflow wiring
+# 4a — CLI gate: missing artifacts → ok:false; either artifact present → ok:true
+F4_TMP=$(mktemp -d)
+mkdir -p "$F4_TMP/.devt/state"
+printf 'created_at: "2026-01-01T00:00:00Z"\nactive: true\n' > "$F4_TMP/.devt/state/workflow.yaml"
+F4A_OUT=$(cd "$F4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null)
+if echo "$F4A_OUT" | /usr/bin/grep -q '"ok": *false'; then
+  pass "F4a: assert-claude-mem-harvest BLOCKS when neither artifact exists"
+else
+  fail "F4a: gate didn't block on missing artifacts — got: $F4A_OUT"
+fi
+# Write skip artifact → gate auto-passes
+echo "test reason" > "$F4_TMP/.devt/state/claude-mem-skipped.txt"
+F4A_OK=$(cd "$F4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null)
+if echo "$F4A_OK" | /usr/bin/grep -q '"ok": *true'; then
+  pass "F4b: assert-claude-mem-harvest PASSES with claude-mem-skipped.txt present"
+else
+  fail "F4b: gate didn't pass with skipped.txt — got: $F4A_OK"
+fi
+# Both artifacts → mutual exclusion violation → blocks
+echo "harvest content" > "$F4_TMP/.devt/state/claude-mem-harvest.md"
+F4A_BOTH=$(cd "$F4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null)
+if echo "$F4A_BOTH" | /usr/bin/grep -q '"ok": *false' && echo "$F4A_BOTH" | /usr/bin/grep -q "mutually exclusive"; then
+  pass "F4c: assert-claude-mem-harvest BLOCKS when both artifacts present (mutual exclusion)"
+else
+  fail "F4c: didn't block on both artifacts — got: $F4A_BOTH"
+fi
+# No workflow.yaml → auto-pass
+rm -rf "$F4_TMP/.devt/state"
+mkdir -p "$F4_TMP/.devt/state"
+F4A_NOWF=$(cd "$F4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null)
+if echo "$F4A_NOWF" | /usr/bin/grep -q '"ok": *true' && echo "$F4A_NOWF" | /usr/bin/grep -q "no workflow.yaml"; then
+  pass "F4d: assert-claude-mem-harvest auto-passes when no workflow.yaml exists"
+else
+  fail "F4d: didn't auto-pass without workflow.yaml — got: $F4A_NOWF"
+fi
+rm -rf "$F4_TMP"
+# F4e — Workflow wiring: 3 workflows have the gate + get_observations clarification
+F4E_OK=0
+for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/lesson-extraction.md; do
+  if /usr/bin/grep -q "state assert-claude-mem-harvest" "$ROOT/$wf" \
+     && /usr/bin/grep -q "get_observations" "$ROOT/$wf" \
+     && /usr/bin/grep -q "DECISION-ARTIFACT REQUIRED" "$ROOT/$wf"; then
+    F4E_OK=$((F4E_OK + 1))
+  fi
+done
+if [ "$F4E_OK" -eq 3 ]; then
+  pass "F4e: claude-mem decision-artifact gate + get_observations clarification in dev/quick/lesson workflows"
+else
+  fail "F4e: gate wiring missing in $((3 - F4E_OK)) of 3 workflows"
+fi
+
 # F13: graphify_scan_prep has RECOVERY branch in all 4 workflows (orchestrator fallback when symbols=0)
 F13_OK=0
 for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md; do

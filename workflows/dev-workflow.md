@@ -1370,20 +1370,33 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=
 
 This step runs for ALL workflows regardless of complexity tier or retro/curator skip flags. It harvests `#KNOWLEDGE-CANDIDATE` scratchpad tags + `.devt/state/decisions.md` DEC-xxx entries + Graphify god-nodes (when graphify-out/GRAPH_REPORT.md exists) + claude-mem MCP observations (when persisted by the orchestrator pre-step below) into `.devt/memory/_suggestions.md`. Curator review of these proposals is gated separately (see Step 9b); the harvest itself is intentionally NOT skippable so observations from quick/simple workflows are buffered for the next curator pass.
 
-**Orchestrator pre-step (claude-mem MCP).** If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session, call it with `query=${task}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with three row types: observations (numeric `#NNNN` ID), sessions (`#SNNN` ID), and prompts. Extract ONLY observation rows and Write `.devt/state/claude-mem-harvest.md` with one line each in this canonical format:
+**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught.
 
-```
-- [decision] <title>: <body>
-- [discovery] <title>: <body>
-```
+If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session:
+1. Call `mcp__plugin_claude-mem_mcp-search__search` with `query=${task}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with table-row observations (`| #NNNN | time | <emoji> | Title | ~tokens |`) grouped by source file.
+2. For each observation row with emoji ⚖️ (decision) or 🔵 (discovery): fetch the body via `mcp__plugin_claude-mem_mcp-search__get_observations({ids: [...]})` — the bare `search` response carries only Title, not body, so without `get_observations` the curator's evidence filter rejects the candidate. Batch IDs into one `get_observations` call for efficiency.
+3. Write `.devt/state/claude-mem-harvest.md` with one line each in canonical format:
 
-Map the `T` emoji column to obs_type: ⚖️ → `decision`, 🔵 → `discovery`. Drop rows with any other emoji (those are bugfix / feature / refactor / change — session telemetry, not memory candidates). Skip silently when the MCP tool is unavailable, returns zero observations, or errors. The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
+   ```
+   - [decision] <title>: <body>
+   - [discovery] <title>: <body>
+   ```
 
-Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report/claude-mem harvest). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
+   Map emoji → obs_type: ⚖️ → `decision`, 🔵 → `discovery`. Drop rows with any other emoji (bugfix / feature / refactor / change — session telemetry, not memory candidates). The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
+
+If the MCP tool is unavailable, returns zero observations, or errors:
+- Write `.devt/state/claude-mem-skipped.txt` with a one-line reason (e.g., `"mcp_unavailable"` or `"zero_observations"` or `"error: <message>"`). This is the decision-artifact that signals the gate the orchestrator *did* consider the pre-step.
 
 ```bash
+HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
+if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+  exit 1
+fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
 ```
+
+Harvest is cheap (~10ms — pure filesystem reads of scratchpad/decisions/graphify report/claude-mem harvest). It NEVER writes permanent memory docs — only a curator-reviewable proposal report.
 
 The `|| true` is intentional: harvest is best-effort. A missing `.devt/memory/` directory or empty observation set produces a 0-issue report. We never fail a workflow because harvest had nothing to find.
 

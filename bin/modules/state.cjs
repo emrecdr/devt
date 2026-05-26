@@ -735,7 +735,7 @@ const STATE_FILE_CONTRACT = {
     "arch-triage.json", "scanner-output.txt",
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
-    "claude-mem-harvest.md", "memory-suggestions.md",
+    "claude-mem-harvest.md", "claude-mem-skipped.txt", "memory-suggestions.md",
     "continue-here.md",         // /devt:pause output (paired with handoff.json)
     "graph-impact.md", "pr-impact.md",
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
@@ -1309,6 +1309,49 @@ function assertPreflightFresh() {
   };
 }
 
+// Decision-artifact gate for the claude-mem harvest pre-step. Mirrors
+// assertGraphifyDecision pattern: workflow contract is "EXACTLY ONE of
+// claude-mem-harvest.md OR claude-mem-skipped.txt MUST exist after the
+// orchestrator's pre-step in context_init". Without enforcement, orchestrators
+// under context pressure silently skip the pre-step and discovery never sees
+// claude-mem observations — field-validated leak where greenfield's
+// _suggestions.md accumulated only graphify god-nodes (zero claude-mem entries)
+// despite dozens of workflows running.
+//
+// When no workflow is active, the gate auto-passes (the assertion is about
+// orchestrator obedience to the workflow contract, not about claude-mem
+// being installed).
+function assertClaudeMemHarvest() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const workflowPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(workflowPath)) {
+    return { ok: true, reason: "no workflow.yaml — gate does not apply" };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const harvestPath = path.join(dir, "claude-mem-harvest.md");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const skippedPath = path.join(dir, "claude-mem-skipped.txt");
+  const haveHarvest = fs.existsSync(harvestPath);
+  const haveSkipped = fs.existsSync(skippedPath);
+  if (haveHarvest && haveSkipped) {
+    return {
+      ok: false,
+      reason: "both claude-mem-harvest.md AND claude-mem-skipped.txt exist — mutually exclusive; orchestrator wrote both",
+    };
+  }
+  if (!haveHarvest && !haveSkipped) {
+    return {
+      ok: false,
+      reason: "neither claude-mem-harvest.md nor claude-mem-skipped.txt exists — orchestrator skipped the claude-mem pre-step in context_init",
+    };
+  }
+  return {
+    ok: true,
+    file: haveHarvest ? "claude-mem-harvest.md" : "claude-mem-skipped.txt",
+  };
+}
+
 // Extract --flag <value> from a positional args array. Returns null when absent.
 function _getFlag(args, name) {
   if (!Array.isArray(args)) return null;
@@ -1369,9 +1412,11 @@ function run(subcommand, args) {
       return assertGraphifyDecision();
     case "assert-preflight-fresh":
       return assertPreflightFresh();
+    case "assert-claude-mem-harvest":
+      return assertClaudeMemHarvest();
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest`,
       );
   }
 }
@@ -1390,6 +1435,7 @@ module.exports = {
   validateConsistency,
   assertGraphifyDecision,
   assertPreflightFresh,
+  assertClaudeMemHarvest,
   describeMismatch,
   getStateDir,
   ensureStateDir,
