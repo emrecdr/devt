@@ -288,6 +288,14 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     touched by your findings, cross-reference them as you write each finding's remediation. Use Grep/Read
     to validate specific code lines that the map points to. When `graphify-skip-reason.txt` exists, no
     graph data is available — proceed with Grep+Read review normally.
+
+    **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing review.md):
+    Per your agent body's `knowledge_candidates` step, if this review surfaces non-obvious patterns
+    worth promoting to permanent memory (recurring code smell, undocumented invariant, "we always do X
+    because Y" rule, REJ-tombstone-worthy anti-pattern), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Skip trivial findings
+    or anything already in CLAUDE.md / .devt/rules/. Each tag passes the 5-filter test: specificity,
+    durability, non-obviousness, evidence, actionability. Even when none qualify, surface that
+    decision in your review.md ("no knowledge candidates emerged — all findings were code-local").
   </task>
   Write review to .devt/state/review.md
 ")

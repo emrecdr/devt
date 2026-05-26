@@ -5936,6 +5936,23 @@ else
 fi
 rm -rf "$F14_TMP"
 
+# F5b: #KNOWLEDGE-CANDIDATE reinforcement in 5 workflow dispatch task blocks
+# Field validation (greenfield 2026-05-26 PR #370 review): agent-body instruction at line ~190 wasn't
+# enforced — 5 lane subagents wrote zero tags. Reinforcing in the task block makes it load-bearing.
+F5B_OK=0
+for wf in workflows/code-review.md workflows/research-task.md workflows/debug.md workflows/dev-workflow.md workflows/quick-implement.md; do
+  if /usr/bin/grep -q "Capture knowledge candidates" "$ROOT/$wf" \
+     && /usr/bin/grep -q "load-bearing.*not optional" "$ROOT/$wf" \
+     && /usr/bin/grep -q "#KNOWLEDGE-CANDIDATE:" "$ROOT/$wf"; then
+    F5B_OK=$((F5B_OK + 1))
+  fi
+done
+if [ "$F5B_OK" -eq 5 ]; then
+  pass "F5b: knowledge-candidate dispatch reinforcement in all 5 agent-dispatching workflows"
+else
+  fail "F5b: dispatch reinforcement missing in $((5 - F5B_OK)) of 5 workflows"
+fi
+
 # F5: #KNOWLEDGE-CANDIDATE prompt addition in 5 agent files
 F5_OK=0
 for ag in agents/researcher.md agents/code-reviewer.md agents/debugger.md agents/architect.md agents/programmer.md; do

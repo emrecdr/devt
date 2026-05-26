@@ -528,7 +528,10 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
-  <task>Research implementation approaches for: {task_description}</task>
+  <task>Research implementation approaches for: {task_description}
+
+  **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing research.md): per your `knowledge_candidates` step, if investigation surfaces non-obvious facts worth promoting to permanent memory (recurring trap, undocumented constraint, verified rule of thumb, "why does the codebase do it this way" pattern), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
+  </task>
   Write findings to .devt/state/research.md
 ")
 ```
@@ -898,7 +901,10 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
-  <task>{task_description}</task>
+  <task>{task_description}
+
+  **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing impl-summary.md): per your `knowledge_candidates` step, if implementation surfaces non-obvious patterns worth promoting (hidden constraint discovered mid-flight, "must always do X" verified empirically, existing invariant that took grep-archaeology to find), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
+  </task>
   Write summary to .devt/state/impl-summary.md
 ")
 ```
