@@ -898,6 +898,47 @@ function godNodes(limit = 10) {
   }));
 }
 
+// F17 — Check whether files in the diff scope are graphify god-nodes.
+// Field rationale (greenfield 2026-05-26): routes.py at 2,463 LOC was almost
+// certainly a god node, but symbol-anchored scan_prep missed it because the
+// anchor list didn't include routes.py module-level symbols. This function
+// maps file paths back to graph nodes (via `source_file` metadata) and reports
+// the max-degree symbol per file — orchestrators can flag any file above
+// `edgeThreshold` (default 50) as a god-node candidate for the review.
+//
+// Returns [{file, max_edges, top_symbol, is_god_node}] sorted by max_edges desc.
+// Files with no graph nodes are omitted (no signal to report). When loadGraph
+// fails the function returns [] — the workflow proceeds without F17 surface.
+function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
+  const loaded = loadGraph();
+  if (!loaded.ok) return [];
+  const { nodeMap, inc, out } = loaded.cache.adj;
+  // file basename → top match (deterministic dedup so absolute/relative paths
+  // collapse to the same file row). We match on basename to handle the common
+  // case where diff entries are relative paths but graph source_file is
+  // absolute (or vice versa).
+  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  const perFile = new Map(); // basename -> { max_edges, top_symbol, file }
+  for (const [id, node] of nodeMap) {
+    const sf = node && node.source_file;
+    if (!sf) continue;
+    const bn = path.basename(sf);
+    if (!wantBasenames.has(bn)) continue;
+    const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
+    const cur = perFile.get(bn);
+    if (!cur || degree > cur.max_edges) {
+      perFile.set(bn, { file: sf, max_edges: degree, top_symbol: node.label || id });
+    }
+  }
+  const out_ = [];
+  for (const row of perFile.values()) {
+    out_.push({ ...row, is_god_node: row.max_edges >= edgeThreshold });
+  }
+  out_.sort((a, b) => b.max_edges - a.max_edges);
+  return out_;
+}
+
 /**
  * Return nodes belonging to a single graphify community. The Leiden clustering
  * step writes a `community: <int>` attribute on every node — same field used by
@@ -1064,10 +1105,18 @@ function run(subcommand, args) {
       json(godNodes(limit));
       return 0;
     }
+    case "check-large-files": {
+      const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
+      const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
+      const files = args.filter(a => !a.startsWith("--"));
+      if (files.length === 0) { process.stderr.write("Usage: graphify check-large-files <file>... [--edge-threshold=50]\n"); return 2; }
+      json(checkLargeFilesGodNodes(files, threshold));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files\n`
       );
       return 2;
   }
@@ -1100,6 +1149,7 @@ module.exports = {
   shortestPath,
   blastRadius,
   godNodes,
+  checkLargeFilesGodNodes,
   getCommunity,
   maybeRefresh,
   writeMemoryEntry,

@@ -5877,6 +5877,45 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F17: god-node auto-check on diff files — CLI returns deterministic per-file max-degree report
+F17_TMP=$(mktemp -d)
+mkdir -p "$F17_TMP/.devt" "$F17_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$F17_TMP/.devt/config.json"
+# Fake graph.json with one god-node file (routes.py at 88 edges) + one small file (helper.py at 3 edges)
+node -e '
+const fs=require("fs");
+const nodes=[];
+const links=[];
+const routesId="src/routes.py:big_handler";
+nodes.push({id:routesId, label:"big_handler", source_file:"src/routes.py"});
+for(let i=0;i<88;i++){ const callerId="caller"+i; nodes.push({id:callerId, label:callerId, source_file:"src/clients/c"+i+".py"}); links.push({source:callerId, target:routesId}); }
+const helperId="src/helper.py:tiny";
+nodes.push({id:helperId, label:"tiny", source_file:"src/helper.py"});
+for(let i=0;i<3;i++){ const cid="x"+i; nodes.push({id:cid, label:cid, source_file:"src/x"+i+".py"}); links.push({source:cid, target:helperId}); }
+fs.writeFileSync("'"$F17_TMP"'/graphify-out/graph.json", JSON.stringify({nodes,links,built_at_commit:"abc"}));'
+F17A=$(cd "$F17_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify check-large-files routes.py helper.py --edge-threshold=50 2>/dev/null)
+if echo "$F17A" | /usr/bin/grep -qE '"file":\s*"src/routes\.py"' \
+   && echo "$F17A" | /usr/bin/grep -qE '"is_god_node":\s*true' \
+   && echo "$F17A" | /usr/bin/grep -qE '"max_edges":\s*88'; then
+  pass "F17a: graphify check-large-files identifies routes.py as god-node (88 edges, threshold=50)"
+else
+  fail "F17a: god-node check failed — got: $F17A"
+fi
+# Helper file is below threshold → is_god_node=false
+if echo "$F17A" | node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8")); const h=r.find(x=>x.file==="src/helper.py"); process.exit((h && h.is_god_node===false && h.max_edges===3)?0:1);'; then
+  pass "F17b: small file (3 edges) below threshold → is_god_node=false"
+else
+  fail "F17b: small-file threshold logic wrong"
+fi
+rm -rf "$F17_TMP"
+# F17c — workflow wiring in code-review.md
+if /usr/bin/grep -q "graphify check-large-files" "$ROOT/workflows/code-review.md" \
+   && /usr/bin/grep -q "God-node warning" "$ROOT/workflows/code-review.md"; then
+  pass "F17c: code-review.md wires check-large-files CLI + appends God-node warning to graph-impact.md"
+else
+  fail "F17c: workflow wiring missing from code-review.md"
+fi
+
 # F16: multi-tier follow-up (post-blast_radius drill-down on top-3 dependents) in all 5 graphify workflows
 F16_OK=0
 F16_WORKFLOWS="workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md workflows/code-review.md"

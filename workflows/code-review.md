@@ -164,6 +164,26 @@ echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 
 **F16 — Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 highest-impact dependents from the response. Append each as a `## Drill-down: <DEP>` section to `graph-impact.md`. Field rationale (greenfield 2026-05-26 PR #370): one blast_radius call alone left 5 lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Skip the drill-down when fewer than 3 dependents are returned (small graph or leaf central symbol) — the appended section may be empty or partial. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
 
+**F17 — God-node auto-check on diff files.** After the tier executes (or even when it skipped), run a deterministic CPU-local check that catches god-nodes the symbol-anchored anchor list missed. The CLI maps each diff file back to graph nodes via `source_file` metadata and reports the max-degree symbol per file:
+
+```bash
+DIFF_FILES=$(git diff --name-only ${PRIMARY_BRANCH:-main}...HEAD 2>/dev/null | tr '\n' ' ')
+if [ -n "$DIFF_FILES" ]; then
+  GODNODE_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify check-large-files $DIFF_FILES --edge-threshold=50 2>/dev/null || echo '[]')
+  GOD_COUNT=$(echo "$GODNODE_CHECK" | jq '[.[] | select(.is_god_node)] | length')
+  if [ "$GOD_COUNT" != "0" ] && [ "$GOD_COUNT" != "" ]; then
+    {
+      echo ""
+      echo "## God-node warning"
+      echo ""
+      echo "$GODNODE_CHECK" | jq -r '.[] | select(.is_god_node) | "- `\(.file)` — `\(.top_symbol)` has \(.max_edges) edges; signature changes ripple to all callers. Prefer additive changes."'
+    } >> .devt/state/graph-impact.md
+  fi
+fi
+```
+
+Field rationale (greenfield 2026-05-26): `routes.py` at 2,463 LOC was almost certainly a god node, but the symbol-anchored anchor list missed it because the diff's PascalCase symbols (UserStatus, ConsentType) didn't include module-level identifiers from routes.py. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
+
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
 ```bash
