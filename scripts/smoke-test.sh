@@ -6157,6 +6157,13 @@ if echo "$F18B" | /usr/bin/grep -q '"thin_content": *false' \
 else
   fail "F18b: substantive-content signal wrong — got: $(echo "$F18B" | /usr/bin/head -c 200)"
 fi
+# F25 — B6 minimum-viable: drill_down_sections counted, under_three_drill_downs flagged for fewer than 3.
+F18C_DD=$(echo "$F18B" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(JSON.stringify({dd:j.drill_down_sections, u3:j.under_three_drill_downs}));' 2>/dev/null)
+if echo "$F18C_DD" | /usr/bin/grep -q '"dd":0' && echo "$F18C_DD" | /usr/bin/grep -q '"u3":true'; then
+  pass "F25 (B6): assert-graphify-decision exposes drill_down_sections=0 + under_three_drill_downs=true on no-drill-down file"
+else
+  fail "F25: B6 drill-down signal wrong — got: $F18C_DD"
+fi
 rm -rf "$F18_TMP"
 
 # F15: dead-file cleanup — confirm 3 retired canonical entries are gone from contract + state-audit evict list

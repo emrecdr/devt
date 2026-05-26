@@ -1255,25 +1255,40 @@ function assertGraphifyDecision() {
   // file_bytes + section_count (Markdown `## ` headings) so downstream tooling
   // can flag thin payloads as advisory — never block, since legitimate empty
   // results exist (e.g., leaf nodes with zero callers).
+  //
+  // B6 — drill-down count signal (signal-only, not blocking). F16 prescribes
+  // top-3 drill-down on direct_dependents but the bash gate only writes
+  // graph-impact.md without enforcing section structure. Field 2026-05-26:
+  // orchestrator drilled top-1 (ClientService) and skipped top-2/3. We count
+  // `## Drill-down:` sections and surface drill_down_sections +
+  // under_three_drill_downs so workflows / auditors can flag incomplete F16
+  // execution. Not enforced as BLOCK because legitimate small graphs may have
+  // fewer than 3 direct_dependents to drill into.
   const filePath = haveImpact ? graphImpactPath : skipReasonPath;
   let fileBytes = 0;
   let sectionCount = 0;
+  let drillDownSections = 0;
   try {
     fileBytes = fs.statSync(filePath).size;
     if (haveImpact && fileBytes > 0) {
       const content = fs.readFileSync(filePath, "utf8");
       const m = content.match(/^##\s+/gm);
       sectionCount = m ? m.length : 0;
+      const dm = content.match(/^##\s+Drill-down:/gim);
+      drillDownSections = dm ? dm.length : 0;
     }
   } catch { /* stat/read failure — leave zeros, gate still passes */ }
   const thin = haveImpact && fileBytes < 200;
+  const underThreeDrillDowns = haveImpact && drillDownSections < 3;
   return {
     ok: true,
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
     file_bytes: fileBytes,
     section_count: sectionCount,
+    drill_down_sections: drillDownSections,
     thin_content: thin,
+    under_three_drill_downs: underThreeDrillDowns,
   };
 }
 

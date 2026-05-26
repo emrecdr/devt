@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.57.4] - 2026-05-26
+
+Minimum-viable B6 — F16 top-3 drill-down enforcement (signal-only). Smoke: **602 passed**, **0 failed** (+1 new gate).
+
+### Added
+
+- **`drill_down_sections` + `under_three_drill_downs`** fields on `state assert-graphify-decision` response. Counts `## Drill-down:` headings in `graph-impact.md` and flags when fewer than 3 are present. Field rationale (greenfield 2026-05-26): orchestrator drilled top-1 dependent (ClientService) and skipped top-2/3. Signal-only — does NOT block; legitimate small graphs may have fewer than 3 direct_dependents to drill into. Downstream tooling / auditors can use the signal to surface incomplete F16 execution.
+- **F25 smoke gate** — verifies `drill_down_sections=0` + `under_three_drill_downs=true` on a substantive graph-impact.md with zero drill-down sections.
+
+### Why signal-only, not BLOCK
+
+A hard gate at ≥3 drill-downs would false-positive on legitimate cases:
+- Small project graphs with fewer than 3 direct_dependents
+- Leaf central symbols (no callers to drill into)
+- Single-tier graphify responses without drill-down section
+
+Combined with F18's `thin_content` + `section_count`, the assert response now carries 5 quality signals: `file_bytes`, `section_count`, `drill_down_sections`, `thin_content`, `under_three_drill_downs`. Workflows and auditors can build verdict logic on top without the gate making policy decisions about acceptable drill-down counts.
+
+### Still deferred
+
+- **B3 (inheritance edge filtering)** — blocked on graphify upstream `edge_type` metadata. No clean local heuristic.
+- **B6-full (hard-block on <3)** — needs verdict-design pass to handle small-graph false positives.
+
 ## [0.57.3] - 2026-05-26
 
 Field-validation bug-fix wave from greenfield WITH_CONCERNS verdict. Closes 4 of 6 audited bugs (B1, B2, B4, B5); defers 2 (B3, B6) with documented reasons. Smoke: **601 passed**, **0 failed** (+6 new gates).
