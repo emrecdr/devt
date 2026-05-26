@@ -1239,10 +1239,32 @@ function assertGraphifyDecision() {
       graphify_state: "ready",
     };
   }
+  // F18 — content-quality signal. The gate passes when one artifact exists,
+  // but workflows + auditors benefit from knowing whether graph-impact.md
+  // carries substantive content. Field observation (greenfield 2026-05-26):
+  // "I had no signal whether content was complete enough." We expose
+  // file_bytes + section_count (Markdown `## ` headings) so downstream tooling
+  // can flag thin payloads as advisory — never block, since legitimate empty
+  // results exist (e.g., leaf nodes with zero callers).
+  const filePath = haveImpact ? graphImpactPath : skipReasonPath;
+  let fileBytes = 0;
+  let sectionCount = 0;
+  try {
+    fileBytes = fs.statSync(filePath).size;
+    if (haveImpact && fileBytes > 0) {
+      const content = fs.readFileSync(filePath, "utf8");
+      const m = content.match(/^##\s+/gm);
+      sectionCount = m ? m.length : 0;
+    }
+  } catch { /* stat/read failure — leave zeros, gate still passes */ }
+  const thin = haveImpact && fileBytes < 200;
   return {
     ok: true,
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
+    file_bytes: fileBytes,
+    section_count: sectionCount,
+    thin_content: thin,
   };
 }
 

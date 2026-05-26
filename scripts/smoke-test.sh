@@ -5877,6 +5877,34 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F18: content-quality signal in assert-graphify-decision response
+F18_TMP=$(mktemp -d)
+mkdir -p "$F18_TMP/.devt/state" "$F18_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$F18_TMP/.devt/config.json"
+node -e 'require("fs").writeFileSync("'"$F18_TMP"'/graphify-out/graph.json", "{\"meta\":{},\"built_at_commit\":\"abc\"}")'
+# F18a — thin content: short file, no headings → thin_content=true
+echo "stub" > "$F18_TMP/.devt/state/graph-impact.md"
+F18A=$(cd "$F18_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F18A" | /usr/bin/grep -q '"thin_content": *true' \
+   && echo "$F18A" | /usr/bin/grep -q '"section_count": *0' \
+   && echo "$F18A" | /usr/bin/grep -q '"ok": *true'; then
+  pass "F18a: assert-graphify-decision flags thin_content=true on short graph-impact.md (still ok=true)"
+else
+  fail "F18a: thin_content signal wrong — got: $(echo "$F18A" | /usr/bin/head -c 200)"
+fi
+# F18b — substantive content: with sections + bytes >= 200 → thin_content=false
+node -e '
+const fs=require("fs"); const p="'"$F18_TMP"'/.devt/state/graph-impact.md";
+fs.writeFileSync(p,"# Graph Impact — test\n\n## Caller set (get_neighbors)\n"+("x".repeat(250))+"\n\n## Blast radius\nstuff\n");'
+F18B=$(cd "$F18_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F18B" | /usr/bin/grep -q '"thin_content": *false' \
+   && echo "$F18B" | /usr/bin/grep -q '"section_count": *2'; then
+  pass "F18b: assert-graphify-decision flags thin_content=false + counts ## sections (2) for substantive content"
+else
+  fail "F18b: substantive-content signal wrong — got: $(echo "$F18B" | /usr/bin/head -c 200)"
+fi
+rm -rf "$F18_TMP"
+
 # F15: dead-file cleanup — confirm 3 retired canonical entries are gone from contract + state-audit evict list
 F15_DEAD="regression-baseline.md memory-suggestions.md pr-impact.md"
 F15_FAILS=""
