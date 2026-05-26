@@ -1,16 +1,11 @@
 ---
 name: council
 description: >-
-  Pressure-test high-stakes engineering decisions through 5 advisors with distinct thinking
-  styles. They independently analyze, peer-review each other anonymously, and a chairman
-  synthesizes a verdict. MANDATORY TRIGGERS: 'council this', 'run the council', 'pressure-test',
-  'stress-test', 'red team this', "devil's advocate", 'second opinion on this', 'war room',
-  'debate this'. STRONG TRIGGERS (only when paired with a real engineering trade-off):
-  'should I use X or Y', 'is this the right approach', "I'm torn between", "I can't decide".
-  Do NOT trigger on factual lookups, syntax questions, single-line fixes, or when the user has
-  already decided and just wants confirmation. Distinct from strategic-analysis — the council
-  adds adversarial peer review and chairman synthesis for decisions where the user suspects
-  their first instinct is biased.
+  Pressure-tests high-stakes engineering decisions through 5 advisors with distinct thinking styles —
+  independent analysis, anonymous peer review, chairman synthesis. Use when the user says "council this",
+  "run the council", "pressure-test", "stress-test", "red team this", or "devil's advocate" on a real
+  engineering trade-off. Distinct from strategic-analysis — adds adversarial peer review for decisions
+  where the user suspects their first instinct is biased.
 allowed-tools: Bash Read Write Edit Grep Glob Skill Task
 ---
 

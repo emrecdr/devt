@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-05-26
+
+Skill description refactor — trims 8 verbose SKILL.md descriptions to follow the official [`What it does` + `When to use it` + `Key capabilities`] structure documented in *The Complete Guide to Building Skills for Claude* (page 11). Smoke: **595 passed**, **0 failed** (+1 new gate enforcing the 800-char limit).
+
+### Why
+
+Skill descriptions load into every Claude session via level-1 progressive disclosure (always in context). The 8 audited skills were 800–1,100 chars each (~200–275 tokens). One — `codebase-scan` — was over the official 1,024-char hard limit (1,045 chars). Together they cost ~2,000 tokens per session before any skill was triggered.
+
+### Changed
+
+- **`skills/codebase-scan/SKILL.md`** — description trimmed from 1,045 → ~430 chars. Was in violation of the official 1,024-char hard limit.
+- **`skills/complexity-assessment/SKILL.md`** — 1,028 → ~440 chars
+- **`skills/api-docs-fetcher/SKILL.md`** — 916 → ~400 chars
+- **`skills/scratchpad/SKILL.md`** — 885 → ~420 chars
+- **`skills/weekly-report/SKILL.md`** — 868 → ~390 chars
+- **`skills/council/SKILL.md`** — 867 → ~420 chars
+- **`skills/tdd-patterns/SKILL.md`** — 832 → ~370 chars
+- **`skills/lesson-extraction/SKILL.md`** — 825 → ~430 chars
+
+Each rewrite follows the official template: lead with what the skill does, name 3–5 specific trigger phrases users would say, end with a "Distinct from <sibling skill>" disambiguation. Removed: quoted-phrase enumeration (10–20 paraphrases → 3–5 canonical), negative-space "NOT for X" clauses (3–6 → 1 disambiguation line), implementation details that belong in skill body.
+
+### Added
+
+- **F19 smoke gate** — enforces all `skills/*/SKILL.md` descriptions stay under 800 chars (22% margin under the official 1,024-char hard limit). Catches future verbose-description drift before it lands.
+
+### Token savings
+
+- Per session: ~2,000 → ~600 tokens of skill metadata (≈ 1,400 tokens saved every session).
+- Compounds across every user and every session for the lifetime of the plugin.
+
 ## [0.57.0] - 2026-05-26
 
 Wave 3 — memory pipeline + state hygiene + graphify depth. Twelve atomic fixes across two themes: (a) close the silent capture/promotion leak surfaced by greenfield field validation, (b) advance graphify integration depth from "data ingested at workflow boundaries" to "multi-tier drill-down with structural-risk surfacing". Smoke: **594 passed**, **0 failed** (+25 gates over v0.56.0's 569).

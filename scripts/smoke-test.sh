@@ -5877,6 +5877,33 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F19: all SKILL.md descriptions stay under 800 chars (22% margin under the official 1024-char hard
+# limit per The Complete Guide to Building Skills for Claude, page 10). Catches verbose-description
+# drift that loads on every session via level-1 progressive disclosure (metadata always in context).
+F19_OVER=""
+for skill_dir in "$ROOT"/skills/*/; do
+  f="$skill_dir/SKILL.md"
+  [ -f "$f" ] || continue
+  DESC_LEN=$(node -e '
+    const fs = require("fs");
+    const m = fs.readFileSync(process.argv[1], "utf8").match(/^---\n([\s\S]*?)\n---/);
+    if (!m) { process.exit(0); }
+    const fm = m[1];
+    const mDesc = fm.match(/^description:\s*(>-?|>|\|-?|\|)?\s*\n?([\s\S]*?)(?=\n[a-z_-]+:|\n$)/m);
+    if (!mDesc) { process.exit(0); }
+    const raw = mDesc[2].split("\n").map(l => l.trim()).filter(Boolean).join(" ");
+    process.stdout.write(String(raw.length));
+  ' "$f")
+  if [ -n "$DESC_LEN" ] && [ "$DESC_LEN" -gt 800 ]; then
+    F19_OVER="$F19_OVER $(basename "$skill_dir")=$DESC_LEN"
+  fi
+done
+if [ -z "$F19_OVER" ]; then
+  pass "F19: all SKILL.md descriptions stay under 800 chars (22% margin under official 1024-char limit)"
+else
+  fail "F19: skills over 800-char description budget —$F19_OVER"
+fi
+
 # F10: slug-variant patterns + review-scope rename + state history CLI + collision gate
 # 10a — 4 new slug patterns present in STATE_FILE_CONTRACT.allowed_patterns
 F10A_OK=0

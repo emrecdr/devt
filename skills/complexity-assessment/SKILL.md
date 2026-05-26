@@ -1,16 +1,11 @@
 ---
 name: complexity-assessment
 description: >-
-  Use to assess how big or complex a task is BEFORE starting work — scores 5 dimensions (scope,
-  integration, infrastructure, dependencies, risk) to determine the tier (SIMPLE/STANDARD/COMPLEX) and
-  match the right workflow depth. Trigger on "how complex is this", "assess the scope", "what tier",
-  "is this a big change", "estimate effort", "how big of a change is this really", "is this a one-day
-  thing or a full sprint", "can I knock this out in an afternoon", "do we need a plan for this", "sounds
-  simple but", "bigger than it looks", "quantify the scope", "score the dimensions", "SIMPLE or COMPLEX",
-  "what workflow should we use", "realistic assessment of the scope", "before anyone touches code I need
-  to understand the size", "how should we approach this." This is about SIZING a task before starting —
-  not about choosing between implementation approaches (use strategic-analysis), not about reviewing
-  finished code (use code-review-guide), and not about scanning for existing code (use codebase-scan).
+  Sizes a task before work starts — scores 5 dimensions (scope, integration, infrastructure, dependencies,
+  risk) and selects the tier (SIMPLE / STANDARD / COMPLEX) that matches workflow depth. Use when the user
+  says "how complex is this", "what tier", "SIMPLE or COMPLEX", "do we need a plan for this", or "what
+  workflow should we use". Distinct from strategic-analysis (picks between approaches) and codebase-scan
+  (finds existing code).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 

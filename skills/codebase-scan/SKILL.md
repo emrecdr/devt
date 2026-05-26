@@ -1,16 +1,10 @@
 ---
 name: codebase-scan
 description: >-
-  MANDATORY before writing any new code. Scan the codebase for existing implementations, reusable utilities,
-  and established patterns to prevent duplication. Use whenever the user says "check if similar exists",
-  "before I build/create/add/implement", "search for existing", "look for reusable code", "find what we
-  already have", "is there already a", "don't want to duplicate", "explore the codebase", "what utilities
-  exist", "scan for patterns", "any existing code for", "check utils/shared/helpers", "extend instead of
-  building from scratch", "look around first", "see if we already have", or any variant of "before I start,
-  find what exists." Also triggers on "investigate how X works", "find where X is used", "what conventions
-  does the project follow." This is about DISCOVERING existing code before creating new code — not about
-  reviewing code quality (use code-review-guide), not about verifying completeness of finished work (use
-  verification-patterns), and not about assessing task size (use complexity-assessment).
+  Scans the codebase for existing implementations, reusable utilities, and established patterns before
+  writing new code. Use when the user says "check if X exists", "look for existing code", "before I
+  build/add Y", "find what we have for Z", or "investigate how X works". Distinct from code-review-guide
+  (reviews quality), verification-patterns (checks finished work), and complexity-assessment (sizes tasks).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
 ---
 
