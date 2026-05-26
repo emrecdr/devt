@@ -5877,6 +5877,42 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F6: conditional auto-curator wiring — config flag + threshold + cooldown + workflow steps
+# 6a — config DEFAULTS expose the 3 new memory.auto_curator_* keys
+F6A_OK=0
+for k in auto_curator_on_review auto_curator_min_candidates auto_curator_cooldown_days; do
+  if /usr/bin/grep -q "$k" "$ROOT/bin/modules/config.cjs"; then
+    F6A_OK=$((F6A_OK + 1))
+  fi
+done
+if [ "$F6A_OK" -eq 3 ]; then
+  pass "F6a: config DEFAULTS expose all 3 auto-curator keys (on_review, min_candidates, cooldown_days)"
+else
+  fail "F6a: missing $((3 - F6A_OK)) of 3 auto-curator config keys"
+fi
+# 6b — last-curator-run.txt is RESET_EXEMPT (cooldown survives state reset)
+if /usr/bin/grep -q '"last-curator-run\.txt"' "$ROOT/bin/modules/state.cjs"; then
+  pass "F6b: last-curator-run.txt is RESET_EXEMPT (cooldown survives state reset)"
+else
+  fail "F6b: last-curator-run.txt missing from RESET_EXEMPT set"
+fi
+# 6c — workflow wiring: code-review.md + debug.md both have auto_curator step + dispatch + cooldown gate
+F6C_OK=0
+for wf in workflows/code-review.md workflows/debug.md; do
+  if /usr/bin/grep -q "auto_curator: ACTIVE" "$ROOT/$wf" \
+     && /usr/bin/grep -q "auto_curator: SKIP" "$ROOT/$wf" \
+     && /usr/bin/grep -q "auto_curator: DISABLED" "$ROOT/$wf" \
+     && /usr/bin/grep -q "last-curator-run.txt" "$ROOT/$wf" \
+     && /usr/bin/grep -q 'subagent_type="devt:curator"' "$ROOT/$wf"; then
+    F6C_OK=$((F6C_OK + 1))
+  fi
+done
+if [ "$F6C_OK" -eq 2 ]; then
+  pass "F6c: auto-curator step wired in code-review.md + debug.md (ACTIVE/SKIP/DISABLED branches + cooldown + dispatch)"
+else
+  fail "F6c: auto-curator wiring missing in $((2 - F6C_OK)) of 2 workflows"
+fi
+
 # F17: god-node auto-check on diff files — CLI returns deterministic per-file max-degree report
 F17_TMP=$(mktemp -d)
 mkdir -p "$F17_TMP/.devt" "$F17_TMP/graphify-out"

@@ -60,6 +60,15 @@ const DEFAULTS = {
     // (.devt/memory) is automatically appended if not present, so curator writes
     // always have a destination.
     paths: null,
+    // F6 — Auto-curator on /devt:review + /devt:debug. When true, those
+    // workflows conditionally fire a curator dispatch at the end when
+    // _suggestions.md has >= auto_curator_min_candidates AND last curator
+    // run was >= auto_curator_cooldown_days ago. Tracks last run via
+    // .devt/state/last-curator-run.txt (RESET_EXEMPT). Default false —
+    // opt-in because curator dispatch costs ~3K tokens per fire.
+    auto_curator_on_review: false,
+    auto_curator_min_candidates: 3,
+    auto_curator_cooldown_days: 7,
   },
   // Graphify integration — optional AST symbol anchoring + MCP query layer.
   // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and

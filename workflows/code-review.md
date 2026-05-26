@@ -427,6 +427,62 @@ Route on `verdict`:
 
 </step>
 
+<step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
+
+**F6 — Conditional auto-curator.** When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh discovery harvest and fire a curator dispatch. Skipped silently otherwise — default `false` keeps the workflow cost-neutral for users who don't opt in.
+
+Decision logic (bash):
+
+```bash
+AUTO=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
+if [ "$AUTO" = "true" ]; then
+  MIN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_min_candidates 2>/dev/null | jq -r '.value // 3')
+  COOLDOWN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_cooldown_days 2>/dev/null | jq -r '.value // 7')
+  CANDIDATES=$(/usr/bin/grep -cE '^###\s+[⚖️🔵]' .devt/memory/_suggestions.md 2>/dev/null || echo 0)
+  LAST_RUN_FILE=.devt/state/last-curator-run.txt
+  COOLDOWN_OK=1
+  if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$(cat "$LAST_RUN_FILE")" "+%s" 2>/dev/null || echo 0)
+    NOW_EPOCH=$(date "+%s")
+    AGE_DAYS=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
+    if [ "$AGE_DAYS" -lt "$COOLDOWN" ]; then COOLDOWN_OK=0; fi
+  fi
+  if [ "$CANDIDATES" -ge "$MIN" ] && [ "$COOLDOWN_OK" = "1" ]; then
+    echo "auto_curator: ACTIVE — candidates=$CANDIDATES min=$MIN age=${AGE_DAYS:-never}d cooldown=${COOLDOWN}d"
+    # Refresh _suggestions.md from the latest scratchpad #KNOWLEDGE-CANDIDATE tags + decisions before dispatch
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
+    # Record run timestamp BEFORE dispatch so a curator crash doesn't trigger immediate re-runs
+    date -u "+%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
+  else
+    echo "auto_curator: SKIP — candidates=$CANDIDATES (need $MIN) cooldown_ok=$COOLDOWN_OK"
+  fi
+else
+  echo "auto_curator: DISABLED — memory.auto_curator_on_review=false (default; opt-in via .devt/config.json)"
+fi
+```
+
+When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
+
+```
+Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+  <context>
+    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
+  </context>
+  <task>
+    Auto-curator triggered by /devt:review post-review threshold (≥${MIN} candidates pending, last run ≥${COOLDOWN}d ago).
+    Evaluate ⚖️/🔵 entries in .devt/memory/_suggestions.md. For each that passes the 5-filter (Specificity, Durability,
+    Non-obviousness, Evidence, Actionability), present an AskUserQuestion proposal per memory-curation skill.
+    Accepted candidates land in .devt/memory/{decisions,concepts,flows,rejected}/.
+    Write .devt/state/curation-summary.md with verdicts per candidate (accepted / edited / rejected with reason).
+  </task>
+")
+```
+
+When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch — proceed to `present_findings`.
+
+</step>
+
 <step name="present_findings" gate="findings are reported to the user">
 
 Read `.devt/state/review.md` and present to the user:

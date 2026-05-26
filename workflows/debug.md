@@ -161,6 +161,55 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 ")
 </step>
 
+<step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
+
+**F6 — Conditional auto-curator.** Same gate as `/devt:review`. When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh harvest and fire curator dispatch. Skipped silently otherwise.
+
+```bash
+AUTO=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
+if [ "$AUTO" = "true" ]; then
+  MIN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_min_candidates 2>/dev/null | jq -r '.value // 3')
+  COOLDOWN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_cooldown_days 2>/dev/null | jq -r '.value // 7')
+  CANDIDATES=$(/usr/bin/grep -cE '^###\s+[⚖️🔵]' .devt/memory/_suggestions.md 2>/dev/null || echo 0)
+  LAST_RUN_FILE=.devt/state/last-curator-run.txt
+  COOLDOWN_OK=1
+  if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$(cat "$LAST_RUN_FILE")" "+%s" 2>/dev/null || echo 0)
+    NOW_EPOCH=$(date "+%s")
+    AGE_DAYS=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
+    if [ "$AGE_DAYS" -lt "$COOLDOWN" ]; then COOLDOWN_OK=0; fi
+  fi
+  if [ "$CANDIDATES" -ge "$MIN" ] && [ "$COOLDOWN_OK" = "1" ]; then
+    echo "auto_curator: ACTIVE — candidates=$CANDIDATES min=$MIN age=${AGE_DAYS:-never}d cooldown=${COOLDOWN}d"
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
+    date -u "+%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
+  else
+    echo "auto_curator: SKIP — candidates=$CANDIDATES (need $MIN) cooldown_ok=$COOLDOWN_OK"
+  fi
+else
+  echo "auto_curator: DISABLED — memory.auto_curator_on_review=false (default; opt-in via .devt/config.json)"
+fi
+```
+
+When ACTIVE, dispatch curator:
+
+```
+Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+  <context>
+    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
+  </context>
+  <task>
+    Auto-curator triggered by /devt:debug post-debug threshold (≥${MIN} candidates pending, last run ≥${COOLDOWN}d ago).
+    Evaluate ⚖️/🔵 entries in .devt/memory/_suggestions.md. For each that passes the 5-filter, present an
+    AskUserQuestion proposal per memory-curation skill. Accepted candidates land in
+    .devt/memory/{decisions,concepts,flows,rejected}/. Write .devt/state/curation-summary.md.
+  </task>
+")
+```
+
+</step>
+
 <step name="report" gate="results presented to user">
 ## Step 4: Report Results
 

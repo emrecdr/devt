@@ -717,6 +717,7 @@ const RESET_EXEMPT = new Set([
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
+  "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:cancel-workflow
 ]);
 
 // ---------------------------------------------------------------------------
@@ -750,7 +751,7 @@ const STATE_FILE_CONTRACT = {
     "arch-triage.json", "scanner-output.txt",
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
-    "claude-mem-harvest.md", "claude-mem-skipped.txt",
+    "claude-mem-harvest.md", "claude-mem-skipped.txt", "last-curator-run.txt",
     "continue-here.md",         // /devt:pause output (paired with handoff.json)
     "graph-impact.md",
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
