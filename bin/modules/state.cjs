@@ -334,6 +334,21 @@ function readState() {
   if (parsed.complexity && !parsed.tier) {
     parsed.tier = parsed.complexity;
   }
+  // Deep-parse `_json`-suffixed values so consumers don't have to. Field
+  // failure (greenfield 2026-05-26): `STATE=$(state read); echo "$STATE" | jq`
+  // broke because zsh's echo interpreted embedded `\n` escapes in nested
+  // string values, producing invalid JSON for downstream jq. With deep-parse,
+  // those keys hold real objects/arrays — no escape sequences to misinterpret.
+  for (const k of Object.keys(parsed)) {
+    if (!k.endsWith("_json")) continue;
+    const v = parsed[k];
+    if (typeof v !== "string" || !v) continue;
+    try {
+      parsed[k] = JSON.parse(v);
+    } catch {
+      // Keep as string on parse failure — defensive against malformed legacy data
+    }
+  }
   return parsed;
 }
 

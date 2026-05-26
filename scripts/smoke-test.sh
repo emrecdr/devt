@@ -5877,6 +5877,42 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F14: state read deep-parses _json-suffixed keys so echo "$STATE" | jq doesn't break on shell escape interp
+F14_TMP=$(mktemp -d)
+mkdir -p "$F14_TMP/.devt/state"
+# Synthesize workflow.yaml with embedded JSON in _json-suffixed keys
+cat > "$F14_TMP/.devt/state/workflow.yaml" <<'F14EOF'
+active: true
+phase: identify_scope
+scope_hint_json: "[\"NotFoundError\",\"QueryParams\",\"Page\"]"
+scope_trust_json: "{\"trust\":\"dense\",\"lag_commits\":0,\"fresh\":true}"
+memory_signal_json: "{\n  \"query\": \"em-dash — test\",\n  \"mode\": \"signal\"\n}"
+F14EOF
+F14_RAW=$(cd "$F14_TMP" && node "$ROOT/bin/devt-tools.cjs" state read 2>/dev/null)
+# A: type assertions — _json keys are now arrays/objects, not strings
+F14A=$(echo "$F14_RAW" | jq -c '{a:(.scope_hint_json|type),b:(.scope_trust_json|type),c:(.memory_signal_json|type)}' 2>/dev/null)
+if [ "$F14A" = '{"a":"array","b":"object","c":"object"}' ]; then
+  pass "F14a: state read deep-parses _json keys (scope_hint_json=array, scope_trust_json=object, memory_signal_json=object)"
+else
+  fail "F14a: deep-parse types wrong — got $F14A"
+fi
+# B: zsh echo round-trip — the field failure scenario
+F14B=$(cd "$F14_TMP" && STATE=$(node "$ROOT/bin/devt-tools.cjs" state read); echo "$STATE" | jq -c '.scope_hint_json[0]' 2>&1)
+if [ "$F14B" = '"NotFoundError"' ]; then
+  pass "F14b: STATE=\$(...); echo \"\$STATE\" | jq survives zsh-echo escape interpretation (greenfield field failure fixed)"
+else
+  fail "F14b: round-trip through shell still broken — got: $F14B"
+fi
+# C: malformed _json value stays as string (defensive)
+echo 'malformed_json: "not valid json {'\'' "' >> "$F14_TMP/.devt/state/workflow.yaml"
+F14C=$(cd "$F14_TMP" && node "$ROOT/bin/devt-tools.cjs" state read 2>/dev/null | jq -c '.malformed_json|type' 2>/dev/null)
+if [ "$F14C" = '"string"' ]; then
+  pass "F14c: malformed _json value stays as string (defensive against bad legacy data)"
+else
+  fail "F14c: malformed JSON not handled defensively — got: $F14C"
+fi
+rm -rf "$F14_TMP"
+
 # F5: #KNOWLEDGE-CANDIDATE prompt addition in 5 agent files
 F5_OK=0
 for ag in agents/researcher.md agents/code-reviewer.md agents/debugger.md agents/architect.md agents/programmer.md; do
