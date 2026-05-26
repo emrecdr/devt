@@ -602,7 +602,14 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
       if (matchedGods.length) {
         lines.push("**God-nodes touching this topic (high coupling — scope changes carefully):**");
         for (const g of matchedGods) {
-          lines.push(`- \`${g.symbol}\` — ${g.edge_count} edges`);
+          // Operational guidance — distinguish raw edge count from behavior the
+          // agent should adopt. Field audit (greenfield GF-543) showed agents
+          // ignored bare edge counts but modified signatures of 100+ edge nodes
+          // anyway. Reifying the implication makes the guidance load-bearing.
+          const guidance = g.edge_count >= 50
+            ? " — prefer adding new methods over modifying signatures; any signature change ripples to all callers"
+            : "";
+          lines.push(`- \`${g.symbol}\` — ${g.edge_count} edges${guidance}`);
         }
       }
       if (matchedConns.length) {
@@ -799,6 +806,16 @@ function generate(taskText, opts) {
     memoryIndexMissing = !fs.existsSync(path.join(findProjectRoot(), ".devt", "memory", "index.db"));
   } catch { memoryIndexMissing = false; }
 
+  // Top-N god-nodes for downstream consumers. graphify.godNodes() may have been
+  // called above when overlaying report.god_nodes; re-resolve here so the sidecar
+  // surfaces structured data even when the markdown brief omits god-node prose
+  // (e.g., topic doesn't textually match any god-node). Subagent dispatch
+  // templates inject this list as operational guidance — "X is a god-node with
+  // N edges; signature changes ripple to N sites". Cap at 3 — beyond that the
+  // signal/noise ratio in agent prompts degrades.
+  let topGods = [];
+  try { topGods = (graphify.godNodes(3) || []).slice(0, 3); } catch { /* empty */ }
+
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
     topic,
@@ -811,6 +828,7 @@ function generate(taskText, opts) {
     },
     graph_stats: graphStats,
     staleness,
+    god_nodes: topGods,
     memory_index_missing: memoryIndexMissing,
     rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
     generated_at: generatedAt,

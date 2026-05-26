@@ -5877,6 +5877,28 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F8a: preflight sidecar emits god_nodes[] field (presence test — schema contract)
+F8_TMP=$(mktemp -d)
+mkdir -p "$F8_TMP/.devt/rules" "$F8_TMP/.devt/state"
+echo '{}' > "$F8_TMP/.devt/config.json"
+for r in coding-standards.md testing-patterns.md quality-gates.md architecture.md; do echo "$r" > "$F8_TMP/.devt/rules/$r"; done
+F8A_OUT=$(cd "$F8_TMP" && node "$ROOT/bin/devt-tools.cjs" preflight generate "test topic" 2>/dev/null)
+if [ -f "$F8_TMP/.devt/state/preflight-brief.json" ] \
+   && jq -e 'has("god_nodes") and (.god_nodes | type == "array")' "$F8_TMP/.devt/state/preflight-brief.json" > /dev/null 2>&1; then
+  pass "F8a: preflight sidecar emits god_nodes[] field (schema contract)"
+else
+  fail "F8a: sidecar missing god_nodes[] field"
+fi
+rm -rf "$F8_TMP"
+
+# F8b: preflight.cjs source contains operational guidance string at the matched-gods rendering site
+if /usr/bin/grep -q "prefer adding new methods over modifying signatures" "$ROOT/bin/modules/preflight.cjs" \
+   && /usr/bin/grep -B2 "prefer adding new methods" "$ROOT/bin/modules/preflight.cjs" | /usr/bin/grep -q "edge_count >= 50"; then
+  pass "F8b: preflight.cjs renders operational guidance line for god-nodes with edge_count >= 50"
+else
+  fail "F8b: operational guidance string missing or not gated on edge_count >= 50 in preflight.cjs"
+fi
+
 # F7: graphify_scan_prep + assert-graphify-decision present in research-task + debug workflows
 F7_OK=0
 for wf in workflows/research-task.md workflows/debug.md; do
