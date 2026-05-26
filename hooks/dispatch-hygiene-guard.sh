@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Dispatch hygiene guard — PreToolUse hook on Task tool calls.
-# Advisory only: detects "raw dispatches" where the orchestrator dispatches a
-# devt:* subagent WITHOUT the workflow-managed context blocks (<scope_trust>,
-# <scope_hint>, <memory_signal>). Closes the failure mode where the orchestrator
-# rolls its own Task() fan-out and bypasses /devt:review entirely — all of
-# the Wave 1-4 protections (Graphify-first directive, impact-plan, telemetry)
-# live inside workflow dispatch templates, so a raw dispatch silently strips
-# every integration the workflow was supposed to inject.
+# Detects "raw dispatches" where the orchestrator dispatches a devt:* subagent
+# WITHOUT the workflow-managed context blocks (<scope_trust>, <scope_hint>,
+# <memory_signal>). Closes the failure mode where the orchestrator rolls its
+# own Task() fan-out and bypasses /devt:review entirely — all of the Wave 1-4
+# protections (Graphify-first directive, impact-plan, telemetry) live inside
+# workflow dispatch templates, so a raw dispatch silently strips every
+# integration the workflow was supposed to inject.
 #
-# Never blocks. Emits an advisory additionalContext block surfaced to the
-# orchestrator and appends one JSONL record to .devt/state/dispatch-warnings.jsonl
-# tagged source: "raw_dispatch" for /devt:forensics post-hoc analysis.
+# L1 — Behavior depends on `dispatch_hygiene_mode` in .devt/config.json:
+#   block (default) — hook returns {decision:"deny"} for investigative subagents
+#     (code-reviewer, programmer, verifier, researcher, debugger, architect,
+#     tester). Hard-blocks the dispatch. Curator/docs-writer/retro are exempt
+#     because they don't consume scope blocks.
+#   warn — hook returns additionalContext advisory; allows the call.
+#   off — hook is a no-op for raw dispatches.
+# Always appends a forensic JSONL record to .devt/state/dispatch-warnings.jsonl
+# regardless of mode, so /devt:forensics can analyze bypass attempts.
 #
 # Trigger condition: subagent_type matches /^devt:/ AND the prompt is MISSING
 # all of <scope_trust>, <scope_hint>, and <memory_signal> blocks. Having any
@@ -88,7 +94,54 @@ node -e "
     }
   } catch { /* forensic write failure must NEVER affect the hook */ }
 
-  // PreToolUse advisory — non-blocking. additionalContext surfaces to the LLM.
+  // L1 — read dispatch_hygiene_mode from project's .devt/config.json (upward
+  // search). Defaults to 'block'. Failure to read = block (fail-secure: better
+  // to over-block a misconfigured project than to silently strip the gate).
+  let mode = 'block';
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    let dir = process.cwd();
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, '.devt', 'config.json');
+      if (fs.existsSync(candidate)) {
+        const cfg = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+        if (cfg && typeof cfg.dispatch_hygiene_mode === 'string') {
+          mode = cfg.dispatch_hygiene_mode.toLowerCase();
+        }
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch { /* keep default 'block' on any failure */ }
+
+  if (mode === 'off') process.exit(0);
+
+  // Agent-type filter for block mode. Only investigative agents consume scope
+  // blocks; curator/docs-writer/retro/devt-coordinator dispatch templates
+  // legitimately don't have <scope_trust>/<scope_hint>/<memory_signal> blocks.
+  // Blocking them would over-fire. Warn mode still surfaces the advisory.
+  const INVESTIGATIVE = new Set([
+    'code-reviewer', 'programmer', 'verifier', 'researcher',
+    'debugger', 'architect', 'tester',
+  ]);
+  const subagentName = subagent.slice(5);  // strip 'devt:' prefix
+  const shouldBlock = mode === 'block' && INVESTIGATIVE.has(subagentName);
+
+  if (shouldBlock) {
+    // Claude Code hook contract: {decision:'deny', reason:...} blocks the call.
+    // Reason includes remediation guidance so orchestrator can fix and retry.
+    const denyReason =
+      '[devt dispatch hygiene — BLOCKED] ' + advisory +
+      ' Remediation: dispatch via the workflow (/devt:review, /devt:workflow, /devt:debug) which injects the required context blocks, ' +
+      'OR set dispatch_hygiene_mode to \"warn\" in .devt/config.json if intentional raw dispatch.';
+    process.stdout.write(JSON.stringify({ decision: 'deny', reason: denyReason }));
+    process.exit(0);
+  }
+
+  // Warn mode (or non-investigative agent in block mode) — emit advisory, allow.
   const output = JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',

@@ -5877,6 +5877,55 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# L1: dispatch-hygiene-guard.sh blocks raw investigative dispatches by default
+# Field rationale (greenfield 2026-05-26): soft warning was ignored 6 times in a row.
+# Block-default makes ceremony involuntary. Curator/docs-writer exempt from block.
+L1_TMP=$(mktemp -d)
+mkdir -p "$L1_TMP/.devt/state"
+RAW_PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review X"}}'
+# L1a — DEFAULT (no config.json) blocks investigative raw dispatch
+L1A=$(cd "$L1_TMP" && echo "$RAW_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+if echo "$L1A" | /usr/bin/grep -q '"decision":"deny"' && echo "$L1A" | /usr/bin/grep -q "BLOCKED"; then
+  pass "L1a: dispatch-hygiene blocks raw devt:code-reviewer dispatch by default (decision:deny)"
+else
+  fail "L1a: default-block missing — got: $(echo "$L1A" | /usr/bin/head -c 200)"
+fi
+# L1b — warn mode emits advisory, allows call
+mkdir -p "$L1_TMP/.devt"
+echo '{"dispatch_hygiene_mode":"warn"}' > "$L1_TMP/.devt/config.json"
+L1B=$(cd "$L1_TMP" && echo "$RAW_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+if echo "$L1B" | /usr/bin/grep -q "additionalContext" && ! echo "$L1B" | /usr/bin/grep -q '"decision":"deny"'; then
+  pass "L1b: dispatch_hygiene_mode=warn emits advisory + allows (no deny)"
+else
+  fail "L1b: warn mode wrong — got: $(echo "$L1B" | /usr/bin/head -c 200)"
+fi
+# L1c — off mode is no-op
+echo '{"dispatch_hygiene_mode":"off"}' > "$L1_TMP/.devt/config.json"
+L1C=$(cd "$L1_TMP" && echo "$RAW_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+if [ -z "$L1C" ] || ! echo "$L1C" | /usr/bin/grep -qE '"decision"|additionalContext'; then
+  pass "L1c: dispatch_hygiene_mode=off is no-op (no output)"
+else
+  fail "L1c: off mode produced output — got: $L1C"
+fi
+# L1d — curator NOT blocked even in default-block mode (exempt agent type)
+rm -f "$L1_TMP/.devt/config.json"
+CURATOR_PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:curator","prompt":"Curate X"}}'
+L1D=$(cd "$L1_TMP" && echo "$CURATOR_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+if ! echo "$L1D" | /usr/bin/grep -q '"decision":"deny"'; then
+  pass "L1d: curator dispatch NOT blocked even in default-block mode (agent-type filter works)"
+else
+  fail "L1d: curator over-blocked in default mode — got: $(echo "$L1D" | /usr/bin/head -c 200)"
+fi
+# L1e — wrapped dispatch (has scope_trust) NOT blocked
+WRAPPED='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<scope_trust>{}</scope_trust>\nReview X"}}'
+L1E=$(cd "$L1_TMP" && echo "$WRAPPED" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+if [ -z "$L1E" ] || ! echo "$L1E" | /usr/bin/grep -qE '"decision":"deny"|additionalContext'; then
+  pass "L1e: workflow-wrapped dispatch (has scope_trust) passes through unblocked"
+else
+  fail "L1e: wrapped dispatch incorrectly blocked — got: $L1E"
+fi
+rm -rf "$L1_TMP"
+
 # F21: pick-central-symbol CLI — picks task-relevant symbol over alphabetically first (B1 fix).
 # Field rationale (greenfield 2026-05-26): bash `jq -r '.[0]'` picked AuditMapping for a task about
 # clients/relatives because it was alphabetically first; orchestrator had to manually override.

@@ -6,6 +6,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-05-26
+
+**L1 — Dispatch-hygiene hook upgrades from advisory to default-block.** Field rationale (greenfield 2026-05-26): orchestrator received 6 advisory warnings in succession and proceeded anyway. The LLM's self-diagnosis: *"ceremony cost > result urgency, every time. The hook is the only counterweight, and a soft warning loses to perceived urgency. Make it pay involuntarily."* Smoke: **607 passed**, **0 failed** (+5 L1 gates).
+
+### Changed (BREAKING for raw dispatches)
+
+- **`hooks/dispatch-hygiene-guard.sh` now returns `{decision:"deny"}` by default** when a raw `devt:*` dispatch is detected (prompt lacks ALL of `<scope_trust>`, `<scope_hint>`, `<memory_signal>`). Hard-blocks the dispatch instead of merely emitting an advisory. Investigative subagents only (`code-reviewer`, `programmer`, `verifier`, `researcher`, `debugger`, `architect`, `tester`) — curator/docs-writer/retro/coordinator are exempt because their dispatch templates legitimately don't carry scope blocks.
+
+### Added
+
+- **`dispatch_hygiene_mode` config flag** (top-level in `.devt/config.json`):
+  - `"block"` (default) — hook denies raw investigative dispatches
+  - `"warn"` — hook emits `additionalContext` advisory, allows call (pre-L1 behavior)
+  - `"off"` — hook is a no-op for raw dispatches
+- **Agent-type filter** in the hook — block-mode no longer over-fires on curator/docs-writer dispatches that legitimately don't carry scope blocks.
+- **5 L1 smoke gates**: L1a (default block on raw code-reviewer), L1b (warn mode allows + advises), L1c (off mode no-op), L1d (curator exempt from block), L1e (wrapped dispatch with `<scope_trust>` passes).
+
+### Why default-block
+
+Three structural arguments:
+
+1. **Field-validated necessity**: soft warning was ignored 6 times in one session by the same LLM, with explicit self-report that informational warnings get classified as "not load-bearing".
+2. **Pattern consistency**: same lesson as F4 (gate inside skippable step → moved to precondition) and B4 (relocated to mandatory step). Gates that don't block don't work.
+3. **Per [[feedback-no-legacy-trash]]**: devt has no production usage that requires raw dispatch. Ship the clean default. Users with intentional raw-dispatch needs (custom workflows, testing) opt to `warn` or `off`.
+
+### Migration notes
+
+- Existing devt workflows are unaffected — dispatch templates always carry scope blocks; the hook only denies *raw* dispatches that bypass the workflow contract.
+- Users who improvise raw `Task(subagent_type="devt:code-reviewer", ...)` calls will get a deny with remediation guidance.
+- Override per-project by adding `"dispatch_hygiene_mode": "warn"` to `.devt/config.json`.
+
+### Deferred from field report (next-cycle backlog)
+
+- **L2** — Compound `prep-context` CLI runs all context_init bash in one call (DX win, removes 200-line ceremony).
+- **L3** — Pre-load graphify MCP tools (out of devt's control — Claude Code harness).
+- **L4** — `compose-dispatch-prompt` CLI emits ready-to-paste templated prompts.
+- **L5** — Document parallel-lane workflow (`code-review-parallel.md`) for multi-lane reviews.
+
 ## [0.57.4] - 2026-05-26
 
 Minimum-viable B6 — F16 top-3 drill-down enforcement (signal-only). Smoke: **602 passed**, **0 failed** (+1 new gate).

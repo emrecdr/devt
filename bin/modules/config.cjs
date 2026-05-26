@@ -20,6 +20,25 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const DEFAULTS = {
   model_profile: "quality",
   scope_mode: "surgical",
+  // L1 — dispatch hygiene mode for the PreToolUse:Agent hook
+  // (hooks/dispatch-hygiene-guard.sh). Controls behavior when a raw `devt:*`
+  // subagent dispatch is detected (prompt lacks <scope_trust>, <scope_hint>,
+  // and <memory_signal> blocks).
+  //
+  //   "block" (default) — hook returns {decision:"deny"} with a remediation
+  //     reason, blocking the dispatch. Only enforced for investigative
+  //     subagents (code-reviewer, programmer, verifier, researcher, debugger,
+  //     architect, tester). Curator / docs-writer / retro are exempt because
+  //     they don't consume scope blocks.
+  //   "warn" — hook returns additionalContext advisory (current pre-L1
+  //     behavior). Surfaces the warning to the LLM but allows the call.
+  //   "off" — hook is a no-op for raw dispatches.
+  //
+  // Field rationale (greenfield 2026-05-26): orchestrator received 6 advisory
+  // warnings and proceeded anyway because "ceremony cost > result urgency".
+  // Soft warning lost to perceived urgency. block-default makes ceremony
+  // involuntary — friction beats protocol.
+  dispatch_hygiene_mode: "block",
   // Memory layer — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
   // preflight_mode: "off" (Phase 1-2) | "warn" | "block".
   // off — hook is a no-op (escape hatch for projects that opt out entirely)
