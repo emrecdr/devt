@@ -5936,21 +5936,25 @@ else
 fi
 rm -rf "$F14_TMP"
 
-# F5b: #KNOWLEDGE-CANDIDATE reinforcement in 5 workflow dispatch task blocks
-# Field validation (greenfield 2026-05-26 PR #370 review): agent-body instruction at line ~190 wasn't
-# enforced — 5 lane subagents wrote zero tags. Reinforcing in the task block makes it load-bearing.
+# F5b: #KNOWLEDGE-CANDIDATE reinforcement in all agent-dispatching workflows
+# Field validation (greenfield 2026-05-26 PR #370 review): agent-body instruction wasn't enforced —
+# 5 lane subagents wrote zero tags. Reinforcing in the task block makes it load-bearing.
+# Coverage extended to all 7 workflows that dispatch an agent with a knowledge_candidates body step
+# (researcher, code-reviewer, debugger, architect, programmer).
 F5B_OK=0
-for wf in workflows/code-review.md workflows/research-task.md workflows/debug.md workflows/dev-workflow.md workflows/quick-implement.md; do
+F5B_WORKFLOWS="workflows/code-review.md workflows/research-task.md workflows/debug.md workflows/dev-workflow.md workflows/quick-implement.md workflows/arch-health-scan.md workflows/create-plan.md"
+F5B_COUNT=$(echo $F5B_WORKFLOWS | /usr/bin/wc -w | /usr/bin/tr -d ' ')
+for wf in $F5B_WORKFLOWS; do
   if /usr/bin/grep -q "Capture knowledge candidates" "$ROOT/$wf" \
      && /usr/bin/grep -q "load-bearing.*not optional" "$ROOT/$wf" \
      && /usr/bin/grep -q "#KNOWLEDGE-CANDIDATE:" "$ROOT/$wf"; then
     F5B_OK=$((F5B_OK + 1))
   fi
 done
-if [ "$F5B_OK" -eq 5 ]; then
-  pass "F5b: knowledge-candidate dispatch reinforcement in all 5 agent-dispatching workflows"
+if [ "$F5B_OK" -eq "$F5B_COUNT" ]; then
+  pass "F5b: knowledge-candidate dispatch reinforcement in all $F5B_COUNT agent-dispatching workflows"
 else
-  fail "F5b: dispatch reinforcement missing in $((5 - F5B_OK)) of 5 workflows"
+  fail "F5b: dispatch reinforcement missing in $((F5B_COUNT - F5B_OK)) of $F5B_COUNT workflows"
 fi
 
 # F5: #KNOWLEDGE-CANDIDATE prompt addition in 5 agent files

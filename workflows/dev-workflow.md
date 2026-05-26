@@ -565,6 +565,8 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     Focus on: layer violations, coupling issues, circular dependencies, and convention drift.
     Classify each finding as: true positive, false positive, or pre-existing.
     Report only findings relevant to the in-scope modules.
+
+    **Capture knowledge candidates** (load-bearing — not optional): per your `knowledge_candidates` step, if your scan surfaces architectural rules / patterns worth promoting (cross-component invariants, "this layer cannot depend on that", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write findings to .devt/state/arch-health-scan.md
 ")
@@ -756,6 +758,8 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     Review the architectural approach for: {task_description}
     Assess module boundaries, dependency direction, and structural impact.
     Identify risks before implementation begins.
+
+    **Capture knowledge candidates** (load-bearing — not optional): per your `knowledge_candidates` step, if your review surfaces architectural rules / patterns worth promoting (cross-component invariants, "this layer cannot depend on that", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write findings to .devt/state/arch-review.md
 ")
@@ -1110,6 +1114,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   <task>
     Review the implementation and tests for quality, correctness, and standards compliance.
     Review ALL code in scope — do not filter by origin or label findings as pre-existing.
+
+    **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing review.md): per your `knowledge_candidates` step, if this review surfaces non-obvious patterns worth promoting (recurring code smell, undocumented invariant, "we always do X because Y" rule, REJ-tombstone-worthy anti-pattern), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write review to .devt/state/review.md
 ")

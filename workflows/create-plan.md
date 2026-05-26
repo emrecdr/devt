@@ -241,7 +241,10 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     <files_to_read>.devt/rules/architecture.md, .devt/state/plan.md</files_to_read>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
-  <task>Review this implementation plan for architectural soundness.</task>
+  <task>Review this implementation plan for architectural soundness.
+
+  **Capture knowledge candidates** (load-bearing — not optional): per your `knowledge_candidates` step, if your review surfaces architectural rules worth promoting (cross-component invariants, "this layer cannot depend on that", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
+  </task>
   Write review to .devt/state/arch-review.md
 ")
 ```

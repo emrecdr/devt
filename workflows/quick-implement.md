@@ -397,6 +397,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   <task>
     Review the implementation and tests for quality, correctness, and standards compliance.
     Review ALL code in scope — do not filter by origin or label findings as pre-existing.
+
+    **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing review.md): per your `knowledge_candidates` step, if this review surfaces non-obvious patterns worth promoting (recurring code smell, undocumented invariant, "we always do X because Y" rule, REJ-tombstone-worthy anti-pattern), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write review to .devt/state/review.md
 ")

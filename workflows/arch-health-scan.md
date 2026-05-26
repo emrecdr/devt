@@ -239,6 +239,8 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 
     If no scanner output is available, perform the analysis manually by scanning
     imports, module structure, and cross-module references.
+
+    **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing arch-review.md): per your `knowledge_candidates` step, if your assessment surfaces architectural rules / patterns worth promoting (cross-component invariants, "this layer cannot depend on that layer", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write findings to .devt/state/arch-review.md
 ")
