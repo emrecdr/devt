@@ -5877,6 +5877,50 @@ else
 fi
 rm -rf "$TRUNC_TMP"
 
+# F21: pick-central-symbol CLI — picks task-relevant symbol over alphabetically first (B1 fix).
+# Field rationale (greenfield 2026-05-26): bash `jq -r '.[0]'` picked AuditMapping for a task about
+# clients/relatives because it was alphabetically first; orchestrator had to manually override.
+F21A=$(node "$ROOT/bin/devt-tools.cjs" preflight pick-central-symbol '["AuditMapping","ClientRelativeDetail","ClientService"]' "extend GET /clients/relatives/details" 2>/dev/null | head -1)
+if [ "$F21A" = "ClientRelativeDetail" ]; then
+  pass "F21a: pick-central-symbol prefers ClientRelativeDetail over alphabetical AuditMapping for clients/relatives task"
+else
+  fail "F21a: pick-central-symbol picked wrong — got '$F21A'"
+fi
+F21B=$(node "$ROOT/bin/devt-tools.cjs" preflight pick-central-symbol '["AuditMapping","ClientService"]' "" 2>/dev/null | head -1)
+if [ "$F21B" = "AuditMapping" ]; then
+  pass "F21b: pick-central-symbol falls back to first symbol when no task text (deterministic)"
+else
+  fail "F21b: empty-task fallback wrong — got '$F21B'"
+fi
+
+# F22: B4 pre-dispatch gate present before curator Task() in dev-workflow, lesson-extraction, memory-promote.
+# Relocates assert-claude-mem-harvest from optional harvest step to mandatory curator precondition.
+F22_OK=0
+for wf in workflows/dev-workflow.md workflows/lesson-extraction.md workflows/memory-promote.md; do
+  if /usr/bin/grep -B0 -A30 "Pre-dispatch gate (B4)" "$ROOT/$wf" 2>/dev/null | /usr/bin/grep -q "assert-claude-mem-harvest"; then
+    F22_OK=$((F22_OK + 1))
+  fi
+done
+if [ "$F22_OK" -eq 3 ]; then
+  pass "F22: B4 pre-dispatch claude-mem-harvest gate wired before curator in dev-workflow/lesson-extraction/memory-promote"
+else
+  fail "F22: pre-dispatch gate missing in $((3 - F22_OK)) of 3 curator-dispatching workflows"
+fi
+
+# F23: B2 scope_hint poisoning filter — direct_dependents suppressed when blast.god_node_match=true.
+if /usr/bin/grep -qE "B2 — when the topic central symbol is itself a god-node" "$ROOT/bin/modules/preflight.cjs"; then
+  pass "F23: B2 god-node directDeps suppression present in preflight.cjs::generate"
+else
+  fail "F23: B2 god-node suppression missing from preflight.cjs"
+fi
+
+# F24: B5 god-node prose fallback — surfaces top god-node when blast.god_node_match=true even on token mismatch.
+if /usr/bin/grep -qE "matchedGods\.length === 0 && blast && blast.god_node_match" "$ROOT/bin/modules/preflight.cjs"; then
+  pass "F24: B5 god-node prose fallback present in preflight.cjs::renderBrief"
+else
+  fail "F24: B5 god-node prose fallback missing"
+fi
+
 # F20: SKILL.md bodies use imperative form (no second-person "you should/need/can/must/will" patterns).
 # Per The Complete Guide to Building Skills for Claude (page 13): "Be Specific and Actionable" with
 # verb-first instructions; per plugin-dev:skill-development: "Use imperative/infinitive form, not second

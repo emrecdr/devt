@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.57.3] - 2026-05-26
+
+Field-validation bug-fix wave from greenfield WITH_CONCERNS verdict. Closes 4 of 6 audited bugs (B1, B2, B4, B5); defers 2 (B3, B6) with documented reasons. Smoke: **601 passed**, **0 failed** (+6 new gates).
+
+### Fixed
+
+- **B1 — CENTRAL_SYMBOL selection now task-aware.** Field rationale: bash `jq -r '.[0]'` picked alphabetically-first `AuditMapping` for a task about clients/relatives; orchestrator had to manually override. New `preflight pick-central-symbol` CLI tokenizes each symbol (CamelCase + snake_case → 3-char-plus tokens) and scores by fraction of tokens appearing in task text. Highest score wins; falls back to first symbol when no score > 0. Wired into 4 workflows (dev-workflow, quick-implement, research-task, debug) with `jq` fallback.
+- **B2 — scope_hint no longer poisoned by god-node neighborhoods.** When `blast.god_node_match=true`, `directDeps` is suppressed from `suggestedReading` because the god-node's huge dependent list is structurally adjacent but task-irrelevant. Field case: `ClientService` god-node match filled `scope_hint` with `OrganizationCreatedEvent` etc. — zero overlap with actual task. Path: `preflight.cjs::generate`.
+- **B4 — claude-mem harvest gate relocated to curator-dispatch precondition.** Field rationale: orchestrator skipped the entire `harvest_observations` step; assert-claude-mem-harvest never fired because it was INSIDE the skipped step. Gate now runs as a precondition before curator dispatch in 3 workflows (dev-workflow, lesson-extraction, memory-promote). Missing harvest now BLOCKS curator instead of silently passing.
+- **B5 — F8 god-node prose fallback when token match fails.** Previously the operational-guidance prose (`"prefer adding methods over modifying signatures"`) required `report.god_nodes` to textually match a topic symbol via tokenMatches(). When `blast.god_node_match=true` but textual tokenization differed (e.g., CamelCase vs snake_case), no prose surfaced. Now surfaces the top god-node when `blast.god_node_match=true` even if textual match fails. Path: `preflight.cjs::renderBrief`.
+
+### Added
+
+- **`preflight pick-central-symbol <symbols-json> <task-text>` CLI subcommand** — used by 4 workflow bash blocks to pick a task-relevant central symbol from topic.symbols. Returns plain-string output for shell consumption.
+- **5 new smoke gates**: F21a (pick-central-symbol task-relevant), F21b (fallback to first), F22 (B4 gate present in 3 workflows), F23 (B2 suppression present), F24 (B5 fallback present).
+
+### Deferred
+
+- **B3 — Inheritance edges in `direct_dependents`** (e.g., `BaseModel` listed as dependent of `ClientRelativeDetail`). Filtering parent-class edges requires `edge_type` metadata which graphify's `graph.json` does not currently expose. Deferred until graphify upstream surfaces relation kinds, or local inheritance-detection heuristic is designed.
+- **B6 — F16 top-3 drill-down enforcement.** Workflow prose prescribes top-3 `get_neighbors` calls but only assert-graphify-decision checks file presence, not section count. Would require extending `assertGraphifyDecision` with a `min_drill_down_sections` parameter and a corresponding `WARNED` / `BLOCKED` verdict design. Deferred to v0.58.0+ as its own contract design.
+- **A2 — Inline-implementation impl-summary stub.** When orchestrator implements without dispatching `devt:programmer`, no `impl-summary.json` is written and the post-impl graphify-refresh gate has nothing to read. Fix would auto-write a minimal stub from git-diff data. Deferred — requires orchestrator-side detection logic.
+
 ## [0.57.2] - 2026-05-26
 
 Skill best-practice compliance — converts 6 second-person language instances across 4 skills to imperative form per the [official skill-writing guidance](https://docs.claude.com/en/docs/claude-code/skills) (page 12-13 of *The Complete Guide to Building Skills for Claude*). Smoke: **596 passed**, **0 failed** (+1 F20 gate).

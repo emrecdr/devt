@@ -147,6 +147,16 @@ Best-effort: harvest gracefully no-ops when no observations matched. Failure her
 
 Dispatch the curator agent. Both lessons and architectural candidates flow through the same unified memory layer at `.devt/memory/` — every promotion is gated by AskUserQuestion per candidate.
 
+**Pre-dispatch gate (B4)** — ensure the claude-mem harvest decision artifact exists before curator runs:
+
+```bash
+HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
+if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+  exit 1
+fi
+```
+
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>

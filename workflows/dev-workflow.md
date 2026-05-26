@@ -267,7 +267,8 @@ TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2
 SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
 SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
 if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
-  CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${TASK_DESCRIPTION:-}" 2>/dev/null | head -1)
+  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
   echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
 elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
   echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
@@ -1428,6 +1429,16 @@ _Skip this step if complexity is SIMPLE or STANDARD._
 - If both empty/missing: skip curation entirely
 
 Dispatch the curator agent. Both lessons and architectural candidates flow into the unified `.devt/memory/` layer through a single approval gate (AskUserQuestion per candidate):
+
+**Pre-dispatch gate (B4)** — ensure the claude-mem harvest decision artifact exists before curator runs. Guards against silent skip of the harvest_observations step (field-validated 2026-05-26: orchestrator skipped the entire step, gate inside the step never fired). Relocating the assert here makes harvest required for curator to run.
+
+```bash
+HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
+if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+  exit 1
+fi
+```
 
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="

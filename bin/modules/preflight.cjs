@@ -619,7 +619,15 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
       return false;
     };
 
-    const matchedGods = report.god_nodes.filter(g => tokenMatches(g.symbol)).slice(0, 5);
+    // B5 — when blast.god_node_match is true, the topic touched a god-node even
+    // if the textual symbol comparison missed (e.g. CamelCase vs snake_case
+    // tokenization differences). Surface the top god-node so the operational
+    // guidance below (>=50 edges) fires. Field case: ClientService was a
+    // god_node_match but tokenMatches() rejected it.
+    let matchedGods = report.god_nodes.filter(g => tokenMatches(g.symbol)).slice(0, 5);
+    if (matchedGods.length === 0 && blast && blast.god_node_match && report.god_nodes.length > 0) {
+      matchedGods = report.god_nodes.slice(0, 1);
+    }
     const matchedConns = report.surprising_connections
       .filter(c => tokenMatches(c.from) || tokenMatches(c.to))
       .slice(0, 5);
@@ -790,7 +798,15 @@ function generate(taskText, opts) {
   try {
     affectsPaths = memory.getAffectsPathsByIds(governingUnion.map(d => d.id));
   } catch { /* memory layer not initialized — empty list is correct */ }
-  const directDeps = (blast.direct_dependents || []).slice(0, MAX_DIRECT_DEPS);
+  // B2 — when the topic central symbol is itself a god-node, blast.direct_dependents
+  // is the god-node's general neighborhood (often 200+ entries unrelated to the task).
+  // Suppressing direct_dependents avoids poisoning scope_hint with structurally
+  // adjacent but task-irrelevant paths. Field case (greenfield 2026-05-26):
+  // ClientService god-node match produced scope_hint filled with
+  // OrganizationCreatedEvent etc. that had zero overlap with the actual task scope.
+  const directDeps = blast.god_node_match
+    ? []
+    : (blast.direct_dependents || []).slice(0, MAX_DIRECT_DEPS);
 
   // Graphify wiki output (when the project ran `graphify <path> --wiki`) is the
   // agent-crawlable curated navigation surface. When present, prepend it to the
@@ -921,6 +937,35 @@ function readBriefMeta() {
   };
 }
 
+// B1 — pick the central symbol from a topic.symbols list that best matches the
+// task description text. Field rationale (greenfield 2026-05-26): the prior
+// bash logic `jq -r '.[0]'` picked the alphabetically-first symbol regardless
+// of task relevance (chose `AuditMapping` for a task about clients/relatives).
+// Strategy: tokenize each symbol (CamelCase + snake_case + _underscores) into
+// lowercase 3-char-plus tokens, score by what fraction appear in task text.
+// Highest score wins; ties broken by original order; falls back to first symbol
+// when no symbol scores above zero.
+function pickCentralSymbol(symbols, taskText) {
+  if (!Array.isArray(symbols) || symbols.length === 0) return null;
+  const task = (taskText || "").toLowerCase();
+  if (!task) return symbols[0];
+  const tokenize = (sym) => sym
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_.]/g, " ")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(t => t.length >= 3);
+  let best = { sym: symbols[0], score: 0, idx: -1 };
+  symbols.forEach((sym, i) => {
+    const tokens = tokenize(sym);
+    if (tokens.length === 0) return;
+    const hits = tokens.filter(t => task.includes(t)).length;
+    const score = hits / tokens.length;
+    if (score > best.score) best = { sym, score, idx: i };
+  });
+  return best.score > 0 ? best.sym : symbols[0];
+}
+
 function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
   switch (subcommand) {
@@ -951,10 +996,25 @@ function run(subcommand, args) {
       json(markStale(reason));
       return 0;
     }
+    case "pick-central-symbol": {
+      // Usage: preflight pick-central-symbol <symbols-json> <task-text>
+      if (args.length < 2) {
+        process.stderr.write("Usage: preflight pick-central-symbol <symbols-json> <task-text>\n");
+        return 2;
+      }
+      let symbols;
+      try { symbols = JSON.parse(args[0]); }
+      catch (e) { process.stderr.write(`Invalid symbols JSON: ${e.message}\n`); return 2; }
+      const task = args.slice(1).join(" ");
+      const picked = pickCentralSymbol(symbols, task);
+      // Plain string output — easier for bash to consume than JSON
+      process.stdout.write((picked || "") + "\n");
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown preflight subcommand: ${subcommand}\n` +
-        `Valid: generate | topic | status | mark-stale\n`
+        `Valid: generate | topic | status | mark-stale | pick-central-symbol\n`
       );
       return 2;
   }
@@ -963,6 +1023,7 @@ function run(subcommand, args) {
 module.exports = {
   run,
   generate,
+  pickCentralSymbol,
   extractTopic,
   extractDiffSymbols,
   resolveScopeHintCap,

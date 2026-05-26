@@ -66,6 +66,16 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest
 <step name="dispatch" gate="curator returns curation-summary.md">
 ## Step 2: Dispatch the curator agent
 
+**Pre-dispatch gate (B4)** — ensure the claude-mem harvest decision artifact exists before curator runs. This guards against silent skip of the harvest pre-step. If neither `claude-mem-harvest.md` nor `claude-mem-skipped.txt` exists, BLOCK here so the orchestrator can't reach curator without addressing harvest.
+
+```bash
+HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
+if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+  exit 1
+fi
+```
+
 ```
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
 <context>
