@@ -189,6 +189,7 @@ const GRAPHIFY_EVICTABLE = Object.freeze([
   "graphify-impact-plan.json",
   "graph-impact.md",
   "graphify-skip-reason.txt",
+  "staleness-suppressed.txt",
 ]);
 
 function evictGraphifyArtifacts(opts = {}) {
