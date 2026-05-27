@@ -1576,6 +1576,68 @@ function listLaneOutputs() {
   return { lanes };
 }
 
+function updateLane(laneId, kvPairs) {
+  if (!laneId || typeof laneId !== "string") {
+    return { ok: false, reason: "no lane-id provided" };
+  }
+  const updates = {};
+  for (const kv of (kvPairs || [])) {
+    const [k, v] = kv.split("=", 2);
+    if (!k || v === undefined) continue;
+    if (k === "status") {
+      if (!VALID_LANE_STATUSES.has(v)) {
+        return { ok: false, reason: `invalid status "${v}" (allowed: ${[...VALID_LANE_STATUSES].join(", ")})` };
+      }
+      updates.status = v;
+    } else if (k === "redispatch_count") {
+      const n = parseInt(v, 10);
+      if (isNaN(n) || n < 0) {
+        return { ok: false, reason: `invalid redispatch_count "${v}" (must be non-negative integer)` };
+      }
+      updates.redispatch_count = n;
+    } else {
+      return { ok: false, reason: `unknown lane field "${k}" (allowed: status, redispatch_count)` };
+    }
+  }
+  if (Object.keys(updates).length === 0) {
+    return { ok: false, reason: "no updates provided (need status=... or redispatch_count=...)" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { ok: false, reason: "no workflow.yaml" };
+  }
+  const yaml = fs.readFileSync(wfPath, "utf8");
+  // Locate the lane block by id, then mutate the status/redispatch_count
+  // lines in-place. Conservative line-based edit preserves YAML formatting.
+  const lines = yaml.split("\n");
+  let inLane = false;
+  let mutated = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^  - id:\s*"?/.test(line)) {
+      inLane = line.includes(`"${laneId}"`) || line.replace(/^  - id:\s*"?/, "").replace(/"\s*$/, "").trim() === laneId;
+    } else if (/^[a-z_]/.test(line)) {
+      inLane = false;
+    }
+    if (!inLane) continue;
+    if (updates.status !== undefined && /^\s+status:\s*/.test(line)) {
+      lines[i] = line.replace(/status:\s*"?[^"\n]*"?/, `status: "${updates.status}"`);
+      mutated = true;
+    }
+    if (updates.redispatch_count !== undefined && /^\s+redispatch_count:\s*/.test(line)) {
+      lines[i] = line.replace(/redispatch_count:\s*\d+/, `redispatch_count: ${updates.redispatch_count}`);
+      mutated = true;
+    }
+  }
+  if (!mutated) {
+    return { ok: false, reason: `lane id "${laneId}" not found in workflow.yaml::lanes[]` };
+  }
+  atomicWriteFileSync(wfPath, lines.join("\n"));
+  return { ok: true, lane_id: laneId, updates };
+}
+
 // Process-level gate that the orchestrator actually ran `preflight generate`
 // in context_init (vs. silently reusing a brief from a prior workflow). Field
 // observed (greenfield-api 2026-05-21): orchestrator started a new workflow at
@@ -1804,6 +1866,8 @@ function run(subcommand, args) {
       return assertVerifierRan();
     case "list-lane-outputs":
       return listLaneOutputs();
+    case "update-lane":
+      return updateLane(args[0], args.slice(1));
     case "history": {
       const limitArg = _getFlag(args, "--limit");
       const lim = limitArg ? parseInt(limitArg, 10) : 20;
@@ -1811,7 +1875,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, list-lane-outputs, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -1834,6 +1898,7 @@ module.exports = {
   checkAgentOutput,
   assertVerifierRan,
   listLaneOutputs,
+  updateLane,
   stateHistory,
   describeMismatch,
   getStateDir,
