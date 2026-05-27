@@ -4483,7 +4483,7 @@ fi
 
 echo
 echo "== Graphify impact-map wiring (layered trigger: PR / bulk / symbol-anchored) =="
-if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "graph-impact.md" "$ROOT/workflows/code-review.md" && grep -q "mcp__devt-graphify__" "$ROOT/workflows/code-review.md"; then
+if grep -q "get_pr_impact" "$ROOT/workflows/code-review.md" && grep -q "graph-impact.md" "$ROOT/workflows/code-review.md" && grep -qE "mcp__(plugin_devt_devt-graphify|devt-graphify)__" "$ROOT/workflows/code-review.md"; then
   pass "code-review workflow defines layered impact trigger (PR / bulk / symbol-anchored) persisting to .devt/state/graph-impact.md via vendored relay"
 else
   fail "code-review.md missing layered impact trigger or graph-impact.md persistence or devt-graphify MCP refs"
