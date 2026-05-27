@@ -1650,6 +1650,69 @@ function assertAutoCuratorConsidered() {
   return { ok: true, auto_curator_status: status };
 }
 
+// Mechanical gate: programmer must write .devt/state/reuse-analysis.md
+// before code is written. Field rationale: prose-only "scan existing code
+// first" gets rationalized past, producing 5-variations-of-same-function.
+// Pattern: derive-reuse-candidates writes the candidate list; programmer
+// must address each candidate in reuse-analysis.md with a decision.
+function assertReuseAnalyzed() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const candidatesPath = path.join(dir, "reuse-candidates.md");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const analysisPath = path.join(dir, "reuse-analysis.md");
+
+  if (!fs.existsSync(candidatesPath)) {
+    return {
+      ok: true,
+      reason: "reuse-candidates.md absent — derive-reuse-candidates was not run (graphify unavailable or skipped); gate does not apply",
+    };
+  }
+
+  const candidatesContent = fs.readFileSync(candidatesPath, "utf8");
+  // Extract candidate labels from ### `<label>` at... headings.
+  const labelMatches = candidatesContent.matchAll(/^###\s+`([^`]+)`/gm);
+  const candidateLabels = Array.from(labelMatches, (m) => m[1]);
+
+  if (candidateLabels.length === 0) {
+    return {
+      ok: true,
+      reason: "reuse-candidates.md has zero candidates — nothing to analyze",
+      candidates_to_analyze: 0,
+    };
+  }
+
+  if (!fs.existsSync(analysisPath)) {
+    return {
+      ok: false,
+      reason:
+        `reuse-candidates.md lists ${candidateLabels.length} candidate(s) but reuse-analysis.md absent — ` +
+        "programmer must write per-candidate decisions (REUSED | EXTENDED | REJECTED) before writing new code.",
+      candidates_to_analyze: candidateLabels.length,
+    };
+  }
+
+  const analysisContent = fs.readFileSync(analysisPath, "utf8");
+  const missing = candidateLabels.filter(
+    (label) => !analysisContent.includes(label),
+  );
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason:
+        `reuse-analysis.md exists but does not address ${missing.length} candidate(s): ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? "..." : ""} — programmer must include a decision for every candidate.`,
+      candidates_to_analyze: candidateLabels.length,
+      candidates_missing: missing,
+    };
+  }
+
+  return {
+    ok: true,
+    candidates_to_analyze: candidateLabels.length,
+    candidates_addressed: candidateLabels.length,
+  };
+}
+
 // Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
 // each lane's review file existence + size. Consumed by code-review-parallel.md's
 // substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
@@ -1991,6 +2054,8 @@ function run(subcommand, args) {
       return assertConsolidatorDispatched();
     case "assert-auto-curator-considered":
       return assertAutoCuratorConsidered();
+    case "assert-reuse-analyzed":
+      return assertReuseAnalyzed();
     case "derive-reuse-candidates":
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "list-lane-outputs":
@@ -2004,7 +2069,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -2030,6 +2095,7 @@ module.exports = {
   assertLanesRegistered,
   assertConsolidatorDispatched,
   assertAutoCuratorConsidered,
+  assertReuseAnalyzed,
   listLaneOutputs,
   updateLane,
   stateHistory,
