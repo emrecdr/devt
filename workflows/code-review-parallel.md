@@ -49,7 +49,7 @@ fi
 # Parse affected_communities from graph-impact.md. Expected format: a section
 # like `## Affected Communities` with bullet lines naming each community.
 # graphify writes this section when blast_radius returns multi-community impact.
-COMMUNITIES_RAW=$(awk '/^## Affected Communities/,/^## /' "$GRAPH_IMPACT_PATH" | grep -E '^- ' | sed 's/^- //' | head -5)
+COMMUNITIES_RAW=$(awk '/^## Affected Communities/{found=1; next} found && /^## /{exit} found{print}' "$GRAPH_IMPACT_PATH" | grep -E '^- ' | sed 's/^- //' | head -5)
 COMMUNITY_COUNT=$(echo "$COMMUNITIES_RAW" | grep -cE '.')
 
 if [ "$COMMUNITY_COUNT" -eq 0 ]; then
@@ -63,7 +63,7 @@ LANE_NUM=1
 echo "$COMMUNITIES_RAW" | while IFS= read -r COMMUNITY; do
   [ -z "$COMMUNITY" ] && continue
   TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  SLUG=$(node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName('$COMMUNITY'))")
+  SLUG=$(COMMUNITY_NAME="$COMMUNITY" node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName(process.env.COMMUNITY_NAME))")
   echo "  - id: \"L${LANE_NUM}\""
   echo "    community: \"${COMMUNITY}\""
   echo "    slug: \"${SLUG}\""
@@ -79,7 +79,7 @@ node -e '
 const fs = require("fs");
 const path = ".devt/state/workflow.yaml";
 let yaml = fs.readFileSync(path, "utf8");
-yaml = yaml.replace(/^lanes:[\s\S]*?(?=^[a-z_]+:|$)/m, "");
+yaml = yaml.replace(/\nlanes:(\n[ \t][^\n]*)*/g, "");
 const lanesBlock = "lanes:\n" + fs.readFileSync("/tmp/devt-lanes-block.yaml", "utf8");
 fs.writeFileSync(path, yaml.trimEnd() + "\n" + lanesBlock);
 '
