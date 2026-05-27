@@ -2178,6 +2178,11 @@ function run(subcommand, args) {
       if (ageArg) opts.maxAgeMinutes = parseInt(ageArg, 10);
       return audit.evictGraphifyArtifacts(opts);
     }
+    case "evict-workflow-artifacts": {
+      const audit = require("./state-audit.cjs");
+      const opts = { dryRun: args.includes("--dry-run") };
+      return audit.evictWorkflowArtifacts(opts);
+    }
     case "assert-graphify-decision":
       return assertGraphifyDecision();
     case "assert-preflight-fresh":
@@ -2211,7 +2216,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }

@@ -251,11 +251,111 @@ function evictGraphifyArtifacts(opts = {}) {
   };
 }
 
+// Workflow-state artifacts evicted on init * to prevent stale prior-workflow
+// artifacts from satisfying gates. The freshness check in isArtifactFresh
+// (state.cjs) catches stale files defensively, but evicting on init removes
+// the noise and makes "fresh state" the literal filesystem truth.
+//
+// NOT included: task outputs that follow-up workflows may consume
+// (review.md, impl-summary.md, test-summary.md, spec.md, plan.md,
+// decisions.md, scratchpad.md). Those persist across workflows by design.
+//
+// Also NOT included: workflow.yaml itself (init.cjs handles that
+// separately via updateState).
+const WORKFLOW_EVICTABLE = Object.freeze([
+  // Gate-satisfaction markers (per-workflow)
+  "scope-check-required.txt",
+  "scope-check-answer.txt",
+  "consolidator-ran.txt",
+  "auto-curator-considered.txt",
+  "reuse-candidates.md",
+  "reuse-analysis.md",
+  "claude-mem-harvest.md",
+  "claude-mem-skipped.txt",
+  // Verification sidecars (replaced per-workflow)
+  "verification.json",
+  "verification.md",
+]);
+
+function evictWorkflowArtifacts(opts = {}) {
+  const { dryRun = false } = opts;
+  const root = findProjectRoot();
+  if (!root) {
+    return { ok: false, reason: "no_project_root", evicted: [], skipped: [] };
+  }
+  const stateDir = path.join(root, STATE_DIR_REL);
+  if (!fs.existsSync(stateDir)) {
+    return { ok: true, evicted: [], skipped: WORKFLOW_EVICTABLE.slice(), reason: "no_state_dir" };
+  }
+
+  const evicted = [];
+  const skipped = [];
+
+  for (const filename of WORKFLOW_EVICTABLE) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const fullPath = path.join(stateDir, filename);
+    if (!fs.existsSync(fullPath)) {
+      skipped.push({ file: filename, reason: "absent" });
+      continue;
+    }
+    if (dryRun) {
+      evicted.push({ file: filename, dry_run: true });
+      continue;
+    }
+    try {
+      fs.unlinkSync(fullPath);
+      evicted.push({ file: filename });
+    } catch (e) {
+      skipped.push({ file: filename, reason: "unlink_failed", error: String(e && e.message || e) });
+    }
+  }
+
+  // Evict review-lane-*.md by readdir + regex match (no shell glob)
+  try {
+    for (const entry of fs.readdirSync(stateDir)) {
+      if (/^review-lane-[A-Za-z0-9_.-]+\.md$/.test(entry)) {
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+        const fullPath = path.join(stateDir, entry);
+        if (dryRun) {
+          evicted.push({ file: entry, dry_run: true });
+          continue;
+        }
+        try {
+          fs.unlinkSync(fullPath);
+          evicted.push({ file: entry });
+        } catch (e) {
+          skipped.push({ file: entry, reason: "unlink_failed", error: String(e && e.message || e) });
+        }
+      }
+    }
+  } catch { /* readdir failure is non-fatal */ }
+
+  // Chain evictGraphifyArtifacts — workflow eviction is a superset
+  const graphifyResult = evictGraphifyArtifacts({ dryRun });
+  for (const item of (graphifyResult.evicted || [])) {
+    evicted.push(item);
+  }
+  for (const item of (graphifyResult.skipped || [])) {
+    skipped.push(item);
+  }
+
+  return {
+    ok: true,
+    state_dir: stateDir,
+    dry_run: !!dryRun,
+    evicted,
+    skipped,
+    counts: { evicted: evicted.length, skipped: skipped.length },
+  };
+}
+
 module.exports = {
   auditStateFiles,
   cleanupStateFiles,
   evictGraphifyArtifacts,
+  evictWorkflowArtifacts,
   GRAPHIFY_EVICTABLE,
+  WORKFLOW_EVICTABLE,
   ALLOWED_PATTERNS,
   EPHEMERAL_PATTERNS,
 };

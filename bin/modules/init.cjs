@@ -420,6 +420,15 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // dispatch in a fresh workflow still gets tier-aware skill loading.
   const seededTier = state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null);
 
+  // Clean prior-workflow gate markers + lane outputs before mutating workflow.yaml.
+  // Without this, stale gate-satisfaction markers from a prior session would persist
+  // into the new workflow's state directory and falsely satisfy freshness gates.
+  // Eviction is best-effort — failure does not block init.
+  try {
+    const { evictWorkflowArtifacts } = require("./state-audit.cjs");
+    evictWorkflowArtifacts({ dryRun: false });
+  } catch { /* non-fatal */ }
+
   // Reset workflow.yaml unconditionally on every init * call so stale prior-session
   // values (workflow_id, workflow_type, created_at from a different workflow) never
   // bleed into the new session. Strip created_at + workflow_id first so updateState
