@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.58.1] - 2026-05-27
+
+**F26 + F27 — substance enforcement on existing gates.** Same architectural class as prior F4/B4/L1: gates that don't enforce what they claim. Field rationale (greenfield 2026-05-26 PR #372 multi-lane review): two new bypass patterns surfaced — the drill-down gate accepted prose-only sections without any MCP calls, and the verifier approved lane outputs whose entire body was `Stub written; analysis in progress.` Smoke: **612 passed**, **0 failed** (+5 new gates).
+
+### Changed
+
+- **`state assert-graphify-decision` now cross-references `.devt/memory/_mcp-trace.jsonl`** for `get_neighbors` calls scoped to the current `workflow_id`. When `drill_down_sections >= 1` but no matching MCP records exist in the workflow's window, the gate returns `ok: false` with `fabricated_drill_down: true` and a reason naming the section count. Closes the form-vs-substance gap where 3 prose drill-down headings could be hand-written from codebase knowledge without invoking MCP.
+
+### Added
+
+- **`state check-agent-output <file-path>` CLI subcommand** — substance check for agent output files. Returns JSON with `word_count`, `stub_phrases_found[]`, `heading_only`, and `looks_like_stub`. Flags output as a stub when ANY of: stub-marker phrase present (`stub written`, `analysis in progress`, `placeholder`, `TODO:`, `WIP:`, `(stub)`, `not yet written/complete/done`), word count below 50, OR every non-empty line is a heading. Provides the API auditors and downstream gates need to refuse stub-only lane outputs.
+- **`mcp_get_neighbors_calls` + `fabricated_drill_down`** fields on `state assert-graphify-decision` response — exposes the MCP cross-reference count and the boolean fabrication verdict so workflows and auditors can read substance state without re-parsing trace files.
+- **5 new smoke gates**: F26a (fabricated drill-down blocked), F26b (real drill-down with matching MCP calls passes), F27a (substantive output passes), F27b (stub-phrase output blocked), F27c (heading-only output blocked).
+
+### Why these are blocking (not advisory)
+
+Both fixes follow the same lesson as L1 (v0.58.0): soft signals get classified as "not load-bearing" by orchestrators under context pressure. Per [[feedback-no-legacy-trash]] devt ships clean defaults — no opt-in flag, no transitional warn mode. Workflows already wired to `assert-graphify-decision` inherit F26 for free; `check-agent-output` is a CLI that workflows can adopt incrementally without breaking existing wiring.
+
+### Not in this release (deferred)
+
+- **Workflow integration of `check-agent-output`** — wiring the CLI into `code-review.md` verifier dispatch's pre-check or a new `assert-lane-substance` step is left for v0.58.2. The CLI alone provides the API; workflow adoption can land separately without affecting the gate semantics.
+
 ## [0.58.0] - 2026-05-26
 
 **L1 — Dispatch-hygiene hook upgrades from advisory to default-block.** Field rationale (greenfield 2026-05-26): orchestrator received 6 advisory warnings in succession and proceeded anyway. The LLM's self-diagnosis: *"ceremony cost > result urgency, every time. The hook is the only counterweight, and a soft warning loses to perceived urgency. Make it pay involuntarily."* Smoke: **607 passed**, **0 failed** (+5 L1 gates).

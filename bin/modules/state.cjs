@@ -1280,16 +1280,135 @@ function assertGraphifyDecision() {
   } catch { /* stat/read failure — leave zeros, gate still passes */ }
   const thin = haveImpact && fileBytes < 200;
   const underThreeDrillDowns = haveImpact && drillDownSections < 3;
-  return {
-    ok: true,
+  // Substance check: a drill-down section in graph-impact.md asserts the
+  // orchestrator called get_neighbors via MCP. Field (greenfield 2026-05-26
+  // PR #372): 3 prose drill-downs were written from codebase knowledge with
+  // zero MCP calls — form-only gate (sections exist) passed silently. Cross-
+  // reference _mcp-trace.jsonl for get_neighbors records scoped to the
+  // current workflow_id; if drill-down headings exist but no MCP calls
+  // landed in this workflow's window, mark fabricated and fail the gate.
+  let mcpGetNeighborsCalls = 0;
+  let fabricatedDrillDown = false;
+  if (haveImpact && drillDownSections >= 1) {
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const wfPath = path.join(dir, "workflow.yaml");
+      if (fs.existsSync(wfPath)) {
+        const wfYaml = fs.readFileSync(wfPath, "utf8");
+        const wfIdMatch = wfYaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        const workflowId = wfIdMatch ? wfIdMatch[1].trim() : null;
+        if (workflowId) {
+          // _mcp-trace.jsonl is in .devt/memory/ — sibling of .devt/state/
+          const memDir = path.join(path.dirname(dir), "memory");
+          // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+          const tracePath = path.join(memDir, "_mcp-trace.jsonl");
+          if (fs.existsSync(tracePath)) {
+            const content = fs.readFileSync(tracePath, "utf8");
+            const lines = content.split("\n");
+            for (const line of lines) {
+              if (!line) continue;
+              try {
+                const rec = JSON.parse(line);
+                if (rec.workflow_id === workflowId &&
+                    typeof rec.tool === "string" &&
+                    /graphify.*get_neighbors/.test(rec.tool)) {
+                  mcpGetNeighborsCalls++;
+                }
+              } catch { /* malformed line — skip */ }
+            }
+          }
+        }
+      }
+    } catch { /* trace unavailable — leave count at 0 */ }
+    fabricatedDrillDown = mcpGetNeighborsCalls === 0;
+  }
+  const result = {
+    ok: !fabricatedDrillDown,
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
     file_bytes: fileBytes,
     section_count: sectionCount,
     drill_down_sections: drillDownSections,
+    mcp_get_neighbors_calls: mcpGetNeighborsCalls,
     thin_content: thin,
     under_three_drill_downs: underThreeDrillDowns,
+    fabricated_drill_down: fabricatedDrillDown,
   };
+  if (fabricatedDrillDown) {
+    result.reason =
+      `drill-down sections present (${drillDownSections}) but no get_neighbors ` +
+      `MCP calls recorded in workflow_id window — fabricated drill-down`;
+  }
+  return result;
+}
+
+// Substance check for agent output files. Field (greenfield 2026-05-26
+// PR #372): 5/6 lane sub-agent dispatches returned status:completed with
+// placeholder bodies like "Stub written; analysis in progress." The verifier
+// approved them on file-existence alone. This function detects stub markers,
+// low word count, and heading-only structure so downstream gates can refuse
+// to accept the output without re-dispatch.
+const STUB_MARKER_PATTERNS = [
+  /\bstub written\b/i,
+  /\banalysis in progress\b/i,
+  /\bplaceholder\b/i,
+  /^\s*TODO\s*:/m,
+  /^\s*WIP\s*:/m,
+  /\(stub\)/i,
+  /\bnot yet (?:written|complete|done)\b/i,
+];
+const STUB_WORD_COUNT_THRESHOLD = 50;
+
+function checkAgentOutput(filePath) {
+  if (!filePath || typeof filePath !== "string") {
+    return { ok: false, reason: "no path provided" };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const abs = path.isAbsolute(filePath)
+    ? filePath
+    : path.join(findProjectRoot(), filePath);
+  if (!fs.existsSync(abs)) {
+    return {
+      ok: false,
+      path: filePath,
+      looks_like_stub: false,
+      reason: `file does not exist: ${filePath}`,
+    };
+  }
+  let content = "";
+  try {
+    content = fs.readFileSync(abs, "utf8");
+  } catch (e) {
+    return { ok: false, path: filePath, reason: `read failure: ${e.message}` };
+  }
+  const wordCount = content.split(/\s+/).filter(Boolean).length;
+  const stubPhrasesFound = [];
+  for (const re of STUB_MARKER_PATTERNS) {
+    if (re.test(content)) stubPhrasesFound.push(re.source);
+  }
+  const nonEmptyLines = content.split("\n").filter((l) => l.trim());
+  const allHeadings =
+    nonEmptyLines.length > 0 &&
+    nonEmptyLines.every((l) => /^#+\s/.test(l.trim()));
+  const looksLikeStub =
+    stubPhrasesFound.length > 0 ||
+    wordCount < STUB_WORD_COUNT_THRESHOLD ||
+    allHeadings;
+  const result = {
+    ok: !looksLikeStub,
+    path: filePath,
+    word_count: wordCount,
+    stub_phrases_found: stubPhrasesFound,
+    heading_only: allHeadings,
+    looks_like_stub: looksLikeStub,
+  };
+  if (looksLikeStub) {
+    result.reason =
+      `agent output looks like a stub: word_count=${wordCount} ` +
+      `(threshold ${STUB_WORD_COUNT_THRESHOLD}), ` +
+      `stub_phrases=${stubPhrasesFound.length}, heading_only=${allHeadings}`;
+  }
+  return result;
 }
 
 // Process-level gate that the orchestrator actually ran `preflight generate`
@@ -1514,6 +1633,8 @@ function run(subcommand, args) {
       return assertPreflightFresh();
     case "assert-claude-mem-harvest":
       return assertClaudeMemHarvest();
+    case "check-agent-output":
+      return checkAgentOutput(args[0]);
     case "history": {
       const limitArg = _getFlag(args, "--limit");
       const lim = limitArg ? parseInt(limitArg, 10) : 20;
@@ -1521,7 +1642,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, history`,
       );
   }
 }
@@ -1541,6 +1662,7 @@ module.exports = {
   assertGraphifyDecision,
   assertPreflightFresh,
   assertClaudeMemHarvest,
+  checkAgentOutput,
   stateHistory,
   describeMismatch,
   getStateDir,

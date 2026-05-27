@@ -6504,6 +6504,114 @@ else
 fi
 rm -rf "$F3_TMP"
 
+# F26: assert-graphify-decision must cross-reference _mcp-trace.jsonl for
+# get_neighbors calls scoped to the current workflow_id. Drill-down sections
+# without matching MCP trace records are fabricated and MUST fail the gate.
+# Field rationale (greenfield 2026-05-26 PR #372): orchestrator wrote 3 prose
+# drill-down headings without calling MCP; previous form-only gate passed.
+F26_TMP=$(mktemp -d)
+mkdir -p "$F26_TMP/.devt/state" "$F26_TMP/.devt/memory" "$F26_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$F26_TMP/.devt/config.json"
+cat > "$F26_TMP/.devt/state/workflow.yaml" <<'WFEOF'
+active: true
+workflow_id: "test-wf-abc123"
+WFEOF
+node -e '
+const fs=require("fs");
+fs.writeFileSync("'"$F26_TMP"'/graphify-out/graph.json",
+  JSON.stringify({meta:{},built_at_commit:"abc"}));'
+cat > "$F26_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact — test
+## Blast radius — TestSymbol
+content here at least 250 bytes to pass thin_content threshold xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: SymA
+prose
+## Drill-down: SymB
+prose
+## Drill-down: SymC
+prose
+IMPEOF
+: > "$F26_TMP/.devt/memory/_mcp-trace.jsonl"
+F26A=$(cd "$F26_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F26A" | /usr/bin/grep -q '"fabricated_drill_down":true' \
+  && echo "$F26A" | /usr/bin/grep -q '"ok":false'; then
+  pass "F26a: assert-graphify-decision BLOCKS fabricated drill-downs (3 sections, 0 MCP calls)"
+else
+  fail "F26a: fabrication not caught — got: $(echo "$F26A" | head -c 400)"
+fi
+for i in 1 2 3; do
+  echo "{\"ts\":\"2026-05-27T00:00:0${i}.000Z\",\"tool\":\"mcp__devt-graphify__get_neighbors\",\"workflow_id\":\"test-wf-abc123\"}" \
+    >> "$F26_TMP/.devt/memory/_mcp-trace.jsonl"
+done
+F26B=$(cd "$F26_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F26B" | /usr/bin/grep -q '"fabricated_drill_down":false' \
+  && echo "$F26B" | /usr/bin/grep -q '"mcp_get_neighbors_calls":3' \
+  && echo "$F26B" | /usr/bin/grep -q '"ok":true'; then
+  pass "F26b: assert-graphify-decision PASSES when MCP calls match drill-down section count"
+else
+  fail "F26b: real drill-down incorrectly blocked — got: $(echo "$F26B" | head -c 400)"
+fi
+rm -rf "$F26_TMP"
+
+# F27: state check-agent-output detects stub-output failure mode. Field
+# rationale (greenfield 2026-05-26 PR #372): 5/6 lane sub-agent dispatches
+# returned status:completed with placeholder bodies; verifier approved on
+# file-existence alone. CLI must flag stub markers, low word count, and
+# heading-only structure.
+F27_TMP=$(mktemp -d)
+mkdir -p "$F27_TMP/.devt"
+echo '{}' > "$F27_TMP/.devt/config.json"
+cat > "$F27_TMP/real.md" <<'REALEOF'
+# Lane B Review — PR #372
+
+## Findings
+
+- LB-C1 (Critical): The notification service constructor takes 4 dependencies but the
+  fixture only injects 2. This breaks all integration tests under app/services/notifications.
+- LB-M1 (Minor): The repository method find_by_topic should be paginated; currently
+  loads all 12k records into memory.
+
+## Recommendations
+
+Refactor the constructor to use a builder pattern or split into two services.
+Migrate find_by_topic to use cursor-based pagination matching the device service pattern.
+REALEOF
+F27A=$(cd "$F27_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output real.md 2>/dev/null)
+if echo "$F27A" | /usr/bin/grep -q '"looks_like_stub":false' \
+  && echo "$F27A" | /usr/bin/grep -q '"ok":true'; then
+  pass "F27a: check-agent-output PASSES substantive output"
+else
+  fail "F27a: substantive output incorrectly flagged — got: $F27A"
+fi
+{
+  echo "# Lane B — in progress"
+  echo "Stub written; analysis in progress."
+} > "$F27_TMP/stub.md"
+F27B=$(cd "$F27_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output stub.md 2>/dev/null)
+if echo "$F27B" | /usr/bin/grep -q '"looks_like_stub":true' \
+  && echo "$F27B" | /usr/bin/grep -q '"ok":false'; then
+  pass "F27b: check-agent-output BLOCKS stub output (phrase match + low word count)"
+else
+  fail "F27b: stub not caught — got: $F27B"
+fi
+cat > "$F27_TMP/headings.md" <<'HEADEOF'
+# Lane Review
+
+## Findings
+
+## Recommendations
+
+## Status
+HEADEOF
+F27C=$(cd "$F27_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output headings.md 2>/dev/null)
+if echo "$F27C" | /usr/bin/grep -q '"looks_like_stub":true' \
+  && echo "$F27C" | /usr/bin/grep -q '"heading_only":true'; then
+  pass "F27c: check-agent-output BLOCKS heading-only output (no body content)"
+else
+  fail "F27c: heading-only not caught — got: $F27C"
+fi
+rm -rf "$F27_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
