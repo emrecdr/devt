@@ -113,6 +113,7 @@ When an artifact has multiple instances within one workflow (sliced PR reviews, 
 | `^verification-[A-Za-z0-9_.-]+\.(md\|json)$` | `verification-rerun.json` | Multiple verifier passes |
 | `^slice-[A-Za-z0-9_.-]+\.md$` | `slice-A.md`, `slice-frontend.md` | Generic slice files for non-review workflows |
 | `^[a-z]+-summary\.md$` | `module-md-update-summary.md` | Topical summaries when none of the above fit |
+| `^review-lane-[a-z][a-z0-9_]{0,31}\.md$` | `review-lane-api.md`, `review-lane-frontend.md` | Per-lane review output from `code-review-parallel.md`. Slug computed via `state.cjs::slugifyLaneName`. Multiple files allowed per workflow run. Not RESET_EXEMPT. |
 
 **Pattern-allowed files are archived after 21 days** (`STATE_FILE_CONTRACT.stale_days_default`). Override per-run with `state cleanup --stale-days=N`.
 

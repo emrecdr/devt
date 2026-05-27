@@ -77,6 +77,7 @@ The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:ne
 | `preflight` | `preflight.md` | `/devt:preflight` |
 | `memory_promote` | `memory-promote.md` | `/devt:memory promote` |
 | `memory_reject` | `memory-reject.md` | `/devt:memory reject` |
+| `code_review_parallel` | `code-review-parallel.md` | `/devt:review` (re-routes via scope_check) |
 
 When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` and routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
 
@@ -99,6 +100,8 @@ node bin/devt-tools.cjs state sync # Reconstruct workflow.yaml from artifacts
 node bin/devt-tools.cjs state prune [--dry-run] # Remove orphaned artifacts
 node bin/devt-tools.cjs state check-agent-output <path> # Substance check: detects stub phrases, low word count, heading-only outputs
 node bin/devt-tools.cjs state assert-graphify-decision # Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs
+node bin/devt-tools.cjs state list-lane-outputs # Read workflow.yaml::lanes[] registry with per-lane file existence + size
+node bin/devt-tools.cjs state update-lane <id> status=<status> # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>

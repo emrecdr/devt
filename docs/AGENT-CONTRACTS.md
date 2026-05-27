@@ -47,6 +47,8 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **If parallel fan-out is genuinely needed.** The orchestrator must inject `<scope_trust>` + `<scope_hint>` + a reference to `.devt/state/graph-impact.md` into each manual dispatch and synthesize the results.
 
+**Sanctioned exception.** `workflows/code-review-parallel.md` dispatches N code-reviewers in foreground parallel (single message, multi-Task) when scope > 10 files AND the user opts in via AskUserQuestion. The parallel workflow inherits the same context-block contract (`scope_trust` + `scope_hint` + `memory_signal` injected per dispatch); the L1 dispatch-hygiene hook accepts all lane Task() calls. Substance gates per-lane (via `state check-agent-output`) and a consolidator dispatch enforce the same quality bar. Orchestrator improvisation OUTSIDE this workflow remains prohibited.
+
 ### Orchestrator owns MCP; sub-agents are MCP-blind
 
 **Rule.** Every sub-agent's `tools:` frontmatter declares stdlib tools only (`Read, Bash, Glob, Grep` for read-only; `+ Write, Edit` for writers) — never `mcp__*`. The orchestrator runs MCP calls (e.g. `mcp__devt-graphify__query_graph`, `blast_radius`) inside workflow `context_init` bash blocks, writes results to `.devt/state/graph-impact.md`, and sub-agents consume that file READ-ONLY.
