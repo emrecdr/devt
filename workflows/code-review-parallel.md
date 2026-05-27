@@ -385,6 +385,17 @@ Route on `verdict`:
 
 > **KEEP IN SYNC** with code-review.md::present_findings.
 
+**Auto-curator-considered gate** (same as code-review.md::present_findings):
+
+```bash
+CURATOR_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-auto-curator-considered)
+if echo "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$CURATOR_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
 **Verifier-ran enforcement gate** (same as code-review.md::present_findings):
 
 ```bash

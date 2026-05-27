@@ -63,6 +63,11 @@ Do NOT skip any of these. Reviewing without loading the project's rules means re
 
 **Lane synthesis mode (code-review-parallel only).** When the dispatch `<task>` instruction begins with the literal phrase "Synthesize the N lane review files", DO NOT perform a fresh code review. Instead:
 
+0. **Write `.devt/state/consolidator-ran.txt`** with a single line `synthesis dispatch entered` — this marker is consumed by `state assert-consolidator-dispatched` to verify the orchestrator actually dispatched the consolidator (rather than writing review.md themselves, which was the field failure mode):
+   ```bash
+   echo "synthesis dispatch entered" > .devt/state/consolidator-ran.txt
+   ```
+
 1. Read every path listed in the `<lane_files>` context block (one per line).
 2. Parse findings from each lane. Standard finding format: `<severity>-<id>: <file>:<line> — <description>`.
 3. Dedupe by `(file:line:finding_class)`. Two findings with the same file + line + class are the same issue; collapse into one entry.

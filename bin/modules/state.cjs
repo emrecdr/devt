@@ -785,6 +785,8 @@ const STATE_FILE_CONTRACT = {
     "review.md", "code-review-input.md",
     "scope-check-required.txt", // marker written when >10-file + graphify-ready gate fires
     "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
+    "consolidator-ran.txt",     // marker written by consolidator synthesis entry (assert-consolidator-dispatched)
+    "auto-curator-considered.txt", // marker written by auto_curator step (assert-auto-curator-considered)
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
