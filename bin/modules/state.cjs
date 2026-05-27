@@ -783,6 +783,8 @@ const STATE_FILE_CONTRACT = {
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
     "review.md", "code-review-input.md",
+    "scope-check-required.txt", // marker written when >10-file + graphify-ready gate fires
+    "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
