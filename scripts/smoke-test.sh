@@ -6927,6 +6927,36 @@ else
   fail "F36b: parallel workflow does not mirror code-review.md context-prep contract"
 fi
 
+# F35 — consolidator step + synthesis-mode handler.
+# F35a: code-review-parallel.md has a consolidate step that invokes code-reviewer
+if /usr/bin/grep -q '<step name="consolidate"' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "Synthesize the N lane review files" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F35a: code-review-parallel.md consolidate step dispatches code-reviewer with synthesis instruction"
+else
+  fail "F35a: consolidate step missing or does not use the synthesis task instruction"
+fi
+# F35b: code-reviewer agent body carries the synthesis-mode handler
+if /usr/bin/grep -q "Lane synthesis mode" "$ROOT/agents/code-reviewer.md" \
+  && /usr/bin/grep -q "Dedupe by" "$ROOT/agents/code-reviewer.md" \
+  && /usr/bin/grep -q "Lane Provenance" "$ROOT/agents/code-reviewer.md"; then
+  pass "F35b: agents/code-reviewer.md carries lane synthesis-mode handler"
+else
+  fail "F35b: code-reviewer agent body missing lane synthesis-mode handler"
+fi
+
+# F37 — edge cases: hard-defer impossibly-fast empty returns + all-deferred handling.
+if /usr/bin/grep -qE "LANE_SIZE.*-lt 30|hard.defer|harness failure" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F37a: code-review-parallel.md hard-defers impossibly-fast empty lane returns (< 30 bytes)"
+else
+  fail "F37a: impossibly-fast lane hard-defer not implemented"
+fi
+if /usr/bin/grep -q "All Lanes Failed\|DEFERRED_COUNT" "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "All Lanes Failed" "$ROOT/agents/code-reviewer.md"; then
+  pass "F37b: all-lanes-deferred case produces review.md with ## All Lanes Failed + verdict=failed"
+else
+  fail "F37b: all-lanes-deferred handling incomplete in workflow or agent body"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
