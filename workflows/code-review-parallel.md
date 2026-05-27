@@ -33,39 +33,50 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 </step>
 
-<step name="partition_lanes" gate="lanes[] written to workflow.yaml OR fallback decision recorded">
+<step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
-Read `graph-impact.md` to extract `affected_communities`. Partition files into lanes by community, cap at 5 lanes, write the registry to `workflow.yaml::lanes[]`.
+Partition scope files into lanes by top-level directory. Path-based (not graphify-community-based) because graphify's blast_radius response doesn't emit community labels in practice (field-validated: greenfield's graph-impact.md has zero `## Affected Communities` sections after a 58-file blast_radius call). The orchestrator already manually partitions by filename in this case — this step automates that.
 
 ```bash
-GRAPH_IMPACT_PATH=".devt/state/graph-impact.md"
-if [ ! -f "$GRAPH_IMPACT_PATH" ]; then
-  echo "FALLBACK: graph-impact.md absent — parallel partition requires graphify; routing back to single-dispatch"
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
-  echo "Re-run /devt:review for community-filter single-dispatch path"
-  exit 0
-fi
-
-# Parse affected_communities from graph-impact.md. Expected format: a section
-# like `## Affected Communities` with bullet lines naming each community.
-# graphify writes this section when blast_radius returns multi-community impact.
-COMMUNITIES_RAW=$(awk '/^## Affected Communities/{found=1; next} found && /^## /{exit} found{print}' "$GRAPH_IMPACT_PATH" | grep -E '^- ' | sed 's/^- //' | head -5)
-COMMUNITY_COUNT=$(echo "$COMMUNITIES_RAW" | grep -cE '.')
-
-if [ "$COMMUNITY_COUNT" -eq 0 ]; then
-  echo "FALLBACK: graph-impact.md has no affected_communities — routing to single-dispatch + community-filter"
+SCOPE_FILES_PATH=".devt/state/code-review-input.md"
+if [ ! -f "$SCOPE_FILES_PATH" ]; then
+  echo "FALLBACK: code-review-input.md absent — routing to single-dispatch"
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
   exit 0
 fi
 
-# Build the lanes[] YAML block. Slug normalization happens via the CLI helper.
+# Read scope files (one path per line, skip blanks + comments)
+SCOPE_FILES=$(/usr/bin/grep -vE '^#|^$' "$SCOPE_FILES_PATH" 2>/dev/null || echo "")
+SCOPE_FILE_COUNT=$(echo "$SCOPE_FILES" | /usr/bin/grep -cE '.' || echo 0)
+if [ "$SCOPE_FILE_COUNT" -eq 0 ]; then
+  echo "FALLBACK: zero scope files — routing to single-dispatch"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
+  exit 0
+fi
+
+# Group by top-2-level path (e.g., "src/auth/middleware.ts" → "src/auth").
+# For flat layouts (single top-level), falls back to top-1-level. Top-level
+# files get "root". Cap at 5 lanes (head -5 preserves first 5 by sort order).
+GROUPS_FILE=$(mktemp)
+echo "$SCOPE_FILES" | while IFS= read -r FILE; do
+  [ -z "$FILE" ] && continue
+  PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
+  echo "$PREFIX|$FILE"
+done | sort > "$GROUPS_FILE"
+
+UNIQUE_PREFIXES=$(cut -d'|' -f1 "$GROUPS_FILE" | sort -u)
+PREFIX_COUNT=$(echo "$UNIQUE_PREFIXES" | /usr/bin/grep -cE '.')
+echo "partition_lanes: ${SCOPE_FILE_COUNT} files → ${PREFIX_COUNT} path groups"
+
+# Build lanes block. Each prefix becomes one lane. The lanes block is then
+# injected into workflow.yaml (replacing any prior lanes: section).
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LANE_NUM=1
-echo "$COMMUNITIES_RAW" | while IFS= read -r COMMUNITY; do
-  [ -z "$COMMUNITY" ] && continue
-  TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  SLUG=$(COMMUNITY_NAME="$COMMUNITY" node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName(process.env.COMMUNITY_NAME))")
+echo "$UNIQUE_PREFIXES" | head -5 | while IFS= read -r PREFIX; do
+  [ -z "$PREFIX" ] && continue
+  SLUG=$(PREFIX_NAME="$PREFIX" node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName(process.env.PREFIX_NAME))")
   echo "  - id: \"L${LANE_NUM}\""
-  echo "    community: \"${COMMUNITY}\""
+  echo "    community: \"${PREFIX}\""
   echo "    slug: \"${SLUG}\""
   echo "    review_file: \".devt/state/review-lane-${SLUG}.md\""
   echo "    status: \"in_flight\""
@@ -74,7 +85,6 @@ echo "$COMMUNITIES_RAW" | while IFS= read -r COMMUNITY; do
   LANE_NUM=$((LANE_NUM + 1))
 done > /tmp/devt-lanes-block.yaml
 
-# Append lanes block to workflow.yaml (idempotent: strip any prior lanes: section first)
 node -e '
 const fs = require("fs");
 const path = ".devt/state/workflow.yaml";
@@ -83,15 +93,15 @@ yaml = yaml.replace(/\nlanes:(\n[ \t][^\n]*)*/g, "");
 const lanesBlock = "lanes:\n" + fs.readFileSync("/tmp/devt-lanes-block.yaml", "utf8");
 fs.writeFileSync(path, yaml.trimEnd() + "\n" + lanesBlock);
 '
-rm -f /tmp/devt-lanes-block.yaml
+rm -f /tmp/devt-lanes-block.yaml "$GROUPS_FILE"
 
 LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 LANE_COUNT=$(echo "$LANES_OUT" | jq '.lanes | length')
-echo "Partitioned into ${LANE_COUNT} lanes (cap=5)"
+echo "Partitioned into ${LANE_COUNT} lanes (path-based, cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
 ```
 
-**Gate**: If the partition produced 0 lanes (graphify absent or empty communities), the step routes back to the standard `code-review.md` single-dispatch path and exits cleanly. The parallel workflow only proceeds when ≥ 1 lane was successfully partitioned.
+**Gate**: When zero lanes were registered (empty scope or path bucketing failed), the step routes back to the single-dispatch path. The parallel workflow only proceeds when ≥ 1 lane is in `workflow.yaml::lanes[]` — the next step (dispatch_lanes) enforces this via `state assert-lanes-registered`.
 
 </step>
 
