@@ -6,6 +6,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-05-27
+
+**Workflow Freshness — bind all assert-* gates to workflow.yaml::created_at.** Field validation of v0.60.0 (greenfield calibration) surfaced that all mechanical assert-* gates used existence-only checks; stale prior-workflow artifacts from prior sessions satisfied every gate. The only gate that fired correctly (`assert-auto-curator-considered`) was the one tied to a marker the current workflow must write. Plus root cause: `init.cjs::initWorkflow` returned a payload but did NOT mutate workflow.yaml — workflow_type/workflow_id/created_at only got reset when context_init bash called `state update` (which orchestrators skipped). This release closes both: `init *` now writes workflow.yaml unconditionally; every existence-checking gate gains a freshness branch (mtime vs workflow.yaml::created_at, 30s grace). Also hotfixes v0.60.0's mcp-stats namespace drift. Smoke: **666 → 678 passed**, **0 failed**.
+
+### Fixed
+
+- **`init review` / `init workflow` now write workflow.yaml unconditionally**. Previously initWorkflow was a payload-returning CLI; workflow.yaml mutations happened entirely through `state update` calls in each workflow's `context_init` bash. When orchestrators skipped that bash (greenfield's calibration: "I skipped context_init machinery wholesale"), workflow.yaml retained prior session values forever. Now every `init *` triggers state.cjs::updateState which already had the workflow_type-transition logic for regenerating workflow_id + created_at — just needed to be invoked. Validated end-to-end: stale workflow.yaml with `workflow_type: quick_implement` / `created_at: 2026-05-01` is fully reset by `init review`.
+- **mcp-stats namespace drift hotfix**: workflow `mcp-stats` query lines now use unprefixed graphify tool names (`mcp__devt-graphify__*`) to match `_mcp-trace.jsonl` records. v0.60.0's C1 over-applied the prefixed-form replacement; "Graphify activity" surface returned empty for unknown duration. Convention documented in workflow comments: trace records UNPREFIXED form regardless of how orchestrator invokes (prefixed `mcp__plugin_devt_devt-graphify__*` per Claude Code plugin namespacing); mcp-stats queries match trace.
+
+### Added
+
+- **`isArtifactFresh(path)` shared helper** in state.cjs — used by every freshness-aware gate. Returns `{fresh, reason?, artifact_mtime?, workflow_created_at?, age_seconds?}`. 30-second grace window for within-workflow ordering. Auto-passes when workflow.yaml has no created_at stamp (legacy compat). Exported for testing + direct programmatic use.
+- **Freshness branch on 7 existence-only assert-* gates**: `assert-graphify-decision`, `assert-verifier-ran`, `assert-claude-mem-harvest`, `assert-scope-check-handled`, `assert-consolidator-dispatched`, `assert-auto-curator-considered`, `assert-reuse-analyzed`. Each gate now has three branches: artifact absent (existing) → stale (NEW ok:false "older than workflow.yaml::created_at") → fresh (existing ok:true).
+- **`state evict-workflow-artifacts` CLI** — cleans gate-satisfaction markers + lane files from `.devt/state/` while preserving task outputs (review.md, impl-summary.md, test-summary.md, spec.md, plan.md, decisions.md). Called automatically by every `init *` verb. Manual invocation supported with `--dry-run` for preview.
+- **`WORKFLOW_TYPE_BY_INIT_VERB` map in init.cjs** — single source of truth mapping init CLI verbs to workflow.yaml::workflow_type values. Currently: `workflow → dev`, `review → code_review`. New init verbs added in the future must extend this map AND state.cjs::VALID_WORKFLOW_TYPES.
+- **12 new smoke gates (I1-I8)**: I1a/b/c (init reset of workflow_type / workflow_id / created_at), I2a/b/c (isArtifactFresh helper correctness: absent / fresh / stale), I3a (graphify-decision staleness branch), I4a (verifier-ran staleness), I5a (reuse-analyzed staleness), I6a (evict-workflow-artifacts preserves task outputs), I7a (namespace drift convention sanity), I8a (init auto-evict).
+
+### Architectural note
+
+CON-001 substance-enforcement-gates now has TWO required properties:
+1. **Existence binding**: the artifact must exist (already enforced)
+2. **Freshness binding**: the artifact's mtime must postdate the current workflow.yaml::created_at within a 30s grace (NEW in v0.62.0)
+
+Gates missing either property are bypassable by stale prior-workflow artifacts. Both must be in place. The greenfield v0.60.0 calibration's findings confirmed this with a 100% prediction record: every existence-only gate produced false-positive ok:true on stale state; the one gate with mechanical reset binding (auto-curator-considered) fired correctly.
+
+### Why this matters
+
+The greenfield v0.60.0 calibration surfaced that every mechanical gate built across v0.58-0.61 had the same architectural blind spot: existence is necessary but not sufficient for the artifact to represent the CURRENT workflow's work. Without freshness binding, a new session can start, do nothing, and pass every gate against the prior session's leftovers. This release closes that systematically across all 7 existing gates plus the freshness helper for future ones.
+
+### Not in this release (deferred)
+
+- **context_init prose simplification** (greenfield orchestrator's #16) — the workflow's 250-line context_init step is hard to follow; obligations near the end get forgotten. UX gap; structurally separable from freshness binding.
+- **Knowledge-candidate aggregation to scratchpad** — lane agents append to lane outputs, orchestrator doesn't always aggregate.
+- **Bitbucket PR-scoped tier** — still on the backlog.
+- **Agent passivity around graphify** — orchestrator's P1 observation that lanes consume graph-impact.md statically; structural change (would conflict with "orchestrator owns MCP" contract).
+
 ## [0.61.0] - 2026-05-27
 
 **Reuse Pre-Search Pattern.** Extends CON-001 substance-enforcement-gates to the duplicate-function domain. Field signal: programmers (LLM-driven) tend to reimplement functionality rather than search existing code, producing N variations of the same logic across the codebase. The prose instruction "scan existing code first" exists in `programmer.md` but gets rationalized past under context pressure — identical failure mode as the prose gates v0.58-0.60 fixed. This release adds a pure-Node CLI that queries the local graphify graph for existing methods with similar responsibility, scores them via a 3-signal heuristic (name match + caller-community overlap + docstring keyword), writes them to `.devt/state/reuse-candidates.md`, and mechanically blocks the test step until the programmer writes per-candidate decisions to `reuse-analysis.md`. Smoke: **657 → 666 passed**, **0 failed** (+9 new gates).
