@@ -7101,6 +7101,97 @@ else
   fail "G9a: staleness-suppressed.txt not in evict targets"
 fi
 
+# === v0.61.0 reuse pre-search gates ===
+
+# H1: derive-reuse-candidates CLI behavior (3 sub-gates)
+H1_TMP=$(mktemp -d)
+mkdir -p "$H1_TMP/.devt" && echo '{}' > "$H1_TMP/.devt/config.json"
+H1A=$(cd "$H1_TMP" && node "$ROOT/bin/devt-tools.cjs" state derive-reuse-candidates "" 2>/dev/null)
+if echo "$H1A" | jq -e '.ok == false and (.reason | contains("no task"))' >/dev/null 2>&1; then
+  pass "H1a: derive-reuse-candidates rejects empty task with ok:false"
+else
+  fail "H1a: empty-task rejection did not fire — got: $H1A"
+fi
+H1B=$(cd "$H1_TMP" && node "$ROOT/bin/devt-tools.cjs" state derive-reuse-candidates "add email validation" 2>/dev/null)
+if echo "$H1B" | jq -e '.ok == true and .candidates_total == 0' >/dev/null 2>&1; then
+  pass "H1b: derive-reuse-candidates returns ok:true + empty candidates when graphify unavailable"
+else
+  fail "H1b: graphify-unavailable degradation incorrect — got: $H1B"
+fi
+rm -rf "$H1_TMP"
+# H1c: success path — needs graphify-out. Skip cleanly if devt's repo doesn't have one.
+if [ -d "$ROOT/graphify-out" ] && [ -f "$ROOT/graphify-out/graph.json" ]; then
+  H1C_TMP=$(mktemp -d)
+  mkdir -p "$H1C_TMP/.devt" "$H1C_TMP/graphify-out"
+  echo '{"graphify":{"enabled":true}}' > "$H1C_TMP/.devt/config.json"
+  cp "$ROOT/graphify-out/graph.json" "$H1C_TMP/graphify-out/graph.json"
+  H1C=$(cd "$H1C_TMP" && node "$ROOT/bin/devt-tools.cjs" state derive-reuse-candidates "find similar functions" 2>/dev/null)
+  if echo "$H1C" | jq -e '.ok == true' >/dev/null 2>&1 && [ -f "$H1C_TMP/.devt/state/reuse-candidates.md" ]; then
+    pass "H1c: derive-reuse-candidates success path writes reuse-candidates.md"
+  else
+    fail "H1c: success path failed — got: $(echo "$H1C" | head -c 300)"
+  fi
+  rm -rf "$H1C_TMP"
+else
+  pass "H1c: skipped (no graphify-out/ in devt repo for fixture copy)"
+fi
+
+# H2: assert-reuse-analyzed CLI (3 sub-gates)
+H2_TMP=$(mktemp -d)
+mkdir -p "$H2_TMP/.devt/state" && echo '{}' > "$H2_TMP/.devt/config.json"
+H2A=$(cd "$H2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null)
+if echo "$H2A" | jq -e '.ok == true' >/dev/null 2>&1; then
+  pass "H2a: assert-reuse-analyzed PASSES when reuse-candidates.md absent (gate does not apply)"
+else
+  fail "H2a: gate fired incorrectly when no candidates — got: $H2A"
+fi
+cat > "$H2_TMP/.devt/state/reuse-candidates.md" <<'CEOF'
+# Candidates
+### `funcA` at `a.ts:1`
+### `funcB` at `b.ts:2`
+CEOF
+H2B=$(cd "$H2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null)
+if echo "$H2B" | jq -e '.ok == false and .candidates_to_analyze == 2' >/dev/null 2>&1; then
+  pass "H2b: assert-reuse-analyzed BLOCKS when candidates listed but analysis.md absent"
+else
+  fail "H2b: blocking failed — got: $H2B"
+fi
+cat > "$H2_TMP/.devt/state/reuse-analysis.md" <<'AEOF'
+## funcA — REUSED
+## funcB — REJECTED (different scope)
+AEOF
+H2C=$(cd "$H2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null)
+if echo "$H2C" | jq -e '.ok == true and .candidates_addressed == 2' >/dev/null 2>&1; then
+  pass "H2c: assert-reuse-analyzed PASSES with complete analysis"
+else
+  fail "H2c: pass-case failed — got: $H2C"
+fi
+rm -rf "$H2_TMP"
+
+# H3: dev-workflow.md + quick-implement.md both wire derive + gate
+if /usr/bin/grep -q "state derive-reuse-candidates" "$ROOT/workflows/dev-workflow.md" \
+  && /usr/bin/grep -q "reuse_candidates" "$ROOT/workflows/dev-workflow.md" \
+  && /usr/bin/grep -q "assert-reuse-analyzed" "$ROOT/workflows/dev-workflow.md"; then
+  pass "H3a: dev-workflow.md wires derive-reuse-candidates + reuse_candidates context block + assert-reuse-analyzed gate"
+else
+  fail "H3a: dev-workflow.md missing one or more reuse pre-search elements"
+fi
+if /usr/bin/grep -q "state derive-reuse-candidates" "$ROOT/workflows/quick-implement.md" \
+  && /usr/bin/grep -q "reuse_candidates" "$ROOT/workflows/quick-implement.md" \
+  && /usr/bin/grep -q "assert-reuse-analyzed" "$ROOT/workflows/quick-implement.md"; then
+  pass "H3b: quick-implement.md mirrors dev-workflow.md reuse pre-search wiring (KEEP-IN-SYNC)"
+else
+  fail "H3b: quick-implement.md missing reuse pre-search wiring"
+fi
+
+# H4: programmer.md has reuse_analysis step + decision vocabulary
+if /usr/bin/grep -q '<step name="reuse_analysis"' "$ROOT/agents/programmer.md" \
+  && /usr/bin/grep -qE "REUSED.*EXTENDED.*REJECTED|REUSED \| EXTENDED \| REJECTED" "$ROOT/agents/programmer.md"; then
+  pass "H4a: programmer.md has reuse_analysis step + REUSED/EXTENDED/REJECTED decision vocabulary"
+else
+  fail "H4a: programmer.md missing reuse_analysis step or decision vocabulary"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
