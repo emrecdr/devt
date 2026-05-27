@@ -33,6 +33,66 @@ function ensureStateDir() {
   return dir;
 }
 
+// Freshness check: an artifact is fresh if its mtime is no more than
+// 30 seconds OLDER than workflow.yaml::created_at. Files from prior
+// workflows have mtime << current created_at → return fresh:false.
+//
+// Returns: { fresh: bool, reason?: string, artifact_mtime?, workflow_created_at?, age_seconds? }
+//
+// Auto-passes (fresh:true) when:
+//   - workflow.yaml has no created_at field (legacy / fresh project)
+//   - workflow.yaml does not exist
+//   - artifact does not exist (caller handles existence separately)
+//
+// Binding to workflow.yaml::created_at (reset on every init * verb) makes
+// each gate workflow-current: stale prior-workflow artifacts that passed
+// existence-only checks now fail with a clear staleness message.
+const ARTIFACT_FRESHNESS_GRACE_MS = 30 * 1000;
+
+function isArtifactFresh(artifactPath) {
+  if (!fs.existsSync(artifactPath)) {
+    return { fresh: true, reason: "artifact absent (caller handles existence)" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const workflowPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(workflowPath)) {
+    return { fresh: true, reason: "no workflow.yaml — freshness check inapplicable" };
+  }
+  let createdAt;
+  try {
+    const yaml = fs.readFileSync(workflowPath, "utf8");
+    const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) return { fresh: true, reason: "workflow.yaml has no created_at stamp" };
+    createdAt = new Date(m[1]).getTime();
+    if (isNaN(createdAt)) return { fresh: true, reason: "workflow.yaml::created_at unparseable" };
+  } catch {
+    return { fresh: true, reason: "workflow.yaml read failure" };
+  }
+  let artifactMtime;
+  try {
+    artifactMtime = fs.statSync(artifactPath).mtime.getTime();
+  } catch {
+    return { fresh: true, reason: "artifact stat failure" };
+  }
+  const ageMs = createdAt - artifactMtime;
+  if (ageMs > ARTIFACT_FRESHNESS_GRACE_MS) {
+    return {
+      fresh: false,
+      reason: `artifact mtime is ${Math.round(ageMs / 1000)}s older than workflow.yaml::created_at — file is from a prior workflow`,
+      artifact_mtime: new Date(artifactMtime).toISOString(),
+      workflow_created_at: new Date(createdAt).toISOString(),
+      age_seconds: Math.round(ageMs / 1000),
+    };
+  }
+  return {
+    fresh: true,
+    artifact_mtime: new Date(artifactMtime).toISOString(),
+    workflow_created_at: new Date(createdAt).toISOString(),
+    age_seconds: Math.round(ageMs / 1000),
+  };
+}
+
 /**
  * Simple YAML-like parser for workflow state.
  * Handles flat key: value pairs and basic nesting.
@@ -1409,6 +1469,20 @@ function assertGraphifyDecision() {
       `substance threshold with no truncation marker (${sym}). Either the MCP ` +
       `response was empty or the drill-down was hand-typed.`;
   }
+  if (result.ok) {
+    const freshness = isArtifactFresh(filePath);
+    if (!freshness.fresh) {
+      return {
+        ok: false,
+        file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
+        graphify_state: "ready",
+        reason: `${freshness.reason} — graph-impact may be from a prior workflow; re-run preflight/graphify`,
+        artifact_mtime: freshness.artifact_mtime,
+        workflow_created_at: freshness.workflow_created_at,
+        age_seconds: freshness.age_seconds,
+      };
+    }
+  }
   return result;
 }
 
@@ -1529,6 +1603,20 @@ function assertVerifierRan() {
         "config.workflow.verification=false if verification is genuinely not needed for this workflow.",
     };
   }
+  const checkPath = haveSidecar ? sidecarPath : mdPath;
+  const freshness = isArtifactFresh(checkPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      verification_enabled: true,
+      sidecar_present: haveSidecar,
+      markdown_present: haveMd,
+      reason: `${freshness.reason} — verification artifact may be from a prior workflow; re-run verifier`,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return {
     ok: true,
     verification_enabled: true,
@@ -1568,6 +1656,16 @@ function assertScopeCheckHandled() {
     };
   }
   const answer = fs.readFileSync(answerPath, "utf8").trim();
+  const freshness = isArtifactFresh(answerPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      reason: `${freshness.reason} — scope-check-answer.txt may be from a prior workflow; re-run scope check`,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return { ok: true, answer };
 }
 
@@ -1625,6 +1723,17 @@ function assertConsolidatorDispatched() {
       substance_pass_count: substancePassCount,
     };
   }
+  const freshness = isArtifactFresh(markerPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      reason: `${freshness.reason} — consolidator-ran.txt may be from a prior workflow; re-dispatch the synthesis agent`,
+      substance_pass_count: substancePassCount,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return { ok: true, substance_pass_count: substancePassCount };
 }
 
@@ -1647,6 +1756,16 @@ function assertAutoCuratorConsidered() {
     };
   }
   const status = fs.readFileSync(markerPath, "utf8").trim();
+  const freshness = isArtifactFresh(markerPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      reason: `${freshness.reason} — auto-curator-considered.txt may be from a prior workflow; re-run the auto_curator step`,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return { ok: true, auto_curator_status: status };
 }
 
@@ -1706,6 +1825,17 @@ function assertReuseAnalyzed() {
     };
   }
 
+  const freshness = isArtifactFresh(analysisPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      reason: `${freshness.reason} — reuse-analysis.md may be from a prior workflow; re-run reuse analysis`,
+      candidates_to_analyze: candidateLabels.length,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return {
     ok: true,
     candidates_to_analyze: candidateLabels.length,
@@ -1935,6 +2065,18 @@ function assertClaudeMemHarvest() {
       reason: "neither claude-mem-harvest.md nor claude-mem-skipped.txt exists — orchestrator skipped the claude-mem pre-step in context_init",
     };
   }
+  const checkPath = haveHarvest ? harvestPath : skippedPath;
+  const freshness = isArtifactFresh(checkPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      file: haveHarvest ? "claude-mem-harvest.md" : "claude-mem-skipped.txt",
+      reason: `${freshness.reason} — claude-mem artifact may be from a prior workflow; re-run the claude-mem pre-step in context_init`,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return {
     ok: true,
     file: haveHarvest ? "claude-mem-harvest.md" : "claude-mem-skipped.txt",
@@ -2123,4 +2265,6 @@ module.exports = {
   SIDECAR_FOR_MARKDOWN,
   VALID_LANE_STATUSES,
   slugifyLaneName,
+  isArtifactFresh,
+  ARTIFACT_FRESHNESS_GRACE_MS,
 };
