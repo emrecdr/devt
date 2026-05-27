@@ -7192,6 +7192,210 @@ else
   fail "H4a: programmer.md missing reuse_analysis step or decision vocabulary"
 fi
 
+# === I1-I8: v0.62.0 workflow freshness gates ===
+
+# I1: init * resets workflow.yaml::{workflow_type, workflow_id, created_at}
+I1_TMP=$(mktemp -d)
+mkdir -p "$I1_TMP/.devt/state" && echo '{}' > "$I1_TMP/.devt/config.json"
+cat > "$I1_TMP/.devt/state/workflow.yaml" <<'WFEOF'
+active: true
+workflow_id: "old-stale-id"
+workflow_type: "quick_implement"
+created_at: "2026-05-01T10:00:00Z"
+task: "old task"
+WFEOF
+(cd "$I1_TMP" && node "$ROOT/bin/devt-tools.cjs" init review "fresh task" >/dev/null 2>&1)
+I1_STATE=$(cd "$I1_TMP" && node "$ROOT/bin/devt-tools.cjs" state read 2>/dev/null)
+if echo "$I1_STATE" | jq -e '.workflow_type == "code_review"' >/dev/null 2>&1; then
+  pass "I1a: init review resets workflow_type from prior session (quick_implement -> code_review)"
+else
+  fail "I1a: workflow_type not reset — got: $(echo "$I1_STATE" | jq -r '.workflow_type')"
+fi
+if echo "$I1_STATE" | jq -e '.workflow_id != "old-stale-id" and (.workflow_id | length) > 8' >/dev/null 2>&1; then
+  pass "I1b: init review regenerates workflow_id (fresh UUID, not old-stale-id)"
+else
+  fail "I1b: workflow_id not regenerated — got: $(echo "$I1_STATE" | jq -r '.workflow_id')"
+fi
+CREATED_AT=$(echo "$I1_STATE" | jq -r '.created_at // ""')
+NOW_EPOCH=$(date -u +%s)
+CREATED_EPOCH=$(date -u -d "$CREATED_AT" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%S" "${CREATED_AT%.*Z}" +%s 2>/dev/null || echo 0)
+AGE_SECONDS=$((NOW_EPOCH - CREATED_EPOCH))
+if [ "$AGE_SECONDS" -lt 3600 ] && [ "$AGE_SECONDS" -ge 0 ]; then
+  pass "I1c: init review sets created_at to recent timestamp (age=${AGE_SECONDS}s)"
+else
+  fail "I1c: created_at not refreshed — got: ${CREATED_AT} (age=${AGE_SECONDS}s)"
+fi
+rm -rf "$I1_TMP"
+
+# I2: isArtifactFresh helper correctness (exported from state.cjs)
+I2_TMP=$(mktemp -d)
+mkdir -p "$I2_TMP/.devt/state" && echo '{}' > "$I2_TMP/.devt/config.json"
+# I2a: artifact absent → fresh:true
+I2A=$(cd "$I2_TMP" && node -e '
+const {isArtifactFresh} = require("'"$ROOT"'/bin/modules/state.cjs");
+console.log(JSON.stringify(isArtifactFresh(".devt/state/nonexistent.txt")));
+' 2>/dev/null)
+if echo "$I2A" | jq -e '.fresh == true' >/dev/null 2>&1; then
+  pass "I2a: isArtifactFresh returns fresh:true when artifact absent (escape clause)"
+else
+  fail "I2a: absent-artifact case incorrect — got: $I2A"
+fi
+# I2b: artifact mtime ~ workflow.yaml::created_at → fresh:true
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$I2_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+created_at: "${NOW_ISO}"
+EOF
+echo "fresh content" > "$I2_TMP/.devt/state/fresh-art.txt"
+I2B=$(cd "$I2_TMP" && node -e '
+const {isArtifactFresh} = require("'"$ROOT"'/bin/modules/state.cjs");
+console.log(JSON.stringify(isArtifactFresh(".devt/state/fresh-art.txt")));
+' 2>/dev/null)
+if echo "$I2B" | jq -e '.fresh == true' >/dev/null 2>&1; then
+  pass "I2b: isArtifactFresh returns fresh:true when artifact mtime ~ workflow.yaml::created_at"
+else
+  fail "I2b: fresh-artifact case incorrect — got: $I2B"
+fi
+# I2c: artifact mtime 1h before created_at → fresh:false
+echo "stale content" > "$I2_TMP/.devt/state/stale-art.txt"
+touch -d "1 hour ago" "$I2_TMP/.devt/state/stale-art.txt" 2>/dev/null || \
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null)" "$I2_TMP/.devt/state/stale-art.txt"
+I2C=$(cd "$I2_TMP" && node -e '
+const {isArtifactFresh} = require("'"$ROOT"'/bin/modules/state.cjs");
+console.log(JSON.stringify(isArtifactFresh(".devt/state/stale-art.txt")));
+' 2>/dev/null)
+if echo "$I2C" | jq -e '.fresh == false and .age_seconds > 100' >/dev/null 2>&1; then
+  pass "I2c: isArtifactFresh returns fresh:false when artifact mtime is >30s older than workflow.yaml::created_at"
+else
+  fail "I2c: stale-artifact case incorrect — got: $I2C"
+fi
+rm -rf "$I2_TMP"
+
+# I3: assert-graphify-decision blocks on stale graph-impact.md
+I3_TMP=$(mktemp -d)
+mkdir -p "$I3_TMP/.devt/state" "$I3_TMP/.devt/memory" "$I3_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$I3_TMP/.devt/config.json"
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$I3_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: "wf-i3"
+created_at: "${NOW_ISO}"
+EOF
+echo '{"meta":{},"built_at_commit":"abc"}' > "$I3_TMP/graphify-out/graph.json"
+# Substantive graph-impact.md (must pass thin_content threshold)
+cat > "$I3_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact — stale fixture
+## Blast radius — TestSymbol
+content padded for thin_content threshold xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: SymA
+Substantive drill-down body padded past the 200-byte substance threshold so the thin-content gate passes and the staleness check fires next. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+IMPEOF
+for i in 1 2 3; do
+  echo "{\"ts\":\"2026-05-27T00:00:0${i}.000Z\",\"tool\":\"mcp__devt-graphify__get_neighbors\",\"workflow_id\":\"wf-i3\"}" >> "$I3_TMP/.devt/memory/_mcp-trace.jsonl"
+done
+# Force stale mtime (1h before created_at)
+touch -d "1 hour ago" "$I3_TMP/.devt/state/graph-impact.md" 2>/dev/null || \
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null)" "$I3_TMP/.devt/state/graph-impact.md"
+I3=$(cd "$I3_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$I3" | jq -e '.ok == false and (.reason | test("older than"; "i"))' >/dev/null 2>&1; then
+  pass "I3a: assert-graphify-decision BLOCKS when graph-impact.md mtime is older than workflow.yaml::created_at"
+else
+  fail "I3a: staleness branch did not fire — got: $(echo "$I3" | head -c 400)"
+fi
+rm -rf "$I3_TMP"
+
+# I4: assert-verifier-ran blocks on stale verification.json
+I4_TMP=$(mktemp -d)
+mkdir -p "$I4_TMP/.devt/state" && echo '{}' > "$I4_TMP/.devt/config.json"
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$I4_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+created_at: "${NOW_ISO}"
+EOF
+echo '{"agent":"verifier","status":"VERIFIED","verdict":"satisfied"}' > "$I4_TMP/.devt/state/verification.json"
+touch -d "1 hour ago" "$I4_TMP/.devt/state/verification.json" 2>/dev/null || \
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null)" "$I4_TMP/.devt/state/verification.json"
+I4=$(cd "$I4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null)
+if echo "$I4" | jq -e '.ok == false and (.reason | test("older than"; "i"))' >/dev/null 2>&1; then
+  pass "I4a: assert-verifier-ran BLOCKS when verification.json mtime is older than workflow.yaml::created_at"
+else
+  fail "I4a: staleness branch did not fire — got: $(echo "$I4" | head -c 400)"
+fi
+rm -rf "$I4_TMP"
+
+# I5: assert-reuse-analyzed blocks on stale reuse-analysis.md
+I5_TMP=$(mktemp -d)
+mkdir -p "$I5_TMP/.devt/state" && echo '{}' > "$I5_TMP/.devt/config.json"
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$I5_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+created_at: "${NOW_ISO}"
+EOF
+cat > "$I5_TMP/.devt/state/reuse-candidates.md" <<'CEOF'
+# Candidates
+### `funcA` at `a.ts:1`
+CEOF
+cat > "$I5_TMP/.devt/state/reuse-analysis.md" <<'AEOF'
+## funcA — REUSED
+AEOF
+touch -d "1 hour ago" "$I5_TMP/.devt/state/reuse-analysis.md" 2>/dev/null || \
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null)" "$I5_TMP/.devt/state/reuse-analysis.md"
+I5=$(cd "$I5_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null)
+if echo "$I5" | jq -e '.ok == false and (.reason | test("older than"; "i"))' >/dev/null 2>&1; then
+  pass "I5a: assert-reuse-analyzed BLOCKS when reuse-analysis.md mtime is older than workflow.yaml::created_at"
+else
+  fail "I5a: staleness branch did not fire — got: $(echo "$I5" | head -c 400)"
+fi
+rm -rf "$I5_TMP"
+
+# I6: evict-workflow-artifacts — gate markers removed, task outputs preserved
+I6_TMP=$(mktemp -d)
+mkdir -p "$I6_TMP/.devt/state" && echo '{}' > "$I6_TMP/.devt/config.json"
+touch "$I6_TMP/.devt/state/scope-check-answer.txt"
+touch "$I6_TMP/.devt/state/consolidator-ran.txt"
+touch "$I6_TMP/.devt/state/claude-mem-harvest.md"
+touch "$I6_TMP/.devt/state/review-lane-auth.md"
+touch "$I6_TMP/.devt/state/review.md"
+touch "$I6_TMP/.devt/state/impl-summary.md"
+(cd "$I6_TMP" && node "$ROOT/bin/devt-tools.cjs" state evict-workflow-artifacts >/dev/null 2>&1)
+EVICTED_GATE=$( [ ! -f "$I6_TMP/.devt/state/scope-check-answer.txt" ] \
+  && [ ! -f "$I6_TMP/.devt/state/consolidator-ran.txt" ] \
+  && [ ! -f "$I6_TMP/.devt/state/claude-mem-harvest.md" ] \
+  && [ ! -f "$I6_TMP/.devt/state/review-lane-auth.md" ] \
+  && echo "yes" || echo "no" )
+PRESERVED=$( [ -f "$I6_TMP/.devt/state/review.md" ] && [ -f "$I6_TMP/.devt/state/impl-summary.md" ] && echo "yes" || echo "no" )
+if [ "$EVICTED_GATE" = "yes" ] && [ "$PRESERVED" = "yes" ]; then
+  pass "I6a: evict-workflow-artifacts removes gate markers + lane files, preserves review.md + impl-summary.md"
+else
+  fail "I6a: eviction wrong — evicted_gate=${EVICTED_GATE}, preserved=${PRESERVED}"
+fi
+rm -rf "$I6_TMP"
+
+# I7: namespace drift — mcp-stats uses unprefixed form, workflow prose uses prefixed form
+MCP_STATS_OK=$(/usr/bin/grep -c "mcp-stats.*--tool='mcp__devt-graphify__\*'" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+PROSE_PREFIXED=$(/usr/bin/grep -c "mcp__plugin_devt_devt-graphify__" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "$MCP_STATS_OK" -ge 1 ] && [ "$PROSE_PREFIXED" -ge 3 ]; then
+  pass "I7a: code-review.md mcp-stats uses UNPREFIXED form (matches trace records) + prose uses PREFIXED form (orchestrator calls)"
+else
+  fail "I7a: namespace asymmetry broken — mcp-stats unprefixed=${MCP_STATS_OK}, prose prefixed=${PROSE_PREFIXED}"
+fi
+
+# I8: init * auto-evicts stale gate markers; preserves task outputs
+I8_TMP=$(mktemp -d)
+mkdir -p "$I8_TMP/.devt/state" && echo '{}' > "$I8_TMP/.devt/config.json"
+touch "$I8_TMP/.devt/state/scope-check-answer.txt"
+touch "$I8_TMP/.devt/state/consolidator-ran.txt"
+touch "$I8_TMP/.devt/state/review.md"
+(cd "$I8_TMP" && node "$ROOT/bin/devt-tools.cjs" init review "test task" >/dev/null 2>&1)
+if [ ! -f "$I8_TMP/.devt/state/scope-check-answer.txt" ] \
+  && [ ! -f "$I8_TMP/.devt/state/consolidator-ran.txt" ] \
+  && [ -f "$I8_TMP/.devt/state/review.md" ]; then
+  pass "I8a: init * auto-evicts prior-workflow gate markers; preserves task outputs"
+else
+  fail "I8a: init auto-evict failed: scope-check-answer=$([ -f "$I8_TMP/.devt/state/scope-check-answer.txt" ] && echo present || echo absent), consolidator=$([ -f "$I8_TMP/.devt/state/consolidator-ran.txt" ] && echo present || echo absent), review.md=$([ -f "$I8_TMP/.devt/state/review.md" ] && echo present || echo absent)"
+fi
+rm -rf "$I8_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
