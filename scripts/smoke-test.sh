@@ -6892,6 +6892,41 @@ else
   fail "F33b: graphify-unavailable fallback missing in partition_lanes"
 fi
 
+# F34 — per-lane F28 substance check + retry-once-then-defer.
+# F34a: presence — substance_check_lanes step exists and calls check-agent-output
+if /usr/bin/grep -q '<step name="substance_check_lanes"' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "state check-agent-output" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F34a: code-review-parallel.md substance_check_lanes loops state check-agent-output per lane"
+else
+  fail "F34a: substance_check_lanes step missing or does not invoke check-agent-output"
+fi
+# F34b: retry-once-then-defer — state transitions in_flight → stub_redispatched → deferred
+if /usr/bin/grep -q 'status=stub_redispatched' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q 'status=deferred' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qE 'REDISPATCH_COUNT.*1|redispatch_count.*ge 1' "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F34b: retry-once-then-defer policy wired (stub_redispatched on first, deferred on second)"
+else
+  fail "F34b: retry-once-then-defer policy not implemented"
+fi
+
+# F36 — re-dispatch carries all three L1-required context blocks.
+# F36a: redispatch_lanes step references the same context-block injection idiom as dispatch_lanes
+if /usr/bin/grep -q '<step name="redispatch_lanes"' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "scope_trust" "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "scope_hint" "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "memory_signal" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F36a: redispatch_lanes carries scope_trust + scope_hint + memory_signal (L1 compliance)"
+else
+  fail "F36a: redispatch_lanes missing one or more L1-required context blocks"
+fi
+# F36b: code-review.md and code-review-parallel.md both call the same governing-rules + memory-signal CLIs
+if /usr/bin/grep -q "memory query.*--signal=3\|memory_signal_json" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -q "memory_signal_json" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F36b: code-review.md and code-review-parallel.md share governing context-prep idioms"
+else
+  fail "F36b: parallel workflow does not mirror code-review.md context-prep contract"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
