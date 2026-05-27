@@ -3737,7 +3737,7 @@ echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # below AND author the corresponding rubric — the smoke test will fail until
 # both land. Workflows that don't dispatch the verifier have no rubric
 # obligation (debug/code-review/arch-health use their own terminal agents).
-VERIFIER_USING_WORKFLOWS=("dev" "code_review")
+VERIFIER_USING_WORKFLOWS=("dev" "code_review" "code_review_parallel")
 # rubrics are version-pinned. The smoke test resolves each
 # workflow_type to its pinned filename via the `rubrics` config map in
 # DEFAULTS, then asserts the file exists. When a project bumps its rubric
@@ -3794,6 +3794,7 @@ for actual in $ACTUAL_VERIFIER_WORKFLOWS; do
   case "$actual" in
     dev-workflow) wt="dev" ;;
     code-review) wt="code_review" ;;
+    code-review-parallel) wt="code_review_parallel" ;;
     *) wt="$actual" ;;
   esac
   found=0

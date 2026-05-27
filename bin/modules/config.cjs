@@ -177,6 +177,9 @@ const DEFAULTS = {
   rubrics: {
     dev: "dev.v1.md",
     code_review: "code_review.v1.md",
+    // Parallel-lane review consolidates N lane outputs into a single review.md;
+    // verifier still grades the consolidated artifact, so the rubric is shared.
+    code_review_parallel: "code_review.v1.md",
   },
 };
 
