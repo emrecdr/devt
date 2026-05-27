@@ -239,6 +239,41 @@ fi
 The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason satisfies the gate. The point is to make the consideration explicit — silent skips are the failure mode.
 </step>
 
+<step name="scope_check" gate="scope size measured + parallel decision made if applicable">
+
+Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
+
+```bash
+SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
+GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
+echo "scope_check: file_count=${SCOPE_FILE_COUNT}, graphify_state=${GRAPHIFY_STATE}"
+```
+
+If `SCOPE_FILE_COUNT ≤ 10` OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope creeps past 10 files without graphify.
+
+If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"`: ask the user:
+
+```yaml
+question: "Review scope is {SCOPE_FILE_COUNT} files. Split into parallel lanes (one reviewer per graphify community, capped at 5)?"
+header: "Parallel Review"
+multiSelect: false
+options:
+  - label: "Yes — parallel lanes (recommended for >15 files)"
+    description: "Foreground multi-Task dispatch by community; substance-gated per lane; consolidated into single review.md"
+  - label: "No — single dispatch with community-filter"
+    description: "One reviewer; deep review restricted to affected_communities; rest deferred"
+```
+
+If user picks YES: delegate to `workflows/code-review-parallel.md` by Read-ing that file and following its steps starting from `context_init`. The cached workflow.yaml state (workflow_id, memory_signal, scope_hint, scope_trust) carries over — the parallel workflow re-reads it.
+
+If user picks NO: continue to identify_scope (existing single-dispatch path; the code-reviewer agent's community-filter logic handles scope > 10 files automatically).
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check status=DONE
+```
+
+</step>
+
 <step name="identify_scope" gate="file list is determined">
 
 Determine which files to review. Use ONE of these strategies (in priority order):
