@@ -99,6 +99,17 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lan
 
 **Foreground parallel dispatch.** Issue ONE message containing N `Task(subagent_type="devt:code-reviewer", …)` calls — one per lane in `workflow.yaml::lanes[]`. Sequential Task calls serialize; only multi-Task-in-one-message gets true parallelism per the Anthropic Task contract (same idiom as `dev-workflow.md:506` researcher+architect parallel dispatch).
 
+```bash
+LANES_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-lanes-registered)
+if echo "$LANES_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lanes status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$LANES_GATE" | jq -r '.reason')"
+  exit 0
+fi
+LANE_COUNT=$(echo "$LANES_GATE" | jq -r '.lane_count')
+echo "dispatch_lanes: ${LANE_COUNT} lanes registered"
+```
+
 Read the lane registry:
 
 ```bash
@@ -279,6 +290,15 @@ if echo "$SUBSTANCE" | /usr/bin/grep -qF '"looks_like_stub":true'; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
   REASON=$(echo "$SUBSTANCE" | /usr/bin/grep -oE '"reason":"[^"]*"' || echo '"reason":"unknown"')
   echo "BLOCKED: consolidated review.md looks like a stub — ${REASON}"
+  exit 0
+fi
+```
+
+```bash
+CONS_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-consolidator-dispatched)
+if echo "$CONS_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$CONS_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
