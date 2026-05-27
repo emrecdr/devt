@@ -30,7 +30,7 @@ The orchestrator owns the terminal `max_iterations_reached` outcome — when `ve
 
 ## Grading axes (what to actually check)
 
-The verifier evaluates the review against **five axes**. Each axis must pass for `verdict=satisfied`. Any failed axis produces a `revisions[]` entry.
+The verifier evaluates the review against **six axes**. Each axis must pass for `verdict=satisfied`. Any failed axis produces a `revisions[]` entry.
 
 | Axis | Bar | How to check |
 | ---- | --- | ------------ |
@@ -39,8 +39,9 @@ The verifier evaluates the review against **five axes**. Each axis must pass for
 | **C. Severity calibration** | No critical-rated nits (e.g. "Critical: variable naming"). No minor-rated security/data-mutation issues (e.g. "Minor: SQL injection on POST /admin"). Severity must match impact. | Read each Critical and each Minor finding; flag any obvious miscalibration. |
 | **D. Remediation concreteness** | Every Critical and Important finding describes a remediation step — "replace X with Y", "extract the validation to module Z", "add a test for the empty-collection case." Findings that only describe the problem without a fix direction are gaps for NEEDS_WORK reviews; informational-only is acceptable for APPROVED_WITH_NOTES. | Re-read each Critical/Important finding; check for an actionable fix. |
 | **E. ADR Compliance section** | If `node bin/devt-tools.cjs memory affects <file>` returns hits for any scope file, `review.md` MUST include an `## ADR Compliance` section that addresses each affected ADR/CON/FLOW. Reviews missing this section when memory affects-paths returned hits are gaps. (Skip this axis when memory layer is disabled OR no affects hits exist for any scope file.) | Run `memory affects` for each scope file; if hits, grep review.md for ADR Compliance section. |
+| **G. Reuse Discipline** | When `.devt/state/reuse-candidates.md` exists AND lists ≥1 candidate, `review.md` MUST include a `## Reuse Discipline` section with a per-candidate decision (REUSED / EXTENDED / REJECTED). Missing section is a gap. REUSED claims must be verifiable via import + call site in the diff; REJECTED reasons must be technically specific (wrong abstraction level, async mismatch, state mutation conflict) — generic reasons ("different style", "not quite right") are gaps. EXTENDED claims must show modification of the cited function, not a parallel reimplementation. (Skip this axis when `reuse-candidates.md` is absent or empty.) | If `reuse-candidates.md` exists and is non-empty: grep `review.md` for `## Reuse Discipline`; for each REUSED, grep the diff for the cited import + call site; for each REJECTED, read the rejection reason and assess specificity; for each EXTENDED, verify the candidate function was modified not duplicated. A programmer-claimed REUSED with no import in the diff is a Critical violation (not just a gap). |
 
-A sixth axis — **REJ tombstone alignment** — is a hard fail rather than a gap: if `review.md` proposes (in any remediation) an approach whose keywords match a REJ tombstone via `memory rejected-keywords`, the verdict is `failed` (not `needs_revision`). The reviewer is recommending something the team explicitly tombstoned; that's not a "fix this and retry" — it's a structural confusion that needs human review.
+A seventh axis — **REJ tombstone alignment** — is a hard fail rather than a gap: if `review.md` proposes (in any remediation) an approach whose keywords match a REJ tombstone via `memory rejected-keywords`, the verdict is `failed` (not `needs_revision`). The reviewer is recommending something the team explicitly tombstoned; that's not a "fix this and retry" — it's a structural confusion that needs human review.
 
 ## `revisions[]` Array Shape
 
@@ -82,7 +83,7 @@ Choose `failed` only when:
 
 - `review.md` is missing, empty, or unparseable.
 - `.devt/state/review-scope.md` is missing (the reviewer was dispatched without scope — a workflow bug, not a review quality issue).
-- The review proposes (in remediation) an approach that matches a REJ tombstone — see axis F above.
+- The review proposes (in remediation) an approach that matches a REJ tombstone — see the REJ tombstone alignment hard-fail axis above.
 - 3+ axes fail simultaneously across the same finding cluster — re-dispatch will not converge; surface to human.
 
 `failed` is a hard stop. The workflow surfaces BLOCKED to the user. Do not use `failed` for "the review missed one file" — that is what `needs_revision` is for.
@@ -96,12 +97,12 @@ Choose `failed` only when:
               │
               ├─ Remediation matches a REJ tombstone? ─────────────────► failed
               │
-              ├─ Every axis A–E passes + no NEEDS_HUMAN flags? ────────► satisfied
+              ├─ Every axis A–E + G passes + no NEEDS_HUMAN flags? ──► satisfied
               │
 Verifier ─────┤
               ├─ Only NEEDS_HUMAN flags remain? ──► satisfied (status=DONE_WITH_CONCERNS)
               │
-              ├─ Axis A–E failures are point fixes (1-3 entries)? ─────► needs_revision
+              ├─ Axis A–E + G failures are point fixes (1-3 entries)? ► needs_revision
               │     (populate revisions[] with axis-keyed ids + gap evidence)
               │
               └─ 3+ axes fail simultaneously across same finding cluster? ► failed
