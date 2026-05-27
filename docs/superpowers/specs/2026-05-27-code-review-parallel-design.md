@@ -3,8 +3,8 @@
 **Status**: approved 2026-05-27. Pending implementation plan (writing-plans skill next).
 **Author**: design pass with Emre.
 **Field signal**: greenfield 2026-05-26 PR #372 6-lane improvised fan-out → 5/6 lanes returned stubs, L1 hook denied improvised re-dispatches, main thread stalled on background tasks waiting for notifications that never arrived.
-**Predecessor**: deferred backlog item L5 from v0.58.0 CHANGELOG (*"Document parallel-lane workflow (`code-review-parallel.md`) for multi-lane reviews"*).
-**Builds on**: substance-enforcement gates shipped v0.58.1–v0.58.3 (F26/F27/F28/F29/F30/F31). [[CON-001-substance-enforcement-gates]].
+**Predecessor**: deferred backlog item L5 (*"Document parallel-lane workflow (`code-review-parallel.md`) for multi-lane reviews"*) — see CHANGELOG for the dispatch-hygiene release that recorded it.
+**Builds on**: the substance-enforcement gates F26/F27/F28/F29/F30/F31 (see CHANGELOG entries and [[CON-001-substance-enforcement-gates]]).
 
 ## Problem
 

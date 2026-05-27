@@ -6543,6 +6543,20 @@ for i in 1 2 3; do
   echo "{\"ts\":\"2026-05-27T00:00:0${i}.000Z\",\"tool\":\"mcp__devt-graphify__get_neighbors\",\"workflow_id\":\"test-wf-abc123\"}" \
     >> "$F26_TMP/.devt/memory/_mcp-trace.jsonl"
 done
+# Replace the thin-prose fixture with substantive ≥200-byte sections so the
+# v0.58.4 F39 per-section substance gate also passes — F26b's contract is
+# "MCP calls match drill-down count", not "drill-down content is thin".
+cat > "$F26_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact — test
+## Blast radius — TestSymbol
+content here at least 250 bytes to pass thin_content threshold xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: SymA
+Substantive drill-down body with real graph signal: caller_set includes 4 modules with combined edge_count of 18; the symbol participates in event-driven wiring across two distinct namespaces; the reviewer should treat this as a structural-coupling indicator and inspect handler signatures before approving changes.
+## Drill-down: SymB
+Another substantive section: direct_dependents = [Alpha, Beta, Gamma]; depth_2_callers add 3 more modules to the impact set; the response was complete within MCP payload limits and the graph trust is dense; cross-namespace edges suggest the symbol is a coordination point.
+## Drill-down: SymC
+Third substantive section: edge_count 12, in-edges from 4 distinct namespaces; the graph trust level is dense and lag_commits=0, so this signal is reliable for the reviewer; this symbol is referenced by orchestration code paths and merits scope_hint upgrade.
+IMPEOF
 F26B=$(cd "$F26_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
 if echo "$F26B" | /usr/bin/grep -q '"fabricated_drill_down":false' \
   && echo "$F26B" | /usr/bin/grep -q '"mcp_get_neighbors_calls":3' \
@@ -6718,6 +6732,137 @@ else
   fail "F31c: broadened regex false-positive on substantive prose — got: $F31C"
 fi
 rm -rf "$F31_TMP"
+
+# F38a: SYMBOL_DENYLIST extension catches greenfield prose-noise tokens that
+# slipped through into topic.symbols (greenfield 2026-05-27 PR #372 P1).
+# Validates by checking the source: the new tokens must appear in the denylist
+# Set literal in preflight.cjs. Behavioral test (preflight generate against
+# a noisy task) is covered by existing F11/F12 gates.
+F38_MISSING=""
+for TOK in service notification scope secondary graphify; do
+  /usr/bin/grep -q "\"$TOK\"" "$ROOT/bin/modules/preflight.cjs" || F38_MISSING="$F38_MISSING $TOK"
+done
+if [ -z "$F38_MISSING" ]; then
+  pass "F38a: SYMBOL_DENYLIST extended with greenfield prose-noise tokens (service|notification|scope|secondary|graphify all present)"
+else
+  fail "F38a: denylist missing tokens:$F38_MISSING"
+fi
+
+# F39: per-section drill-down substance gate (greenfield 2026-05-27 PR #372 P5).
+# F26 counted sections; F39 requires each section's body to be ≥ 200 bytes OR
+# carry an explicit truncation marker.
+F39_TMP=$(mktemp -d)
+mkdir -p "$F39_TMP/.devt/state" "$F39_TMP/.devt/memory" "$F39_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$F39_TMP/.devt/config.json"
+cat > "$F39_TMP/.devt/state/workflow.yaml" <<'WFEOF'
+active: true
+workflow_id: "f39-test"
+WFEOF
+node -e 'require("fs").writeFileSync("'"$F39_TMP"'/graphify-out/graph.json", JSON.stringify({meta:{},built_at_commit:"abc"}))'
+# Real MCP records — F26 cross-ref passes so F39 is the gate under test
+for i in 1 2 3; do
+  echo "{\"ts\":\"2026-05-27T00:00:0${i}.000Z\",\"tool\":\"mcp__devt-graphify__get_neighbors\",\"workflow_id\":\"f39-test\"}" \
+    >> "$F39_TMP/.devt/memory/_mcp-trace.jsonl"
+done
+# F39a — thin sections (each <200 bytes, no truncation marker) → fail gate
+cat > "$F39_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact
+## Blast radius — TestSymbol
+substantive blast-radius body padded past 250 bytes to clear the thin_content guard xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: SymA
+prose
+## Drill-down: SymB
+prose
+## Drill-down: SymC
+prose
+IMPEOF
+F39A=$(cd "$F39_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F39A" | jq -e '.thin_drill_down_sections == 3 and .ok == false' >/dev/null 2>&1; then
+  pass "F39a: assert-graphify-decision BLOCKS when drill-down sections all below 200-byte substance threshold"
+else
+  fail "F39a: thin drill-down gate did not trip — got: $(echo "$F39A" | head -c 400)"
+fi
+# F39b — substantive sections (each ≥ 200 bytes) → pass gate
+cat > "$F39_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact
+## Blast radius — TestSymbol
+substantive blast-radius body padded past 250 bytes to clear the thin_content guard xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: SymA
+This is a substantive drill-down body. It contains real graph data: caller_set: [Alpha, Beta, Gamma], depth_2_callers: [Delta, Epsilon], file_path: src/foo.py, edge_count: 12. The symbol participates in event-driven wiring and the depth-2 callers reveal cross-module coupling.
+## Drill-down: SymB
+Another substantive section with the full neighbor response: direct_dependents includes 5 modules with combined edge_count of 27. The symbol appears in 3 import chains and has 8 in-edges from 4 distinct namespaces. The graph trust level is dense and the response was complete.
+IMPEOF
+F39B=$(cd "$F39_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F39B" | jq -e '.thin_drill_down_sections == 0 and .ok == true' >/dev/null 2>&1; then
+  pass "F39b: assert-graphify-decision PASSES when drill-down sections all carry ≥200-byte substance"
+else
+  fail "F39b: substantive drill-downs incorrectly blocked — got: $(echo "$F39B" | head -c 400)"
+fi
+# F39c — thin section WITH truncation marker → pass gate (god-node response saved off-context)
+cat > "$F39_TMP/.devt/state/graph-impact.md" <<'IMPEOF'
+# Graph Impact
+## Blast radius — TestSymbol
+substantive blast-radius body padded past 250 bytes to clear the thin_content guard xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+## Drill-down: GodNode
+— TRUNCATED — response saved to /tmp/cc-output/get_neighbors-12345.txt
+IMPEOF
+F39C=$(cd "$F39_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null)
+if echo "$F39C" | jq -e '.thin_drill_down_sections == 0 and .ok == true' >/dev/null 2>&1; then
+  pass "F39c: assert-graphify-decision PASSES when thin section carries explicit truncation marker"
+else
+  fail "F39c: truncation-marker exemption not honored — got: $(echo "$F39C" | head -c 400)"
+fi
+rm -rf "$F39_TMP"
+
+# F40: verifier-ran enforcement gate (greenfield 2026-05-27 PR #372 silent-
+# skip #2). Asserts the verifier dispatch happened when config requires it.
+F40_TMP=$(mktemp -d)
+mkdir -p "$F40_TMP/.devt/state"
+echo '{}' > "$F40_TMP/.devt/config.json"
+# F40a — verification on by default, no verification artifact → fail
+F40A=$(cd "$F40_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null)
+if echo "$F40A" | jq -e '.ok == false and .verification_enabled == true' >/dev/null 2>&1; then
+  pass "F40a: assert-verifier-ran BLOCKS when config.workflow.verification=true but verification.json absent"
+else
+  fail "F40a: verifier-skip not caught — got: $F40A"
+fi
+# F40b — verification artifact present → pass
+echo '{"agent":"verifier","status":"VERIFIED","verdict":"satisfied"}' > "$F40_TMP/.devt/state/verification.json"
+F40B=$(cd "$F40_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null)
+if echo "$F40B" | jq -e '.ok == true and .sidecar_present == true' >/dev/null 2>&1; then
+  pass "F40b: assert-verifier-ran PASSES when verification.json exists"
+else
+  fail "F40b: verification artifact present but gate failed — got: $F40B"
+fi
+# F40c — verification explicitly disabled in config → pass (gate does not apply)
+rm "$F40_TMP/.devt/state/verification.json"
+echo '{"workflow":{"verification":false}}' > "$F40_TMP/.devt/config.json"
+F40C=$(cd "$F40_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null)
+if echo "$F40C" | jq -e '.ok == true and .verification_enabled == false' >/dev/null 2>&1; then
+  pass "F40c: assert-verifier-ran PASSES when config.workflow.verification=false (gate does not apply)"
+else
+  fail "F40c: explicit verification=false not honored — got: $F40C"
+fi
+rm -rf "$F40_TMP"
+
+# F41: ARGS CONTRACT pre-truncation in code-review.md (greenfield 2026-05-27
+# PR #372 P2). Workflow body must cap topic.symbols at 32 BEFORE the args
+# object is built. Presence check — the bash idiom is the contract.
+if /usr/bin/grep -q "TOPIC_SYMBOLS_RAW" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -q 'jq -c .*\.\[:32\]' "$ROOT/workflows/code-review.md"; then
+  pass "F41a: code-review.md pre-truncates topic.symbols to 32 BEFORE building blast_radius args (P2 fix)"
+else
+  fail "F41a: code-review.md missing ARGS-CONTRACT pre-truncation — VERBATIM contract still unimplementable at symbols > 32"
+fi
+
+# F42: claude-mem 2-step pre-step now wired in code-review.md context_init
+# (greenfield 2026-05-27 PR #372 silent-skip #3). Presence check.
+if /usr/bin/grep -q "mcp__plugin_claude-mem_mcp-search__search" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -q "assert-claude-mem-harvest" "$ROOT/workflows/code-review.md"; then
+  pass "F42a: code-review.md wires claude-mem 2-step pre-search + assert-claude-mem-harvest gate"
+else
+  fail "F42a: code-review.md missing claude-mem pre-step (still silently skipped)"
+fi
 
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="

@@ -159,6 +159,17 @@ const SYMBOL_DENYLIST = new Set([
   "bitbucket", "github", "gitlab", "stripe", "notion", "linear", "slack",
   "hubspot", "salesforce", "discord", "confluence", "jira", "trello", "asana",
   "intercom", "segment", "datadog", "sentry", "pagerduty", "cloudflare",
+  // Domain-prose tokens that slip through when REVIEW_SCOPE prose contains
+  // PascalCase labels that LOOK like symbols but are descriptive English
+  // (greenfield 2026-05-27 PR #372: "Deep notification service review" → the
+  // regex extracted Deep, Notification, Service as symbols; none are graph
+  // nodes; they polluted the 32-symbol blast_radius args).
+  "deep", "shallow", "primary", "secondary", "tertiary",
+  "service", "services", "notification", "notifications", "scope", "scopes",
+  "audit", "audits", "summary", "summaries",
+  "lane", "lanes", "tier", "tiers", "phase", "phases",
+  // devt-internal terminology that appears in task descriptions about devt itself
+  "graphify", "claudemem", "devt", "preflight",
 ]);
 
 // Tokens of pure ALL-CAPS letters (≥4 chars, no lowercase) are usually

@@ -1268,6 +1268,16 @@ function assertGraphifyDecision() {
   let fileBytes = 0;
   let sectionCount = 0;
   let drillDownSections = 0;
+  // Per-section substance bookkeeping. Field (greenfield 2026-05-27 PR #372 P5):
+  // F26 counted sections but didn't measure each section's body. A response can
+  // have 3 headings with empty bodies and pass the count gate. We measure each
+  // drill-down section's byte count after the heading; require ≥ 200 bytes OR
+  // an explicit truncation marker ("— TRUNCATED" or "saved to /tmp/.../") that
+  // documents an oversized response was saved off-context for later reference.
+  const DRILL_DOWN_MIN_BYTES = 200;
+  const TRUNCATION_MARKER_RE = /(?:—\s*TRUNCATED\b|saved (?:to|at)\s+[/\w.-]+)/i;
+  const thinDrillDowns = [];
+  let thinDrillDownSections = 0;
   try {
     fileBytes = fs.statSync(filePath).size;
     if (haveImpact && fileBytes > 0) {
@@ -1276,10 +1286,33 @@ function assertGraphifyDecision() {
       sectionCount = m ? m.length : 0;
       const dm = content.match(/^##\s+Drill-down:/gim);
       drillDownSections = dm ? dm.length : 0;
+      if (drillDownSections > 0) {
+        // Split on drill-down headings; track each section's body length.
+        // Each section runs until the next ^## heading or EOF.
+        const sections = content.split(/(?=^##\s+Drill-down:)/gim).slice(1);
+        for (const sec of sections) {
+          const lines = sec.split("\n");
+          const heading = lines[0] || "";
+          // Body = everything after the heading line, up to next ^## (already
+          // handled by the split lookahead) or EOF.
+          const body = lines.slice(1).join("\n").trim();
+          const bodyBytes = Buffer.byteLength(body, "utf8");
+          const hasTruncMarker = TRUNCATION_MARKER_RE.test(body);
+          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker) {
+            thinDrillDownSections++;
+            const symMatch = heading.match(/^##\s+Drill-down:\s*(.+?)\s*$/i);
+            thinDrillDowns.push({
+              symbol: symMatch ? symMatch[1] : heading.trim(),
+              body_bytes: bodyBytes,
+            });
+          }
+        }
+      }
     }
   } catch { /* stat/read failure — leave zeros, gate still passes */ }
   const thin = haveImpact && fileBytes < 200;
   const underThreeDrillDowns = haveImpact && drillDownSections < 3;
+  const hasThinDrillDowns = thinDrillDownSections > 0;
   // Substance check: a drill-down section in graph-impact.md asserts the
   // orchestrator called get_neighbors via MCP. Field (greenfield 2026-05-26
   // PR #372): 3 prose drill-downs were written from codebase knowledge with
@@ -1323,7 +1356,7 @@ function assertGraphifyDecision() {
     fabricatedDrillDown = mcpGetNeighborsCalls === 0;
   }
   const result = {
-    ok: !fabricatedDrillDown,
+    ok: !fabricatedDrillDown && !hasThinDrillDowns,
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
     file_bytes: fileBytes,
@@ -1333,11 +1366,19 @@ function assertGraphifyDecision() {
     thin_content: thin,
     under_three_drill_downs: underThreeDrillDowns,
     fabricated_drill_down: fabricatedDrillDown,
+    thin_drill_down_sections: thinDrillDownSections,
+    thin_drill_downs: thinDrillDowns,
   };
   if (fabricatedDrillDown) {
     result.reason =
       `drill-down sections present (${drillDownSections}) but no get_neighbors ` +
       `MCP calls recorded in workflow_id window — fabricated drill-down`;
+  } else if (hasThinDrillDowns) {
+    const sym = thinDrillDowns.map(d => `${d.symbol}=${d.body_bytes}B`).join(", ");
+    result.reason =
+      `${thinDrillDownSections} drill-down section(s) below ${DRILL_DOWN_MIN_BYTES}-byte ` +
+      `substance threshold with no truncation marker (${sym}). Either the MCP ` +
+      `response was empty or the drill-down was hand-typed.`;
   }
   return result;
 }
@@ -1416,6 +1457,55 @@ function checkAgentOutput(filePath) {
       `stub_phrases=${stubPhrasesFound.length}, heading_only=${allHeadings}`;
   }
   return result;
+}
+
+// Substance gate ensuring the verifier dispatch actually ran when config
+// said it should. Field (greenfield 2026-05-27 PR #372): orchestrator with
+// config.workflow.verification=true skipped the verifier step entirely,
+// rationalizing that "8-lane fan-out is verifier-grade." Nothing in the
+// workflow contract enforced the dispatch happening; the conditional skip
+// at the top of the verify step was the only check, and orchestrators
+// under context pressure rationalize past conditional skips. Same arch
+// class as L1: gate-bypass via "I'll skip this one." We expose the
+// post-dispatch substance check as a CLI; workflows wire it into
+// present_findings.
+function assertVerifierRan() {
+  // require() at call time to avoid circular deps with config.cjs at module load
+  // (same pattern as the validateConsistency path elsewhere in this file).
+  const { getMergedConfig } = require("./config.cjs");
+  const cfg = getMergedConfig();
+  const verificationEnabled =
+    cfg && cfg.workflow && cfg.workflow.verification !== false;
+  if (!verificationEnabled) {
+    return {
+      ok: true,
+      verification_enabled: false,
+      reason: "config.workflow.verification=false — gate does not apply",
+    };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const sidecarPath = path.join(dir, "verification.json");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const mdPath = path.join(dir, "verification.md");
+  const haveSidecar = fs.existsSync(sidecarPath);
+  const haveMd = fs.existsSync(mdPath);
+  if (!haveSidecar && !haveMd) {
+    return {
+      ok: false,
+      verification_enabled: true,
+      reason:
+        "config.workflow.verification=true but neither verification.json nor verification.md exists — " +
+        "verifier was skipped despite being required. Re-dispatch the verifier or set " +
+        "config.workflow.verification=false if verification is genuinely not needed for this workflow.",
+    };
+  }
+  return {
+    ok: true,
+    verification_enabled: true,
+    sidecar_present: haveSidecar,
+    markdown_present: haveMd,
+  };
 }
 
 // Process-level gate that the orchestrator actually ran `preflight generate`
@@ -1642,6 +1732,8 @@ function run(subcommand, args) {
       return assertClaudeMemHarvest();
     case "check-agent-output":
       return checkAgentOutput(args[0]);
+    case "assert-verifier-ran":
+      return assertVerifierRan();
     case "history": {
       const limitArg = _getFlag(args, "--limit");
       const lim = limitArg ? parseInt(limitArg, 10) : 20;
@@ -1649,7 +1741,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, history`,
       );
   }
 }
@@ -1670,6 +1762,7 @@ module.exports = {
   assertPreflightFresh,
   assertClaudeMemHarvest,
   checkAgentOutput,
+  assertVerifierRan,
   stateHistory,
   describeMismatch,
   getStateDir,

@@ -126,8 +126,19 @@ GIT_PROVIDER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get git.pr
 PR_NUM=$(echo "${REVIEW_SCOPE}" | grep -oE '(PR|pull request) ?#?[0-9]+' | grep -oE '[0-9]+' | head -1)
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 GRAPHIFY_TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
-TOPIC_SYMBOLS=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+TOPIC_SYMBOLS_RAW=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+TOPIC_SYMBOLS_RAW_COUNT=$(echo "$TOPIC_SYMBOLS_RAW" | jq 'length')
+# Pre-truncate to the MCP blast_radius cap (32). Preflight orders symbols by
+# relevance (governing-doc anchors first, then diff symbols, then prose), so
+# slicing the first 32 preserves that ranking. Field rationale (greenfield
+# 2026-05-27 PR #372 P2): the prior contract said "Use args VERBATIM" but
+# topic.symbols can exceed 32, making the contract mechanically unimplementable.
+# Truncating in the bash that WRITES the plan makes VERBATIM tractable.
+TOPIC_SYMBOLS=$(echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[:32]')
 TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
+if [ "$TOPIC_SYMBOLS_RAW_COUNT" -gt 32 ]; then
+  echo "topic.symbols pre-truncated: ${TOPIC_SYMBOLS_RAW_COUNT} → 32 (MCP blast_radius cap)"
+fi
 SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
 IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
 
@@ -202,6 +213,30 @@ fi
 The assert auto-passes when graphify is disabled or the graph is missing (`graphify_state != "ready"`) — the gate is about orchestrator obedience to the workflow contract, not about graphify being installed.
 
 **Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false`, STOP with BLOCKED — the orchestrator skipped the EXECUTE THE PLAN step above.
+
+**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught. Field signal (greenfield 2026-05-27 PR #372): orchestrator self-reported this pre-step as an unconscious skip — not rationalized, not noticed, simply absent from the workflow file.
+
+If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session:
+1. Call `mcp__plugin_claude-mem_mcp-search__search` with `query=${REVIEW_SCOPE}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with table-row observations (`| #NNNN | time | <emoji> | Title | ~tokens |`) grouped by source file.
+2. For each observation row with emoji ⚖️ (decision) or 🔵 (discovery): fetch the body via `mcp__plugin_claude-mem_mcp-search__get_observations({ids: [...]})` — the bare `search` response carries only Title, not body, so without `get_observations` the curator's evidence filter rejects the candidate. Batch IDs into one `get_observations` call for efficiency.
+3. Write `.devt/state/claude-mem-harvest.md` with one line each in canonical format:
+
+   ```
+   - [decision] <title>: <body>
+   - [discovery] <title>: <body>
+   ```
+
+If MCP unavailable / zero observations / errors: write `.devt/state/claude-mem-skipped.txt` with a one-line reason (e.g., `"mcp_unavailable"` or `"zero_observations"` or `"error: <message>"`). This is the decision-artifact that signals the gate the orchestrator *did* consider the pre-step.
+
+```bash
+HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
+if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+  exit 1
+fi
+```
+
+The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason satisfies the gate. The point is to make the consideration explicit — silent skips are the failure mode.
 </step>
 
 <step name="identify_scope" gate="file list is determined">
@@ -497,6 +532,19 @@ When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch �
 </step>
 
 <step name="present_findings" gate="findings are reported to the user">
+
+**Verifier-ran enforcement gate**. Before presenting findings, assert that the verifier step actually ran when `config.workflow.verification=true`. Field signal (greenfield 2026-05-27 PR #372): orchestrator skipped the verifier dispatch with the rationalization "8-lane fan-out is already verifier-grade." Nothing in the conditional skip at the top of the verify step pushed back. This gate makes the skip impossible:
+
+```bash
+VERIF_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-ran)
+if echo "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$VERIF_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When the gate trips, surface the reason to the user and recommend re-running the verify step. Do not present findings until verification has actually been performed (or `config.workflow.verification` is explicitly set to `false`).
 
 Read `.devt/state/review.md` and present to the user:
 

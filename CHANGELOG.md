@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.58.4] - 2026-05-27
+
+**5 field-validated fixes from greenfield 2026-05-27 PR #372 calibration report.** Closes blockers and quick wins before v0.59.0 parallel-review work — the parallel workflow would otherwise inherit these bugs into a wider surface. Smoke: **620 → 629**, **0 failed** (+9 new gates).
+
+### Changed
+
+- **`workflows/code-review.md` topic.symbols pre-truncated to 32** (P2). The bash that writes `graphify-impact-plan.json` now caps the array at 32 BEFORE assembling the args, with deterministic preflight-ranking preserved. Closes a contract violation where "Use args VERBATIM" was mechanically unimplementable any time `topic.symbols > 32` — the MCP `blast_radius` cap. Workflow now emits an explicit log line when truncation fires (`topic.symbols pre-truncated: N → 32`).
+- **`bin/modules/state.cjs::assertGraphifyDecision` now measures per-section drill-down substance** (P5). Each `## Drill-down:` section in `graph-impact.md` must carry ≥ 200 bytes of body OR an explicit truncation marker (`— TRUNCATED` / `saved to/at <path>`). Sections that fail both criteria are emitted in a new `thin_drill_downs[]` sidecar array and fail the gate with a reason naming the symbols + their byte counts. Closes a form-only check where 3 heading-only sections passed.
+- **`bin/modules/preflight.cjs::SYMBOL_DENYLIST` extended** (P1) with 17 domain-prose tokens that slipped through into greenfield's 32-symbol args: `deep`, `shallow`, `primary`, `secondary`, `tertiary`, `service(s)`, `notification(s)`, `scope(s)`, `audit(s)`, `summary/summaries`, `lane(s)`, `tier(s)`, `phase(s)`, plus devt-internal terms (`graphify`, `claudemem`, `devt`, `preflight`). These are PascalCase-extractable from prose but never code symbols.
+
+### Added
+
+- **`state assert-verifier-ran` CLI subcommand** + wired into `workflows/code-review.md::present_findings` as a pre-gate. When `config.workflow.verification=true` but neither `verification.json` nor `verification.md` exists, returns `ok:false` and routes the workflow through `verdict=FAILED → STOP with BLOCKED`. Closes the silent-skip vector where the verify step's conditional skip was rationalized past ("8-lane fan-out is verifier-grade"). Same substance-enforcement architectural class as F28/F29/F30 — see [[CON-001-substance-enforcement-gates]].
+- **`workflows/code-review.md::context_init` wires claude-mem 2-step pre-search** + `state assert-claude-mem-harvest` decision-artifact gate, mirroring the canonical pattern from `dev-workflow.md`. Closes the orchestrator's self-reported unconscious skip (the pre-step instruction was simply absent from the workflow file; the gate exists but never fired here).
+- **9 new smoke gates**: F38a (denylist coverage), F39a/b/c (thin / substantive / truncation-marker drill-down substance), F40a/b/c (verifier-ran enforcement with verification absent / present / disabled), F41a (ARGS pre-truncation presence), F42a (claude-mem pre-step presence).
+
+### Why these ship together
+
+All five fixes derive from the same calibration report and form a coherent substance-enforcement pass over `/devt:review`. Shipping them as v0.58.4 before v0.59.0 parallel-review means the multi-lane workflow inherits a clean base — the parallel design's blast_radius dispatch reuses the same ARGS bash; the parallel verify path uses the same verifier-ran gate; the per-lane drill-down outputs benefit from the per-section substance check.
+
+### Not in this release
+
+- **F28 T+N grace timer before re-dispatch** (mentioned in the calibration report) — analyzed and rejected. The "agent still thinking" condition only manifests under background dispatch (which v0.59.0 explicitly rejects in favor of foreground multi-Task). With foreground, an agent that returns has returned final output; no grace window is meaningful. Per [[feedback-no-legacy-trash]], not adding infrastructure for an obsolete failure mode.
+- **P3 graphify get_neighbors pagination** — upstream MCP surface; devt cannot patch directly. Workflow could detect overflow + auto-save + reference path, but that's a separate item.
+- **P4 file-aggregated edge counts in `graphify check-large-files`** — strengthens existing F17; tracked as a separate item.
+- **P6 Bitbucket-native PR-scoped tier** — new feature, deferred to its own milestone.
+
 ## [0.58.3] - 2026-05-27
 
 **F29 + F30 + F31 — completes the substance-enforcement layer.** v0.58.2 wired F27 into one workflow (code-review) and one artifact (review.md). v0.58.3 closes the remaining surface: backports the gate to dev-workflow's multi-artifact verifier (F29), moves the substance check into the verifier agent body itself for defense-in-depth across all workflows (F30), and broadens the stub-marker regex to catch realistic phrase variants the v0.58.2 narrow form would miss (F31). Smoke: **620 passed**, **0 failed** (+6 new gates).
