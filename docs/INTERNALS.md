@@ -374,6 +374,34 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 
 ---
 
+## Substance-Enforcement Gates
+
+Cross-cutting design discipline. A recurring failure mode: gates that verify an artifact exists, has the right shape, or has the right section count — but not whether the *substance* behind the form is real. Five field-validated instances:
+
+| Gate | Form check (passed) | Substance gap (bypassed) | Fix |
+|---|---|---|---|
+| **F4** | `graphify_scan_prep` step ran | Step was inside a skippable conditional | Move gate to mandatory precondition |
+| **B4** | Curator dispatched | Dispatch was in an unreachable workflow branch | Relocate gate to context_init |
+| **L1** | `dispatch-hygiene-guard.sh` warned | Advisory was ignored 6× in one session | Default-block (`{decision:"deny"}`) |
+| **F26** | `## Drill-down:` headings present | Headings hand-written without MCP calls | Cross-reference `_mcp-trace.jsonl` for `get_neighbors` records in `workflow_id` window |
+| **F27/F28** | `review.md` file exists | Body is "Stub written; analysis in progress." | `state check-agent-output` detects stub phrases, low word count, heading-only structure; wired into `code-review.md` verifier pre-gate |
+
+### Pattern recognition
+
+When adding a new gate, ask explicitly: **does this check the artifact's shape, or the work behind it?** If it checks shape alone, identify a substance signal that proves the work happened:
+
+- **For MCP-backed work** — cross-reference `_mcp-trace.jsonl` records scoped to the current `workflow_id` (the trace is the receipt). See `assertGraphifyDecision` for the reference implementation.
+- **For agent-authored content** — run `state check-agent-output` against the output file (stubs, low word count, heading-only all flag as `looks_like_stub: true`). Wire the call as a bash pre-gate before the verifier dispatch.
+- **For multi-step work where one step is skippable** — relocate the gate to a mandatory step, not the optional one (the F4 lesson).
+
+### Why these gates fail closed, not advisory
+
+LLM orchestrators under context pressure classify advisory warnings as "not load-bearing" and skip them. The pattern across all five instances: a soft signal loses to perceived urgency every time. The only counterweights with observed efficacy in the field are gates that block involuntarily — either by failing the artifact contract (F26 returns `ok:false`) or by failing the workflow contract (F28 sets `verdict=FAILED`, which routes to STOP-with-BLOCKED at the existing failure terminal).
+
+The audit instinct when reviewing devt's own gates: *if I remove the substance check, can a well-intentioned orchestrator still pass by writing prose / creating an empty file / running through the form?* If yes, the gate enforces form not substance.
+
+---
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — agent + workflow contracts (consumed by these mechanisms)

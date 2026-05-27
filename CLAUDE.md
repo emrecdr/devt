@@ -97,6 +97,8 @@ node bin/devt-tools.cjs state reset # Archives non-exempt artifacts to .devt/sta
 node bin/devt-tools.cjs state validate # Check state/artifact consistency
 node bin/devt-tools.cjs state sync # Reconstruct workflow.yaml from artifacts
 node bin/devt-tools.cjs state prune [--dry-run] # Remove orphaned artifacts
+node bin/devt-tools.cjs state check-agent-output <path> # Substance check: detects stub phrases, low word count, heading-only outputs
+node bin/devt-tools.cjs state assert-graphify-decision # Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>

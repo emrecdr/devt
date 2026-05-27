@@ -338,6 +338,19 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 
 **Artifact pre-gate**: confirm both `.devt/state/review.md` and `.devt/state/review.json` exist. If either is missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact. The sidecar is the routing source of truth; the markdown is the human-readable view.
 
+**Substance pre-gate (F28)**: even when the file exists, the code-reviewer may have returned a placeholder body (field signal: greenfield 2026-05-26 PR #372 multi-lane fan-out, 5/6 lane dispatches returned `status:completed` with bodies like "Stub written; analysis in progress."). Don't burn a verifier dispatch grading a stub — block here and re-dispatch the reviewer instead:
+
+```bash
+SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md)
+if echo "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
+  echo "BLOCKED: review.md looks like a stub — $(echo "$SUBSTANCE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When this gate trips, surface the substance reason to the user and recommend `/devt:review` re-dispatch — verifier loop cannot recover from an empty upstream artifact.
+
 **Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 
 ```bash

@@ -6612,6 +6612,30 @@ else
 fi
 rm -rf "$F27_TMP"
 
+# F28: workflows/code-review.md must wire the F27 substance check before its
+# verifier dispatch. Field rationale: F27 CLI without a caller is half a fix.
+# Presence check (a) confirms the workflow body invokes check-agent-output on
+# review.md before dispatching the verifier; behavioral check (b) confirms the
+# CLI's looks_like_stub=true output is what the workflow gates on.
+if /usr/bin/grep -q "state check-agent-output .devt/state/review.md" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -q "looks_like_stub == true" "$ROOT/workflows/code-review.md"; then
+  pass "F28a: code-review.md wires state check-agent-output + looks_like_stub gate before verifier dispatch"
+else
+  fail "F28a: code-review.md missing F27 substance pre-gate wiring before verifier dispatch"
+fi
+F28_TMP=$(mktemp -d)
+mkdir -p "$F28_TMP/.devt/state"
+echo '{}' > "$F28_TMP/.devt/config.json"
+echo "# Review" > "$F28_TMP/.devt/state/review.md"
+echo "Stub written; analysis in progress." >> "$F28_TMP/.devt/state/review.md"
+F28B=$(cd "$F28_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md 2>/dev/null)
+if echo "$F28B" | jq -e '.looks_like_stub == true and .ok == false' >/dev/null 2>&1; then
+  pass "F28b: stub review.md routes through looks_like_stub=true+ok=false (workflow gate trips)"
+else
+  fail "F28b: stub routing condition not satisfied — got: $F28B"
+fi
+rm -rf "$F28_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

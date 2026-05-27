@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.58.2] - 2026-05-27
+
+**F28 — activates F27 from dormant CLI to live workflow gate**, plus documentation alignment. v0.58.1 shipped `state check-agent-output` as a CLI but nothing called it; the greenfield failure mode (5/6 lane outputs were stubs the verifier approved) remained un-blocked in the actual workflow flow. v0.58.2 wires the substance check into `code-review.md` before the verifier dispatch, syncs CLAUDE.md, and codifies the recurring "substance vs form gates" pattern in `docs/INTERNALS.md`. Smoke: **614 passed**, **0 failed** (+2 new gates).
+
+### Changed
+
+- **`workflows/code-review.md` verifier step now runs `state check-agent-output .devt/state/review.md` as a substance pre-gate** before the verifier dispatch. When the CLI returns `looks_like_stub: true`, the workflow writes `phase=verify status=BLOCKED verdict=FAILED` and exits — routing through the existing `verdict=FAILED → STOP with BLOCKED` terminal at the same step. Saves a verifier dispatch on a stub artifact and surfaces a remediation (re-dispatch the reviewer) instead.
+
+### Added
+
+- **`docs/INTERNALS.md::Substance-Enforcement Gates` section** — codifies the recurring architectural pattern across F4 / B4 / L1 / F26 / F27+F28. Tabulates each instance's form-check vs substance-gap, lists the three substance signal categories (MCP trace cross-reference, agent-output check, mandatory-step relocation), and documents why these gates fail closed rather than emit advisory warnings. Audit checklist included for reviewing future gates.
+- **`CLAUDE.md` Development Commands sync** — `state check-agent-output <path>` and `state assert-graphify-decision` added to the state subcommand block. Closes the docs gap from v0.58.1 (new CLI subcommand wasn't reflected in the discoverable command list).
+- **2 new smoke gates**: F28a (presence-check that `code-review.md` invokes `state check-agent-output` and gates on `looks_like_stub`), F28b (behavioral check that a stub review.md returns `looks_like_stub:true + ok:false`, confirming the CLI output is what the workflow gates on).
+
+### Why this matters
+
+v0.58.1 added F27 as a CLI but no caller. Per the [[feedback-validate-during-impl]] discipline, dormant gates are half-fixes — the substance enforcement only counts when a workflow actually consults the CLI. v0.58.2 closes that loop on the highest-risk dispatch (verifier on review.md) and documents the pattern so future gates inherit the discipline rather than re-discovering the lesson under field pressure.
+
+### Not in this release (deferred)
+
+- **F28 in dev-workflow.md verifier dispatch** — the same substance gate would apply to `verification.md` / `impl-summary.md` artifacts in the dev flow. Deferred until field signal arrives showing the failure mode there too (current observed cases are all multi-lane review fan-out).
+- **F26 missing-trace-file branch** — `setup.cjs:319` creates `_mcp-trace.jsonl` unconditionally during init, so the file missing reduces to "project not set up" which is itself a substance failure. Existing behavior (treat as fabricated) is correct; explicit branch unnecessary.
+
 ## [0.58.1] - 2026-05-27
 
 **F26 + F27 — substance enforcement on existing gates.** Same architectural class as prior F4/B4/L1: gates that don't enforce what they claim. Field rationale (greenfield 2026-05-26 PR #372 multi-lane review): two new bypass patterns surfaced — the drill-down gate accepted prose-only sections without any MCP calls, and the verifier approved lane outputs whose entire body was `Stub written; analysis in progress.` Smoke: **612 passed**, **0 failed** (+5 new gates).
