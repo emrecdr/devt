@@ -277,7 +277,7 @@ const PERSISTENT_ARTIFACTS = [
 ];
 
 const VALID_WORKFLOW_TYPES = new Set([
-  "dev", "quick_implement", "debug", "retro", "code_review", "arch_health_scan",
+  "dev", "quick_implement", "debug", "retro", "code_review", "code_review_parallel", "arch_health_scan",
   "research", "plan", "specify", "clarify",
   // Memory layer workflow types — see workflows/memory-*.md.
   // memory_promote: curator promotes ephemeral DEC -> permanent ADR.

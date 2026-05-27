@@ -118,6 +118,7 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `retro` | `/devt:retro` |
 | `arch_health_scan` | `/devt:arch-health` |
 | `code_review` | `/devt:review` |
+| `code_review_parallel` | `/devt:review` with the original scope |
 | `research` | `/devt:research` with the original task |
 | `plan` | `/devt:plan` with the original task |
 | `specify` | `/devt:specify` with the original task |
