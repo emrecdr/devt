@@ -1531,6 +1531,119 @@ function assertVerifierRan() {
   };
 }
 
+// Mechanical gate for code-review.md::scope_check. When the scope_check
+// bash detects scope > 10 files AND graphify=ready, it writes
+// .devt/state/scope-check-required.txt. The next step (identify_scope)
+// must verify either:
+//   - .devt/state/scope-check-answer.txt exists (orchestrator wrote the
+//     AskUserQuestion answer)
+//   - OR .devt/state/scope-check-required.txt does NOT exist (condition
+//     didn't match; gate doesn't apply)
+// Field rationale (greenfield 2026-05-27): orchestrator skipped the
+// AskUserQuestion silently with the rationalization "user pre-stated
+// parallel intent." Prose gate failed.
+function assertScopeCheckHandled() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const requiredPath = path.join(dir, "scope-check-required.txt");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const answerPath = path.join(dir, "scope-check-answer.txt");
+  if (!fs.existsSync(requiredPath)) {
+    return { ok: true, reason: "scope-check-required.txt absent — gate does not apply" };
+  }
+  if (!fs.existsSync(answerPath)) {
+    return {
+      ok: false,
+      reason:
+        "scope-check-required.txt exists but scope-check-answer.txt absent — " +
+        "orchestrator skipped the AskUserQuestion. Either ask the user " +
+        "(parallel vs single-dispatch) and write the answer to " +
+        ".devt/state/scope-check-answer.txt, or set autonomous-mode override.",
+    };
+  }
+  const answer = fs.readFileSync(answerPath, "utf8").trim();
+  return { ok: true, answer };
+}
+
+// Mechanical gate for code-review-parallel.md::dispatch_lanes. partition_lanes
+// is supposed to populate workflow.yaml::lanes[] via state update-lane calls.
+// Field rationale (greenfield 2026-05-27): orchestrator skipped lane
+// registration entirely; list-lane-outputs returned {"lanes":[]} despite
+// 6 lanes being dispatched manually. This gate fails when partition_lanes
+// runs but produces zero lane records — forcing the orchestrator to either
+// register lanes or fall back to single-dispatch explicitly.
+function assertLanesRegistered() {
+  const result = listLaneOutputs();
+  const laneCount = (result.lanes || []).length;
+  if (laneCount === 0) {
+    return {
+      ok: false,
+      reason:
+        "workflow.yaml::lanes[] is empty — partition_lanes did not register " +
+        "any lanes. Either run state update-lane for each lane in the " +
+        "partition, or route to code-review.md single-dispatch fallback.",
+      lane_count: 0,
+    };
+  }
+  return { ok: true, lane_count: laneCount };
+}
+
+// Mechanical gate for code-review-parallel.md::verify step. The consolidator
+// (code-reviewer in synthesis mode) writes .devt/state/consolidator-ran.txt
+// as its first action (synthesis-mode handler in agents/code-reviewer.md).
+// Field rationale (greenfield 2026-05-27): orchestrator wrote the
+// consolidated review.md themselves instead of dispatching the synthesis
+// agent. Verifier graded it and the silent skip was invisible. This gate
+// fails when ≥1 lane passed substance but no consolidator marker exists.
+function assertConsolidatorDispatched() {
+  const result = listLaneOutputs();
+  const substancePassCount = (result.lanes || []).filter(
+    (l) => l.status === "substance_pass",
+  ).length;
+  if (substancePassCount === 0) {
+    return {
+      ok: true,
+      reason: "no substance_pass lanes — consolidator dispatch not required",
+    };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const markerPath = path.join(dir, "consolidator-ran.txt");
+  if (!fs.existsSync(markerPath)) {
+    return {
+      ok: false,
+      reason:
+        `${substancePassCount} lanes passed substance but consolidator-ran.txt absent — ` +
+        "orchestrator skipped synthesis-mode dispatch. Dispatch the code-reviewer " +
+        "with synthesis task instruction; the agent body writes the marker.",
+      substance_pass_count: substancePassCount,
+    };
+  }
+  return { ok: true, substance_pass_count: substancePassCount };
+}
+
+// Mechanical gate ensuring the auto_curator step was at least considered.
+// Field rationale (greenfield 2026-05-27): orchestrator skipped the step
+// entirely with "default config has it disabled" rationale, but never
+// actually read the config to confirm. This forces a consideration marker
+// regardless of the config outcome.
+function assertAutoCuratorConsidered() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const markerPath = path.join(dir, "auto-curator-considered.txt");
+  if (!fs.existsSync(markerPath)) {
+    return {
+      ok: false,
+      reason:
+        "auto-curator-considered.txt absent — orchestrator skipped the " +
+        "auto_curator step without reading config. Run the auto_curator bash " +
+        "block which writes the marker (SKIP|FIRE|DISABLED status).",
+    };
+  }
+  const status = fs.readFileSync(markerPath, "utf8").trim();
+  return { ok: true, auto_curator_status: status };
+}
+
 // Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
 // each lane's review file existence + size. Consumed by code-review-parallel.md's
 // substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
@@ -1864,6 +1977,14 @@ function run(subcommand, args) {
       return checkAgentOutput(args[0]);
     case "assert-verifier-ran":
       return assertVerifierRan();
+    case "assert-scope-check-handled":
+      return assertScopeCheckHandled();
+    case "assert-lanes-registered":
+      return assertLanesRegistered();
+    case "assert-consolidator-dispatched":
+      return assertConsolidatorDispatched();
+    case "assert-auto-curator-considered":
+      return assertAutoCuratorConsidered();
     case "list-lane-outputs":
       return listLaneOutputs();
     case "update-lane":
@@ -1875,7 +1996,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -1897,6 +2018,10 @@ module.exports = {
   assertClaudeMemHarvest,
   checkAgentOutput,
   assertVerifierRan,
+  assertScopeCheckHandled,
+  assertLanesRegistered,
+  assertConsolidatorDispatched,
+  assertAutoCuratorConsidered,
   listLaneOutputs,
   updateLane,
   stateHistory,
