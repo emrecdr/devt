@@ -219,6 +219,18 @@ SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
 SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
+**Reuse pre-search** — derive graphify-powered candidates before the programmer writes new code. Best-effort: swallowed on graphify unavailability (0 candidates, gate passes transparently).
+
+```bash
+# KEEP IN SYNC: mirrored in dev-workflow.md implement step
+TASK_TEXT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')
+if [ -n "$TASK_TEXT" ]; then
+  REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":true,"candidates_total":0}')
+  REUSE_COUNT=$(echo "$REUSE_RESULT" | jq -r '.candidates_total // 0')
+  echo "reuse-search: ${REUSE_COUNT} candidates → .devt/state/reuse-candidates.md"
+fi
+```
+
 Dispatch the programmer agent:
 
 ```
@@ -254,6 +266,8 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <!-- KEEP IN SYNC: <reuse_candidates> block mirrored in dev-workflow.md programmer dispatch -->
+    <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
@@ -300,6 +314,18 @@ Skip entirely when graphify is disabled or `files_modified` is empty.
 </step>
 
 <step name="test" gate="test-summary.json is written with status DONE or DONE_WITH_CONCERNS">
+
+**Reuse-analysis gate** — programmer must have addressed all reuse candidates before tests run.
+
+```bash
+# KEEP IN SYNC: mirrored in dev-workflow.md test step
+REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
+if echo "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$REUSE_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
 
 Dispatch the tester agent:
 

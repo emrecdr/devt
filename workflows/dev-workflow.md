@@ -841,6 +841,18 @@ SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. Both blocks are byte-stable across retry iterations within a workflow run, so the cache hits across dispatches.
 
+**Reuse pre-search** — derive graphify-powered candidates before the programmer writes new code. Best-effort: swallowed on graphify unavailability (0 candidates, gate passes transparently).
+
+```bash
+# KEEP IN SYNC: mirrored in quick-implement.md implement step
+TASK_TEXT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')
+if [ -n "$TASK_TEXT" ]; then
+  REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":true,"candidates_total":0}')
+  REUSE_COUNT=$(echo "$REUSE_RESULT" | jq -r '.candidates_total // 0')
+  echo "reuse-search: ${REUSE_COUNT} candidates → .devt/state/reuse-candidates.md"
+fi
+```
+
 Dispatch the programmer agent:
 
 ```
@@ -884,6 +896,8 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <!-- STANDARD+: include scan_results and plan -->
+    <!-- KEEP IN SYNC: <reuse_candidates> block mirrored in quick-implement.md programmer dispatch -->
+    <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
     <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
@@ -948,6 +962,18 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 ## Step 5: Testing
 
 <step name="test" gate="test-summary.json is written with status DONE or DONE_WITH_CONCERNS">
+
+**Reuse-analysis gate** — programmer must have addressed all reuse candidates before tests run.
+
+```bash
+# KEEP IN SYNC: mirrored in quick-implement.md test step
+REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
+if echo "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$REUSE_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
 
 _Skip this step if `test` is listed in `skipped_phases` from workflow state._
 
