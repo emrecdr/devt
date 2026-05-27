@@ -1350,7 +1350,14 @@ function assertGraphifyDecision() {
 // to accept the output without re-dispatch.
 const STUB_MARKER_PATTERNS = [
   /\bstub written\b/i,
-  /\banalysis in progress\b/i,
+  // Verb-prefixed "in progress" variants. Field validation (greenfield 2026-05-26)
+  // surfaced "Stub: analysis in progress" — broader pattern catches realistic
+  // variants without false-positives on substantive prose (validated against
+  // real review.md files: matches stub, zero matches on 2132-word real review).
+  /\b(?:analysis|implementation|review|work|writing|investigation)\s+in\s+progress\b/i,
+  // Leading "Stub:" or "Stub." marker — field stubs frequently use this prefix
+  // form independent of the "in progress" phrase.
+  /^\s*stub\s*[:.]/im,
   /\bplaceholder\b/i,
   /^\s*TODO\s*:/m,
   /^\s*WIP\s*:/m,

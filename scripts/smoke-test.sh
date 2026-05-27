@@ -6636,6 +6636,89 @@ else
 fi
 rm -rf "$F28_TMP"
 
+# F29: dev-workflow.md verifier step must wire F28 substance check across
+# impl-summary + test-summary + review.md (the three upstream artifacts the
+# verifier consumes). Field signal: same architectural risk as F28 in
+# code-review.md, applied to a workflow with multi-artifact verifier input.
+if /usr/bin/grep -q "state check-agent-output" "$ROOT/workflows/dev-workflow.md" \
+  && /usr/bin/grep -q "for ARTIFACT in impl-summary.md test-summary.md review.md" "$ROOT/workflows/dev-workflow.md"; then
+  pass "F29a: dev-workflow.md wires state check-agent-output across all three upstream artifacts before verifier dispatch"
+else
+  fail "F29a: dev-workflow.md missing F28 substance pre-gate wiring"
+fi
+F29_TMP=$(mktemp -d)
+mkdir -p "$F29_TMP/.devt/state"
+echo '{}' > "$F29_TMP/.devt/config.json"
+# Stub impl-summary.md (worst-case input the dev-workflow gate would see)
+{
+  echo "# Implementation Summary — in progress"
+  echo "Stub: implementation in progress."
+} > "$F29_TMP/.devt/state/impl-summary.md"
+F29B=$(cd "$F29_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output .devt/state/impl-summary.md 2>/dev/null)
+if echo "$F29B" | jq -e '.looks_like_stub == true and .ok == false' >/dev/null 2>&1; then
+  pass "F29b: stub impl-summary.md routes through looks_like_stub=true+ok=false (dev-workflow gate trips)"
+else
+  fail "F29b: dev-workflow stub routing condition not satisfied — got: $F29B"
+fi
+rm -rf "$F29_TMP"
+
+# F30: agents/verifier.md must carry the defense-in-depth substance pre-check
+# in its body, so the gate fires regardless of workflow wiring. Field signal:
+# soft gates that depend on per-workflow discipline regress when new workflows
+# are added without the wiring; agent-body check makes substance enforcement
+# structural rather than workflow-dependent.
+if /usr/bin/grep -q "<step name=\"substance_pre_check\">" "$ROOT/agents/verifier.md" \
+  && /usr/bin/grep -q "state check-agent-output" "$ROOT/agents/verifier.md" \
+  && /usr/bin/grep -q '"verdict": "failed"' "$ROOT/agents/verifier.md"; then
+  pass "F30a: verifier.md carries substance_pre_check step + check-agent-output + verdict=failed routing"
+else
+  fail "F30a: verifier.md missing defense-in-depth substance pre-check"
+fi
+
+# F31: broadened stub-marker regex catches verb-prefixed "in progress" variants
+# beyond the original "analysis in progress" narrow form. Validated against
+# real review.md files: matches field stubs, zero matches on substantive prose.
+F31_TMP=$(mktemp -d)
+mkdir -p "$F31_TMP/.devt"
+echo '{}' > "$F31_TMP/.devt/config.json"
+# Pad text shared across cases — keeps word count above the 50-word threshold so
+# the regex is the sole signal under test (not the word-count fallback).
+PAD="more substantive prose words follow here to comfortably exceed the fifty word threshold so the regex is the sole signal under test for this gate not the word count fallback or the heading only detector all three independent gates remain independently testable"
+# F31a: "implementation in progress" variant (NOT caught by old narrow regex)
+{
+  echo "# Implementation Summary"
+  echo "Stub: implementation in progress. $PAD"
+} > "$F31_TMP/impl.md"
+F31A=$(cd "$F31_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output impl.md 2>/dev/null)
+if echo "$F31A" | jq -e '.looks_like_stub == true and (.stub_phrases_found | length) >= 1' >/dev/null 2>&1; then
+  pass "F31a: broadened regex catches 'implementation in progress' variant (missed by v0.58.2 narrow regex)"
+else
+  fail "F31a: broadened regex missed 'implementation in progress' — got: $F31A"
+fi
+# F31b: leading "Stub:" marker (covers the field-validated greenfield case)
+{
+  echo "Stub: deferred. $PAD"
+} > "$F31_TMP/leading.md"
+F31B=$(cd "$F31_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output leading.md 2>/dev/null)
+if echo "$F31B" | jq -e '.looks_like_stub == true and (.stub_phrases_found | length) >= 1' >/dev/null 2>&1; then
+  pass "F31b: leading 'Stub:' marker pattern catches field-validated greenfield stub form"
+else
+  fail "F31b: leading-Stub-marker regex missed — got: $F31B"
+fi
+# F31c: substantive prose with the literal word "implementation" but no stub
+# signal must NOT false-positive. Critical guard against over-broadening.
+{
+  echo "# Real Review"
+  echo "The implementation of the notification service uses a 4-arg constructor that the test fixture only partially exercises. $PAD"
+} > "$F31_TMP/real.md"
+F31C=$(cd "$F31_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output real.md 2>/dev/null)
+if echo "$F31C" | jq -e '.looks_like_stub == false and (.stub_phrases_found | length) == 0' >/dev/null 2>&1; then
+  pass "F31c: broadened regex does NOT false-positive on substantive prose mentioning 'implementation' (no 'in progress' phrase)"
+else
+  fail "F31c: broadened regex false-positive on substantive prose — got: $F31C"
+fi
+rm -rf "$F31_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

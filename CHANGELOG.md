@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.58.3] - 2026-05-27
+
+**F29 + F30 + F31 — completes the substance-enforcement layer.** v0.58.2 wired F27 into one workflow (code-review) and one artifact (review.md). v0.58.3 closes the remaining surface: backports the gate to dev-workflow's multi-artifact verifier (F29), moves the substance check into the verifier agent body itself for defense-in-depth across all workflows (F30), and broadens the stub-marker regex to catch realistic phrase variants the v0.58.2 narrow form would miss (F31). Smoke: **620 passed**, **0 failed** (+6 new gates).
+
+### Changed
+
+- **`workflows/dev-workflow.md` verifier step now runs F28 substance check across all three upstream artifacts** (`impl-summary.md`, `test-summary.md`, `review.md`) before the deterministic pre-verifier gate. Mirrors the `code-review.md` wiring from v0.58.2; routes through the same `verdict=FAILED → STOP with BLOCKED` terminal when any artifact looks like a stub. Saves a verifier dispatch on stub upstream — surfaces remediation (re-dispatch the originating agent) instead of asking the verifier to grade a placeholder.
+- **`agents/verifier.md` carries a `substance_pre_check` step** as defense-in-depth — runs `state check-agent-output` on upstream artifacts immediately after stub-first protocol, before any grading effort. When a stub is detected, writes `verdict=failed` to verification.json with a structured `failure_reason` and exits. Makes substance enforcement structural rather than workflow-dependent: gates fire even when a new workflow is added without the explicit F28/F29 wiring.
+- **F27 stub-marker regex broadened**: replaces `\banalysis in progress\b` with verb-prefixed `\b(?:analysis|implementation|review|work|writing|investigation)\s+in\s+progress\b`, and adds a new leading-marker pattern `^\s*stub\s*[:.]` that catches the field-validated "Stub: …" prefix form. Both validated against real review.md files: catches stubs, returns zero matches on substantive 2132-word reviews.
+
+### Added
+
+- **6 new smoke gates**:
+  - F29a: dev-workflow.md wires substance check across all three upstream artifacts before verifier dispatch
+  - F29b: stub impl-summary.md routes through `looks_like_stub:true + ok:false`
+  - F30a: verifier.md carries the substance_pre_check step + `check-agent-output` call + `verdict=failed` routing
+  - F31a: broadened regex catches "implementation in progress" variant (missed by v0.58.2 narrow regex)
+  - F31b: leading "Stub:" marker catches the field-validated greenfield form
+  - F31c: broadened regex does NOT false-positive on substantive prose mentioning "implementation" without "in progress"
+
+### Fixed
+
+- **`agents/verifier.md` substance pre-check uses the canonical `TS=$(date …)` heredoc pattern** rather than inlining `$(date …)` inside the JSON body. Aligns with the byte-stability lint's 3-line code-fence lookback window — keeps the prefix-cache stable across iterations and prevents a smoke regression on the v0.32.0+ byte-stability gate.
+
+### Why all three together
+
+F29 alone leaves dev-workflow gated but every other workflow with a verifier unprotected; F30 alone provides defense-in-depth but lets workflows burn a verifier dispatch before the agent self-aborts; F31 alone tightens detection but doesn't reach new dispatch sites. Together they make substance enforcement robust against three independent failure modes: workflow forgets to wire (F30 catches), regex too narrow (F31 catches), multi-artifact verifier path lacks coverage (F29 catches).
+
+### Not in this release (validated and skipped)
+
+- **F28 in `quick-implement.md`** — validation confirmed quick-implement has zero `Task(subagent_type="devt:verifier"...)` dispatches by design (the workflow's stated purpose is "skip docs and retro, go straight to code and tests"). No verifier means no substance gate to wire. Recorded here so future audits don't re-evaluate.
+
 ## [0.58.2] - 2026-05-27
 
 **F28 — activates F27 from dormant CLI to live workflow gate**, plus documentation alignment. v0.58.1 shipped `state check-agent-output` as a CLI but nothing called it; the greenfield failure mode (5/6 lane outputs were stubs the verifier approved) remained un-blocked in the actual workflow flow. v0.58.2 wires the substance check into `code-review.md` before the verifier dispatch, syncs CLAUDE.md, and codifies the recurring "substance vs form gates" pattern in `docs/INTERNALS.md`. Smoke: **614 passed**, **0 failed** (+2 new gates).

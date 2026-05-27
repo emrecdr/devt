@@ -54,6 +54,44 @@ Do NOT skip any of these. Verification without understanding the goal is just an
 
 **Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
+<step name="substance_pre_check">
+**Defense-in-depth substance check (F30).** Before sinking effort into grading, confirm the upstream artifacts you're about to verify are not themselves stubs. Field signal (greenfield 2026-05-26 PR #372): upstream agents under context pressure returned placeholder bodies that passed file-existence gates; grading a stub burns a verification turn and produces a meaningless verdict. The workflow's pre-gate (F28/F29) catches this when wired, but not every dispatch path runs through a workflow gate — this in-agent check makes the substance enforcement structural rather than workflow-dependent.
+
+Run `state check-agent-output` against each upstream artifact your `<task>` instruction tells you to grade. For dev/quick_implement workflows that's `impl-summary.md`, `test-summary.md` (if tests ran), and `review.md` (if review ran). For code_review workflow that's `review.md`. Skip artifacts your task doesn't reference.
+
+```bash
+for ARTIFACT in impl-summary.md test-summary.md review.md; do
+  [ -f ".devt/state/$ARTIFACT" ] || continue
+  RESULT=$(node bin/devt-tools.cjs state check-agent-output ".devt/state/$ARTIFACT" 2>/dev/null)
+  if echo "$RESULT" | grep -q '"looks_like_stub":true'; then
+    echo "STUB DETECTED in $ARTIFACT — $(echo "$RESULT" | grep -o '"reason":"[^"]*"')"
+    break
+  fi
+done
+```
+
+When a stub is detected, finalize verification with `verdict=failed` (NOT `needs_revision` — the upstream is structurally broken, not improvable through revision iteration). Write to both verification.md and verification.json using the canonical heredoc pattern documented later in this file (`TS=$(date …)` first, then interpolate `\${TS}` into the JSON body):
+
+```bash
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > .devt/state/verification.json <<EOF
+{
+  "agent": "verifier",
+  "status": "FAILED",
+  "verdict": "failed",
+  "task": "\${TASK}",
+  "criteria_total": 0,
+  "criteria_met": 0,
+  "revisions": [],
+  "timestamp": "\${TS}",
+  "failure_reason": "upstream artifact is a stub — re-dispatch the originating agent (programmer for impl-summary.md, tester for test-summary.md, code-reviewer for review.md)"
+}
+EOF
+```
+
+Surface the same reason in verification.md and exit. Do NOT proceed through the remaining context_loading / trace_artifacts / verdict steps — they cannot recover meaningful information from a stub upstream.
+</step>
+
 <step name="understand_goal">
 What was the original task? What should a successful implementation look like?
 

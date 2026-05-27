@@ -1169,6 +1169,21 @@ If ANY of these are missing: **STOP with BLOCKED**. Report to the user:
 
 Do NOT dispatch the verifier with incomplete context — it will waste a subagent turn and produce unreliable results.
 
+**Substance pre-gate (F29)**: even when the three artifacts exist, the upstream agents may have returned placeholder bodies (field signal: greenfield 2026-05-26 PR #372 multi-lane fan-out, "Stub written; analysis in progress." passed file-existence gates). Run `state check-agent-output` on each one BEFORE the LLM verifier dispatch — same architectural class as the code-review F28 pre-gate, applied to all three upstream artifacts the verifier consumes:
+
+```bash
+for ARTIFACT in impl-summary.md test-summary.md review.md; do
+  SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output ".devt/state/$ARTIFACT")
+  if echo "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
+    echo "BLOCKED: $ARTIFACT looks like a stub — $(echo "$SUBSTANCE" | jq -r '.reason')"
+    exit 0
+  fi
+done
+```
+
+When this gate trips, surface the substance reason to the user. The verifier loop cannot recover from a stub upstream artifact — re-dispatch the originating agent (programmer for impl-summary, tester for test-summary, code-reviewer for review) rather than asking the verifier to grade a placeholder.
+
 **Deterministic pre-verifier gate**. Run `bin/modules/grader.cjs` against the test-summary + impl-summary sidecars BEFORE dispatching the LLM verifier. Saves the verifier round-trip on red-test cycles where the test runner or quality gates already proved failure:
 
 ```bash
