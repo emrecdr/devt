@@ -13,9 +13,17 @@ const path = require("path");
 const crypto = require("crypto");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
-const { readState, checkWorkflowLock, ensureStateDir } = require("./state.cjs");
+const { readState, checkWorkflowLock, ensureStateDir, updateState } = require("./state.cjs");
 const { sanitizeForPrompt, scanForInjection, validatePath, maskSecrets } = require("./security.cjs");
 const { detectTier } = require("./preflight.cjs");
+
+// Maps the `init <verb>` CLI verb to the canonical workflow_type written
+// to workflow.yaml. New init verbs added in the future must also be added
+// to this map AND to state.cjs::VALID_WORKFLOW_TYPES.
+const WORKFLOW_TYPE_BY_INIT_VERB = Object.freeze({
+  workflow: "dev",
+  review: "code_review",
+});
 
 const REQUIRED_DEV_RULES = [
   "coding-standards.md",
@@ -342,7 +350,7 @@ function resolveSkills(pluginRoot, config, tier) {
   return resolved;
 }
 
-function initWorkflow(task, pluginRoot) {
+function initWorkflow(task, pluginRoot, initVerb) {
   const projectRoot = findProjectRoot();
   const config = getMergedConfig();
   const models = getModels(
@@ -411,6 +419,45 @@ function initWorkflow(task, pluginRoot) {
   // complexity-assessment); fall back to detectTier(task) so the first
   // dispatch in a fresh workflow still gets tier-aware skill loading.
   const seededTier = state.tier || (sanitizedTask ? detectTier(sanitizedTask) : null);
+
+  // Reset workflow.yaml unconditionally on every init * call so stale prior-session
+  // values (workflow_id, workflow_type, created_at from a different workflow) never
+  // bleed into the new session. Strip created_at + workflow_id first so updateState
+  // treats this as a fresh activation and re-stamps both fields unconditionally —
+  // the transition branch only fires on workflow_type change, but the !created_at
+  // branch fires whenever the field is absent, covering same-type re-activations too.
+  const workflowTypeForVerb = WORKFLOW_TYPE_BY_INIT_VERB[initVerb] || null;
+  if (workflowTypeForVerb) {
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const wfPath = path.join(projectRoot, ".devt", "state", "workflow.yaml");
+      if (fs.existsSync(wfPath)) {
+        let yaml = fs.readFileSync(wfPath, "utf8");
+        yaml = yaml
+          .replace(/^created_at:.*\n?/gm, "")
+          .replace(/^workflow_id:.*\n?/gm, "");
+        fs.writeFileSync(wfPath, yaml);
+      }
+    } catch {
+      // fs error tolerated — updateState handles create-from-scratch
+    }
+    updateState([
+      "active=true",
+      `workflow_type=${workflowTypeForVerb}`,
+      `task=${sanitizedTask || "null"}`,
+      "phase=context_init",
+      "status=in_progress",
+      "verify_iteration=0",
+      "verdict=null",
+      "repair=null",
+      "stopped_at=null",
+      "stopped_phase=null",
+      "resume_context=null",
+      "memory_signal_json=null",
+      "scope_hint_json=null",
+      "scope_trust_json=null",
+    ]);
+  }
 
   return {
     task: sanitizedTask,
@@ -497,9 +544,9 @@ function scanDevRules(dir, prefix, rootDir) {
 function run(subcommand, args, pluginRoot) {
   switch (subcommand) {
     case "workflow":
-      return initWorkflow(args.join(" "), pluginRoot);
+      return initWorkflow(args.join(" "), pluginRoot, "workflow");
     case "review":
-      return initWorkflow(args.join(" ") || "code review", pluginRoot);
+      return initWorkflow(args.join(" ") || "code review", pluginRoot, "review");
     default:
       throw new Error(
         `Unknown init type: ${subcommand}. Use: workflow, review`,
