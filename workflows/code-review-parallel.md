@@ -135,3 +135,75 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lane
 ```
 
 </step>
+
+<step name="substance_check_lanes" gate="every lane has terminal status (substance_pass | stub_redispatched | deferred)">
+
+After dispatch_lanes returns, run `state check-agent-output` on each lane's review file. F28 catches stub outputs (greenfield 2026-05-26 PR #372 5/6-lanes-stub failure mode).
+
+```bash
+LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+STUB_LANE_IDS=""
+for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
+  LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
+  LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
+  # Hard-defer impossibly-fast empty returns (file size < 30 bytes — that's
+  # not even a real stub, it's a harness/dispatch failure). No retry.
+  if [ "$LANE_SIZE" -lt 30 ]; then
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred
+    echo "Lane $LANE_ID hard-deferred (size=${LANE_SIZE}B — harness failure suspected)"
+    continue
+  fi
+  RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output "$LANE_FILE")
+  # grep -F avoids jq parse failure: stub_phrases_found[] contains raw regex
+  # source strings with unescaped backslashes (\b, \s) that are invalid JSON.
+  if echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
+    REDISPATCH_COUNT=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .redispatch_count')
+    if [ "$REDISPATCH_COUNT" -ge 1 ]; then
+      node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred
+      echo "Lane $LANE_ID deferred after retry (second stub)"
+    else
+      node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=stub_redispatched
+      STUB_LANE_IDS="$STUB_LANE_IDS $LANE_ID"
+    fi
+  else
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=substance_pass
+  fi
+done
+echo "STUB_LANES_FOR_REDISPATCH=$STUB_LANE_IDS"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=substance_check_lanes status=DONE
+```
+
+If `STUB_LANES_FOR_REDISPATCH` is non-empty, proceed to redispatch_lanes. Otherwise jump directly to consolidate.
+
+</step>
+
+<step name="redispatch_lanes" gate="all stub_redispatched lanes have new outputs OR are deferred">
+
+For each lane with `status=stub_redispatched`, issue ONE re-dispatch via the canonical template. All three L1-required context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`) MUST be present — re-read from cached workflow.yaml to ensure the L1 dispatch-hygiene hook accepts the call. Increment `redispatch_count` BEFORE the Task() call so the next substance_check_lanes pass correctly routes a second stub to deferred.
+
+```bash
+LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" redispatch_count=1
+done
+```
+
+Then issue ONE message with N Task() calls (one per stub_redispatched lane), using EXACTLY the same prompt template as `dispatch_lanes` (same context blocks, same task instruction, same output path). After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time any lane that's still a stub gets `status=deferred` (the retry-once-then-defer terminal).
+
+```bash
+# Re-run the substance check loop (copy from substance_check_lanes step).
+# Lanes with redispatch_count >= 1 that still look like stubs route to deferred.
+LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
+  LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
+  RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output "$LANE_FILE")
+  if echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred
+  else
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=substance_pass
+  fi
+done
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=redispatch_lanes status=DONE
+```
+
+</step>
