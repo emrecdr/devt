@@ -288,6 +288,29 @@ const VALID_WORKFLOW_TYPES = new Set([
   null,
 ]);
 
+// Lane-status enum for code-review-parallel.md::workflow.yaml::lanes[].
+// in_flight       — Task() dispatched, lane file may be empty/stub
+// substance_pass  — state check-agent-output returned ok:true
+// stub_redispatched — first F28 stub; will be re-dispatched once
+// deferred        — second F28 stub OR harness failure; consolidator notes it
+const VALID_LANE_STATUSES = new Set([
+  "in_flight", "substance_pass", "stub_redispatched", "deferred",
+]);
+
+// Slug normalization for lane file names. Graphify affected_communities[].name
+// can carry spaces, hyphens, slashes, or other separators that would produce
+// invalid filenames. Rule: lowercase, replace non-alphanum with underscore,
+// collapse repeats, trim, cap at 32 chars. Deterministic and stable across
+// re-partitions.
+function slugifyLaneName(name) {
+  if (!name || typeof name !== "string") return "ungrouped";
+  const slug = name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+  return slug || "ungrouped";
+}
+
 function warnState(msg) {
   process.stderr.write(JSON.stringify({ state_warning: msg }) + "\n");
 }
@@ -1786,4 +1809,6 @@ module.exports = {
   RESET_EXEMPT,
   STATE_FILE_CONTRACT,
   SIDECAR_FOR_MARKDOWN,
+  VALID_LANE_STATUSES,
+  slugifyLaneName,
 };
