@@ -94,3 +94,44 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lan
 **Gate**: If the partition produced 0 lanes (graphify absent or empty communities), the step routes back to the standard `code-review.md` single-dispatch path and exits cleanly. The parallel workflow only proceeds when ≥ 1 lane was successfully partitioned.
 
 </step>
+
+<step name="dispatch_lanes" gate="all lane Task() calls returned in a single foreground batch">
+
+**Foreground parallel dispatch.** Issue ONE message containing N `Task(subagent_type="devt:code-reviewer", …)` calls — one per lane in `workflow.yaml::lanes[]`. Sequential Task calls serialize; only multi-Task-in-one-message gets true parallelism per the Anthropic Task contract (same idiom as `dev-workflow.md:506` researcher+architect parallel dispatch).
+
+Read the lane registry:
+
+```bash
+LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+```
+
+For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these context blocks injected (L1 hook compliance requires ALL three blocks present in every devt:code-reviewer dispatch):
+
+- `<workflow_type>code_review_parallel</workflow_type>`
+- `<lane_id>L<N></lane_id>`
+- `<lane_community>{community}</lane_community>`
+- `<lane_files>{files for this lane}</lane_files>`
+- `<scope_trust>{cached from workflow.yaml::scope_trust_json}</scope_trust>`
+- `<scope_hint>{filtered to this lane's files only}</scope_hint>`
+- `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
+- `<governing_rules>{governing_rules.content from init payload}</governing_rules>`
+
+Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate.`
+
+Output path: each lane's `review_file` from the registry.
+
+**Issue all N Task() calls in ONE message.** Example for 3 lanes:
+
+```
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L1</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-auth_subgraph.md.</task>")
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L2</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-billing_subgraph.md.</task>")
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L3</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-payments.md.</task>")
+```
+
+When all Task() calls return (foreground blocks until all complete — each agent bounded by its `maxTurns: 40` frontmatter), proceed to substance_check_lanes.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lanes status=DONE
+```
+
+</step>
