@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-05-27
+
+**Parallel-lane code review as a first-class workflow.** Closes deferred backlog item L5 from the dispatch-hygiene release. Triggered from `/devt:review` via `AskUserQuestion` when scope > 10 files. Foreground multi-Task dispatch (Anthropic-canonical idiom); community-aware partitioning capped at 5 lanes; F28 substance gates per-lane with retry-once-then-defer; canonical re-dispatch template closes L1 hook compliance; consolidator runs code-reviewer in synthesis mode. Inherits the full substance-enforcement layer from the prior dispatch-hygiene release. Smoke: **630 → 642 passed**, **0 failed** (+12 new gates).
+
+### Added
+
+- **`workflows/code-review-parallel.md`** — new workflow body covering context_init, partition_lanes (community-based, cap 5), dispatch_lanes (foreground multi-Task), substance_check_lanes, redispatch_lanes (canonical L1-compliant re-dispatch template), consolidate (synthesis dispatch), verify + present_findings (KEEP-IN-SYNC with code-review.md).
+- **`agents/code-reviewer.md` synthesis-mode handler** — when dispatch task instruction begins with "Synthesize the N lane review files", agent dedupes findings by (file:line:finding_class), reconciles severity via rubric, preserves Critical findings, groups by file, emits `## Lane Provenance` section.
+- **`workflows/code-review.md::scope_check` step** — measures file count; when > 10 AND graphify ready, surfaces `AskUserQuestion` offering parallel-lane review with single-dispatch+community-filter as the alternative.
+- **2 new state CLI subcommands**:
+  - `state list-lane-outputs` — parses `workflow.yaml::lanes[]` and returns per-lane existence + size
+  - `state update-lane <id> status=<status>` — mutates a single lane's status, validated against `VALID_LANE_STATUSES`
+- **`code_review_parallel` workflow_type** registered in `VALID_WORKFLOW_TYPES` + routed in `next.md` + `status.md` + rubric pinned in `DEFAULTS.rubrics`.
+- **12 new smoke gates**: F32a/b (scope_check + threshold), F33a/b (partition cap + fallback), F34a/b (per-lane substance + retry-defer), F35a/b (consolidator + synthesis handler), F36a/b (L1 re-dispatch + KEEP-IN-SYNC), F37a/b (impossibly-fast hard-defer + all-deferred handling).
+
+### Why foreground dispatch
+
+Field signal (the multi-lane fan-out case from the dispatch-hygiene release): background dispatch + "no-polling-rule" stalled the main thread waiting for agents that never returned. Foreground multi-Task in one message is Anthropic-canonical for true parallelism — each agent bounded by `maxTurns: 40` (natural timeout), all results arrive synchronously (no polling required), consolidator gets everything at once. The same pattern devt already uses for researcher+architect parallel in `dev-workflow.md`.
+
+### Not in this release (deferred)
+
+- Auto-trigger without AskUserQuestion (user-opt-in design preserved).
+- Per-lane verifiers (single verifier on consolidated review is simpler; field signal for needing per-lane grading not yet observed).
+- Multi-lane patterns for `dev-workflow.md` (no field signal for multi-programmer flows).
+- Lane partitioning strategies other than community (file-bucket + directory rejected during brainstorming).
+
 ## [0.58.4] - 2026-05-27
 
 **5 field-validated fixes from greenfield 2026-05-27 PR #372 calibration report.** Closes blockers and quick wins before v0.59.0 parallel-review work — the parallel workflow would otherwise inherit these bugs into a wider surface. Smoke: **620 → 629**, **0 failed** (+9 new gates).
