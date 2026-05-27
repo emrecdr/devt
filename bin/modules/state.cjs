@@ -787,6 +787,8 @@ const STATE_FILE_CONTRACT = {
     "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
     "consolidator-ran.txt",     // marker written by consolidator synthesis entry (assert-consolidator-dispatched)
     "auto-curator-considered.txt", // marker written by auto_curator step (assert-auto-curator-considered)
+    "reuse-candidates.md",      // written by state derive-reuse-candidates (reuse pre-search)
+    "reuse-analysis.md",        // written by programmer per-candidate decisions (assert-reuse-analyzed gate)
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1989,6 +1991,8 @@ function run(subcommand, args) {
       return assertConsolidatorDispatched();
     case "assert-auto-curator-considered":
       return assertAutoCuratorConsidered();
+    case "derive-reuse-candidates":
+      return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "list-lane-outputs":
       return listLaneOutputs();
     case "update-lane":
@@ -2000,7 +2004,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }
