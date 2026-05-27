@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-05-27
+
+**Mechanical gates + functional parallel partitioning.** Field validation of the prior parallel-review release revealed 5 silent-skip vectors (orchestrator skipped scope_check AskUserQuestion, lane registration, consolidator dispatch, auto_curator step, delegation routing — all prose-only). Plus the central data-layer bug: partition_lanes depended on `## Affected Communities` section that graphify never emits. This release converts prose to mechanical artifact-and-CLI gates and replaces community-based partitioning with path-based (which the orchestrator was doing manually anyway). Smoke: **642 → 657 passed**, **0 failed** (+15 new gates).
+
+### Added
+
+- **4 new state CLI subcommands** (mechanical gates following the substance-enforcement pattern):
+  - `state assert-scope-check-handled` — BLOCKS when `scope-check-required.txt` exists but `scope-check-answer.txt` absent. Closes the AskUserQuestion silent-skip vector.
+  - `state assert-lanes-registered` — BLOCKS when `workflow.yaml::lanes[]` empty. Forces `state update-lane` registration before `dispatch_lanes`.
+  - `state assert-consolidator-dispatched` — BLOCKS when ≥1 lane passed substance but `consolidator-ran.txt` marker absent. Closes the orchestrator-wrote-review.md-themselves silent skip.
+  - `state assert-auto-curator-considered` — BLOCKS when `auto-curator-considered.txt` absent. Forces orchestrator to enter the auto_curator step.
+- **Path-based lane partitioning** in `workflows/code-review-parallel.md::partition_lanes`. Groups scope files by top-2-level directory prefix, caps at 5 lanes, falls back to single-dispatch on empty input. Replaces graphify-community-based partitioning that never worked.
+- **Synthesis-mode marker write** in `agents/code-reviewer.md` — first action of synthesis mode writes `.devt/state/consolidator-ran.txt`. Consumed by assert-consolidator-dispatched.
+- **auto_curator-considered marker** in `workflows/code-review.md::auto_curator` — writes FIRE or DISABLED status regardless of config opt-in.
+- **15 new smoke gates** (G1a/b/c, G2a/b, G3a/b/c, G4a/b, G5a, G6a, G7a, G8a, G9a) covering the 4 mechanical assertions + 5 workflow corrections.
+
+### Fixed
+
+- **Tool name inconsistency**: graphify references in workflow prose now use `mcp__plugin_devt_devt-graphify__*` (matches the prefixed convention already used for claude-mem). Field signal: orchestrator had to ToolSearch for the real callable name.
+- **F16 ranking ambiguity**: workflow prose now specifies "rank by in_count field if present, else edge_count, else array position".
+- **F16 empty-drill-down handling**: when `get_neighbors` returns empty for a top-3 dependent (e.g., module-level container with dynamic dispatch), the step records the empty result and substitutes the next-ranked dependent.
+- **god_node_match vs F17 signal clarification**: workflow prose notes the two signals measure different things (symbol-aggregated vs file-aggregated) and both should be surfaced independently.
+- **`state evict-graphify` now also cleans `staleness-suppressed.txt`**: previously left stale across sessions.
+
+### Why these ship together
+
+All 5 silent-skip vectors derive from the same architectural class (prose gates get rationalized past). The mechanical conversion is one coherent pattern applied to 4 gates. The path-based partitioning fix is a prerequisite for those gates to have any value — without it, even mechanically-forced delegation would route into a broken workflow. The 4 prose corrections are field-validated quick fixes from the same calibration report; bundling them avoids two-release ceremony for small changes.
+
+### Not in this release (deferred)
+
+- **Bitbucket PR-scoped tier** — orchestrator's P0 for greenfield. Needs separate design + Bitbucket API research. Tracked for the next release.
+- **Re-dispatch template enforcement** — L1 hook can detect missing context blocks but can't distinguish freeform-with-blocks from canonical template. Needs richer logging infrastructure.
+- **Lane subagents getting graphify tool surface** — orchestrator's P1, but conflicts with the deliberate "orchestrator owns MCP, sub-agents MCP-blind" contract.
+
 ## [0.59.0] - 2026-05-27
 
 **Parallel-lane code review as a first-class workflow.** Closes deferred backlog item L5 from the dispatch-hygiene release. Triggered from `/devt:review` via `AskUserQuestion` when scope > 10 files. Foreground multi-Task dispatch (Anthropic-canonical idiom); community-aware partitioning capped at 5 lanes; F28 substance gates per-lane with retry-once-then-defer; canonical re-dispatch template closes L1 hook compliance; consolidator runs code-reviewer in synthesis mode. Inherits the full substance-enforcement layer from the prior dispatch-hygiene release. Smoke: **630 → 642 passed**, **0 failed** (+12 new gates).
