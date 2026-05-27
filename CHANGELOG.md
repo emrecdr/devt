@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-05-27
+
+**Reuse Pre-Search Pattern.** Extends CON-001 substance-enforcement-gates to the duplicate-function domain. Field signal: programmers (LLM-driven) tend to reimplement functionality rather than search existing code, producing N variations of the same logic across the codebase. The prose instruction "scan existing code first" exists in `programmer.md` but gets rationalized past under context pressure — identical failure mode as the prose gates v0.58-0.60 fixed. This release adds a pure-Node CLI that queries the local graphify graph for existing methods with similar responsibility, scores them via a 3-signal heuristic (name match + caller-community overlap + docstring keyword), writes them to `.devt/state/reuse-candidates.md`, and mechanically blocks the test step until the programmer writes per-candidate decisions to `reuse-analysis.md`. Smoke: **657 → 666 passed**, **0 failed** (+9 new gates).
+
+### Added
+
+- **`state derive-reuse-candidates "<task>"` CLI** — pure-Node, no MCP, no LLM dispatch. Reads the local `graphify.cjs` graph via `queryGraph` + `getNeighbors`, scores candidates with a 3-signal heuristic (+3 name-keyword match, +3 caller-community overlap vs `preflight-brief.json::suggested_reading`, +2 docstring-keyword match, +1 in_degree ≥ 2), buckets into STRONG/MEDIUM/WEAK (≥7/4-6/1-3), caps top 8, writes `.devt/state/reuse-candidates.md` with signature + line number + first-comment-line per candidate. Reads source files (best-effort, 200KB cap) to extract signatures via regex against function/class declarations. Degrades gracefully when graphify is unavailable (returns `{ok:true, candidates:[]}` with reason).
+- **`state assert-reuse-analyzed` CLI** — mechanical gate. Parses `reuse-candidates.md` for `` ### `<label>` `` headings, then verifies each label appears in `reuse-analysis.md`. Returns `ok:false` (with which labels are missing) until every candidate is addressed. Gate inapplicably passes when candidates.md is absent (graphify unavailable) or has zero candidates.
+- **`workflows/dev-workflow.md` + `workflows/quick-implement.md` wiring** (KEEP-IN-SYNC): derive-reuse-candidates runs before programmer dispatch with the task text from `state read | jq '.task'`; programmer Task() prompt gets a `<reuse_candidates>` context block referencing the artifact; `state assert-reuse-analyzed` gates the test step.
+- **`agents/programmer.md` `reuse_analysis` step** — inserted between `scan` and `plan` steps. Programmer reads `reuse-candidates.md`, writes per-candidate REUSED | EXTENDED | REJECTED decisions to `reuse-analysis.md` BEFORE writing any code. impl-summary template gets a `## Reuse Decisions` section.
+- **`references/rubrics/code_review.v1.md` axis G — Reuse Discipline** — L1 (critical: duplicates a STRONG candidate without justification, OR REUSED claim has no import in diff) / L2 (important: generic REJECTED reason, EXTENDED candidate reimplemented from scratch) / L3 (acceptable: every candidate addressed defensibly) / L4 (exemplary: ≥2 helpers reused, OR semantic duplicate the pre-search missed got caught by reviewer).
+- **9 new smoke gates**: H1a/b/c (CLI empty-task rejection, graphify-unavailable degradation, success-path file write), H2a/b/c (gate inapplicable, blocks missing analysis, passes complete analysis), H3a/b (workflow wiring in both dev-workflow and quick-implement), H4a (programmer.md reuse_analysis step + decision vocabulary).
+
+### Why this ships as a single coherent release
+
+All components are interlocked: the CLI writes the file the gate validates, which references the agent step the programmer follows, which the rubric verifies. Splitting them would ship a half-functional state. The architectural pattern (artifact + mechanical gate + agent body instruction + rubric axis) is the same recipe v0.58/0.60 established for scope_check, lanes-registered, consolidator-dispatched, auto-curator-considered — this is its 7th field-validated instance (per [[CON-001-substance-enforcement-gates]]).
+
+### What this catches vs misses
+
+**Catches (~70% of the duplicate-function pattern)**:
+- Name-similar functions whose names overlap task keywords
+- Functions called from the same upstream community as the new function
+- Functions whose docstring/first-comment mentions task keywords
+
+**Misses (~30% — second-line caught by reviewer's axis G L4)**:
+- Semantically-equivalent functions with no name overlap and no shared callers
+- These rely on the code-reviewer's independent scan for L4 catches
+
+### Not in this release (deferred)
+
+- **AST-based semantic duplicate detection** (PR-side, like the cited blog post's tool) — covers the misses above. Tracked for a future release as a complement, not replacement.
+- **Bitbucket PR-scoped tier** — still on the backlog; deferred from v0.59.0+ scoping.
+- **Re-dispatch template enforcement** — L1 hook can detect missing context blocks but can't distinguish freeform-with-blocks from canonical template. Deferred.
+
 ## [0.60.0] - 2026-05-27
 
 **Mechanical gates + functional parallel partitioning.** Field validation of the prior parallel-review release revealed 5 silent-skip vectors (orchestrator skipped scope_check AskUserQuestion, lane registration, consolidator dispatch, auto_curator step, delegation routing — all prose-only). Plus the central data-layer bug: partition_lanes depended on `## Affected Communities` section that graphify never emits. This release converts prose to mechanical artifact-and-CLI gates and replaces community-based partitioning with path-based (which the orchestrator was doing manually anyway). Smoke: **642 → 657 passed**, **0 failed** (+15 new gates).
