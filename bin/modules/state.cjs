@@ -1531,6 +1531,51 @@ function assertVerifierRan() {
   };
 }
 
+// Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
+// each lane's review file existence + size. Consumed by code-review-parallel.md's
+// substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
+// parallel workflow is active (lanes key missing from workflow.yaml).
+function listLaneOutputs() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { lanes: [], reason: "no workflow.yaml" };
+  }
+  const yaml = fs.readFileSync(wfPath, "utf8");
+  // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
+  // line-based parsing to avoid pulling in a YAML library (zero-deps rule).
+  const lanes = [];
+  const blocks = yaml.split(/^  - id:/m).slice(1);
+  for (const block of blocks) {
+    const id = (block.match(/^\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const community = (block.match(/^\s+community:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const reviewFile = (block.match(/^\s+review_file:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const status = (block.match(/^\s+status:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const redispatchCount = parseInt(
+      (block.match(/^\s+redispatch_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    if (!id) continue;
+    let sizeBytes = 0;
+    let exists = false;
+    if (reviewFile) {
+      try {
+        sizeBytes = fs.statSync(reviewFile).size;
+        exists = true;
+      } catch { /* file absent — leave defaults */ }
+    }
+    lanes.push({
+      id: id ? id.trim() : null,
+      community: community ? community.trim() : null,
+      review_file: reviewFile ? reviewFile.trim() : null,
+      status: status ? status.trim() : null,
+      redispatch_count: redispatchCount,
+      file_exists: exists,
+      file_size_bytes: sizeBytes,
+    });
+  }
+  return { lanes };
+}
+
 // Process-level gate that the orchestrator actually ran `preflight generate`
 // in context_init (vs. silently reusing a brief from a prior workflow). Field
 // observed (greenfield-api 2026-05-21): orchestrator started a new workflow at
@@ -1757,6 +1802,8 @@ function run(subcommand, args) {
       return checkAgentOutput(args[0]);
     case "assert-verifier-ran":
       return assertVerifierRan();
+    case "list-lane-outputs":
+      return listLaneOutputs();
     case "history": {
       const limitArg = _getFlag(args, "--limit");
       const lim = limitArg ? parseInt(limitArg, 10) : 20;
@@ -1764,7 +1811,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, list-lane-outputs, history`,
       );
   }
 }
@@ -1786,6 +1833,7 @@ module.exports = {
   assertClaudeMemHarvest,
   checkAgentOutput,
   assertVerifierRan,
+  listLaneOutputs,
   stateHistory,
   describeMismatch,
   getStateDir,
