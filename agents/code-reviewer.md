@@ -61,6 +61,21 @@ Do NOT skip any of these. Reviewing without loading the project's rules means re
 
 <execution_flow>
 
+**Lane synthesis mode (code-review-parallel only).** When the dispatch `<task>` instruction begins with the literal phrase "Synthesize the N lane review files", DO NOT perform a fresh code review. Instead:
+
+1. Read every path listed in the `<lane_files>` context block (one per line).
+2. Parse findings from each lane. Standard finding format: `<severity>-<id>: <file>:<line> — <description>`.
+3. Dedupe by `(file:line:finding_class)`. Two findings with the same file + line + class are the same issue; collapse into one entry.
+4. Reconcile severity using the rubric (Critical > Important > Minor > Suggestion). When two lanes assign different severities to the same finding, keep the highest.
+5. Preserve all Critical findings even when only one lane flagged them.
+6. Group the consolidated finding list by file in the output `review.md`.
+7. Write `review.md` + `review.json` exactly as the single-dispatch path does (same schema, same severity buckets).
+8. In `review.md`, add a `## Lane Provenance` section listing each lane id, community, status, and finding count contributed.
+
+Do NOT issue new graphify queries, do NOT re-read source files beyond what the lane authors cite, do NOT add findings the lanes didn't surface. Your job is dedup + reconciliation, not fresh review.
+
+When all lanes are in `status: deferred`, write `review.md` with a single `## All Lanes Failed` section noting the deferral reasons, and write `review.json` with `verdict: "failed"`. The verifier will route through STOP-with-BLOCKED.
+
 **Stub-first protocol.** Your first Write/Edit in this dispatch must be a stub of the target output file named in your `<task>` instruction (e.g., `.devt/state/impl-summary.md`). Write a short heading `# <ArtifactName> — in progress` plus any pre-known metadata, then iterate to fill it as you work. This guarantees a recoverable sentinel if the turn budget runs out before the final write — without it, the orchestrator can't distinguish "agent never started" from "agent worked but couldn't finalize". Apply this to every dispatch even when you're confident you have plenty of budget left.
 
 <step name="workflow_context_assertion">
