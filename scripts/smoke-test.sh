@@ -6865,6 +6865,33 @@ else
   fail "F42a: code-review.md missing claude-mem pre-step (still silently skipped)"
 fi
 
+# F32 — scope_check step routes by file count + AskUserQuestion presence.
+# F32a: presence — code-review.md contains a scope_check step that gates on >10 files
+if /usr/bin/grep -q '<step name="scope_check"' "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -q "AskUserQuestion" "$ROOT/workflows/code-review.md"; then
+  pass "F32a: code-review.md has scope_check step with AskUserQuestion (parallel-lane gate)"
+else
+  fail "F32a: code-review.md missing scope_check step or AskUserQuestion"
+fi
+# F32b: the file-count threshold is the canonical 10 (matches community-filter trigger)
+if /usr/bin/grep -qE 'SCOPE_FILE_COUNT.*(>|gt).*10|files > 10|10 files' "$ROOT/workflows/code-review.md"; then
+  pass "F32b: code-review.md uses the canonical >10 file threshold for parallel-lane offer"
+else
+  fail "F32b: parallel-lane threshold is not the canonical 10"
+fi
+
+# F33 — partition_lanes caps at 5 + falls back when graphify unavailable.
+if /usr/bin/grep -qE 'head -5|cap.*5 lanes' "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F33a: code-review-parallel.md partition_lanes caps at 5"
+else
+  fail "F33a: partition_lanes does not cap at 5 lanes"
+fi
+if /usr/bin/grep -qE 'FALLBACK.*graphify|graph-impact.md absent|routing.*single-dispatch' "$ROOT/workflows/code-review-parallel.md"; then
+  pass "F33b: code-review-parallel.md falls back to single-dispatch when graphify unavailable"
+else
+  fail "F33b: graphify-unavailable fallback missing in partition_lanes"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
