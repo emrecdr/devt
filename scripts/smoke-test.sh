@@ -6957,6 +6957,150 @@ else
   fail "F37b: all-lanes-deferred handling incomplete in workflow or agent body"
 fi
 
+# === v0.60.0 mechanical gates + path-based partition + prose corrections ===
+
+# G1: assert-scope-check-handled (3 sub-gates)
+G1_TMP=$(mktemp -d)
+mkdir -p "$G1_TMP/.devt/state" && echo '{}' > "$G1_TMP/.devt/config.json"
+G1A=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
+if echo "$G1A" | jq -e '.ok == true' >/dev/null 2>&1; then
+  pass "G1a: assert-scope-check-handled PASSES when scope-check-required.txt absent (gate does not apply)"
+else
+  fail "G1a: gate incorrectly fired when no required.txt — got: $G1A"
+fi
+echo "scope=50 graphify=ready" > "$G1_TMP/.devt/state/scope-check-required.txt"
+G1B=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
+if echo "$G1B" | jq -e '.ok == false' >/dev/null 2>&1; then
+  pass "G1b: assert-scope-check-handled BLOCKS when required.txt exists but answer.txt absent"
+else
+  fail "G1b: gate failed to block on missing answer — got: $G1B"
+fi
+echo "parallel" > "$G1_TMP/.devt/state/scope-check-answer.txt"
+G1C=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
+if echo "$G1C" | jq -e '.ok == true and .answer == "parallel"' >/dev/null 2>&1; then
+  pass "G1c: assert-scope-check-handled PASSES with answer.txt + returns answer"
+else
+  fail "G1c: gate failed to pass with answer — got: $G1C"
+fi
+rm -rf "$G1_TMP"
+
+# G2: assert-lanes-registered (2 sub-gates)
+G2_TMP=$(mktemp -d)
+mkdir -p "$G2_TMP/.devt/state" && echo '{}' > "$G2_TMP/.devt/config.json"
+echo "active: true" > "$G2_TMP/.devt/state/workflow.yaml"
+G2A=$(cd "$G2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-lanes-registered 2>/dev/null)
+if echo "$G2A" | jq -e '.ok == false and .lane_count == 0' >/dev/null 2>&1; then
+  pass "G2a: assert-lanes-registered BLOCKS when workflow.yaml::lanes[] empty"
+else
+  fail "G2a: gate did not block on empty lanes — got: $G2A"
+fi
+cat > "$G2_TMP/.devt/state/workflow.yaml" <<'WFEOF'
+active: true
+lanes:
+  - id: "L1"
+    community: "auth"
+    review_file: ".devt/state/review-lane-auth.md"
+    status: "in_flight"
+    redispatch_count: 0
+WFEOF
+G2B=$(cd "$G2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-lanes-registered 2>/dev/null)
+if echo "$G2B" | jq -e '.ok == true and .lane_count == 1' >/dev/null 2>&1; then
+  pass "G2b: assert-lanes-registered PASSES with ≥1 lane registered"
+else
+  fail "G2b: gate did not pass with registered lane — got: $G2B"
+fi
+rm -rf "$G2_TMP"
+
+# G3: assert-consolidator-dispatched (3 sub-gates)
+G3_TMP=$(mktemp -d)
+mkdir -p "$G3_TMP/.devt/state" && echo '{}' > "$G3_TMP/.devt/config.json"
+echo "active: true" > "$G3_TMP/.devt/state/workflow.yaml"
+G3A=$(cd "$G3_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-consolidator-dispatched 2>/dev/null)
+if echo "$G3A" | jq -e '.ok == true' >/dev/null 2>&1; then
+  pass "G3a: assert-consolidator-dispatched PASSES when no substance_pass lanes (gate inapplicable)"
+else
+  fail "G3a: gate fired incorrectly when no lanes — got: $G3A"
+fi
+cat > "$G3_TMP/.devt/state/workflow.yaml" <<'WFEOF'
+active: true
+lanes:
+  - id: "L1"
+    community: "auth"
+    review_file: ".devt/state/review-lane-auth.md"
+    status: "substance_pass"
+    redispatch_count: 0
+WFEOF
+G3B=$(cd "$G3_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-consolidator-dispatched 2>/dev/null)
+if echo "$G3B" | jq -e '.ok == false' >/dev/null 2>&1; then
+  pass "G3b: assert-consolidator-dispatched BLOCKS when ≥1 lane passes but marker absent"
+else
+  fail "G3b: gate failed to block on missing marker — got: $G3B"
+fi
+echo "synthesis dispatch entered" > "$G3_TMP/.devt/state/consolidator-ran.txt"
+G3C=$(cd "$G3_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-consolidator-dispatched 2>/dev/null)
+if echo "$G3C" | jq -e '.ok == true' >/dev/null 2>&1; then
+  pass "G3c: assert-consolidator-dispatched PASSES with marker"
+else
+  fail "G3c: gate failed with marker present — got: $G3C"
+fi
+rm -rf "$G3_TMP"
+
+# G4: assert-auto-curator-considered (2 sub-gates)
+G4_TMP=$(mktemp -d)
+mkdir -p "$G4_TMP/.devt/state" && echo '{}' > "$G4_TMP/.devt/config.json"
+G4A=$(cd "$G4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-auto-curator-considered 2>/dev/null)
+if echo "$G4A" | jq -e '.ok == false' >/dev/null 2>&1; then
+  pass "G4a: assert-auto-curator-considered BLOCKS when marker absent"
+else
+  fail "G4a: gate failed to block on missing marker — got: $G4A"
+fi
+echo "DISABLED" > "$G4_TMP/.devt/state/auto-curator-considered.txt"
+G4B=$(cd "$G4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-auto-curator-considered 2>/dev/null)
+if echo "$G4B" | jq -e '.ok == true and .auto_curator_status == "DISABLED"' >/dev/null 2>&1; then
+  pass "G4b: assert-auto-curator-considered PASSES with marker + returns status"
+else
+  fail "G4b: gate failed with marker — got: $G4B"
+fi
+rm -rf "$G4_TMP"
+
+# G5: path-based partition_lanes (presence check)
+if /usr/bin/grep -q "path-based" "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -q "top-2-level path" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "G5a: code-review-parallel.md partition_lanes uses path-based partitioning (no graphify community dependency)"
+else
+  fail "G5a: partition_lanes still depends on community labels"
+fi
+
+# G6: tool name prefix fix
+PREFIXED_COUNT=$(/usr/bin/grep -c "mcp__plugin_devt_devt-graphify__" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "$PREFIXED_COUNT" -ge 1 ]; then
+  pass "G6a: code-review.md uses mcp__plugin_devt_devt-graphify__ prefixed form (${PREFIXED_COUNT} references)"
+else
+  fail "G6a: code-review.md missing prefixed graphify references"
+fi
+
+# G7: F16 ranking + empty-drill-down fallback
+if /usr/bin/grep -qE "in_count|edge_count" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qE "dynamic dispatch suspected|Empty drill-down" "$ROOT/workflows/code-review.md"; then
+  pass "G7a: code-review.md F16 specifies ranking criterion + empty-drill-down fallback"
+else
+  fail "G7a: F16 ranking or empty-fallback prose missing"
+fi
+
+# G8: god_node_match + F17 signal independence
+if /usr/bin/grep -qE "symbol-aggregated|signal independence" "$ROOT/workflows/code-review.md"; then
+  pass "G8a: code-review.md clarifies god_node_match vs F17 signal independence"
+else
+  fail "G8a: god_node/F17 clarification note missing"
+fi
+
+# G9: staleness-suppressed.txt in evict targets
+if /usr/bin/grep -q "staleness-suppressed.txt" "$ROOT/bin/modules/state-audit.cjs"; then
+  pass "G9a: GRAPHIFY_EVICTABLE includes staleness-suppressed.txt"
+else
+  fail "G9a: staleness-suppressed.txt not in evict targets"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
