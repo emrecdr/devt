@@ -32,3 +32,65 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 **Note**: `workflow_type=code_review_parallel` must be added to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` AND routed in `workflows/next.md` + `workflows/status.md` (handled in Task 10 + Task 11).
 
 </step>
+
+<step name="partition_lanes" gate="lanes[] written to workflow.yaml OR fallback decision recorded">
+
+Read `graph-impact.md` to extract `affected_communities`. Partition files into lanes by community, cap at 5 lanes, write the registry to `workflow.yaml::lanes[]`.
+
+```bash
+GRAPH_IMPACT_PATH=".devt/state/graph-impact.md"
+if [ ! -f "$GRAPH_IMPACT_PATH" ]; then
+  echo "FALLBACK: graph-impact.md absent — parallel partition requires graphify; routing back to single-dispatch"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
+  echo "Re-run /devt:review for community-filter single-dispatch path"
+  exit 0
+fi
+
+# Parse affected_communities from graph-impact.md. Expected format: a section
+# like `## Affected Communities` with bullet lines naming each community.
+# graphify writes this section when blast_radius returns multi-community impact.
+COMMUNITIES_RAW=$(awk '/^## Affected Communities/,/^## /' "$GRAPH_IMPACT_PATH" | grep -E '^- ' | sed 's/^- //' | head -5)
+COMMUNITY_COUNT=$(echo "$COMMUNITIES_RAW" | grep -cE '.')
+
+if [ "$COMMUNITY_COUNT" -eq 0 ]; then
+  echo "FALLBACK: graph-impact.md has no affected_communities — routing to single-dispatch + community-filter"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
+  exit 0
+fi
+
+# Build the lanes[] YAML block. Slug normalization happens via the CLI helper.
+LANE_NUM=1
+echo "$COMMUNITIES_RAW" | while IFS= read -r COMMUNITY; do
+  [ -z "$COMMUNITY" ] && continue
+  TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  SLUG=$(node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName('$COMMUNITY'))")
+  echo "  - id: \"L${LANE_NUM}\""
+  echo "    community: \"${COMMUNITY}\""
+  echo "    slug: \"${SLUG}\""
+  echo "    review_file: \".devt/state/review-lane-${SLUG}.md\""
+  echo "    status: \"in_flight\""
+  echo "    redispatch_count: 0"
+  echo "    dispatched_at: \"${TS}\""
+  LANE_NUM=$((LANE_NUM + 1))
+done > /tmp/devt-lanes-block.yaml
+
+# Append lanes block to workflow.yaml (idempotent: strip any prior lanes: section first)
+node -e '
+const fs = require("fs");
+const path = ".devt/state/workflow.yaml";
+let yaml = fs.readFileSync(path, "utf8");
+yaml = yaml.replace(/^lanes:[\s\S]*?(?=^[a-z_]+:|$)/m, "");
+const lanesBlock = "lanes:\n" + fs.readFileSync("/tmp/devt-lanes-block.yaml", "utf8");
+fs.writeFileSync(path, yaml.trimEnd() + "\n" + lanesBlock);
+'
+rm -f /tmp/devt-lanes-block.yaml
+
+LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+LANE_COUNT=$(echo "$LANES_OUT" | jq '.lanes | length')
+echo "Partitioned into ${LANE_COUNT} lanes (cap=5)"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
+```
+
+**Gate**: If the partition produced 0 lanes (graphify absent or empty communities), the step routes back to the standard `code-review.md` single-dispatch path and exits cleanly. The parallel workflow only proceeds when ≥ 1 lane was successfully partitioned.
+
+</step>
