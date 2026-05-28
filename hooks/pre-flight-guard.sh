@@ -48,6 +48,31 @@ node -e "
       dir = path.dirname(dir);
     }
 
+    // Refuse to fire if the target file is NOT a descendant of the resolved
+    // project root. Field signal (greenfield 2026-05-28 PM calibration #3,
+    // preflight-denies.jsonl): edits to /tmp/*.md and ~/.claude/plans/*.md
+    // tripped the hook against greenfield-api's scratchpad because the
+    // walk-up resolved greenfield-api as the project root (from cwd) and the
+    // hook then required PREFLIGHT for unrelated files. Out-of-project files
+    // are by definition not governed by this project's memory layer.
+    //
+    // Symlink resolution: macOS exposes /tmp -> /private/tmp and /var ->
+    // /private/var. Node's process.cwd() returns the canonical (resolved)
+    // form, but tool_input.file_path arrives as the user-visible (unresolved)
+    // form. Both sides must be realpath'd before comparison or the descendant
+    // check rejects genuinely in-project edits.
+    const absFp = path.isAbsolute(fp) ? fp : path.resolve(process.cwd(), fp);
+    let canonDir = dir;
+    try { canonDir = fs.realpathSync(dir); } catch { /* keep dir as-is */ }
+    let canonFp = absFp;
+    try {
+      // Realpath the parent and rejoin — the target file may not exist yet
+      // (Write tool creating new files); only the parent is guaranteed-resolvable.
+      const parent = fs.realpathSync(path.dirname(absFp));
+      canonFp = path.join(parent, path.basename(absFp));
+    } catch { /* parent unresolvable — fall back to absFp */ }
+    if (!canonFp.startsWith(canonDir + path.sep)) process.exit(0);
+
     // Resolve memory.preflight_mode (defaults ← global ← project) AND honor
     // the memory.enabled master switch (when false, the entire memory layer
     // is opted out — guard becomes a no-op).

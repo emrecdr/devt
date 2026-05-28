@@ -665,19 +665,21 @@ else
   fail "state read-section: missing section did not return expected error: $SECTION_MISS"
 fi
 
-# v0.30.5 → v0.33.0: pre-flight-guard hook appends every deny as one
-# JSON record to .devt/state/preflight-denies.jsonl (migrated from .log).
+# pre-flight-guard hook appends every deny as one JSON record to
+# .devt/state/preflight-denies.jsonl. The hook also refuses to fire on
+# out-of-project paths (descendant check added 2026-05-28) — so this test
+# uses a relative path that resolves under the smoke tmpdir (in-project).
 echo '{"memory":{"preflight_mode":"block","enabled":true}}' > .devt/config.json
 echo "active: true" > .devt/state/workflow.yaml
 rm -f .devt/state/scratchpad.md .devt/state/preflight-denies.jsonl
-HOOK_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/smoke-target.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
+HOOK_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" echo '{"tool_name":"Edit","tool_input":{"file_path":"smoke-target.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
 if [ -f .devt/state/preflight-denies.jsonl ]; then
   # Each line must be valid JSON with the schema (mode, ts, action, file_path, reason).
   if node -e "
     const lines = require('fs').readFileSync('.devt/state/preflight-denies.jsonl','utf8').split('\n').filter(Boolean);
     for (const l of lines) {
       const j = JSON.parse(l);
-      if (j.mode==='block' && j.action==='edit' && j.file_path==='/tmp/smoke-target.py' && j.reason==='missing PREFLIGHT line') process.exit(0);
+      if (j.mode==='block' && j.action==='edit' && j.file_path==='smoke-target.py' && j.reason==='missing PREFLIGHT line') process.exit(0);
     }
     process.exit(1);
   " 2>/dev/null; then
@@ -7513,6 +7515,37 @@ else
   fail "K5: workflow_type-awareness broken. quick_implement: $K5_POS  | code_review: $K5_NEG"
 fi
 rm -rf "$K5_TMP"
+
+# K8: pre-flight-guard.sh refuses to fire on out-of-project file paths.
+# Field signal (greenfield 2026-05-28 PM calibration #3): preflight-denies.jsonl
+# accumulated 10+ entries for files OUTSIDE the project root because the
+# walk-up resolved an adjacent .devt/ and the hook validated unrelated files.
+# Fixture creates a non-symlinked tmpdir (resolves /tmp -> /private/tmp on
+# macOS), an active workflow, and verifies:
+#   in-project edit → advisory emitted + preflight-denies entry written
+#   out-of-project edit → exit 0, no advisory, no log entry
+K8_TMP=$(mktemp -d)
+K8_TMP=$(cd "$K8_TMP" && pwd -P)
+mkdir -p "$K8_TMP/.devt/state"
+echo '{}' > "$K8_TMP/.devt/config.json"
+cat > "$K8_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: context_init
+workflow_type: dev
+EOF
+K8_IN_OUT=$(echo "{\"tool_input\":{\"file_path\":\"$K8_TMP/foo.py\"}}" | (cd "$K8_TMP" && bash "$ROOT/hooks/pre-flight-guard.sh") 2>/dev/null)
+K8_OUT_OUT=$(echo '{"tool_input":{"file_path":"/Users/totally-elsewhere/plans/foo.md"}}' | (cd "$K8_TMP" && bash "$ROOT/hooks/pre-flight-guard.sh") 2>/dev/null)
+K8_IN_HAS_ADVISORY=0
+echo "$K8_IN_OUT" | grep -q "PREFLIGHT MISSING" && K8_IN_HAS_ADVISORY=1
+K8_OUT_EMPTY=0
+[ -z "$K8_OUT_OUT" ] && K8_OUT_EMPTY=1
+K8_DENY_COUNT=$(wc -l < "$K8_TMP/.devt/state/preflight-denies.jsonl" 2>/dev/null | tr -d ' ' || echo 0)
+if [ "$K8_IN_HAS_ADVISORY" = "1" ] && [ "$K8_OUT_EMPTY" = "1" ] && [ "$K8_DENY_COUNT" = "1" ]; then
+  pass "K8: pre-flight-guard refuses out-of-project files (in-project advisory=1, out empty=1, deny-log entries=1)"
+else
+  fail "K8: scope check broken. in_advisory=${K8_IN_HAS_ADVISORY} out_empty=${K8_OUT_EMPTY} deny_count=${K8_DENY_COUNT}"
+fi
+rm -rf "$K8_TMP"
 
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
