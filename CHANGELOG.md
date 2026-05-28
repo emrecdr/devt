@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-05-29
+
+**Calibration #5 bug fixes + MCP wiring improvements.** Greenfield's first field session on v0.63.0 surfaced five real bugs (workflow_id mutation cascade, lanes[] flattening, JSON scalar coercion, mcp-stats namespace mismatch, drill-down oversize) and validated five P1 improvements (lane-suggestions partial mode, workflow-aware reuse gate, god_node_warnings, shortest_path verification, adaptive threshold). Smoke: **711 → 720 passed**, **0 failed**.
+
+### Fixed
+
+- **`state update workflow_type=...` no longer breaks freshness gates** (NEW-1). Adds immutable `first_created_at` + `original_workflow_id` fields stamped once at first activation. Freshness gates (`assert-preflight-fresh`, `assert-claude-mem-harvest`, `assert-graphify-decision`) and `mcp-stats --since-workflow-created` now use the immutable anchors. Mutable `workflow_id` + `created_at` continue to rotate on workflow_type transitions (preserves trace-attribution intent). Backward-compat fallback to `created_at` for legacy workflow.yaml files.
+- **`lanes[]` block survives state-update mutations** (NEW-2). `parseSimpleYaml` now special-cases the nested `lanes:` block and round-trips it as a structured array. Previously every `state update` call dropped lanes silently because the parser only handled flat key:value pairs; `assert-lanes-registered` reported `lane_count: 0` after any mid-workflow mutation.
+- **JSON object/array workflow.yaml values preserved** (NEW-3). `serializeSimpleYaml` now JSON.stringify's non-primitives; `parseSimpleYaml` JSON.parse's `{...}` / `[...]` quoted strings back to structured data. Caches like `memory_signal_json` and `scope_hint_json` no longer get coerced to the literal `[object Object]` on write.
+- **`mcp-stats --tool` matches prefixed and unprefixed forms** (NEW-4). Adds `normalizeToolName` that strips the `mcp__plugin_<plugin>_` prefix to yield the canonical `mcp__<service>__<tool>` form. Trace records use the unprefixed form (handler name); orchestrators call the prefixed form (plugin-namespace). Both now match equivalently in `--tool` filter and wildcard queries.
+- **`assert-reuse-analyzed` opts out for read-only workflow_types** (NEW-7). Adds `REUSE_REQUIRED_WORKFLOWS = {dev, quick_implement}`. Other types (code_review, debug, research, arch_health_scan, retro, etc.) return `ok:true` with workflow-type reason. Same A9 opt-out pattern as `assert-verifier-ran`. Closes the false-positive that greenfield's calibration #5 review session hit.
+
+### Added
+
+- **`graphify neighbors --max-bytes=N`** (NEW-5). Drill-downs into god-nodes can return tens of thousands of neighbors at depth=2 (greenfield's AuditMapping overflowed 84KB and produced zero signal via MCP). Sorts depth-asc + label-alpha so the closest neighbors are kept; truncated responses carry `truncated: true`, `total_neighbors`, `truncation_reason`. `code-review.md::F16` prose extended with the god-node oversize handling protocol — fall back to CLI when MCP overflows.
+- **`graphify lane-suggestions` partial mode** (NEW-6). Strict 100%-coverage check relaxed: full fallback now only fires when ZERO files have graph nodes. Partial coverage falls through to grouping logic — covered files group by community, uncovered files land in the `ungrouped` bucket. Response carries `covered_count`, `uncovered_count`, `coverage_ratio`. Greenfield's calibration #5 session had 47 of 91 files uncovered → full fallback under v0.63.0; now partitions into 5+ community lanes plus one ungrouped lane.
+- **`<god_node_warnings>` structured dispatch block** (C-I.1). `code-review.md::context_init` substep 3 caches `{god_node_match, matches: [{symbol, edge_count, source_file}]}` into `workflow.yaml::god_node_warnings_json`. Code-reviewer + verifier dispatch templates carry the block. Code-reviewer agent body elevates findings on god-node source files because blast radius multiplies.
+- **`shortestPath` cross-service verification via architect** (C-I.2). architect.md gains an inline `graphify path <from> <to>` Bash protocol with three structured outcomes (depth ≤ 3 / depth > 3 / no path). Architect already preloads graphify-helpers + has Bash, so no new workflow step needed.
+- **`graphify adaptive-threshold` CLI** (C-III.1). Returns `max(5, ceil(log10(node_count) * 2))`. quick-implement.md + dev-workflow.md graphify_scan_prep blocks pipe the value into the conditional in lieu of the hardcoded `>= 10`. Scaling: 100 nodes → 5, 5K → 8, 45K → 10 (greenfield baseline preserved), 100K+ → 10. Echoes the resolved threshold for audit trail.
+
+### Smoke tests
+
+- **L1-L9** (+9 net gates): L1 first_created_at immutability matrix, L2 lanes[] survives mutation, L3 JSON object round-trip, L4 mcp-stats prefix normalization, L5 max-bytes truncation, L6 reuse-analyzed workflow-type matrix, L7 god_node_warnings wiring presence, L8 architect cross-service path protocol presence, L9 adaptive-threshold scaling matrix. K32 extended to cover partial mode.
+
 ## [0.63.0] - 2026-05-28
 
 **Phase B — symbol-extraction unlock + anti-escape-hatch gate hardening + memory UX surfacing + parallel-review polish.** Field calibrations #2–#4 against greenfield-api delivered a coherent batch of structural improvements across 13 tasks. The headline change: greenfield's #1-ranked memory UX gap (candidates sitting in `_suggestions.md` without ambient signal) closed via three coordinated surfaces, plus the symbol-extraction cascade that caused `graphify_scan_prep` to silently skip on noun-heavy tasks. Smoke: **689 → 711 passed**, **0 failed**.
