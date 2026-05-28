@@ -939,6 +939,42 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   return out_;
 }
 
+// Symbol-level companion to `checkLargeFilesGodNodes`. The file-level check
+// collapses to one max-degree symbol per basename — when a high-degree symbol
+// lives alongside the file's dominant symbol it can be eclipsed and never
+// surface independently. This check reports every symbol whose `source_file`
+// is in the diff AND whose degree clears `edgeThreshold`, with no per-file
+// aggregation. Independent of `topic.symbols`, so high-degree symbols missing
+// from the anchor list still surface.
+//
+// Returns [{symbol, source_file, edge_count, is_god_node}] sorted by
+// edge_count desc, already filtered to is_god_node=true.
+function checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50) {
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
+  const loaded = loadGraph();
+  if (!loaded.ok) return [];
+  const { nodeMap, inc, out } = loaded.cache.adj;
+  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  const results = [];
+  for (const [id, node] of nodeMap) {
+    const sf = node && node.source_file;
+    if (!sf || !wantBasenames.has(path.basename(sf))) continue;
+    const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
+    if (degree < edgeThreshold) continue;
+    if (_isFileNode(node, degree)) continue;
+    if (_isConceptNode(node)) continue;
+    if (_isJsonKeyNode(node)) continue;
+    results.push({
+      symbol: node.label || id,
+      source_file: sf,
+      edge_count: degree,
+      is_god_node: true,
+    });
+  }
+  results.sort((a, b) => b.edge_count - a.edge_count);
+  return results;
+}
+
 /**
  * Return nodes belonging to a single graphify community. The Leiden clustering
  * step writes a `community: <int>` attribute on every node — same field used by
@@ -1113,10 +1149,18 @@ function run(subcommand, args) {
       json(checkLargeFilesGodNodes(files, threshold));
       return 0;
     }
+    case "check-symbol-godnodes": {
+      const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
+      const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
+      const files = args.filter(a => !a.startsWith("--"));
+      if (files.length === 0) { process.stderr.write("Usage: graphify check-symbol-godnodes <file>... [--edge-threshold=50]\n"); return 2; }
+      json(checkSymbolLevelGodNodes(files, threshold));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes\n`
       );
       return 2;
   }
@@ -1150,6 +1194,7 @@ module.exports = {
   blastRadius,
   godNodes,
   checkLargeFilesGodNodes,
+  checkSymbolLevelGodNodes,
   getCommunity,
   maybeRefresh,
   writeMemoryEntry,

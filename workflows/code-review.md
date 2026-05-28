@@ -192,12 +192,29 @@ if [ -n "$DIFF_FILES" ]; then
       echo "$GODNODE_CHECK" | jq -r '.[] | select(.is_god_node) | "- `\(.file)` — `\(.top_symbol)` has \(.max_edges) edges; signature changes ripple to all callers. Prefer additive changes."'
     } >> .devt/state/graph-impact.md
   fi
+  SYMBOL_GODNODES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify check-symbol-godnodes $DIFF_FILES --edge-threshold=50 2>/dev/null || echo '[]')
+  SYM_COUNT=$(echo "$SYMBOL_GODNODES" | jq 'length')
+  if [ "$SYM_COUNT" != "0" ] && [ "$SYM_COUNT" != "" ]; then
+    {
+      echo ""
+      echo "## Symbol-level god-nodes"
+      echo ""
+      echo "$SYMBOL_GODNODES" | jq -r '.[] | "- `\(.symbol)` (\(.source_file)) has \(.edge_count) edges; any non-additive change cascades through every caller."'
+    } >> .devt/state/graph-impact.md
+  fi
 fi
 ```
 
 Field rationale (greenfield 2026-05-26): `routes.py` at 2,463 LOC was almost certainly a god node, but the symbol-anchored anchor list missed it because the diff's PascalCase symbols (UserStatus, ConsentType) didn't include module-level identifiers from routes.py. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
 
-**Note on signal independence**: `blast_radius::god_node_match` (symbol-aggregated — at least one of the input symbols matches a god-node in the graph) and F17's `check-large-files` god-node detection (file-aggregated — diff files whose edge counts exceed god-node threshold) measure different things. Both can be true or false independently. Don't expect F17=0 to override a `god_node_match=true` from blast_radius — surface both signals verbatim in the reviewer dispatch context.
+Symbol-level rationale (greenfield 2026-05-28 calibration #4, graph-impact.md:62 verbatim): *"0 file-level god-nodes in PR #374 diff despite symbol-level god-node match on AuditMapping."* — `check-large-files` aggregates per-file (one max-degree symbol per basename) and missed AuditMapping when SmallHelper happened to be the file's reported top symbol. `check-symbol-godnodes` returns every above-threshold symbol whose `source_file` is in the diff with no per-file collapse, so a high-degree symbol cannot be eclipsed by a same-file sibling.
+
+**Note on signal independence**: three signals now feed the reviewer, all independent:
+- `blast_radius::god_node_match` — symbol-aggregated; at least one input symbol matches a god-node in the graph.
+- `check-large-files` — file-aggregated; reports the max-degree symbol per diff file.
+- `check-symbol-godnodes` — symbol-level; reports every above-threshold symbol whose source_file is in the diff, no per-file aggregation.
+
+Any of the three can fire while the others stay silent — surface all three verbatim in the reviewer dispatch context.
 
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 

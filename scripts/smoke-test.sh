@@ -7620,6 +7620,49 @@ else
 fi
 rm -rf "$K8_TMP"
 
+# K12: graphify check-symbol-godnodes surfaces symbol-level god-nodes from
+# diff files independently of topic.symbols. Field signal (greenfield
+# 2026-05-28 calibration #4 — graph-impact.md:62 verbatim): "0 file-level
+# god-nodes in PR #374 diff despite symbol-level god-node match on
+# AuditMapping." File-level checkLargeFilesGodNodes aggregates max-degree
+# per basename and surfaces only the dominant symbol per file; the new
+# checkSymbolLevelGodNodes returns every above-threshold symbol whose
+# source_file is in the diff. Fixture: synthetic graph with AuditMapping
+# at 60 incoming edges in src/audit.py — the symbol-level CLI returns 1
+# god-node matching symbol+source_file. GRAPHIFY_OUT not needed: the CLI
+# is run from the fixture tmpdir, so findProjectRoot resolves to it.
+K12_TMP=$(mktemp -d)
+K12_TMP=$(cd "$K12_TMP" && pwd -P)
+mkdir -p "$K12_TMP/.devt/state" "$K12_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K12_TMP/.devt/config.json"
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    {id: 's1', label: 'AuditMapping', source_file: 'src/audit.py', kind: 'class'},
+    {id: 's2', label: 'SmallHelper', source_file: 'src/audit.py', kind: 'function'},
+    {id: 'f1', label: 'src/audit.py', kind: 'file', source_file: 'src/audit.py'}
+  ],
+  links: []
+};
+for (let i = 0; i < 60; i++) {
+  g.nodes.push({id: 'c' + i, label: 'Caller' + i, source_file: 'src/other.py', kind: 'function'});
+  g.links.push({source: 'c' + i, target: 's1'});
+}
+fs.writeFileSync('$K12_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K12_OUT=$(cd "$K12_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify check-symbol-godnodes src/audit.py --edge-threshold=50 2>/dev/null)
+K12_COUNT=$(echo "$K12_OUT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log(Array.isArray(a)?a.length:-1);}catch(e){console.log(-1);}})")
+K12_SYMBOL=$(echo "$K12_OUT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log((a[0]&&a[0].symbol)||'');}catch(e){console.log('');}})")
+K12_GOD=$(echo "$K12_OUT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log((a[0]&&a[0].is_god_node)?'1':'0');}catch(e){console.log('0');}})")
+if [ "$K12_COUNT" = "1" ] && [ "$K12_SYMBOL" = "AuditMapping" ] && [ "$K12_GOD" = "1" ]; then
+  pass "K12: check-symbol-godnodes surfaces symbol-level god-node from diff (count=1, symbol=AuditMapping, is_god_node=true)"
+else
+  fail "K12: symbol-level god-node detection broken. count=${K12_COUNT} symbol=${K12_SYMBOL} is_god_node=${K12_GOD}"
+fi
+rm -rf "$K12_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts
