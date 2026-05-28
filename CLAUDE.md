@@ -138,7 +138,17 @@ Run both locally before committing changes to `bin/`, `hooks/`, or `.claude-plug
 
 ### Releasing
 
-The release flow is tag-driven via `.github/workflows/release.yml`:
+The release flow is tag-driven via `.github/workflows/release.yml`.
+
+**Recommended**: after bumping VERSION + plugin.json + CHANGELOG and committing, run:
+
+```bash
+bash scripts/release.sh X.Y.Z
+```
+
+The helper pushes commits and the tag separately (avoiding the bulk-push edge case where the per-tag push event silent-skips), uses an annotated tag (more reliable workflow trigger than lightweight), verifies the GitHub release was created, and surfaces the manual-dispatch recovery command if it wasn't.
+
+**Manual flow** (use only if the helper isn't available — e.g., during initial setup):
 
 ```bash
 # 1. Bump VERSION, plugin.json version, and write the new CHANGELOG section
@@ -149,6 +159,9 @@ git push
 # 3. Tag and push — the release workflow fires on the tag-push event
 git tag vX.Y.Z
 git push origin vX.Y.Z
+
+# 4. If the workflow didn't fire (silent-skip recurrence), fall back to:
+gh workflow run release.yml -f tag=vX.Y.Z
 ```
 
 The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via `scripts/extract-changelog.sh` and creates a GitHub release with those notes. It is idempotent — if a release already exists for the tag, it exits cleanly. Tags containing `-` (e.g. `v1.0.0-rc1`) are flagged as prereleases. All step-output values are passed through `env:` rather than direct `${{ }}` shell interpolation, so a maliciously named tag cannot inject shell.
