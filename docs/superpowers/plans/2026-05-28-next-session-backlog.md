@@ -1210,23 +1210,58 @@ The following items surfaced from greenfield's two graphify audits + calibration
 
 ### Task B-XV (NEW): Symbol-level F17 god-node check
 
-**Validated finding** (greenfield 2026-05-28 calibration #4, defect #3): F17's `checkLargeFilesGodNodes` at `graphify.cjs:912` is file-aggregated (sums edges across all symbols per file). AuditMapping (symbol-level god-node, 198 edges) was caught only by `blast_radius::god_node_match` via orchestrator-MCP, not by deterministic F17. When AuditMapping is in a diff file but NOT in topic.symbols, the symbol-level signal is missed.
+**Validated finding** (greenfield 2026-05-28 calibration #4, defect #3): F17's `checkLargeFilesGodNodes` at `graphify.cjs:912` is file-aggregated (per-basename `max_edges` aggregation). AuditMapping (symbol-level god-node, 198 edges) was caught only by `blast_radius::god_node_match` from orchestrator-MCP, not by deterministic F17. When AuditMapping is in a diff file but NOT in topic.symbols, the symbol-level signal is missed.
 
-- [ ] Add `checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50)` to `bin/modules/graphify.cjs` (sibling function to `checkLargeFilesGodNodes`). Walks symbols per diff file via graph index; returns `{source_file, symbol, edge_count}` records for symbols above threshold.
+**On-disk evidence from greenfield's graph-impact.md:62 (verbatim quote)**: *"F17 diff-file god-node check: 0 file-level god-nodes in PR #374 diff despite symbol-level god-node match on AuditMapping."* — the workflow output itself documents the bug.
+
+**Implementation simplification** (validated 2026-05-28 late): `bin/modules/graphify.cjs:892::godNodes(limit)` ALREADY returns symbol-level god-node data — iterates nodeMap, computes per-symbol degree (`(inc.get(id) || []).length + (out.get(id) || []).length`), filters file/concept/JSON-key nodes, returns top-N by degree. B-XV doesn't need new graph traversal — just filter `godNodes()` output by `source_file ∈ diffFiles`. Effort drops to ~1h.
+
+- [ ] Add `checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50)` to `bin/modules/graphify.cjs` (sibling function to `checkLargeFilesGodNodes`). Shape:
+
+```javascript
+function checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50) {
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
+  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  // godNodes(200) gives us ample candidates above the typical god-node
+  // floor; filter to those whose source_file is in the diff.
+  return godNodes(200)
+    .filter(g => {
+      const sf = g.node && g.node.source_file;
+      return sf && wantBasenames.has(path.basename(sf));
+    })
+    .map(g => ({
+      symbol: g.node.label || g.id,
+      source_file: g.node.source_file,
+      edge_count: g.degree,
+      is_god_node: g.degree >= edgeThreshold,
+    }))
+    .filter(r => r.is_god_node);
+}
+```
+
 - [ ] Wire into `code-review.md::F17` step alongside file-level check. Output appended to `graph-impact.md` under `## Symbol-level god-nodes` heading.
-- [ ] Smoke gate: fixture with diff containing known-god-node symbol surfaces it independently of topic.symbols.
-- [ ] Effort: ~2h.
+- [ ] Update workflow `### Note on signal independence` (code-review.md:200) — now three signals: blast_radius symbol-aggregated, F17 file-aggregated, F17 symbol-level (the new one).
+- [ ] Smoke gate: fixture with diff file containing a synthetic high-degree symbol (≥50 edges) surfaces it independently of topic.symbols.
+- [ ] Effort: ~1h (down from ~2h after infrastructure reuse discovery).
 
 ### Task B-XVI (NEW): mcp-stats correlation_id
 
-**Validated finding** (greenfield 2026-05-28 calibration #4, defect #5): trace records carry `args_fp` (12-char fingerprint) but no explicit correlation_id. Findings in lane outputs can't trace back to specific MCP calls — auditability gap.
+**Validated finding** (greenfield 2026-05-28 calibration #4, defect #5): trace records carry `args_fp` (12-char fingerprint of args object — NOT unique across identical-args calls) but no explicit per-call ID. Findings in lane outputs cite "blast_radius said X" but can't trace back to the specific call timestamp + ID.
 
-- [ ] Schema: add `correlation_id: string` (8-10 char hex) to trace record format in `bin/devt-memory-mcp.cjs::544+571`.
-- [ ] Surface in MCP response so orchestrator can capture it OR write to sidecar `.devt/state/last-mcp-call-id.txt` for drill-down bash to read.
-- [ ] mcp-stats filter: `--correlation-id=<id>` returns matching record.
-- [ ] Workflow integration: dispatch templates injecting `<graphify_status>` block include correlation IDs of the calls behind each drill-down section.
-- [ ] Smoke gate: trace records carry correlation_id; mcp-stats filter returns single record.
-- [ ] Effort: ~2h.
+**Implementation pattern**:
+
+- [ ] Generate `correlation_id` (8-char hex via `crypto.randomBytes(4).toString('hex')`) at the start of every MCP call in `bin/devt-memory-mcp.cjs`. Inject into both the trace record AND the MCP response envelope.
+- [ ] Schema: add `correlation_id: string` to trace record format at `bin/devt-memory-mcp.cjs::544+571`.
+- [ ] mcp-stats filter: `--correlation-id=<id>` returns matching record (single-row aggregate).
+- [ ] Workflow integration in `code-review.md` (and parallel sibling) — when F16 drill-down writes a `## Drill-down: <symbol>` heading, append `[call: <correlation_id>]` to the heading so the lane reviewer's downstream finding can cite the specific call.
+- [ ] Smoke gate: trace records carry 8-char hex correlation_id; mcp-stats filter returns the expected single record.
+- [ ] Effort: ~1.5h.
+
+### Task B-XIV — priority bump after calibration #4
+
+The original B-XIV (mcp-stats `--since-workflow-created` flag) was scored as "documentation + telemetry improvement, low priority." Calibration #4 produced concrete evidence that it's blocking observability: greenfield's 82 graphify calls are real but invisible via `mcp-stats --workflow-id=66473ef4` because the calls were stamped under the prior workflow_id (`6863c532`, code_review) before code_review_parallel was activated. The workflow_id rotation issue isn't documentation-only — it makes successful sessions look empty in telemetry.
+
+**Bump priority**: ship B-XIV alongside B-XV + B-XVI as the "mcp-stats observability batch" in v0.63.0. Estimated combined effort: ~3.5h.
 
 ### Task B-XIV (NEW): mcp-stats workflow_id propagation diagnostic
 
@@ -1252,3 +1287,4 @@ From greenfield's audit, additional items for v0.64.0+:
 - **2026-05-28 (afternoon)** — Revised after greenfield calibration #2 (GFBUGS-180 quick-implement session). Added: A6-A10 surgical hotfixes (F31 placeholder regex, SYMBOL_DENYLIST extension, lane-JSON eviction, verifier gate workflow_type-awareness, mcp-stats CLI-wrapper caveat docs). Restructured Phase B into 3 sub-batches: B-I symbol extraction unlock (the cascading SKIP root cause), B-II anti-escape-hatch gate strictening (3 silent-skip vectors closed), B-III memory UX (greenfield-validated B0+B3 priorities, B2 scope-corrected, B1+B4+B5 deferred). Added Phase D agent-truncation research spike. Total: 26 items reviewed → 23 kept, 3 rejected, 7 deferred.
 - **2026-05-28 (evening)** — v0.62.1 shipped. Greenfield calibration #3 + secondary side-request (parallel review session) surfaced 6 new findings + audit confirmations: 4 dead MCP tools, code-review-parallel zero-MCP, graphify-helpers self-contradiction, namespace drift across 4 workflows, PREFLIGHT walk-up bug, missing state release CLI. Added Phase A2 (v0.62.2 patch) with 4 surgical tasks (PREFLIGHT scope, namespace drift, debug.md auto_refresh, state release CLI) and 7 new v0.63.0 candidates (lane scope pre-warn, lane scoped-redispatch, bulk-scoped tier improvement, graphify-helpers resolution, concern-based partition, code-review-parallel MCP audit, mcp-stats since-workflow-created flag).
 - **2026-05-28 (later evening)** — v0.62.2 staged locally (5 commits, not yet released). Greenfield calibration #4 (parallel review session against v0.62.1 — 82 graphify calls, 0 errors, verifier ran 93/100) surfaced 5 findings, 2 devt-actionable: B-XV (symbol-level F17 god-node check — file-aggregated only today) and B-XVI (mcp-stats correlation_id — args_fp exists but no explicit finding→call linkage). The other 3 findings (Bitbucket pr_scoped, namespace disambiguation, suggest-time evidence) are graphify-upstream limitations devt cannot fix directly. Phase C-II Bitbucket PR tier remains in plan as devt-side workaround.
+- **2026-05-28 (deeper validation pass)** — Validated calibration #4 findings against on-disk evidence. Three corrections to plan: (1) B-XV effort drops to ~1h (was ~2h) — `graphify.cjs:892::godNodes()` ALREADY returns symbol-level data; B-XV just filters by diff-file source_file. Implementation skeleton documented inline. (2) B-XV's evidence base is now anchored to verbatim graph-impact.md:62 quote from greenfield — the workflow output itself documents the F17 gap. (3) B-XIV priority bumped — `grep workflow_id=66473ef4 _mcp-trace.jsonl` returns 0 matches in greenfield's logs even though 82 calls were made; the workflow_id rotation issue is blocking observability, not just documentation-cosmetic. Recommended scheduling: ship B-XIV + B-XV + B-XVI together as the "mcp-stats observability batch" in v0.63.0 (~3.5h combined). Positive signals validated: verification.json shows VERIFIED + verdict:satisfied + total_score:93 + 8/8 criteria met; 5 lanes all substance_pass — v0.62.1's A9 verifier gate is functioning under realistic load.
