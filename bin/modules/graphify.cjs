@@ -939,6 +939,41 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   return out_;
 }
 
+// Top-N non-noise symbols whose source_file is in the diff. Used by
+// code-review.md's bulk_scoped tier (B-XI) to convert "scope > 10 files +
+// dense graph" into a symbol_anchored blast_radius call instead of a less
+// useful query_graph text search. Field signal (greenfield calibration #3
+// finding #4): for bitbucket + dense + >10 files, query_graph(text=REVIEW_SCOPE)
+// returns keyword matches that don't reflect the call graph. blast_radius
+// with diff-derived symbols produces actual structural impact.
+//
+// Returns [{symbol, source_file, edge_count}] sorted desc by edge_count, with
+// file/concept/json-key nodes filtered out. Defaults to limit=10 (matches
+// blast_radius's typical comfortable input size).
+function symbolsInFiles(diffFiles, limit = 10) {
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
+  const loaded = loadGraph();
+  if (!loaded.ok) return [];
+  const { nodeMap, inc, out } = loaded.cache.adj;
+  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  const results = [];
+  for (const [id, node] of nodeMap) {
+    const sf = node && node.source_file;
+    if (!sf || !wantBasenames.has(path.basename(sf))) continue;
+    const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
+    if (_isFileNode(node, degree)) continue;
+    if (_isConceptNode(node)) continue;
+    if (_isJsonKeyNode(node)) continue;
+    results.push({
+      symbol: node.label || id,
+      source_file: sf,
+      edge_count: degree,
+    });
+  }
+  results.sort((a, b) => b.edge_count - a.edge_count);
+  return results.slice(0, Math.max(1, Math.min(limit, 200)));
+}
+
 // Symbol-level companion to `checkLargeFilesGodNodes`. The file-level check
 // collapses to one max-degree symbol per basename — when a high-degree symbol
 // lives alongside the file's dominant symbol it can be eclipsed and never
@@ -1157,10 +1192,18 @@ function run(subcommand, args) {
       json(checkSymbolLevelGodNodes(files, threshold));
       return 0;
     }
+    case "symbols-in-files": {
+      const limitArg = args.find(a => a.startsWith("--limit="));
+      const limit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 10) : 10;
+      const files = args.filter(a => !a.startsWith("--"));
+      if (files.length === 0) { process.stderr.write("Usage: graphify symbols-in-files <file>... [--limit=10]\n"); return 2; }
+      json(symbolsInFiles(files, limit));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files\n`
       );
       return 2;
   }
@@ -1195,6 +1238,7 @@ module.exports = {
   godNodes,
   checkLargeFilesGodNodes,
   checkSymbolLevelGodNodes,
+  symbolsInFiles,
   getCommunity,
   maybeRefresh,
   writeMemoryEntry,

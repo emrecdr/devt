@@ -8066,6 +8066,41 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K30: graphify symbols-in-files returns top-N symbols whose source_file is
+# in the diff. Drives B-XI's tier decision change (bitbucket + dense + >10
+# files prefers symbol_anchored over query_graph text search). Fixture:
+# 3 symbols across 2 source files, request top-2 → returns top-2 by degree.
+K30_TMP=$(mktemp -d)
+K30_TMP=$(cd "$K30_TMP" && pwd -P)
+mkdir -p "$K30_TMP/.devt/state" "$K30_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K30_TMP/.devt/config.json"
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    {id: 's1', label: 'HighDegreeSymbol', source_file: 'src/auth.py', kind: 'class'},
+    {id: 's2', label: 'MidDegreeSymbol', source_file: 'src/auth.py', kind: 'function'},
+    {id: 's3', label: 'LowDegreeSymbol', source_file: 'src/util.py', kind: 'function'},
+    {id: 'other', label: 'NotInDiff', source_file: 'src/other.py', kind: 'function'}
+  ],
+  links: []
+};
+for (let i = 0; i < 30; i++) { g.nodes.push({id: 'a'+i, label: 'A'+i, source_file: 'src/x.py'}); g.links.push({source: 'a'+i, target: 's1'}); }
+for (let i = 0; i < 10; i++) { g.nodes.push({id: 'b'+i, label: 'B'+i, source_file: 'src/x.py'}); g.links.push({source: 'b'+i, target: 's2'}); }
+for (let i = 0; i < 2; i++) { g.nodes.push({id: 'c'+i, label: 'C'+i, source_file: 'src/x.py'}); g.links.push({source: 'c'+i, target: 's3'}); }
+fs.writeFileSync('$K30_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K30_OUT=$(cd "$K30_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify symbols-in-files src/auth.py src/util.py --limit=2 2>/dev/null)
+K30_COUNT=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log(Array.isArray(a)?a.length:-1);}catch(e){console.log(-1);}})")
+K30_TOP=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log((a[0]&&a[0].symbol)||'');}catch(e){console.log('');}})")
+if [ "$K30_COUNT" = "2" ] && [ "$K30_TOP" = "HighDegreeSymbol" ]; then
+  pass "K30: symbols-in-files returns top-N by degree filtered to diff files (count=2, top=HighDegreeSymbol)"
+else
+  fail "K30: diff-symbol surface broken. count=${K30_COUNT} top=${K30_TOP}"
+fi
+rm -rf "$K30_TMP"
+
 # K29: code-review-parallel.md::context_init documents MCP-setup inheritance
 # architecture. Greenfield audit flagged "0 functional MCP calls" in parallel
 # workflow — that's correct observation, intentional architecture (lanes are

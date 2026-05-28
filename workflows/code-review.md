@@ -165,7 +165,24 @@ elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
 elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
   TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
 elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
-  TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
+  # B-XI: prefer symbol_anchored driven from diff-file symbols over bulk_scoped
+  # text-search. Greenfield calibration #3 finding #4: for bitbucket + dense +
+  # >10 files, query_graph(text=REVIEW_SCOPE) returns keyword hits that don't
+  # reflect the call graph. blast_radius with symbols whose source_file is in
+  # the diff produces actual structural impact. Falls back to legacy bulk_scoped
+  # only when no symbols can be extracted from the diff files (graph too sparse,
+  # diff is all new files not yet indexed, etc.).
+  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
+  DIFF_SYMBOLS_JSON='[]'
+  if [ -n "$DIFF_FILES" ]; then
+    DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=10 2>/dev/null | jq -c '[.[].symbol]' 2>/dev/null || echo '[]')
+  fi
+  DIFF_SYMBOL_COUNT=$(echo "$DIFF_SYMBOLS_JSON" | jq 'length')
+  if [ "$DIFF_SYMBOL_COUNT" -gt 0 ]; then
+    TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$DIFF_SYMBOLS_JSON" '{symbols: $s}')"
+  else
+    TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
+  fi
 else
   TIER="skip"; SKIP_REASON="no PR (or non-GitHub), no topic symbols, scope below threshold"; TOOL=""; ARGS_JSON='{}'
 fi
