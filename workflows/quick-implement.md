@@ -486,6 +486,19 @@ Best-effort. Never fails the workflow.
 
 <step name="finalize" gate="final status is reported to user">
 
+**Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator harvester. Runs BEFORE the scratchpad truncate below — that order matters because the truncate would otherwise erase the very tags the gate checks for.
+
+```bash
+KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
+if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When the gate trips: re-read impl-summary.md, identify non-obvious patterns surfaced during implementation but not tagged, append `#KNOWLEDGE-CANDIDATE: [type=...] <summary>` lines to scratchpad.md, then re-enter finalize. If genuinely none qualify, write the structured none-declaration: `printf 'reason=task_too_routine\ndeclared_at=%s\n' "$(date -u +%FT%TZ)" > .devt/state/knowledge-candidates-none.txt`.
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md

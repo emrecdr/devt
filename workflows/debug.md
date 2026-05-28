@@ -229,6 +229,19 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 <step name="report" gate="results presented to user">
 ## Step 4: Report Results
 
+**Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator. Runs BEFORE the scratchpad truncate below — that order matters.
+
+```bash
+KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
+if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When the gate trips: re-read debug-summary.md, identify non-obvious patterns the debugger described in prose (recurring bug class, hidden invariant, environmental gotcha) but did not tag, append `#KNOWLEDGE-CANDIDATE: [type=...] <summary>` lines to scratchpad.md, then re-enter report. If genuinely none qualify, write the structured none-declaration: `printf 'reason=no_novel_patterns\ndeclared_at=%s\n' "$(date -u +%FT%TZ)" > .devt/state/knowledge-candidates-none.txt`.
+
 Read `.devt/state/debug-summary.md`:
 
 - **FIXED**: report fix, run quality gates to verify. Confirm that the debugger agent appended an entry to its persistent memory at `.claude/agent-memory/devt-debugger/MEMORY.md` (the agent does this automatically).

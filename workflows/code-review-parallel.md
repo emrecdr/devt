@@ -464,6 +464,17 @@ if echo "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
+**Knowledge-candidates-tagged gate** (same as code-review.md::present_findings):
+
+```bash
+KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
+if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
 Read `.devt/state/review.md` and present to the user:
 
 - **Verdict**: APPROVED / APPROVED_WITH_NOTES / NEEDS_WORK

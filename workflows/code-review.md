@@ -648,6 +648,19 @@ fi
 
 When the gate trips, surface the reason to the user and recommend re-running the verify step. Do not present findings until verification has actually been performed (or `config.workflow.verification` is explicitly set to `false`).
 
+**Knowledge-candidates-tagged gate.** Before presenting findings, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none explicitly via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in review.md prose but never tagged in scratchpad → never reached the curator harvester. The gate forces an explicit decision.
+
+```bash
+KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
+if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When the gate trips: re-read the review.md narrative, identify any non-obvious patterns the reviewer described in prose but did not tag, append `#KNOWLEDGE-CANDIDATE: [type=...] <summary>` lines to scratchpad.md, then re-enter present_findings. If genuinely none qualify, write the structured none-declaration: `printf 'reason=no_novel_patterns\ndeclared_at=%s\n' "$(date -u +%FT%TZ)" > .devt/state/knowledge-candidates-none.txt`.
+
 Read `.devt/state/review.md` and present to the user:
 
 - **Verdict**: APPROVED / APPROVED_WITH_NOTES / NEEDS_WORK

@@ -857,6 +857,7 @@ const STATE_FILE_CONTRACT = {
     "reuse-candidates.md",      // written by state derive-reuse-candidates (reuse pre-search)
     "reuse-analysis.md",        // written by programmer per-candidate decisions (assert-reuse-analyzed gate)
     "reuse-search-attempted.txt", // marker written by workflow bash BEFORE derive-reuse-candidates CLI — distinguishes "never ran" from "ran with 0 candidates"
+    "knowledge-candidates-none.txt", // declared-none artifact for assert-knowledge-candidates-tagged (escape hatch with structured reason)
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1943,6 +1944,78 @@ function assertReuseAnalyzed() {
   };
 }
 
+// B-II.3 — verify the orchestrator either surfaced #KNOWLEDGE-CANDIDATE tags
+// in scratchpad.md (canonical capture path → harvester → curator) OR declared
+// none explicitly via knowledge-candidates-none.txt with a structured reason.
+//
+// Greenfield calibration #2 finding 6a#1+6e: the agent prose at
+// workflows/quick-implement.md said "load-bearing — not optional" but no
+// assert-* enforced it. Result: 4 candidates described in review.md prose
+// but ZERO #KNOWLEDGE-CANDIDATE lines in scratchpad. The candidates never
+// reached the curator harvester. Hard miss.
+//
+// The structured none-declaration is the deliberate escape hatch — pure CRUD
+// tasks, conventional-pattern implementations, or topics already covered by
+// existing memory don't always produce novel candidates. The valid-reason
+// enum forces the orchestrator to commit to a category rather than skipping
+// silently.
+function assertKnowledgeCandidatesTagged() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const scratchpadPath = path.join(dir, "scratchpad.md");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const nonePath = path.join(dir, "knowledge-candidates-none.txt");
+
+  if (fs.existsSync(nonePath)) {
+    const content = fs.readFileSync(nonePath, "utf8");
+    const reasonMatch = content.match(/^reason=([a-z_]+)$/m);
+    const validReasons = new Set([
+      "task_too_routine", "no_novel_patterns", "all_subsumed_by_existing_memory",
+    ]);
+    if (!reasonMatch || !validReasons.has(reasonMatch[1])) {
+      return {
+        ok: false,
+        reason:
+          "knowledge-candidates-none.txt missing valid reason= line. Required format: " +
+          "reason=<task_too_routine|no_novel_patterns|all_subsumed_by_existing_memory>.",
+      };
+    }
+    const freshness = isArtifactFresh(nonePath);
+    if (!freshness.fresh) {
+      return {
+        ok: false,
+        reason: `${freshness.reason} — knowledge-candidates-none.txt may be from a prior workflow; re-evaluate for this run`,
+        artifact_mtime: freshness.artifact_mtime,
+        workflow_created_at: freshness.workflow_created_at,
+        age_seconds: freshness.age_seconds,
+      };
+    }
+    return { ok: true, none_declared: true, skip_reason: reasonMatch[1] };
+  }
+
+  if (!fs.existsSync(scratchpadPath)) {
+    return {
+      ok: false,
+      reason:
+        "scratchpad.md absent AND knowledge-candidates-none.txt absent — orchestrator must either tag candidates during work " +
+        "(append `#KNOWLEDGE-CANDIDATE: [type=...] <summary>` lines to scratchpad.md) or declare none with a structured reason " +
+        "(write `reason=<task_too_routine|no_novel_patterns|all_subsumed_by_existing_memory>` to knowledge-candidates-none.txt).",
+    };
+  }
+  const content = fs.readFileSync(scratchpadPath, "utf8");
+  const tags = (content.match(/^#KNOWLEDGE-CANDIDATE:/gm) || []).length;
+  if (tags === 0) {
+    return {
+      ok: false,
+      tag_count: 0,
+      reason:
+        "scratchpad.md present but contains 0 #KNOWLEDGE-CANDIDATE lines. " +
+        "Orchestrator must either tag candidates during work or write knowledge-candidates-none.txt with a structured reason.",
+    };
+  }
+  return { ok: true, tag_count: tags };
+}
+
 // Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
 // each lane's review file existence + size. Consumed by code-review-parallel.md's
 // substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
@@ -2341,6 +2414,8 @@ function run(subcommand, args) {
       return assertAutoCuratorConsidered();
     case "assert-reuse-analyzed":
       return assertReuseAnalyzed();
+    case "assert-knowledge-candidates-tagged":
+      return assertKnowledgeCandidatesTagged();
     case "derive-reuse-candidates":
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "list-lane-outputs":
@@ -2354,7 +2429,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -2382,6 +2457,7 @@ module.exports = {
   assertConsolidatorDispatched,
   assertAutoCuratorConsidered,
   assertReuseAnalyzed,
+  assertKnowledgeCandidatesTagged,
   listLaneOutputs,
   updateLane,
   stateHistory,

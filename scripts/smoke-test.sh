@@ -7894,6 +7894,50 @@ else
 fi
 rm -rf "$K20_TMP"
 
+# K21: assert-knowledge-candidates-tagged enforces either scratchpad tags
+# or a structured none-declaration. Field signal (greenfield calibration
+# #2 finding 6a#1): "I described 4 candidates in prose inside review.md
+# but never appended the magic-string #KNOWLEDGE-CANDIDATE lines to
+# scratchpad.md. The candidates I noted in prose will NEVER reach the
+# curator. Hard miss." Four cases prove the matrix:
+#   1. neither scratchpad nor none.txt → BLOCK (nothing-said)
+#   2. scratchpad with 0 tags + no none.txt → BLOCK (forgot to tag)
+#   3. scratchpad with ≥1 tag → PASS (canonical capture path)
+#   4. valid none.txt → PASS (explicit none-declaration)
+#   5. malformed none.txt → BLOCK (free-form rejected)
+K21_TMP=$(mktemp -d)
+K21_TMP=$(cd "$K21_TMP" && pwd -P)
+mkdir -p "$K21_TMP/.devt/state"
+echo '{}' > "$K21_TMP/.devt/config.json"
+K21_CREATED=$(date -u -d "-60 seconds" +%FT%TZ 2>/dev/null || date -u -v-60S +%FT%TZ)
+cat > "$K21_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k21-test
+workflow_type: quick_implement
+created_at: ${K21_CREATED}
+EOF
+# Case 1: nothing
+K21_C1=$(cd "$K21_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 2: scratchpad with 0 tags
+echo "no tags here, just prose" > "$K21_TMP/.devt/state/scratchpad.md"
+K21_C2=$(cd "$K21_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 3: scratchpad with 1 tag
+printf '%s\n#KNOWLEDGE-CANDIDATE: [type=concept] Some valid pattern noted during work\n' "no tags here" > "$K21_TMP/.devt/state/scratchpad.md"
+K21_C3=$(cd "$K21_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 4: valid none.txt (also remove scratchpad to isolate)
+rm -f "$K21_TMP/.devt/state/scratchpad.md"
+printf 'reason=task_too_routine\ndeclared_at=%s\n' "$(date -u +%FT%TZ)" > "$K21_TMP/.devt/state/knowledge-candidates-none.txt"
+K21_C4=$(cd "$K21_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 5: malformed none.txt
+echo "just a one-liner reason" > "$K21_TMP/.devt/state/knowledge-candidates-none.txt"
+K21_C5=$(cd "$K21_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+if [ "$K21_C1" = "false" ] && [ "$K21_C2" = "false" ] && [ "$K21_C3" = "true" ] && [ "$K21_C4" = "true" ] && [ "$K21_C5" = "false" ]; then
+  pass "K21: assert-knowledge-candidates-tagged five-state matrix (none=BLOCK, 0-tags=BLOCK, ≥1-tag=PASS, valid-none=PASS, malformed-none=BLOCK)"
+else
+  fail "K21: matrix broken. c1(none)=${K21_C1} c2(0-tags)=${K21_C2} c3(tag)=${K21_C3} c4(valid-none)=${K21_C4} c5(malformed-none)=${K21_C5}"
+fi
+rm -rf "$K21_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts
