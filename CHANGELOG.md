@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.62.2] - 2026-05-28
+
+**Four surgical bug fixes from greenfield calibration #3 + graphify audit.** A fresh calibration session on greenfield-api surfaced two real bugs (PREFLIGHT walk-up + MCP namespace drift) with forensic evidence in their filesystem, plus a workflow parity gap (debug.md missing auto-refresh-post-impl) and a workflow-lifecycle ergonomics gap (no `state release` CLI). Smoke: **685 → 689 passed**, **0 failed**.
+
+### Fixed
+
+- **pre-flight-guard refuses to fire on out-of-project file paths.** Previously the walk-up from `process.cwd()` found the first `.devt/` ancestor and treated that as project root — the hook then validated unrelated target file paths against that project's scratchpad. Greenfield's `preflight-denies.jsonl` accumulated 10+ entries for `/tmp/*.md` and `~/.claude/plans/*.md` edits across multiple sessions. After resolving project root, the hook now refuses to fire when `fs.realpathSync(target)` is not a descendant of `fs.realpathSync(dir + sep)`. Symlink resolution on both sides handles macOS `/var → /private/var` and `/tmp → /private/tmp` consistently. realpath of the target's parent (not the target itself) so the check works when the Write tool creates new files.
+- **MCP namespace drift in 4 dispatching workflows.** `dev-workflow.md`, `debug.md`, `quick-implement.md`, `research-task.md` carried 12 functional `mcp__devt-graphify__*` (unprefixed) references where the plugin loader exposes only `mcp__plugin_devt_devt-graphify__*`. Agents reading the prose verbatim would call non-existent tools; the orchestrator (with both forms in scope) smoothed over the wrong-name lookup, hiding the drift. Sed-rewrite with `#` delimiter across all 4 files. Trace-filter comments in `code-review*.md` (using the `*` wildcard form) deliberately untouched — those reference the mcp-stats handler-name, which records unprefixed.
+
+### Added
+
+- **debug.md gains the `auto_refresh_post_impl` post-fix hook** (parity with dev-workflow.md). When the debugger lands a fix (`debug-summary.md` status=FIXED) and `graphify.enabled=true`, the workflow now offers a graph refresh before exiting. Three branches identical to dev-workflow.md: `"ask"` emits AskUserQuestion; `"true"` silently refreshes; `"false"` emits a one-line tip. Skips when the status is `NEEDS_MORE_INVESTIGATION` or `BLOCKED` (no fix landed, graph isn't stale).
+- **`state release` CLI subcommand.** Cleanly releases an active workflow lock — flips `active=false, phase=cancelled, status=cancelled` and stamps `released_at`. Distinct from `state reset` (which archives all artifacts) — release preserves task outputs so `/devt:next` or `/devt:retro` can still consume them. Idempotent: re-release on an already-released workflow is a no-op. Replaces the ad-hoc workaround `state update active=false phase=cancelled status=cancelled` which previously tripped the VALID_PHASES warning.
+- **"cancelled" added to `PHASE_ORDER`** as a terminal phase distinct from `complete` (normal terminal) and `finalize` (last-step-before-complete). Workflows abandoned mid-flight via `state release` end here without VALID_PHASES warnings.
+- **Smoke gates K8/K9/K10/K11** — regression fixtures for the four fixes above.
+
 ## [0.62.1] - 2026-05-28
 
 **Operational hardening + four surgical hotfixes from a fresh greenfield calibration.** The afternoon calibration on GFBUGS-180 (quick-implement workflow) surfaced four false-negative / false-positive gate behaviors that didn't need architecture, only surgical edits. Plus: release-flow hardening so the v0.58.1–v0.62.0 bulk-push silent-skip cannot recur, and a promotion of the substance-enforcement-gates pattern documentation to first-class principle status (now records all 14 shipped instances plus the freshness-binding required property). Smoke: **679 → 685 passed**, **0 failed**.
