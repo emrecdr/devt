@@ -129,6 +129,10 @@ Before any step, initialize the workflow:
 
 <step name="context_init" gate="compound init succeeds and .devt/rules/ is readable">
 
+> Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with code-review.md::context_init.
+
+### Substep 1: Compound init + project context
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
 ```
@@ -168,6 +172,8 @@ Then load project context:
 
 Store the task description in workflow state for reference by status, forensics, and resume.
 
+### Substep 2: Capture inline_guardrails + governing_rules
+
 **Capture `inline_guardrails` for downstream dispatches**: the `init workflow` payload includes `inline_guardrails` — a `{ "<file>.md": "<content>" }` object covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this in working memory across the workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block — those two agents read all three files on every dispatch, so inlining cuts three Read tool calls per dispatch in favor of cache-friendly prefix injection. Other dev agents continue reading from disk.
 
 **Capture `governing_rules` for downstream dispatches**: the same `init workflow` payload also includes `governing_rules` — a `{ content: {<path>: <content>}, paths_included: [...], paths_excluded: [...], rules_hash: "<sha256-16>", total_bytes: N }` shape covering the PROJECT's `CLAUDE.md` plus `.devt/rules/*.md` files (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical). Cap is 96 KB total — files past the cap appear in `paths_excluded` and agents Read them on demand. The `code-reviewer`, `verifier`, and `researcher` dispatches embed this as a `<governing_rules>` block — those three READ-ONLY agents previously reread `CLAUDE.md` + 1-4 rule files on every dispatch (~30-50 KB duplicate reads per workflow). The `rules_hash` lets agents detect mid-workflow drift if a rule file is edited between Brief generation and agent dispatch.
@@ -178,11 +184,15 @@ Store the task description in workflow state for reference by status, forensics,
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
 ```
 
+### Substep 3: Evict stale Graphify artifacts
+
 **Evict stale Graphify artifacts** before regenerating preflight + impact data. Prevents cross-workflow contamination (a prior `/devt:review` or sibling workflow's `graph-impact.md` would otherwise persist and mislead this session — observed in field as PR-#367 artifacts persisting into an unrelated GFBUGS-XXX dev session):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 ```
+
+### Substep 4: Auto-fire Pre-Flight Brief
 
 **Auto-fire Pre-Flight Brief**:
 
@@ -192,6 +202,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCR
 
 This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn or block edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
 
+### Substep 5: Compute memory_signal (cached for downstream dispatches)
+
 **Compute the memory signal once and cache it for all downstream dispatches.** The same `memory query --signal=3` aggregate is consumed by the programmer, code-reviewer, and verifier dispatches — running it once at context_init eliminates 2 redundant subprocess calls per workflow and keeps the `<memory_signal>` block byte-stable across iterations (better prompt-cache hits on retries):
 
 ```bash
@@ -200,6 +212,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json=
 ```
 
 The cached value is read back via `state read | jq -r '.memory_signal_json // "{}"'` in each dispatch's orchestrator-prep step below — substituted into the `<memory_signal>` template variable.
+
+### Substep 6: Cache scope_hint + scope_trust
 
 **Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` array is the deduped union of governing docs' `affects_paths` (frontmatter-declared file globs) plus blast-radius `direct_dependents` (Graphify depth-1 incoming), capped at 8. Cache once at context_init so the block is byte-stable across iterations:
 
@@ -230,6 +244,8 @@ fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+### Substep 7: Staleness gate
+
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30, set via `.devt/config.json::graphify.stale_threshold`) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE any dispatch in this workflow:
 
 - Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; scope_hint signals may reflect stale call graph. Refresh now?"
@@ -258,6 +274,8 @@ Parse the init output JSON:
 - If `warnings` array is non-empty: report each warning
 - Store `models` for agent dispatch (use model values in Task() prompts)
 - Store `config` for workflow behavior (model_profile, agent_skills)
+
+### Substep 8: Graphify scan-prep + decision-artifact assertion
 
 **Graphify scan-prep gate** — When the task is non-trivial AND the graph is dense AND blast radius is substantial, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Field-validated threshold (greenfield-api forensic): `direct_dependents_count >= 10 AND graph_stats.trust == "dense"`. Below the threshold (or graphify disabled): skip; agents fall back to grep + scope_hint. The decision tree is bash; the MCP calls are the orchestrator's responsibility:
 

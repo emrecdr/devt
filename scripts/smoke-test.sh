@@ -8066,6 +8066,21 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K26: context_init substep navigation markers exist in code-review.md and
+# dev-workflow.md. Field signal (greenfield calibration #2, 6c): "context_init
+# is still 188+ lines in v0.62.0 with 5 nested bash conditionals…". B-III.3
+# scoped the refactor to those two workflows (NOT quick-implement.md whose
+# 123-line context_init was deemed tractable). Each workflow carries 8 named
+# substep markers as navigation anchors; the gate just asserts they exist so
+# a future edit doesn't silently strip them.
+K26_CR=$(/usr/bin/grep -c "^### Substep [1-8]:" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+K26_DW=$(/usr/bin/grep -c "^### Substep [1-8]:" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+if [ "${K26_CR:-0}" -ge 8 ] && [ "${K26_DW:-0}" -ge 8 ]; then
+  pass "K26: context_init substep markers present (code-review.md=${K26_CR}, dev-workflow.md=${K26_DW}; ≥8 each)"
+else
+  fail "K26: substep markers missing. code-review.md=${K26_CR} dev-workflow.md=${K26_DW} (need ≥8 each)"
+fi
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

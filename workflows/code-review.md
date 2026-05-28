@@ -55,6 +55,10 @@ If not configured, omit the block.
 
 <step name="context_init" gate="compound init succeeds">
 
+> Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with dev-workflow.md::context_init.
+
+### Substep 1: Compound init + project context
+
 Initialize the workflow (read-only — do NOT reset .devt/state/ as it may contain artifacts from a prior workflow that this review depends on):
 
 ```bash
@@ -75,12 +79,16 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${REVIEW_SCO
 
 The second call auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
 
+### Substep 2: Compute memory_signal (cached for downstream dispatches)
+
 **Compute the memory signal once and cache it for downstream dispatches.** The same `memory query --signal=3` aggregate keyed on the review scope is consumed by both the code-reviewer and verifier dispatches — compute once here, cache in `workflow.yaml`, read back in each orchestrator-prep step below:
 
 ```bash
 MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${REVIEW_SCOPE}" --signal=3 --json-compact 2>/dev/null || echo '{}')
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
 ```
+
+### Substep 3: Cache scope_hint + scope_trust
 
 **Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
 
@@ -111,6 +119,8 @@ fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+### Substep 4: Staleness gate + Graphify eviction
+
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
 **Evict any stale Graphify artifacts before regeneration.** A prior session's `graph-impact.md` or `graphify-skip-reason.txt` would otherwise look current and silently mask whether the orchestrator actually ran the plan this session. Targeted — never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The CLI is the single source of truth for the eviction set (also used by `dev-workflow`, `quick-implement`, `debug`, `research-task`):
@@ -118,6 +128,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 ```
+
+### Substep 5: Compute the Graphify impact-plan
 
 **Compute the Graphify impact-map plan.** This bash step decides which tier the orchestrator MUST execute next. It writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.
 
@@ -164,6 +176,8 @@ jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 ```
 
+### Substep 6: Execute the impact-plan + F16 multi-tier drill-down
+
 **EXECUTE THE PLAN.** Read `.devt/state/graphify-impact-plan.json`. This is not optional and not a "consider running it" — the next step gates on the output existing:
 
 **ARGS CONTRACT** — the `args` field in `graphify-impact-plan.json` is the single source of truth for what gets passed to the MCP tool. Use it VERBATIM. Do NOT substitute symbols, narrow the list, "pick anchors", or improvise an alternative parameter set — those changes are unauditable and were field-observed (greenfield PR-369, 2026-05-21) to degrade tier signal. If the args look wrong, fix the bash that wrote them; do not override at the call site.
@@ -176,6 +190,8 @@ echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 **F16 — Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response, ranked by `in_count` field if present (depth-1 incoming edges), else by `edge_count`, else by position in the response array. When the response has fewer than 3 dependents, drill on however many exist (skip the F16 step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Field rationale (greenfield 2026-05-26 PR #370): one blast_radius call alone left 5 lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
 
 **Empty drill-down handling**: when `get_neighbors` returns `results: []` for a top-3 dependent (e.g., a module-level container where callers are dynamically dispatched), record the empty result as `## Drill-down: <SYM> (empty — dynamic dispatch suspected) [call: <correlation_id>]` and substitute the next-ranked dependent in the cap-3 slot. Bounded: try up to 5 ranked dependents before giving up on completing the top-3.
+
+### Substep 7: F17 deterministic god-node check
 
 **F17 — God-node auto-check on diff files.** After the tier executes (or even when it skipped), run a deterministic CPU-local check that catches god-nodes the symbol-anchored anchor list missed. The CLI maps each diff file back to graph nodes via `source_file` metadata and reports the max-degree symbol per file:
 
@@ -234,6 +250,8 @@ fi
 The assert auto-passes when graphify is disabled or the graph is missing (`graphify_state != "ready"`) — the gate is about orchestrator obedience to the workflow contract, not about graphify being installed.
 
 **Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false`, STOP with BLOCKED — the orchestrator skipped the EXECUTE THE PLAN step above.
+
+### Substep 8: Decision-artifact gates + claude-mem MCP pre-step
 
 **Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught. Field signal (greenfield 2026-05-27 PR #372): orchestrator self-reported this pre-step as an unconscious skip — not rationalized, not noticed, simply absent from the workflow file.
 
