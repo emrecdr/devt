@@ -3,7 +3,7 @@ name: verifier
 model: inherit
 color: cyan
 effort: high
-maxTurns: 40
+maxTurns: 50
 description: |
   Use after code review passes to verify the implementation actually achieves the task goal.
   Goal-backward verification — starts from what was requested, traces to what was built.

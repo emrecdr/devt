@@ -196,7 +196,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt=
 Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L3</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-payments.md.</task>")
 ```
 
-When all Task() calls return (foreground blocks until all complete — each agent bounded by its `maxTurns: 40` frontmatter), proceed to substance_check_lanes.
+When all Task() calls return (foreground blocks until all complete — each agent bounded by its `maxTurns` frontmatter), proceed to substance_check_lanes.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lanes status=DONE

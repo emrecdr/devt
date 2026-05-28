@@ -3,7 +3,7 @@ name: code-reviewer
 model: inherit
 color: cyan
 effort: high
-maxTurns: 40
+maxTurns: 60
 description: |
   Code review specialist. Triggered when code needs quality review before approval.
   READ-ONLY — inspects but never modifies code. Examples: "review the payment service
