@@ -7454,6 +7454,22 @@ else
 fi
 rm -rf "$K2_TMP"
 
+# K3: extractTopic must filter common English verb-prefixes from task text
+# so they don't cascade into the graphify_scan_prep SKIP path. Field signal
+# (greenfield 2026-05-28 calibration #2): "Enrich relative-clients picker
+# endpoint with license code…" returned topic.symbols=["Enrich"], masking
+# the snake_case FTS fallback (gated on symbols.length === 0).
+K3_OUT=$(node -e '
+const p = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const t = p.extractTopic("Enrich relative-clients picker endpoint with license code, valid_until, subscription name");
+console.log(JSON.stringify(t.symbols));
+')
+if [ "$K3_OUT" = "[]" ]; then
+  pass "K3: extractTopic filters Enrich (English verb) from task-leading position"
+else
+  fail "K3: extractTopic returned ${K3_OUT}; expected []. Denylist incomplete?"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

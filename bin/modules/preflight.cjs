@@ -140,6 +140,14 @@ const SYMBOL_DENYLIST = new Set([
   "add", "fix", "remove", "delete", "update", "change", "rename", "refactor",
   "implement", "build", "create", "make", "extend", "improve", "optimize",
   "support", "introduce", "migrate", "wire", "integrate", "polish",
+  // Field signal (greenfield 2026-05-28 calibration #2): "Enrich relative-clients
+  // picker endpoint…" returned topic.symbols=["Enrich"] — the lone noise symbol
+  // also blocked the snake_case FTS fallback (gated on symbols.length === 0).
+  // Extend with task-vocabulary verbs that appear PascalCase at sentence start.
+  "enrich", "harvest", "normalize", "validate", "deprecate", "sunset",
+  "ratify", "expose", "enable", "disable", "surface", "propagate",
+  "expand", "shrink", "split", "merge", "join", "annotate", "tag", "track",
+  "monitor", "observe", "log", "trace", "report",
   // Common English markers
   "before", "after", "during", "while", "when", "where", "what", "which", "who",
   "the", "this", "that", "these", "those", "some", "all", "any", "each",
