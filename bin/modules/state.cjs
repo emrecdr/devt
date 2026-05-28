@@ -101,43 +101,133 @@ function isArtifactFresh(artifactPath) {
 
 /**
  * Simple YAML-like parser for workflow state.
- * Handles flat key: value pairs and basic nesting.
+ * Handles flat key: value pairs at the top level, plus a single nested
+ * block: `lanes:` followed by `  - id: "..."` entries. The lanes block is
+ * round-tripped as a structured array on the special-case path; all other
+ * top-level keys round-trip as scalars (objects/arrays get JSON.stringify'd
+ * on write and JSON.parse'd on read when the value looks like JSON).
+ *
+ * NEW-2 (greenfield calibration #5): the legacy parser dropped nested
+ * `lanes:` blocks entirely on read, causing every `state update` to
+ * re-serialize without them — `assert-lanes-registered` would report
+ * lane_count: 0 after any state mutation between partition_lanes and
+ * dispatch_lanes.
+ *
+ * NEW-3: the legacy serializer did `${value}` template coercion, which
+ * stringifies non-primitive objects to "[object Object]" — the
+ * memory_signal_json and scope_hint_json caches were getting destroyed
+ * on every state.update call. Now: objects/arrays get JSON.stringify'd
+ * before write, and JSON-shaped strings get parsed back into objects on
+ * read so downstream code sees structured data, not stringified blobs.
  */
 function parseSimpleYaml(content) {
   const result = {};
   const lines = content.split("\n");
-  for (const line of lines) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!trimmed || trimmed.startsWith("#")) { i++; continue; }
+    // NEW-2 special-case: lanes: header followed by indented `- id:` entries.
+    // Capture the contiguous block until the next non-indented line.
+    if (trimmed === "lanes:") {
+      const lanes = [];
+      i++;
+      let current = null;
+      while (i < lines.length) {
+        const sub = lines[i];
+        if (!sub.startsWith("  ")) break; // de-indent — block ended
+        const subTrim = sub.trim();
+        if (subTrim.startsWith("- id:")) {
+          if (current) lanes.push(current);
+          current = {};
+          const idMatch = subTrim.match(/^-\s+id:\s*"?([^"\n]+)"?\s*$/);
+          if (idMatch) current.id = idMatch[1];
+        } else if (current) {
+          const kvMatch = subTrim.match(/^([\w-]+):\s*(.+)$/);
+          if (kvMatch) {
+            const [, k, rawV] = kvMatch;
+            let v = rawV;
+            if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+            else if (v === "true") v = true;
+            else if (v === "false") v = false;
+            else if (/^\d+$/.test(v)) v = parseInt(v, 10);
+            current[k] = v;
+          }
+        }
+        i++;
+      }
+      if (current) lanes.push(current);
+      result.lanes = lanes;
+      continue;
+    }
     const match = trimmed.match(/^([\w-]+):\s*(.+)$/);
     if (match) {
       const [, key, rawValue] = match;
       let value = rawValue;
-      // Handle quoted strings
       if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\"/g, '"');
-        result[key] = value;
+        // NEW-3: JSON-shaped strings parse back to structured data so
+        // downstream consumers see objects/arrays, not stringified blobs.
+        if ((value.startsWith("{") && value.endsWith("}")) ||
+            (value.startsWith("[") && value.endsWith("]"))) {
+          try { result[key] = JSON.parse(value); }
+          catch { result[key] = value; }
+        } else {
+          result[key] = value;
+        }
       } else if (value === "true") result[key] = true;
       else if (value === "false") result[key] = false;
       else if (value === "null") result[key] = null;
       else if (/^\d+$/.test(value)) result[key] = parseInt(value, 10);
       else result[key] = value;
     }
+    i++;
   }
   return result;
 }
 
 function serializeSimpleYaml(obj) {
-  return (
-    Object.entries(obj)
-      .map(([key, value]) => {
-        if (typeof value === "string" && (value.includes(":") || value.includes("\n") || value.includes('"') || value.includes("#"))) {
-          return `${key}: "${value.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+  const lines = [];
+  let lanesBlock = null;
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === "lanes" && Array.isArray(value)) {
+      // NEW-2: lanes round-trip as a structured block, preserving every
+      // lane's fields across state mutations.
+      lanesBlock = value;
+      continue;
+    }
+    // NEW-3: objects + arrays serialize via JSON.stringify before the
+    // quote-wrap path. Without this, template coercion stringifies
+    // objects to "[object Object]" and arrays to "1,2,3" (comma-join).
+    if (value && typeof value === "object") {
+      const json = JSON.stringify(value);
+      const escaped = json.replace(/"/g, '\\"');
+      lines.push(`${key}: "${escaped}"`);
+      continue;
+    }
+    if (typeof value === "string" && (value.includes(":") || value.includes("\n") || value.includes('"') || value.includes("#"))) {
+      lines.push(`${key}: "${value.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`);
+      continue;
+    }
+    lines.push(`${key}: ${value}`);
+  }
+  if (lanesBlock) {
+    lines.push("lanes:");
+    for (const lane of lanesBlock) {
+      const id = lane.id || "";
+      lines.push(`  - id: "${id}"`);
+      for (const [k, v] of Object.entries(lane)) {
+        if (k === "id") continue;
+        if (typeof v === "string") {
+          lines.push(`    ${k}: "${v.replace(/"/g, '\\"')}"`);
+        } else {
+          lines.push(`    ${k}: ${v}`);
         }
-        return `${key}: ${value}`;
-      })
-      .join("\n") + "\n"
-  );
+      }
+    }
+  }
+  return lines.join("\n") + "\n";
 }
 
 // Known state keys with expected types — warns on mismatch, does not block writes
@@ -2556,6 +2646,8 @@ function run(subcommand, args) {
 
 module.exports = {
   run,
+  parseSimpleYaml,
+  serializeSimpleYaml,
   readState,
   readSection,
   readSidecar,

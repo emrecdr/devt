@@ -8102,6 +8102,92 @@ else
 fi
 rm -rf "$L1_TMP"
 
+# L2: lanes[] round-trip across state mutations. Greenfield calibration #5
+# bug: parseSimpleYaml only handled flat key:value pairs, dropping the
+# `lanes:` nested block entirely on read. Every subsequent state update
+# call re-serialized without lanes, so assert-lanes-registered would
+# report lane_count: 0 after any mutation between partition_lanes and
+# dispatch_lanes. Fixture: write workflow.yaml with 2 lanes, mutate
+# unrelated field, verify lanes still surface via list-lane-outputs.
+L2_TMP=$(mktemp -d)
+L2_TMP=$(cd "$L2_TMP" && pwd -P)
+mkdir -p "$L2_TMP/.devt/state"
+echo '{}' > "$L2_TMP/.devt/config.json"
+cat > "$L2_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: l2-test
+workflow_type: code_review_parallel
+first_created_at: 2026-05-29T00:00:00.000Z
+original_workflow_id: l2-test
+created_at: 2026-05-29T00:00:00.000Z
+lanes:
+  - id: "L1"
+    community: "src/auth"
+    review_file: ".devt/state/review-lane-auth.md"
+    status: "in_flight"
+    file_count: 5
+    est_loc: 200
+    oversized: false
+  - id: "L2"
+    community: "src/billing"
+    review_file: ".devt/state/review-lane-billing.md"
+    status: "in_flight"
+    file_count: 8
+    est_loc: 400
+    oversized: false
+EOF
+L2_BEFORE=$(cd "$L2_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.lanes.length);}catch(e){console.log(-1);}})")
+# Mutate unrelated field — would historically clobber lanes[]
+(cd "$L2_TMP" && node "$ROOT/bin/devt-tools.cjs" state update phase=dispatch_lanes >/dev/null 2>&1)
+L2_AFTER=$(cd "$L2_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.lanes.length);}catch(e){console.log(-1);}})")
+L2_FIELDS=$(cd "$L2_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l1=j.lanes.find(x=>x.id==='L1');console.log(l1 && l1.file_count===5 && l1.est_loc===200 ? '1':'0');}catch(e){console.log('0');}})")
+if [ "$L2_BEFORE" = "2" ] && [ "$L2_AFTER" = "2" ] && [ "$L2_FIELDS" = "1" ]; then
+  pass "L2: lanes[] survives state-update mutation (before=2, after=2, L1 fields intact)"
+else
+  fail "L2: lanes preservation broken. before=${L2_BEFORE} after=${L2_AFTER} L1-fields=${L2_FIELDS}"
+fi
+rm -rf "$L2_TMP"
+
+# L3: JSON object values round-trip through workflow.yaml. Greenfield
+# calibration #5: memory_signal_json got coerced to "[object Object]"
+# literal by the legacy serializer's ${value} template (NEW-3). Now
+# objects serialize via JSON.stringify and parse back to structured
+# data on read, so downstream consumers see {a:1,b:2} not the string
+# "[object Object]".
+L3_TMP=$(mktemp -d)
+L3_TMP=$(cd "$L3_TMP" && pwd -P)
+mkdir -p "$L3_TMP/.devt/state"
+echo '{}' > "$L3_TMP/.devt/config.json"
+# Direct atomic write of a workflow.yaml with the structured field
+node -e "
+const fs = require('fs');
+const { atomicWriteFileSync } = require('$ROOT/bin/modules/io.cjs');
+const { parseSimpleYaml, serializeSimpleYaml } = require('$ROOT/bin/modules/state.cjs');
+const obj = {
+  active: true,
+  workflow_id: 'l3',
+  workflow_type: 'dev',
+  first_created_at: '2026-05-29T00:00:00.000Z',
+  original_workflow_id: 'l3',
+  memory_signal_json: { domain: 'auth', topic: 'session', signals: 3 }
+};
+atomicWriteFileSync('$L3_TMP/.devt/state/workflow.yaml', serializeSimpleYaml(obj));
+const round = parseSimpleYaml(fs.readFileSync('$L3_TMP/.devt/state/workflow.yaml', 'utf8'));
+process.stdout.write(JSON.stringify({
+  signal_type: typeof round.memory_signal_json,
+  signal_domain: round.memory_signal_json && round.memory_signal_json.domain,
+  signal_signals: round.memory_signal_json && round.memory_signal_json.signals,
+}));
+" > /tmp/l3_out.json 2>&1
+L3_TYPE=$(cat /tmp/l3_out.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.signal_type);}catch(e){console.log('err');}})")
+L3_DOM=$(cat /tmp/l3_out.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.signal_domain);}catch(e){console.log('err');}})")
+if [ "$L3_TYPE" = "object" ] && [ "$L3_DOM" = "auth" ]; then
+  pass "L3: JSON object survives YAML round-trip as structured data (typeof=object, domain=auth)"
+else
+  fail "L3: object round-trip broken. type=${L3_TYPE} domain=${L3_DOM}"
+fi
+rm -rf "$L3_TMP" /tmp/l3_out.json
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a
