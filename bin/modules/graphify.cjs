@@ -1027,13 +1027,28 @@ function laneSuggestions(diffFiles) {
     const counts = byFileCommunityCounts.get(bn);
     counts.set(node.community, (counts.get(node.community) || 0) + 1);
   }
-  if (byFileCommunityCounts.size < diffFiles.length) {
+  // NEW-6 (greenfield calibration #5): the legacy strict-coverage check
+  // required 100% of diff files to have graph nodes — any diff with tests,
+  // migrations, .md docs failed and routed to full fallback. Greenfield's
+  // session: 47/91 files lacked nodes → community partition never fired
+  // despite 44 files having clean community labels. The marquee feature
+  // was consistently absent in practice.
+  //
+  // Now: full fallback only fires when ZERO files have nodes (graph
+  // irrelevant for this diff). Partial coverage falls through to the
+  // grouping logic below — covered files group by community, uncovered
+  // files land in the "ungrouped" bucket (community: null). The mode
+  // reports as "partial" when ANY file is uncovered, "community" when
+  // all are covered.
+  if (byFileCommunityCounts.size === 0) {
     return {
       mode: "fallback",
       groups: [],
-      reason: `${diffFiles.length - byFileCommunityCounts.size} file(s) have no graph nodes — diff likely uncovered or basename collision`,
+      reason: "no diff file has graph nodes — graph irrelevant for this diff",
     };
   }
+  const uncoveredCount = diffFiles.length - byFileCommunityCounts.size;
+  const coverageRatio = byFileCommunityCounts.size / diffFiles.length;
   // Pick dominant community per file (max count wins).
   const fileToCommunity = new Map();
   for (const [bn, counts] of byFileCommunityCounts) {
@@ -1045,6 +1060,9 @@ function laneSuggestions(diffFiles) {
     fileToCommunity.set(bn, bestC);
   }
   // Group input files (preserve original path strings, not basenames).
+  // Files without a community attribute land in the "ungrouped" bucket so
+  // the orchestrator can route them to a single lane (better than collapsing
+  // everything to path-prefix partition when only some files are uncovered).
   const groupsByCommunity = new Map();
   for (const f of diffFiles) {
     const c = fileToCommunity.get(path.basename(f));
@@ -1054,6 +1072,15 @@ function laneSuggestions(diffFiles) {
   }
   const groups = Array.from(groupsByCommunity.values())
     .sort((a, b) => b.files.length - a.files.length);
+  if (uncoveredCount > 0) {
+    return {
+      mode: "partial",
+      groups,
+      covered_count: byFileCommunityCounts.size,
+      uncovered_count: uncoveredCount,
+      coverage_ratio: Number(coverageRatio.toFixed(4)),
+    };
+  }
   return { mode: "community", groups };
 }
 

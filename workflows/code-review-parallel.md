@@ -113,11 +113,19 @@ LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}
 LANE_MODE=$(echo "$LANE_SUG" | jq -r '.mode // "fallback"')
 
 GROUPS_FILE=$(mktemp)
-if [ "$LANE_MODE" = "community" ]; then
+if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ]; then
   # Community partition: each group becomes one lane. The prefix label is
-  # "community-N" so downstream slug generation stays valid.
-  echo "$LANE_SUG" | jq -r '.groups[] | (.community|tostring) as $c | .files[] | "community-" + $c + "|" + .' | sort > "$GROUPS_FILE"
-  echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
+  # "community-N" for covered files; "ungrouped" for partial-mode uncovered
+  # files (those without graph nodes — tests, migrations, docs). The
+  # downstream slug generation handles both labels (NEW-6).
+  echo "$LANE_SUG" | jq -r '.groups[] | (if .community == null then "ungrouped" else "community-" + (.community|tostring) end) as $c | .files[] | $c + "|" + .' | sort > "$GROUPS_FILE"
+  if [ "$LANE_MODE" = "partial" ]; then
+    COVERED=$(echo "$LANE_SUG" | jq -r '.covered_count')
+    UNCOVERED=$(echo "$LANE_SUG" | jq -r '.uncovered_count')
+    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED}) (NEW-6)"
+  else
+    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
+  fi
 else
   # Fallback: group by top-2-level path (e.g., "src/auth/middleware.ts" →
   # "src/auth"). For flat layouts (single top-level), falls back to

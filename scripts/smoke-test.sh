@@ -8289,10 +8289,27 @@ const g = {
 fs.writeFileSync('$K32_TMP/graphify-out/graph.json', JSON.stringify(g));
 "
 K32_C2=$(cd "$K32_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth.py 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.mode==='fallback'?'1':'0');}catch(e){console.log('err');}})")
-if [ "$K32_C1" = "11" ] && [ "$K32_C2" = "1" ]; then
-  pass "K32: lane-suggestions partitions by community when available (2 groups), falls back when absent"
+# Case 3 (NEW-6): partial coverage → mode=partial with ungrouped bucket for uncovered files
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    {id: 'a1', label: 'AuthHelper', source_file: 'src/auth.py', community: 1},
+    {id: 'b1', label: 'BillingService', source_file: 'src/billing.py', community: 2}
+  ],
+  links: []
+};
+fs.writeFileSync('$K32_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K32_C3=$(cd "$K32_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth.py src/billing.py tests/test_auth.py migrations/001.sql 2>/dev/null)
+K32_C3_MODE=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.mode||'err');}catch(e){console.log('err');}})")
+K32_C3_GROUPS=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.groups||[]).length);}catch(e){console.log(-1);}})")
+K32_C3_COVERED=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.covered_count===2 && j.uncovered_count===2 ? '1':'0');}catch(e){console.log('0');}})")
+if [ "$K32_C1" = "11" ] && [ "$K32_C2" = "1" ] && [ "$K32_C3_MODE" = "partial" ] && [ "$K32_C3_GROUPS" = "3" ] && [ "$K32_C3_COVERED" = "1" ]; then
+  pass "K32: lane-suggestions community + fallback + partial modes (community=2 groups, fallback=mode-only, partial=3 groups covered:2/uncovered:2)"
 else
-  fail "K32: community partition broken. c1=${K32_C1} c2=${K32_C2}"
+  fail "K32: matrix broken. c1=${K32_C1} c2=${K32_C2} c3_mode=${K32_C3_MODE} c3_groups=${K32_C3_GROUPS} c3_counts=${K32_C3_COVERED}"
 fi
 rm -rf "$K32_TMP"
 
