@@ -939,6 +939,90 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   return out_;
 }
 
+// B-XIII — group diff files by their dominant graphify community attribute.
+// Each node in graph.json may carry `community: <int>` from the Leiden
+// clustering step. For each input file, find its source-file node(s) and
+// determine the most-common community among symbols in that file. Group
+// files by community. Returns:
+//   {
+//     mode: "community" | "fallback",
+//     groups: [{community: <int|null>, files: [<file>...]}],
+//     reason?: <string>            // why we fell back (when mode === "fallback")
+//   }
+// Falls back to mode:"fallback" with empty groups when:
+//   - graph not loaded (graphify disabled / graph.json missing)
+//   - graph has no community attributes (clustering didn't run)
+//   - any input file has 0 matching nodes (diff entirely uncovered)
+// Caller (code-review-parallel.md::partition_lanes) handles the fallback
+// by routing to the legacy top-N-path partition.
+function laneSuggestions(diffFiles) {
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
+    return { mode: "fallback", groups: [], reason: "no input files" };
+  }
+  const loaded = loadGraph();
+  if (!loaded.ok) {
+    return { mode: "fallback", groups: [], reason: "graph not loaded" };
+  }
+  const { nodeMap } = loaded.cache.adj;
+  // Quick community-presence probe: scan first 100 nodes for any non-null
+  // community attribute. Bails to fallback if clustering wasn't run.
+  let sawCommunity = false;
+  let nodesScanned = 0;
+  for (const [, node] of nodeMap) {
+    if (node && node.community !== undefined && node.community !== null) {
+      sawCommunity = true;
+      break;
+    }
+    if (++nodesScanned >= 100) break;
+  }
+  if (!sawCommunity) {
+    return { mode: "fallback", groups: [], reason: "graph has no community attributes" };
+  }
+  // Per-file: collect community counts across all matching nodes, pick the
+  // mode. Files with no matching nodes flag a fallback so the orchestrator
+  // doesn't silently drop them.
+  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  const byFileCommunityCounts = new Map();
+  for (const [, node] of nodeMap) {
+    const sf = node && node.source_file;
+    if (!sf) continue;
+    const bn = path.basename(sf);
+    if (!wantBasenames.has(bn)) continue;
+    if (node.community === undefined || node.community === null) continue;
+    if (!byFileCommunityCounts.has(bn)) byFileCommunityCounts.set(bn, new Map());
+    const counts = byFileCommunityCounts.get(bn);
+    counts.set(node.community, (counts.get(node.community) || 0) + 1);
+  }
+  if (byFileCommunityCounts.size < diffFiles.length) {
+    return {
+      mode: "fallback",
+      groups: [],
+      reason: `${diffFiles.length - byFileCommunityCounts.size} file(s) have no graph nodes — diff likely uncovered or basename collision`,
+    };
+  }
+  // Pick dominant community per file (max count wins).
+  const fileToCommunity = new Map();
+  for (const [bn, counts] of byFileCommunityCounts) {
+    let bestC = null;
+    let bestN = 0;
+    for (const [c, n] of counts) {
+      if (n > bestN) { bestC = c; bestN = n; }
+    }
+    fileToCommunity.set(bn, bestC);
+  }
+  // Group input files (preserve original path strings, not basenames).
+  const groupsByCommunity = new Map();
+  for (const f of diffFiles) {
+    const c = fileToCommunity.get(path.basename(f));
+    const key = c === null || c === undefined ? "ungrouped" : String(c);
+    if (!groupsByCommunity.has(key)) groupsByCommunity.set(key, { community: c, files: [] });
+    groupsByCommunity.get(key).files.push(f);
+  }
+  const groups = Array.from(groupsByCommunity.values())
+    .sort((a, b) => b.files.length - a.files.length);
+  return { mode: "community", groups };
+}
+
 // Top-N non-noise symbols whose source_file is in the diff. Used by
 // code-review.md's bulk_scoped tier (B-XI) to convert "scope > 10 files +
 // dense graph" into a symbol_anchored blast_radius call instead of a less
@@ -1200,10 +1284,16 @@ function run(subcommand, args) {
       json(symbolsInFiles(files, limit));
       return 0;
     }
+    case "lane-suggestions": {
+      const files = args.filter(a => !a.startsWith("--"));
+      if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>...\n"); return 2; }
+      json(laneSuggestions(files));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions\n`
       );
       return 2;
   }
@@ -1239,6 +1329,7 @@ module.exports = {
   checkLargeFilesGodNodes,
   checkSymbolLevelGodNodes,
   symbolsInFiles,
+  laneSuggestions,
   getCommunity,
   maybeRefresh,
   writeMemoryEntry,

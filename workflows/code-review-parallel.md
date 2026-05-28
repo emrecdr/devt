@@ -86,7 +86,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 <step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
-Partition scope files into lanes by top-level directory. Path-based (not graphify-community-based) because graphify's blast_radius response doesn't emit community labels in practice (field-validated: greenfield's graph-impact.md has zero `## Affected Communities` sections after a 58-file blast_radius call). The orchestrator already manually partitions by filename in this case — this step automates that.
+Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, or `mode: "fallback"` when the graph is missing / has no community labels / leaves diff files uncovered. The fallback case is the legacy path partition — field-validated when graphify's blast_radius response doesn't emit community labels (greenfield's graph-impact.md had zero `## Affected Communities` sections after a 58-file blast_radius call). The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
 ```bash
 SCOPE_FILES_PATH=".devt/state/code-review-input.md"
@@ -105,19 +105,35 @@ if [ "$SCOPE_FILE_COUNT" -eq 0 ]; then
   exit 0
 fi
 
-# Group by top-2-level path (e.g., "src/auth/middleware.ts" → "src/auth").
-# For flat layouts (single top-level), falls back to top-1-level. Top-level
-# files get "root". Cap at 5 lanes (head -5 preserves first 5 by sort order).
+# B-XIII: try community-first partition. lane-suggestions returns mode=community
+# with per-file dominant-community grouping when the graph has community
+# attributes from Leiden clustering. Otherwise mode=fallback and the bash
+# branch below uses the legacy top-2-level path partition.
+LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions 2>/dev/null || echo '{"mode":"fallback"}')
+LANE_MODE=$(echo "$LANE_SUG" | jq -r '.mode // "fallback"')
+
 GROUPS_FILE=$(mktemp)
-echo "$SCOPE_FILES" | while IFS= read -r FILE; do
-  [ -z "$FILE" ] && continue
-  PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
-  echo "$PREFIX|$FILE"
-done | sort > "$GROUPS_FILE"
+if [ "$LANE_MODE" = "community" ]; then
+  # Community partition: each group becomes one lane. The prefix label is
+  # "community-N" so downstream slug generation stays valid.
+  echo "$LANE_SUG" | jq -r '.groups[] | (.community|tostring) as $c | .files[] | "community-" + $c + "|" + .' | sort > "$GROUPS_FILE"
+  echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
+else
+  # Fallback: group by top-2-level path (e.g., "src/auth/middleware.ts" →
+  # "src/auth"). For flat layouts (single top-level), falls back to
+  # top-1-level. Top-level files get "root".
+  echo "$SCOPE_FILES" | while IFS= read -r FILE; do
+    [ -z "$FILE" ] && continue
+    PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
+    echo "$PREFIX|$FILE"
+  done | sort > "$GROUPS_FILE"
+  FALLBACK_REASON=$(echo "$LANE_SUG" | jq -r '.reason // "graphify disabled"')
+  echo "partition_lanes: ${SCOPE_FILE_COUNT} files → path-based partition (community fallback: ${FALLBACK_REASON})"
+fi
 
 UNIQUE_PREFIXES=$(cut -d'|' -f1 "$GROUPS_FILE" | sort -u)
 PREFIX_COUNT=$(echo "$UNIQUE_PREFIXES" | /usr/bin/grep -cE '.')
-echo "partition_lanes: ${SCOPE_FILE_COUNT} files → ${PREFIX_COUNT} path groups"
+echo "partition_lanes: ${PREFIX_COUNT} groups (cap=5 in next step)"
 
 # Build lanes block. Each prefix becomes one lane. The lanes block is then
 # injected into workflow.yaml (replacing any prior lanes: section).

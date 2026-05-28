@@ -8066,6 +8066,53 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K32: graphify lane-suggestions partitions diff files by dominant community
+# attribute when available, falls back when not. B-XIII: replaces the legacy
+# path-only partition in code-review-parallel.md::partition_lanes with a
+# community-first approach that respects the graph's actual structural
+# clustering when Leiden ran. Two fixtures: with community labels → mode=
+# community, without → mode=fallback.
+K32_TMP=$(mktemp -d)
+K32_TMP=$(cd "$K32_TMP" && pwd -P)
+mkdir -p "$K32_TMP/.devt/state" "$K32_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K32_TMP/.devt/config.json"
+# Case 1: community attributes present → mode=community
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    {id: 'a1', label: 'AuthHelper', source_file: 'src/auth.py', community: 1},
+    {id: 'a2', label: 'AuthSession', source_file: 'src/auth.py', community: 1},
+    {id: 'b1', label: 'BillingService', source_file: 'src/billing.py', community: 2},
+    {id: 'b2', label: 'Invoice', source_file: 'src/billing.py', community: 2}
+  ],
+  links: []
+};
+fs.writeFileSync('$K32_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K32_C1=$(cd "$K32_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth.py src/billing.py 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.mode==='community'?'1':'0')+(j.groups.length===2?'1':'0'));}catch(e){console.log('err');}})")
+# Case 2: no community attributes → mode=fallback
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    {id: 'x1', label: 'Sym1', source_file: 'src/auth.py'},
+    {id: 'x2', label: 'Sym2', source_file: 'src/billing.py'}
+  ],
+  links: []
+};
+fs.writeFileSync('$K32_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K32_C2=$(cd "$K32_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth.py 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.mode==='fallback'?'1':'0');}catch(e){console.log('err');}})")
+if [ "$K32_C1" = "11" ] && [ "$K32_C2" = "1" ]; then
+  pass "K32: lane-suggestions partitions by community when available (2 groups), falls back when absent"
+else
+  fail "K32: community partition broken. c1=${K32_C1} c2=${K32_C2}"
+fi
+rm -rf "$K32_TMP"
+
 # K31: code-reviewer.md graphify-access prose clarifies that Bash CLI is
 # allowed via graphify-helpers skill (B-XII). The audit interpreted "no MCP
 # tool surface" as "no graphify access at all" — the skill IS loaded per
