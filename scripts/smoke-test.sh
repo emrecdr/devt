@@ -7663,6 +7663,41 @@ else
 fi
 rm -rf "$K12_TMP"
 
+# K13: mcp-stats --since-workflow-created filters trace records to
+# entries newer than workflow.yaml::created_at. Field signal (greenfield
+# 2026-05-28 calibration #4): 82 graphify calls in a code_review_parallel
+# session were invisible to `mcp-stats --workflow-id=66473ef4` because
+# the calls were stamped with the prior workflow_id (6863c532) during
+# context_init. Time-based filtering captures the session window
+# regardless of how workflow_id mutated. Fixture: workflow.yaml with
+# created_at=20:00Z; trace with one pre-rotation entry (19:55Z) and
+# two post-rotation entries (20:05Z, 20:10Z). --since-workflow-created
+# returns 2 entries and surfaces the resolved cutoff in filters.
+K13_TMP=$(mktemp -d)
+K13_TMP=$(cd "$K13_TMP" && pwd -P)
+mkdir -p "$K13_TMP/.devt/state" "$K13_TMP/.devt/memory"
+echo '{}' > "$K13_TMP/.devt/config.json"
+cat > "$K13_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: new-uuid-after-rotation
+workflow_type: code_review_parallel
+created_at: 2026-05-28T20:00:00.000Z
+EOF
+cat > "$K13_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
+{"ts":"2026-05-28T19:55:00.000Z","tool":"query_fts","ok":true,"duration_ms":10,"result_size":100,"workflow_id":"old-uuid"}
+{"ts":"2026-05-28T20:05:00.000Z","tool":"blast_radius","ok":true,"duration_ms":50,"result_size":200,"workflow_id":"old-uuid"}
+{"ts":"2026-05-28T20:10:00.000Z","tool":"get_neighbors","ok":true,"duration_ms":30,"result_size":150,"workflow_id":"old-uuid"}
+EOF
+K13_OUT=$(cd "$K13_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --since-workflow-created 2>/dev/null)
+K13_COUNT=$(echo "$K13_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log(-1);}})")
+K13_CUTOFF=$(echo "$K13_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.filters.since_workflow_created||'');}catch(e){console.log('');}})")
+if [ "$K13_COUNT" = "2" ] && [ "$K13_CUTOFF" = "2026-05-28T20:00:00.000Z" ]; then
+  pass "K13: --since-workflow-created drops pre-rotation entry (count=2, cutoff=2026-05-28T20:00:00.000Z)"
+else
+  fail "K13: time-based filter broken. count=${K13_COUNT} cutoff=${K13_CUTOFF}"
+fi
+rm -rf "$K13_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

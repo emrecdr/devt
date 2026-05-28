@@ -20,6 +20,7 @@
  * Usage:
  * node bin/devt-tools.cjs mcp-stats # aggregate all entries
  * node bin/devt-tools.cjs mcp-stats --since=2026-05-01 # ISO date filter
+ * node bin/devt-tools.cjs mcp-stats --since-workflow-created # all calls since workflow.yaml::created_at
  * node bin/devt-tools.cjs mcp-stats --tool=query_fts # filter to one tool
  * node bin/devt-tools.cjs mcp-stats --workflow-id=<UUID> # filter to one workflow session
  * node bin/devt-tools.cjs mcp-stats --workflow-type=dev # filter by workflow_type (dev|code_review|…)
@@ -41,6 +42,30 @@ const { atomicWriteFileSync } = require("./io.cjs");
 
 function getTracePath() {
   return path.join(findProjectRoot(), ".devt", "memory", "_mcp-trace.jsonl");
+}
+
+// Workflow-id stamping rotates across init→partition transitions: trace records
+// emitted in `context_init` carry the prior workflow_id, then code_review_parallel
+// activates a fresh workflow_id, and `mcp-stats --workflow-id=<current>` returns
+// an empty result for sessions whose calls all preceded the rotation. Filter by
+// time instead — `--since-workflow-created` reads workflow.yaml::created_at and
+// captures every call from session start regardless of how workflow_id mutated.
+// Returns ISO timestamp string on success, null when workflow.yaml or its
+// created_at field is missing — caller decides whether to error or no-op.
+function getWorkflowCreatedAt() {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
+  if (!fs.existsSync(wfPath)) return null;
+  try {
+    const raw = fs.readFileSync(wfPath, "utf8");
+    const m = raw.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) return null;
+    const ts = new Date(m[1]).getTime();
+    if (isNaN(ts)) return null;
+    return new Date(ts).toISOString();
+  } catch {
+    return null;
+  }
 }
 
 function parseDuration(spec) {
@@ -207,6 +232,25 @@ function run(subcommand, args) {
     catch (e) { process.stderr.write(JSON.stringify({ error: e.message }) + "\n"); return 2; }
   }
 
+  // `--since-workflow-created` resolves to a time-based filter against
+  // workflow.yaml::created_at, mitigating workflow_id rotation across
+  // init→partition transitions. Composes conjunctively with --since: when
+  // both are set, the later (most-restrictive) timestamp wins.
+  let workflowCreatedAt = null;
+  if (opts.since_workflow_created) {
+    workflowCreatedAt = getWorkflowCreatedAt();
+    if (!workflowCreatedAt) {
+      process.stderr.write(JSON.stringify({
+        error: "no workflow.yaml::created_at — start a workflow or pass --since=<ISO> explicitly",
+        path: path.join(findProjectRoot(), ".devt", "state", "workflow.yaml"),
+      }) + "\n");
+      return 2;
+    }
+    const explicitSince = opts.since ? new Date(opts.since).getTime() : 0;
+    const wfSince = new Date(workflowCreatedAt).getTime();
+    opts.since = new Date(Math.max(explicitSince, wfSince)).toISOString();
+  }
+
   // Aggregate mode (default)
   const loaded = loadEntries(opts);
   if (!loaded.exists) {
@@ -238,6 +282,7 @@ function run(subcommand, args) {
     entries_considered: loaded.entries.length,
     filters: {
       since: opts.since || null,
+      since_workflow_created: workflowCreatedAt,
       tool: opts.tool || null,
       top: opts.top || null,
       by: opts.top ? (opts.by || "calls") : null,
@@ -247,4 +292,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration };
+module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration, getWorkflowCreatedAt };
