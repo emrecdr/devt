@@ -1,72 +1,58 @@
 # Next-Session Plan — Post-v0.62.0 Backlog
 
-> **Created**: 2026-05-28. Validates against working tree state as of v0.62.0 commit `2ef32fb` + chore commit `5c6c6bd`.
+> **Created**: 2026-05-28. **Revised**: 2026-05-28 (afternoon) to integrate greenfield calibration findings from `/Users/emrec/Projects/greenfield-api/.devt/state/graphify-implementation-review.md` + the 10-part calibration prompt response. All claims validated against working tree at v0.62.0 + commits `2ef32fb`, `5c6c6bd`, `166f5b5`, `e63c318`, `cd279a8`.
 >
-> **Discipline**: every task includes a "validate before coding" step. Per [[feedback-validate-before-implement]], do not blindly trust this plan; surface deviations from observed code state before implementing.
+> **Discipline**: every task includes a "validate before coding" step. Per [[feedback-validate-before-implement]] and [[feedback-deep-scan-pattern]], do not blindly trust this plan — surface deviations from observed code state before implementing. Validation findings for every claim are recorded inline so future-you can audit the diagnosis without re-running the calibration.
 
 ## Backlog grooming summary
 
 | Source | Items reviewed | Kept | Rejected | Deferred | Skipped |
 |---|---|---|---|---|---|
-| v0.62.0 deferred + greenfield calibration + session findings | 14 | 6 | 3 | 3 | 2 |
+| v0.62.0 deferred + greenfield calibration (2026-05-28 morning) | 14 | 11 | 3 | 3 | 2 |
+| greenfield calibration #2 (2026-05-28 afternoon, GFBUGS-180 quick-implement) | 12 | 12 | 0 | 4 | 0 |
+| **Total** | **26** | **23** | **3** | **7** | **2** |
 
 **Rejected (will not implement)**:
-- *Agent passivity around graphify* — conflicts with CLAUDE.md:176 architectural contract ("Agent bodies MUST NOT instruct mcp__*graphify* calls"). The intentional "orchestrator owns MCP, sub-agents MCP-blind" design must not be reversed.
-- *Re-dispatch template enforcement* — detecting freeform-vs-template requires new hook infrastructure; L1 hook's existing "blocks present" check is the right granularity.
-- *Per-lane verifiers* — no field signal; speculative. Single consolidated verifier remains correct architecturally.
+- *Agent passivity around graphify* — conflicts with CLAUDE.md:176 architectural contract ("Agent bodies MUST NOT instruct mcp__*graphify* calls"). Intentional design.
+- *Re-dispatch template enforcement* — detecting freeform-vs-template needs new hook infrastructure; L1's "blocks present" check is correct granularity.
+- *Per-lane verifiers* — no field signal; speculative. Single consolidated verifier remains correct.
 
-**Deferred (revisit on field signal)**:
-- *AST-based semantic duplicate detection* — complements v0.61.0's text-based pre-search; defer until field shows v0.61.0's ~30% miss-rate is a real problem.
-- *v0.62.0 freshness-binding field test*, *v0.61.0 reuse pre-search field test* — user-driven, not in this plan.
-- *Field calibration template as Lesson doc* — nice-to-have; folds into Phase A INTERNALS.md update if quick, otherwise defer.
+**Deferred (revisit on next field signal)**:
+- *AST-based semantic duplicate detection* — defer until v0.61.0's text-based pre-search shows a real miss-rate problem.
+- *LLM/embedding-based symbol extraction* (greenfield review #1 highest-ROI item) — too invasive for v0.63.0; needs framework decision (embedding source, latency budget). Phase B unlocks the easy half via denylist + fallback gating; defer the LLM half to v0.65.0+ after field signal on whether the easy half is sufficient.
+- *Concept docs `superseded_when` lifecycle field* — defer to v0.64.0; no recurring field pain yet.
+- *`memory promote` batches tooling items* — defer to v0.64.0; the curator pre-recommend (Task B3 in current B-III) likely eliminates 80% of the per-candidate friction without batching.
+- *`list_prs` / `triage_prs` MCP wiring* — GitHub-only, blocked by Phase C decisions.
+- *blast_radius memoization* (greenfield review #6) — premature optimization without field timing data.
+- *Move reuse-search to plan stage* (greenfield review #8) — defer until COMPLEX dev-workflow gets field exercise.
 
 **Skipped (not code tasks)**:
-- Greenfield testing of v0.62.0 + v0.61.0 — your runs; produces next signal cycle.
+- Greenfield testing of v0.62.1/v0.63.0 — user-driven; produces next signal cycle.
+- LLM/embedding spike research — separate exploration, not a release task.
 
-## Three-phase plan
+## Four-phase plan
 
-Phases sequenced by risk + leverage. Phase A is small and ships quickly; Phase B is medium; Phase C is a focused feature milestone.
+Phases sequenced by risk + leverage. Phase A is small + ships quickly; Phase B is medium + addresses the highest field-impact gaps; Phase C is graphify-coverage milestone; Phase D is a research-only spike.
 
 ---
 
-## Phase A — Operational + Architecture documentation (v0.62.1 patch)
+## Phase A — Operational + Surgical Hotfixes (v0.62.1)
 
-**Theme**: clean operational deck + harden release flow + promote CON-001 to first-class architectural principle.
+**Theme**: clean operational deck + harden release flow + ship the small calibration hotfixes that don't need architectural change.
 
-**Smoke target**: 678 → 680 (J1 INTERNALS.md instance-count gate + J2 release-tag-drift gate)
+**Smoke target**: 679 → ~682 (J1 INTERNALS.md gate + J2 release-drift gate + new K2 stub-regex regression fixture)
 
-**Task count**: 6 (A1 already done; A2-A6 to ship).
+**Effort**: ~3–4 hours (A1 already done; A2-A11 to ship).
+
+**Sequencing note**: A6-A9 are independent 1–5 line code changes; could be batched into a single commit if desired. A2-A5 + A10 are release-flow / docs work that can run in parallel with A6-A9.
 
 ### Task A1: Recover 8 missing GitHub Releases — ✅ COMPLETED 2026-05-28
 
-**Validated finding (controller)**: `gh release list` confirmed v0.58.1 → v0.62.0 missing from GitHub. Tags ARE on remote with matching SHAs. The release workflow never fired for these 8 tags — likely a lightweight-tag + bulk-push edge case.
-
-**Effort**: ~5 minutes. **Done — Emre ran the loop manually on 2026-05-28.**
-
-- [x] **Step 1: Run the recovery loop** (✅ done)
-
-```bash
-cd /Users/emrec/Projects/devt
-for v in 0.58.1 0.58.2 0.58.3 0.58.4 0.59.0 0.60.0 0.61.0 0.62.0; do
-  notes=$(bash scripts/extract-changelog.sh "${v}")
-  gh release create "v${v}" --title "v${v}" --notes "$notes"
-done
-```
-
-- [ ] **Step 2: Verify**
-
-```bash
-gh release list --limit 12
-# Expected: v0.62.0 marked Latest; 8 new releases visible
-```
-
-Confirm `v0.62.0` shows as `Latest` and the count went from 41 → 49.
-
-**No commit needed** — this is a GitHub-side operation; no git changes locally.
+(Unchanged — see git history. Confirmed by greenfield calibration 9a: "v0.62.0 IS the Latest. All of v0.58.0 through v0.62.0 are visible as published releases.")
 
 ### Task A2: Add `workflow_dispatch` to release.yml
 
-**Validated finding (controller)**: `.github/workflows/release.yml` currently has only `on: push: tags: 'v*'`. No manual trigger fallback exists. If the silent-skip pattern recurs (as in A1), there's no way to manually re-run the workflow.
+**Validated finding** (controller, 2026-05-28 morning): `.github/workflows/release.yml` currently has only `on: push: tags: 'v*'`. No manual fallback. If the silent-skip recurs, recovery requires the loop in A1.
 
 **Effort**: ~5 minutes.
 
@@ -78,7 +64,7 @@ head -25 /Users/emrec/Projects/devt/.github/workflows/release.yml
 
 - [ ] **Step 2: Add `workflow_dispatch` trigger**
 
-Use Edit. Find:
+Find:
 ```yaml
 on:
   push:
@@ -100,9 +86,7 @@ on:
         type: string
 ```
 
-- [ ] **Step 3: Update the "Resolve version from tag" step to handle workflow_dispatch input**
-
-Currently the step uses `${GITHUB_REF#refs/tags/}`. For workflow_dispatch, the ref is the branch, not the tag. Add input handling:
+- [ ] **Step 3: Update "Resolve version from tag" step to handle workflow_dispatch input**
 
 Replace:
 ```yaml
@@ -128,94 +112,31 @@ With:
           VERSION="${TAG#v}"
 ```
 
-Then in the checkout step earlier, add `ref: ${{ github.event.inputs.tag || github.ref }}` so workflow_dispatch checks out the tag's commit, not main.
+Then in the checkout step, add `ref: ${{ github.event.inputs.tag || github.ref }}` so workflow_dispatch checks out the tag, not main.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/emrec/Projects/devt
 git add .github/workflows/release.yml
 git commit -m "ci(release): add workflow_dispatch trigger as manual fallback (covers silent-skip recurrence)"
 ```
 
-### Task A3: Release helper script (`scripts/release.sh`) — prevent silent-skip recurrence
+### Task A3: Release helper script (`scripts/release.sh`)
 
-**Validated finding**: the v0.58.1→v0.62.0 silent-skip happened because tags got pushed in a single bulk `git push --tags` operation. The fix is procedural — a helper script that pushes commits + tag separately, uses an annotated tag (more reliable workflow triggering than lightweight), and verifies the GitHub Release was created.
+**Validated finding** (2026-05-28 morning): the v0.58.1→v0.62.0 silent-skip happened because tags got pushed in a single bulk `git push --tags`. Procedural fix — helper script pushes commits + tag separately, uses annotated tags, verifies the GitHub Release was created.
 
 **Effort**: ~30 minutes.
 
-- [ ] **Step 1: Validate existing release flow + git config**
+- [ ] **Step 1: Validate** existing release flow + git config
 
 ```bash
-# What does git tag -a look like in this repo's history? Compare to plain git tag.
 git -C /Users/emrec/Projects/devt for-each-ref --format='%(refname:short) %(objecttype)' refs/tags | head -10
-# Annotated tags show "tag" (object); lightweight show "commit". The 8 session tags are likely "commit" (lightweight).
+# Annotated tags show "tag"; lightweight show "commit". The 8 session tags are likely "commit".
 ```
 
-- [ ] **Step 2: Create `scripts/release.sh`**
+- [ ] **Step 2: Create `scripts/release.sh`** (see existing plan content; unchanged from prior revision)
 
-```bash
-#!/usr/bin/env bash
-# Release a new devt version. Pushes commits + annotated tag in separate
-# operations to avoid the bulk-push edge case where GitHub Actions
-# release workflow can silently miss per-tag events. Verifies the
-# release was created post-push; surfaces a fallback recovery command
-# if the workflow didn't fire.
-#
-# Usage: bash scripts/release.sh 0.62.1
-# Pre-requisites:
-#   - VERSION + plugin.json + CHANGELOG.md already updated for this version
-#   - Release commit already made on local main
-#   - Working tree clean
-
-set -euo pipefail
-VERSION="${1:?usage: bash scripts/release.sh X.Y.Z}"
-TAG="v${VERSION}"
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_ROOT"
-
-# Sanity checks
-[ -z "$(git status --porcelain)" ] || { echo "ERROR: working tree not clean"; exit 1; }
-[ "$(cat VERSION | tr -d '[:space:]')" = "$VERSION" ] || { echo "ERROR: VERSION file is not $VERSION"; exit 1; }
-grep -q "^## \[${VERSION}\]" CHANGELOG.md || { echo "ERROR: CHANGELOG.md missing [$VERSION] section"; exit 1; }
-[ -z "$(git tag -l "$TAG")" ] || { echo "WARN: tag $TAG already exists locally; reusing"; }
-
-# Push the release commit first; CI runs on main push.
-echo "→ Pushing main to origin..."
-git push origin main
-
-# Create annotated tag (object type 'tag', more reliable workflow triggering)
-if [ -z "$(git tag -l "$TAG")" ]; then
-  echo "→ Creating annotated tag $TAG..."
-  git tag -a "$TAG" -m "Release $TAG"
-fi
-
-# Push the single tag (NOT --tags; single-tag pushes always trigger the workflow per tag)
-echo "→ Pushing tag $TAG to origin..."
-git push origin "$TAG"
-
-# Wait briefly + verify the release workflow fired
-echo "→ Waiting 15s for the release workflow to start..."
-sleep 15
-
-if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
-  echo "✓ Release $TAG created on GitHub"
-else
-  echo "⚠ Release $TAG NOT yet created on GitHub. Check workflow:"
-  echo "   gh run list --workflow=release.yml --limit 3"
-  echo "   Fallback: gh workflow run release.yml -f tag=$TAG"
-fi
-```
-
-Make executable: `chmod +x scripts/release.sh`.
-
-- [ ] **Step 3: Document the helper in CLAUDE.md's Releasing section**
-
-Find the "Releasing" section in CLAUDE.md (currently shows the manual `git tag` + `git push` flow). Add a note above it:
-
-```markdown
-**Recommended**: use `bash scripts/release.sh X.Y.Z` instead of the manual flow below — it pushes commits + tag separately (avoiding the bulk-push edge case that caused v0.58.1→v0.62.0 to silently skip the release workflow), uses an annotated tag (more reliable trigger), and verifies the GitHub Release was created.
-```
+- [ ] **Step 3: Make executable + document the helper in CLAUDE.md's Releasing section**
 
 - [ ] **Step 4: Commit**
 
@@ -224,388 +145,967 @@ git add scripts/release.sh CLAUDE.md
 git commit -m "chore(release): scripts/release.sh helper — annotated tag + per-tag push (prevents silent-skip recurrence)"
 ```
 
-### Task A4: Smoke gate detecting release-tag drift
+### Task A4: Smoke gate J2 — detect release-tag drift
 
-**Validated finding**: there is currently no smoke gate that warns when local tags exist but corresponding GitHub Releases don't. The v0.58.1→v0.62.0 drift went unnoticed for hours because nothing tested for it.
+**Validated finding**: no smoke gate today warns when local tags exist but GitHub Releases don't. The v0.58.1→v0.62.0 drift went unnoticed for hours.
 
 **Effort**: ~15 minutes.
 
-- [ ] **Step 1: Add the gate to `scripts/smoke-test.sh`**
-
-Just before the final `== Result ==` echo, add:
-
-```bash
-# J2: every local tag in the current minor-series has a corresponding
-# GitHub release. Catches the silent-skip drift the v0.58.1→v0.62.0
-# tags hit. Skipped when gh CLI is not available or authenticated.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  CURRENT_VER=$(cat "$ROOT/VERSION" | tr -d '[:space:]')
-  CURRENT_MINOR=$(echo "$CURRENT_VER" | awk -F. '{print $1"."$2}')
-  LOCAL_TAGS=$(git -C "$ROOT" tag --list "v${CURRENT_MINOR}.*" | sort -V)
-  MISSING=""
-  for tag in $LOCAL_TAGS; do
-    if ! gh -R emrecdr/devt release view "$tag" --json tagName >/dev/null 2>&1; then
-      MISSING="$MISSING $tag"
-    fi
-  done
-  if [ -z "$MISSING" ]; then
-    pass "J2: every local tag in v${CURRENT_MINOR}.* series has a corresponding GitHub release"
-  else
-    fail "J2: missing GitHub release(s) for:${MISSING} — run: bash scripts/release.sh <version> or gh workflow run release.yml -f tag=<tag>"
-  fi
-else
-  pass "J2: gh CLI unavailable; release-drift check skipped"
-fi
-```
+- [ ] **Step 1: Add J2 gate to `scripts/smoke-test.sh`** (see existing plan content; unchanged)
 
 - [ ] **Step 2: Run smoke + commit**
 
 ```bash
-bash /Users/emrec/Projects/devt/scripts/smoke-test.sh 2>&1 | grep -E "J[12]|Result"
-# Expected: J1 + J2 both pass; result 680/0
+bash scripts/smoke-test.sh 2>&1 | grep -E "J[12]|Result"
 git add scripts/smoke-test.sh
-git commit -m "test(smoke): J2 — detect local-tag-vs-GitHub-release drift (prevents silent-skip blindness)"
+git commit -m "test(smoke): J2 — detect local-tag-vs-GitHub-release drift"
 ```
 
 ### Task A5: Promote CON-001 + update INTERNALS.md to current state
 
-**Validated finding (controller)**: docs/INTERNALS.md::Substance-Enforcement Gates section documents only 5 instances (F4, B4, L1, F26, F27-F28) and only the existence-binding property. Missing 9 instances (F29, F30, F31, v0.60.0 × 4 mechanical gates, v0.61.0 reuse pre-search, v0.62.0 freshness binding × 7 retrofits) and the new freshness-binding property.
+**Validated finding** (controller, 2026-05-28 morning): docs/INTERNALS.md::Substance-Enforcement Gates documents only 5 instances (F4, B4, L1, F26, F27-F28) and only the existence-binding property. Missing 9 instances + the freshness-binding property.
 
 **Effort**: ~30 minutes.
 
-- [ ] **Step 1: Read current section**
+(Unchanged — see existing plan body for the 14-row table content + freshness-binding required-properties subsection + J1 smoke gate.)
+
+### Task A6 (NEW): Drop `\bplaceholder\b` from F31 stub-marker regex
+
+**Validated finding** (greenfield calibration #2, 2026-05-28 afternoon, calibration responses 2b and 2d):
+> "F31 stub regex produced FALSE POSITIVES on my finalized artifacts: review.md (897 words) and impl-summary.md (762 words). Match is on legitimate compliance-checklist row 'No TODO / placeholder | ✓'. F31 needs word-context awareness."
+
+**Root-cause diagnosis** (deeper than greenfield's framing):
+
+I read `STUB_MARKER_PATTERNS` at `bin/modules/state.cjs:1495-1510` — 8 regexes. Seven target specific phrase structures ("Stub written", "analysis in progress", "(stub)", line-leading "TODO:"/"WIP:", "not yet written", "stub:"/"stub." prefix). Only `\bplaceholder\b/i` is a bare common-noun match with no phrase context. A genuine "placeholder for the real review" stub would also match the "analysis|implementation|review|work|writing|investigation in progress" pattern OR the "Stub:" prefix pattern, so deleting the bare-noun regex has zero detection cost.
+
+**Effort**: ~5 minutes including the smoke fixture.
+
+- [ ] **Step 1: Read current STUB_MARKER_PATTERNS array**
 
 ```bash
-sed -n '377,402p' /Users/emrec/Projects/devt/docs/INTERNALS.md
+sed -n '1495,1510p' /Users/emrec/Projects/devt/bin/modules/state.cjs
 ```
 
-- [ ] **Step 2: Update the section**
+- [ ] **Step 2: Delete line 1505** (the `/\bplaceholder\b/i,` entry only). All other patterns stay.
 
-Use Edit. Replace the entire current section (lines 377-402) with the updated version. Three changes:
+- [ ] **Step 3: Add smoke gate K2 — stub-regex regression fixture**
 
-1. **Header sentence**: "Five field-validated instances" → "Fourteen field-validated instances across v0.55–v0.62."
-
-2. **Expand the instances table** to 14 rows (one per gate). Group by release for readability:
-
-```markdown
-| Gate | Form check (passed) | Substance gap | Fix |
-|---|---|---|---|
-| **F4** (v0.55) | `graphify_scan_prep` step ran | Step was inside a skippable conditional | Move gate to mandatory precondition |
-| **B4** (v0.55) | Curator dispatched | Dispatch was in unreachable workflow branch | Relocate gate to context_init |
-| **L1** (v0.58.0) | `dispatch-hygiene-guard.sh` warned | Advisory was ignored 6× in one session | Default-block (`{decision:"deny"}`) |
-| **F26** (v0.58.1) | `## Drill-down:` headings present | Headings hand-written without MCP calls | Cross-reference `_mcp-trace.jsonl` for `get_neighbors` in `workflow_id` window |
-| **F27/F28** (v0.58.1/2) | `review.md` file exists | Body is "Stub written; analysis in progress." | `state check-agent-output` detects stub phrases + low word count + heading-only |
-| **F29** (v0.58.3) | dev-workflow verifier dispatch | Same stub problem, different workflow | Apply F28 substance gate to dev-workflow |
-| **F30** (v0.58.3) | Verifier agent body grading stubs | Agent burns turns on stub artifacts | Verifier self-aborts with `verdict=failed` on stub upstream |
-| **F31** (v0.58.3) | Narrow stub regex | "analysis in progress" only — missed variants | Verb-prefixed pattern catches realistic phrasings |
-| **scope-check-handled** (v0.60.0) | AskUserQuestion prose in workflow | Orchestrator skips silently | Artifact-and-CLI: `scope-check-required.txt` + `state assert-scope-check-handled` |
-| **lanes-registered** (v0.60.0) | partition_lanes ran | Empty `workflow.yaml::lanes[]` | `state assert-lanes-registered` blocks dispatch |
-| **consolidator-dispatched** (v0.60.0) | Lanes passed substance | Orchestrator writes review.md instead of dispatching synthesis agent | `state assert-consolidator-dispatched` requires marker from agent body |
-| **auto-curator-considered** (v0.60.0) | auto_curator step in workflow | Skipped without reading config | Marker file writes FIRE/DISABLED; gate requires marker |
-| **assert-reuse-analyzed** (v0.61.0) | Programmer "scans existing code" prose | Reimplements similar functions | derive-reuse-candidates writes candidates; programmer must address each |
-| **isArtifactFresh** (v0.62.0) | Artifact exists | Stale prior-workflow artifact passes | mtime-vs-workflow.yaml::created_at, 30s grace; retro-fit to 7 gates |
-```
-
-3. **Add a new "Required properties" subsection** after the table, before "Pattern recognition":
-
-```markdown
-### Required properties (both must hold)
-
-Every substance-enforcement gate has two non-negotiable properties:
-
-1. **Existence binding** — the artifact must exist. Validated by `fs.existsSync` or equivalent. (Established v0.58.x.)
-2. **Freshness binding** — the artifact's mtime must postdate the current `workflow.yaml::created_at` within a 30-second grace window. Validated by `isArtifactFresh(path)`. (Established v0.62.0 after greenfield calibration showed every existence-only gate passed against stale prior-workflow artifacts.)
-
-Gates missing either property are bypassable. The v0.60.0 → v0.62.0 arc demonstrated this empirically: 5 existence-only gates produced silent passes against stale state; the one gate with mechanical reset binding (auto-curator-considered) fired correctly because the prior session's marker was naturally absent.
-```
-
-4. **Update "Pattern recognition"** with a 4th bullet for freshness:
-
-```markdown
-- **For any artifact whose currency matters** — wire `isArtifactFresh(artifactPath)` into the gate's branch logic. Stale prior-workflow artifacts return `fresh:false` with reason "artifact mtime is Ns older than workflow.yaml::created_at — file is from a prior workflow".
-```
-
-- [ ] **Step 3: Add smoke gate enforcing the instance count claim**
-
-In `scripts/smoke-test.sh`, just before the final result echo, add:
+In `scripts/smoke-test.sh`, just before the final result echo:
 
 ```bash
-# J1: INTERNALS.md substance-enforcement-gates section is current.
-# Pattern documentation must accurately reflect shipped gates — when a new gate
-# ships, this gate fails until the docs are updated. Conservative count check.
-INSTANCES=$(/usr/bin/grep -cE "^\| \*\*[A-Za-z0-9_-]+\*\* \(v[0-9]" "$ROOT/docs/INTERNALS.md" 2>/dev/null || echo 0)
-if [ "$INSTANCES" -ge 14 ]; then
-  pass "J1: INTERNALS.md substance-enforcement-gates table documents ≥14 instances (${INSTANCES} found)"
+# K2: F31 stub-marker regex must not false-positive on legitimate compliance
+# checklists. greenfield 2026-05-28 PM: substantive review.md (897 words) was
+# flagged because of "No TODO / placeholder | ✓" checklist row. Fixture mimics
+# that exact shape.
+mkdir -p /tmp/devt-smoke-k2
+FIXTURE=/tmp/devt-smoke-k2/compliance-checklist.md
+cat >"$FIXTURE" <<'EOF'
+# Code Review
+
+## Findings
+The implementation is clean. All standards met.
+
+## Compliance Checklist
+
+| Check | Status | Notes |
+|---|---|---|
+| No TODO / placeholder | ✓ | grep clean for TODO/FIXME/XXX in diff |
+| Tests pass | ✓ | full suite green |
+| Lint clean | ✓ | no warnings |
+
+## Verdict
+APPROVED.
+EOF
+# Pad to >50 words so word_count threshold isn't the trigger
+for i in 1 2 3 4 5; do
+  echo "Detailed analysis line $i with substantive prose about correctness." >> "$FIXTURE"
+done
+K2_OUT=$(node "$ROOT/bin/devt-tools.cjs" state check-agent-output "$FIXTURE" 2>&1)
+if echo "$K2_OUT" | grep -q '"looks_like_stub":false'; then
+  pass "K2: compliance-checklist with 'placeholder' word in row label does NOT trigger stub-marker false-positive"
 else
-  fail "J1: INTERNALS.md table has only ${INSTANCES} instances; should be ≥14 (missing recent gates?)"
+  fail "K2: substantive review with 'No TODO / placeholder | ✓' row flagged as stub — F31 regex regression. Output: $K2_OUT"
+fi
+rm -rf /tmp/devt-smoke-k2
+```
+
+- [ ] **Step 4: Run smoke + commit**
+
+```bash
+bash /Users/emrec/Projects/devt/scripts/smoke-test.sh 2>&1 | grep -E "K2|Result"
+# Expected: K2 pass; 680/0
+git add bin/modules/state.cjs scripts/smoke-test.sh
+git commit -m "fix(state): drop \\bplaceholder\\b from F31 stub regex (false-positive on compliance checklists)"
+```
+
+### Task A7 (NEW): Extend SYMBOL_DENYLIST with missing English action verbs
+
+**Validated finding** (greenfield calibration #2, 5c: `topic.symbols | length = 1, single symbol: ["Enrich"]`):
+
+Reading `bin/modules/preflight.cjs:138-173`, SYMBOL_DENYLIST contains 30+ verbs (add, fix, remove, delete, update, change, rename, refactor, implement, build, create, make, extend, improve, optimize, support, introduce, migrate, wire, integrate, polish) but is missing the verbs that appeared in greenfield's task: `enrich, harvest, normalize, validate, deprecate, sunset, ratify, expose, enable, disable, surface, propagate, audit`. The PascalCase regex (line 307) extracted `Enrich` from "Enrich relative-clients picker endpoint…" and it survived all filters — cascading into `direct_dependents=0` and the entire graphify_scan_prep SKIP path.
+
+The denylist is the correct mechanism; it just hasn't kept up with task vocabulary.
+
+**Effort**: ~10 minutes.
+
+- [ ] **Step 1: Read current denylist**
+
+```bash
+sed -n '138,173p' /Users/emrec/Projects/devt/bin/modules/preflight.cjs
+```
+
+- [ ] **Step 2: Extend the "Action verbs commonly capitalized as task-leading words" block (line 140-142)**
+
+Add to that block:
+```javascript
+  "enrich", "harvest", "normalize", "validate", "deprecate", "sunset",
+  "ratify", "expose", "enable", "disable", "surface", "propagate", "audit",
+  "expand", "shrink", "split", "merge", "join", "annotate", "tag", "track",
+  "monitor", "observe", "log", "trace", "report",
+```
+
+- [ ] **Step 3: Add smoke gate K3 — denylist coverage fixture**
+
+In `scripts/smoke-test.sh`:
+
+```bash
+# K3: extractTopic must filter common English verb-prefixes from task text
+# so they don't cascade into the graphify_scan_prep SKIP path. greenfield
+# 2026-05-28 PM: "Enrich relative-clients picker endpoint with license code…"
+# returned topic.symbols=["Enrich"] which masked the snake_case FTS fallback.
+K3_OUT=$(node -e '
+const p = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const t = p.extractTopic("Enrich relative-clients picker endpoint with license code, valid_until, subscription name");
+console.log(JSON.stringify(t.symbols));
+')
+if [ "$K3_OUT" = "[]" ]; then
+  pass "K3: extractTopic filters Enrich (English verb) from task-leading position"
+else
+  fail "K3: extractTopic returned ${K3_OUT}; expected []. Denylist incomplete?"
 fi
 ```
 
-- [ ] **Step 4: Smoke + commit**
+- [ ] **Step 4: Run smoke + commit**
 
 ```bash
-bash /Users/emrec/Projects/devt/scripts/smoke-test.sh 2>&1 | tail -3
-# Expected: 679 passed, 0 failed (678 + J1)
-cd /Users/emrec/Projects/devt
-git add docs/INTERNALS.md scripts/smoke-test.sh
-git commit -m "docs(internals): promote substance-enforcement-gates to first-class principle (14 instances + freshness property)"
+bash /Users/emrec/Projects/devt/scripts/smoke-test.sh 2>&1 | grep -E "K[23]|Result"
+git add bin/modules/preflight.cjs scripts/smoke-test.sh
+git commit -m "fix(preflight): extend SYMBOL_DENYLIST with 25 more English action verbs (closes Enrich-blocks-FTS-fallback path)"
 ```
 
-### Task A6: v0.62.1 release
+### Task A8 (NEW): Add `review-lane-*.json` to WORKFLOW_EVICTABLE regex
+
+**Validated finding** (greenfield calibration #2, 1b + 3b notes):
+> "state directory still has stale artifacts from prior sessions visible: arch-review.md, plan.md, validated-plan.md, review-lane-c.json — triggered validation_warnings=2."
+
+Reading `bin/modules/state-audit.cjs:313-331` — the lane-file eviction regex matches `^review-lane-[A-Za-z0-9_.-]+\.md$` only. JSON sidecars (e.g., `review-lane-c.json`) are NOT cleared. Greenfield's stale `review-lane-c.json` from a prior workflow persisted across `init review` because of this gap.
+
+`validated-plan.md` and `arch-review.md` are intentionally preserved (plan-phase + arch-health-scan outputs that follow-up workflows consume). Leave those alone.
+
+**Effort**: ~10 minutes.
+
+- [ ] **Step 1: Read current regex**
+
+```bash
+sed -n '313,331p' /Users/emrec/Projects/devt/bin/modules/state-audit.cjs
+```
+
+- [ ] **Step 2: Extend regex to cover `.json` siblings**
+
+Change line 316 from:
+```javascript
+if (/^review-lane-[A-Za-z0-9_.-]+\.md$/.test(entry)) {
+```
+
+To:
+```javascript
+if (/^review-lane-[A-Za-z0-9_.-]+\.(md|json)$/.test(entry)) {
+```
+
+- [ ] **Step 3: Add smoke gate K4 — JSON-sibling eviction fixture**
+
+```bash
+# K4: review-lane-*.json sidecars must be evicted alongside their .md
+# counterparts. greenfield 2026-05-28 PM: review-lane-c.json from a prior
+# workflow persisted, causing validation_warnings=2 mid-session.
+mkdir -p /tmp/devt-smoke-k4/.devt/state
+cd /tmp/devt-smoke-k4
+echo "stub" > .devt/state/review-lane-a.md
+echo "{}" > .devt/state/review-lane-a.json
+echo "stub" > .devt/state/review-lane-b.md
+echo "{}" > .devt/state/review-lane-b.json
+K4_OUT=$(node "$ROOT/bin/devt-tools.cjs" state evict-workflow-artifacts 2>&1)
+REMAINING=$(ls .devt/state/ | grep -c "review-lane" || echo 0)
+if [ "$REMAINING" = "0" ]; then
+  pass "K4: both review-lane-*.md and review-lane-*.json evicted"
+else
+  fail "K4: ${REMAINING} review-lane files remain after eviction. Output: $K4_OUT"
+fi
+cd "$ROOT"
+rm -rf /tmp/devt-smoke-k4
+```
+
+- [ ] **Step 4: Run smoke + commit**
+
+```bash
+bash scripts/smoke-test.sh 2>&1 | grep -E "K4|Result"
+git add bin/modules/state-audit.cjs scripts/smoke-test.sh
+git commit -m "fix(state-audit): evict review-lane-*.json sidecars alongside .md (closes greenfield lane-JSON persistence)"
+```
+
+### Task A9 (NEW): Make `assert-verifier-ran` workflow_type-aware
+
+**Validated finding** (greenfield calibration #2, 1c + 6a #2):
+> "assert-verifier-ran: ok:false — config.workflow.verification=true but neither verification.json nor verification.md exists. I did NOT notice this gate failed. quick-implement.md doesn't have a verifier step, but the project config expects one and I never noticed the mismatch."
+
+Reading `bin/modules/state.cjs:1575-1626` — the gate reads `cfg.workflow.verification` from `getMergedConfig()` but is `workflow_type`-blind. quick-implement intentionally skips verification (per its command description: "skip docs and retro, go straight to code and tests"). Same for debug, retro, memory_promote, memory_reject, plan, specify, clarify, preflight, research, arch_health_scan. Only `dev`, `code_review`, `code_review_parallel` actually dispatch verifiers when `cfg.workflow.verification=true`.
+
+**Effort**: ~20 minutes.
+
+- [ ] **Step 1: Read current gate**
+
+```bash
+sed -n '1575,1626p' /Users/emrec/Projects/devt/bin/modules/state.cjs
+```
+
+- [ ] **Step 2: Add VERIFIER_REQUIRED set + short-circuit logic**
+
+After line 1574 (before `function assertVerifierRan()`):
+
+```javascript
+// Workflow types that dispatch a verifier when config.workflow.verification=true.
+// Other workflow types (quick_implement, debug, retro, plan, specify, etc.)
+// intentionally skip verification by design — applying the gate uniformly
+// produces false-negative blocks. Validated 2026-05-28 (greenfield calibration #2).
+const VERIFIER_REQUIRED_WORKFLOWS = new Set([
+  "dev",
+  "code_review",
+  "code_review_parallel",
+]);
+```
+
+Then inside `assertVerifierRan()`, after the `verificationEnabled` check (line 1582), insert:
+
+```javascript
+  // workflow_type opt-out: only dev / code_review / code_review_parallel
+  // dispatch a verifier. Other workflow_types intentionally skip.
+  let workflowType = null;
+  try {
+    const stateData = readState();
+    workflowType = stateData && stateData.workflow_type;
+  } catch { /* fall through — treat as "unknown, apply gate" */ }
+  if (workflowType && !VERIFIER_REQUIRED_WORKFLOWS.has(workflowType)) {
+    return {
+      ok: true,
+      verification_enabled: true,
+      workflow_type: workflowType,
+      reason: `workflow_type=${workflowType} does not dispatch a verifier by design — gate does not apply`,
+    };
+  }
+```
+
+- [ ] **Step 3: Add smoke gate K5 — verifier-gate workflow-type awareness**
+
+```bash
+# K5: assert-verifier-ran must short-circuit for workflow_types that don't
+# dispatch a verifier. greenfield 2026-05-28 PM: quick_implement workflow
+# tripped the gate because config.workflow.verification=true but quick_implement
+# doesn't have a verifier step — false negative.
+mkdir -p /tmp/devt-smoke-k5/.devt/state
+cd /tmp/devt-smoke-k5
+echo '{"workflow":{"verification":true}}' > .devt/config.json
+node "$ROOT/bin/devt-tools.cjs" init quick "test task" >/dev/null 2>&1 || true
+K5_OUT=$(node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>&1)
+if echo "$K5_OUT" | grep -q '"ok":true'; then
+  pass "K5: assert-verifier-ran short-circuits for workflow_type=quick_implement"
+else
+  fail "K5: assert-verifier-ran did not short-circuit. Output: $K5_OUT"
+fi
+cd "$ROOT"
+rm -rf /tmp/devt-smoke-k5
+```
+
+- [ ] **Step 4: Run smoke + commit**
+
+```bash
+bash scripts/smoke-test.sh 2>&1 | grep -E "K5|Result"
+git add bin/modules/state.cjs scripts/smoke-test.sh
+git commit -m "fix(state): assert-verifier-ran short-circuits for workflow_types that skip verification by design"
+```
+
+### Task A10 (NEW): Document the mcp-stats CLI-wrapper caveat
+
+**Validated finding** (greenfield calibration #2, 5a + 9c):
+> "mcp-stats for this workflow_id: entries_considered: 0. Trace file has 74 lines total, all from older workflows. Every graphify-flavored action went through CLI wrappers (preflight generate, state derive-reuse-candidates if it had fired, state assert-graphify-decision). CLI wrappers don't write to _mcp-trace.jsonl. So mcp-stats is 'correctly empty' but the underlying graphify usage was also empty."
+
+This isn't a bug — it's an undocumented invariant. Sessions that go entirely through CLI wrappers will produce empty `mcp-stats`. The post-v0.60.0 namespace hotfix can't be validated from such a session.
+
+**Effort**: ~10 minutes.
+
+- [ ] **Step 1: Find the MCP Trace section in docs/INTERNALS.md**
+
+```bash
+grep -n "MCP Trace\|mcp-stats\|_mcp-trace" /Users/emrec/Projects/devt/docs/INTERNALS.md | head -10
+```
+
+- [ ] **Step 2: Add the caveat note**
+
+After the existing description of `_mcp-trace.jsonl`, add:
+
+```markdown
+**CLI wrappers do NOT write to `_mcp-trace.jsonl`.** The trace records direct
+MCP tool invocations only. Workflows that go entirely through CLI wrappers
+(`preflight generate`, `state derive-reuse-candidates`, `state assert-graphify-decision`,
+`state evict-graphify`) will produce empty `mcp-stats` output even when graphify
+is fully active and load-bearing — the trace is "correctly empty" because no
+direct MCP calls occurred. To validate the v0.60.0 namespace hotfix or measure
+direct MCP usage, exercise a workflow that dispatches code-reviewer's
+symbol_anchored / bulk_scoped / pr_scoped tiers (which DO call `query_graph`,
+`get_neighbors`, `blast_radius` directly), or call MCP tools from the orchestrator
+during context_init's drill-down protocol.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/INTERNALS.md
+git commit -m "docs(internals): clarify mcp-stats is empty for CLI-wrapper-only sessions"
+```
+
+### Task A11: v0.62.1 release
 
 **Files**: VERSION, plugin.json, CHANGELOG.md
 
 - [ ] Bump VERSION 0.62.0 → 0.62.1, plugin.json to match
-- [ ] CHANGELOG `[0.62.1]` section — theme: "operational cleanup + INTERNALS.md substance-gates update"
-- [ ] Final smoke 679/0
-- [ ] Commit + tag v0.62.1, then `git push origin main v0.62.1` (with workflow_dispatch fallback in place, this triggers the release workflow even if the push event misses)
+- [ ] CHANGELOG `[0.62.1]` section — theme: "operational cleanup + INTERNALS.md substance-gates update + 4 surgical hotfixes"
+  - Group entries: `### Fixed` (A6/A7/A8/A9), `### Changed` (A2/A3/A5), `### Documentation` (A5/A10), `### Smoke tests` (J1, J2, K2-K5)
+- [ ] Final smoke 679 → ~684 (+J1, +J2, +K2, +K3, +K4, +K5)
+- [ ] Commit
+- [ ] Tag + push via the new `scripts/release.sh v0.62.1` (validates the helper in the same release that introduces it)
 
 ---
 
-## Phase B — Workflow UX + memory layer improvements (v0.63.0)
+## Phase B — Symbol Extraction Unlock + Anti-Escape-Hatch + Memory UX (v0.63.0)
 
-**Theme**: close six field-validated gaps in workflow + memory-layer ergonomics.
+**Theme**: close the three highest-impact field gaps greenfield calibration surfaced — (1) the symbol-extraction bottleneck that cascades into full graphify SKIP, (2) the escape-hatch gate class that silently passes on missing prep artifacts, (3) the memory-candidate surfacing gap that leaves candidates in `_suggestions.md` untouched.
 
-**Smoke target**: 679 → ~694 (+~15 gates)
+**Smoke target**: ~684 → ~705 (+~20 gates across three sub-batches)
 
-**Effort**: ~7-9 hours subagent-driven.
+**Effort**: ~12–15 hours across 2–3 sessions.
 
-**Task list**:
-- B0 (a-d): Passive memory-candidate surfacing (SessionStart + /devt:next + present_findings)
-- B1: Knowledge-candidate aggregation to scratchpad
-- B2: context_init prose simplification
-- B3: Curator pre-recommends `candidate` for tooling-evolving items
-- B4: Concept docs track `superseded_when` for lifecycle clarity
-- B5: `memory promote` batches tooling-related items
+**Sequencing inside Phase B**: B-I (symbol extraction) is independent of B-II + B-III; can ship in parallel. B-II + B-III are independent of each other but share a release boundary because they're all UX/correctness improvements that don't affect protocol. If shipping incrementally, suggested order: B-I first (highest field impact, smallest blast radius), then B-II (closes silent-skip class), then B-III (UX polish on top of working gates).
 
-B0+B3+B4+B5 are a coherent "memory layer UX" sub-batch. B1+B2 are workflow-side. Both share the v0.63.0 release boundary because they're all UX improvements that don't affect protocol/correctness.
+---
 
-### Task B0: Passive memory-candidate surfacing at three natural moments
+### Sub-batch B-I — Symbol Extraction Unlock
 
-**Validated finding** (field signal 2026-05-28 + investigation): user wants memory candidates surfaced at relevant moments without manual `/devt:health` invocation. Investigation of `/devt:memory promote` cost profile shows it dispatches the `curator` agent (effort: medium, maxTurns: 35, AskUserQuestion-per-candidate) → 1–3 minutes + 30–100K tokens for 18 candidates. This is decisively NOT auto-fireable, and AskUserQuestion at every workflow end would prompt the user repeatedly with a costly action.
+**Validated finding** (greenfield calibration #2, 5c + full review report §4):
+> "topic.symbols=['Enrich']. For 'GFBUGS-180: Enrich relative-clients picker endpoint with license code, valid_until, subscription name…' the high-signal terms are `relative-clients`, `license`, `subscription`, `valid_until`, `picker`. None are PascalCase. None are snake_case (relative-clients is kebab). The regex catches Enrich. The fallback never fires (symbols.length=1). Net: 0 useful symbols, but the system doesn't know."
 
-**Right pattern**: surface count, never auto-dispatch, never block. Three passive surfaces; user acts when they have attention budget.
+Reading `bin/modules/preflight.cjs:295-358`, the resolution path is:
+1. Source 1: git-diff symbols (high signal, unavailable for fresh tasks)
+2. Source 2: PascalCase regex on text (low signal — sentence-leading verbs leak)
+3. Source 3 (fallback): snake_case keyword FTS — **only fires when `symbols.length === 0`** (the gating bug)
 
-**Effort**: ~2-3 hours.
+A7 (Phase A) closes the Enrich-survives-denylist hole. B-I closes the structural cascade.
 
-#### Sub-task B0a — SessionStart hint
+**Effort**: ~3-4 hours.
 
-**Wire `hooks/session-start.sh`** to check `_suggestions.md` candidate count at session start. If count ≥ threshold AND no active workflow (`workflow.yaml::active != true`) AND time-since-last-shown ≥ cooldown, inject via `additionalContext`:
+#### Task B-I.1 — Loosen FTS-fallback gate
 
-> 📋 Memory: N candidates pending triage. When you have time, run `/devt:retro` or `/devt:memory promote`.
-
-Single line. Non-blocking. Free (hook output, no LLM cost). Frequency-limited via `.devt/state/last-memory-hint-shown.txt`.
-
-- [ ] **Step 1: Validate** the SessionStart hook structure (currently does plugin registration + project detection; no candidate surfacing today).
-- [ ] **Step 2: Add candidate-count read** + cooldown check + `additionalContext` emission. Update `last-memory-hint-shown.txt` post-emit.
-- [ ] **Step 3: Smoke gate**: `_suggestions.md` count ≥ 5 + no active workflow → hint appears; with `last-memory-hint-shown.txt` recent → hint skipped (cooldown).
-
-#### Sub-task B0b — `/devt:next` candidate recommendation
-
-**Modify `workflows/next.md`** to include "🧠 Triage memory candidates (N pending)" as one of the recommended next actions WHEN `state.active=false` AND count ≥ threshold. This is the natural "user explicitly asks what's next" moment.
-
-- [ ] **Step 1: Validate** the current branching logic in `next.md` (it already considers state.active and other signals; just add candidate-count branch).
-- [ ] **Step 2: Add the recommendation prose** + bash check for `_suggestions.md` count.
-- [ ] **Step 3: Smoke gate**: count ≥ 5 + no active workflow → `/devt:next` surfaces "Triage memory candidates" as one of the options; otherwise doesn't.
-
-#### Sub-task B0c — `present_findings` informational footer
-
-**Add a one-line footer** to every workflow's `present_findings` step (after the main report, before the workflow ends). When `_suggestions.md` count ≥ threshold:
-
-> 💡 N memory candidates pending — run `/devt:retro` when you have time.
-
-NOT AskUserQuestion. Just a line of text. User can act or ignore. KEEP-IN-SYNC across code-review.md, code-review-parallel.md, dev-workflow.md, quick-implement.md.
-
-- [ ] **Step 1: Identify present_findings step in all 4 workflows.**
-- [ ] **Step 2: Add the footer bash snippet** — reads candidate count, emits line if ≥ threshold.
-- [ ] **Step 3: Smoke gate**: footer present in each workflow's present_findings (4 grep checks).
-
-#### Sub-task B0d — Config schema additions
-
-Add to `bin/modules/config.cjs::DEFAULTS.memory`:
+**Change**: line 338 of preflight.cjs from:
 
 ```javascript
-// Memory-candidate surfacing config. Three passive surfaces (SessionStart
-// hint + /devt:next recommendation + present_findings footer) all gate
-// on count ≥ surface_threshold. SessionStart hint additionally
-// rate-limits via surface_cooldown_hours. Surfaces never dispatch the
-// curator — they only inform; user runs /devt:memory promote when ready.
-candidates_surface_threshold: 5,
-candidates_surface_cooldown_hours: 24,
+if (symbols.length === 0 && graphifyQuery) {
 ```
 
-KEEP existing `memory.auto_curator_on_review` (boolean) for power users who DO want auto-dispatch. Don't rework it to tristate — surfacing and dispatching are separate concerns now.
+To:
 
-#### Sub-task B0e — Commit
+```javascript
+// Field signal (greenfield 2026-05-28): a single noise symbol that
+// survives the denylist (e.g., "Enrich" pre-A7) blocks the FTS rescue
+// path entirely. Run the fallback ALSO when surviving symbols are all
+// short (likely PascalCase noise rather than meaningful identifiers).
+const allShortSymbols = symbols.length > 0 && symbols.every(s => s.length <= 6);
+if ((symbols.length === 0 || allShortSymbols) && graphifyQuery) {
+```
 
-Single commit for B0a-B0d:
+- [ ] **Validate**: confirm with the A7 fixture ("Enrich relative-clients picker…") that the fallback now fires and resolves `valid_until` → graph nodes.
+- [ ] **Smoke gate K6**: extractTopic with `{graphifyQuery: stubResolver}` on the fixture returns symbols beyond just "Enrich" (or post-A7, beyond empty).
+
+#### Task B-I.2 — Add kebab-case extraction pattern
+
+**Change**: in the FTS fallback block (preflight.cjs:339-341), extend the candidate regex to cover BOTH snake and kebab:
+
+```javascript
+const candidates = Array.from(new Set(
+  words.filter(w =>
+    (/^[a-z][a-z0-9]+(_[a-z0-9]+)+$/.test(w) ||      // snake_case
+     /^[a-z][a-z0-9]+(-[a-z0-9]+)+$/.test(w))        // kebab-case
+    && !STOP_WORDS.has(w))
+)).slice(0, 3);
+```
+
+Note: the `words` extraction at line 320 already uses `/[a-z][a-z0-9_-]{1,30}/g` so kebab tokens are preserved through to this point. Just extend the predicate.
+
+- [ ] **Validate**: confirm `words` regex captures `relative-clients` (it does per line 320's `[a-z0-9_-]` character class).
+- [ ] **Smoke gate K7**: extractTopic on "Enrich relative-clients picker" with graphifyQuery returning a hit for "relative-clients" surfaces it as a symbol.
+
+#### Task B-I.3 — Full-text FTS terminal fallback
+
+**Change**: when keyword-by-keyword FTS returns 0 candidates resolved to graph nodes AND graph is dense, run one more FTS pass on the FULL task text:
+
+After the snake/kebab fallback loop (around preflight.cjs:355, before `return`):
+
+```javascript
+// Terminal fallback: if snake/kebab keyword FTS yielded nothing AND graph
+// is dense, run a single FTS pass on the full task text. Catches domain
+// nouns ("license", "subscription", "picker") that aren't snake/kebab.
+// Cap result merge at 5 to avoid polluting scope_hint with weak matches.
+if (symbols.length === 0 && graphifyQuery) {
+  let r;
+  try { r = graphifyQuery(text, { limit: 5 }); } catch { r = null; }
+  if (r && Array.isArray(r.results)) {
+    for (const node of r.results.slice(0, 5)) {
+      const label = (node && (node.label || node.id)) || null;
+      if (!label) continue;
+      if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
+        seen.add(label);
+        symbols.push(label);
+      }
+    }
+  }
+}
+```
+
+- [ ] **Validate**: with all symbols filtered out AND graph fresh dense, the full-text fallback runs once.
+- [ ] **Smoke gate K8**: extractTopic with a noun-heavy task ("Add license subscription picker endpoint") + graphifyQuery returning matches resolves at least one symbol.
+
+#### Task B-I.4 — `symbol_resolution_path` telemetry
+
+**Change**: extend the `extractTopic` return shape with a `resolution_path` field that records which source produced the final symbols:
+
+```javascript
+return {
+  domains,
+  symbols,
+  keywords,
+  raw: text,
+  resolution_path: <"diff" | "text" | "snake_fts" | "kebab_fts" | "full_text_fts" | "none">,
+};
+```
+
+Wire it into `preflight-brief.json` so future calibrations can measure fallback effectiveness without instrumentation.
+
+- [ ] **Validate**: read `preflight.cjs::renderPreflightSidecar` to confirm where it serializes topic data.
+- [ ] **Smoke gate K9**: preflight-brief.json contains `topic.resolution_path` field with one of the enum values.
+
+#### B-I commit
 
 ```bash
-git commit -m "feat(memory): passive candidate surfacing at 3 natural moments (SessionStart + /devt:next + present_findings footer)"
+git add bin/modules/preflight.cjs scripts/smoke-test.sh
+git commit -m "feat(preflight): symbol extraction unlock — kebab support + full-text FTS terminal fallback + resolution_path telemetry"
 ```
 
-**Why this design over the original B0**:
+---
 
-| Concern | Original B0 (AskUserQuestion at workflow end) | Revised B0 (3 passive surfaces) |
+### Sub-batch B-II — Anti-Escape-Hatch Gate Strictening
+
+**Validated finding** (greenfield calibration #2, bottom line):
+> "The workflow's mechanical gates DID hold, but they're too easy to satisfy with escape-hatch artifacts (claude-mem-skipped.txt, reuse-candidates.md absent → gate doesn't apply). The gates are guarding against egregious skips, not against shallow-completion patterns."
+
+Three silent skips in one session, all sharing the same structural signature:
+
+| Gate | Escape vector | Greenfield observation |
 |---|---|---|
-| User interruption | Blocks workflow completion with prompt | Never blocks — informational only |
-| Cost when user accepts | 1–3min + 30-100K tokens immediately | User runs `/devt:memory promote` deliberately when ready |
-| Notification fatigue | Prompts at end of every workflow | SessionStart once/24h + opt-in `/devt:next` + passive footer |
-| Honors "right moments" intent | Yes but invasive | Yes and non-invasive |
-| Cost of the surface itself | AskUserQuestion latency | Zero (text emission) |
+| `assert-reuse-analyzed` | `reuse-candidates.md` absent → gate returns ok:true | "v0.61.0 reuse-search feature ran zero times in this workflow. The programmer made no formal reuse analysis." |
+| `assert-claude-mem-harvest` | One-line `claude-mem-skipped.txt` satisfies the gate | "wrote a one-line skip reason instead of actually running claude-mem MCP search. Lazy escape that satisfies the gate but produces no value." |
+| (none) `KNOWLEDGE-CANDIDATE` tagging | Prose at quick-implement.md:281 says "load-bearing" but no `assert-*` enforces it | "grep -c '#KNOWLEDGE-CANDIDATE' scratchpad.md returns 0. I described 4 candidates in prose. The candidates I noted in prose will NEVER reach the curator. Hard miss." |
 
-### Task B3 — Curator pre-recommends `candidate` status for tooling-evolving items
+**Effort**: ~3-4 hours.
 
-**Field-validated finding** (2026-05-28 promote pass): user ran `/devt:memory promote` on 18 candidates. Curator asked "active vs candidate vs REJ vs defer?" per candidate, but for tooling-related items (e.g., "Bitbucket pr_scoped tier doesn't exist on devt-graphify"), the answer is always `candidate` — because the underlying tooling will evolve. User had to make this decision manually 18 times.
+#### Task B-II.1 — `reuse-search-attempted.txt` marker
 
-**Design**: heuristic in the curator agent body. When the candidate text contains tooling-evolving signals (regex match on `mcp__*`, `version`, `currently`, `today`, `limitation`, `until`, `not yet`, etc.) AND a related entry exists in `docs/superpowers/plans/*.md` (text search across plan files), pre-recommend `candidate` as the default option and surface the resolution path in the question prose:
+**Validated finding** (greenfield calibration #2, 4a-4e):
+> ".devt/state/reuse-candidates.md does not exist. The workflow's implement step has a bash block calling state derive-reuse-candidates — I either skipped that block entirely or it ran silently. assert-reuse-analyzed returns ok:true with reason 'reuse-candidates.md absent — derive-reuse-candidates was not run; gate does not apply'."
 
-> Q: "{candidate-text}" — tooling-related, expected to evolve. Promote how?
->   1. **Candidate** (Recommended — related backlog: Phase C v0.64.0 in 2026-05-28-next-session-backlog.md)
->   2. Active (if you want this canonical; risk: stales when Phase C ships)
->   3. REJ tombstone
->   4. Defer
+Read `bin/modules/reuse-search.cjs:139-140` — `deriveReuseCandidates` ALWAYS writes the file. So absence ⇒ the workflow bash block didn't run at all. The fix gives the gate a way to distinguish "ran with 0 candidates" (legit no-op, file present with `0 candidates` header) from "never ran" (file absent because bash block was skipped).
 
-**Effort**: ~1 hour. Curator agent body change + smoke gate.
+**Design**: workflow writes a `reuse-search-attempted.txt` marker BEFORE invoking the CLI. Gate checks marker presence:
+- Marker absent → workflow skipped the step (BLOCK with "orchestrator must run derive-reuse-candidates before implement step")
+- Marker present + candidates.md absent → CLI failed (BLOCK with CLI failure context)
+- Marker present + candidates.md with 0 candidates → legit no-op (PASS with "0 candidates — graphify unavailable or task has no resolvable symbols")
+- Marker present + candidates.md with N candidates → require reuse-analysis.md (existing logic, unchanged)
 
-- [ ] **Step 1**: Validate the curator's current per-candidate prompt format in `agents/curator.md`.
-- [ ] **Step 2**: Add the tooling-detection heuristic + plan-file backref text search.
-- [ ] **Step 3**: Update curator prose to surface "Recommended" + resolution link when matched.
-- [ ] **Step 4**: Smoke gate verifying the heuristic matches the documented signals on a fixture candidate.
+- [ ] **Step 1: Validate**: read `workflows/quick-implement.md:226-232` (the implement-step bash block).
+- [ ] **Step 2: Update implement-step bash** in quick-implement.md + dev-workflow.md to write the marker first:
 
-### Task B4 — Concept docs track `superseded_when` for lifecycle clarity
-
-**Field-validated finding** (same promote pass): `candidate` status means "true today, expected to evolve" — but there's no field documenting WHAT would resolve the candidate. When v0.64.0 ships Bitbucket pr_scoped, the CON-002 doc becomes invalid; today there's no automatic detection.
-
-**Design**: add optional `superseded_when` frontmatter field to concept/decision/rejected docs:
-
-```yaml
----
-id: CON-002
-title: Bitbucket pr_scoped tier unavailable on devt-graphify
-doc_type: concept
-status: candidate
-confidence: explicit
-domain: graphify
-summary: ...
-superseded_when: "devt ships a Bitbucket-native pr_scoped tier (tracked: Phase C in docs/superpowers/plans/2026-05-28-next-session-backlog.md)"
----
+```bash
+echo "attempted_at=$(date -u +%FT%TZ)" > .devt/state/reuse-search-attempted.txt
+echo "task=${TASK_TEXT}" >> .devt/state/reuse-search-attempted.txt
+REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":false,"error":"cli_failed"}')
+echo "result=$REUSE_RESULT" >> .devt/state/reuse-search-attempted.txt
 ```
 
-Add `state assert-concept-currency` (or `memory check-stale-concepts`) CLI that scans `.devt/memory/concepts/*.md` + `decisions/*.md` + `rejected/*.md` for `superseded_when` fields, then surfaces a warning if any reference plan items that have been completed (i.e., the plan file's checkbox is `[x]` for that task).
+- [ ] **Step 3: Update `assertReuseAnalyzed` in state.cjs:1777**:
 
-**Effort**: ~1.5 hours. Schema addition + new CLI + smoke gate.
+```javascript
+function assertReuseAnalyzed() {
+  const dir = getStateDir();
+  const markerPath = path.join(dir, "reuse-search-attempted.txt");
+  const candidatesPath = path.join(dir, "reuse-candidates.md");
+  const analysisPath = path.join(dir, "reuse-analysis.md");
+  const haveMarker = fs.existsSync(markerPath);
+  const haveCandidates = fs.existsSync(candidatesPath);
 
-- [ ] **Step 1**: Add `superseded_when` to memory frontmatter schema (in `bin/modules/memory.cjs::validateFrontmatter`). Optional field; existing docs without it are fine.
-- [ ] **Step 2**: Implement `state assert-concept-currency` CLI that scans for stale references.
-- [ ] **Step 3**: Wire into `/devt:health` as a new I-code (I005 — stale concept references found).
-- [ ] **Step 4**: Smoke gates (schema accepts field; CLI flags fixture stale doc).
+  if (!haveMarker) {
+    return {
+      ok: false,
+      reason:
+        "reuse-search-attempted.txt absent — workflow skipped the reuse pre-search step. " +
+        "Orchestrator must run `state derive-reuse-candidates \"<task>\"` from the implement-step bash block.",
+    };
+  }
+  if (!haveCandidates) {
+    return {
+      ok: false,
+      marker_present: true,
+      reason:
+        "reuse-search-attempted.txt present but reuse-candidates.md absent — derive-reuse-candidates CLI failed. " +
+        "Check the result= line in the marker file for failure context.",
+    };
+  }
+  // ... rest of existing logic (candidate count parsing, reuse-analysis check, freshness) unchanged
+}
+```
 
-### Task B5 — `memory promote` batches tooling-related items
+- [ ] **Step 4: Add `reuse-search-attempted.txt` to WORKFLOW_EVICTABLE** in `state-audit.cjs:265-278` so it gets cleared on init.
+- [ ] **Step 5: Smoke gate K10**: marker absent + candidates absent → gate returns ok:false (BLOCK). Marker present + candidates absent → gate returns ok:false with CLI failure reason. Marker present + candidates with 0 entries → gate returns ok:true.
 
-**Field-validated finding** (same promote pass): user had to make 18 sequential per-candidate decisions. Tooling-related items share the same answer pattern — batching by category would reduce decisions to ~3-5.
+#### Task B-II.2 — Require structured payload in `claude-mem-skipped.txt`
 
-**Design**: in the curator agent body, before per-candidate prompts, scan ALL candidates for shared signals (tooling-evolving, REJ-tombstone-shape, decision-pattern). Group similar candidates and offer batch-promote:
+**Validated finding** (greenfield calibration #2, 6b #3):
+> "claude-mem MCP harvest is optional, just write the skipped.txt — wrote a one-line skip reason instead of actually running mcp__plugin_claude-mem_mcp-search__search. Lazy escape that satisfies the gate but produces no value."
 
-> "5 candidates are all tooling-evolving concepts about devt-graphify limitations. Promote all as `candidate` with status='expires when matching backlog item ships'?"
->
->   1. **Batch promote all 5 as candidate** (Recommended)
->   2. Review each individually
->   3. Reject the batch
+Read `bin/modules/state.cjs:2043-2086` — `assertClaudeMemHarvest` accepts either `claude-mem-harvest.md` OR `claude-mem-skipped.txt` with no payload validation. The fix: require a structured `reason=<enum>` line in the skip file. Reject one-liners or free-form text.
 
-Falls back to per-candidate prompts for non-batched items.
+**Design**: valid reasons:
+- `not_installed` — claude-mem plugin not present
+- `mcp_unavailable` — plugin present but MCP server not responding
+- `corpus_empty` — claude-mem has no observations for this project
+- `task_unrelated_to_history` — explicit orchestrator decision (rare; requires `details=<text>` line)
 
-**Effort**: ~2 hours. Curator agent body restructure + batch-grouping algorithm + smoke gate.
+- [ ] **Step 1: Update `assertClaudeMemHarvest`** to validate `claude-mem-skipped.txt` content:
 
-- [ ] **Step 1**: Validate the curator's current iteration over `_suggestions.md` entries.
-- [ ] **Step 2**: Implement clustering heuristic (group by tooling signal + domain).
-- [ ] **Step 3**: Add batch-prompt branch with per-cluster summary.
-- [ ] **Step 4**: Smoke gate verifying clustering on a fixture with 3+ tooling candidates.
+```javascript
+if (haveSkipped) {
+  const skipContent = fs.readFileSync(skippedPath, "utf8");
+  const reasonMatch = skipContent.match(/^reason=([a-z_]+)$/m);
+  const validReasons = new Set([
+    "not_installed", "mcp_unavailable", "corpus_empty", "task_unrelated_to_history",
+  ]);
+  if (!reasonMatch || !validReasons.has(reasonMatch[1])) {
+    return {
+      ok: false,
+      file: "claude-mem-skipped.txt",
+      reason:
+        "claude-mem-skipped.txt missing valid reason= line. Required format: " +
+        "reason=<not_installed|mcp_unavailable|corpus_empty|task_unrelated_to_history>. " +
+        "For task_unrelated_to_history, also include details=<explanation>.",
+    };
+  }
+  if (reasonMatch[1] === "task_unrelated_to_history" && !/^details=/m.test(skipContent)) {
+    return {
+      ok: false,
+      file: "claude-mem-skipped.txt",
+      reason: "reason=task_unrelated_to_history requires a details= line explaining the orchestrator's reasoning.",
+    };
+  }
+}
+```
 
-### Task B1: Knowledge-candidate aggregation to scratchpad
+- [ ] **Step 2: Update workflow prose** (context_init steps in all 4 workflows) — when the orchestrator decides to skip claude-mem, the bash must write the structured form:
 
-**Validated finding** (greenfield calibration #18): lane agents append `#KNOWLEDGE-CANDIDATE` to their lane output files; orchestrator never aggregates them into `.devt/state/scratchpad.md`. The curator's harvest step reads scratchpad — without aggregation, lane-surfaced candidates are invisible to the memory layer.
+```bash
+cat > .devt/state/claude-mem-skipped.txt <<EOF
+reason=mcp_unavailable
+attempted_at=$(date -u +%FT%TZ)
+EOF
+```
 
-- [ ] **Validate**: confirm exactly where `#KNOWLEDGE-CANDIDATE` tags get written today (lane agents vs scratchpad) and where the curator reads from.
-- [ ] **Implement**: workflow bash step after `consolidate` (parallel) or `review` (single-dispatch) that greps lane outputs / review.md for `#KNOWLEDGE-CANDIDATE` lines, appends them to scratchpad.md with provenance comment.
-- [ ] Alternative: add a `state aggregate-knowledge-candidates` CLI that scans `.devt/state/review-lane-*.md` + `review.md`, dedupes by content, appends to scratchpad.
-- [ ] Smoke gate: aggregation runs, scratchpad gets entries.
+- [ ] **Step 3: Smoke gate K11**: one-liner skip file → BLOCK; valid structured payload → PASS; `task_unrelated_to_history` without details → BLOCK.
 
-### Task B2: `context_init` prose simplification (split into named sub-steps)
+#### Task B-II.3 — New `assertKnowledgeCandidatesTagged()` gate
 
-**Validated finding**: code-review.md context_init = 188 lines; dev-workflow.md context_init = 180 lines. Orchestrator's calibration #16: "By the time prose reaches line ~220, I've started forgetting earlier obligations."
+**Validated finding** (greenfield calibration #2, 6a #1 + 6e):
+> "grep -c '#KNOWLEDGE-CANDIDATE' .devt/state/scratchpad.md returns 0. I described 4 candidates in prose inside review.md ('Knowledge candidates surfaced') but never appended the magic-string #KNOWLEDGE-CANDIDATE lines to scratchpad.md. The candidates I noted in prose will NEVER reach the curator. Hard miss."
 
-- [ ] **Validate**: read both context_init blocks; identify natural sub-step boundaries (e.g., "init", "compute memory_signal", "compute scope_hint + scope_trust", "evict graphify", "compute impact-plan", "execute graphify call", "F16 drill-down", "claude-mem harvest", "assert decision artifact").
-- [ ] **Implement**: split context_init into ~8 named `<substep>` blocks (or named bash sections) with one bash block + one gate-assert per sub-step. Minimize prose between bash blocks.
-- [ ] Apply to both code-review.md and code-review-parallel.md (KEEP-IN-SYNC).
-- [ ] Smoke gate: count `<substep>` markers; gate fails if fewer than expected.
+Read `workflows/quick-implement.md:281` — prose says "load-bearing — not optional, do this BEFORE writing impl-summary.md" but no `assert-*` enforces it.
 
-### Task B3: v0.63.0 release
+**Design**: new CLI subcommand `state assert-knowledge-candidates-tagged`. Runs in `present_findings` step of all 5 task-producing workflows (quick-implement, code-review, code-review-parallel, dev-workflow, debug). Checks scratchpad.md for ≥1 `#KNOWLEDGE-CANDIDATE:` line, OR a `.devt/state/knowledge-candidates-none.txt` artifact with structured payload.
 
-Standard bump + CHANGELOG + tag.
+Valid `knowledge-candidates-none.txt` reasons:
+- `task_too_routine` — pure CRUD / well-trodden patterns
+- `no_novel_patterns` — implementation followed existing conventions exactly
+- `all_subsumed_by_existing_memory` — every interesting pattern already exists in `.devt/memory/`
+
+- [ ] **Step 1: Implement `assertKnowledgeCandidatesTagged()`** in state.cjs:
+
+```javascript
+function assertKnowledgeCandidatesTagged() {
+  const dir = getStateDir();
+  const scratchpadPath = path.join(dir, "scratchpad.md");
+  const nonePath = path.join(dir, "knowledge-candidates-none.txt");
+
+  const haveNone = fs.existsSync(nonePath);
+  if (haveNone) {
+    const content = fs.readFileSync(nonePath, "utf8");
+    const reasonMatch = content.match(/^reason=([a-z_]+)$/m);
+    const validReasons = new Set([
+      "task_too_routine", "no_novel_patterns", "all_subsumed_by_existing_memory",
+    ]);
+    if (!reasonMatch || !validReasons.has(reasonMatch[1])) {
+      return {
+        ok: false,
+        reason:
+          "knowledge-candidates-none.txt missing valid reason= line. Required format: " +
+          "reason=<task_too_routine|no_novel_patterns|all_subsumed_by_existing_memory>.",
+      };
+    }
+    const freshness = isArtifactFresh(nonePath);
+    if (!freshness.fresh) {
+      return { ok: false, reason: `${freshness.reason} — knowledge-candidates-none.txt is stale; re-evaluate for this workflow.` };
+    }
+    return { ok: true, none_declared: true, reason: `explicit none with reason=${reasonMatch[1]}` };
+  }
+
+  if (!fs.existsSync(scratchpadPath)) {
+    return {
+      ok: false,
+      reason: "scratchpad.md absent AND knowledge-candidates-none.txt absent — orchestrator did not surface candidates or declare none.",
+    };
+  }
+  const content = fs.readFileSync(scratchpadPath, "utf8");
+  const tags = (content.match(/^#KNOWLEDGE-CANDIDATE:/gm) || []).length;
+  if (tags === 0) {
+    return {
+      ok: false,
+      tag_count: 0,
+      reason:
+        "scratchpad.md present but contains 0 #KNOWLEDGE-CANDIDATE lines. " +
+        "Orchestrator must tag candidates during work OR write knowledge-candidates-none.txt with a structured reason.",
+    };
+  }
+  return { ok: true, tag_count: tags };
+}
+```
+
+- [ ] **Step 2: Wire into `present_findings` step** of quick-implement.md, code-review.md, code-review-parallel.md, dev-workflow.md, debug.md as a hard gate (BLOCK on `ok:false`).
+- [ ] **Step 3: Add `knowledge-candidates-none.txt` to WORKFLOW_EVICTABLE**.
+- [ ] **Step 4: Smoke gate K12**: scratchpad with ≥1 tag → PASS; scratchpad with 0 tags + no `none.txt` → BLOCK; valid `none.txt` → PASS; malformed `none.txt` → BLOCK.
+
+#### Task B-II.4 — Knowledge-candidate aggregation for parallel workflows
+
+**Validated finding** (from current plan's B1 — preserved here because it's complementary to B-II.3 for parallel flows):
+
+For parallel workflows (`code-review-parallel`), lane agents append `#KNOWLEDGE-CANDIDATE` lines to their lane output files (`.devt/state/review-lane-*.md`), not to scratchpad. The orchestrator's consolidate step must aggregate them or B-II.3's gate will false-block parallel reviews.
+
+- [ ] **Step 1: Validate**: confirm exactly where lane agents are instructed to write the tags today (lane file vs scratchpad). Currently they should write to scratchpad per the agent body, but field signal suggests this is inconsistent.
+- [ ] **Step 2: Add `state aggregate-knowledge-candidates` CLI** that scans `review-lane-*.md` + `review.md` for `#KNOWLEDGE-CANDIDATE:` lines, dedupes by content, appends to scratchpad.md with `<!-- aggregated from review-lane-X.md -->` provenance comment.
+- [ ] **Step 3: Wire the aggregator** into code-review-parallel.md's consolidate step (after consolidator-ran marker, before present_findings).
+- [ ] **Step 4: Smoke gate K13**: aggregator pulls tags from 2 lane files into scratchpad with provenance comments.
+
+#### B-II commit batch
+
+Two commits for clarity:
+
+```bash
+# Commit 1: state.cjs gate work
+git add bin/modules/state.cjs bin/modules/state-audit.cjs
+git commit -m "feat(state): anti-escape-hatch gate strictening — reuse-attempted marker + structured skip payloads + knowledge-candidates gate"
+
+# Commit 2: workflow + CLI wiring
+git add bin/devt-tools.cjs workflows/*.md
+git commit -m "feat(workflow): wire reuse-attempted + claude-mem-structured-skip + knowledge-candidates aggregation into context_init/present_findings"
+```
 
 ---
 
-## Phase C — Bitbucket PR-scoped tier (v0.64.0)
+### Sub-batch B-III — Memory Layer UX (greenfield-validated priorities)
+
+Greenfield calibration #2 #10 explicitly ranked the previous B0-B5 list. **Adopt greenfield's ranking**:
+- #1 field impact: B0 (passive memory-candidate surfacing) → ship in v0.63.0
+- #2 field impact: B3 (curator pre-recommends `candidate` status for tooling items) → ship in v0.63.0
+- Lower impact: B2 (context_init prose simplification) → ship in v0.63.0 but **scope to code-review.md only** (greenfield observation: 189 lines, not quick-implement's 122)
+- Defer: B1 (knowledge-candidate aggregation) → merged into B-II.4 above
+- Defer: B4 (`superseded_when`) → v0.64.0+, no recurring field pain yet
+- Defer: B5 (memory promote batches) → v0.64.0+, B3 likely eliminates 80% of the friction
+
+**Effort**: ~5-6 hours.
+
+#### Task B-III.1 — Passive memory-candidate surfacing at three natural moments
+
+(Content unchanged from existing plan's B0a-B0e. Renumber to B-III.1.a through B-III.1.e. See lines 391-456 of the prior plan version.)
+
+Three surfaces:
+- **B-III.1.a** SessionStart hint via `additionalContext`, gated on count ≥ threshold + no active workflow + cooldown
+- **B-III.1.b** `/devt:next` recommendation when `state.active=false`
+- **B-III.1.c** `present_findings` footer (4 workflows KEEP-IN-SYNC)
+- **B-III.1.d** Config schema: `candidates_surface_threshold: 5`, `candidates_surface_cooldown_hours: 24`
+- **B-III.1.e** Single commit
+
+(Detailed steps unchanged — see existing plan body. Validation steps + smoke gates preserved.)
+
+#### Task B-III.2 — Curator pre-recommends `candidate` status for tooling-evolving items
+
+(Content unchanged from existing plan's B3. Renumber to B-III.2.)
+
+**Validated finding** (2026-05-28 morning + afternoon calibration #7c-7d confirmation):
+> "Tooling-related candidates from THIS session (Hurl scalar predicate behavior, CONCURRENTLY migration pattern) should likely auto-route to candidate status rather than asking — they're descriptive, not opinionated."
+
+(Detailed steps unchanged — see existing plan body.)
+
+#### Task B-III.3 — `context_init` prose simplification (scope: code-review.md only)
+
+**Refined scope** (greenfield calibration #2, 6c):
+> "context_init is still 188+ lines in v0.62.0 with 5 nested bash conditionals…"
+
+I validated against the actual files:
+- `workflows/quick-implement.md::context_init` = **122 lines** (long but tractable; defer)
+- `workflows/code-review.md::context_init` = **189 lines** (matches greenfield's complaint; in scope)
+- `workflows/dev-workflow.md::context_init` = need to measure (likely similar to code-review per existing plan estimate of 180 lines)
+
+**Effort**: ~2-3 hours (just code-review.md + dev-workflow.md, NOT quick-implement.md).
+
+- [ ] **Step 1: Validate** by re-measuring context_init lengths in all 3 dispatch-heavy workflows.
+- [ ] **Step 2: Identify natural sub-step boundaries**: init / compute memory_signal / compute scope_hint + scope_trust / evict graphify / compute impact-plan / execute graphify call / F16 drill-down / claude-mem harvest / assert decision artifacts.
+- [ ] **Step 3: Split into ~8 named `<substep>` blocks** with one bash + one gate-assert each.
+- [ ] **Step 4: Apply KEEP-IN-SYNC across code-review.md, code-review-parallel.md, dev-workflow.md**.
+- [ ] **Step 5: Smoke gate K14**: count `<substep>` markers in each affected workflow; gate fails if fewer than 8.
+
+#### B-III commit batch
+
+```bash
+# Commit 1: memory surfacing (B-III.1)
+git add hooks/session-start.sh workflows/next.md workflows/*.md bin/modules/config.cjs scripts/smoke-test.sh
+git commit -m "feat(memory): passive candidate surfacing at 3 natural moments (SessionStart + /devt:next + present_findings footer)"
+
+# Commit 2: curator pre-recommend (B-III.2)
+git add agents/curator.md scripts/smoke-test.sh
+git commit -m "feat(curator): pre-recommend candidate status for tooling-evolving items + surface backlog backref"
+
+# Commit 3: context_init simplification (B-III.3)
+git add workflows/code-review.md workflows/code-review-parallel.md workflows/dev-workflow.md scripts/smoke-test.sh
+git commit -m "refactor(workflows): split context_init into named substeps (code-review + dev-workflow only)"
+```
+
+---
+
+### Task B-Z: v0.63.0 release
+
+**Files**: VERSION, plugin.json, CHANGELOG.md
+
+- [ ] Bump VERSION 0.62.1 → 0.63.0, plugin.json to match
+- [ ] CHANGELOG `[0.63.0]` section — theme: "symbol-extraction unlock + anti-escape-hatch gate hardening + memory UX surfacing"
+  - `### Added`: B-I.3 (full-text FTS fallback), B-I.4 (resolution_path telemetry), B-II.3 (knowledge-candidates gate), B-II.4 (aggregator CLI), B-III.1 (3 passive surfaces), B-III.2 (curator pre-recommend), config keys
+  - `### Changed`: B-I.1 + B-I.2 (FTS fallback gate + kebab support), B-II.1 (reuse-attempted marker), B-II.2 (structured skip payload), B-III.3 (context_init refactor)
+  - `### Smoke tests`: K6-K14
+- [ ] Final smoke ~684 → ~705 (+~21 gates)
+- [ ] Tag + push via `scripts/release.sh v0.63.0`
+
+---
+
+## Phase C — MCP Wiring Gaps + Bitbucket PR Tier (v0.64.0)
+
+**Theme**: close the graphify-coverage gaps greenfield's review report ranked #3-5, plus the Bitbucket PR tier that's blocking every greenfield-api PR review.
+
+**Smoke target**: ~705 → ~715 (+~10 gates)
+
+**Effort**: ~10-12 hours (own milestone).
+
+**Sequencing inside Phase C**: C-I (MCP wiring) and C-II (Bitbucket PR tier) are independent. C-III (threshold tuning) is small + can ride on either. Suggested: C-I first (smaller, validates MCP integration patterns before adding new tier), then C-II.
+
+---
+
+### Sub-batch C-I — MCP Wiring Gaps
+
+**Validated finding** (greenfield review report §5 + §7):
+> "5 of 10 graphify MCP tools never called in agentic flows: shortest_path, get_community, get_node, list_prs, triage_prs."
+
+I confirmed via grep: `get_node` is wrapped at `graphify.cjs:448`, `get_community` at `graphify.cjs:945`. Both have CLI/internal wrappers but are not consumed in any workflow or agent. `shortest_path` is wrapped but never called. `list_prs` + `triage_prs` are GitHub-only (deferred — Phase D candidate).
+
+#### Task C-I.1 — Wire `god_nodes` as structured `<god_node_warnings>` block
+
+**Validated finding** (greenfield review report #3):
+> "Today god_nodes lands in the markdown brief but isn't wired into the agent dispatch context as a STRUCTURED hint ('you're about to edit X — it has 417 callers')."
+
+- [ ] **Validate**: read `preflight.cjs::renderPreflightSidecar` to confirm where god_node_match is computed; read existing agent dispatch templates in workflows/.
+- [ ] **Implement**: in workflow `<context>` blocks (programmer + code-reviewer + architect dispatches), add `<god_node_warnings>{json from preflight-brief.json::god_node_match}</god_node_warnings>` between `<scope_hint>` and `<scope_trust>` blocks. When god_node_match=true, the agent sees structured warning instead of having to parse the brief markdown.
+- [ ] **Smoke gate L1**: dispatching programmer when preflight-brief.json has `god_node_match=true` for some file in scope produces a `<god_node_warnings>` block with `match_count`, `top_callers[]`, etc.
+
+#### Task C-I.2 — Wire `shortest_path` for COMPLEX-tier architect
+
+**Validated finding** (greenfield review report #4):
+> "When the architect identifies a service boundary cross, call shortest_path(modified_symbol, other_service_entry_point) to validate ownership. Currently never used."
+
+- [ ] **Validate**: confirm `shortest_path` is exported from `bin/modules/graphify.cjs` and accessible via CLI wrapper.
+- [ ] **Implement**: in `workflows/dev-workflow.md::architect` step, when the architect output mentions service-boundary cross, orchestrator runs `state graphify-shortest-path <sym1> <sym2>` (new CLI wrapper) and feeds the result into the verifier dispatch as `<cross_service_paths>` block.
+- [ ] **Smoke gate L2**: shortest_path CLI wrapper returns sensible output on a known cross-service symbol pair.
+
+#### Task C-I.3 — Wire `get_community` for parallel-review partitioning
+
+**Validated finding** (greenfield review report #7):
+> "Today code-review-parallel partitions by directory prefix (CHANGELOG calls out that community-based partitioning 'never worked'). With proper community resolution via get_community, partition by graph-community could be re-enabled and outperform path-based."
+
+- [ ] **Validate**: read `workflows/code-review-parallel.md::partition_lanes`; understand the current directory-prefix logic + the prior "community-based never worked" failure mode.
+- [ ] **Spike-first**: write a 30-line node script that calls `get_community` on a sample diff and prints proposed partitions. Eyeball results before committing to implementation.
+- [ ] **Implement** (conditional on spike): replace the directory-prefix partition step with `get_community`-driven partition. Keep directory-prefix as graceful-degradation fallback when graphify=disabled.
+- [ ] **Smoke gate L3**: partition output for a 3-community diff produces 3 lanes; partition output for a graphify-disabled scenario falls back to directory prefixes.
+
+#### Task C-I.4 — Wire `get_node` for review.md per-finding context
+
+**Validated finding** (own analysis — greenfield didn't explicitly request this but it complements C-I.1):
+
+When code-reviewer flags a finding tied to a specific symbol, the review.md could carry `get_node`-derived metadata (declaration site, doc strings, type hints) inline. Currently the reviewer has to read the file again to look these up.
+
+- [ ] **Validate**: read code-reviewer agent body for finding-emission format.
+- [ ] **Defer decision**: this is greenfield review report's #3 god_nodes-flavored idea but for ad-hoc finding context. Lower priority than C-I.1 — could defer to v0.64.1 if Phase C runs long.
+
+#### C-I commit batch
+
+```bash
+# Commit 1: god_nodes structured warnings
+git add workflows/*.md scripts/smoke-test.sh
+git commit -m "feat(workflow): wire god_nodes as <god_node_warnings> structured block in agent dispatch context"
+
+# Commit 2: shortest_path for cross-service verification
+git add bin/devt-tools.cjs bin/modules/state.cjs workflows/dev-workflow.md scripts/smoke-test.sh
+git commit -m "feat(graphify): wire shortest_path in COMPLEX-tier architect step for cross-service ownership verification"
+
+# Commit 3: get_community partitioning (conditional on spike)
+git add workflows/code-review-parallel.md scripts/smoke-test.sh
+git commit -m "feat(graphify): replace directory-prefix partition with get_community-driven for parallel review"
+```
+
+---
+
+### Sub-batch C-II — Bitbucket PR-Scoped Tier
 
 **Theme**: graphify's biggest project-leverage gap for non-GitHub repos.
 
-**Validated finding** (greenfield orchestrator's P0): `code-review.md:152-156` shows the tier-decision bash routes Bitbucket projects to `symbol_anchored` because `pr_scoped` requires `git.provider=github`. Every greenfield-api review since 2026-05-19 has hit the fallback. The upstream `mcp__graphify__get_pr_impact` MCP tool is GitHub-only.
+(Content unchanged from existing plan's Phase C. See lines 549-585 of the prior plan version for task bodies C1-C5.)
 
-**Effort**: 6-8 hours. Larger feature; deserves its own milestone.
+**Validated finding** (greenfield orchestrator's P0): code-review.md:152-156 routes Bitbucket projects to `symbol_anchored` because `pr_scoped` requires `git.provider=github`. Every greenfield-api review since 2026-05-19 has hit the fallback.
 
-**Strategy**: implement a devt-native equivalent. No upstream MCP changes needed; devt computes the equivalent locally using `git diff origin/main...HEAD` + symbol extraction + blast_radius on the extracted symbols.
+**Effort**: ~6-8 hours.
 
-### Task C1: Validate Bitbucket PR detection
+(Tasks C-II.1 through C-II.5 — unchanged from prior C1-C5; see existing plan body.)
 
-- [ ] **Validate**: How does devt detect "this is a PR"? Currently `PR_NUM=$(echo "${REVIEW_SCOPE}" | grep -oE '(PR|pull request) ?#?[0-9]+' ...)` — text parse from task description. Workable for both GitHub and Bitbucket since both use "PR #N" idiom.
-- [ ] How does devt know which commit range to diff for the PR? Currently it doesn't — for symbol_anchored, the bash extracts symbols from `git diff origin/main...HEAD`.
-- [ ] **Design**: new tier `bitbucket_pr_scoped` (or rename `pr_scoped` to `provider_native_pr` and parameterize by provider).
+---
 
-### Task C2: Implement `bitbucket_pr_scoped` tier
+### Sub-batch C-III — Threshold Tuning + Memoization
 
-- [ ] In code-review.md context_init's impact-plan bash, add a branch:
-  - When `PR_NUM` is detected AND `git.provider=bitbucket` AND `graphify_state=ready` → use `bitbucket_pr_scoped` tier
-  - Tool: `mcp__plugin_devt_devt-graphify__blast_radius` (same as symbol_anchored — graphify's blast_radius is provider-agnostic)
-  - Args derivation: extract symbols from `git diff origin/main...HEAD -- <files-touched-by-PR>` (currently the same diff command, but scoped to the PR's actual file list rather than HEAD's recent changes)
-  - The key difference vs symbol_anchored is the SCOPE of diff: PR's commit range, not just recent HEAD.
+**Validated finding** (greenfield review report #5 + #6 — lower priority but real):
 
-- [ ] Validate the PR commit range derivation. Bitbucket doesn't have a stable "main branch" name in all repos — may be `master`, `main`, or custom. Read it from config or detect via `git symbolic-ref refs/remotes/origin/HEAD`.
+#### Task C-III.1 — Adaptive `direct_dependents` threshold
 
-- [ ] Implement.
+> "Lower the direct_dependents >= 10 AND trust=dense threshold OR make it adaptive. For a 45K-node graph, 10 is high; many real edits touch 3-9 dependents that would benefit from a blast map."
 
-### Task C3: Mirror in code-review-parallel.md (KEEP-IN-SYNC)
+- [ ] **Validate**: confirm the threshold lives in `workflows/quick-implement.md` + `dev-workflow.md` step `graphify_scan_prep`. Read the actual bash conditional.
+- [ ] **Design**: scale threshold by graph size — `max(5, log10(node_count) * 2)` (≈5 for small graphs, ≈10 for 100K-node graphs).
+- [ ] **Implement**: extract the threshold computation into a helper function (likely in graphify.cjs or preflight.cjs), used by both workflows. Workflows just consume the resolved value.
+- [ ] **Smoke gate L4**: threshold helper returns ≥5 for small graphs, ≤15 for large graphs.
 
-### Task C4: Smoke gates
+#### Task C-III.2 — `mcp-stats` direct-MCP validation pass
 
-- bitbucket-pr-tier fires when `git.provider=bitbucket` + PR detected
-- bitbucket-pr-tier produces different args than symbol_anchored (broader scope: full PR diff)
-- bitbucket-pr-tier degrades to symbol_anchored when origin/main doesn't exist
+**Validated finding** (greenfield calibration #2, 9c):
+> "Cannot validate post-v0.60.0 namespace hotfix from this session's data. Would need to run a session with explicit graphify MCP calls to confirm namespace hotfix."
 
-### Task C5: v0.64.0 release
+Not a code task — but a deliberate calibration in a dev-workflow run with explicit MCP drill-downs would close the validation gap. **Owner**: user, not the plan. Track here so it's not lost.
+
+- [ ] Run `/devt:workflow "implement <feature> with symbol-anchored review"` against a multi-symbol diff that exercises the code-reviewer drill-down protocol.
+- [ ] Confirm `mcp-stats` returns non-empty for the resulting workflow_id.
+
+### Task C-Z: v0.64.0 release
+
+(Standard bump; CHANGELOG `[0.64.0]` section.)
+
+---
+
+## Phase D — Agent Truncation Recovery (research spike)
+
+**Theme**: investigate the biggest field pain point greenfield's session-2 calibration surfaced.
+
+**Validated finding** (greenfield calibration #2, 6b + 8e):
+> "3 of 4 dispatches truncated mid-run. The workflow has no documented recovery protocol. The proper recovery should be SendMessage to the truncated agent's ID, but that's not in the workflow prose. Improvised 'validate-on-disk-then-write-summary-myself' silently degrades the workflow's value (review.md becomes orchestrator-authored, not reviewer-authored)."
+
+**Status**: research spike, not implementation. The fix shape is unknown until we understand the failure modes.
+
+**Effort**: ~1 hour spike → fix shape decision → TBD implementation.
+
+### Task D-1 — Truncation forensics
+
+- [ ] Run `/devt:forensics` on greenfield's 3 truncated dispatches (programmer agent `a28840e8c54223a78`, code-reviewer agent `a45b60838b54a1d26`, tester agent — extract IDs from greenfield's session log).
+- [ ] Identify common failure mode signature: which agent? which dispatch length? which scope size? was the prior output viable as continuation context?
+- [ ] Document findings in `.devt/state/D1-truncation-forensics.md`.
+
+### Task D-2 — Fix shape decision
+
+Based on D-1, choose between:
+
+**Option D-2.a**: Document SendMessage-to-agent-id recovery in canonical dispatch template (light prose change, ~30min)
+**Option D-2.b**: Build `state continue-agent <artifact>` CLI that re-dispatches with partial output as continuation context (heavier; ~3-4h)
+**Option D-2.c**: Detect truncation via output substance check (run `check-agent-output` post-dispatch; if `looks_like_stub=true` AND agent dispatch terminated abruptly, trigger automatic re-dispatch with continuation context). Heaviest; ~5-6h.
+
+Pick after D-1.
+
+### Task D-3 — Implementation
+
+TBD per D-2 decision. Could go in v0.63.1 (if D-2.a) or v0.64.0 (if D-2.b) or v0.65.0 (if D-2.c).
 
 ---
 
 ## Sequencing recommendation
 
-**This session (today)**: Phase A only. 5 tasks remaining (A1 done), ~1.5 hours total. Operational cleanup + release-flow hardening + docs update. Low risk, high value.
+| Session | Work | Effort | Output |
+|---|---|---|---|
+| Today (afternoon, after this plan revision) | Phase A: A6, A7, A8, A9 (the 4 surgical hotfixes) | ~1.5h | v0.62.1 hotfix subset shipped to main, no release yet |
+| Next session | Phase A remainder: A2, A3, A4, A5, A10, A11 release | ~2h | v0.62.1 tagged + released |
+| Session 3 | Phase B-I (symbol extraction) | ~3-4h | B-I shipped to main (4 new smoke gates) |
+| Session 4 | Phase B-II (anti-escape-hatch) | ~3-4h | B-II shipped to main (4 new smoke gates) |
+| Session 5 | Phase B-III (memory UX) + B-Z release | ~5-6h | v0.63.0 tagged + released |
+| Session 6+ | Phase C (MCP + Bitbucket) | ~10-12h | v0.64.0 milestone |
+| Spike (parallel) | Phase D-1 forensics | ~1h | D-2 decision; D-3 effort scoped |
 
-**Next session**: Phase B. 3 tasks, ~3 hours. Workflow UX improvements.
+**Do not bundle Phase B with Phase C.** Different risk profiles, different release boundaries.
 
-**Following session**: Phase C. Bitbucket PR tier. ~6-8 hours, own milestone.
-
-**Do not bundle Phase B with Phase C** — they have different risk profiles and natural release boundaries.
+**Do not bundle Phase A hotfixes with Phase B unlock work.** Hotfixes ship fast as v0.62.1; Phase B is a 12-15h effort that needs the full release cycle of CHANGELOG + smoke + tag + verify.
 
 ## Out of scope (will not implement; will not re-evaluate without new field signal)
 
 - Agent passivity around graphify — architectural contract requires this stays.
-- Re-dispatch template enforcement — L1 hook's existence check is the right granularity.
-- Per-lane verifiers — no field signal, speculative.
+- Re-dispatch template enforcement — L1's existence check is correct granularity.
+- Per-lane verifiers — speculative, no field signal.
+- LLM/embedding-based symbol extraction (greenfield review #1 highest-ROI) — deferred to v0.65.0+ pending Phase B's easy-half results.
+- Knowledge-candidate aggregation as a standalone task — merged into B-II.4.
+- `superseded_when` concept lifecycle field — defer to v0.64.0+.
+- `memory promote` batches tooling items — defer to v0.64.0+; B-III.2 likely subsumes 80%.
+- `list_prs` / `triage_prs` MCP wiring — GitHub-only, deferred with Bitbucket Phase C.
+- `blast_radius` memoization — premature without field timing data.
+- Move reuse-search to plan stage — defer until COMPLEX dev-workflow gets field exercise.
 
 ## Why this plan
 
-- **Validation-first**: every kept item has codebase evidence; every rejected item has documented reason.
-- **No speculative work**: every item traces to specific field signal or operational evidence.
-- **Phased by risk**: operational/docs first (low risk), UX second (medium), large feature last (own milestone).
-- **CON-001 pattern preserved**: Phase A's INTERNALS.md update locks in the architectural principle the session demonstrated. Future work inherits the documented discipline.
-- **Aligns with [[project-devt-north-star-goals]]**: output quality (better gates), token usage (no wasted dispatches), graphify integration (Bitbucket tier closes the biggest project gap).
+- **Validation-first**: every kept item has explicit codebase evidence (file:line citations) OR field-signal evidence (calibration response numbers). Every rejection or defer has documented reason.
+- **No speculative work**: every implemented item traces to specific calibration signal or operational evidence from this session or greenfield's 2026-05-28 sessions.
+- **Phased by risk + leverage**: surgical hotfixes first (Phase A, low risk), architectural unlocks second (Phase B, medium risk, highest field impact), coverage milestones last (Phase C, medium risk, own release).
+- **CON-001 pattern preserved**: A5's INTERNALS.md update locks in the architectural principle the session demonstrated. Future work inherits the discipline.
+- **Greenfield's ranking honored**: B-III.1 (passive surfacing) and B-III.2 (curator pre-recommend) ship in v0.63.0 per the field signal; B-III.3 (context_init refactor) ships in v0.63.0 but scope-corrected to code-review.md + dev-workflow.md only.
+- **Aligns with [[project-devt-north-star-goals]]**: output quality (better gates closing silent skips), token usage (no wasted dispatches from gate false-negatives), graphify integration (symbol-extraction unlock + Bitbucket tier close the biggest project gaps).
+
+---
+
+## Change history
+
+- **2026-05-28 (morning)** — Initial plan with 3 phases (operational v0.62.1 / memory UX v0.63.0 / Bitbucket v0.64.0). Commit `cd279a8`.
+- **2026-05-28 (afternoon)** — Revised after greenfield calibration #2 (GFBUGS-180 quick-implement session). Added: A6-A10 surgical hotfixes (F31 placeholder regex, SYMBOL_DENYLIST extension, lane-JSON eviction, verifier gate workflow_type-awareness, mcp-stats CLI-wrapper caveat docs). Restructured Phase B into 3 sub-batches: B-I symbol extraction unlock (the cascading SKIP root cause), B-II anti-escape-hatch gate strictening (3 silent-skip vectors closed), B-III memory UX (greenfield-validated B0+B3 priorities, B2 scope-corrected, B1+B4+B5 deferred). Added Phase D agent-truncation research spike. Total: 26 items reviewed → 23 kept, 3 rejected, 7 deferred.
