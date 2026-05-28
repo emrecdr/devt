@@ -7518,6 +7518,18 @@ else
 fi
 rm -rf "$K5_TMP"
 
+# K10: debug.md carries the auto_refresh_post_impl hook (parity with
+# dev-workflow.md). Field signal (greenfield 2026-05-28 graphify-audit.md
+# improvement #3): post-debug-fix doesn't refresh the graph; the next
+# code-review fires on stale data. The hook surfaces an AskUserQuestion
+# (or silent refresh in autonomous mode) when a fix lands.
+K10_DBG_HITS=$(/usr/bin/grep -c "auto_refresh_post_impl\|graphify maybe-refresh" "$ROOT/workflows/debug.md" 2>/dev/null || echo 0)
+if [ "${K10_DBG_HITS:-0}" -ge 2 ]; then
+  pass "K10: debug.md carries auto_refresh_post_impl post-fix hook (parity with dev-workflow.md)"
+else
+  fail "K10: debug.md missing auto_refresh_post_impl post-fix hook (hits=${K10_DBG_HITS})"
+fi
+
 # K9: MCP namespace consistency across dispatching workflows. Field signal
 # (greenfield 2026-05-28 graphify-audit.md): 12 unprefixed mcp__devt-graphify__
 # functional references across dev-workflow.md, debug.md, research-task.md,

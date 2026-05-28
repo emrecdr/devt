@@ -211,6 +211,21 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
 
 </step>
 
+<step name="post_fix_graphify_refresh" gate="refresh decision recorded">
+
+**Post-fix graphify refresh** — When `graphify.enabled=true` AND the debugger landed a fix (`debug-summary.md` status is `FIXED`), the graph is now N commits behind reality. The next workflow (review, dev, retro) would consume a stale scope_hint. Branch on `config.graphify.auto_refresh_post_impl` (default `"ask"`):
+
+- **`"ask"` (default)** AND interactive (non-autonomous) mode: emit AskUserQuestion with header "Graphify refresh", question "Debug fix landed. The graph is now N commits behind reality. Refresh now?", three options:
+    1. **Refresh now (recommended)** — runs `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`, surfaces one-line confirmation. Downstream workflows see the patched symbols.
+    2. **Skip — I'll refresh manually later** — emits the `💡` tip and continues; user retains control. Next preflight will catch staleness via the staleness gate.
+    3. **Always auto-refresh for this project** — runs the refresh AND writes `auto_refresh_post_impl: true` into `.devt/config.json` so future workflows in this project skip the prompt.
+- **`true`** OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`. Surface a one-line confirmation: `🔄 Refreshed graphify graph after fix (Xs)` or `⚠️ Graphify refresh skipped: <reason>`. Continue regardless — refresh is best-effort.
+- **`false`**: emit only the one-line tip — `💡 Debug fix landed — run `graphify update .` (or `node bin/devt-tools.cjs graphify maybe-refresh --force`) to refresh the project graph. The staleness gate will catch drift on the next workflow.` No prompt, no refresh.
+
+Skip the step entirely when graphify is disabled (`config.graphify.enabled=false`) — emit nothing. Skip when `debug-summary.md` status is `NEEDS_MORE_INVESTIGATION` or `BLOCKED` (no fix landed; graph isn't stale).
+
+</step>
+
 <step name="report" gate="results presented to user">
 ## Step 4: Report Results
 
