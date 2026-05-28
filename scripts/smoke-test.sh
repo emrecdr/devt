@@ -7396,6 +7396,26 @@ else
 fi
 rm -rf "$I8_TMP"
 
+# W010: every workflow that dispatches a devt:* agent MUST carry an
+# <available_agent_types> section. Without it, post-/clear context-reload
+# silently falls back to general-purpose dispatch (loses devt's specialist
+# agents). Field signal (greenfield health check 2026-05-28): code-review-
+# parallel.md was missing the section since v0.59.0; health surface W010
+# flagged it. This gate enforces the invariant for all dispatching workflows.
+W010_OFFENDERS=""
+for wf in "$ROOT"/workflows/*.md; do
+  # Skip if the workflow doesn't actually dispatch any devt:* agent
+  if ! /usr/bin/grep -q 'Task(subagent_type="devt:' "$wf"; then continue; fi
+  if ! /usr/bin/grep -q "<available_agent_types>" "$wf"; then
+    W010_OFFENDERS="$W010_OFFENDERS $(basename "$wf")"
+  fi
+done
+if [ -z "$W010_OFFENDERS" ]; then
+  pass "K1: every workflow dispatching devt:* agents carries <available_agent_types> (W010 satisfied)"
+else
+  fail "K1: workflows dispatching agents WITHOUT <available_agent_types>:${W010_OFFENDERS}"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

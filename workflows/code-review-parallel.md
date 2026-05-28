@@ -10,6 +10,53 @@ argument-hint: "<scope-description>"
 
 This workflow is invoked from `code-review.md::scope_check` when the review scope exceeds 10 files AND the user opts into parallel via `AskUserQuestion`. It is NOT a user-facing slash command — there is no `/devt:review-parallel`; the routing is internal to `/devt:review`.
 
+---
+
+<prerequisites>
+- `.devt/config.json` exists in project root (run `/init` first if not)
+- `.devt/rules/` directory exists with project conventions
+- `${CLAUDE_PLUGIN_ROOT}` is set (devt plugin is loaded)
+- `node` is available on PATH
+- `workflows/code-review.md::scope_check` has already routed here via `AskUserQuestion` → user picked parallel
+- `.devt/state/workflow.yaml::workflow_type` is `code_review_parallel` (set during delegation)
+</prerequisites>
+
+<available_agent_types>
+The following agent type is used in this workflow:
+
+- `devt:code-reviewer` — code review specialist, READ-ONLY (Read, Bash, Glob, Grep). Used for both per-lane reviews AND the consolidator (synthesis-mode) dispatch.
+
+Not used in this workflow:
+
+- `devt:programmer` — implementation specialist
+- `devt:tester` — testing specialist
+- `devt:architect` — structural review specialist
+- `devt:docs-writer` — documentation specialist
+- `devt:retro` — lesson extraction specialist
+- `devt:curator` — playbook quality maintenance specialist
+- `devt:verifier` — used by the inherited verify step from code-review.md (KEEP IN SYNC)
+  </available_agent_types>
+
+<agent_skill_injection>
+Before dispatching the code-reviewer agent (both per-lane and consolidator), check `.devt/config.json` for an `agent_skills` configuration block:
+
+```json
+{
+  "agent_skills": {
+    "code-reviewer": ["code-review-guide"]
+  }
+}
+```
+
+If `agent_skills.code-reviewer` exists, inject the skill references into the agent's prompt context — same idiom as `code-review.md` single-dispatch path. Apply uniformly to every per-lane dispatch AND the consolidator synthesis-mode dispatch so all dispatches have the same skill surface.
+
+If not configured, omit the block.
+</agent_skill_injection>
+
+---
+
+## Steps
+
 <step name="context_init" gate="compound init succeeds + lane partition computed">
 
 Initialize the workflow (delegated from code-review.md; the upstream step already wrote workflow.yaml::active=true and ran preflight + memory_signal cache). Re-read the cached context blocks:
