@@ -7470,6 +7470,27 @@ else
   fail "K3: extractTopic returned ${K3_OUT}; expected []. Denylist incomplete?"
 fi
 
+# K4: review-lane-*.json sidecars must be evicted alongside their .md
+# counterparts. Field signal (greenfield 2026-05-28 calibration #2, 1b):
+# review-lane-c.json from a prior workflow persisted across init review,
+# causing validation_warnings=2 mid-session. The eviction regex covered
+# .md only.
+K4_TMP=$(mktemp -d)
+mkdir -p "$K4_TMP/.devt/state" && echo '{}' > "$K4_TMP/.devt/config.json"
+touch "$K4_TMP/.devt/state/review-lane-a.md"
+echo "{}" > "$K4_TMP/.devt/state/review-lane-a.json"
+touch "$K4_TMP/.devt/state/review-lane-b.md"
+echo "{}" > "$K4_TMP/.devt/state/review-lane-b.json"
+touch "$K4_TMP/.devt/state/review-lane-c.json"
+(cd "$K4_TMP" && node "$ROOT/bin/devt-tools.cjs" state evict-workflow-artifacts >/dev/null 2>&1)
+K4_REMAINING=$(ls "$K4_TMP/.devt/state/" 2>/dev/null | grep -c "^review-lane-" || true)
+if [ "${K4_REMAINING:-0}" = "0" ]; then
+  pass "K4: both review-lane-*.md and review-lane-*.json sidecars evicted on workflow init"
+else
+  fail "K4: ${K4_REMAINING} review-lane file(s) remain after eviction. Files: $(ls "$K4_TMP/.devt/state/" | grep review-lane | tr '\n' ' ')"
+fi
+rm -rf "$K4_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

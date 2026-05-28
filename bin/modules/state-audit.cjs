@@ -313,7 +313,7 @@ function evictWorkflowArtifacts(opts = {}) {
   // Evict review-lane-*.md by readdir + regex match (no shell glob)
   try {
     for (const entry of fs.readdirSync(stateDir)) {
-      if (/^review-lane-[A-Za-z0-9_.-]+\.md$/.test(entry)) {
+      if (/^review-lane-[A-Za-z0-9_.-]+\.(md|json)$/.test(entry)) {
         // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
         const fullPath = path.join(stateDir, entry);
         if (dryRun) {
