@@ -8249,6 +8249,57 @@ else
 fi
 rm -rf "$L5_TMP"
 
+# L6: assert-reuse-analyzed opts out for read-only workflow_types.
+# Greenfield calibration #5: /devt:review (code_review) returned ok:false
+# because no programmer-side reuse-search bash ran — but review is
+# READ-ONLY by design. Same A9-pattern as assert-verifier-ran: declare
+# REUSE_REQUIRED_WORKFLOWS = {dev, quick_implement}, other types get
+# ok:true with workflow-type reason. Three cases prove the matrix:
+#   1. workflow_type=code_review (read-only) → ok:true with reason
+#   2. workflow_type=dev with no marker → ok:false (gate still enforces)
+#   3. workflow_type=quick_implement with marker + zero candidates → ok:true
+L6_TMP=$(mktemp -d)
+L6_TMP=$(cd "$L6_TMP" && pwd -P)
+mkdir -p "$L6_TMP/.devt/state"
+echo '{}' > "$L6_TMP/.devt/config.json"
+# Case 1: code_review opt-out
+cat > "$L6_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: l6-test
+workflow_type: code_review
+first_created_at: 2026-05-29T00:00:00.000Z
+EOF
+L6_C1=$(cd "$L6_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.ok===true && j.workflow_type==='code_review')?'1':'0');}catch(e){console.log('err');}})")
+# Case 2: dev workflow with no marker → BLOCK
+cat > "$L6_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: l6-test
+workflow_type: dev
+first_created_at: 2026-05-29T00:00:00.000Z
+EOF
+L6_C2=$(cd "$L6_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===false ? '1':'0');}catch(e){console.log('err');}})")
+# Case 3: quick_implement with marker + zero candidates → PASS
+cat > "$L6_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: l6-test
+workflow_type: quick_implement
+first_created_at: 2026-05-29T00:00:00.000Z
+EOF
+echo "attempted_at=2026-05-29T00:01:00Z" > "$L6_TMP/.devt/state/reuse-search-attempted.txt"
+echo "result={\"ok\":true,\"candidates_total\":0}" >> "$L6_TMP/.devt/state/reuse-search-attempted.txt"
+cat > "$L6_TMP/.devt/state/reuse-candidates.md" <<'EOF'
+# Candidates
+
+(no candidates)
+EOF
+L6_C3=$(cd "$L6_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true?'1':'0');}catch(e){console.log('err');}})")
+if [ "$L6_C1" = "1" ] && [ "$L6_C2" = "1" ] && [ "$L6_C3" = "1" ]; then
+  pass "L6: assert-reuse-analyzed opts out for code_review, enforces for dev/quick_implement"
+else
+  fail "L6: workflow-type matrix broken. c1(code_review)=${L6_C1} c2(dev-block)=${L6_C2} c3(qi-pass)=${L6_C3}"
+fi
+rm -rf "$L6_TMP"
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a

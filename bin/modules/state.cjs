@@ -1973,7 +1973,36 @@ function assertAutoCuratorConsidered() {
 // first" gets rationalized past, producing 5-variations-of-same-function.
 // Pattern: derive-reuse-candidates writes the candidate list; programmer
 // must address each candidate in reuse-analysis.md with a decision.
+// NEW-7 (greenfield calibration #5): assert-reuse-analyzed was workflow_type-
+// blind, returning ok:false on /devt:review sessions even though review is
+// READ-ONLY and never dispatches a programmer. The gate is correct for
+// implement-flows (dev / quick_implement) but creates noise for review-only
+// flows. Same pattern as VERIFIER_REQUIRED_WORKFLOWS (A9) — declare the
+// implement-flow opt-in set, return ok:true for others with a workflow-type
+// reason.
+const REUSE_REQUIRED_WORKFLOWS = new Set([
+  "dev",
+  "quick_implement",
+]);
+
 function assertReuseAnalyzed() {
+  // Workflow-type opt-out: read-only workflows (code_review, debug, research,
+  // arch_health_scan, retro, etc.) intentionally don't dispatch a programmer,
+  // so the reuse pre-search step is irrelevant. Returning ok:true with a
+  // workflow-type reason prevents the gate from blocking present_findings on
+  // these flows. Same opt-out pattern as assertVerifierRan (A9).
+  let workflowType = null;
+  try {
+    const stateData = readState();
+    workflowType = stateData && stateData.workflow_type;
+  } catch { /* fall through — treat as unknown, apply gate */ }
+  if (workflowType && !REUSE_REQUIRED_WORKFLOWS.has(workflowType)) {
+    return {
+      ok: true,
+      workflow_type: workflowType,
+      reason: `workflow_type=${workflowType} does not dispatch a programmer by design — reuse pre-search gate does not apply`,
+    };
+  }
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const markerPath = path.join(dir, "reuse-search-attempted.txt");
