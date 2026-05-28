@@ -362,90 +362,165 @@ git commit -m "docs(internals): promote substance-enforcement-gates to first-cla
 
 ---
 
-## Phase B — Workflow UX + small features (v0.63.0)
+## Phase B — Workflow UX + memory layer improvements (v0.63.0)
 
-**Theme**: close three field-validated gaps in workflow ergonomics.
+**Theme**: close six field-validated gaps in workflow + memory-layer ergonomics.
 
-**Smoke target**: 679 → ~688 (+~9 gates)
+**Smoke target**: 679 → ~694 (+~15 gates)
 
-**Effort**: ~4-5 hours subagent-driven.
+**Effort**: ~7-9 hours subagent-driven.
 
-### Task B0: Interactive memory-promotion offer at workflow end
+**Task list**:
+- B0 (a-d): Passive memory-candidate surfacing (SessionStart + /devt:next + present_findings)
+- B1: Knowledge-candidate aggregation to scratchpad
+- B2: context_init prose simplification
+- B3: Curator pre-recommends `candidate` for tooling-evolving items
+- B4: Concept docs track `superseded_when` for lifecycle clarity
+- B5: `memory promote` batches tooling-related items
 
-**Validated finding** (field signal 2026-05-28): the auto_curator infrastructure is binary today — FIRE (auto-dispatch curator) or SKIP (silent). When `memory.auto_curator_on_review=false` (default), candidates accumulate in `_suggestions.md` until the user remembers to run `/devt:retro` or `/devt:memory promote`. The `devt:health` I004 info line is the only surface today and requires manual `/devt:health` invocation.
+B0+B3+B4+B5 are a coherent "memory layer UX" sub-batch. B1+B2 are workflow-side. Both share the v0.63.0 release boundary because they're all UX improvements that don't affect protocol/correctness.
 
-User feedback: "memory update should be more robust — at most relevant moments like after task execution, changing codebase or at other relevant moments it should ask me for this."
+### Task B0: Passive memory-candidate surfacing at three natural moments
 
-**Design**: extend `memory.auto_curator_on_review` from boolean to tristate `"off" | "ask" | "auto"` (with bool back-compat — `true` → `"auto"`, `false` → `"off"`). Add `"ask"` mode = AskUserQuestion at workflow-end when threshold + cooldown both met. Wire the prompt into every workflow that ends with `present_findings` (code-review.md, code-review-parallel.md, dev-workflow.md, quick-implement.md).
+**Validated finding** (field signal 2026-05-28 + investigation): user wants memory candidates surfaced at relevant moments without manual `/devt:health` invocation. Investigation of `/devt:memory promote` cost profile shows it dispatches the `curator` agent (effort: medium, maxTurns: 35, AskUserQuestion-per-candidate) → 1–3 minutes + 30–100K tokens for 18 candidates. This is decisively NOT auto-fireable, and AskUserQuestion at every workflow end would prompt the user repeatedly with a costly action.
 
-**Effort**: ~1.5 hours.
+**Right pattern**: surface count, never auto-dispatch, never block. Three passive surfaces; user acts when they have attention budget.
 
-- [ ] **Step 1: Validate the current auto_curator step's branching**
+**Effort**: ~2-3 hours.
+
+#### Sub-task B0a — SessionStart hint
+
+**Wire `hooks/session-start.sh`** to check `_suggestions.md` candidate count at session start. If count ≥ threshold AND no active workflow (`workflow.yaml::active != true`) AND time-since-last-shown ≥ cooldown, inject via `additionalContext`:
+
+> 📋 Memory: N candidates pending triage. When you have time, run `/devt:retro` or `/devt:memory promote`.
+
+Single line. Non-blocking. Free (hook output, no LLM cost). Frequency-limited via `.devt/state/last-memory-hint-shown.txt`.
+
+- [ ] **Step 1: Validate** the SessionStart hook structure (currently does plugin registration + project detection; no candidate surfacing today).
+- [ ] **Step 2: Add candidate-count read** + cooldown check + `additionalContext` emission. Update `last-memory-hint-shown.txt` post-emit.
+- [ ] **Step 3: Smoke gate**: `_suggestions.md` count ≥ 5 + no active workflow → hint appears; with `last-memory-hint-shown.txt` recent → hint skipped (cooldown).
+
+#### Sub-task B0b — `/devt:next` candidate recommendation
+
+**Modify `workflows/next.md`** to include "🧠 Triage memory candidates (N pending)" as one of the recommended next actions WHEN `state.active=false` AND count ≥ threshold. This is the natural "user explicitly asks what's next" moment.
+
+- [ ] **Step 1: Validate** the current branching logic in `next.md` (it already considers state.active and other signals; just add candidate-count branch).
+- [ ] **Step 2: Add the recommendation prose** + bash check for `_suggestions.md` count.
+- [ ] **Step 3: Smoke gate**: count ≥ 5 + no active workflow → `/devt:next` surfaces "Triage memory candidates" as one of the options; otherwise doesn't.
+
+#### Sub-task B0c — `present_findings` informational footer
+
+**Add a one-line footer** to every workflow's `present_findings` step (after the main report, before the workflow ends). When `_suggestions.md` count ≥ threshold:
+
+> 💡 N memory candidates pending — run `/devt:retro` when you have time.
+
+NOT AskUserQuestion. Just a line of text. User can act or ignore. KEEP-IN-SYNC across code-review.md, code-review-parallel.md, dev-workflow.md, quick-implement.md.
+
+- [ ] **Step 1: Identify present_findings step in all 4 workflows.**
+- [ ] **Step 2: Add the footer bash snippet** — reads candidate count, emits line if ≥ threshold.
+- [ ] **Step 3: Smoke gate**: footer present in each workflow's present_findings (4 grep checks).
+
+#### Sub-task B0d — Config schema additions
+
+Add to `bin/modules/config.cjs::DEFAULTS.memory`:
+
+```javascript
+// Memory-candidate surfacing config. Three passive surfaces (SessionStart
+// hint + /devt:next recommendation + present_findings footer) all gate
+// on count ≥ surface_threshold. SessionStart hint additionally
+// rate-limits via surface_cooldown_hours. Surfaces never dispatch the
+// curator — they only inform; user runs /devt:memory promote when ready.
+candidates_surface_threshold: 5,
+candidates_surface_cooldown_hours: 24,
+```
+
+KEEP existing `memory.auto_curator_on_review` (boolean) for power users who DO want auto-dispatch. Don't rework it to tristate — surfacing and dispatching are separate concerns now.
+
+#### Sub-task B0e — Commit
+
+Single commit for B0a-B0d:
 
 ```bash
-sed -n '538,580p' /Users/emrec/Projects/devt/workflows/code-review.md
+git commit -m "feat(memory): passive candidate surfacing at 3 natural moments (SessionStart + /devt:next + present_findings footer)"
 ```
 
-Identify the FIRE / SKIP / DISABLED branches and confirm where the new "ASK" branch would slot in.
+**Why this design over the original B0**:
 
-- [ ] **Step 2: Extend config schema**
+| Concern | Original B0 (AskUserQuestion at workflow end) | Revised B0 (3 passive surfaces) |
+|---|---|---|
+| User interruption | Blocks workflow completion with prompt | Never blocks — informational only |
+| Cost when user accepts | 1–3min + 30-100K tokens immediately | User runs `/devt:memory promote` deliberately when ready |
+| Notification fatigue | Prompts at end of every workflow | SessionStart once/24h + opt-in `/devt:next` + passive footer |
+| Honors "right moments" intent | Yes but invasive | Yes and non-invasive |
+| Cost of the surface itself | AskUserQuestion latency | Zero (text emission) |
 
-In `bin/modules/config.cjs::DEFAULTS.memory`, change:
-```javascript
-auto_curator_on_review: false,
-```
-to:
-```javascript
-// Tristate: "off" (silent skip) | "ask" (AskUserQuestion at workflow end
-// when threshold + cooldown met) | "auto" (silent dispatch via curator).
-// Boolean values accepted for back-compat: false→"off", true→"auto".
-auto_curator_on_review: "ask",
-```
+### Task B3 — Curator pre-recommends `candidate` status for tooling-evolving items
 
-(Default = `"ask"` is the right ergonomic — user gets the offer instead of silent skip. Boolean back-compat preserves existing config files.)
+**Field-validated finding** (2026-05-28 promote pass): user ran `/devt:memory promote` on 18 candidates. Curator asked "active vs candidate vs REJ vs defer?" per candidate, but for tooling-related items (e.g., "Bitbucket pr_scoped tier doesn't exist on devt-graphify"), the answer is always `candidate` — because the underlying tooling will evolve. User had to make this decision manually 18 times.
 
-- [ ] **Step 3: Implement the ASK branch in code-review.md::auto_curator**
+**Design**: heuristic in the curator agent body. When the candidate text contains tooling-evolving signals (regex match on `mcp__*`, `version`, `currently`, `today`, `limitation`, `until`, `not yet`, etc.) AND a related entry exists in `docs/superpowers/plans/*.md` (text search across plan files), pre-recommend `candidate` as the default option and surface the resolution path in the question prose:
 
-Inside the existing auto_curator bash block, after the threshold + cooldown checks pass, add a tristate dispatch:
+> Q: "{candidate-text}" — tooling-related, expected to evolve. Promote how?
+>   1. **Candidate** (Recommended — related backlog: Phase C v0.64.0 in 2026-05-28-next-session-backlog.md)
+>   2. Active (if you want this canonical; risk: stales when Phase C ships)
+>   3. REJ tombstone
+>   4. Defer
 
-```bash
-case "$AUTO_CURATOR_MODE" in
-  auto|true)
-    # existing auto-dispatch path
-    ;;
-  ask)
-    # NEW: AskUserQuestion offer
-    echo "auto_curator: ASK — surface AskUserQuestion to user with ${CANDIDATES} candidates"
-    # The actual AskUserQuestion is workflow-level prose (orchestrator must
-    # surface it). Write a marker so the orchestrator's present_findings
-    # step knows to ask.
-    echo "ASK ${CANDIDATES}" > .devt/state/auto-curator-considered.txt
-    ;;
-  off|false|"")
-    # existing silent skip
-    ;;
-esac
-```
+**Effort**: ~1 hour. Curator agent body change + smoke gate.
 
-Then in present_findings, after the existing report, add prose:
+- [ ] **Step 1**: Validate the curator's current per-candidate prompt format in `agents/curator.md`.
+- [ ] **Step 2**: Add the tooling-detection heuristic + plan-file backref text search.
+- [ ] **Step 3**: Update curator prose to surface "Recommended" + resolution link when matched.
+- [ ] **Step 4**: Smoke gate verifying the heuristic matches the documented signals on a fixture candidate.
 
-```markdown
-If `.devt/state/auto-curator-considered.txt` contains `ASK <N>`, surface to the user via AskUserQuestion:
+### Task B4 — Concept docs track `superseded_when` for lifecycle clarity
 
-  Question: "{N} memory promotion candidates pending. Triage now via /devt:memory promote?"
-  Options: Yes (run promote) | No (defer; will ask again after next workflow if conditions persist) | Snooze 7d (record cooldown extension)
+**Field-validated finding** (same promote pass): `candidate` status means "true today, expected to evolve" — but there's no field documenting WHAT would resolve the candidate. When v0.64.0 ships Bitbucket pr_scoped, the CON-002 doc becomes invalid; today there's no automatic detection.
+
+**Design**: add optional `superseded_when` frontmatter field to concept/decision/rejected docs:
+
+```yaml
+---
+id: CON-002
+title: Bitbucket pr_scoped tier unavailable on devt-graphify
+doc_type: concept
+status: candidate
+confidence: explicit
+domain: graphify
+summary: ...
+superseded_when: "devt ships a Bitbucket-native pr_scoped tier (tracked: Phase C in docs/superpowers/plans/2026-05-28-next-session-backlog.md)"
+---
 ```
 
-- [ ] **Step 4: Mirror in code-review-parallel.md, dev-workflow.md, quick-implement.md** (KEEP-IN-SYNC)
+Add `state assert-concept-currency` (or `memory check-stale-concepts`) CLI that scans `.devt/memory/concepts/*.md` + `decisions/*.md` + `rejected/*.md` for `superseded_when` fields, then surfaces a warning if any reference plan items that have been completed (i.e., the plan file's checkbox is `[x]` for that task).
 
-Each workflow's terminal step (present_findings or report) gets the same ASK-branch surface.
+**Effort**: ~1.5 hours. Schema addition + new CLI + smoke gate.
 
-- [ ] **Step 5: Smoke gates** (~3)
-  - L1: config schema accepts `"ask"` value
-  - L2: ASK mode writes the marker (not auto-dispatches)
-  - L3: ASK mode skip surfaces when count < min OR cooldown active
+- [ ] **Step 1**: Add `superseded_when` to memory frontmatter schema (in `bin/modules/memory.cjs::validateFrontmatter`). Optional field; existing docs without it are fine.
+- [ ] **Step 2**: Implement `state assert-concept-currency` CLI that scans for stale references.
+- [ ] **Step 3**: Wire into `/devt:health` as a new I-code (I005 — stale concept references found).
+- [ ] **Step 4**: Smoke gates (schema accepts field; CLI flags fixture stale doc).
 
-- [ ] **Step 6: Commit**
+### Task B5 — `memory promote` batches tooling-related items
+
+**Field-validated finding** (same promote pass): user had to make 18 sequential per-candidate decisions. Tooling-related items share the same answer pattern — batching by category would reduce decisions to ~3-5.
+
+**Design**: in the curator agent body, before per-candidate prompts, scan ALL candidates for shared signals (tooling-evolving, REJ-tombstone-shape, decision-pattern). Group similar candidates and offer batch-promote:
+
+> "5 candidates are all tooling-evolving concepts about devt-graphify limitations. Promote all as `candidate` with status='expires when matching backlog item ships'?"
+>
+>   1. **Batch promote all 5 as candidate** (Recommended)
+>   2. Review each individually
+>   3. Reject the batch
+
+Falls back to per-candidate prompts for non-batched items.
+
+**Effort**: ~2 hours. Curator agent body restructure + batch-grouping algorithm + smoke gate.
+
+- [ ] **Step 1**: Validate the curator's current iteration over `_suggestions.md` entries.
+- [ ] **Step 2**: Implement clustering heuristic (group by tooling signal + domain).
+- [ ] **Step 3**: Add batch-prompt branch with per-cluster summary.
+- [ ] **Step 4**: Smoke gate verifying clustering on a fixture with 3+ tooling candidates.
 
 ### Task B1: Knowledge-candidate aggregation to scratchpad
 
