@@ -2114,6 +2114,16 @@ function listLaneOutputs() {
     const status = (block.match(/^\s+status:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
     const redispatchCount = parseInt(
       (block.match(/^\s+redispatch_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    // B-VIII oversized-lane sizing — file_count / est_loc / oversized are
+    // optional fields written by code-review-parallel.md::partition_lanes.
+    // Absent when the lane was registered manually (pre-B-VIII workflows) or
+    // when the fields were stripped during a manual workflow.yaml edit.
+    const fileCount = parseInt(
+      (block.match(/^\s+file_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    const estLoc = parseInt(
+      (block.match(/^\s+est_loc:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    const oversizedRaw = (block.match(/^\s+oversized:\s*(true|false)\s*$/m) || [])[1];
+    const oversized = oversizedRaw === "true";
     if (!id) continue;
     let sizeBytes = 0;
     let exists = false;
@@ -2129,6 +2139,9 @@ function listLaneOutputs() {
       review_file: reviewFile ? reviewFile.trim() : null,
       status: status ? status.trim() : null,
       redispatch_count: redispatchCount,
+      file_count: fileCount,
+      est_loc: estLoc,
+      oversized,
       file_exists: exists,
       file_size_bytes: sizeBytes,
     });

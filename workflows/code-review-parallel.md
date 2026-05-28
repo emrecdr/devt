@@ -117,11 +117,33 @@ echo "partition_lanes: ${SCOPE_FILE_COUNT} files → ${PREFIX_COUNT} path groups
 
 # Build lanes block. Each prefix becomes one lane. The lanes block is then
 # injected into workflow.yaml (replacing any prior lanes: section).
+# Per-lane sizing (B-VIII): file count + estimated LOC are computed so an
+# oversized lane (> 15 files OR > 800 LOC) is flagged before dispatch. Field
+# signal (greenfield calibration #3 finding #1): Lane C with 25 files /
+# 1577 LOC consistently exhausted code-reviewer's maxTurns budget on both
+# dispatches. The thresholds are heuristics validated against that case —
+# tunable via .devt/config.json::workflow.lane_oversized_thresholds in
+# future, hardcoded here for now.
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LANE_NUM=1
+OVERSIZED_COUNT=0
 echo "$UNIQUE_PREFIXES" | head -5 | while IFS= read -r PREFIX; do
   [ -z "$PREFIX" ] && continue
   SLUG=$(PREFIX_NAME="$PREFIX" node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName(process.env.PREFIX_NAME))")
+  # Files belonging to this lane (filter the prefix-tagged groups file).
+  LANE_FILES=$(awk -F'|' -v p="$PREFIX" '$1 == p { print $2 }' "$GROUPS_FILE")
+  LANE_FILE_COUNT=$(echo "$LANE_FILES" | /usr/bin/grep -cE '.' || echo 0)
+  # LOC: sum wc -l across existing files. Non-existent paths contribute 0.
+  LANE_LOC=$(echo "$LANE_FILES" | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    [ -f "$f" ] && wc -l < "$f" 2>/dev/null || echo 0
+  done | awk '{s+=$1} END {print s+0}')
+  OVERSIZED="false"
+  if [ "$LANE_FILE_COUNT" -gt 15 ] || [ "$LANE_LOC" -gt 800 ]; then
+    OVERSIZED="true"
+    OVERSIZED_COUNT=$((OVERSIZED_COUNT + 1))
+    echo "WARN: lane L${LANE_NUM} (${PREFIX}) oversized — ${LANE_FILE_COUNT} files / ${LANE_LOC} LOC exceeds 15/800 threshold; may exhaust maxTurns budget" >&2
+  fi
   echo "  - id: \"L${LANE_NUM}\""
   echo "    community: \"${PREFIX}\""
   echo "    slug: \"${SLUG}\""
@@ -129,6 +151,9 @@ echo "$UNIQUE_PREFIXES" | head -5 | while IFS= read -r PREFIX; do
   echo "    status: \"in_flight\""
   echo "    redispatch_count: 0"
   echo "    dispatched_at: \"${TS}\""
+  echo "    file_count: ${LANE_FILE_COUNT}"
+  echo "    est_loc: ${LANE_LOC}"
+  echo "    oversized: ${OVERSIZED}"
   LANE_NUM=$((LANE_NUM + 1))
 done > /tmp/devt-lanes-block.yaml
 
@@ -146,6 +171,20 @@ LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outp
 LANE_COUNT=$(echo "$LANES_OUT" | jq '.lanes | length')
 echo "Partitioned into ${LANE_COUNT} lanes (path-based, cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
+```
+
+**Oversized-lane surface (B-VIII)**: when any lane carries `oversized: true` in `workflow.yaml::lanes[]`, surface a one-line summary to the user with paths-based remediation hints. The orchestrator may proceed (the dispatch will still attempt the lane) or use AskUserQuestion to offer narrowing — see the AskUserQuestion block below. Field signal: greenfield Lane C with 25 files / 1577 LOC consistently hit the maxTurns ceiling before findings could be written.
+
+```bash
+OVERSIZED_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
+  jq -r '.lanes[] | select(.oversized == true) | "  - " + .id + " (" + .community + "): " + (.file_count|tostring) + " files / " + (.est_loc|tostring) + " LOC"')
+if [ -n "$OVERSIZED_LANES" ]; then
+  echo ""
+  echo "⚠️ Oversized lane(s) detected — may exhaust code-reviewer maxTurns budget:"
+  echo "$OVERSIZED_LANES"
+  echo ""
+  echo "Consider: (1) split the review into multiple PRs, (2) restrict scope via /devt:review --scope=<subset>, or (3) proceed and accept that oversized lanes may produce DONE_WITH_CONCERNS verdicts when budget runs out."
+fi
 ```
 
 **Gate**: When zero lanes were registered (empty scope or path bucketing failed), the step routes back to the single-dispatch path. The parallel workflow only proceeds when ≥ 1 lane is in `workflow.yaml::lanes[]` — the next step (dispatch_lanes) enforces this via `state assert-lanes-registered`.

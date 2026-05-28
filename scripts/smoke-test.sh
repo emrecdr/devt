@@ -8066,6 +8066,52 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K27: listLaneOutputs surfaces oversized-lane sizing fields (file_count,
+# est_loc, oversized) when present in workflow.yaml::lanes[]. Field signal
+# (greenfield calibration #3 finding #1): Lane C with 25 files / 1577 LOC
+# consistently exhausted code-reviewer maxTurns. partition_lanes writes the
+# sizing; listLaneOutputs surfaces it so the oversized-lane warning bash in
+# code-review-parallel.md can iterate. Two cases: oversized=true present →
+# field surfaces, default sizing absent → defaults to 0/false (back-compat).
+K27_TMP=$(mktemp -d)
+K27_TMP=$(cd "$K27_TMP" && pwd -P)
+mkdir -p "$K27_TMP/.devt/state"
+echo '{}' > "$K27_TMP/.devt/config.json"
+cat > "$K27_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: k27-test
+workflow_type: code_review_parallel
+created_at: 2026-05-28T20:00:00.000Z
+lanes:
+  - id: "L1"
+    community: "src/auth"
+    slug: "auth"
+    review_file: ".devt/state/review-lane-auth.md"
+    status: "in_flight"
+    redispatch_count: 0
+    file_count: 25
+    est_loc: 1577
+    oversized: true
+  - id: "L2"
+    community: "src/util"
+    slug: "util"
+    review_file: ".devt/state/review-lane-util.md"
+    status: "in_flight"
+    redispatch_count: 0
+    file_count: 4
+    est_loc: 120
+    oversized: false
+EOF
+K27_OUT=$(cd "$K27_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null)
+K27_L1_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L1');console.log(l && l.oversized===true && l.file_count===25 && l.est_loc===1577 ? '1':'0');}catch(e){console.log('err');}})")
+K27_L2_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L2');console.log(l && l.oversized===false ? '1':'0');}catch(e){console.log('err');}})")
+if [ "$K27_L1_OVER" = "1" ] && [ "$K27_L2_OVER" = "1" ]; then
+  pass "K27: list-lane-outputs surfaces oversized + file_count + est_loc (L1=25f/1577L/true, L2=4f/120L/false)"
+else
+  fail "K27: sizing-field surface broken. L1=${K27_L1_OVER} L2=${K27_L2_OVER}"
+fi
+rm -rf "$K27_TMP"
+
 # K26: context_init substep navigation markers exist in code-review.md and
 # dev-workflow.md. Field signal (greenfield calibration #2, 6c): "context_init
 # is still 188+ lines in v0.62.0 with 5 nested bash conditionals…". B-III.3
