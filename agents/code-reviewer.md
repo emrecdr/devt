@@ -212,6 +212,13 @@ Calculate the score using `code-reviewer/scoring-guide.md`:
 Write `.devt/state/review.md` with the complete review. Every finding must appear. Every deduction must trace to a finding. The math must be auditable.
 
 When `.devt/state/graph-impact.md` carries caller-set data for symbols touched by your findings, cross-reference it as you write each finding's remediation — call out high-blast-radius symbols and structural risks. You consume that file as data; you do NOT call graphify MCP yourself.
+
+The file may include three independent god-node signals — surface any that fire:
+- `## God-node warning` — file-aggregated god-nodes from `check-large-files` (max-degree symbol per diff file).
+- `## Symbol-level god-nodes` — per-symbol god-nodes from `check-symbol-godnodes` (every above-threshold symbol whose source_file is in the diff, no per-file collapse). A symbol can surface here without surfacing in the file-level section when a same-file sibling has higher max degree — treat the two sections as orthogonal.
+- `blast_radius::god_node_match` (when present in the body) — symbol-aggregated match from the graph itself.
+
+Drill-down sections (`## Drill-down: <symbol>`) may carry a `[call: <correlation_id>]` suffix — that 8-char hex id is the orchestrator's reference to a specific MCP call. When you cite a finding rooted in a drill-down section's contents, copy the `[call: <id>]` suffix into the finding's `## Evidence` block so a reader can replay the exact MCP call via `mcp-stats --correlation-id=<id>`. Findings without a backing drill-down section omit the suffix — do not invent ids.
 </step>
 
 <step name="knowledge_candidates">

@@ -45,7 +45,7 @@ It does NOT apply when:
 **Output**: `.devt/state/preflight-brief.md` with `## Status: FRESH`.
 
 The Brief contains:
-- **Topic Extracted** — domains, symbols, keywords parsed from the task
+- **Topic Extracted** — domains, symbols, keywords parsed from the task. The JSON sidecar (`preflight-brief.json::topic.resolution_path`) records WHICH fallback leg produced the final symbol set: `diff` (working-tree changes) → `text` (PascalCase in task) → `snake_fts` / `kebab_fts` (FTS rescue on snake/kebab keywords) → `full_text_fts` (terminal FTS on the full task text) → `none`. Deeper-leg paths (`*_fts`) signal the upstream heuristics under-resolved — a useful diagnostic when reviews surface unexpected symbols.
 - **Governing Documentation** — ADRs/CONs/FLOWs from Lanes A (domain), B (FTS), C (symbol), D (link closure)
 - **Memory Graph (2-hop subgraph)** — flat `source → predicate → target` triples spanning the depth-2 link closure of the governing union. Scan this section to understand structural relationships (`supersedes`, `depends_on`, `relates_to`, etc.) without firing per-doc `get_doc` calls.
 - **Rejected Approaches** — REJ tombstones whose `search_keywords` overlap the topic (Lane E)

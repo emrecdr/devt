@@ -70,7 +70,7 @@ why a candidate didn't make the cut.
 
 ## The Approval Protocol
 
-### Phase A — Triage
+### Step 1 — Triage
 
 1. Read `.devt/memory/_suggestions.md` (or take the candidate from the workflow caller).
 2. For each proposal:
@@ -79,7 +79,7 @@ why a candidate didn't make the cut.
    - Cross-check against REJ tombstones — if one of them suppressed the proposal already, the discovery engine should have filtered it; double-check via `node bin/devt-tools.cjs memory rejected-keywords`
 3. Build a short queue of qualified candidates.
 
-### Phase B — Present each qualified candidate via AskUserQuestion
+### Step 2 — Present each qualified candidate via AskUserQuestion
 
 For each, present:
 
@@ -103,7 +103,7 @@ options:
 When showing the question, INCLUDE the original reasoning verbatim above the options
 block — the user must see exactly what was recorded, not a curator paraphrase.
 
-### Phase C — Act on the choice
+### Step 3 — Act on the choice
 
 - **Promote (active|candidate)**: Use a `templates/memory/{ADR,CON,FLOW}-template.md` as
   the starting frontmatter. Fill in id (auto-incremented from existing docs), title,
@@ -120,7 +120,7 @@ block — the user must see exactly what was recorded, not a curator paraphrase.
   edits, then loop back to AskUserQuestion with the edited version. ONE edit cycle —
   if the user wants a third pass, defer and let them edit the markdown by hand.
 
-### Phase D — Capture summary
+### Step 4 — Capture summary
 
 Append to `.devt/state/curation-summary.md` (status: DONE):
 
@@ -194,9 +194,8 @@ Reference the curation summary path so the user can audit the run.
 
 ## Credit & Lineage
 
-Unified curation skill — supersedes the v0.17-v0.27 split between
-`playbook-curation` (operational) and `memory-curation` (architectural). Now covers all 5
-doc types (ADR/CON/FLOW/REJ/LES) with one 5-filter and one approval flow. The
-promotion-via-AskUserQuestion pattern is shared with the council offramp
-(`references/council-offramp.md` §3.2) — both encode "discovery automated, action
-approved" as the core devt invariant for irreversible state changes.
+Unified curation skill covering all 5 doc types (ADR/CON/FLOW/REJ/LES) with one
+5-filter and one approval flow. The promotion-via-AskUserQuestion pattern is shared
+with the council offramp (`references/council-offramp.md` §3.2) — both encode
+"discovery automated, action approved" as the core devt invariant for irreversible
+state changes.

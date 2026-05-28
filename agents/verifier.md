@@ -190,6 +190,7 @@ Cross-check the three workflow artifacts with INDEPENDENT verification — do no
 - test-summary lists test files → READ those files. Do they test what the summary claims?
 - review.md approves code → CHECK that code currently exists at the cited paths (git diff may have changed it since review)
 - Programmer reported DONE → Verify independently. Their summary documents what they BELIEVE they did.
+- Finding `## Evidence` blocks may carry a `[call: <correlation_id>]` reference to a specific MCP call — when a finding's claim hinges on an MCP response (god-node match, dependent set, blast radius), replay that call via `mcp-stats --correlation-id=<id>` to confirm the cited duration/tool/args fingerprint match what the reviewer reported. Mismatch or absent record = the cited evidence is unverifiable.
 
 Specific checks:
 - Are there files the programmer mentioned but forgot to create?
