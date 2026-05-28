@@ -376,7 +376,7 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 
 ## Substance-Enforcement Gates
 
-Cross-cutting design discipline. A recurring failure mode: gates that verify an artifact exists, has the right shape, or has the right section count — but not whether the *substance* behind the form is real. Five field-validated instances:
+Cross-cutting design discipline. A recurring failure mode: gates that verify an artifact exists, has the right shape, or has the right section count — but not whether the *substance* behind the form is real. Fourteen field-validated instances, grouped by enforcement class:
 
 | Gate | Form check (passed) | Substance gap (bypassed) | Fix |
 |---|---|---|---|
@@ -384,7 +384,27 @@ Cross-cutting design discipline. A recurring failure mode: gates that verify an 
 | **B4** | Curator dispatched | Dispatch was in an unreachable workflow branch | Relocate gate to context_init |
 | **L1** | `dispatch-hygiene-guard.sh` warned | Advisory was ignored 6× in one session | Default-block (`{decision:"deny"}`) |
 | **F26** | `## Drill-down:` headings present | Headings hand-written without MCP calls | Cross-reference `_mcp-trace.jsonl` for `get_neighbors` records in `workflow_id` window |
-| **F27/F28** | `review.md` file exists | Body is "Stub written; analysis in progress." | `state check-agent-output` detects stub phrases, low word count, heading-only structure; wired into `code-review.md` verifier pre-gate |
+| **F27/F28** | `review.md` file exists | Body is "Stub written; analysis in progress." | `state check-agent-output` detects stub phrases + low word count + heading-only |
+| **F29** | dev-workflow verifier dispatch | Same stub problem, different workflow | Apply F28 substance gate to dev-workflow |
+| **F30** | Verifier agent body grading stubs | Agent burns turns on stub artifacts | Verifier self-aborts with `verdict=failed` on stub upstream |
+| **F31** | Narrow stub regex | "analysis in progress" only — missed variants | Verb-prefixed pattern catches realistic phrasings |
+| **scope-check-handled** | AskUserQuestion prose in workflow | Orchestrator skips silently | Artifact-and-CLI: `scope-check-required.txt` + `state assert-scope-check-handled` |
+| **lanes-registered** | partition_lanes ran | Empty `workflow.yaml::lanes[]` | `state assert-lanes-registered` blocks dispatch |
+| **consolidator-dispatched** | Lanes passed substance | Orchestrator writes review.md instead of dispatching synthesis agent | `state assert-consolidator-dispatched` requires marker from agent body |
+| **auto-curator-considered** | auto_curator step in workflow | Skipped without reading config | Marker file writes FIRE/DISABLED; gate requires marker |
+| **assert-reuse-analyzed** | Programmer "scans existing code" prose | Reimplements similar functions | `derive-reuse-candidates` writes candidates; programmer must address each |
+| **isArtifactFresh** | Artifact exists | Stale prior-workflow artifact passes | mtime-vs-`workflow.yaml::created_at`, 30s grace; retro-fit to 7 gates |
+
+(Historical timeline: see `CHANGELOG.md` for which release introduced each gate.)
+
+### Required properties (both must hold)
+
+Every substance-enforcement gate has two non-negotiable properties:
+
+1. **Existence binding** — the artifact must exist. Validated by `fs.existsSync` or equivalent. This was the original F26-F28 contract.
+2. **Freshness binding** — the artifact's mtime must postdate the current `workflow.yaml::created_at` within a 30-second grace window. Validated by `isArtifactFresh(path)`. Added after a greenfield calibration showed every existence-only gate passed against stale prior-workflow artifacts.
+
+Gates missing either property are bypassable. Empirical evidence from the freshness retrofit: five existence-only gates produced silent passes against stale state; the one gate with mechanical reset binding (`auto-curator-considered`) fired correctly because the prior session's marker was naturally absent.
 
 ### Pattern recognition
 
@@ -393,10 +413,11 @@ When adding a new gate, ask explicitly: **does this check the artifact's shape, 
 - **For MCP-backed work** — cross-reference `_mcp-trace.jsonl` records scoped to the current `workflow_id` (the trace is the receipt). See `assertGraphifyDecision` for the reference implementation.
 - **For agent-authored content** — run `state check-agent-output` against the output file (stubs, low word count, heading-only all flag as `looks_like_stub: true`). Wire the call as a bash pre-gate before the verifier dispatch.
 - **For multi-step work where one step is skippable** — relocate the gate to a mandatory step, not the optional one (the F4 lesson).
+- **For any artifact whose currency matters** — wire `isArtifactFresh(artifactPath)` into the gate's branch logic. Stale prior-workflow artifacts return `fresh:false` with reason "artifact mtime is Ns older than workflow.yaml::created_at — file is from a prior workflow".
 
 ### Why these gates fail closed, not advisory
 
-LLM orchestrators under context pressure classify advisory warnings as "not load-bearing" and skip them. The pattern across all five instances: a soft signal loses to perceived urgency every time. The only counterweights with observed efficacy in the field are gates that block involuntarily — either by failing the artifact contract (F26 returns `ok:false`) or by failing the workflow contract (F28 sets `verdict=FAILED`, which routes to STOP-with-BLOCKED at the existing failure terminal).
+LLM orchestrators under context pressure classify advisory warnings as "not load-bearing" and skip them. The pattern across all fourteen instances: a soft signal loses to perceived urgency every time. The only counterweights with observed efficacy in the field are gates that block involuntarily — either by failing the artifact contract (F26 returns `ok:false`) or by failing the workflow contract (F28 sets `verdict=FAILED`, which routes to STOP-with-BLOCKED at the existing failure terminal).
 
 The audit instinct when reviewing devt's own gates: *if I remove the substance check, can a well-intentioned orchestrator still pass by writing prose / creating an empty file / running through the form?* If yes, the gate enforces form not substance.
 

@@ -7514,6 +7514,19 @@ else
 fi
 rm -rf "$K5_TMP"
 
+# J1: INTERNALS.md substance-enforcement-gates section is current.
+# Pattern documentation must accurately reflect shipped gates — when a
+# new gate ships, this gate fails until the docs are updated. Counts
+# bolded gate-name rows in the table (e.g. "| **F26** | …"). Version
+# markers are deliberately excluded from the table to honor the
+# no-version-refs rule (CHANGELOG.md owns the timeline).
+J1_INSTANCES=$(/usr/bin/grep -cE "^\| \*\*[A-Za-z0-9_/-]+\*\* \|" "$ROOT/docs/INTERNALS.md" 2>/dev/null || echo 0)
+if [ "$J1_INSTANCES" -ge 14 ]; then
+  pass "J1: INTERNALS.md substance-enforcement-gates table documents ≥14 instances (${J1_INSTANCES} found)"
+else
+  fail "J1: INTERNALS.md table has only ${J1_INSTANCES} instances; should be ≥14 (missing recent gates?)"
+fi
+
 # J2: every local tag in the current minor-series has a corresponding
 # GitHub release. Catches the silent-skip drift that v0.58.1–v0.62.0
 # hit when bulk-push --tags didn't fire per-tag events. Skipped when
