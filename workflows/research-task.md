@@ -94,12 +94,12 @@ fi
 
 When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
 
-1. **`mcp__devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, impact map with `direct_dependents`.
-2. **Drill-down on top-3 dependents** (F16). Parse `direct_dependents`, take top-3 by impact_size, call `mcp__devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for each. The researcher uses drill-down data to find existing usage patterns across the most-affected modules without grep-discovery.
+1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, impact map with `direct_dependents`.
+2. **Drill-down on top-3 dependents** (F16). Parse `direct_dependents`, take top-3 by impact_size, call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for each. The researcher uses drill-down data to find existing usage patterns across the most-affected modules without grep-discovery.
 
 Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1>` / `## Drill-down: <dep2>` / `## Drill-down: <dep3>`. The researcher Reads this file when present. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above and no MCP call is made — researcher falls back to grep+scope_hint.
 
-**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph. Orchestrator MUST first call `mcp__devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section.
+**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph. Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 

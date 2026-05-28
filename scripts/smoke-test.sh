@@ -5008,11 +5008,13 @@ fi
 
 # Both scan_prep gates instruct the orchestrator to call get_neighbors + blast_radius
 # when ACTIVE. Verbose dispatch protocol prose required for the orchestrator to know
-# what to do.
+# what to do. The check accepts the prefixed plugin-namespace form (the only form
+# that actually resolves through the plugin loader; greenfield 2026-05-28 namespace
+# drift fix).
 SCAN_PREP_PROTOCOL_MISSING=""
 for wf in quick-implement dev-workflow; do
-  if ! command grep -q 'mcp__devt-graphify__get_neighbors' "$ROOT/workflows/$wf.md" 2>/dev/null || \
-     ! command grep -q 'mcp__devt-graphify__blast_radius' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+  if ! command grep -q 'mcp__plugin_devt_devt-graphify__get_neighbors' "$ROOT/workflows/$wf.md" 2>/dev/null || \
+     ! command grep -q 'mcp__plugin_devt_devt-graphify__blast_radius' "$ROOT/workflows/$wf.md" 2>/dev/null; then
     SCAN_PREP_PROTOCOL_MISSING="$SCAN_PREP_PROTOCOL_MISSING $wf"
   fi
 done
@@ -7515,6 +7517,30 @@ else
   fail "K5: workflow_type-awareness broken. quick_implement: $K5_POS  | code_review: $K5_NEG"
 fi
 rm -rf "$K5_TMP"
+
+# K9: MCP namespace consistency across dispatching workflows. Field signal
+# (greenfield 2026-05-28 graphify-audit.md): 12 unprefixed mcp__devt-graphify__
+# functional references across dev-workflow.md, debug.md, research-task.md,
+# quick-implement.md. An agent reading those workflows verbatim would call
+# a tool name that doesn't exist (the plugin loader exposes only the
+# prefixed mcp__plugin_devt_devt-graphify__* form).
+#
+# This gate asserts ZERO functional unprefixed references in those 4
+# workflows. code-review*.md keeps 2 unprefixed references each — those are
+# mcp-stats --tool='mcp__devt-graphify__*' trace-filter comments using the
+# '*' wildcard form (trace records use the unprefixed handler name).
+K9_OFFENDERS=""
+for wf in dev-workflow debug research-task quick-implement; do
+  UNPREFIXED=$(/usr/bin/grep -cE "mcp__devt-graphify__(blast_radius|get_neighbors|query_graph)" "$ROOT/workflows/${wf}.md" 2>/dev/null || echo 0)
+  if [ "${UNPREFIXED:-0}" -gt 0 ]; then
+    K9_OFFENDERS="$K9_OFFENDERS ${wf}.md(${UNPREFIXED})"
+  fi
+done
+if [ -z "$K9_OFFENDERS" ]; then
+  pass "K9: no unprefixed mcp__devt-graphify__ functional refs in dispatching workflows (namespace drift closed)"
+else
+  fail "K9: unprefixed MCP refs survive in:${K9_OFFENDERS} — agents reading these workflows would call non-existent tools"
+fi
 
 # K8: pre-flight-guard.sh refuses to fire on out-of-project file paths.
 # Field signal (greenfield 2026-05-28 PM calibration #3): preflight-denies.jsonl
