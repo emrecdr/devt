@@ -8300,6 +8300,23 @@ else
 fi
 rm -rf "$L6_TMP"
 
+# L7: god_node_warnings block wired into code-review.md dispatch templates
+# AND code-reviewer agent body. Greenfield review report #3: today
+# god_nodes lands in the preflight-brief.md prose but isn't injected as
+# a STRUCTURED hint into the agent context. C-I.1 adds the prep step
+# (jq extracts {god_node_match, matches} from preflight-brief.json into
+# god_node_warnings_json), the dispatch block in code-review.md, and the
+# agent-body parsing instruction. Gate: drift detection that all three
+# touch points stay in sync.
+L7_WORKFLOW=$(/usr/bin/grep -c "god_node_warnings_json" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+L7_AGENT=$(/usr/bin/grep -c "<god_node_warnings>" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+L7_PREP=$(/usr/bin/grep -c "GOD_NODE_WARNINGS=" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "${L7_WORKFLOW:-0}" -ge 3 ] && [ "${L7_AGENT:-0}" -ge 1 ] && [ "${L7_PREP:-0}" -ge 1 ]; then
+  pass "L7: god_node_warnings wired into workflow (${L7_WORKFLOW} refs), agent body (${L7_AGENT} ref), prep step (${L7_PREP} bash)"
+else
+  fail "L7: god_node_warnings wiring incomplete. workflow=${L7_WORKFLOW} agent=${L7_AGENT} prep=${L7_PREP}"
+fi
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a

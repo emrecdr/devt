@@ -119,6 +119,18 @@ fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
+**Cache god_node_warnings (C-I.1)** for `<god_node_warnings>` injection. Extracts the structured god-node data already computed in `preflight-brief.json` — `god_nodes[]` array carries `{symbol, edge_count, source_file}` per entry, plus the boolean `blast.god_node_match`. Cached once so the dispatch block stays byte-stable across iterations:
+
+```bash
+GOD_NODE_WARNINGS=$(jq -c '{
+  god_node_match: (.blast.god_node_match // false),
+  matches: (.god_nodes // [])
+}' .devt/state/preflight-brief.json 2>/dev/null || echo '{"god_node_match":false,"matches":[]}')
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update god_node_warnings_json="${GOD_NODE_WARNINGS}"
+```
+
+When `god_node_match=true`, the agent sees a structured warning ("you're about to edit `<symbol>` — it has `<edge_count>` callers") instead of having to parse the markdown brief. Empty `matches: []` with `god_node_match: false` is the no-warning baseline.
+
 ### Substep 4: Staleness gate + Graphify eviction
 
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
@@ -447,6 +459,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
+    <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     <review_scope>Read .devt/state/code-review-input.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
@@ -536,6 +549,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
          researcher, code-reviewer, and verifier dispatch templates. When one
          changes, update the others. -->
