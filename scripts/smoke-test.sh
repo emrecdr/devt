@@ -6327,7 +6327,7 @@ else
   fail "F4a: gate didn't block on missing artifacts — got: $F4A_OUT"
 fi
 # Write skip artifact → gate auto-passes
-echo "test reason" > "$F4_TMP/.devt/state/claude-mem-skipped.txt"
+printf 'reason=mcp_unavailable\nattempted_at=%s\n' "$(date -u +%FT%TZ)" > "$F4_TMP/.devt/state/claude-mem-skipped.txt"
 F4A_OK=$(cd "$F4_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null)
 if echo "$F4A_OK" | /usr/bin/grep -q '"ok": *true'; then
   pass "F4b: assert-claude-mem-harvest PASSES with claude-mem-skipped.txt present"
@@ -7853,6 +7853,46 @@ else
   fail "K19: matrix broken. c1(none)=${K19_C1} c2(no-cand)=${K19_C2} c3(zero-cand)=${K19_C3}"
 fi
 rm -rf "$K19_TMP"
+
+# K20: assert-claude-mem-harvest validates skip-file structured payload.
+# Field signal (greenfield calibration #2 finding 6b#3): "wrote a one-line
+# skip reason instead of actually running mcp__plugin_claude-mem_mcp-search.
+# Lazy escape that satisfies the gate but produces no value." Four enum
+# values for reason= cover the legitimate skip universe; task_unrelated_to_
+# history additionally requires details= so the deliberate override leaves
+# audit trail.
+K20_TMP=$(mktemp -d)
+K20_TMP=$(cd "$K20_TMP" && pwd -P)
+mkdir -p "$K20_TMP/.devt/state"
+echo '{}' > "$K20_TMP/.devt/config.json"
+# created_at must trail "now" so the artifact written-by-this-test passes the
+# freshness check (artifact mtime > workflow_created_at). 60s back keeps us
+# clear of clock skew.
+K20_CREATED=$(date -u -d "-60 seconds" +%FT%TZ 2>/dev/null || date -u -v-60S +%FT%TZ)
+cat > "$K20_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k20-test
+workflow_type: code_review
+created_at: ${K20_CREATED}
+EOF
+# Case 1: free-form one-liner (legacy form) → BLOCK
+echo "mcp_unavailable" > "$K20_TMP/.devt/state/claude-mem-skipped.txt"
+K20_C1=$(cd "$K20_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 2: valid structured payload → PASS
+printf 'reason=mcp_unavailable\nattempted_at=2026-05-28T20:01:00Z\n' > "$K20_TMP/.devt/state/claude-mem-skipped.txt"
+K20_C2=$(cd "$K20_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 3: task_unrelated_to_history without details= → BLOCK
+printf 'reason=task_unrelated_to_history\nattempted_at=2026-05-28T20:01:00Z\n' > "$K20_TMP/.devt/state/claude-mem-skipped.txt"
+K20_C3=$(cd "$K20_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 4: task_unrelated_to_history WITH details= → PASS
+printf 'reason=task_unrelated_to_history\ndetails=PR is doc-only, no production history relevant\nattempted_at=2026-05-28T20:01:00Z\n' > "$K20_TMP/.devt/state/claude-mem-skipped.txt"
+K20_C4=$(cd "$K20_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+if [ "$K20_C1" = "false" ] && [ "$K20_C2" = "true" ] && [ "$K20_C3" = "false" ] && [ "$K20_C4" = "true" ]; then
+  pass "K20: claude-mem-skipped.txt enum validation (oneliner=BLOCK, valid-reason=PASS, unrelated-no-details=BLOCK, unrelated-with-details=PASS)"
+else
+  fail "K20: matrix broken. c1(oneliner)=${K20_C1} c2(valid)=${K20_C2} c3(no-details)=${K20_C3} c4(with-details)=${K20_C4}"
+fi
+rm -rf "$K20_TMP"
 
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a

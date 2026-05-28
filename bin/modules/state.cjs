@@ -2177,9 +2177,45 @@ function assertClaudeMemHarvest() {
       age_seconds: freshness.age_seconds,
     };
   }
+  if (haveSkipped) {
+    // Structured payload requirement. Greenfield calibration #2 finding 6b#3:
+    // a one-line skip reason satisfied the gate but produced no value. The
+    // valid-reason enum forces the orchestrator to commit to a concrete
+    // reason category that downstream observability can aggregate over.
+    // task_unrelated_to_history additionally requires a details= line so
+    // the deliberate override leaves an audit trail rather than a bare
+    // assertion.
+    const skipContent = fs.readFileSync(skippedPath, "utf8");
+    const reasonMatch = skipContent.match(/^reason=([a-z_]+)$/m);
+    const validReasons = new Set([
+      "not_installed", "mcp_unavailable", "corpus_empty", "task_unrelated_to_history",
+    ]);
+    if (!reasonMatch || !validReasons.has(reasonMatch[1])) {
+      return {
+        ok: false,
+        file: "claude-mem-skipped.txt",
+        reason:
+          "claude-mem-skipped.txt missing valid reason= line. Required format: " +
+          "reason=<not_installed|mcp_unavailable|corpus_empty|task_unrelated_to_history>. " +
+          "For task_unrelated_to_history, also include details=<explanation>.",
+      };
+    }
+    if (reasonMatch[1] === "task_unrelated_to_history" && !/^details=/m.test(skipContent)) {
+      return {
+        ok: false,
+        file: "claude-mem-skipped.txt",
+        reason: "reason=task_unrelated_to_history requires a details= line explaining the orchestrator's reasoning.",
+      };
+    }
+    return {
+      ok: true,
+      file: "claude-mem-skipped.txt",
+      skip_reason: reasonMatch[1],
+    };
+  }
   return {
     ok: true,
-    file: haveHarvest ? "claude-mem-harvest.md" : "claude-mem-skipped.txt",
+    file: "claude-mem-harvest.md",
   };
 }
 

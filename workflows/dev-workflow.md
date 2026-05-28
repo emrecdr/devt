@@ -1448,7 +1448,14 @@ If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session:
    Map emoji → obs_type: ⚖️ → `decision`, 🔵 → `discovery`. Drop rows with any other emoji (bugfix / feature / refactor / change — session telemetry, not memory candidates). The next `memory suggest` invocation picks up the file via `discovery.cjs::harvestClaudeMemFromMcp`.
 
 If the MCP tool is unavailable, returns zero observations, or errors:
-- Write `.devt/state/claude-mem-skipped.txt` with a one-line reason (e.g., `"mcp_unavailable"` or `"zero_observations"` or `"error: <message>"`). This is the decision-artifact that signals the gate the orchestrator *did* consider the pre-step.
+- Write `.devt/state/claude-mem-skipped.txt` with the structured payload below. The gate validates the `reason=` enum (`not_installed | mcp_unavailable | corpus_empty | task_unrelated_to_history`) — free-form one-liners are rejected. For `task_unrelated_to_history`, also include a `details=` line explaining the orchestrator's reasoning.
+
+```bash
+cat > .devt/state/claude-mem-skipped.txt <<EOF
+reason=mcp_unavailable
+attempted_at=$(date -u +%FT%TZ)
+EOF
+```
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)

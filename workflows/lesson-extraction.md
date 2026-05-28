@@ -128,7 +128,7 @@ Unconditional harvest. Refreshes `.devt/memory/_suggestions.md` from `#KNOWLEDGE
 
 If `mcp__plugin_claude-mem_mcp-search__search` is registered: (1) call `search` with `query=${task}`, `project=<devt project name>`, `limit=50`; (2) for ⚖️/🔵 rows, call `mcp__plugin_claude-mem_mcp-search__get_observations({ids: [...]})` to fetch bodies; (3) write `.devt/state/claude-mem-harvest.md` with `- [decision|discovery] <title>: <body>` lines (emoji → obs_type: ⚖️→decision, 🔵→discovery; drop other emojis).
 
-If MCP unavailable / zero observations / errors: write `.devt/state/claude-mem-skipped.txt` with a one-line reason.
+If MCP unavailable / zero observations / errors: write `.devt/state/claude-mem-skipped.txt` with `reason=<not_installed|mcp_unavailable|corpus_empty|task_unrelated_to_history>` (one of those four enum values; free-form rejected). Example: `printf 'reason=mcp_unavailable\nattempted_at=%s\n' "$(date -u +%FT%TZ)" > .devt/state/claude-mem-skipped.txt`.
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
