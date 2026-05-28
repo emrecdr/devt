@@ -201,6 +201,8 @@ Each trace record appended to `.devt/memory/_mcp-trace.jsonl` carries `workflow_
 
 **CLI consumption.** `bin/devt-tools.cjs mcp-stats` consumes these fields via `--workflow-id`, `--workflow-type`, and `--phase` filter flags. Filters compose conjunctively with the existing `--since` and `--tool`.
 
+**CLI wrappers do NOT write to `_mcp-trace.jsonl`.** The trace records direct MCP tool invocations only. Workflows that go entirely through CLI wrappers (`preflight generate`, `state derive-reuse-candidates`, `state assert-graphify-decision`, `state evict-graphify`) will produce empty `mcp-stats` output even when graphify is fully active and load-bearing — the trace is "correctly empty" because no direct MCP calls occurred. To validate the namespace-prefix invariant (each trace record's `tool` field is the *unprefixed* form like `query_graph`, while orchestrator-side MCP calls use the *prefixed* form like `mcp__plugin_devt_devt-graphify__query_graph`) or to measure direct MCP usage, exercise a workflow that dispatches code-reviewer's `symbol_anchored` / `bulk_scoped` / `pr_scoped` tiers (which call `query_graph`, `get_neighbors`, `blast_radius` directly), or call MCP tools from the orchestrator during context_init's drill-down protocol.
+
 ---
 
 ## Skills Resolution
