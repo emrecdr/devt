@@ -8188,6 +8188,31 @@ else
 fi
 rm -rf "$L3_TMP" /tmp/l3_out.json
 
+# L4: mcp-stats normalizes prefixed vs unprefixed tool names. Greenfield
+# calibration #5: trace records carry `mcp__devt-graphify__*` (handler
+# name); orchestrators call via `mcp__plugin_devt_devt-graphify__*`
+# (plugin-namespace prefixed). Exact match returned 0 entries when user
+# queried the prefixed form. Fix: normalize both sides to unprefixed
+# canonical form. Fixture: trace with 2 unprefixed records, query with
+# both forms → both return 2.
+L4_TMP=$(mktemp -d)
+L4_TMP=$(cd "$L4_TMP" && pwd -P)
+mkdir -p "$L4_TMP/.devt/memory" "$L4_TMP/.devt/state"
+echo '{}' > "$L4_TMP/.devt/config.json"
+cat > "$L4_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
+{"ts":"2026-05-29T00:00:00.000Z","tool":"mcp__devt-graphify__blast_radius","ok":true,"duration_ms":50}
+{"ts":"2026-05-29T00:00:01.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true,"duration_ms":30}
+EOF
+L4_UNPREFIXED=$(cd "$L4_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --tool=mcp__devt-graphify__blast_radius 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+L4_PREFIXED=$(cd "$L4_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --tool=mcp__plugin_devt_devt-graphify__blast_radius 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+L4_WILDCARD=$(cd "$L4_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --tool='mcp__plugin_devt_devt-graphify__*' 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+if [ "$L4_UNPREFIXED" = "1" ] && [ "$L4_PREFIXED" = "1" ] && [ "$L4_WILDCARD" = "2" ]; then
+  pass "L4: mcp-stats matches trace records via prefixed OR unprefixed tool names (each form=1, wildcard=2)"
+else
+  fail "L4: namespace normalization broken. unprefixed=${L4_UNPREFIXED} prefixed=${L4_PREFIXED} wildcard=${L4_WILDCARD}"
+fi
+rm -rf "$L4_TMP"
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a

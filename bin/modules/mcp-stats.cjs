@@ -108,22 +108,47 @@ function readJsonlLines(filePath) {
   return { entries, raw, parseErrors, exists: true };
 }
 
+// NEW-4 (greenfield calibration #5): trace records use UNPREFIXED tool
+// names — the handler name as the MCP server sees it (mcp__devt-graphify__
+// blast_radius). Orchestrators call MCP via the plugin-namespace PREFIXED
+// form (mcp__plugin_devt_devt-graphify__blast_radius) per Claude Code's
+// plugin loader. Without normalization, mcp-stats --tool=<prefixed> matches
+// nothing because exact equality compares two forms that are functionally
+// equivalent but lexically different. The fix normalizes BOTH the query
+// pattern and the trace record's tool field to the unprefixed form before
+// comparison. Result: users can query in either form and get the same
+// match set.
+function normalizeToolName(name) {
+  if (typeof name !== "string") return name;
+  // mcp__plugin_<plugin>_<service>__<tool> → mcp__<service>__<tool>
+  // The plugin segment is the user-installed namespace; the service segment
+  // is the MCP server's handler-registered name. Trace records preserve
+  // only the service+tool portion. Plugin names may contain hyphens but
+  // not underscores by convention — the character class excludes `_` so
+  // the regex stops at the first `_` after `mcp__plugin_`, leaving the
+  // service segment (which may contain hyphens, e.g., `devt-graphify`) intact.
+  return name.replace(/^mcp__plugin_[a-z0-9-]+_/, "mcp__");
+}
+
 function loadEntries(opts) {
   opts = opts || {};
   const tracePath = getTracePath();
   // Builds a tool-name matcher. Pattern with `*` → glob (anchored regex);
   // no `*` → exact equality. Glob supports `*` only (no `?`, no character classes).
+  // Both pattern and tool-name normalized through normalizeToolName so
+  // prefixed/unprefixed forms match equivalently.
   function buildToolMatcher(pat) {
-    if (!pat.includes("*")) return (t) => t === pat;
+    const normPat = normalizeToolName(pat);
+    if (!normPat.includes("*")) return (t) => normalizeToolName(t) === normPat;
     // Cap pattern length to prevent ReDoS on hostile input. Real tool names
     // are short (mcp__plugin_<name>__<tool>), 200 chars is well above any
     // legitimate use. Special regex metachars are escaped before `*` → `.*`
     // substitution so only the literal `*` becomes a wildcard.
-    if (pat.length > 200) return () => false;
-    const esc = pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    if (normPat.length > 200) return () => false;
+    const esc = normPat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
     // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     const re = new RegExp("^" + esc + "$");
-    return (t) => typeof t === "string" && re.test(t);
+    return (t) => typeof t === "string" && re.test(normalizeToolName(t));
   }
   const parsed = readJsonlLines(tracePath);
   if (!parsed.exists) return { entries: [], path: tracePath, exists: false };
@@ -303,4 +328,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration, getWorkflowCreatedAt };
+module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration, getWorkflowCreatedAt, normalizeToolName };
