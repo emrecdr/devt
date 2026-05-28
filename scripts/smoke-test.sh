@@ -7518,6 +7518,41 @@ else
 fi
 rm -rf "$K5_TMP"
 
+# K11: state release CLI subcommand cleanly releases the workflow lock.
+# Field signal (greenfield 2026-05-28 PM calibration #3 finding #3): no
+# `state release` existed; workaround `state update active=false
+# phase=cancelled status=cancelled` tripped the VALID_PHASES warning
+# because "cancelled" wasn't in PHASE_ORDER. This gate verifies:
+#   - active workflow → release flips active=false, phase=cancelled, status=cancelled
+#   - "cancelled" accepted as valid phase (no warning)
+#   - released_at timestamp stamped
+#   - re-release is idempotent (no-op with already_released:true)
+K11_TMP=$(mktemp -d)
+K11_TMP=$(cd "$K11_TMP" && pwd -P)
+mkdir -p "$K11_TMP/.devt/state"
+echo '{}' > "$K11_TMP/.devt/config.json"
+(cd "$K11_TMP" && node "$ROOT/bin/devt-tools.cjs" init workflow "K11 release fixture" >/dev/null 2>&1)
+(cd "$K11_TMP" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=dev active=true phase=implement status=in_progress >/dev/null 2>&1)
+K11_RELEASE_OUT=$(cd "$K11_TMP" && node "$ROOT/bin/devt-tools.cjs" state release 2>&1)
+K11_POST=$(cd "$K11_TMP" && node "$ROOT/bin/devt-tools.cjs" state read 2>/dev/null)
+K11_REREL_OUT=$(cd "$K11_TMP" && node "$ROOT/bin/devt-tools.cjs" state release 2>&1)
+K11_OK=1
+echo "$K11_RELEASE_OUT" | grep -q '"released":true' || K11_OK=0
+echo "$K11_POST" | grep -q '"active":false' || K11_OK=0
+echo "$K11_POST" | grep -q '"phase":"cancelled"' || K11_OK=0
+echo "$K11_POST" | grep -q '"status":"cancelled"' || K11_OK=0
+echo "$K11_POST" | grep -q '"released_at"' || K11_OK=0
+echo "$K11_REREL_OUT" | grep -q '"already_released":true' || K11_OK=0
+# Critical: the workflow_type=dev update with phase=implement must NOT have
+# emitted the VALID_PHASES warning — "cancelled" came from release, but the
+# enum must accept it.
+if [ "$K11_OK" = "1" ]; then
+  pass "K11: state release flips workflow to cancelled cleanly; 'cancelled' is valid phase; re-release idempotent"
+else
+  fail "K11: state release behavior wrong. release_out=$K11_RELEASE_OUT post=$K11_POST rerel=$K11_REREL_OUT"
+fi
+rm -rf "$K11_TMP"
+
 # K10: debug.md carries the auto_refresh_post_impl hook (parity with
 # dev-workflow.md). Field signal (greenfield 2026-05-28 graphify-audit.md
 # improvement #3): post-debug-fix doesn't refresh the graph; the next

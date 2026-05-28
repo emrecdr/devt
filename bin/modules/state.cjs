@@ -169,6 +169,13 @@ const PHASE_ORDER = [
   "plan", "architect", "implement", "test", "simplify", "review",
   "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
   "identify_scope", "debug", "complete", "finalize",
+  // Terminal phase set by `state release` for workflows abandoned mid-flight
+  // (greenfield 2026-05-28 PM calibration #3 finding #3: ad-hoc workaround
+  // `state update active=false phase=cancelled` tripped the VALID_PHASES
+  // warning because the enum didn't include the value the workflow actually
+  // ended in). Distinct from "complete" (normal terminal) and "finalize"
+  // (last-step-before-complete).
+  "cancelled",
 ];
 
 const VALID_PHASES = new Set([...PHASE_ORDER, null]);
@@ -1154,6 +1161,46 @@ function checkWorkflowLock(preReadState) {
     };
   }
   return { locked: false };
+}
+
+/**
+ * Release an active workflow lock cleanly. Sets active=false, phase=cancelled,
+ * status=cancelled, and stamps released_at. Distinct from resetState (which
+ * archives all artifacts) — release preserves task outputs so a follow-up
+ * /devt:next or /devt:retro can still consume them.
+ *
+ * Field signal (greenfield 2026-05-28 PM calibration #3 finding #3): the
+ * ad-hoc workaround `state update active=false phase=cancelled status=cancelled`
+ * tripped the VALID_PHASES warning. This subcommand encapsulates the correct
+ * mutation set and stamps released_at so /devt:forensics can distinguish
+ * orderly release from interrupted state.
+ */
+function releaseWorkflow() {
+  const current = readState();
+  if (!current || current.active === false) {
+    return {
+      ok: true,
+      already_released: true,
+      reason: "no active workflow — release is a no-op",
+      previous_phase: current && current.phase,
+      previous_workflow_type: current && current.workflow_type,
+    };
+  }
+  const released_at = new Date().toISOString();
+  updateState([
+    "active=false",
+    "phase=cancelled",
+    "status=cancelled",
+    `released_at=${released_at}`,
+  ]);
+  return {
+    ok: true,
+    released: true,
+    workflow_id: current.workflow_id,
+    workflow_type: current.workflow_type,
+    previous_phase: current.phase,
+    released_at,
+  };
 }
 
 /**
@@ -2183,6 +2230,8 @@ function run(subcommand, args) {
       return updateState(args);
     case "reset":
       return resetState();
+    case "release":
+      return releaseWorkflow();
     case "validate":
       return validateConsistency();
     case "sync":
@@ -2246,7 +2295,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -2259,6 +2308,7 @@ module.exports = {
   truncateArtifact,
   updateState,
   resetState,
+  releaseWorkflow,
   syncState,
   pruneState,
   checkWorkflowLock,
