@@ -8066,6 +8066,20 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K31: code-reviewer.md graphify-access prose clarifies that Bash CLI is
+# allowed via graphify-helpers skill (B-XII). The audit interpreted "no MCP
+# tool surface" as "no graphify access at all" — the skill IS loaded per
+# skill-index.yaml:75 and code-reviewer's tools include Bash. Gate asserts
+# the disambiguation prose stays in the agent body so a future read doesn't
+# re-flag the same contradiction.
+K31_CLI=$(/usr/bin/grep -c "Bash-CLI access IS available" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+K31_HELPERS=$(/usr/bin/grep -c "graphify-helpers" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+if [ "${K31_CLI:-0}" -ge 1 ] && [ "${K31_HELPERS:-0}" -ge 1 ]; then
+  pass "K31: code-reviewer disambiguates 'no MCP' vs 'no graphify' — Bash CLI via graphify-helpers is allowed"
+else
+  fail "K31: graphify-access clarification missing. CLI=${K31_CLI} helpers=${K31_HELPERS}"
+fi
+
 # K30: graphify symbols-in-files returns top-N symbols whose source_file is
 # in the diff. Drives B-XI's tier decision change (bitbucket + dense + >10
 # files prefers symbol_anchored over query_graph text search). Fixture:
