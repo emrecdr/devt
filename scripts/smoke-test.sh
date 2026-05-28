@@ -8047,6 +8047,25 @@ else
 fi
 rm -rf "$K24_TMP"
 
+# K25: memory-curation skill carries the tooling-evolving pre-recommendation
+# heuristic that drives B-III.2's curator behavior. Greenfield calibration
+# #2 finding 7c-7d: tooling-related candidates (Hurl, CONCURRENTLY) belong
+# in `candidate` status, not `active`. The skill's classifier section is
+# the source of truth — if it drifts out of the skill, the curator agent
+# loses the heuristic and reverts to symmetric option presentation.
+# Gates four signal patterns + the (Recommended) suffix convention.
+K25_SKILL="$ROOT/skills/memory-curation/SKILL.md"
+K25_SIG_VERSION=$(/usr/bin/grep -c "version constraint" "$K25_SKILL" 2>/dev/null || echo 0)
+K25_SIG_BEHAVIOR=$(/usr/bin/grep -c "BEHAVIOR or PATTERN of an external tool" "$K25_SKILL" 2>/dev/null || echo 0)
+K25_SIG_OPINIONATED=$(/usr/bin/grep -c "Lacks opinionated framing" "$K25_SKILL" 2>/dev/null || echo 0)
+K25_SIG_TITLE=$(/usr/bin/grep -c "behavior\`, \`pattern\`, \`migration" "$K25_SKILL" 2>/dev/null || echo 0)
+K25_RECO=$(/usr/bin/grep -c "(Recommended)" "$K25_SKILL" 2>/dev/null || echo 0)
+if [ "${K25_SIG_VERSION:-0}" -ge 1 ] && [ "${K25_SIG_BEHAVIOR:-0}" -ge 1 ] && [ "${K25_SIG_OPINIONATED:-0}" -ge 1 ] && [ "${K25_SIG_TITLE:-0}" -ge 1 ] && [ "${K25_RECO:-0}" -ge 2 ]; then
+  pass "K25: memory-curation skill carries tooling-evolving heuristic (version/behavior/opinionated/title signals + (Recommended) suffix in ≥2 places)"
+else
+  fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
+fi
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

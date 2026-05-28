@@ -81,16 +81,51 @@ why a candidate didn't make the cut.
 
 ### Step 2 — Present each qualified candidate via AskUserQuestion
 
-For each, present:
+Before assembling the options, classify the candidate to pre-recommend the right
+default status. The classifier inspects the candidate body for tooling-evolving
+signal — those candidates describe how an external tool / framework / migration
+behaves rather than an opinionated project decision. Promoting them as `active`
+locks the project to a third-party detail that may shift in the next release;
+`candidate` captures the observation without making it governing. Project
+decisions (architecture, security stance, naming conventions) still default to
+`active` because that's what the recorded reasoning is actually committing to.
+
+**Tooling-evolving signal — pre-recommend `candidate` when ANY of these match the body:**
+
+1. Names a specific external tool / framework / library with a version constraint
+   (e.g., "Hurl 4.1+", "Postgres CONCURRENTLY", "Vue 3.4+", "Node 22 ESM resolver").
+2. Describes the BEHAVIOR or PATTERN of an external tool (`how X handles Y`,
+   `Z's default is W`, `command X needs flag Y`) rather than a project rule.
+3. Lacks opinionated framing — no "we should", "must", "prefer", "always", "never",
+   "the project rule is". Descriptive prose ("X happens when Y") signals
+   observation, not decision.
+4. Title contains `behavior`, `pattern`, `migration`, `syntax`, `quirk`,
+   `workaround`, `gotcha`.
+
+**When NO tooling-evolving signal is present** (clear project decision, security
+posture, architectural invariant), pre-recommend `active`.
+
+Greenfield calibration #2 finding 7c-7d: "Tooling-related candidates from THIS
+session (Hurl scalar predicate behavior, CONCURRENTLY migration pattern) should
+likely auto-route to candidate status rather than asking — they're descriptive,
+not opinionated." This pre-recommendation moves that judgment up-front so the
+user accepts/overrides instead of hunting through five symmetric options.
+
+For each candidate, present (apply the pre-recommendation by putting the
+recommended option FIRST with the suffix `(Recommended)` on the label;
+descriptions and the other four options unchanged):
 
 ```yaml
 question: "Promote this {⚖️ decision | 🔵 discovery} to {ADR | CON | FLOW}?"
 header: "{short candidate title, ≤12 chars}"
 multiSelect: false
 options:
-  - label: "Promote (active)"
+  # Pre-recommendation: when tooling-evolving signal present, swap the first two
+  # so "Promote (candidate)" leads with the (Recommended) suffix. Otherwise the
+  # default order below puts "Promote (active)" first with (Recommended).
+  - label: "Promote (active) (Recommended)"  # or "Promote (candidate) (Recommended)" per classifier
     description: "Write {ADR-xxx} to .devt/memory/decisions/ with status: active. Becomes immediately governing for future agent edits."
-  - label: "Promote (candidate)"
+  - label: "Promote (candidate)"  # or "Promote (active)" per classifier
     description: "Write {ADR-xxx} with status: candidate. Documented but not yet enforcing — promote to active later via the same flow."
   - label: "Reject — capture as REJ tombstone"
     description: "This idea was considered and explicitly NOT chosen. Write to .devt/memory/rejected/ with search_keywords so AI re-proposals are suppressed."
@@ -101,7 +136,10 @@ options:
 ```
 
 When showing the question, INCLUDE the original reasoning verbatim above the options
-block — the user must see exactly what was recorded, not a curator paraphrase.
+block — the user must see exactly what was recorded, not a curator paraphrase. Also
+include a one-line pre-recommendation rationale ("Pre-recommend `candidate` — body
+describes Hurl 4.1+ predicate behavior, not a project rule") so the user can sanity-
+check the classifier before accepting.
 
 ### Step 3 — Act on the choice
 

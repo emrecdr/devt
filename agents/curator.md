@@ -187,10 +187,17 @@ DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 ## Actions Taken
 
-| #   | Candidate         | Source         | Target ID | Action                      | Reason / Filter |
-| --- | ----------------- | -------------- | --------- | --------------------------- | --------------- |
-| 1   | "<title>"         | lessons.yaml   | LES-007   | accept                      | passed all 5    |
-| 2   | "<title>"         | _suggestions   | -         | reject                      | non-obviousness |
+| #   | Candidate         | Source         | Target ID | Action                      | Pre-recommended | User choice                 | Reason / Filter |
+| --- | ----------------- | -------------- | --------- | --------------------------- | --------------- | --------------------------- | --------------- |
+| 1   | "<title>"         | lessons.yaml   | LES-007   | accept                      | active          | active                      | passed all 5    |
+| 2   | "<title>"         | _suggestions   | CON-014   | accept                      | candidate (tooling) | candidate               | passed all 5    |
+| 3   | "<title>"         | _suggestions   | -         | reject                      | -               | -                           | non-obviousness |
+
+Pre-recommended column records which status the classifier suggested (per the
+memory-curation skill's tooling-evolving heuristic — see Step 2 there). When it
+diverges from User choice, the user overrode the recommendation; that signal is
+worth surfacing in `## Concerns` if it happens for several candidates in one run
+(classifier may be drifting against actual preference).
 
 ## Memory Layer Changes
 
