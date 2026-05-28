@@ -88,6 +88,17 @@ const DEFAULTS = {
     auto_curator_on_review: false,
     auto_curator_min_candidates: 3,
     auto_curator_cooldown_days: 7,
+    // Passive memory-candidate surfacing. When _suggestions.md accumulates
+    // >= candidates_surface_threshold proposed promotions, devt's three
+    // ambient surfaces (SessionStart hint, /devt:next recommendation,
+    // present_findings workflow footer) suggest running /devt:memory promote.
+    // The cooldown_hours guard prevents re-surfacing within a single working
+    // session — once a hint fires, it stays silent for the configured window.
+    // Threshold defaults to 5 (enough to be worth a curator dispatch's
+    // ~3K token cost); cooldown defaults to 24h (per-day cadence so a
+    // user who dismisses the hint isn't pestered same-session).
+    candidates_surface_threshold: 5,
+    candidates_surface_cooldown_hours: 24,
   },
   // Graphify integration — optional AST symbol anchoring + MCP query layer.
   // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and

@@ -7979,6 +7979,74 @@ else
 fi
 rm -rf "$K22_TMP"
 
+# K23: memory candidates-status counts proposal headings + reports
+# above_threshold + cooldown_passed. The four ambient surfaces
+# (SessionStart hint, /devt:next recommendation, two present_findings
+# footers) all consume this single source of truth so the threshold +
+# cooldown logic lives in one place.
+K23_TMP=$(mktemp -d)
+K23_TMP=$(cd "$K23_TMP" && pwd -P)
+mkdir -p "$K23_TMP/.devt/memory" "$K23_TMP/.devt/state"
+echo '{"memory":{"candidates_surface_threshold":3,"candidates_surface_cooldown_hours":1}}' > "$K23_TMP/.devt/config.json"
+# Empty _suggestions.md → 0 candidates, below threshold
+cat > "$K23_TMP/.devt/memory/_suggestions.md" <<'EOF'
+# Memory Layer — Discovery Suggestions
+
+## Summary
+- total_candidates: 0
+EOF
+K23_C1=$(cd "$K23_TMP" && node "$ROOT/bin/devt-tools.cjs" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.count===0?'1':'0')+(j.ready_to_surface===false?'1':'0'));}catch(e){console.log('err');}})")
+# 4 candidates → above_threshold + cooldown_passed (no last-surface yet) → ready_to_surface=true
+cat >> "$K23_TMP/.devt/memory/_suggestions.md" <<'EOF'
+
+## ⚖️/🔵 Proposed Promotions
+
+### ⚖️ First decision proposal
+- body
+### 🔵 Second discovery proposal
+- body
+### ⚖️ Third decision proposal
+- body
+### 🔵 Fourth discovery proposal
+- body
+EOF
+K23_C2=$(cd "$K23_TMP" && node "$ROOT/bin/devt-tools.cjs" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.count===4?'1':'0')+(j.ready_to_surface===true?'1':'0'));}catch(e){console.log('err');}})")
+if [ "$K23_C1" = "11" ] && [ "$K23_C2" = "11" ]; then
+  pass "K23: candidates-status counts emoji proposal headings + reports ready_to_surface correctly (empty→0/false, 4 headings→4/true)"
+else
+  fail "K23: count/ready logic broken. c1(empty)=${K23_C1} c2(4-headings)=${K23_C2}"
+fi
+rm -rf "$K23_TMP"
+
+# K24: candidates-touch-surface updates the cooldown timestamp; subsequent
+# candidates-status reports cooldown_passed=false. Validates the
+# anti-duplicate-hint guard that prevents within-session re-surfacing.
+K24_TMP=$(mktemp -d)
+K24_TMP=$(cd "$K24_TMP" && pwd -P)
+mkdir -p "$K24_TMP/.devt/memory" "$K24_TMP/.devt/state"
+echo '{"memory":{"candidates_surface_threshold":3,"candidates_surface_cooldown_hours":1}}' > "$K24_TMP/.devt/config.json"
+cat > "$K24_TMP/.devt/memory/_suggestions.md" <<'EOF'
+# proposals
+
+## ⚖️/🔵 Proposed Promotions
+### ⚖️ One
+### 🔵 Two
+### ⚖️ Three
+### 🔵 Four
+EOF
+# Step 1: pre-touch ready=true
+K24_PRE=$(cd "$K24_TMP" && node "$ROOT/bin/devt-tools.cjs" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ready_to_surface===true?'1':'0');}catch(e){console.log('err');}})")
+# Step 2: touch (subshell so parent cwd survives the post-test rm -rf)
+(cd "$K24_TMP" && node "$ROOT/bin/devt-tools.cjs" memory candidates-touch-surface >/dev/null 2>&1)
+# Step 3: post-touch ready=false (cooldown active)
+K24_POST=$(cd "$K24_TMP" && node "$ROOT/bin/devt-tools.cjs" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.ready_to_surface===false?'1':'0')+(j.cooldown_passed===false?'1':'0'));}catch(e){console.log('err');}})")
+if [ "$K24_PRE" = "1" ] && [ "$K24_POST" = "11" ]; then
+  pass "K24: candidates-touch-surface suppresses ready_to_surface for the cooldown window (pre=ready, post=cooldown_active)"
+else
+  fail "K24: cooldown gate broken. pre=${K24_PRE} post=${K24_POST}"
+fi
+rm -rf "$K24_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

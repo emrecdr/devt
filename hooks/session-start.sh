@@ -150,6 +150,23 @@ if [[ -n "$UPDATE_MSG" ]]; then
 ${UPDATE_MSG}"
 fi
 
+# ─── Memory-Candidate Surfacing (B-III.1.a) ───
+# When _suggestions.md has accumulated >= candidates_surface_threshold proposals
+# AND cooldown has elapsed AND no active workflow, surface a one-liner hint and
+# touch the cooldown timestamp so subsequent SessionStart fires in the same
+# 24h window stay silent.
+if [[ -z "$STOPPED_AT" && -z "$HANDOFF_INFO" ]]; then
+  CANDIDATES_STATUS=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-status 2>/dev/null || echo '{"ready_to_surface":false}')
+  READY=$(echo "$CANDIDATES_STATUS" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ready_to_surface?'1':'0');}catch(e){console.log('0');}})" 2>/dev/null || echo "0")
+  if [[ "$READY" == "1" ]]; then
+    CC_COUNT=$(echo "$CANDIDATES_STATUS" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.count||0);}catch(e){console.log(0);}})" 2>/dev/null || echo "0")
+    CONTEXT="${CONTEXT}
+
+💭 ${CC_COUNT} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote when ready to triage. Hint will stay silent for ~24h after surfacing."
+    node "${PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-touch-surface >/dev/null 2>&1 || true
+  fi
+fi
+
 # ─── Output ───
 
 node -e "

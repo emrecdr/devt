@@ -102,10 +102,24 @@ Based on detected state, execute the appropriate action (per the dispatch mechan
 ```
 Nothing in progress. What would you like to do?
 ```
+
+Before asking the user, check the memory-candidate surface (B-III.1.b). When `_suggestions.md` has ≥ `memory.candidates_surface_threshold` proposals AND the cooldown has elapsed, surface the count so the user sees the pending triage opportunity, and include a "Triage memory candidates" option in the AskUserQuestion. The CLI handles all gating — the workflow just consumes `ready_to_surface`.
+
+```bash
+CC_STATUS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-status 2>/dev/null || echo '{"ready_to_surface":false,"count":0}')
+CC_READY=$(echo "$CC_STATUS" | jq -r '.ready_to_surface')
+CC_COUNT=$(echo "$CC_STATUS" | jq -r '.count')
+if [ "$CC_READY" = "true" ]; then
+  echo "💭 ${CC_COUNT} memory candidates pending in .devt/memory/_suggestions.md."
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-touch-surface >/dev/null 2>&1 || true
+fi
+```
+
 Ask via AskUserQuestion:
 - "Build something" → ask for task description, then run `/devt:workflow`
 - "Define a feature" → ask for feature idea, then run `/devt:specify`
 - "Fix a bug" → ask for bug description, then run `/devt:debug`
+- When `CC_READY=true`, also include: "Triage memory candidates (${CC_COUNT} pending)" → run `/devt:memory promote`
 
 ### No workflow, has stopped_phase (interrupted session)
 Read `stopped_phase` and `workflow_type` from state. Route to the correct workflow:

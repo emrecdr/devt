@@ -1500,6 +1500,69 @@ function run(subcommand, args) {
       });
       return 0;
     }
+    case "candidates-status": {
+      // B-III.1 surface metadata: drives the passive memory-candidate
+      // surfacing across SessionStart, /devt:next, and present_findings
+      // footers. Count is sourced from _suggestions.md proposal headings
+      // (### ⚖️ / ### 🔵 / ### 🔄) — the canonical curator inbox. The
+      // cooldown timestamp lives at .devt/memory/.last-candidate-surface
+      // (NEVER committed; gitignored as a hidden file). Consumers should
+      // treat ready_to_surface as the only call-to-action signal; count
+      // alone is informational.
+      const cfg = require("./config.cjs").getMergedConfig().memory || {};
+      const threshold = Number.isInteger(cfg.candidates_surface_threshold) ? cfg.candidates_surface_threshold : 5;
+      const cooldownHours = Number.isFinite(cfg.candidates_surface_cooldown_hours) ? cfg.candidates_surface_cooldown_hours : 24;
+      const root = findProjectRoot();
+      const suggestionsPath = path.join(root, ".devt", "memory", "_suggestions.md");
+      const cooldownPath = path.join(root, ".devt", "memory", ".last-candidate-surface");
+      let count = 0;
+      if (fs.existsSync(suggestionsPath)) {
+        try {
+          const content = fs.readFileSync(suggestionsPath, "utf8");
+          count = (content.match(/^### [⚖️🔵🔄]/gmu) || []).length;
+        } catch { /* count stays 0 */ }
+      }
+      let lastSurfacedAt = null;
+      let hoursSinceLast = null;
+      if (fs.existsSync(cooldownPath)) {
+        try {
+          const ts = fs.readFileSync(cooldownPath, "utf8").trim();
+          const parsed = new Date(ts).getTime();
+          if (!isNaN(parsed)) {
+            lastSurfacedAt = new Date(parsed).toISOString();
+            hoursSinceLast = (Date.now() - parsed) / 3_600_000;
+          }
+        } catch { /* fields stay null */ }
+      }
+      const aboveThreshold = count >= threshold;
+      const cooldownPassed = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
+      json({
+        count,
+        threshold,
+        above_threshold: aboveThreshold,
+        last_surfaced_at: lastSurfacedAt,
+        hours_since_last_surface: hoursSinceLast,
+        cooldown_hours: cooldownHours,
+        cooldown_passed: cooldownPassed,
+        ready_to_surface: aboveThreshold && cooldownPassed,
+      });
+      return 0;
+    }
+    case "candidates-touch-surface": {
+      // Update the surface-tracking timestamp. Called by consumers AFTER
+      // they emit the hint to the user (SessionStart hook, /devt:next,
+      // present_findings footer). The next candidates-status call will
+      // then report cooldown_passed=false until the cooldown window
+      // elapses, suppressing duplicate hints within a single session.
+      const root = findProjectRoot();
+      const memDir = path.join(root, ".devt", "memory");
+      if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
+      const cooldownPath = path.join(memDir, ".last-candidate-surface");
+      const ts = new Date().toISOString();
+      fs.writeFileSync(cooldownPath, ts + "\n", "utf8");
+      json({ ok: true, touched_at: ts });
+      return 0;
+    }
     case "promote":
     case "reject": {
       // These subcommands are routed to curator via workflows/memory-promote.md and
@@ -1519,6 +1582,7 @@ function run(subcommand, args) {
         `Unknown memory subcommand: ${subcommand}\n` +
         `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
         `       validate | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
+        `       candidates-status | candidates-touch-surface |\n` +
         `       promote (via /devt:memory) | reject (via /devt:memory)\n`
       );
       return 2;

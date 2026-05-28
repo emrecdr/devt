@@ -699,6 +699,18 @@ Surface the output verbatim in the user report under "Graphify activity". When t
 
 This is a READ-ONLY workflow. Do NOT offer to fix findings. If the user wants fixes applied, they should run `/implement` or `/workflow` with the review findings as input.
 
+**Memory-candidate footer** (B-III.1.c — KEEP IN SYNC across code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize). Surfaces a one-liner when `_suggestions.md` has ≥ `memory.candidates_surface_threshold` proposals AND the cooldown has elapsed. The CLI handles all gating — workflows only need to echo the hint and touch the cooldown timestamp.
+
+```bash
+CC_STATUS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-status 2>/dev/null || echo '{"ready_to_surface":false}')
+if echo "$CC_STATUS" | jq -e '.ready_to_surface == true' >/dev/null 2>&1; then
+  CC_COUNT=$(echo "$CC_STATUS" | jq -r '.count')
+  echo ""
+  echo "💭 ${CC_COUNT} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage."
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-touch-surface >/dev/null 2>&1 || true
+fi
+```
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
 ```
