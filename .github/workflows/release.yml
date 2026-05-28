@@ -13,6 +13,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual fallback for the silent-skip pattern where a bulk `git push --tags`
+  # didn't fire the per-tag push event (greenfield 2026-05-27: v0.58.1–v0.62.0
+  # had to be backfilled by hand). Re-run via:
+  #   gh workflow run release.yml -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.62.0). Must already exist on origin.'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -22,11 +32,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # On workflow_dispatch the default ref is the branch the workflow
+          # was triggered from (usually main). Resolving to the input tag
+          # ensures the rest of the job sees the tagged commit's tree.
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve version from tag
         id: version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
