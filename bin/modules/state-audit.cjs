@@ -270,6 +270,7 @@ const WORKFLOW_EVICTABLE = Object.freeze([
   "auto-curator-considered.txt",
   "reuse-candidates.md",
   "reuse-analysis.md",
+  "reuse-search-attempted.txt",
   "claude-mem-harvest.md",
   "claude-mem-skipped.txt",
   // Verification sidecars (replaced per-workflow)

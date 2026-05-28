@@ -847,7 +847,16 @@ Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_
 # KEEP IN SYNC: mirrored in quick-implement.md implement step
 TASK_TEXT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')
 if [ -n "$TASK_TEXT" ]; then
-  REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":true,"candidates_total":0}')
+  # Write the attempted-marker BEFORE invoking the CLI. assert-reuse-analyzed
+  # uses marker presence to distinguish "ran with 0 candidates" from
+  # "orchestrator skipped this block entirely". The result= line preserves
+  # CLI failure context for the gate's BLOCK message.
+  {
+    echo "attempted_at=$(date -u +%FT%TZ)"
+    echo "task=${TASK_TEXT}"
+  } > .devt/state/reuse-search-attempted.txt
+  REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":false,"error":"cli_failed"}')
+  echo "result=${REUSE_RESULT}" >> .devt/state/reuse-search-attempted.txt
   REUSE_COUNT=$(echo "$REUSE_RESULT" | jq -r '.candidates_total // 0')
   echo "reuse-search: ${REUSE_COUNT} candidates → .devt/state/reuse-candidates.md"
 fi

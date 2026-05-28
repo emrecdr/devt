@@ -856,6 +856,7 @@ const STATE_FILE_CONTRACT = {
     "auto-curator-considered.txt", // marker written by auto_curator step (assert-auto-curator-considered)
     "reuse-candidates.md",      // written by state derive-reuse-candidates (reuse pre-search)
     "reuse-analysis.md",        // written by programmer per-candidate decisions (assert-reuse-analyzed gate)
+    "reuse-search-attempted.txt", // marker written by workflow bash BEFORE derive-reuse-candidates CLI — distinguishes "never ran" from "ran with 0 candidates"
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1854,14 +1855,36 @@ function assertAutoCuratorConsidered() {
 function assertReuseAnalyzed() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const markerPath = path.join(dir, "reuse-search-attempted.txt");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const candidatesPath = path.join(dir, "reuse-candidates.md");
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const analysisPath = path.join(dir, "reuse-analysis.md");
 
+  // Three-state gate. Marker presence distinguishes the legitimate "ran with
+  // zero candidates" pass from the silent "workflow bash skipped the step"
+  // failure. Greenfield calibration #2: assert-reuse-analyzed returned
+  // ok:true under the old escape clause when reuse-candidates.md was simply
+  // absent, blessing a session where the entire pre-search step never ran.
+  // The marker is written BEFORE the derive-reuse-candidates CLI invocation
+  // by the workflow bash, so its presence is the canonical "orchestrator
+  // attempted the step" signal.
+  if (!fs.existsSync(markerPath)) {
+    return {
+      ok: false,
+      reason:
+        "reuse-search-attempted.txt absent — workflow skipped the reuse pre-search step entirely. " +
+        "Orchestrator must run the reuse-search bash block (write the marker, then `state derive-reuse-candidates \"<task>\"`) before dispatching the programmer.",
+    };
+  }
+
   if (!fs.existsSync(candidatesPath)) {
     return {
-      ok: true,
-      reason: "reuse-candidates.md absent — derive-reuse-candidates was not run (graphify unavailable or skipped); gate does not apply",
+      ok: false,
+      marker_present: true,
+      reason:
+        "reuse-search-attempted.txt present but reuse-candidates.md absent — the derive-reuse-candidates CLI was invoked but failed to write the candidates file. " +
+        "Check the result= line in the marker file for failure context (graphify down, CLI exception, etc.).",
     };
   }
 

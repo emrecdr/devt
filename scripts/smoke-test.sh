@@ -7140,14 +7140,24 @@ else
   pass "H1c: skipped (no graphify-out/ in devt repo for fixture copy)"
 fi
 
-# H2: assert-reuse-analyzed CLI (3 sub-gates)
+# H2: assert-reuse-analyzed CLI (3 sub-gates). Post-B-II.1: the marker
+# (reuse-search-attempted.txt) is the canonical "orchestrator attempted
+# the pre-search" signal; every H2 case must write it before testing
+# downstream conditions or the marker-absent BLOCK swallows the test.
 H2_TMP=$(mktemp -d)
 mkdir -p "$H2_TMP/.devt/state" && echo '{}' > "$H2_TMP/.devt/config.json"
+echo "attempted_at=2026-05-28T00:00:00Z" > "$H2_TMP/.devt/state/reuse-search-attempted.txt"
+echo "result={\"ok\":true,\"candidates_total\":0}" >> "$H2_TMP/.devt/state/reuse-search-attempted.txt"
+cat > "$H2_TMP/.devt/state/reuse-candidates.md" <<'CEOF'
+# Candidates
+
+(no candidates surfaced — graphify resolved zero matches for task)
+CEOF
 H2A=$(cd "$H2_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null)
 if echo "$H2A" | jq -e '.ok == true' >/dev/null 2>&1; then
-  pass "H2a: assert-reuse-analyzed PASSES when reuse-candidates.md absent (gate does not apply)"
+  pass "H2a: assert-reuse-analyzed PASSES when marker present + candidates file has zero entries (legit no-op)"
 else
-  fail "H2a: gate fired incorrectly when no candidates — got: $H2A"
+  fail "H2a: gate fired incorrectly on legit zero-candidates no-op — got: $H2A"
 fi
 cat > "$H2_TMP/.devt/state/reuse-candidates.md" <<'CEOF'
 # Candidates
@@ -7335,6 +7345,8 @@ cat > "$I5_TMP/.devt/state/workflow.yaml" <<EOF
 active: true
 created_at: "${NOW_ISO}"
 EOF
+echo "attempted_at=${NOW_ISO}" > "$I5_TMP/.devt/state/reuse-search-attempted.txt"
+echo "result={\"ok\":true,\"candidates_total\":1}" >> "$I5_TMP/.devt/state/reuse-search-attempted.txt"
 cat > "$I5_TMP/.devt/state/reuse-candidates.md" <<'CEOF'
 # Candidates
 ### `funcA` at `a.ts:1`
@@ -7802,6 +7814,45 @@ else
   fail "K18: resolution_path not in return shape; typeof=${K18_OUT}"
 fi
 rm -rf "$K18_TMP"
+
+# K19: assert-reuse-analyzed three-state matrix. Field signal (greenfield
+# calibration #2): the legacy `ok:true` escape clause on missing
+# reuse-candidates.md blessed sessions where the orchestrator skipped the
+# reuse-search bash block entirely. The marker (reuse-search-attempted.txt)
+# distinguishes "ran with 0 candidates" (legit no-op) from "never ran"
+# (orchestrator skipped). Three cases:
+#   1. marker absent + candidates absent → BLOCK (silent-skip caught)
+#   2. marker present + candidates absent → BLOCK (CLI failed)
+#   3. marker present + candidates with 0 entries → PASS (legit no-op)
+K19_TMP=$(mktemp -d)
+K19_TMP=$(cd "$K19_TMP" && pwd -P)
+mkdir -p "$K19_TMP/.devt/state"
+echo '{}' > "$K19_TMP/.devt/config.json"
+cat > "$K19_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: k19-test
+workflow_type: quick_implement
+created_at: 2026-05-28T20:00:00.000Z
+EOF
+# Case 1: nothing present
+K19_C1=$(cd "$K19_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 2: marker present, candidates absent
+echo "attempted_at=2026-05-28T20:01:00Z" > "$K19_TMP/.devt/state/reuse-search-attempted.txt"
+echo "result={\"ok\":false,\"error\":\"cli_failed\"}" >> "$K19_TMP/.devt/state/reuse-search-attempted.txt"
+K19_C2=$(cd "$K19_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+# Case 3: marker + candidates with 0 entries (legit no-op)
+cat > "$K19_TMP/.devt/state/reuse-candidates.md" <<'EOF'
+# Reuse candidates
+
+(no candidates surfaced)
+EOF
+K19_C3=$(cd "$K19_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok?'true':'false');}catch(e){console.log('parse_err');}})")
+if [ "$K19_C1" = "false" ] && [ "$K19_C2" = "false" ] && [ "$K19_C3" = "true" ]; then
+  pass "K19: assert-reuse-analyzed three-state matrix (no-marker=BLOCK, no-candidates=BLOCK, zero-candidates=PASS)"
+else
+  fail "K19: matrix broken. c1(none)=${K19_C1} c2(no-cand)=${K19_C2} c3(zero-cand)=${K19_C3}"
+fi
+rm -rf "$K19_TMP"
 
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
