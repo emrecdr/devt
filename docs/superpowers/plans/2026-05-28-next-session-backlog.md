@@ -36,13 +36,19 @@ Phases sequenced by risk + leverage. Phase A is small + ships quickly; Phase B i
 
 ---
 
-## Phase A — Operational + Surgical Hotfixes (v0.62.1)
+## Phase A — Operational + Surgical Hotfixes (v0.62.1) — ✅ SHIPPED 2026-05-28
+
+> **Status**: SHIPPED as v0.62.1. All 11 tasks (A1 through A11) completed. Smoke 679 → 685/0.
+>
+> **Commits**: a66e2ee (A6 placeholder regex), f839aaf (A7 SYMBOL_DENYLIST), ad87029 (A8 lane-JSON eviction), fe9a284 (A9 verifier gate workflow_type), e92e973 (A2 workflow_dispatch), ad46d80 (A3 release.sh), 7428443 (A4 J2 smoke), cc0143a (A5 INTERNALS.md substance-gates), 0f5b8b5 (A10 mcp-stats docs), 623e536 (A11 v0.62.1 release).
+>
+> Task bodies below preserved as audit trail. New work continues in Phase B.
 
 **Theme**: clean operational deck + harden release flow + ship the small calibration hotfixes that don't need architectural change.
 
-**Smoke target**: 679 → ~682 (J1 INTERNALS.md gate + J2 release-drift gate + new K2 stub-regex regression fixture)
+**Smoke target**: 679 → 685 (J1 INTERNALS.md gate + J2 release-drift gate + K2-K5 hotfix regression fixtures) — **ACHIEVED**.
 
-**Effort**: ~3–4 hours (A1 already done; A2-A11 to ship).
+**Effort**: ~3–4 hours.
 
 **Sequencing note**: A6-A9 are independent 1–5 line code changes; could be batched into a single commit if desired. A2-A5 + A10 are release-flow / docs work that can run in parallel with A6-A9.
 
@@ -1105,11 +1111,17 @@ TBD per D-2 decision. Could go in v0.63.1 (if D-2.a) or v0.64.0 (if D-2.b) or v0
 
 ---
 
-## Phase A2 — v0.62.2 patch (surgical bug fixes from greenfield audit + calibration #3)
+## Phase A2 — v0.62.2 patch (surgical bug fixes from greenfield audit + calibration #3) — ✅ SHIPPED 2026-05-28
+
+> **Status**: SHIPPED as v0.62.2. All 5 tasks (A2-1 through A2-5) completed. Smoke 685 → 689/0.
+>
+> **Commits**: 8a0c9fd (A2-1 PREFLIGHT walk-up scope fix), a6333ed (A2-2 MCP namespace drift in 4 workflows), f7f618c (A2-3 debug.md auto_refresh_post_impl), f3bc1df (A2-4 state release CLI + cancelled phase), 7a730ec (A2-5 v0.62.2 release).
+>
+> Task bodies below preserved as audit trail. New work continues in Phase B.
 
 **Theme**: ship four field-validated surgical fixes between v0.62.1 and v0.63.0. All have forensic evidence in greenfield-api's filesystem (preflight-denies.jsonl, dispatch-warnings.jsonl, graphify-audit.md).
 
-**Smoke target**: 685 → ~689 (+K8/K9/K10/K11).
+**Smoke target**: 685 → 689 (+K8/K9/K10/K11) — **ACHIEVED**.
 
 **Effort**: ~2h.
 
@@ -1286,5 +1298,6 @@ From greenfield's audit, additional items for v0.64.0+:
 - **2026-05-28 (morning)** — Initial plan with 3 phases (operational v0.62.1 / memory UX v0.63.0 / Bitbucket v0.64.0). Commit `cd279a8`.
 - **2026-05-28 (afternoon)** — Revised after greenfield calibration #2 (GFBUGS-180 quick-implement session). Added: A6-A10 surgical hotfixes (F31 placeholder regex, SYMBOL_DENYLIST extension, lane-JSON eviction, verifier gate workflow_type-awareness, mcp-stats CLI-wrapper caveat docs). Restructured Phase B into 3 sub-batches: B-I symbol extraction unlock (the cascading SKIP root cause), B-II anti-escape-hatch gate strictening (3 silent-skip vectors closed), B-III memory UX (greenfield-validated B0+B3 priorities, B2 scope-corrected, B1+B4+B5 deferred). Added Phase D agent-truncation research spike. Total: 26 items reviewed → 23 kept, 3 rejected, 7 deferred.
 - **2026-05-28 (evening)** — v0.62.1 shipped. Greenfield calibration #3 + secondary side-request (parallel review session) surfaced 6 new findings + audit confirmations: 4 dead MCP tools, code-review-parallel zero-MCP, graphify-helpers self-contradiction, namespace drift across 4 workflows, PREFLIGHT walk-up bug, missing state release CLI. Added Phase A2 (v0.62.2 patch) with 4 surgical tasks (PREFLIGHT scope, namespace drift, debug.md auto_refresh, state release CLI) and 7 new v0.63.0 candidates (lane scope pre-warn, lane scoped-redispatch, bulk-scoped tier improvement, graphify-helpers resolution, concern-based partition, code-review-parallel MCP audit, mcp-stats since-workflow-created flag).
-- **2026-05-28 (later evening)** — v0.62.2 staged locally (5 commits, not yet released). Greenfield calibration #4 (parallel review session against v0.62.1 — 82 graphify calls, 0 errors, verifier ran 93/100) surfaced 5 findings, 2 devt-actionable: B-XV (symbol-level F17 god-node check — file-aggregated only today) and B-XVI (mcp-stats correlation_id — args_fp exists but no explicit finding→call linkage). The other 3 findings (Bitbucket pr_scoped, namespace disambiguation, suggest-time evidence) are graphify-upstream limitations devt cannot fix directly. Phase C-II Bitbucket PR tier remains in plan as devt-side workaround.
+- **2026-05-28 (later evening)** — v0.62.2 staged locally (5 commits). Greenfield calibration #4 (parallel review session against v0.62.1 — 82 graphify calls, 0 errors, verifier ran 93/100) surfaced 5 findings, 2 devt-actionable: B-XV (symbol-level F17 god-node check — file-aggregated only today) and B-XVI (mcp-stats correlation_id — args_fp exists but no explicit finding→call linkage). The other 3 findings (Bitbucket pr_scoped, namespace disambiguation, suggest-time evidence) are graphify-upstream limitations devt cannot fix directly. Phase C-II Bitbucket PR tier remains in plan as devt-side workaround.
 - **2026-05-28 (deeper validation pass)** — Validated calibration #4 findings against on-disk evidence. Three corrections to plan: (1) B-XV effort drops to ~1h (was ~2h) — `graphify.cjs:892::godNodes()` ALREADY returns symbol-level data; B-XV just filters by diff-file source_file. Implementation skeleton documented inline. (2) B-XV's evidence base is now anchored to verbatim graph-impact.md:62 quote from greenfield — the workflow output itself documents the F17 gap. (3) B-XIV priority bumped — `grep workflow_id=66473ef4 _mcp-trace.jsonl` returns 0 matches in greenfield's logs even though 82 calls were made; the workflow_id rotation issue is blocking observability, not just documentation-cosmetic. Recommended scheduling: ship B-XIV + B-XV + B-XVI together as the "mcp-stats observability batch" in v0.63.0 (~3.5h combined). Positive signals validated: verification.json shows VERIFIED + verdict:satisfied + total_score:93 + 8/8 criteria met; 5 lanes all substance_pass — v0.62.1's A9 verifier gate is functioning under realistic load.
+- **2026-05-28 (release confirmation)** — Both v0.62.1 and v0.62.2 shipped to remote (tags + GitHub releases visible). Greenfield will surface the 16 commits worth of fixes on next devt update pull. Active scope is now v0.63.0; next session starts with the mcp-stats observability batch (B-XIV + B-XV + B-XVI) per agreed sequencing.
