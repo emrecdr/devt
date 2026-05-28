@@ -78,6 +78,14 @@ Review module boundaries:
 - Are there circular dependencies between modules?
 
 Every boundary violation is a finding. Boundaries are the most important architectural constraint.
+
+**Cross-service path verification (C-I.2).** When you identify a planned change that crosses a service boundary (module A depends on module B's symbol via a new import, or a refactor introduces a call from one service to another), verify the dependency path STRUCTURALLY before flagging it as a finding. Use `graphify path <from-symbol> <to-symbol>` via Bash (the graphify-helpers skill is preloaded for you) to confirm whether the path you suspect is real or whether you're seeing a false signal from naming similarity. Three outcomes:
+
+1. **Path exists at depth ≤ 3** — the boundary cross is confirmed. Flag as Critical/Important. Cite the hop count in the finding (`A → IntermediateSymbol → B`).
+2. **Path exists at depth > 3 OR via different graph traversal** — likely indirect coupling worth documenting but not necessarily a hard boundary violation. Flag as Important/Minor and include the trace.
+3. **No path returned** — the symbols are not yet connected; the planned change would create the boundary cross. Flag as a NEW boundary violation in `## Proposed Boundary Crossings`.
+
+Example: when reviewing a plan to call `BillingService.charge()` from `AuthService.login()`, run `node bin/devt-tools.cjs graphify path AuthService BillingService` to confirm whether they currently share a transitive dependency. If they do, the new direct call may be the cleaner option; if they don't, the new dependency is a true boundary cross.
 </step>
 
 <step name="duplication">

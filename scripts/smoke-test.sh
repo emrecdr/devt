@@ -8300,6 +8300,20 @@ else
 fi
 rm -rf "$L6_TMP"
 
+# L8: architect agent body carries the cross-service-path verification
+# protocol via graphify path CLI. C-I.2: when the architect identifies a
+# planned boundary cross, it should structurally verify via shortest_path
+# before flagging. Architect already preloads graphify-helpers per
+# io-contracts.yaml + has Bash; this gate asserts the instruction is in
+# the body so a future audit doesn't re-flag the gap.
+L8_PROTO=$(/usr/bin/grep -c "Cross-service path verification" "$ROOT/agents/architect.md" 2>/dev/null || echo 0)
+L8_CLI=$(/usr/bin/grep -c "graphify path" "$ROOT/agents/architect.md" 2>/dev/null || echo 0)
+if [ "${L8_PROTO:-0}" -ge 1 ] && [ "${L8_CLI:-0}" -ge 1 ]; then
+  pass "L8: architect documents cross-service-path verification via graphify path CLI (protocol=${L8_PROTO}, CLI ref=${L8_CLI})"
+else
+  fail "L8: architect boundary-verification protocol missing. protocol=${L8_PROTO} cli=${L8_CLI}"
+fi
+
 # L7: god_node_warnings block wired into code-review.md dispatch templates
 # AND code-reviewer agent body. Greenfield review report #3: today
 # god_nodes lands in the preflight-brief.md prose but isn't injected as
