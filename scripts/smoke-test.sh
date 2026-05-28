@@ -7514,6 +7514,30 @@ else
 fi
 rm -rf "$K5_TMP"
 
+# J2: every local tag in the current minor-series has a corresponding
+# GitHub release. Catches the silent-skip drift that v0.58.1–v0.62.0
+# hit when bulk-push --tags didn't fire per-tag events. Skipped when
+# gh CLI is unavailable / unauthenticated (CI runners without gh, or
+# local environments where the user isn't logged in).
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  CURRENT_VER=$(tr -d '[:space:]' < "$ROOT/VERSION")
+  CURRENT_MINOR=$(echo "$CURRENT_VER" | awk -F. '{print $1"."$2}')
+  LOCAL_TAGS=$(git -C "$ROOT" tag --list "v${CURRENT_MINOR}.*" | sort -V)
+  J2_MISSING=""
+  for tag in $LOCAL_TAGS; do
+    if ! gh release view "$tag" --json tagName >/dev/null 2>&1; then
+      J2_MISSING="$J2_MISSING $tag"
+    fi
+  done
+  if [ -z "$J2_MISSING" ]; then
+    pass "J2: every local tag in v${CURRENT_MINOR}.* series has a corresponding GitHub release"
+  else
+    fail "J2: missing GitHub release(s) for:${J2_MISSING} — run: bash scripts/release.sh <version> or gh workflow run release.yml -f tag=<tag>"
+  fi
+else
+  pass "J2: gh CLI unavailable / unauthenticated — release-drift check skipped"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
