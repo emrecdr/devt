@@ -286,7 +286,7 @@ If `STUB_LANES_FOR_REDISPATCH` is non-empty, proceed to redispatch_lanes. Otherw
 
 <step name="redispatch_lanes" gate="all stub_redispatched lanes have new outputs OR are deferred">
 
-For each lane with `status=stub_redispatched`, issue ONE re-dispatch via the canonical template. All three L1-required context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`) MUST be present — re-read from cached workflow.yaml to ensure the L1 dispatch-hygiene hook accepts the call. Increment `redispatch_count` BEFORE the Task() call so the next substance_check_lanes pass correctly routes a second stub to deferred.
+For each lane with `status=stub_redispatched`, issue ONE re-dispatch with a NARROWED prompt. Identical re-dispatch (same prompt, same scope) wastes budget — greenfield calibration #3 finding #2: "On stub-retry, identical re-dispatch wastes budget; ask for '5 highest-signal findings only' trades completeness for substance." Increment `redispatch_count` BEFORE the Task() call so the next substance_check_lanes pass correctly routes a second stub to deferred.
 
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
@@ -295,7 +295,15 @@ for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_
 done
 ```
 
-Then issue ONE message with N Task() calls (one per stub_redispatched lane), using EXACTLY the same prompt template as `dispatch_lanes` (same context blocks, same task instruction, same output path). After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time any lane that's still a stub gets `status=deferred` (the retry-once-then-defer terminal).
+**Narrowed redispatch prompt template (B-IX)** — issue ONE message with N Task() calls (one per stub_redispatched lane), using ALL the same context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<lane_id>`, `<lane_files>`, etc. — every L1-required block from dispatch_lanes) BUT replace the `<task>` instruction with the scoped form below. The output file path stays identical so consolidate picks up the new content.
+
+```text
+<task>SCOPED REDISPATCH (1/1 retry budget): the prior dispatch returned stub-quality output (substance check failed). Re-review the files listed in <lane_files>, but constrain scope to the **5 highest-signal findings only** — pick the issues whose severity × blast-radius is greatest, write a substantive `## Finding N: <title>` block for each (description, evidence, remediation), and explicitly drop everything else. The full file path coverage of the prior dispatch is NOT required this time. Write to <review_file_for_this_lane>. Cap the markdown at ~4 KB.</task>
+```
+
+Why this works: oversized + low-information lanes hit maxTurns because the agent tries to cover everything shallowly. Constraining to top-5 lets the limited budget produce substantive findings on the issues that actually matter. The orchestrator's `## Out-of-Scope Findings (Deferred)` synthesis step (consolidate) already absorbs lanes that go deferred, so completeness loss here is intentional and bounded.
+
+After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time any lane that's still a stub gets `status=deferred` (the retry-once-then-defer terminal).
 
 ```bash
 # Re-run the substance check loop (copy from substance_check_lanes step).

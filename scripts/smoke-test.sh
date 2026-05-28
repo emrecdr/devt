@@ -8066,6 +8066,20 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K28: redispatch_lanes step carries the B-IX narrowed-prompt protocol.
+# Field signal (greenfield calibration #3 finding #2): identical re-dispatch
+# wastes budget; "5 highest-signal findings only" trades completeness for
+# substance. The narrowed prompt template must remain in the workflow body —
+# this gate is drift detection so a future edit doesn't silently revert to
+# the "EXACTLY the same prompt template" form.
+K28_NARROWED=$(/usr/bin/grep -c "SCOPED REDISPATCH" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+K28_TOP5=$(/usr/bin/grep -c "5 highest-signal findings" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+if [ "${K28_NARROWED:-0}" -ge 1 ] && [ "${K28_TOP5:-0}" -ge 1 ]; then
+  pass "K28: code-review-parallel redispatch carries narrowed-prompt protocol (SCOPED REDISPATCH=${K28_NARROWED}, top-5 highest-signal=${K28_TOP5})"
+else
+  fail "K28: narrowed-redispatch prose missing. SCOPED REDISPATCH=${K28_NARROWED} top-5=${K28_TOP5}"
+fi
+
 # K27: listLaneOutputs surfaces oversized-lane sizing fields (file_count,
 # est_loc, oversized) when present in workflow.yaml::lanes[]. Field signal
 # (greenfield calibration #3 finding #1): Lane C with 25 files / 1577 LOC
