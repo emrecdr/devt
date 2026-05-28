@@ -62,7 +62,13 @@ function isArtifactFresh(artifactPath) {
   let createdAt;
   try {
     const yaml = fs.readFileSync(workflowPath, "utf8");
-    const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    // NEW-1: prefer first_created_at (immutable session anchor) over
+    // created_at (rotates on workflow_type transitions). Backward-compat:
+    // fall back to created_at when first_created_at is absent — older
+    // workflow.yaml files predate the immutable field.
+    const mFirst = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const mLegacy = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const m = mFirst || mLegacy;
     if (!m) return { fresh: true, reason: "workflow.yaml has no created_at stamp" };
     createdAt = new Date(m[1]).getTime();
     if (isNaN(createdAt)) return { fresh: true, reason: "workflow.yaml::created_at unparseable" };
@@ -144,6 +150,8 @@ const KNOWN_STATE_KEYS = {
   task: "string",
   workflow_id: "string",
   workflow_type: "string",
+  first_created_at: "string",
+  original_workflow_id: "string",
   last_session: "string",
   stopped_at: "string",
   stopped_phase: "string",
@@ -733,9 +741,29 @@ function updateState(keyValues) {
     // Auto-stamp session metadata on first activation. Idempotent — subsequent updates
     // preserve the stamp; resetState() clears workflow.yaml, so the next active=true
     // re-stamps. Anchors the stuck-detector to a precise session boundary.
+    //
+    // NEW-1 (greenfield calibration #5): two fields are immutable for the lifetime
+    // of the workflow:
+    //   - first_created_at — frozen at first active=true; used by freshness gates
+    //     (assert-preflight-fresh, assert-claude-mem-harvest, assert-graphify-decision)
+    //     as the staleness anchor. Survives workflow_type transitions.
+    //   - original_workflow_id — frozen at first active=true; used by mcp-stats
+    //     --since-workflow-created to find ALL trace records from session start
+    //     regardless of mid-session workflow_id rotations.
+    //
+    // The mutable workflow_id + created_at continue to rotate on workflow_type
+    // transitions — that intent (trace attribution per logical workflow) stays
+    // correct. The bug was that freshness gates conflated "logical workflow"
+    // (which legitimately resets on transition) with "session anchor" (which
+    // must NOT reset, otherwise artifacts written before the transition look
+    // stale to gates running after).
     if (current.active === true && !current.created_at) {
-      current.created_at = new Date().toISOString();
+      const now = new Date().toISOString();
+      current.created_at = now;
       current.workflow_id = current.workflow_id || require("crypto").randomUUID();
+      // Freeze the immutable anchors on first activation only.
+      if (!current.first_created_at) current.first_created_at = now;
+      if (!current.original_workflow_id) current.original_workflow_id = current.workflow_id;
     } else if (
       current.active === true &&
       previousWorkflowType &&
@@ -745,6 +773,8 @@ function updateState(keyValues) {
       // workflow_type transition while active — new logical workflow, fresh stamps.
       // Closes the attribution bug where /devt:review running on top of an active
       // /devt:workflow would write trace records with the old workflow_id.
+      // first_created_at + original_workflow_id are NOT touched here — they
+      // anchor the session, not the logical workflow.
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
     }

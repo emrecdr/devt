@@ -59,7 +59,15 @@ function getWorkflowCreatedAt() {
   if (!fs.existsSync(wfPath)) return null;
   try {
     const raw = fs.readFileSync(wfPath, "utf8");
-    const m = raw.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    // NEW-1: prefer first_created_at (immutable session anchor) over
+    // created_at (rotates on workflow_type transitions). When a session
+    // does code_review → code_review_parallel mid-flight, created_at
+    // jumps forward and trace records from the code_review init phase
+    // become unreachable via `--since-workflow-created`. first_created_at
+    // anchors session start so all in-session records surface.
+    const mFirst = raw.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const mLegacy = raw.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const m = mFirst || mLegacy;
     if (!m) return null;
     const ts = new Date(m[1]).getTime();
     if (isNaN(ts)) return null;

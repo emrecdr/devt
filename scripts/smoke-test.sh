@@ -8066,6 +8066,42 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# L1: first_created_at + original_workflow_id are immutable across
+# workflow_type transitions. Greenfield calibration #5: `state update
+# workflow_type=code_review_parallel` mutates created_at + workflow_id,
+# retroactively invalidating assert-preflight-fresh / assert-claude-mem-
+# harvest / assert-graphify-decision because artifacts written BEFORE the
+# transition appear "stale" against the post-transition created_at. The
+# two new fields anchor session start; freshness gates + mcp-stats use
+# these instead of the mutable mirrors. Original mutation intent (trace
+# attribution per logical workflow) preserved on workflow_id + created_at.
+L1_TMP=$(mktemp -d)
+L1_TMP=$(cd "$L1_TMP" && pwd -P)
+mkdir -p "$L1_TMP/.devt/state"
+echo '{}' > "$L1_TMP/.devt/config.json"
+# Step 1: first activation stamps both pairs identically
+(cd "$L1_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review >/dev/null 2>&1)
+L1_FIRST_CA=$(grep -E "^first_created_at:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_ORIG_WID=$(grep -E "^original_workflow_id:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_CA=$(grep -E "^created_at:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_WID=$(grep -E "^workflow_id:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_C1_PAIRED=$( [ "$L1_FIRST_CA" = "$L1_CA" ] && [ "$L1_ORIG_WID" = "$L1_WID" ] && echo "1" || echo "0" )
+# Step 2: workflow_type transition rotates mutable mirrors, immutable anchors stay
+sleep 1
+(cd "$L1_TMP" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=code_review_parallel >/dev/null 2>&1)
+L1_FIRST_CA2=$(grep -E "^first_created_at:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_ORIG_WID2=$(grep -E "^original_workflow_id:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_CA2=$(grep -E "^created_at:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_WID2=$(grep -E "^workflow_id:" "$L1_TMP/.devt/state/workflow.yaml" | cut -d':' -f2- | tr -d ' ')
+L1_C2_IMMUTABLE=$( [ "$L1_FIRST_CA" = "$L1_FIRST_CA2" ] && [ "$L1_ORIG_WID" = "$L1_ORIG_WID2" ] && echo "1" || echo "0" )
+L1_C2_ROTATED=$( [ "$L1_CA" != "$L1_CA2" ] && [ "$L1_WID" != "$L1_WID2" ] && echo "1" || echo "0" )
+if [ "$L1_C1_PAIRED" = "1" ] && [ "$L1_C2_IMMUTABLE" = "1" ] && [ "$L1_C2_ROTATED" = "1" ]; then
+  pass "L1: first_created_at + original_workflow_id immutable across workflow_type transition; created_at + workflow_id rotate (intent preserved)"
+else
+  fail "L1: matrix broken. c1_paired=${L1_C1_PAIRED} c2_immutable=${L1_C2_IMMUTABLE} c2_rotated=${L1_C2_ROTATED}"
+fi
+rm -rf "$L1_TMP"
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a
