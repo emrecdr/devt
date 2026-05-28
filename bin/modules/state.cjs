@@ -1502,7 +1502,6 @@ const STUB_MARKER_PATTERNS = [
   // Leading "Stub:" or "Stub." marker — field stubs frequently use this prefix
   // form independent of the "in progress" phrase.
   /^\s*stub\s*[:.]/im,
-  /\bplaceholder\b/i,
   /^\s*TODO\s*:/m,
   /^\s*WIP\s*:/m,
   /\(stub\)/i,

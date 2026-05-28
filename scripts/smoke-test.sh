@@ -7416,6 +7416,44 @@ else
   fail "K1: workflows dispatching agents WITHOUT <available_agent_types>:${W010_OFFENDERS}"
 fi
 
+# K2: F31 stub-marker regex must not false-positive on legitimate compliance
+# checklists. Field signal (greenfield 2026-05-28 calibration #2): substantive
+# review.md (897 words) flagged because of "No TODO / placeholder | ✓" row.
+# Fixture mimics that exact shape; if K2 fails, a regex regression reintroduced
+# bare-noun "placeholder" matching.
+K2_TMP=$(mktemp -d)
+K2_FIXTURE="$K2_TMP/compliance-checklist.md"
+cat >"$K2_FIXTURE" <<'EOF'
+# Code Review
+
+## Findings
+The implementation is clean. All standards met. No issues surfaced during the review.
+
+## Compliance Checklist
+
+| Check | Status | Notes |
+|---|---|---|
+| No TODO / placeholder | ✓ | grep clean for TODO/FIXME/XXX in diff |
+| Tests pass | ✓ | full suite green |
+| Lint clean | ✓ | no warnings |
+
+## Verdict
+APPROVED.
+
+Detailed analysis line one with substantive prose about correctness.
+Detailed analysis line two with substantive prose about correctness.
+Detailed analysis line three with substantive prose about correctness.
+Detailed analysis line four with substantive prose about correctness.
+Detailed analysis line five with substantive prose about correctness.
+EOF
+K2_OUT=$(node "$ROOT/bin/devt-tools.cjs" state check-agent-output "$K2_FIXTURE" 2>&1)
+if echo "$K2_OUT" | grep -q '"looks_like_stub":false'; then
+  pass "K2: compliance-checklist with 'placeholder' word in row label does NOT trigger stub false-positive"
+else
+  fail "K2: substantive review with 'No TODO / placeholder | ✓' row flagged as stub — F31 regex regression. Output: $K2_OUT"
+fi
+rm -rf "$K2_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
