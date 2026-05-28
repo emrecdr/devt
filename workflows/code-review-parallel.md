@@ -464,7 +464,13 @@ if echo "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Knowledge-candidates-tagged gate** (same as code-review.md::present_findings):
+**Lane knowledge-candidate aggregation** — parallel-flow specific. Lane code-reviewers append `#KNOWLEDGE-CANDIDATE:` lines to their lane output files (`review-lane-*.md`), not directly to scratchpad. Without this step, the knowledge-candidates-tagged gate below would false-block parallel reviews even when lanes diligently surfaced candidates. Scans lane outputs + the consolidated review.md, dedupes by content, appends to scratchpad with provenance comments per source.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates
+```
+
+**Knowledge-candidates-tagged gate** (same as code-review.md::present_findings — runs AFTER lane aggregation so the parallel-flow tags surface in scratchpad):
 
 ```bash
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)

@@ -7938,6 +7938,47 @@ else
 fi
 rm -rf "$K21_TMP"
 
+# K22: aggregate-knowledge-candidates pulls #KNOWLEDGE-CANDIDATE lines
+# from review-lane-*.md and review.md into scratchpad.md with provenance
+# comments. Field signal (greenfield calibration #2 + B-II.3 design):
+# parallel-flow lanes write tags to their lane output files; without
+# aggregation, scratchpad stays empty and the assert-knowledge-
+# candidates-tagged gate false-blocks the workflow. Dedup is by line
+# content so two lanes proposing the same architectural rule produce
+# one scratchpad entry attributed to the first source seen.
+K22_TMP=$(mktemp -d)
+K22_TMP=$(cd "$K22_TMP" && pwd -P)
+mkdir -p "$K22_TMP/.devt/state"
+echo '{}' > "$K22_TMP/.devt/config.json"
+cat > "$K22_TMP/.devt/state/review-lane-auth.md" <<'EOF'
+# Lane: auth
+
+Some prose review content.
+
+#KNOWLEDGE-CANDIDATE: [type=concept] Auth tokens must be hashed before storage
+#KNOWLEDGE-CANDIDATE: [type=rejected] Magic-link auth deemed unsafe for this product
+EOF
+cat > "$K22_TMP/.devt/state/review-lane-billing.md" <<'EOF'
+# Lane: billing
+
+Prose.
+
+#KNOWLEDGE-CANDIDATE: [type=concept] Auth tokens must be hashed before storage
+#KNOWLEDGE-CANDIDATE: [type=flow] Refund flow always passes through the audit log
+EOF
+K22_OUT=$(cd "$K22_TMP" && node "$ROOT/bin/devt-tools.cjs" state aggregate-knowledge-candidates 2>/dev/null)
+K22_AGG=$(echo "$K22_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.aggregated||0);}catch(e){console.log(-1);}})")
+K22_TOTAL=$(echo "$K22_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.total_seen||0);}catch(e){console.log(-1);}})")
+K22_SCRATCH_TAGS=$(/usr/bin/grep -c "^#KNOWLEDGE-CANDIDATE:" "$K22_TMP/.devt/state/scratchpad.md" 2>/dev/null || echo 0)
+K22_PROV=$(/usr/bin/grep -c "aggregated from review-lane" "$K22_TMP/.devt/state/scratchpad.md" 2>/dev/null || echo 0)
+# 4 total lines seen across 2 files, but 1 dedup (auth tokens line in both) → 3 unique aggregated
+if [ "$K22_AGG" = "3" ] && [ "$K22_TOTAL" = "4" ] && [ "${K22_SCRATCH_TAGS:-0}" = "3" ] && [ "${K22_PROV:-0}" = "3" ]; then
+  pass "K22: aggregate-knowledge-candidates dedupes by content + writes provenance (4 seen → 3 aggregated → 3 scratchpad lines w/ provenance)"
+else
+  fail "K22: aggregation broken. aggregated=${K22_AGG} total_seen=${K22_TOTAL} scratch_tags=${K22_SCRATCH_TAGS} provenance=${K22_PROV}"
+fi
+rm -rf "$K22_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

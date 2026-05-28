@@ -2016,6 +2016,81 @@ function assertKnowledgeCandidatesTagged() {
   return { ok: true, tag_count: tags };
 }
 
+// B-II.4 — aggregate #KNOWLEDGE-CANDIDATE lines from review-lane-*.md and
+// review.md into scratchpad.md so the canonical capture path (scratchpad →
+// harvester → curator) sees parallel-lane tags. Without this, parallel
+// reviews dispatched via code-review-parallel write candidates to lane
+// output files (per agent body instructions for the lane agent), and the
+// assert-knowledge-candidates-tagged gate would false-block because
+// scratchpad stays empty even when 8 lanes each tagged 3 candidates.
+//
+// Dedup is by line content (after the `#KNOWLEDGE-CANDIDATE:` prefix) — two
+// lanes might surface the same architectural rule, and the downstream
+// harvester does its own dedup, but writing the same line twice into
+// scratchpad pollutes the audit trail.
+function aggregateKnowledgeCandidates() {
+  const dir = getStateDir();
+  let sources;
+  try {
+    sources = fs.readdirSync(dir)
+      .filter(f => /^review-lane-[A-Za-z0-9_.-]+\.md$/.test(f) || f === "review.md");
+  } catch {
+    return { ok: false, reason: "state_dir_unreadable", aggregated: 0 };
+  }
+  if (sources.length === 0) {
+    return { ok: true, sources_scanned: 0, aggregated: 0, reason: "no review-lane-*.md or review.md present" };
+  }
+  // Map content → first source file that surfaced it; preserves provenance
+  // even when several lanes propose the same candidate (only the first
+  // attribution lands in scratchpad).
+  const byContent = new Map();
+  let totalLines = 0;
+  for (const file of sources) {
+    let content;
+    try { content = fs.readFileSync(path.join(dir, file), "utf8"); } catch { continue; }
+    const matches = content.match(/^#KNOWLEDGE-CANDIDATE:.*$/gm) || [];
+    for (const line of matches) {
+      totalLines++;
+      const body = line.replace(/^#KNOWLEDGE-CANDIDATE:\s*/, "").trim();
+      if (!byContent.has(body)) byContent.set(body, file);
+    }
+  }
+  if (byContent.size === 0) {
+    return { ok: true, sources_scanned: sources.length, aggregated: 0, total_seen: totalLines, reason: "no #KNOWLEDGE-CANDIDATE lines in lane outputs" };
+  }
+  // Determine which entries scratchpad already carries (so re-runs don't
+  // duplicate). Compare full line content rather than just bodies — the
+  // harvester uses the exact prefixed form.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const scratchpadPath = path.join(dir, "scratchpad.md");
+  let existing = "";
+  if (fs.existsSync(scratchpadPath)) {
+    try { existing = fs.readFileSync(scratchpadPath, "utf8"); } catch { existing = ""; }
+  }
+  const toAppend = [];
+  let skipped = 0;
+  for (const [body, source] of byContent) {
+    const line = `#KNOWLEDGE-CANDIDATE: ${body}`;
+    if (existing.includes(line)) { skipped++; continue; }
+    toAppend.push(`<!-- aggregated from ${source} -->\n${line}`);
+  }
+  if (toAppend.length === 0) {
+    return { ok: true, sources_scanned: sources.length, aggregated: 0, total_seen: totalLines, deduped_seen: byContent.size, skipped_already_present: skipped };
+  }
+  const header = existing.endsWith("\n") || existing === "" ? "" : "\n";
+  const block = `${header}\n## Aggregated Knowledge Candidates (from parallel lanes)\n\n${toAppend.join("\n")}\n`;
+  try { fs.appendFileSync(scratchpadPath, block, "utf8"); }
+  catch (e) { return { ok: false, reason: `scratchpad write failed: ${e.message}`, aggregated: 0 }; }
+  return {
+    ok: true,
+    sources_scanned: sources.length,
+    aggregated: toAppend.length,
+    total_seen: totalLines,
+    deduped_seen: byContent.size,
+    skipped_already_present: skipped,
+  };
+}
+
 // Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
 // each lane's review file existence + size. Consumed by code-review-parallel.md's
 // substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
@@ -2416,6 +2491,8 @@ function run(subcommand, args) {
       return assertReuseAnalyzed();
     case "assert-knowledge-candidates-tagged":
       return assertKnowledgeCandidatesTagged();
+    case "aggregate-knowledge-candidates":
+      return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "list-lane-outputs":
@@ -2429,7 +2506,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, aggregate-knowledge-candidates, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }
@@ -2458,6 +2535,7 @@ module.exports = {
   assertAutoCuratorConsidered,
   assertReuseAnalyzed,
   assertKnowledgeCandidatesTagged,
+  aggregateKnowledgeCandidates,
   listLaneOutputs,
   updateLane,
   stateHistory,
