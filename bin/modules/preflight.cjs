@@ -302,7 +302,7 @@ function extractDiffSymbols(opts = {}) {
  */
 function extractTopic(taskText, opts = {}) {
   if (!taskText || typeof taskText !== "string") {
-    return { domains: [], symbols: [], keywords: [], raw: "" };
+    return { domains: [], symbols: [], keywords: [], raw: "", resolution_path: "none" };
   }
   const text = taskText.trim();
   const diffSymbols = Array.isArray(opts.gitDiffSymbols)
@@ -321,8 +321,17 @@ function extractTopic(taskText, opts = {}) {
   // may truncate to top-N — the higher-signal source wins.
   const seen = new Set();
   const symbols = [];
-  for (const s of diffSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); } }
-  for (const s of textSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); } }
+  // resolution_path tracks the DEEPEST fallback leg that contributed at least
+  // one unique symbol. Calibrations use this to measure how often each leg
+  // actually rescues a task vs. the upstream legs being sufficient on their
+  // own. Priority order ascending: none(0) < diff(1) < text(2) <
+  // snake_fts/kebab_fts(3) < full_text_fts(4). A leg only upgrades the
+  // recorded path when it contributes — silent fallbacks stay invisible.
+  let resolutionPath = "none";
+  const pathRank = { none: 0, diff: 1, text: 2, snake_fts: 3, kebab_fts: 3, full_text_fts: 4 };
+  const promotePath = (next) => { if (pathRank[next] > pathRank[resolutionPath]) resolutionPath = next; };
+  for (const s of diffSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("diff"); } }
+  for (const s of textSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("text"); } }
 
   // Lowercased word stream for domain + keyword extraction
   const words = (text.toLowerCase().match(/[a-z][a-z0-9_-]{1,30}/g) || []);
@@ -339,30 +348,64 @@ function extractTopic(taskText, opts = {}) {
   // permission" returned 0 symbols because tablet_communication is a snake_case
   // directory name, not a PascalCase identifier. Without this fallback the
   // scan_prep cascade fails (symbols=0 → blast=skip → impact=skip → subagent blind).
-  // When `opts.graphifyQuery` is injected and text+diff symbols are empty, resolve
-  // snake_case keywords (foo_bar / foo_bar_baz) via FTS against the live graph.
-  // Cap at 3 candidate queries — too many pollutes scope_hint and dominates cost.
+  // When `opts.graphifyQuery` is injected, resolve snake_case + kebab_case
+  // keywords via FTS against the live graph. The gate fires when either
+  //   (a) no symbols at all survived diff+text, OR
+  //   (b) every surviving symbol is ≤6 chars (likely PascalCase noise like
+  //       "Enrich" that escapes the denylist but carries no useful signal).
+  // Greenfield calibration #2 (GFBUGS-180): a single noise symbol that
+  // survived denylist filtering blocked the rescue path entirely under the
+  // legacy `symbols.length === 0` gate. Cap at 3 candidate queries — beyond
+  // that the FTS pass starts polluting scope_hint with weak matches.
+  const SNAKE = /^[a-z][a-z0-9]+(_[a-z0-9]+)+$/;
+  const KEBAB = /^[a-z][a-z0-9]+(-[a-z0-9]+)+$/;
   const graphifyQuery = typeof opts.graphifyQuery === "function" ? opts.graphifyQuery : null;
-  if (symbols.length === 0 && graphifyQuery) {
+  const allShortSymbols = symbols.length > 0 && symbols.every(s => s.length <= 6);
+  if ((symbols.length === 0 || allShortSymbols) && graphifyQuery) {
     const candidates = Array.from(new Set(
-      words.filter(w => /^[a-z][a-z0-9]+(_[a-z0-9]+)+$/.test(w) && !STOP_WORDS.has(w))
+      words.filter(w => (SNAKE.test(w) || KEBAB.test(w)) && !STOP_WORDS.has(w))
     )).slice(0, 3);
     for (const cand of candidates) {
       let r;
       try { r = graphifyQuery(cand, { limit: 2 }); } catch { continue; }
       if (!r || !Array.isArray(r.results)) continue;
+      const candPath = SNAKE.test(cand) ? "snake_fts" : "kebab_fts";
       for (const node of r.results) {
         const label = (node && (node.label || node.id)) || null;
         if (!label) continue;
         if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
           seen.add(label);
           symbols.push(label);
+          promotePath(candPath);
         }
       }
     }
   }
 
-  return { domains, symbols, keywords, raw: text };
+  // Terminal fallback. Field case (greenfield calibration #2): tasks dominated
+  // by domain nouns ("license", "subscription", "picker") carry no PascalCase,
+  // no snake_case, no kebab_case keywords — the keyword FTS legs above all
+  // miss. Run one FTS pass on the full task text so the graph itself decides
+  // which nouns resolve. Cap merge at 5 — beyond that we're polluting
+  // scope_hint with weak matches that the keyword legs would have caught if
+  // they were strong signal.
+  if (symbols.length === 0 && graphifyQuery) {
+    let r;
+    try { r = graphifyQuery(text, { limit: 5 }); } catch { r = null; }
+    if (r && Array.isArray(r.results)) {
+      for (const node of r.results.slice(0, 5)) {
+        const label = (node && (node.label || node.id)) || null;
+        if (!label) continue;
+        if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
+          seen.add(label);
+          symbols.push(label);
+          promotePath("full_text_fts");
+        }
+      }
+    }
+  }
+
+  return { domains, symbols, keywords, raw: text, resolution_path: resolutionPath };
 }
 
 /**

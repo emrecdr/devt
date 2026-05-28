@@ -7738,6 +7738,71 @@ else
 fi
 rm -rf "$K14B_TMP"
 
+# K15-K18: B-I symbol extraction unlock — exercises extractTopic's four
+# fallback legs (loosened gate + kebab pattern + terminal full-text +
+# resolution_path telemetry). Field signal (greenfield calibration #2):
+# "topic.symbols=['Enrich']. Net: 0 useful symbols, but the system
+# doesn't know." Short-symbol noise (Enrich ≤ 6 chars) blocked the
+# rescue path under the legacy `symbols.length === 0` gate.
+K15_OUT=$(node -e "
+const { extractTopic } = require('$ROOT/bin/modules/preflight.cjs');
+const q = (text, opts) => ({ results: [{label:'RescueSymbol'}] });
+const r = extractTopic('Enrich foo_bar baz', { graphifyQuery: q });
+process.stdout.write(JSON.stringify({symbols: r.symbols, path: r.resolution_path}));
+" 2>/dev/null)
+K15_HAS_RESCUE=$(echo "$K15_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.symbols||[]).includes('RescueSymbol')?'1':'0');}catch(e){console.log('0');}})")
+if [ "$K15_HAS_RESCUE" = "1" ]; then
+  pass "K15: loosened FTS gate fires when surviving symbols are all ≤6 chars (Enrich noise no longer blocks fallback)"
+else
+  fail "K15: short-symbol gate not firing; output=${K15_OUT}"
+fi
+
+K16_OUT=$(node -e "
+const { extractTopic } = require('$ROOT/bin/modules/preflight.cjs');
+const q = (text, opts) => text === 'relative-clients' ? { results: [{label:'RelativeClient'}] } : { results: [] };
+const r = extractTopic('Enrich relative-clients picker', { graphifyQuery: q });
+process.stdout.write(JSON.stringify({symbols: r.symbols, path: r.resolution_path}));
+" 2>/dev/null)
+K16_HAS_KEBAB=$(echo "$K16_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.symbols||[]).includes('RelativeClient')?'1':'0');}catch(e){console.log('0');}})")
+K16_PATH=$(echo "$K16_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.path||'');}catch(e){console.log('');}})")
+if [ "$K16_HAS_KEBAB" = "1" ] && [ "$K16_PATH" = "kebab_fts" ]; then
+  pass "K16: kebab-case keyword (relative-clients) reaches FTS leg and resolves (path=kebab_fts)"
+else
+  fail "K16: kebab fallback broken; symbols_match=${K16_HAS_KEBAB} path=${K16_PATH}"
+fi
+
+K17_OUT=$(node -e "
+const { extractTopic } = require('$ROOT/bin/modules/preflight.cjs');
+// Only full text matches — keyword FTS legs yield 0
+const q = (text, opts) => text === 'Add license subscription picker' ? { results: [{label:'LicenseModel'}] } : { results: [] };
+const r = extractTopic('Add license subscription picker', { graphifyQuery: q });
+process.stdout.write(JSON.stringify({symbols: r.symbols, path: r.resolution_path}));
+" 2>/dev/null)
+K17_PATH=$(echo "$K17_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.path||'');}catch(e){console.log('');}})")
+if [ "$K17_PATH" = "full_text_fts" ]; then
+  pass "K17: terminal full-text FTS fires when noun-heavy task has no PascalCase/snake/kebab keywords (path=full_text_fts)"
+else
+  fail "K17: terminal fallback broken; path=${K17_PATH} output=${K17_OUT}"
+fi
+
+K18_TMP=$(mktemp -d)
+K18_TMP=$(cd "$K18_TMP" && pwd -P)
+mkdir -p "$K18_TMP/.devt/state"
+echo '{}' > "$K18_TMP/.devt/config.json"
+# preflight-brief.json::topic.resolution_path is populated even on degraded
+# runs — extractTopic is the source of truth and the sidecar mirrors it.
+K18_OUT=$(node -e "
+const { extractTopic } = require('$ROOT/bin/modules/preflight.cjs');
+const r = extractTopic('hello world');
+process.stdout.write(typeof r.resolution_path);
+" 2>/dev/null)
+if [ "$K18_OUT" = "string" ]; then
+  pass "K18: extractTopic return shape carries resolution_path field (typeof === 'string')"
+else
+  fail "K18: resolution_path not in return shape; typeof=${K18_OUT}"
+fi
+rm -rf "$K18_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts
