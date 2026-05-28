@@ -8213,6 +8213,42 @@ else
 fi
 rm -rf "$L4_TMP"
 
+# L5: graphify neighbors --max-bytes truncates god-node drill-downs to a
+# size cap. Greenfield calibration #5: AuditMapping at depth=2 incoming
+# overflowed 84KB and returned zero signal via MCP. The CLI fallback path
+# truncates deterministically (depth-asc + label-alpha) and surfaces
+# truncated/total_neighbors so the consumer knows the result is partial.
+# Fixture: synthetic god-node with 200 callers, --max-bytes=2000 caps the
+# response to ~5-10 callers.
+L5_TMP=$(mktemp -d)
+L5_TMP=$(cd "$L5_TMP" && pwd -P)
+mkdir -p "$L5_TMP/.devt/state" "$L5_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$L5_TMP/.devt/config.json"
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [{id: 'god', label: 'GodSymbol', source_file: 'src/god.py'}],
+  links: []
+};
+for (let i = 0; i < 200; i++) {
+  g.nodes.push({id: 'c' + i, label: 'Caller' + String(i).padStart(3,'0'), source_file: 'src/x.py'});
+  g.links.push({source: 'c' + i, target: 'god'});
+}
+fs.writeFileSync('$L5_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+L5_FULL=$(cd "$L5_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify neighbors GodSymbol --direction=in --depth=1 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.results||[]).length);}catch(e){console.log(-1);}})")
+L5_CAPPED=$(cd "$L5_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify neighbors GodSymbol --direction=in --depth=1 --max-bytes=2000 2>/dev/null)
+L5_CAP_COUNT=$(echo "$L5_CAPPED" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.results||[]).length);}catch(e){console.log(-1);}})")
+L5_TRUNC=$(echo "$L5_CAPPED" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.truncated===true && j.total_neighbors===200 ? '1':'0');}catch(e){console.log('0');}})")
+# Capped should be substantially less than full (200), and truncated:true with total=200
+if [ "$L5_FULL" = "200" ] && [ "${L5_CAP_COUNT:-0}" -gt 0 ] && [ "${L5_CAP_COUNT:-0}" -lt 200 ] && [ "$L5_TRUNC" = "1" ]; then
+  pass "L5: graphify neighbors --max-bytes truncates god-node drill-down (full=200, capped=${L5_CAP_COUNT}, truncated:true, total:200)"
+else
+  fail "L5: max-bytes truncation broken. full=${L5_FULL} capped=${L5_CAP_COUNT} truncated_flag=${L5_TRUNC}"
+fi
+rm -rf "$L5_TMP"
+
 # K32: graphify lane-suggestions partitions diff files by dominant community
 # attribute when available, falls back when not. B-XIII: replaces the legacy
 # path-only partition in code-review-parallel.md::partition_lanes with a

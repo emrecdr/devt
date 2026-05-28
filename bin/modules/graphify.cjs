@@ -494,10 +494,19 @@ function getNeighbors(symbol, options) {
   const { visited } = _bfs(loaded.cache.adj, fromId, direction, depth);
   visited.delete(fromId);
 
-  const results = [];
+  // NEW-5 (greenfield calibration #5): god-nodes can return tens of thousands
+  // of incoming neighbors at depth=2 (greenfield's AuditMapping overflowed
+  // 84KB and the MCP transport dropped the response, yielding zero signal
+  // on the most-important symbol). The `max_bytes` option caps the serialized
+  // size at a target; sorting by depth-ascending then label-alphabetical
+  // keeps the truncation deterministic and prefers the closest neighbors
+  // (most relevant for impact analysis). When truncation fires, the response
+  // carries `truncated: true` + counts so consumers can flag the partial
+  // result instead of trusting it as complete.
+  const items = [];
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
-    results.push({
+    items.push({
       id,
       label: node.label || id,
       source_file: node.source_file || "",
@@ -505,6 +514,31 @@ function getNeighbors(symbol, options) {
       confidence: info.edge ? info.edge.confidence : "",
       depth: info.depth,
     });
+  }
+  items.sort((a, b) => a.depth - b.depth || (a.label || "").localeCompare(b.label || ""));
+  const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
+  if (!maxBytes) return { source: "graphify", results: items };
+  const totalCount = items.length;
+  const results = [];
+  let runningBytes = 0;
+  // Approximate per-item byte cost via JSON.stringify of the item; cheap
+  // enough at this granularity (god-node payloads are 10K-50K items).
+  for (const item of items) {
+    const itemBytes = JSON.stringify(item).length + 1; // +1 for separator comma
+    if (runningBytes + itemBytes > maxBytes) break;
+    results.push(item);
+    runningBytes += itemBytes;
+  }
+  if (results.length < totalCount) {
+    return {
+      source: "graphify",
+      results,
+      truncated: true,
+      truncated_at: results.length,
+      total_neighbors: totalCount,
+      max_bytes: maxBytes,
+      truncation_reason: `${totalCount - results.length} neighbor(s) dropped to fit max_bytes=${maxBytes}; results sorted depth-asc + label-alpha so closest neighbors retained`,
+    };
   }
   return { source: "graphify", results };
 }
@@ -1236,12 +1270,18 @@ function run(subcommand, args) {
       return 0;
     }
     case "neighbors": {
-      if (!args[0]) { process.stderr.write("Usage: graphify neighbors <symbol> [--direction=in|out|both] [--depth=N]\n"); return 2; }
+      if (!args[0]) { process.stderr.write("Usage: graphify neighbors <symbol> [--direction=in|out|both] [--depth=N] [--max-bytes=N]\n"); return 2; }
       const dirArg = args.find(a => a.startsWith("--direction="));
       const depthArg = args.find(a => a.startsWith("--depth="));
+      const maxBytesArg = args.find(a => a.startsWith("--max-bytes="));
       const direction = dirArg ? dirArg.split("=")[1] : "both";
       const depth = depthArg ? parseInt(depthArg.split("=")[1], 10) : 1;
-      json(getNeighbors(args[0], { direction, depth }));
+      const opts = { direction, depth };
+      if (maxBytesArg) {
+        const v = parseInt(maxBytesArg.split("=")[1], 10);
+        if (Number.isInteger(v) && v > 0) opts.max_bytes = v;
+      }
+      json(getNeighbors(args[0], opts));
       return 0;
     }
     case "path": {
