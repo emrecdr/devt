@@ -1105,7 +1105,150 @@ TBD per D-2 decision. Could go in v0.63.1 (if D-2.a) or v0.64.0 (if D-2.b) or v0
 
 ---
 
+## Phase A2 — v0.62.2 patch (surgical bug fixes from greenfield audit + calibration #3)
+
+**Theme**: ship four field-validated surgical fixes between v0.62.1 and v0.63.0. All have forensic evidence in greenfield-api's filesystem (preflight-denies.jsonl, dispatch-warnings.jsonl, graphify-audit.md).
+
+**Smoke target**: 685 → ~689 (+K8/K9/K10/K11).
+
+**Effort**: ~2h.
+
+### Task A2-1: PREFLIGHT walk-up scope fix
+
+**Validated finding** (greenfield preflight-denies.jsonl, 10+ entries):
+> Out-of-project paths trigger PREFLIGHT warnings: `/tmp/simplify-pr367-*.md`, `/Users/emrec/.claude/plans/*.md`. Hook walks up from cwd to find any `.devt/`, then validates the (out-of-project) target file path against the project's scratchpad.
+
+`hooks/pre-flight-guard.sh:44-49` walks up to find project root. Once resolved, the hook should refuse to fire when the target file is NOT a descendant of resolved root.
+
+- [ ] **Step 1**: After resolving `dir` (project root), add: `if (!fp.startsWith(dir + path.sep)) process.exit(0);`
+- [ ] **Step 2**: Smoke gate K8 — fixture creates project with .devt/, attempts edit on /tmp/foo.md; hook exits 0 (no scratchpad-missing complaint), no preflight-denies entry written.
+- [ ] **Step 3**: Commit `fix(preflight): refuse to fire on out-of-project file paths`.
+
+### Task A2-2: MCP namespace drift in 4 workflows
+
+**Validated finding** (greenfield-api graphify-audit.md): `dev-workflow.md`, `debug.md`, `quick-implement.md`, `research-task.md` each have 3 functional `mcp__devt-graphify__*` references (unprefixed, broken) where the working form is `mcp__plugin_devt_devt-graphify__*`. **12 broken tool references across 4 workflows.**
+
+- [ ] **Step 1**: For each of the 4 workflows, apply sed with non-pipe delimiter (`#`):
+```bash
+sed -i.bak -E 's#`mcp__devt-graphify__(blast_radius|get_neighbors|query_graph)`#`mcp__plugin_devt_devt-graphify__\1`#g' workflows/<name>.md
+```
+- [ ] **Step 2**: Verify trace-filter comments (mcp-stats lines using `*` wildcard) are unchanged.
+- [ ] **Step 3**: Smoke gate K9 — assert zero functional unprefixed references in dev/debug/research-task/quick-implement workflows (trace-filter comments excluded via `* ` wildcard guard).
+- [ ] **Step 4**: Commit `fix(workflows): namespace drift in 4 workflows — 12 unprefixed MCP refs → prefixed`.
+
+### Task A2-3: debug.md `auto_refresh_post_impl` hook
+
+**Validated finding**: dev-workflow.md has 5 hits for `auto_refresh_post_impl`, debug.md has 0. Post-debug-fix doesn't refresh the graph; next code-review fires on stale data.
+
+- [ ] **Step 1**: Identify the dev-workflow.md hook block (around line 947), copy verbatim into debug.md's post-fix step.
+- [ ] **Step 2**: Smoke gate K10 — debug.md grep returns ≥1 hit for `auto_refresh_post_impl`.
+- [ ] **Step 3**: Commit `feat(workflows): debug.md gains auto_refresh_post_impl hook (parity with dev-workflow.md)`.
+
+### Task A2-4: `state release` CLI + "cancelled" phase
+
+**Validated finding** (greenfield #3): no `state release` subcommand exists; workaround `state update active=false phase=cancelled status=cancelled` correctly trips VALID_PHASES warning because "cancelled" isn't in the enum.
+
+- [ ] **Step 1**: Add `"cancelled"` to `PHASE_ORDER` set in `bin/modules/state.cjs:174` area.
+- [ ] **Step 2**: Add `state release` subcommand to `bin/devt-tools.cjs` that calls a new `state.cjs::releaseWorkflow()` setting `active=false, phase=cancelled, status=cancelled` atomically with a `released_at` timestamp.
+- [ ] **Step 3**: Smoke gate K11 — `state release` on an active workflow flips active=false, phase=cancelled, status=cancelled; no warning.
+- [ ] **Step 4**: Commit `feat(state): add state release CLI subcommand for clean workflow lock release`.
+
+### Task A2-5: v0.62.2 release
+
+- [ ] Bump VERSION 0.62.1 → 0.62.2 + plugin.json
+- [ ] CHANGELOG [0.62.2] section — theme: "four surgical bug fixes from greenfield audit"
+- [ ] Final smoke 685 → ~689
+- [ ] `scripts/release.sh 0.62.2`
+
+---
+
+## New v0.63.0 candidates (from greenfield audit + calibration #3, secondary side-request)
+
+The following items surfaced from greenfield's two graphify audits + calibration #3 (parallel review session). Not in v0.62.2 because each touches multi-file workflow logic.
+
+### Task B-VIII (NEW): Lane scope pre-warn + auto-split
+
+**Validated finding** (greenfield calibration #3 finding #1): Lane C with 25 files / 1577 LOC consistently exceeded maxTurns: 40 budget on both dispatches.
+
+- [ ] Workflow change in `code-review-parallel.md::partition_lanes`: pre-compute file count + estimated LOC per lane; warn (or auto-split) when lane > 15 files OR > 800 LOC.
+- [ ] Effort: ~2h.
+
+### Task B-IX (NEW): Lane redispatch with reduced scope
+
+**Validated finding** (greenfield calibration #3 finding #2): On stub-retry, identical re-dispatch wastes budget; ask for "5 highest-signal findings only" trades completeness for substance.
+
+- [ ] Workflow protocol change in `code-review-parallel.md`: on substance-check failure, re-dispatch prompt template differs (top-5 highest-signal request).
+- [ ] Effort: ~1.5h.
+
+### Task B-X (NEW): code-review-parallel.md zero-MCP fix
+
+**Validated finding** (greenfield audit): code-review-parallel.md has 0 functional MCP calls — only mcp-stats trace-filter comments. Parallel review can't drill down because it inherits nothing from code-review.md's MCP setup.
+
+- [ ] Investigate whether parallel lanes should consume orchestrator-prepared graph-impact.md (architectural — confirms "lanes are MCP-blind by design") or whether the parallel workflow needs its own MCP setup phase.
+- [ ] Effort: ~2-3h pending architectural decision.
+
+### Task B-XI (NEW): Bulk-scoped tier — symbol_anchored from diff
+
+**Validated finding** (greenfield calibration #3 finding #4): For bitbucket + dense + >10 files, `query_graph(text=$REVIEW_SCOPE)` is rarely useful (text-search yields keyword hits not call-graph). Better: symbol_anchored driven from `git diff --name-only` mapped to graph nodes.
+
+- [ ] Tier decision logic change in `workflows/code-review.md` around line 145-156: when bitbucket provider + scope > 10 files + dense graph, prefer symbol_anchored with symbols extracted from diff files via existing `extractDiffSymbols`.
+- [ ] Effort: ~2h.
+
+### Task B-XII (NEW): graphify-helpers skill self-contradiction
+
+**Validated finding** (greenfield audit): `agents/code-reviewer.md:50` says "no MCP tool surface"; later step says to use graphify-helpers skill (which calls MCP). Direct conflict.
+
+- [ ] Resolution: either delete graphify-helpers skill OR explicitly mark its CLI-only fallback path AND ensure every loading agent has `Bash` permission for `node bin/devt-tools.cjs graphify *`.
+- [ ] Effort: ~30min (decision-then-edit).
+
+### Task B-XIII (NEW): Concern-based partition_lanes mode
+
+**Validated finding** (greenfield calibration #3 finding #5 + audit + Phase C-I.3 from prior plan): path-based partition created god-bucket; orchestrator bypassed with manual concern-based partition.
+
+- [ ] Replace directory-prefix partition with `get_community`-driven (Phase C-I.3 from existing plan); falls back to "split by top-3-level if cap exceeded" when graphify disabled.
+- [ ] Effort: ~3-4h (combines with C-I.3).
+
+### Task B-XV (NEW): Symbol-level F17 god-node check
+
+**Validated finding** (greenfield 2026-05-28 calibration #4, defect #3): F17's `checkLargeFilesGodNodes` at `graphify.cjs:912` is file-aggregated (sums edges across all symbols per file). AuditMapping (symbol-level god-node, 198 edges) was caught only by `blast_radius::god_node_match` via orchestrator-MCP, not by deterministic F17. When AuditMapping is in a diff file but NOT in topic.symbols, the symbol-level signal is missed.
+
+- [ ] Add `checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50)` to `bin/modules/graphify.cjs` (sibling function to `checkLargeFilesGodNodes`). Walks symbols per diff file via graph index; returns `{source_file, symbol, edge_count}` records for symbols above threshold.
+- [ ] Wire into `code-review.md::F17` step alongside file-level check. Output appended to `graph-impact.md` under `## Symbol-level god-nodes` heading.
+- [ ] Smoke gate: fixture with diff containing known-god-node symbol surfaces it independently of topic.symbols.
+- [ ] Effort: ~2h.
+
+### Task B-XVI (NEW): mcp-stats correlation_id
+
+**Validated finding** (greenfield 2026-05-28 calibration #4, defect #5): trace records carry `args_fp` (12-char fingerprint) but no explicit correlation_id. Findings in lane outputs can't trace back to specific MCP calls — auditability gap.
+
+- [ ] Schema: add `correlation_id: string` (8-10 char hex) to trace record format in `bin/devt-memory-mcp.cjs::544+571`.
+- [ ] Surface in MCP response so orchestrator can capture it OR write to sidecar `.devt/state/last-mcp-call-id.txt` for drill-down bash to read.
+- [ ] mcp-stats filter: `--correlation-id=<id>` returns matching record.
+- [ ] Workflow integration: dispatch templates injecting `<graphify_status>` block include correlation IDs of the calls behind each drill-down section.
+- [ ] Smoke gate: trace records carry correlation_id; mcp-stats filter returns single record.
+- [ ] Effort: ~2h.
+
+### Task B-XIV (NEW): mcp-stats workflow_id propagation diagnostic
+
+**Validated finding** (greenfield calibration #3 finding #6 — nuance correction): trace records DO carry workflow_id, but workflow_id rotates across init→partition transitions; `mcp-stats --workflow-id=<current>` returns empty because trace records were stamped with the PRIOR workflow_id.
+
+- [ ] Add `mcp-stats --since-workflow-created` flag that filters by `ts >= workflow.yaml::created_at` instead of exact workflow_id match. Documents the rotation behavior in INTERNALS.md::MCP Trace.
+- [ ] Effort: ~1h.
+
+### Audit-additional gaps (lower priority)
+
+From greenfield's audit, additional items for v0.64.0+:
+
+- `tester.md` has no graphify input (test-coverage decisions miss callers) — workflow + agent prose change, ~2h
+- `verifier.md` may lack scope_trust (low confidence — needs verification) — diagnostic + fix, ~1h
+- `io-contracts.yaml` doesn't declare graphify dependencies — schema addition, ~1.5h
+- Dead MCP tools (`get_node`, `graph_stats`) — wire-or-remove decision, ~1h
+
+---
+
 ## Change history
 
 - **2026-05-28 (morning)** — Initial plan with 3 phases (operational v0.62.1 / memory UX v0.63.0 / Bitbucket v0.64.0). Commit `cd279a8`.
 - **2026-05-28 (afternoon)** — Revised after greenfield calibration #2 (GFBUGS-180 quick-implement session). Added: A6-A10 surgical hotfixes (F31 placeholder regex, SYMBOL_DENYLIST extension, lane-JSON eviction, verifier gate workflow_type-awareness, mcp-stats CLI-wrapper caveat docs). Restructured Phase B into 3 sub-batches: B-I symbol extraction unlock (the cascading SKIP root cause), B-II anti-escape-hatch gate strictening (3 silent-skip vectors closed), B-III memory UX (greenfield-validated B0+B3 priorities, B2 scope-corrected, B1+B4+B5 deferred). Added Phase D agent-truncation research spike. Total: 26 items reviewed → 23 kept, 3 rejected, 7 deferred.
+- **2026-05-28 (evening)** — v0.62.1 shipped. Greenfield calibration #3 + secondary side-request (parallel review session) surfaced 6 new findings + audit confirmations: 4 dead MCP tools, code-review-parallel zero-MCP, graphify-helpers self-contradiction, namespace drift across 4 workflows, PREFLIGHT walk-up bug, missing state release CLI. Added Phase A2 (v0.62.2 patch) with 4 surgical tasks (PREFLIGHT scope, namespace drift, debug.md auto_refresh, state release CLI) and 7 new v0.63.0 candidates (lane scope pre-warn, lane scoped-redispatch, bulk-scoped tier improvement, graphify-helpers resolution, concern-based partition, code-review-parallel MCP audit, mcp-stats since-workflow-created flag).
+- **2026-05-28 (later evening)** — v0.62.2 staged locally (5 commits, not yet released). Greenfield calibration #4 (parallel review session against v0.62.1 — 82 graphify calls, 0 errors, verifier ran 93/100) surfaced 5 findings, 2 devt-actionable: B-XV (symbol-level F17 god-node check — file-aggregated only today) and B-XVI (mcp-stats correlation_id — args_fp exists but no explicit finding→call linkage). The other 3 findings (Bitbucket pr_scoped, namespace disambiguation, suggest-time evidence) are graphify-upstream limitations devt cannot fix directly. Phase C-II Bitbucket PR tier remains in plan as devt-side workaround.
