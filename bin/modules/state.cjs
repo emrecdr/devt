@@ -1561,6 +1561,20 @@ function checkAgentOutput(filePath) {
   return result;
 }
 
+// Workflow types that dispatch a verifier when config.workflow.verification=true.
+// Other workflow types (quick_implement, debug, retro, plan, specify, etc.)
+// intentionally skip verification by design — applying the gate uniformly
+// produces false-negative blocks. Field signal (greenfield 2026-05-28 PM
+// calibration #2, 1c + 6a #2): orchestrator running quick_implement with
+// project config.workflow.verification=true hit assert-verifier-ran ok:false
+// even though quick_implement has no verifier step. Silent miss that should
+// have been a no-op.
+const VERIFIER_REQUIRED_WORKFLOWS = new Set([
+  "dev",
+  "code_review",
+  "code_review_parallel",
+]);
+
 // Substance gate ensuring the verifier dispatch actually ran when config
 // said it should. Field (greenfield 2026-05-27 PR #372): orchestrator with
 // config.workflow.verification=true skipped the verifier step entirely,
@@ -1583,6 +1597,23 @@ function assertVerifierRan() {
       ok: true,
       verification_enabled: false,
       reason: "config.workflow.verification=false — gate does not apply",
+    };
+  }
+  // workflow_type opt-out: only dev / code_review / code_review_parallel
+  // dispatch a verifier. Other workflow_types intentionally skip — applying
+  // the gate uniformly would block their present_findings step on a missing
+  // artifact that was never going to be written.
+  let workflowType = null;
+  try {
+    const stateData = readState();
+    workflowType = stateData && stateData.workflow_type;
+  } catch { /* fall through — treat as unknown, apply gate */ }
+  if (workflowType && !VERIFIER_REQUIRED_WORKFLOWS.has(workflowType)) {
+    return {
+      ok: true,
+      verification_enabled: true,
+      workflow_type: workflowType,
+      reason: `workflow_type=${workflowType} does not dispatch a verifier by design — gate does not apply`,
     };
   }
   const dir = getStateDir();

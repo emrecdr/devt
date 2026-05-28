@@ -7491,6 +7491,29 @@ else
 fi
 rm -rf "$K4_TMP"
 
+# K5: assert-verifier-ran must short-circuit for workflow_types that don't
+# dispatch a verifier by design. Field signal (greenfield 2026-05-28
+# calibration #2, 1c + 6a #2): orchestrator running quick_implement with
+# project config.workflow.verification=true hit ok:false even though
+# quick_implement has no verifier step. Silent miss.
+# Positive case: workflow_type=quick_implement → ok:true.
+# Negative case: workflow_type=code_review → still ok:false when artifact absent.
+K5_TMP=$(mktemp -d)
+mkdir -p "$K5_TMP/.devt/state"
+echo '{"workflow":{"verification":true}}' > "$K5_TMP/.devt/config.json"
+(cd "$K5_TMP" && node "$ROOT/bin/devt-tools.cjs" init workflow "K5 fixture" >/dev/null 2>&1)
+(cd "$K5_TMP" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=quick_implement active=true >/dev/null 2>&1)
+K5_POS=$(cd "$K5_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>&1)
+(cd "$K5_TMP" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=code_review >/dev/null 2>&1)
+K5_NEG=$(cd "$K5_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>&1)
+if echo "$K5_POS" | grep -q '"ok":true' && echo "$K5_POS" | grep -q 'workflow_type=quick_implement' \
+   && echo "$K5_NEG" | grep -q '"ok":false'; then
+  pass "K5: assert-verifier-ran short-circuits for quick_implement (workflow_type opt-out) but still blocks for code_review"
+else
+  fail "K5: workflow_type-awareness broken. quick_implement: $K5_POS  | code_review: $K5_NEG"
+fi
+rm -rf "$K5_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
