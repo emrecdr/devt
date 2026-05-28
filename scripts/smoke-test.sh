@@ -7698,6 +7698,46 @@ else
 fi
 rm -rf "$K13_TMP"
 
+# K14a: producer-side wiring. devt-memory-mcp.cjs must generate an
+# 8-char hex correlation_id at the start of callTool, include it in
+# both appendTrace records (TOOL_NOT_FOUND path + success/error path),
+# and surface it on the response envelope via _meta.correlation_id.
+# Field signal (greenfield 2026-05-28 calibration #4): trace records
+# carried args_fp but not a per-call id, so lane findings could cite
+# "blast_radius said X" but couldn't trace back to the specific call.
+K14A_MCP="$ROOT/bin/devt-memory-mcp.cjs"
+K14A_HEX_CALL=$(/usr/bin/grep -cE "randomBytes\(4\)\.toString\(.hex.\)" "$K14A_MCP" 2>/dev/null || echo 0)
+K14A_TRACE_HITS=$(/usr/bin/grep -cE "correlation_id:\s*correlationId" "$K14A_MCP" 2>/dev/null || echo 0)
+K14A_META=$(/usr/bin/grep -cE "_meta:\s*\{\s*correlation_id" "$K14A_MCP" 2>/dev/null || echo 0)
+if [ "${K14A_HEX_CALL:-0}" -ge 1 ] && [ "${K14A_TRACE_HITS:-0}" -ge 2 ] && [ "${K14A_META:-0}" -ge 1 ]; then
+  pass "K14a: devt-memory-mcp.cjs wires correlation_id (randomBytes(4)=${K14A_HEX_CALL}, trace-record uses=${K14A_TRACE_HITS}, _meta=${K14A_META})"
+else
+  fail "K14a: correlation_id wiring broken. randomBytes(4)=${K14A_HEX_CALL} (need >=1) trace-record uses=${K14A_TRACE_HITS} (need >=2) _meta=${K14A_META} (need >=1)"
+fi
+
+# K14b: consumer-side filter. mcp-stats --correlation-id=<id> must
+# return exactly the matching trace record. Fixture: three records,
+# only one carries correlation_id=deadbeef; filter returns 1 entry.
+K14B_TMP=$(mktemp -d)
+K14B_TMP=$(cd "$K14B_TMP" && pwd -P)
+mkdir -p "$K14B_TMP/.devt/state" "$K14B_TMP/.devt/memory"
+echo '{}' > "$K14B_TMP/.devt/config.json"
+cat > "$K14B_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
+{"ts":"2026-05-28T20:05:00.000Z","tool":"blast_radius","ok":true,"duration_ms":50,"correlation_id":"deadbeef"}
+{"ts":"2026-05-28T20:06:00.000Z","tool":"get_neighbors","ok":true,"duration_ms":30,"correlation_id":"feedface"}
+{"ts":"2026-05-28T20:07:00.000Z","tool":"query_graph","ok":true,"duration_ms":20,"correlation_id":"cafebabe"}
+EOF
+K14B_OUT=$(cd "$K14B_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --correlation-id=deadbeef 2>/dev/null)
+K14B_COUNT=$(echo "$K14B_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log(-1);}})")
+K14B_TOOL=$(echo "$K14B_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.tools[0]&&j.tools[0].tool)||'');}catch(e){console.log('');}})")
+K14B_ECHO=$(echo "$K14B_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.filters.correlation_id||'');}catch(e){console.log('');}})")
+if [ "$K14B_COUNT" = "1" ] && [ "$K14B_TOOL" = "blast_radius" ] && [ "$K14B_ECHO" = "deadbeef" ]; then
+  pass "K14b: mcp-stats --correlation-id returns single matching record (count=1, tool=blast_radius, echoed=deadbeef)"
+else
+  fail "K14b: correlation_id filter broken. count=${K14B_COUNT} tool=${K14B_TOOL} echoed=${K14B_ECHO}"
+fi
+rm -rf "$K14B_TMP"
+
 # J1: INTERNALS.md substance-enforcement-gates section is current.
 # Pattern documentation must accurately reflect shipped gates — when a
 # new gate ships, this gate fails until the docs are updated. Counts

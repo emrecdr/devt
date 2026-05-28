@@ -536,14 +536,23 @@ function callTool(name, args) {
     try { return JSON.stringify(args || {}).length; } catch { return 0; }
   })();
   const argsFp = fingerprint(args);
+  // 8-char hex (4 random bytes = 32 bits, ~4.3B combinations) — collision
+  // risk negligible for a session-scoped log, short enough to embed in
+  // workflow headings without visual noise. Two consumers:
+  //   1. Trace record — enables `mcp-stats --correlation-id=<id>` lookup.
+  //   2. MCP response `_meta` — orchestrator can cite the id when writing
+  //      F16 drill-down headings, so lane findings can reference a
+  //      specific call rather than just "blast_radius said X".
+  const correlationId = crypto.randomBytes(4).toString("hex");
 
   const tool = TOOLS[name];
   if (!tool) {
     appendTrace({
       ts, tool: name, ok: false, error_code: "TOOL_NOT_FOUND",
       duration_ms: Date.now() - startedAt, args_size: argsSize, args_fp: argsFp, result_size: 0,
+      correlation_id: correlationId,
     });
-    return { error: `unknown tool: ${name}`, code: "TOOL_NOT_FOUND" };
+    return { error: `unknown tool: ${name}`, code: "TOOL_NOT_FOUND", correlation_id: correlationId };
   }
 
   let result;
@@ -569,10 +578,12 @@ function callTool(name, args) {
     ts, tool: name, ok: !isError, error_code: errorCode,
     duration_ms: Date.now() - startedAt,
     args_size: argsSize, args_fp: argsFp, result_size: resultSize,
+    correlation_id: correlationId,
   });
 
   return {
     content: [{ type: "text", text: resultText }],
+    _meta: { correlation_id: correlationId },
     ...(isError ? { isError: true } : {}),
   };
 }

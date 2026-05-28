@@ -25,6 +25,7 @@
  * node bin/devt-tools.cjs mcp-stats --workflow-id=<UUID> # filter to one workflow session
  * node bin/devt-tools.cjs mcp-stats --workflow-type=dev # filter by workflow_type (dev|code_review|…)
  * node bin/devt-tools.cjs mcp-stats --phase=implement # filter by workflow phase
+ * node bin/devt-tools.cjs mcp-stats --correlation-id=abc12345 # filter to single MCP call
  * node bin/devt-tools.cjs mcp-stats --prune-older-than=30d
  *
  * Filters compose conjunctively — e.g. `--workflow-type=dev --phase=verify --tool=query_fts`
@@ -133,6 +134,7 @@ function loadEntries(opts) {
     if (opts.workflow_id && e.workflow_id !== opts.workflow_id) return false;
     if (opts.workflow_type && e.workflow_type !== opts.workflow_type) return false;
     if (opts.phase && e.phase !== opts.phase) return false;
+    if (opts.correlation_id && e.correlation_id !== opts.correlation_id) return false;
     return true;
   });
   return { entries, path: tracePath, exists: true, parse_errors: parsed.parseErrors };
@@ -284,6 +286,7 @@ function run(subcommand, args) {
       since: opts.since || null,
       since_workflow_created: workflowCreatedAt,
       tool: opts.tool || null,
+      correlation_id: opts.correlation_id || null,
       top: opts.top || null,
       by: opts.top ? (opts.by || "calls") : null,
     },
