@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-05-28
+
+**Operational hardening + four surgical hotfixes from a fresh greenfield calibration.** The afternoon calibration on GFBUGS-180 (quick-implement workflow) surfaced four false-negative / false-positive gate behaviors that didn't need architecture, only surgical edits. Plus: release-flow hardening so the v0.58.1–v0.62.0 bulk-push silent-skip cannot recur, and a promotion of the substance-enforcement-gates pattern documentation to first-class principle status (now records all 14 shipped instances plus the freshness-binding required property). Smoke: **679 → 685 passed**, **0 failed**.
+
+### Fixed
+
+- **F31 stub-regex no longer false-positives on compliance checklists.** The bare-noun `/\bplaceholder\b/i` pattern was matching legitimate "No TODO / placeholder | ✓" rows in substantive review documents — flagging an 897-word review as a stub. Dropped the pattern; the other seven phrase-context patterns ("Stub written", "analysis in progress", "(stub)", line-leading "TODO:"/"WIP:", "not yet written", "Stub:" prefix) catch real stubs without the false-positive risk.
+- **`extractTopic` SYMBOL_DENYLIST now filters 25 more English action verbs.** Field signal: "Enrich relative-clients picker endpoint…" pulled `Enrich` as a PascalCase symbol, the lone surviving noise also blocked the snake_case FTS rescue path (gated on `symbols.length === 0`), cascading into `graphify_scan_prep` SKIP despite a fresh dense 45K-node graph. The structural FTS-gate loosening will land in the next minor release; this patch only closes the denylist hole. New verbs: `enrich, harvest, normalize, validate, deprecate, sunset, ratify, expose, enable, disable, surface, propagate, expand, shrink, split, merge, join, annotate, tag, track, monitor, observe, log, trace, report`.
+- **`state evict-workflow-artifacts` now clears `review-lane-*.json` sidecars.** The eviction regex matched `.md` only; JSON sidecars written by parallel lane agents persisted across `init review`, causing `validation_warnings=2` mid-session in greenfield's recent run. Lane MD and JSON are paired artifacts — the regex now treats them as one class.
+- **`state assert-verifier-ran` short-circuits for workflow_types that don't dispatch a verifier by design.** Project config `workflow.verification=true` was producing false-negative blocks for `quick_implement` runs (which intentionally skip verification per the "skip docs and retro, go straight to code and tests" contract). Added `VERIFIER_REQUIRED_WORKFLOWS = {dev, code_review, code_review_parallel}` — workflow_types outside this set return `ok:true` with reason citing the intentional opt-out. Other gates (e.g., `assert-claude-mem-harvest`) remain workflow_type-blind by design; only the verifier gate has a workflow-type contract.
+
+### Added
+
+- **`scripts/release.sh X.Y.Z` helper.** Pushes commits + tag in separate operations (avoiding the bulk-push edge case that left v0.58.1–v0.62.0 without GitHub Releases for hours), uses an annotated tag for more reliable workflow triggering, verifies the release was created post-push, and surfaces the manual-dispatch recovery command if it wasn't. Documented in CLAUDE.md::Releasing as the recommended flow.
+- **`workflow_dispatch` trigger on `release.yml`.** Manual recovery path when the per-tag push event silent-skips. Invoke via `gh workflow run release.yml -f tag=vX.Y.Z`. The checkout step resolves to the input tag (not main HEAD) so the rest of the job sees the tagged commit's tree.
+- **Smoke gate J2 — release-tag drift.** Every local tag in the current minor-series must have a corresponding GitHub release. Catches the silent-skip pattern before it accumulates. Gracefully skips when `gh` CLI is unavailable / unauthenticated (CI runners without gh, local sessions without `gh auth login`).
+- **Smoke gate J1 — substance-enforcement-gates documentation currency.** INTERNALS.md must document ≥14 substance-enforcement-gate instances. Any future gate added without updating the docs trips the gate.
+- **Smoke gates K2-K5 — regression fixtures for the four surgical hotfixes.** K2: compliance-checklist with "placeholder" word does NOT trigger stub false-positive. K3: extractTopic filters "Enrich" from task-leading position. K4: both lane MD and lane JSON sidecars get evicted. K5: assert-verifier-ran short-circuits for `quick_implement` AND still blocks for `code_review`.
+
+### Changed
+
+- **`docs/INTERNALS.md::Substance-Enforcement Gates` section promoted to first-class architectural principle.** Expanded the instances table from 5 → 14 (the full set across the F4 → isArtifactFresh arc). New "Required properties (both must hold)" subsection codifies the invariant: every substance-enforcement gate must have BOTH existence binding (`fs.existsSync`) AND freshness binding (`isArtifactFresh`). Gates missing either property are bypassable — the field arc proved it empirically. New "Pattern recognition" bullet covers freshness binding for any artifact whose currency matters.
+
+### Documentation
+
+- **`docs/INTERNALS.md::MCP Trace Workflow Context` gains a CLI-wrapper caveat.** CLI wrappers (`preflight generate`, `state derive-reuse-candidates`, `state assert-graphify-decision`, `state evict-graphify`) do NOT write to `_mcp-trace.jsonl` — sessions that exercise graphify entirely through CLI wrappers will show empty `mcp-stats` output even when graphify is load-bearing. Validating the namespace-prefix invariant requires a session with direct MCP calls (e.g., code-reviewer's symbol_anchored / bulk_scoped / pr_scoped tiers, or context_init drill-downs).
+- **`docs/superpowers/plans/2026-05-28-next-session-backlog.md` revised** to absorb the afternoon calibration findings: Phase A grew from 6 → 11 tasks (the four hotfixes plus operational items), Phase B restructured into three sub-batches (symbol-extraction unlock, anti-escape-hatch gate strictening, memory UX), Phase D added as research spike for agent-truncation recovery.
+
+### Process
+
+- **8 missing GitHub Releases backfilled.** Tags v0.58.1 through v0.62.0 were on remote but had no GitHub Releases due to a bulk `git push --tags` silent-skip. Recovered manually via `gh release create` loop. The combination of the release helper, the workflow_dispatch trigger, and J2 prevents recurrence.
+
 ## [0.62.0] - 2026-05-27
 
 **Workflow Freshness — bind all assert-* gates to workflow.yaml::created_at.** Field validation of v0.60.0 (greenfield calibration) surfaced that all mechanical assert-* gates used existence-only checks; stale prior-workflow artifacts from prior sessions satisfied every gate. The only gate that fired correctly (`assert-auto-curator-considered`) was the one tied to a marker the current workflow must write. Plus root cause: `init.cjs::initWorkflow` returned a payload but did NOT mutate workflow.yaml — workflow_type/workflow_id/created_at only got reset when context_init bash called `state update` (which orchestrators skipped). This release closes both: `init *` now writes workflow.yaml unconditionally; every existence-checking gate gains a freshness branch (mtime vs workflow.yaml::created_at, 30s grace). Also hotfixes v0.60.0's mcp-stats namespace drift. Smoke: **666 → 678 passed**, **0 failed**.
