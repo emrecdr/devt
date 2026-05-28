@@ -137,14 +137,18 @@ DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-b
 TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
 SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
 SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
-if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
+# C-III.1: adaptive threshold scales with graph size — small graphs need a
+# lower bar to surface useful blast maps. max(5, log10(node_count) * 2):
+# 100 nodes → 5, 5K → 8, 45K → 10, 100K+ → 10.
+ADAPTIVE_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify adaptive-threshold 2>/dev/null | jq -r '.threshold // 10' || echo 10)
+if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge "$ADAPTIVE_THRESHOLD" ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
   CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${TASK_DESCRIPTION:-}" 2>/dev/null | head -1)
   [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
-  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
+  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST threshold=$ADAPTIVE_THRESHOLD"
 elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
   echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
 else
-  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
+  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥${ADAPTIVE_THRESHOLD}+symbols)"
   echo "graphify_scan_prep: SKIP — $REASON"
   printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
 fi

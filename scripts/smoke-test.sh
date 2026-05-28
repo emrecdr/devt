@@ -8300,6 +8300,47 @@ else
 fi
 rm -rf "$L6_TMP"
 
+# L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
+# hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
+# high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
+# floor at 5 and saturates around 10 by 100K nodes. Three checks:
+# small graph (100 nodes → 5), mid graph (5K nodes → 8), large graph
+# (45K nodes → 10). Verifies the CLI returns the expected value.
+L9_TMP=$(mktemp -d)
+L9_TMP=$(cd "$L9_TMP" && pwd -P)
+mkdir -p "$L9_TMP/.devt/state" "$L9_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$L9_TMP/.devt/config.json"
+# Small graph (100 nodes) → threshold 5
+node -e "
+const fs = require('fs');
+const g = { directed: true, multigraph: false, graph: {built_at_commit: 'x'}, nodes: [], links: [] };
+for (let i = 0; i < 100; i++) g.nodes.push({id: 'n'+i, label: 'N'+i});
+fs.writeFileSync('$L9_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+L9_SMALL=$(cd "$L9_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify adaptive-threshold 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.threshold);}catch(e){console.log('err');}})")
+# Mid graph (5000 nodes) → threshold 8
+node -e "
+const fs = require('fs');
+const g = { directed: true, multigraph: false, graph: {built_at_commit: 'x'}, nodes: [], links: [] };
+for (let i = 0; i < 5000; i++) g.nodes.push({id: 'n'+i, label: 'N'+i});
+fs.writeFileSync('$L9_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+L9_MID=$(cd "$L9_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify adaptive-threshold 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.threshold);}catch(e){console.log('err');}})")
+# Large graph (45000 nodes) → threshold 10
+node -e "
+const fs = require('fs');
+const g = { directed: true, multigraph: false, graph: {built_at_commit: 'x'}, nodes: [], links: [] };
+for (let i = 0; i < 45000; i++) g.nodes.push({id: 'n'+i, label: 'N'+i});
+fs.writeFileSync('$L9_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+L9_LARGE=$(cd "$L9_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify adaptive-threshold 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.threshold);}catch(e){console.log('err');}})")
+if [ "$L9_SMALL" = "5" ] && [ "$L9_MID" = "8" ] && [ "$L9_LARGE" = "10" ]; then
+  pass "L9: adaptive-threshold scales (100→5, 5K→8, 45K→10) via max(5, ceil(log10(n) * 2))"
+else
+  fail "L9: scaling broken. small(100)=${L9_SMALL} mid(5K)=${L9_MID} large(45K)=${L9_LARGE}"
+fi
+rm -rf "$L9_TMP"
+
 # L8: architect agent body carries the cross-service-path verification
 # protocol via graphify path CLI. C-I.2: when the architect identifies a
 # planned boundary cross, it should structurally verify via shortest_path

@@ -1212,6 +1212,24 @@ function getCommunity(communityId, options = {}) {
  * (graphify hasn't finished, or language coverage is poor) — derived signals
  * are unreliable in that state.
  */
+// C-III.1 (greenfield review report #5): the legacy direct_dependents
+// threshold was hardcoded `>= 10` across quick-implement.md + dev-workflow.md.
+// For a 45K-node graph (greenfield-api scale), 10 is roughly right; for a
+// 5K-node graph it's too high — many edits touch 3-9 dependents that would
+// benefit from a blast map. Scale with graph size: max(5, log10(node_count) * 2).
+//   100 nodes  → max(5, 4)  = 5
+//   1000 nodes → max(5, 6)  = 6
+//   10000 nodes → max(5, 8) = 8
+//   45000 nodes → max(5, 10) = 10  (greenfield baseline)
+//   100000 nodes → max(5, 10) = 10
+// Floor at 5 prevents trivially-small graphs from triggering scan-prep on
+// 2-3 dependent counts. node_count = 0 (graph not ready) falls back to 5.
+function adaptiveImpactThreshold(nodeCount) {
+  const n = Number.isFinite(nodeCount) && nodeCount > 0 ? nodeCount : 0;
+  if (n === 0) return 5;
+  return Math.max(5, Math.ceil(Math.log10(n) * 2));
+}
+
 function graphStats() {
   const loaded = loadGraph();
   if (!loaded.ok) {
@@ -1357,10 +1375,19 @@ function run(subcommand, args) {
       json(laneSuggestions(files));
       return 0;
     }
+    case "adaptive-threshold": {
+      // Reads node_count from graphStats() (which loads graph.json) and
+      // returns the scaled threshold. Workflows pipe this into their
+      // graphify_scan_prep bash conditional in lieu of the hardcoded 10.
+      const stats = graphStats();
+      const nc = (stats && Number.isFinite(stats.node_count)) ? stats.node_count : 0;
+      json({ threshold: adaptiveImpactThreshold(nc), node_count: nc });
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions | adaptive-threshold\n`
       );
       return 2;
   }
@@ -1397,6 +1424,7 @@ module.exports = {
   checkSymbolLevelGodNodes,
   symbolsInFiles,
   laneSuggestions,
+  adaptiveImpactThreshold,
   getCommunity,
   maybeRefresh,
   writeMemoryEntry,
