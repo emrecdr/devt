@@ -8066,6 +8066,21 @@ else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
 fi
 
+# K29: code-review-parallel.md::context_init documents MCP-setup inheritance
+# architecture. Greenfield audit flagged "0 functional MCP calls" in parallel
+# workflow — that's correct observation, intentional architecture (lanes are
+# MCP-blind by design per CLAUDE.md::Critical Agent + Workflow Contracts; the
+# orchestrator-mediated graph-impact.md handoff is the single source). This
+# gate prevents future audits from re-flagging the same architectural choice
+# by asserting the inheritance doc stays in the workflow body.
+K29_INHERIT=$(/usr/bin/grep -c "MCP-setup inheritance architecture" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+K29_LANES_BLIND=$(/usr/bin/grep -c "MCP-blind by design" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+if [ "${K29_INHERIT:-0}" -ge 1 ] && [ "${K29_LANES_BLIND:-0}" -ge 1 ]; then
+  pass "K29: code-review-parallel documents MCP-inheritance architecture (intentional, not a defect)"
+else
+  fail "K29: inheritance documentation missing. MCP-setup inheritance=${K29_INHERIT} MCP-blind=${K29_LANES_BLIND}"
+fi
+
 # K28: redispatch_lanes step carries the B-IX narrowed-prompt protocol.
 # Field signal (greenfield calibration #3 finding #2): identical re-dispatch
 # wastes budget; "5 highest-signal findings only" trades completeness for

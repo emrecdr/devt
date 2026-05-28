@@ -59,6 +59,10 @@ If not configured, omit the block.
 
 <step name="context_init" gate="compound init succeeds + lane partition computed">
 
+**MCP-setup inheritance architecture (B-X).** This workflow is dispatched AFTER `code-review.md::context_init` has already run its full 8-substep setup — including the Graphify impact-plan, F16 multi-tier drill-down, F17 god-node check, and claude-mem MCP harvest. The result is `.devt/state/graph-impact.md` + cached `workflow.yaml::memory_signal_json` / `scope_hint_json` / `scope_trust_json`. Lanes consume those READ-ONLY through the dispatch templates below — they do NOT run their own MCP calls. Greenfield audit flagged this as "0 functional MCP calls" — that observation is correct but the architecture is intentional: lanes are MCP-blind by design (per CLAUDE.md::Critical Agent + Workflow Contracts), and graph-impact.md is the orchestrator-mediated handoff that gives lanes the same blast-radius context without each lane re-querying the graph. The single-source preparation also keeps trace records / correlation_ids consistent across all lanes of one review.
+
+When this workflow is dispatched WITHOUT a prior `code-review.md::context_init` run (e.g., direct invocation in tests), `STATE.memory_signal_json` will be empty `"{}"`. That's a graceful degradation — lanes still dispatch, just without inherited MCP context — but the orchestrator should re-route to `code-review.md` first when the cached fields are empty AND the project has graphify enabled.
+
 Initialize the workflow (delegated from code-review.md; the upstream step already wrote workflow.yaml::active=true and ran preflight + memory_signal cache). Re-read the cached context blocks:
 
 ```bash
