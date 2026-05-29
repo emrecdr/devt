@@ -187,6 +187,17 @@ The orchestrator owns the MCP boundary; sub-agents are MCP-blind by design (see 
 
 ---
 
+## MCP Trace correlation_id
+
+Each `tools/call` against `bin/devt-graphify-mcp.cjs` generates an 8-char hex correlation_id (`crypto.randomBytes(4).toString("hex")`) at entry into `callTool`. The id appears in two places:
+
+1. **The trace record** appended to `.devt/memory/_mcp-trace.jsonl` (`correlation_id` field), enabling retrospective single-call lookup via `mcp-stats --correlation-id=<id>`.
+2. **The MCP response envelope** under `_meta.correlation_id`, so orchestrators can cite the id when writing F16 drill-down headings (e.g. `## Drill-down: <dep> [call: <id>]`) — lane findings then reference a specific call rather than just "blast_radius said X".
+
+The pattern mirrors the one in `bin/devt-memory-mcp.cjs` (which adopted it earlier). Both servers emit the id even on the `TOOL_NOT_FOUND` path so unknown-tool dispatches stay traceable.
+
+---
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP; scope_hint contract

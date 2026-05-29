@@ -29,7 +29,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 
 | Filename | Written by | Purpose | RESET_EXEMPT |
 |---|---|---|---|
-| `workflow.yaml` | orchestrator (`state update`) | Active workflow state (id, phase, type, status, verdict, autonomous flags) | No — wiped on reset |
+| `workflow.yaml` | orchestrator (`state update`) | Active workflow state — `workflow_id`, `phase`, `workflow_type`, `status`, `verdict`, autonomous flags, plus immutable session anchors `first_created_at` + `original_workflow_id` and the append-only `workflow_id_history[]` chain populated on every `workflow_type` rotation | No — wiped on reset |
 | `scratchpad.md` | any agent | Ephemeral cross-agent notes; reset between workflows | No |
 | `.lock` | `state update` | PID-based mutex preventing concurrent writes | ✓ Yes |
 
@@ -180,6 +180,15 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 | Affects canonical files | Yes (most) | No |
 
 **Rule of thumb**: `state reset` is for "I'm done with this workflow, sweep the workspace." `state cleanup` is for "I want to keep the active workflow but garbage-collect old slices and ad-hoc dumps."
+
+### `state evict-workflow-artifacts` (auto-fired on every `init *`)
+
+The eviction sweep `init.cjs` runs before re-stamping `workflow.yaml` clears stale gate-satisfaction markers plus slug variants that survive across sessions otherwise. Eviction covers:
+
+1. **Explicit allowlist** — gate-satisfaction markers (`consolidator-ran.txt`, `auto-curator-considered.txt`, `reuse-search-attempted.txt`, `knowledge-candidates-none.txt`, etc.) plus verification sidecars (`verification.{md,json}`).
+2. **Slug-variant regex sweep** — matches `ALLOWED_PATTERNS` from `state-audit.cjs` (`review-*.md`, `review-lane-*.{md,json}`, `impl-summary-*.{md,json}`, `test-summary-*.{md,json}`, `verification-*.{md,json}`, `slice-*.md`), gated by `mtime < workflow.yaml::first_created_at`. Canonical task outputs (`review.md`, `impl-summary.md`, etc., no slug suffix) are excluded by design — their regexes require a `-suffix`.
+
+Current-session writes are preserved by the mtime gate. Greenfield calibration #8 evidence: a project that hadn't been reset in days accumulated 167 of 201 stale files in `.devt/state/`; with this sweep, init * keeps fresh state + current-session writes and clears the rest.
 
 ---
 

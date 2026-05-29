@@ -9180,7 +9180,7 @@ fi
 # fs.appendFileSync used when CLAUDE_PLUGIN_ROOT isn't set) must carry it
 # — greenfield's 359 deny entries were all source:MISSING because only
 # bash-guard.cjs wrote the field.
-N2_HOOK_SRC=$(/usr/bin/grep -c "source: 'pre-flight-guard'" "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null || echo 0)
+N2_HOOK_SRC=$(/usr/bin/grep -c "source: 'preflight'" "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null || echo 0)
 if [ "${N2_HOOK_SRC:-0}" -ge 2 ]; then
   pass "N2: pre-flight-guard.sh writes source field in both deny paths (${N2_HOOK_SRC} write sites)"
 else

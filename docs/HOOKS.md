@@ -70,7 +70,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 | `source` value | Origin |
 |---|---|
-| `preflight` | The Edit/Write guard above (also the default for pre-existing records without a `source` field) |
+| `preflight` | The Edit/Write guard above. Written by `hooks/pre-flight-guard.sh` on both the helper-path (via `appendJsonl`) and the fallback-path (direct `fs.appendFileSync` used when `CLAUDE_PLUGIN_ROOT` isn't set). Pre-existing records that predate this field should be treated as `source: "preflight"` by consumers. |
 | `bash_destroy` | Bash safety hook denying filesystem-wipe patterns |
 | `no_verify` | Bash safety hook denying `--no-verify` / `--no-gpg-sign` |
 | `graph_loader` | Graphify `graph.json` exceeded `GRAPH_SIZE_CAP` (per-process deduped) |

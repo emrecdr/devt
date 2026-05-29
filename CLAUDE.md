@@ -103,6 +103,8 @@ node bin/devt-tools.cjs state assert-graphify-decision # Confirms graphify decis
 node bin/devt-tools.cjs state list-lane-outputs # Read workflow.yaml::lanes[] registry with per-lane file existence + size
 node bin/devt-tools.cjs state update-lane <id> status=<status> # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
 node bin/devt-tools.cjs state assert-knowledge-candidates-tagged # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
+node bin/devt-tools.cjs state aggregate-knowledge-candidates # Pulls #KNOWLEDGE-CANDIDATE: tags from review-lane-*.md / review.md / impl-summary*.md into scratchpad with dedup + provenance comments
+node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4] # WARN-mode gate reading preflight-brief.json::topic.extraction_confidence; never blocks, returns {ok:true, warn:bool, confidence, threshold, reason}
 node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
@@ -244,8 +246,8 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 
 - Atomic file writes throughout via `bin/modules/io.cjs::atomicWriteFileSync` / `atomicWriteJsonSync` (single shared implementation). → docs/INTERNALS.md (Universal Conventions).
 - Config uses prototype-pollution-safe deep merge with `FORBIDDEN_KEYS` set. → docs/INTERNALS.md.
-- Workflow session metadata (`created_at`, `workflow_id` auto-stamped on activation; idempotent; cleared on reset). → docs/INTERNALS.md (state.cjs).
-- MCP trace records carry `workflow_id` / `workflow_type` / `phase` (mtime-invalidated caching). → docs/INTERNALS.md (MCP Trace Workflow Context).
+- Workflow session metadata (`created_at`, `workflow_id` auto-stamped on activation; idempotent; cleared on reset). Immutable session anchors `first_created_at` + `original_workflow_id` frozen at first activation. Append-only `workflow_id_history[]` captures every `workflow_type` transition so cross-rotation trace attribution survives multi-hop sessions. → docs/INTERNALS.md (state.cjs).
+- MCP trace records carry `workflow_id` / `workflow_type` / `phase` (mtime-invalidated caching). `mcp-stats --workflow-id=<current>` unions the whole `workflow_id_history[]` chain so trace records written under intermediate rotations stay attributable. → docs/INTERNALS.md (MCP Trace Workflow Context).
 - Shadow-mode state validation persists `validation_status` to `workflow.yaml`. → docs/INTERNALS.md (Shadow-mode State Validation).
 - `autonomous_chain` enables cross-workflow chaining (implement → test → review). → docs/INTERNALS.md (Autonomous Chaining).
 - Parallel researcher + arch_health dispatch in COMPLEX dev flows (one message, two `Task` calls). → docs/INTERNALS.md (Parallel Researcher + arch_health Dispatch).

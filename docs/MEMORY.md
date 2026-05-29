@@ -135,10 +135,23 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
   "topic": {
     "domains": [...],
     "symbols": [...],          // filtered via SYMBOL_DENYLIST + isAllCapsNoise
-    "keywords": [...]
+    "keywords": [...],
+    "resolution_path": "none" | "plan" | "diff" | "text" | "snake_fts" | "kebab_fts" | "full_text_fts",
+    "extraction_confidence": { // numeric trust score; consumed by state assert-preflight-semantic-quality
+      "score": 0.0,            // 0.0 (none) → 0.3 (text-leg short stand-ins) → 0.6 (text-leg with long tokens) → 0.8 (FTS rescue) → 1.0 (diff or plan)
+      "band": "none" | "low" | "medium" | "high",
+      "reason": "..."          // human-readable; +0.2 overlap bonus when CamelCase-split symbol tokens match keywords
+    }
   },
   "governing_ids": [...],      // deduped union of lanes A-D
   "suggested_reading": [...],  // capped at 8 — see below
+  "scope_hint": {
+    "confidence": {            // placeholder pending v0.69 R3 calibration
+      "score": 0.0 | 1.0,
+      "band": "none" | "high",
+      "reason": "..."
+    }
+  },
   "blast": {
     "effect_size": "...",
     "source": "graphify" | "grep",
@@ -162,6 +175,26 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
   "generated_at": "..."
 }
 ```
+
+### Plan-aware symbol extraction
+
+`extractTopic` accepts a `planDerivedSymbols` channel populated from any `~/.claude/plans/*.md` paths referenced verbatim in the task text. `bin/modules/preflight.cjs::extractPlanReferences` regex-matches `~/`, `$HOME/`, `/Users/<u>/.claude/plans/...`, and `/home/<u>/.claude/plans/...`; `extractSymbolsFromPlan` reads each plan (200KB cap), slices `## Files to change` / `## Files affected` / `## Scope` / `## Symbols` sections, and lifts PascalCase + snake_case identifiers (denylist-filtered) plus code-extension file paths. Symbols flow through with `resolution_path: "plan"` (rank 1, equal-priority to diff-derived). Scope intentionally narrow: project-local `docs/plans/*.md` deferred to a follow-up.
+
+### Extraction confidence (semantic-quality observability)
+
+`topic.extraction_confidence` is computed by `preflight.cjs::computeExtractionConfidence` from `topic.symbols` + `topic.resolution_path`. Deterministic score → band → human-readable reason:
+
+| Resolution path | Base score | Band |
+|---|---|---|
+| `diff` or `plan` | 1.0 | high |
+| `snake_fts` / `kebab_fts` / `full_text_fts` | 0.8 | high |
+| `text` with ≥1 token >6 chars | 0.6 | medium |
+| `text`, all symbols ≤6 chars | 0.3 | low (likely stand-ins) |
+| empty `symbols` | 0.0 | none |
+
+Plus a +0.2 overlap bonus (capped at 1.0) when CamelCase-split symbol tokens appear in `keywords` — catches the case where short symbols are real (e.g., `VAT` alongside a `vat_rate` keyword).
+
+Consumed by `state assert-preflight-semantic-quality`, a WARN-mode gate that returns `{ok: true, warn: bool, confidence, threshold, reason}`. Default threshold 0.4 (override via `--threshold=0.6`). The gate never blocks — semantic quality is signal, not safety — so orchestrators can surface a stderr advisory without halting the workflow. Diagnostic prose names the band, names the cause, prescribes the recovery (refine task text with the central subject, re-run /devt:preflight).
 
 ### `suggested_reading` derivation
 
@@ -264,10 +297,13 @@ node bin/devt-tools.cjs discovery harvest        # full discovery sweep
 node bin/devt-tools.cjs discovery wiki-links     # just wiki-link enrichment
 
 # Pre-Flight
-node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius
-node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction
+node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius; auto-loads ~/.claude/plans/*.md referenced in <task>
+node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction (returns extraction_confidence)
 node bin/devt-tools.cjs preflight status            # FRESH/STALE/MISSING + timestamp
 node bin/devt-tools.cjs preflight mark-stale [reason]
+node bin/devt-tools.cjs preflight scope-cache       # cache scope_hint + scope_trust to workflow.yaml from the current sidecar
+node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4]
+                                                    # WARN-mode gate over topic.extraction_confidence; ok:true always
 
 # Telemetry
 node bin/devt-tools.cjs mcp-stats [--since=DATE] [--tool=NAME] [--top=N --by=calls|duration|errors]

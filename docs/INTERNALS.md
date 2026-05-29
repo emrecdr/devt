@@ -46,6 +46,10 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 
 **Workflow session metadata.** `updateState()` auto-stamps `created_at` (ISO-8601) and `workflow_id` (UUID via `crypto.randomUUID`) on the `active=true` transition. Idempotent — subsequent updates preserve the stamps; `resetState()` clears them so the next activation re-stamps. The stuck-detector uses `created_at` as its session boundary anchor.
 
+**Immutable session anchors.** First activation also freezes `first_created_at` and `original_workflow_id` — these never rotate, even when `workflow_type` transitions cause `created_at` / `workflow_id` to refresh. Freshness gates (`assert-preflight-fresh`, `assert-claude-mem-harvest`, `assert-graphify-decision`) and `mcp-stats --since-workflow-created` read the immutable anchors so artifacts written before a transition stay attributable to the current session.
+
+**Workflow_id chain.** Each `workflow_type` transition appends the outgoing `workflow_id` to `workflow_id_history[]` before overwriting (serialized via the JSON-stringify path in `serializeSimpleYaml`; round-tripped via `parseSimpleYaml`). `mcp-stats --workflow-id=<current>` unions the whole chain when the supplied id matches `workflow_id` — sessions chaining through three or more `workflow_type` rotations (e.g. dev → code_review → debug → quick_implement) stay attributable across every intermediate id. Historical-id queries (a user citing a specific past id) stay strict against that id alone.
+
 ### `model-profiles.cjs`
 
 Maps agent types to model tiers (quality / balanced / budget / inherit). Per-agent overrides from `.devt/config.json::models`.
@@ -201,7 +205,12 @@ Each trace record appended to `.devt/memory/_mcp-trace.jsonl` carries `workflow_
 
 **CLI consumption.** `bin/devt-tools.cjs mcp-stats` consumes these fields via `--workflow-id`, `--workflow-type`, and `--phase` filter flags. Filters compose conjunctively with the existing `--since` and `--tool`.
 
-**Workflow_id rotation across init→partition transitions.** A long-running session can rotate `workflow_id` mid-flight: code-review-parallel activates with a fresh `workflow_id` only after partition decisions, but trace records emitted during the preceding `context_init` carry the prior `workflow_id`. As a result, `mcp-stats --workflow-id=<current>` returns an empty result for sessions where every direct MCP call preceded the rotation. Prefer `--since-workflow-created` for current-session observability — it reads `workflow.yaml::created_at` and filters by time, capturing the full session window regardless of how `workflow_id` mutated. The resolved cutoff is echoed in the response under `filters.since_workflow_created`. When both `--since` and `--since-workflow-created` are passed, the later timestamp wins (conjunctive composition, most-restrictive).
+**Workflow_id rotation across init→partition transitions.** A long-running session can rotate `workflow_id` mid-flight: code-review-parallel activates with a fresh `workflow_id` only after partition decisions, but trace records emitted during the preceding `context_init` carry the prior `workflow_id`. As a result, `mcp-stats --workflow-id=<current>` would return an empty result for sessions where every direct MCP call preceded the rotation. Two complementary mitigations:
+
+1. `--since-workflow-created` filters by time — reads `workflow.yaml::first_created_at` (immutable session anchor) and captures the full session window regardless of how `workflow_id` mutated. The resolved cutoff is echoed under `filters.since_workflow_created`. When both `--since` and `--since-workflow-created` are passed, the later timestamp wins (conjunctive composition).
+2. `--workflow-id=<current>` unions the whole `workflow_id_history[]` chain — every intermediate id from prior `workflow_type` transitions is included. Historical-id queries (a specific past id) stay strict so audit-trail lookups remain deterministic.
+
+**graphify-mcp + memory-mcp trace records carry `correlation_id`.** Each `tools/call` generates an 8-char hex id (`crypto.randomBytes(4)`) injected into the trace record AND the MCP response envelope under `_meta.correlation_id`. Two consumers: `mcp-stats --correlation-id=<id>` for retrospective single-call lookup; F16 drill-down headings in lane review files cite `[call: <id>]` so findings reference a specific call rather than just "blast_radius said X".
 
 **CLI wrappers do NOT write to `_mcp-trace.jsonl`.** The trace records direct MCP tool invocations only. Workflows that go entirely through CLI wrappers (`preflight generate`, `state derive-reuse-candidates`, `state assert-graphify-decision`, `state evict-graphify`) will produce empty `mcp-stats` output even when graphify is fully active and load-bearing — the trace is "correctly empty" because no direct MCP calls occurred. To validate the namespace-prefix invariant (each trace record's `tool` field is the *unprefixed* form like `query_graph`, while orchestrator-side MCP calls use the *prefixed* form like `mcp__plugin_devt_devt-graphify__query_graph`) or to measure direct MCP usage, exercise a workflow that dispatches code-reviewer's `symbol_anchored` / `bulk_scoped` / `pr_scoped` tiers (which call `query_graph`, `get_neighbors`, `blast_radius` directly), or call MCP tools from the orchestrator during context_init's drill-down protocol.
 
@@ -401,7 +410,7 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 
 ## Substance-Enforcement Gates
 
-Cross-cutting design discipline. A recurring failure mode: gates that verify an artifact exists, has the right shape, or has the right section count — but not whether the *substance* behind the form is real. Fourteen field-validated instances, grouped by enforcement class:
+Cross-cutting design discipline. A recurring failure mode: gates that verify an artifact exists, has the right shape, or has the right section count — but not whether the *substance* behind the form is real. Fifteen field-validated instances, grouped by enforcement class:
 
 | Gate | Form check (passed) | Substance gap (bypassed) | Fix |
 |---|---|---|---|
@@ -419,6 +428,9 @@ Cross-cutting design discipline. A recurring failure mode: gates that verify an 
 | **auto-curator-considered** | auto_curator step in workflow | Skipped without reading config | Marker file writes FIRE/DISABLED; gate requires marker |
 | **assert-reuse-analyzed** | Programmer "scans existing code" prose | Reimplements similar functions | `derive-reuse-candidates` writes candidates; programmer must address each |
 | **isArtifactFresh** | Artifact exists | Stale prior-workflow artifact passes | mtime-vs-`workflow.yaml::created_at`, 30s grace; retro-fit to 7 gates |
+| **assert-preflight-semantic-quality** | `topic.symbols` non-empty | Symbols don't match task subject (path-leak, short stand-ins) | `topic.extraction_confidence` numeric score from resolution_path + keyword overlap; WARN-mode (`ok:true, warn:bool`), default threshold 0.4. Deliberate variant — see note below. |
+
+**Note on the WARN-mode variant.** `assert-preflight-semantic-quality` is the only entry that returns `ok:true` even when its substance check fails (it surfaces `warn:true` instead). Rationale: semantic quality is signal, not safety. Hard-blocking on noisy symbols would refuse to run workflows on the very tasks that most need rescue (vague PRs, paste-of-Slack-message inputs). The WARN routes through the orchestrator's `present_findings` footer rather than the BLOCKED terminal, preserving forward motion while still surfacing the calibration data downstream gates need.
 
 (Historical timeline: see `CHANGELOG.md` for which release introduced each gate.)
 
