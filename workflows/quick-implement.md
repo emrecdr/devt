@@ -251,37 +251,21 @@ Dispatch the programmer agent:
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         programmer, code-reviewer, verifier, and researcher dispatch templates
-         in workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
-         When one changes, update the others. governing_rules comes from the
-         init payload; omit this block entirely when content is empty (agent
-         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
-    <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
-         programmer and code-reviewer dispatch templates. When one changes,
-         update the other. inline_guardrails comes from the init payload;
-         omit this block entirely when it is null (agent falls back to on-disk
-         Reads of the three guardrail files). -->
-    <guardrails_inline>
+<guardrails_inline>
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
     </guardrails_inline>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated across programmer + code-reviewer + verifier dispatches
-         in dev-workflow.md, code-review.md, and quick-implement.md. When the
-         CLI shape or block position changes, update all five. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
-    <!-- KEEP IN SYNC: <reuse_candidates> block mirrored in dev-workflow.md programmer dispatch -->
-    <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
+<reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
@@ -349,16 +333,12 @@ Dispatch the tester agent:
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         programmer, tester, code-reviewer, verifier, and researcher dispatch
-         templates. When one changes, update the others. -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <testing_patterns>{governing_rules.content[\".devt/rules/testing-patterns.md\"]}</testing_patterns>
     </governing_rules>
-    <!-- KEEP IN SYNC: tester preloads only golden-rules.md from the guardrails set. -->
-    <guardrails_inline>
+<guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
@@ -413,24 +393,14 @@ Dispatch the code-reviewer agent:
 <!-- BEGIN dispatch:code-reviewer:quick_implement -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         researcher, code-reviewer, and verifier dispatch templates in
-         workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
-         When one changes, update the others. governing_rules comes from the
-         init payload; omit this block entirely when content is empty (agent
-         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated across programmer + code-reviewer + verifier dispatches
-         in dev-workflow.md, code-review.md, and quick-implement.md. When the
-         CLI shape or block position changes, update all five. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>

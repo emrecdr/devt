@@ -1,30 +1,16 @@
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         researcher, code-reviewer, and verifier dispatch templates. When one
-         changes, update the others. governing_rules comes from the init
-         payload; omit this block entirely when content is empty (agent falls
-         back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated across programmer + code-reviewer + verifier dispatches
-         in dev-workflow.md, code-review.md, and quick-implement.md. When the
-         CLI shape or block position changes, update all five. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
-    <!-- KEEP IN SYNC: this <guardrails_inline> block is duplicated in the
-         programmer and code-reviewer dispatch templates. When one changes,
-         update the other. inline_guardrails comes from the init payload;
-         omit this block entirely when it is null (agent falls back to on-disk
-         Reads of the three guardrail files). -->
-    <guardrails_inline>
+<guardrails_inline>
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>

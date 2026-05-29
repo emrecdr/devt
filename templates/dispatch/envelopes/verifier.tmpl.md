@@ -12,19 +12,11 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          omitted (oversized rubric → init returns null inline_rubrics). -->
     <rubric_content>{inline_rubrics.dev}</rubric_content>
     <original_task>{task_description}</original_task>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated in workflows/code-review.md verifier dispatch. When the
-         CLI shape or block position changes, update both. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use as primary acceptance criteria source.</spec>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         researcher, code-reviewer, and verifier dispatch templates. When one
-         changes, update the others. governing_rules comes from the init
-         payload; omit this block entirely when content is empty (agent falls
-         back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>

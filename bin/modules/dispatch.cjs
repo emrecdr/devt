@@ -223,27 +223,47 @@ function cmdRender(target) {
 function cmdCompile(mode) {
   const regions = listMarkerRegions();
   const drift = [];
-  for (const region of regions) {
-    const wfPath = path.join(WORKFLOWS_DIR, region.file);
-    const lines = fs.readFileSync(wfPath, "utf8").split("\n");
-    const currentBody = lines.slice(region.begin_line, region.end_line - 1).join("\n");
-    let rendered;
-    try {
-      rendered = renderEnvelope(region.agent, region.workflow_id, readContracts());
-    } catch (err) {
-      drift.push({ ...region, error: err.message });
-      continue;
-    }
-    if (currentBody !== rendered) {
-      drift.push({ ...region, drift: true });
-      if (mode === "write") {
-        const newLines = [
-          ...lines.slice(0, region.begin_line),
-          ...rendered.split("\n"),
-          ...lines.slice(region.end_line - 1),
-        ];
-        atomicWriteFileSync(wfPath, newLines.join("\n"));
+  const contracts = readContracts();
+
+  // Group by file so we can apply all rewrites to a file in one pass.
+  // Crucial: per-region rewrites would invalidate the stale begin_line/end_line
+  // of subsequent regions in the same file. Process within a file in REVERSE
+  // begin_line order so earlier regions' positions stay valid.
+  const byFile = new Map();
+  for (const r of regions) {
+    if (!byFile.has(r.file)) byFile.set(r.file, []);
+    byFile.get(r.file).push(r);
+  }
+
+  for (const [file, fileRegions] of byFile) {
+    const wfPath = path.join(WORKFLOWS_DIR, file);
+    let lines = fs.readFileSync(wfPath, "utf8").split("\n");
+    let fileChanged = false;
+    // Reverse begin_line order so each rewrite preserves earlier regions' indices.
+    const sorted = [...fileRegions].sort((a, b) => b.begin_line - a.begin_line);
+    for (const region of sorted) {
+      const currentBody = lines.slice(region.begin_line, region.end_line - 1).join("\n");
+      let rendered;
+      try {
+        rendered = renderEnvelope(region.agent, region.workflow_id, contracts);
+      } catch (err) {
+        drift.push({ ...region, error: err.message });
+        continue;
       }
+      if (currentBody !== rendered) {
+        drift.push({ ...region, drift: true });
+        if (mode === "write") {
+          lines = [
+            ...lines.slice(0, region.begin_line),
+            ...rendered.split("\n"),
+            ...lines.slice(region.end_line - 1),
+          ];
+          fileChanged = true;
+        }
+      }
+    }
+    if (fileChanged && mode === "write") {
+      atomicWriteFileSync(wfPath, lines.join("\n"));
     }
   }
   return { regions_checked: regions.length, drift, mode };

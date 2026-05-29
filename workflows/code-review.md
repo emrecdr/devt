@@ -512,24 +512,14 @@ Dispatch the code-reviewer agent with the identified file scope:
 <!-- BEGIN dispatch:code-reviewer:code_review -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         researcher, code-reviewer, and verifier dispatch templates in
-         workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
-         When one changes, update the others. governing_rules comes from the
-         init payload; omit this block entirely when content is empty (agent
-         falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated across programmer + code-reviewer + verifier dispatches
-         in dev-workflow.md, code-review.md, and quick-implement.md. When the
-         CLI shape or block position changes, update all five. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
@@ -538,8 +528,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <!-- Inline rubric body from init payload — reviewer self-checks against
          the same axes the verifier will grade, reducing verifier-revision
          loops. Falls back to <rubric_path> on-disk Read when omitted
-         (oversized rubric → init returns null inline_rubrics). KEEP IN SYNC
-         with the verifier dispatch <rubric_content> block below. -->
+         (oversized rubric → init returns null inline_rubrics). -->
     <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <review_scope>Read .devt/state/code-review-input.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
@@ -637,17 +626,11 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          omitted (oversized rubric → init returns null inline_rubrics). -->
     <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
-    <!-- KEEP IN SYNC: the <memory_signal> block + its orchestrator-prep step
-         are duplicated in workflows/dev-workflow.md verifier dispatch. When the
-         CLI shape or block position changes, update both. -->
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         researcher, code-reviewer, and verifier dispatch templates. When one
-         changes, update the others. -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>

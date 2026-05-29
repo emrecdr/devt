@@ -1,16 +1,11 @@
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         programmer, tester, code-reviewer, verifier, researcher, and architect
-         dispatch templates. When one changes, update the others. -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
     </governing_rules>
-    <!-- KEEP IN SYNC: architect preloads golden-rules + engineering-principles
-         from the guardrails set (not generative-debt-checklist). -->
-    <guardrails_inline>
+<guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
       <engineering_principles>{inline_guardrails[\"engineering-principles.md\"]}</engineering_principles>
     </guardrails_inline>

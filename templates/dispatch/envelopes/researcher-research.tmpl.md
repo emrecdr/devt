@@ -1,11 +1,5 @@
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 <context>
-<!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-     researcher, code-reviewer, and verifier dispatch templates in
-     workflows/{dev-workflow,quick-implement,code-review,research-task}.md.
-     When one changes, update the others. governing_rules comes from the
-     init payload; omit this block entirely when content is empty (agent
-     falls back to on-disk Reads of CLAUDE.md + .devt/rules/*.md). -->
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
   <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
   <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>

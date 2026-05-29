@@ -1,16 +1,12 @@
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
-    <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
-         programmer, tester, code-reviewer, verifier, and researcher dispatch
-         templates. When one changes, update the others. -->
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <testing_patterns>{governing_rules.content[\".devt/rules/testing-patterns.md\"]}</testing_patterns>
     </governing_rules>
-    <!-- KEEP IN SYNC: tester preloads only golden-rules.md from the guardrails set. -->
-    <guardrails_inline>
+<guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
     <scope_hint>{scope_hint_json}</scope_hint>
