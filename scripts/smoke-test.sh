@@ -8439,6 +8439,21 @@ else
 fi
 rm -rf "$M3_TMP"
 
+# M4: tester dispatch + agent body wired for <graphify_status> (V65-3).
+# Tester previously received scope_hint + scope_trust but not the
+# skip-awareness block, so it couldn't distinguish "graphify was
+# deliberately skipped" from "the orchestrator forgot to populate
+# graph-impact.md". Three touch points must stay in sync: workflow
+# dispatch template, agent body parsing instruction, workflow prep
+# step caches graphify_status_json (same source as code-reviewer).
+M4_TESTER_DISPATCH=$(/usr/bin/grep -c "<graphify_status>{graphify_status_json}</graphify_status>" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+M4_TESTER_BODY=$(/usr/bin/grep -c "Graphify status signal" "$ROOT/agents/tester.md" 2>/dev/null || echo 0)
+if [ "${M4_TESTER_DISPATCH:-0}" -ge 1 ] && [ "${M4_TESTER_BODY:-0}" -ge 1 ]; then
+  pass "M4: tester gains <graphify_status> skip-awareness (dispatch refs=${M4_TESTER_DISPATCH}, agent body=${M4_TESTER_BODY})"
+else
+  fail "M4: tester graphify_status wiring incomplete. dispatch=${M4_TESTER_DISPATCH} body=${M4_TESTER_BODY}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
