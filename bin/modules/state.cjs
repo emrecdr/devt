@@ -861,7 +861,18 @@ function updateState(keyValues) {
       if (!current.first_created_at) current.first_created_at = now;
       if (!current.original_workflow_id) current.original_workflow_id = current.workflow_id;
       if (!Array.isArray(current.workflow_id_history)) {
-        current.workflow_id_history = [current.workflow_id];
+        // H2 (greenfield calibration #9): upgrade-boundary recovery — when
+        // workflow_id_history is missing on a workflow.yaml that already
+        // carries an original_workflow_id distinct from current, seed history
+        // with both ids so mcp-stats --workflow-id can attribute pre-upgrade
+        // trace records. Greenfield's session: 4 entries via --workflow-id
+        // vs 9 via --since-workflow-created — the 5-record gap was the
+        // original_workflow_id chain dropped during v0.67→v0.68 install.
+        if (current.original_workflow_id && current.original_workflow_id !== current.workflow_id) {
+          current.workflow_id_history = [current.original_workflow_id, current.workflow_id];
+        } else {
+          current.workflow_id_history = [current.workflow_id];
+        }
       }
     } else if (
       current.active === true &&

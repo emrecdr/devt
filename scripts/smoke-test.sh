@@ -9389,6 +9389,150 @@ else
 fi
 rm -rf "$N10_TMP"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# O1–O7: greenfield calibration #9 v0.68.1 follow-ups. Each maps 1:1 to an H
+# backlog item. Live fixture-based — no static-only greps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# O1: cleanup wired into init.cjs sweeps stale ad_hoc files while preserving
+# fresh ad_hoc (current-session work-in-progress).
+O1_TMP=$(mktemp -d)
+mkdir -p "$O1_TMP/.devt/state"
+touch -t 202604010000.00 "$O1_TMP/.devt/state/council-stale.md"
+touch -t 202604010000.00 "$O1_TMP/.devt/state/simplify2-quality.md"
+touch -t 202604010000.00 "$O1_TMP/.devt/state/review-impl.json"
+touch "$O1_TMP/.devt/state/fresh-work.md"
+(cd "$O1_TMP" && node "$CLI" init workflow "o1 test" >/dev/null 2>&1)
+O1_STALE_GONE=$([ ! -f "$O1_TMP/.devt/state/council-stale.md" ] && [ ! -f "$O1_TMP/.devt/state/simplify2-quality.md" ] && [ ! -f "$O1_TMP/.devt/state/review-impl.json" ] && echo 1 || echo 0)
+O1_FRESH_KEPT=$([ -f "$O1_TMP/.devt/state/fresh-work.md" ] && echo 1 || echo 0)
+if [ "$O1_STALE_GONE" = "1" ] && [ "$O1_FRESH_KEPT" = "1" ]; then
+  pass "O1 (H1): init.cjs cleanup sweeps stale ad_hoc, preserves fresh ad_hoc (stale=gone, fresh=kept)"
+else
+  fail "O1: init cleanup broken (stale_gone=$O1_STALE_GONE fresh_kept=$O1_FRESH_KEPT)"
+fi
+rm -rf "$O1_TMP"
+
+# O2: workflow_id_history seeds with [original_workflow_id, workflow_id] when
+# updating a workflow.yaml that already has original_workflow_id but no history
+# array (upgrade-boundary case from v0.67→v0.68).
+O2_TMP=$(mktemp -d)
+mkdir -p "$O2_TMP/.devt/state"
+cat > "$O2_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: review
+first_created_at: "2026-05-28T22:00:00.000Z"
+original_workflow_id: 647d32e5-e9be-47f6-bc07-24daed3783ec
+workflow_type: code_review
+EOF
+(cd "$O2_TMP" && node "$CLI" state update active=true >/dev/null 2>&1)
+O2_HIST=$(cd "$O2_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const h=j.workflow_id_history;console.log(Array.isArray(h) && h.length===2 && h[0]==='647d32e5-e9be-47f6-bc07-24daed3783ec' ? '1' : '0');}catch(e){console.log('err');}})")
+if [ "$O2_HIST" = "1" ]; then
+  pass "O2 (H2): workflow_id_history seeds [original, current] on first write when original ≠ current"
+else
+  fail "O2: H2 upgrade-boundary seed broken ($O2_HIST)"
+fi
+rm -rf "$O2_TMP"
+
+# O3: extractTopic filters ^Test[A-Z] PascalCase pytest test classes while
+# preserving legitimate TestableBase / TestingFixture names.
+O3_OUT=$(node -e '
+const { extractTopic } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const a = extractTopic("Review TestGetActivitySummary TestAddUserToOrganization and Organization");
+const b = extractTopic("Update TestableBase and TestingFixture helpers");
+const filtered = !a.symbols.includes("TestGetActivitySummary") && !a.symbols.includes("TestAddUserToOrganization") && a.symbols.includes("Organization");
+const preserved = b.symbols.includes("TestableBase") && b.symbols.includes("TestingFixture");
+console.log(filtered && preserved ? "1" : "0");' 2>/dev/null)
+if [ "${O3_OUT:-0}" = "1" ]; then
+  pass "O3 (H4): extractTopic filters ^Test[A-Z] pytest classes, preserves TestableBase / TestingFixture"
+else
+  fail "O3: H4 Test* denylist broken (output=$O3_OUT)"
+fi
+
+# O4: init review clears lanes[] block from workflow.yaml so prior-PR lane
+# metadata doesn't pollute the new review session.
+O4_TMP=$(mktemp -d)
+mkdir -p "$O4_TMP/.devt/state"
+cat > "$O4_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: complete
+workflow_type: code_review_parallel
+first_created_at: "2026-05-28T22:00:00.000Z"
+original_workflow_id: 647d32e5-e9be-47f6-bc07-24daed3783ec
+lanes:
+  - id: "L1"
+    community: "old-thing"
+    status: "substance_pass"
+  - id: "L2"
+    community: "another-old-thing"
+EOF
+(cd "$O4_TMP" && node "$CLI" init review "o4 test" >/dev/null 2>&1)
+O4_LANES_CLEARED=$(cd "$O4_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(!Array.isArray(j.lanes) || j.lanes.length===0 ? '1' : '0');}catch(e){console.log('err');}})")
+if [ "$O4_LANES_CLEARED" = "1" ]; then
+  pass "O4 (H7): init review clears stale lanes[] block from workflow.yaml"
+else
+  fail "O4: H7 lanes-clear broken ($O4_LANES_CLEARED)"
+fi
+rm -rf "$O4_TMP"
+
+# O5: evict-workflow-artifacts sweeps stale workflow-scoped canonicals
+# (review.md, test-summary.{md,json}, etc.) while preserving fresh ones.
+O5_TMP=$(mktemp -d)
+mkdir -p "$O5_TMP/.devt/state"
+touch -t 202604010000.00 "$O5_TMP/.devt/state/review.md"
+touch -t 202604010000.00 "$O5_TMP/.devt/state/review.json"
+touch -t 202604010000.00 "$O5_TMP/.devt/state/test-summary.md"
+touch -t 202604010000.00 "$O5_TMP/.devt/state/verification.md"
+sleep 1
+touch "$O5_TMP/.devt/state/impl-summary.md"
+ANCHOR=$(date -u +%FT%TZ)
+cat > "$O5_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR"
+EOF
+(cd "$O5_TMP" && node "$CLI" state evict-workflow-artifacts >/dev/null 2>&1)
+O5_STALE_GONE=$([ ! -f "$O5_TMP/.devt/state/review.md" ] && [ ! -f "$O5_TMP/.devt/state/review.json" ] && [ ! -f "$O5_TMP/.devt/state/test-summary.md" ] && [ ! -f "$O5_TMP/.devt/state/verification.md" ] && echo 1 || echo 0)
+O5_FRESH_KEPT=$([ -f "$O5_TMP/.devt/state/impl-summary.md" ] && echo 1 || echo 0)
+if [ "$O5_STALE_GONE" = "1" ] && [ "$O5_FRESH_KEPT" = "1" ]; then
+  pass "O5 (H11): stale workflow-scoped canonicals evicted (review, test-summary, verification), fresh ones preserved (impl-summary)"
+else
+  fail "O5: H11 canonical sweep broken (stale_gone=$O5_STALE_GONE fresh_kept=$O5_FRESH_KEPT)"
+fi
+rm -rf "$O5_TMP"
+
+# O6: memory validate's trace-aware probe — recentSuccessfulGraphifyTraceCount
+# returns the count of ok=true graphify trace records in the last N minutes.
+# Lets the validator distinguish "graphify down" from "internal probe broken
+# while orchestrator path works".
+O6_TMP=$(mktemp -d)
+mkdir -p "$O6_TMP/.devt/memory"
+NOW=$(date -u +%FT%TZ)
+printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$NOW" >> "$O6_TMP/.devt/memory/_mcp-trace.jsonl"
+printf '{"ts":"%s","tool":"mcp__devt-graphify__get_neighbors","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$NOW" >> "$O6_TMP/.devt/memory/_mcp-trace.jsonl"
+printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","ok":false,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$NOW" >> "$O6_TMP/.devt/memory/_mcp-trace.jsonl"
+O6_OUT=$(cd "$O6_TMP" && node -e '
+process.chdir(process.cwd());
+const m = require("'"$ROOT"'/bin/modules/memory.cjs");
+const ok = m.recentSuccessfulGraphifyTraceCount(5);
+const zero = m.recentSuccessfulGraphifyTraceCount(0);
+console.log(ok === 2 && zero === 0 ? "1" : "0");' 2>/dev/null)
+if [ "${O6_OUT:-0}" = "1" ]; then
+  pass "O6 (H10): recentSuccessfulGraphifyTraceCount counts ok=true graphify traces in window (5min=2, 0min=0)"
+else
+  fail "O6: H10 trace counter broken ($O6_OUT)"
+fi
+rm -rf "$O6_TMP"
+
+# O7: health --repair MEM_INDEX_STALE handler reports doc_count via
+# `result.inserted` not the broken `indexed_count`/`doc_count` chain that
+# always resolved to 0. Static grep — the live integration is exercised by
+# greenfield's actual workflows; this gate just locks the field-name fix.
+O7_FIELD_USED=$(/usr/bin/grep -c "result.inserted" "$ROOT/bin/modules/health.cjs" 2>/dev/null || echo 0)
+if [ "${O7_FIELD_USED:-0}" -ge 1 ]; then
+  pass "O7 (H12): health --repair MEM_INDEX_STALE handler reads result.inserted (${O7_FIELD_USED} reference)"
+else
+  fail "O7: H12 docCount field-name fix missing (result.inserted reference count: $O7_FIELD_USED)"
+fi
+
 echo
 echo "== Dispatch envelope compile gate =="
 

@@ -135,9 +135,20 @@ function cleanupStateFiles(opts = {}) {
   const contract = state.STATE_FILE_CONTRACT || {};
   const staleDays = Number.isFinite(opts.staleDays) ? opts.staleDays : (contract.stale_days_default || 14);
   const staleCutoffMs = Date.now() - (staleDays * 24 * 60 * 60 * 1000);
+  // H1 (greenfield calibration #9): when invoked from init.cjs's auto-sweep,
+  // we want to preserve recent ad-hoc files (likely current-session work in
+  // progress) and only archive accumulated cruft. The opt-in adHocStaleDays
+  // parameter gates ad_hoc archiving by mtime — when unset (default for
+  // manual `state cleanup`), preserves legacy "archive all ad_hoc" behavior
+  // so explicit operator runs stay aggressive.
+  const adHocStaleDays = Number.isFinite(opts.adHocStaleDays) ? opts.adHocStaleDays : null;
+  const adHocCutoffMs = adHocStaleDays != null ? Date.now() - (adHocStaleDays * 24 * 60 * 60 * 1000) : null;
 
   const toArchive = [];
-  for (const f of audit.buckets.ad_hoc) toArchive.push({ ...f, reason: "ad_hoc" });
+  for (const f of audit.buckets.ad_hoc) {
+    if (adHocCutoffMs != null && f.mtimeMs >= adHocCutoffMs) continue; // fresh — preserve
+    toArchive.push({ ...f, reason: "ad_hoc" });
+  }
   for (const f of audit.buckets.ephemeral) toArchive.push({ ...f, reason: "ephemeral" });
   for (const f of audit.buckets.pattern_allowed) {
     if (f.mtimeMs < staleCutoffMs) toArchive.push({ ...f, reason: `stale_pattern_allowed (>${staleDays}d)` });
@@ -256,12 +267,31 @@ function evictGraphifyArtifacts(opts = {}) {
 // (state.cjs) catches stale files defensively, but evicting on init removes
 // the noise and makes "fresh state" the literal filesystem truth.
 //
-// NOT included: task outputs that follow-up workflows may consume
-// (review.md, impl-summary.md, test-summary.md, spec.md, plan.md,
-// decisions.md, scratchpad.md). Those persist across workflows by design.
+// NOT included: cross-workflow task outputs (spec.md, plan.md, decisions.md,
+// scratchpad.md). Those persist across workflows by design.
 //
 // Also NOT included: workflow.yaml itself (init.cjs handles that
 // separately via updateState).
+//
+// H11 (greenfield calibration #9): single-PR canonical outputs (review.md,
+// review.json, test-summary.{md,json}, impl-summary.{md,json},
+// verification.{md,json}, debug-summary.md) MUST be evicted on init * when
+// stale — they're workflow-scoped, not cross-workflow. Greenfield's verifier
+// first-pass-failed because it graded against PR #374's stale review.md.
+// Eviction is gated by mtime < first_created_at so current-session writes
+// stay intact.
+const WORKFLOW_SCOPED_CANONICAL = Object.freeze([
+  "review.md",
+  "review.json",
+  "test-summary.md",
+  "test-summary.json",
+  "impl-summary.md",
+  "impl-summary.json",
+  "verification.md",
+  "verification.json",
+  "debug-summary.md",
+]);
+
 const WORKFLOW_EVICTABLE = Object.freeze([
   // Gate-satisfaction markers (per-workflow)
   "scope-check-required.txt",
@@ -313,6 +343,40 @@ function evictWorkflowArtifacts(opts = {}) {
     }
   }
 
+  // H11 (greenfield calibration #9): workflow-scoped canonical sweep. These
+  // filenames carry a single PR's output (review.md, test-summary.{md,json},
+  // etc.) and should be evicted when their mtime predates the current
+  // session's first_created_at — otherwise the verifier grades against the
+  // PRIOR PR's review.md and silently produces wrong verdicts. Greenfield's
+  // PR #376 verifier first-pass-failed against PR #374's stale review.md.
+  // The anchor read below also serves the slug-variant sweep that follows.
+  let anchorMs = 0;
+  try {
+    const wfYaml = fs.readFileSync(path.join(stateDir, "workflow.yaml"), "utf8");
+    const m = wfYaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (m) {
+      const parsed = new Date(m[1].trim()).getTime();
+      if (Number.isFinite(parsed)) anchorMs = parsed;
+    }
+  } catch { /* no workflow.yaml — sweep without staleness gate */ }
+  if (anchorMs > 0) {
+    for (const filename of WORKFLOW_SCOPED_CANONICAL) {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const fullPath = path.join(stateDir, filename);
+      if (!fs.existsSync(fullPath)) continue;
+      try {
+        if (fs.statSync(fullPath).mtimeMs >= anchorMs) continue;
+      } catch { continue; }
+      if (dryRun) { evicted.push({ file: filename, dry_run: true, reason: "stale_canonical" }); continue; }
+      try {
+        fs.unlinkSync(fullPath);
+        evicted.push({ file: filename, reason: "stale_canonical" });
+      } catch (e) {
+        skipped.push({ file: filename, reason: "unlink_failed", error: String(e && e.message || e) });
+      }
+    }
+  }
+
   // Slug-variant sweep — calibration #8 evidence: greenfield-api accumulated
   // 167 stale files in .devt/state/ (review-pr367-*, review-architecture.md,
   // impl-summary-c5.md, review-slice-*, etc.) because the original allowlist
@@ -329,15 +393,7 @@ function evictWorkflowArtifacts(opts = {}) {
     /^verification-[A-Za-z0-9_.-]+\.(md|json)$/,
     /^slice-[A-Za-z0-9_.-]+\.md$/,
   ];
-  let anchorMs = 0;
-  try {
-    const wfYaml = fs.readFileSync(path.join(stateDir, "workflow.yaml"), "utf8");
-    const m = wfYaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
-    if (m) {
-      const parsed = new Date(m[1].trim()).getTime();
-      if (Number.isFinite(parsed)) anchorMs = parsed;
-    }
-  } catch { /* no workflow.yaml — sweep without staleness gate */ }
+  // anchorMs reused from the H11 canonical sweep above — single read, two consumers.
   try {
     for (const entry of fs.readdirSync(stateDir)) {
       if (!SLUG_VARIANT_PATTERNS.some(re => re.test(entry))) continue;

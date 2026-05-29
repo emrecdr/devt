@@ -507,7 +507,14 @@ function runRepairs(pluginRoot, checkResult) {
           const { rebuildIndex } = require("./memory.cjs");
           const result = rebuildIndex();
           if (result && result.ok !== false) {
-            const docCount = (result && result.indexed_count) || (result && result.doc_count) || 0;
+            // H12 (greenfield calibration #9): rebuildIndex returns `inserted`,
+            // not `indexed_count` / `doc_count`. The legacy field-name fallback
+            // chain always resolved to 0, making every successful rebuild
+            // report "doc_count=0" even when the FTS5 index was populated
+            // correctly (greenfield: actual doc count was 7, reported as 0).
+            // Keep the legacy fallbacks for forward-compat with any caller
+            // that might return one of those keys; just put `inserted` first.
+            const docCount = (result && result.inserted) || (result && result.indexed_count) || (result && result.doc_count) || 0;
             const conflictCount = (result && Array.isArray(result.conflicts)) ? result.conflicts.length : 0;
             repairs.push({
               code: issue.code,

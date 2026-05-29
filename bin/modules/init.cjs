@@ -425,8 +425,17 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // into the new workflow's state directory and falsely satisfy freshness gates.
   // Eviction is best-effort — failure does not block init.
   try {
-    const { evictWorkflowArtifacts } = require("./state-audit.cjs");
+    const { evictWorkflowArtifacts, cleanupStateFiles } = require("./state-audit.cjs");
     evictWorkflowArtifacts({ dryRun: false });
+    // H1 (greenfield calibration #9): the workflow-artifact evict is keyed to a
+    // fixed allowlist + slug-variant regex, but state accumulates ad-hoc
+    // filenames (council-*, simplify-*, validated-*, graphify-*-review.md,
+    // *.json sidecars for slug variants) that no regex catches. Greenfield's
+    // calibration #9 audit: 29 of 30 stale files clear via the existing
+    // ad_hoc classifier when cleanup runs with staleDays=1. Wire it here so
+    // every init * sweep covers both gate markers AND the ad_hoc bucket.
+    // Non-fatal — failure to clean ad_hoc files never blocks workflow init.
+    cleanupStateFiles({ dryRun: false, staleDays: 1, adHocStaleDays: 1 });
   } catch { /* non-fatal */ }
 
   // Reset workflow.yaml unconditionally on every init * call so stale prior-session
@@ -444,7 +453,14 @@ function initWorkflow(task, pluginRoot, initVerb) {
         let yaml = fs.readFileSync(wfPath, "utf8");
         yaml = yaml
           .replace(/^created_at:.*\n?/gm, "")
-          .replace(/^workflow_id:.*\n?/gm, "");
+          .replace(/^workflow_id:.*\n?/gm, "")
+          // H7 (greenfield calibration #9): lanes[] are workflow-scoped to
+          // code_review_parallel — they describe THIS PR's partition, not a
+          // persistent registry. Greenfield's PR #376 review saw PR #374's
+          // lanes still in workflow.yaml because the old parser preserved the
+          // block. Strip both the bare-key marker (rare empty form) AND the
+          // nested block ("lanes:\n  - id:..." with continuation lines).
+          .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
         fs.writeFileSync(wfPath, yaml);
       }
     } catch {

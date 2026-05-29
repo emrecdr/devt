@@ -386,7 +386,14 @@ function extractTopic(taskText, opts = {}) {
   const symbolMatches = tokenizableText.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
   const textSymbols = Array.from(new Set(symbolMatches))
     .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
-    .filter(s => !isAllCapsNoise(s));
+    .filter(s => !isAllCapsNoise(s))
+    // H4 (greenfield calibration #9): pytest test class names (TestFooBar)
+    // leak into symbol extraction and pollute blast_radius. Test classes have
+    // no graph edges in production code and occupy slot budget the real
+    // symbols need. Filter pattern is strict (^Test followed by uppercase)
+    // so legit identifiers like TestableBase or testing-utility-name don't
+    // match. Greenfield: zero non-test production classes match this pattern.
+    .filter(s => !/^Test[A-Z]/.test(s));
   // Diff symbols come first; text symbols only contribute their delta. Order
   // matters because downstream consumers (blast_radius args, scope_hint cap)
   // may truncate to top-N — the higher-signal source wins.

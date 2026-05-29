@@ -124,6 +124,32 @@ function getDbPath() {
   return path.join(getMemoryRoot(), "index.db");
 }
 
+// H10 helper — count successful graphify MCP trace records in the last N
+// minutes. Lets validate() distinguish "graphify is actually down" from
+// "internal probe is broken while orchestrator path works". Returns 0 on any
+// read failure (safe degradation: caller treats absence as "no recent ok").
+function recentSuccessfulGraphifyTraceCount(minutes) {
+  try {
+    const tracePath = path.join(getMemoryRoot(), "_mcp-trace.jsonl");
+    if (!fs.existsSync(tracePath)) return 0;
+    const cutoffMs = Date.now() - (minutes * 60 * 1000);
+    const body = fs.readFileSync(tracePath, "utf8");
+    let count = 0;
+    for (const line of body.split("\n")) {
+      if (!line || !line.includes("graphify")) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.ok !== true) continue;
+        if (typeof rec.tool !== "string" || !rec.tool.includes("graphify")) continue;
+        if (typeof rec.ts !== "string") continue;
+        if (new Date(rec.ts).getTime() < cutoffMs) continue;
+        count++;
+      } catch { /* malformed line — skip */ }
+    }
+    return count;
+  } catch { return 0; }
+}
+
 function getSubdirPath(docType) {
   // Project-local subdir — used for curator writes and the legacy
   // single-root path. For multi-root scanning, see getSubdirPathFor(root, docType).
@@ -1136,12 +1162,30 @@ function validateSymbolsViaGraphify(docs) {
         if (r && r.degraded) {
           consecutiveErrors++;
           if (consecutiveErrors >= 3) {
-            issues.push({
-              filePath: null,
-              severity: "warning",
-              category: "graphify-unreachable",
-              error: `Graphify queries failed ${consecutiveErrors}× consecutively despite graphify.status()=ready — stale-symbol checks aborted (transient outage; safe to retry or run \`graphify update .\` if persistent)`,
-            });
+            // H10 (greenfield calibration #9): the validator's queryGraph
+            // probe is a SEPARATE code path from the orchestrator's MCP
+            // dispatches. Greenfield evidence: 95 successful graphify MCP
+            // calls in the last hour, 0 errors, but the validator still
+            // claimed "3× consecutive failures". Check _mcp-trace.jsonl for
+            // any successful graphify call in the last 5 minutes — if found,
+            // the probe path is the one that's broken, not graphify itself.
+            // Downgrade to info-only so the warning surface doesn't cry wolf.
+            const recentOk = recentSuccessfulGraphifyTraceCount(5);
+            if (recentOk > 0) {
+              issues.push({
+                filePath: null,
+                severity: "info",
+                category: "graphify-probe-transient",
+                error: `Internal stale-symbol probe failed ${consecutiveErrors}× but ${recentOk} graphify MCP calls succeeded in the last 5 minutes — probe path independent from orchestrator's MCP transport. Stale-symbol checks deferred to next session.`,
+              });
+            } else {
+              issues.push({
+                filePath: null,
+                severity: "warning",
+                category: "graphify-unreachable",
+                error: `Graphify queries failed ${consecutiveErrors}× consecutively despite graphify.status()=ready — stale-symbol checks aborted (transient outage; safe to retry or run \`graphify update .\` if persistent)`,
+              });
+            }
             aborted = true;
             break;
           }
@@ -1639,6 +1683,7 @@ module.exports = {
   getSubgraphTriples,
   listDocs,
   scanDocs,
+  recentSuccessfulGraphifyTraceCount,
   parseFrontmatter,
   validateFrontmatter,
   matchesGlob,

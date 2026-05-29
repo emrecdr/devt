@@ -6,6 +6,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.68.1] - 2026-05-29
+
+**Greenfield calibration #9 hotfix bundle — stale-state cluster + extractor noise + diagnostic accuracy.** Field session against PR #376 surfaced seven bugs across three categories: stale prior-PR state contaminating fresh workflows (review.md/test-summary surviving init, lanes[] persisting across PRs, ad-hoc files accumulating with no eviction), extractor noise (pytest test classes leaking into symbols), and diagnostic accuracy (memory validate false-positive on healthy graphify, health --repair always reporting doc_count=0). All seven are surgical fixes — no architectural changes. Smoke: **751 → 758 passed**, **0 failed** (+7 gates O1-O7).
+
+### Fixed
+
+- **`init.cjs` wires `state cleanup --staleDays=1 --adHocStaleDays=1` after the existing evict-workflow-artifacts call** (H1). Greenfield's `.devt/state/` accumulated 30 stale files (council-*, simplify-*, validated-*, graphify-*-review.md, `.json` sidecars for slug variants) that the slug-variant regex couldn't catch. The audit classifier already buckets them as `ad_hoc`, and `cleanup` already knows how to archive them — the sweep just wasn't wired into init *. `adHocStaleDays=1` preserves recent ad-hoc files (likely current-session work-in-progress) while clearing accumulated cruft. Greenfield audit dry-run: 29/30 stale files caught with this single CLI invocation.
+- **`workflow_id_history` seeds with `[original_workflow_id, workflow_id]` on first write when those ids differ** (H2). Upgrade-boundary recovery for sessions whose `first_created_at` predates v0.68 install. Greenfield's session: mcp-stats `--workflow-id=<current>` returned 4 trace records vs 9 via `--since-workflow-created` — the 5-record gap was the original_workflow_id chain that was dropped when v0.68 first wrote workflow_id_history with only `[current]`. Now the history captures the original anchor too, restoring full chain-union attribution.
+- **`extractTopic` filters PascalCase pytest test classes matching `^Test[A-Z]`** (H4). Greenfield's PR #376 symbol set included 5 test class names (TestGetActivitySummary, TestAddUserToOrganization, etc.) consuming candidate slots that real symbols (OrganizationIntegrationRepositoryInterface, etc.) lost to the 32-symbol cap. Filter pattern is strict — `TestableBase`, `TestingFixture`, and other legit identifiers starting with `Test` followed by lowercase are preserved. Greenfield codebase confirmed zero non-test production classes match `^Test[A-Z]`.
+- **`init *` strips `lanes:` block from workflow.yaml so each init starts with empty lanes** (H7). Lanes are workflow-scoped to code_review_parallel — they describe THIS PR's partition, not a persistent registry. Greenfield's PR #376 `init review` ran on top of workflow.yaml that still carried PR #374's 5 lanes (all with `file_exists: false` because the underlying review files had been evicted). Any consumer reading `list-lane-outputs` would falsely see pending work. The regex strip targets both the bare `lanes:` marker and the nested `lanes:\n  - id: ...` continuation block.
+- **`evictWorkflowArtifacts` evicts workflow-scoped canonicals (review.{md,json}, test-summary.{md,json}, impl-summary.{md,json}, verification.{md,json}, debug-summary.md) when mtime predates `first_created_at`** (H11). Greenfield's verifier first-pass-failed because it graded against PR #374's stale `review.md` (~7.5 hours old, still INSIDE the freshness window first_created_at would have permitted). The G1 regex sweep deliberately excluded canonicals because the legacy comment said "task outputs follow-up workflows may consume" — but greenfield confirmed all 5 of these canonicals are single-PR with no cross-PR use case. New `WORKFLOW_SCOPED_CANONICAL` set in state-audit.cjs lists the exact filenames; mtime gate against first_created_at preserves current-session writes.
+- **`memory validate` graphify probe defers to recent successful MCP traces before warning** (H10). Greenfield: 95 successful graphify MCP calls in the last hour AND zero errors per mcp-stats, yet `memory validate` still emitted "Graphify queries failed 3× consecutively despite graphify.status()=ready". The validator's `graphify.queryGraph` probe is a separate code path from the orchestrator's MCP transport — its independent timeouts produced the false-positive. New helper `recentSuccessfulGraphifyTraceCount(minutes)` reads `_mcp-trace.jsonl` for ok=true graphify records; when ≥1 exists, downgrade severity to `info` with category `graphify-probe-transient` and a message clarifying the probe path is independent. When zero recent successes exist, the legacy `warning` + `graphify-unreachable` path stays (genuine outage).
+- **`health --repair MEM_INDEX_STALE` reads `result.inserted` not the broken `indexed_count || doc_count` fallback chain** (H12). `rebuildIndex()` only ever returned `inserted: N` — neither `indexed_count` nor `doc_count` were ever populated, so every successful rebuild reported `doc_count=0`. Greenfield's evidence: filesystem has 7 memory docs, sqlite has 7 documents_fts rows post-rebuild, but health output claimed `doc_count=0`. Fix puts `result.inserted` first in the fallback chain; legacy keys stay as defensive fallbacks for forward-compat.
+
+### Added
+
+- **`cleanupStateFiles` accepts `adHocStaleDays` option** to gate ad_hoc archiving by mtime (default behavior unchanged for manual `state cleanup` — sweeps all ad_hoc; init.cjs's auto-sweep opts into `adHocStaleDays=1` for current-session preservation).
+- **`memory.recentSuccessfulGraphifyTraceCount(minutes)`** helper, exported for testing + reuse. Counts ok=true graphify trace records in a sliding window.
+- **7 smoke gates O1-O7** locking each H fix to a live fixture (no static-only greps).
+
+### Skipped from this release
+
+- **H3** (assert-preflight-fresh negative `age_seconds` cosmetic) — dropped. No consumer reads the field numerically; only `.ok` matters.
+- **H5** (short ≤3-char acronyms like VAT leak as symbols) — deferred to v0.69. Greenfield has SMS (3-char) as a legit symbol; needs graphify-aware filtering rather than blanket threshold lowering. H4 fix already reduces noise enough to push VAT out of the 32-symbol cap on greenfield's PR.
+- **H6** (topic.confidence vs extraction_confidence) — dropped. Field IS present under correct name `extraction_confidence`; greenfield's evidence was reading wrong key.
+- **H8** (stale-session UX warning when first_created_at > N hours) — dropped. With H7+H11 closing the actual contamination paths, a 12-hour stale-session warning would fire constantly for long-running session users and add noise without value.
+- **H9** (verify_iteration bypassable via SendMessage) — deferred. Real workflow gap (no verifier-retry repair operator); needs architectural decision, not surgical fix.
+- **B1 follow-up doc note** — dropped after direct investigation: B1 (graphify-mcp correlation_id) IS shipping correctly in greenfield's running session. Trace records carry cids; greenfield's earlier `grep -c → 0` was a query error (4 hits exist on direct check).
+
+### Smoke gates added
+
+- **O1** — init.cjs cleanup sweeps stale ad_hoc, preserves fresh ad_hoc.
+- **O2** — workflow_id_history upgrade-boundary seed `[original, current]`.
+- **O3** — `^Test[A-Z]` filter drops pytest classes, preserves TestableBase/TestingFixture.
+- **O4** — init review strips `lanes:` block.
+- **O5** — workflow-scoped canonical eviction (stale evicted, fresh preserved).
+- **O6** — recentSuccessfulGraphifyTraceCount window arithmetic.
+- **O7** — health --repair reads `result.inserted`.
+
+### North-star alignment
+
+- **#1 coordination**: lanes refresh per init review (H7); workflow-scoped canonicals refresh per init (H11); upgrade-boundary chain captured (H2).
+- **#2 code quality**: pytest noise dropped from blast_radius args (H4); ad-hoc accumulation no longer contaminates fresh state (H1).
+- **#3 token efficiency**: cleaner symbol set = fewer wasted blast_radius queries; validator no longer cries wolf so consumers stop allocating mental budget to false positives (H10).
+- **#4 3rd-party integrations**: validator distinguishes "probe path broken" from "graphify down" (H10); health report accurately reflects rebuild outcome (H12).
+
 ## [0.68.0] - 2026-05-29
 
 **Greenfield calibration #8 closure — semantic quality observability + plan-aware preflight + 4 confirmed bugfixes.** Three sequential calibration rounds against greenfield-api converged on the same architectural gap: devt's *structural* staleness was fully observable (anchors, isArtifactFresh, decision artifacts), but its *semantic* extraction quality was invisible — an orchestrator could read `scope_hint: ["Users", "VAT"]` for a billing_country task without knowing the symbols were path-leak noise. This release closes that gap: extractTopic strips absolute paths before tokenization (B3), text-leg stand-ins demote when FTS rescue promotes anything (B4), referenced `~/.claude/plans/*.md` are auto-loaded and their `## Files to change` / `## Scope` / `## Symbols` sections feed the symbol channel (G3), and `preflight-brief.json` now carries an `extraction_confidence` numeric score consumed by a new WARN-mode gate (G4). Plus three confirmed regression-class bugfixes from the calibration evidence: graphify-mcp `correlation_id` (B1, was half-shipped vs memory-mcp), pre-flight-guard `source` field (B2), multi-hop `workflow_id_history[]` for the HF-2 union (G6). Smoke: **741 → 751 passed**, **0 failed** (+10 gates N1-N10 lock the calibration #8 contracts).
