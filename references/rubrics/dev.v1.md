@@ -42,6 +42,19 @@ For the `dev` workflow, every acceptance criterion must reach **Level 3 (Wired) 
 
 L5 (scope completeness) is the most common source of `needs_revision`: implementation works for AC-1..3 but silently dropped AC-4. Compare requirements from spec/plan against impl-summary evidence; any requirement without evidence becomes a `revisions[]` entry unless explicitly deferred to a later phase.
 
+## Reject these shortcuts
+
+The verifier MUST NOT pass on any of the following signals alone — each is a verification shortcut that bypasses real verification. When encountered, emit `needs_revision` with the shortcut named in the `revisions[]` entry's `gap` field. This list anticipates the cheap-but-wrong paths a writer-agent will try first under iteration pressure (cookbook outcome-grader pattern: anticipate shortcuts).
+
+- **Passing on absence of red tests.** "No failing tests" is necessary but not sufficient — verifier MUST identify what affirmative evidence proves the behavior change works (a passing test that exercises the new path, a manual confirmation captured in impl-summary.md, a measurable metric delta).
+- **"I remember it passed."** Verifier MUST Read the actual `.devt/state/impl-summary.json` + `test-summary.json` and quote specific fields in the verification body. Relying on impression from earlier in the session is a shortcut.
+- **Citing line numbers from memory** without re-Reading the source file in the current verification pass. If a `revisions[]` entry references `src/foo.py:42`, the verifier MUST Read `src/foo.py` before authoring the entry.
+- **Grep-only behavioral verification.** "I grepped for the new function and found it" is presence, not behavior. Verifier MUST trace at least one call site end-to-end (caller → callee → return) for any new function gated by Level 4 (deep verification).
+- **Treating `gates.{lint,typecheck,test}.passed=true` as verification of correctness.** Quality gates are necessary but separate from acceptance-criteria verification. AC mapping (Level 5) is the load-bearing check; gates alone earn no verdict.
+- **Inferring AC coverage from `impl-summary.md::files_changed` count.** "12 files changed = probably covers all 6 ACs" is correlation, not evidence. Verifier MUST map each AC to specific impl-summary evidence (file:line, test name, or stated artifact).
+
+When a `revisions[]` entry references a shortcut, prefix the `gap` field with `[shortcut]:` so the next programmer pass recognizes the rejection pattern (e.g. `"gap": "[shortcut]: passed on absence of red tests for AC-3; what affirmative test exercises the empty-list path?"`).
+
 ## `revisions[]` Array Shape
 
 When `verdict=needs_revision`, `verification.json` MUST include a `revisions[]` array. Each entry references one AC by id and gives the programmer enough context to act:

@@ -43,6 +43,19 @@ The verifier evaluates the review against **six axes**. Each axis must pass for 
 
 A seventh axis — **REJ tombstone alignment** — is a hard fail rather than a gap: if `review.md` proposes (in any remediation) an approach whose keywords match a REJ tombstone via `memory rejected-keywords`, the verdict is `failed` (not `needs_revision`). The reviewer is recommending something the team explicitly tombstoned; that's not a "fix this and retry" — it's a structural confusion that needs human review.
 
+## Reject these shortcuts
+
+The verifier MUST NOT pass a review on any of the following signals alone — each is a verification shortcut that bypasses real grading. When encountered, emit `needs_revision` with the shortcut named in the `revisions[]` entry's `gap` field. This list anticipates the cheap-but-wrong paths a writer-agent will try first under iteration pressure (cookbook outcome-grader pattern: anticipate shortcuts).
+
+- **Grep-only confirmation of a behavior change.** "I grepped for X and found it" is not evidence the change works — open the source file via Read and trace the call site end-to-end before passing axis B (finding specificity).
+- **"Looks consistent with plan.md"** without naming the changed code line + behavior delta. Consistency claims with no anchor are vibes, not verification.
+- **"Tests would catch this"** without naming the specific test file path (`tests/foo_test.py:123` or equivalent). Hand-waving at a test suite is not coverage.
+- **Passing on diff size alone.** A 3-line change in a load-bearing module (state machine, auth middleware, FTS index writer) still needs the full axis A–E + G walk. Small ≠ safe.
+- **"The findings list is empty so the review is fine."** Empty findings on a non-trivial diff is itself a gap — axis A (scope coverage) requires explicit "no issues found in `<file>`" lines, not silence.
+- **Citing line numbers from memory** without re-Reading the file in the current session. Verifier MUST Read the actual file content if it cites a `file:line` — relying on stale impression invalidates the citation.
+
+When a `revisions[]` entry references a shortcut, prefix the `gap` field with `[shortcut]:` so the next code-reviewer pass recognizes the rejection pattern (e.g. `"gap": "[shortcut]: grep-only confirmation of validation rewrite; Read src/validate.py:42 and trace through callers"`).
+
 ## `revisions[]` Array Shape
 
 When `verdict=needs_revision`, `verification.json` MUST include a `revisions[]` array. Each entry references one axis + one specific gap:
