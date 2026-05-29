@@ -73,6 +73,21 @@ These flags provide fine-grained control over which phases execute. They are par
 7. `--to` and `--only` are mutually exclusive. If both are present, STOP with error: "--to and --only cannot be used together."
 </autonomous_mode>
 
+## Tier Routing Manifest
+
+Single-glance view of which steps fire for each complexity tier. Per-step `(STANDARD + COMPLEX)` annotations downstream remain operational — this manifest is the documentation surface, the inline annotations are the live gates.
+
+| Tier         | Steps fired (in order)                                                          |
+| ------------ | ------------------------------------------------------------------------------- |
+| **TRIVIAL**  | 1 (inline execute + quality gates only — no subagents)                          |
+| **SIMPLE**   | 1, 4, 5, 6, 9a                                                                  |
+| **STANDARD** | 1, 2, 2.5, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 10                                       |
+| **COMPLEX**  | 1, 2, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 9b, 10                                |
+
+Step legend: 1=assess, 2=scan, 2.5=baseline, 3=arch-review, 4=implement, 5=test, 5.5=simplify, 6=review, 6.5=verify, 7+8=docs+retro (parallel), 9a=harvest, 9b=curate, 10=autoskill.
+
+Tier is set in Step 1 and stored in `workflow.yaml::tier`. When in doubt, the inline annotation at each step heading is authoritative.
+
 <prerequisites>
 - `.devt/config.json` exists in project root (run `/init` first if not)
 - `.devt/rules/` directory exists with project conventions
