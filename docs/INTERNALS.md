@@ -37,7 +37,7 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 - `JSON_SIDECAR_SCHEMAS` — schema registry for sidecar `.json` files, with per-sidecar enums for `status` + `verdict` + `agent`.
 - `JSON_INPUT_SCHEMAS` — schemas for input-only JSON (e.g. `handoff.json`).
 - `SIDECAR_FOR_MARKDOWN` — maps markdown → sidecar so `validateConsistency()` reads from the right place.
-- `RESET_EXEMPT` — set of filenames preserved across `state reset`.
+- `RESET_EXEMPT` — set of filenames preserved across `state reset`. Diagnostic side-channels live here so root-cause forensics survive `/devt:cancel-workflow`: `preflight-denies.jsonl`, `dispatch-warnings.jsonl`, `probe-failures.jsonl` (graphify+python probe failure categories — see `docs/GRAPHIFY.md::Probe Failure Diagnostics`), `.graphify-rebuild.lock` (DEF-038 atomic O_CREAT|O_EXCL — see `docs/GRAPHIFY.md::Debounced Rebuild`), `last-curator-run.txt`, `deferred.md`.
 - `STATE_FILE_CONTRACT` — canonical filename inventory (referenced by `docs/STATE-RULES.md`).
 
 **Validation.** `updateState()` auto-runs `validateConsistency()` (shadow mode), emits stderr warnings, and persists `validation_status` / `validation_warnings` to `workflow.yaml` on mismatch.

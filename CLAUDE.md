@@ -102,6 +102,8 @@ node bin/devt-tools.cjs state check-agent-output <path> # Substance check: detec
 node bin/devt-tools.cjs state assert-graphify-decision # Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs
 node bin/devt-tools.cjs state list-lane-outputs # Read workflow.yaml::lanes[] registry with per-lane file existence + size
 node bin/devt-tools.cjs state update-lane <id> status=<status> # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
+node bin/devt-tools.cjs state assert-knowledge-candidates-tagged # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
+node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
 node bin/devt-tools.cjs models get <profile>
@@ -195,6 +197,7 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 - `scope_mode` controls how agents handle unrelated findings (surgical / boyscout). → docs/AGENT-CONTRACTS.md (Scope Mode).
 - `<scope_hint>` and `<scope_trust>` dispatch tags + agent fallback behavior. → docs/AGENT-CONTRACTS.md (Scope Hint + Trust Contract).
 - Community-filter for large reviews (code-reviewer >10 files). → docs/AGENT-CONTRACTS.md (Community-filter).
+- Reviewer rubric self-check — code-reviewer dispatches receive inlined `<rubric_content>`; reviewer walks axes A–G during first pass to skip the verifier-revision loop. → docs/AGENT-CONTRACTS.md (Reviewer rubric self-check).
 - Verifier `<memory_signal>` block (signal-mode memory query). → docs/AGENT-CONTRACTS.md (Verifier memory signal) + docs/MEMORY.md (Verifier Memory Signal).
 - Stub-first protocol (8 output-writing agents). → docs/AGENT-CONTRACTS.md (Stub-first protocol).
 - JSON sidecar contract (`.md` + `.json` agreement, `JSON_SIDECAR_SCHEMAS`). → docs/AGENT-CONTRACTS.md (JSON sidecar contract).

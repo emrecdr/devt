@@ -95,6 +95,12 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Why.** Budget protection — converts PR-impact data from a prioritization hint into an enforcing filter so a single dispatch fits within the turn budget on 30+ file PRs.
 
+### Reviewer rubric self-check
+
+**Rule.** Every code-reviewer dispatch in `workflows/code-review.md` (single + verifier paths) and `workflows/code-review-parallel.md` (per-lane + consolidator) carries `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` plus `<rubric_content>{inline_rubrics.code_review}</rubric_content>` from the init payload. `agents/code-reviewer.md::Rubric self-check (C7-7)` parses the inline block and walks axes A–G (scope coverage, finding specificity, severity calibration, remediation concreteness, ADR Compliance section when memory affects-paths returned hits, Reuse Discipline section when `reuse-candidates.md` is non-empty) as it writes `review.md` — same axes the verifier will grade against.
+
+**Why.** Saves ~5K tokens per avoided verifier-revision round-trip by aligning reviewer ↔ verifier on the same rubric in the first pass, rather than discovering axis drift via the revisions[] loop. Reviewer + verifier no longer work from independent quality bars.
+
 ### Verifier memory signal
 
 **Rule.** Every verifier dispatch in `workflows/dev-workflow.md` and `workflows/code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step that runs `node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact`. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan.

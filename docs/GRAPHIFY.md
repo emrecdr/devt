@@ -22,6 +22,7 @@ Graphify is a multi-language tree-sitter AST extractor: `pip install graphifyy[m
 |---|---|---|
 | `graphify.enabled` | `false` (schema default) | Master switch |
 | `graphify.auto_refresh_post_impl` | `"ask"` | Post-impl prompt — see below |
+| `graphify.rebuild_debounce_seconds` | `30` | Window during which concurrent `graphify rebuild` invocations skip via the atomic lock — see Debounced Rebuild below |
 
 **Auto-enable on setup.** `setup.cjs` writes `graphify.enabled: true` when the `graphify` binary is on PATH at first setup. The schema default stays `false` for projects where the binary is absent (so the toggle is meaningful, not silently wrong).
 
@@ -61,6 +62,49 @@ node bin/devt-tools.cjs state evict-graphify
 |---|---|
 | `--dry-run` | Inspect what would be evicted without removing |
 | `--max-age-minutes=N` | mtime-gated eviction (preserves concurrent-workflow fresh state) |
+
+---
+
+## Debounced Rebuild
+
+**CLI.** `node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N]` — concurrency-safe wrapper around `maybeRefresh(force=true)`. Two workflows firing rebuild within the same second would otherwise race the subprocess against `graph.json`.
+
+**Lock.** Atomic via `fs.openSync(path, "wx")` (O_CREAT|O_EXCL semantics) at `.devt/state/.graphify-rebuild.lock`. Lock body carries `{pid, started_at}` for forensics. Always unlinked in `finally{}` so a subprocess error doesn't deadlock the next caller.
+
+**Contention behavior.**
+
+| State | Action | Reason |
+|---|---|---|
+| Lock absent, acquired | Run `graphify update .` | (normal path) |
+| Lock present, mtime within debounce window | Skip silently | `reason=debounced`, with `age_seconds` + `debounce_seconds` |
+| Lock present, mtime past debounce window | Unlink + retry acquire | Assumes crashed prior holder |
+| Lock present, retry also EEXIST | Skip silently | `reason=in_progress` (legitimate concurrent holder won the race) |
+
+**Default debounce 30 s** (`graphify.rebuild_debounce_seconds`). Override per-call with `--debounce=N`.
+
+**RESET_EXEMPT.** Lock survives `/devt:cancel-workflow` deliberately — a half-broken workflow that crashes mid-rebuild leaves the lock behind, but the next `rebuild` invocation past the debounce window breaks it cleanly. Resetting on cancel would defeat the concurrency guarantee in active multi-workflow scenarios.
+
+---
+
+## Probe Failure Diagnostics
+
+**File.** `.devt/state/probe-failures.jsonl` — append-only structured log written by `graphify.probeBinary` and `setup.probePythonGraphifyMcp`.
+
+**Why.** Both probes previously silent-caught everything (`catch { return false; }`), collapsing four distinct failure modes into a single false return. Users seeing "graphify not detected" had no way to know whether the binary was absent, broken, slow, or permission-denied.
+
+**Record shape.** `{ ts, category, command, args, error, code?, status?, signal?, timeout_ms }`. Categories:
+
+| Category | Meaning |
+|---|---|
+| `not-installed` | ENOENT — binary missing from PATH |
+| `spawn-error` | Other spawn error (permission, sandbox block, etc.) |
+| `timeout` | `signal === "SIGTERM"` — subprocess hit `timeoutMs` |
+| `nonzero-exit` | Process ran but `status !== 0` (often "wrong subcommand" or "wrong flag") |
+| `no-result` | `spawnSync` returned null/undefined |
+
+**Surface.** `node bin/devt-tools.cjs health` raises `PROBE_FAILURES_RECENT` (info-level) when any record's `ts` is within the last 24 h. The check bucketizes by category so the user can distinguish "binary missing" from "binary broken" without reading the raw JSONL. Stale activity (>24 h old) is intentionally NOT flagged — keeps the warning meaningful after the user fixed the cause.
+
+**RESET_EXEMPT.** Survives `/devt:cancel-workflow` so root-cause forensics persist across sessions.
 
 ---
 

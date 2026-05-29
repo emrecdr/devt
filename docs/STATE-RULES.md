@@ -60,6 +60,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `review-scope.md` | orchestrator | Code-review file list | (not status-gated) |
 | `review.md` | code-reviewer | Code review body | Sidecar (review.json) |
 | `graph-impact.md` | orchestrator | Graphify-derived impact map | (not status-gated) |
+| `topic-symbols-dropped.json` | code-review.md substep 5 | Symbols dropped when `symbol_anchored` truncates >32 from preflight; consumed by F17 step to emit truncation notice in `graph-impact.md` (C7-2) | (not status-gated) |
 | `continue-here.md` | `/devt:pause` | Session-resume narrative | (not status-gated) |
 
 ### Per-workflow artifacts (markdown + JSON sidecar pairs)
@@ -89,6 +90,8 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `deferred.md` | `/devt:defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
 | `preflight-denies.jsonl` | preflight hook + bash-guard + graph_loader | JSONL (one record per deny) | ✓ |
 | `dispatch-warnings.jsonl` | dispatch-scope-guard hook | JSONL (advisory only) | ✓ |
+| `probe-failures.jsonl` | `graphify.probeBinary` + `setup.probePythonGraphifyMcp` | JSONL with `{ts, category, command, args, error, ...}` — categories: `spawn-error` / `timeout` / `nonzero-exit` / `not-installed` / `no-result`. `health` surfaces `PROBE_FAILURES_RECENT` info-check when activity is logged within the last 24h. | ✓ |
+| `.graphify-rebuild.lock` | `graphify rebuild` CLI (DEF-038) | atomic O_CREAT|O_EXCL lock holding `{pid, started_at}` JSON; auto-unlinked in finally; survives reset only when the holder crashed (next `rebuild` breaks past the debounce window) | ✓ |
 
 ### Audit-only
 
