@@ -100,9 +100,17 @@ uv tool install graphifyy[mcp]   # recommended — works for both CLI and MCP se
 
 # Already installed? Keep it current:
 uv tool upgrade graphifyy        # required for the full devt feature set (see below)
+graphify install                 # refresh the assistant skill files after upgrading
+                                 # (the CLI warns when skill version drifts from package)
 ```
 
-> **Full devt feature set requires graphifyy ≥ 0.8.x.** Newer subcommands like `graphify prs --conflicts` (powering `/devt:ship`'s pre-PR merge-risk scan), `graphify affected`, and the v8 MCP tools (`list_prs`, `get_pr_impact`, `triage_prs`) only ship in the 0.8 line. devt capability-probes graphify at runtime and silently skips features on older versions — they activate automatically once you upgrade. Check your version with `cat /Users/$USER/.local/share/uv/tools/graphifyy/lib/python*/site-packages/graphify*.dist-info/METADATA | grep ^Version`.
+Check your installed version with:
+
+```bash
+uv tool list | grep graphifyy    # e.g. "graphifyy v0.8.24"
+```
+
+> **Full devt feature set requires graphifyy ≥ 0.8.x.** Newer subcommands like `graphify prs --conflicts` (powering `/devt:ship`'s pre-PR merge-risk scan), `graphify affected`, and the v8 MCP tools (`list_prs`, `get_pr_impact`, `triage_prs`) only ship in the 0.8 line. devt capability-probes graphify at runtime and silently skips features on older versions — they activate automatically once you upgrade.
 
 Tree-sitter multi-language parser that binds memory docs to actual functions/classes. Used by 6 of 10 dev agents (programmer, debugger, researcher, code-reviewer, verifier, architect), Pre-Flight Brief Lane C, blast-radius queries, and `memory validate` stale-symbol detection. See [Features in detail → Graphify](#graphify-deep-dive) for the surface-by-surface benefit comparison.
 
