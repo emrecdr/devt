@@ -8801,6 +8801,42 @@ else
   fail "M17: session-scope gate wiring incomplete. stale_rejected=${M17_STALE_REJECTED} fresh_accepted=${M17_FRESH_ACCEPTED} reason=${M17_REASON_TOUCHED} code=${M17_CODE}"
 fi
 
+# M18: DEF-038 — graphify rebuild --debounce CLI with atomic O_CREAT|O_EXCL
+# lock. End-to-end probe: seed a fresh lock file -> rebuild returns
+# action=skip reason=debounced. Stale lock (mtime > debounce window) gets
+# broken and a retry attempt fires. North-stars #1 (coordination — two
+# workflows can't race graphify update) + #4 (delegate to graphify
+# binary via clean serialization).
+DEB_TMPDIR=$(mktemp -d)
+mkdir -p "${DEB_TMPDIR}/.devt/state"
+cat > "${DEB_TMPDIR}/.devt/config.json" <<'EOF'
+{"graphify":{"enabled":true,"command":"definitely-not-real-xyz-graphify"}}
+EOF
+# Fresh lock seeded → debounce path
+echo "{}" > "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock"
+DEB_FRESH=$(cd "$DEB_TMPDIR" && node "$ROOT/bin/devt-tools.cjs" graphify rebuild --debounce=30 2>/dev/null)
+# Stale lock seeded (3+ min old) → broken path; graphify command will error
+# (binary doesn't exist), but the lock-break logic should execute and the
+# error envelope should NOT carry "debounced"/"in_progress".
+echo "{}" > "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock"
+touch -t "$(date -v-3M +%Y%m%d%H%M.%S 2>/dev/null)" "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock" 2>/dev/null || \
+  touch -d '3 minutes ago' "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock" 2>/dev/null
+DEB_STALE=$(cd "$DEB_TMPDIR" && node "$ROOT/bin/devt-tools.cjs" graphify rebuild --debounce=30 2>/dev/null)
+# After both runs the lock file should be unlinked (finally{} ran).
+DEB_LOCK_PERSISTS=0
+[ -f "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock" ] && DEB_LOCK_PERSISTS=1
+M18_DEBOUNCED=$(echo "$DEB_FRESH" | /usr/bin/grep -cE '"reason":\s*"debounced"' || true)
+M18_STALE_NOT_DEBOUNCED=$(echo "$DEB_STALE" | /usr/bin/grep -cE '"reason":\s*"debounced"' || true)
+M18_RESET_EXEMPT=$(/usr/bin/grep -c "\".graphify-rebuild.lock\"" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M18_FN=$(/usr/bin/grep -c "function rebuildDebounced" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+M18_CASE=$(/usr/bin/grep -c "case \"rebuild\":" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+rm -rf "$DEB_TMPDIR"
+if [ "${M18_DEBOUNCED:-0}" -ge 1 ] && [ "${M18_STALE_NOT_DEBOUNCED:-0}" -eq 0 ] && [ "${DEB_LOCK_PERSISTS:-0}" -eq 0 ] && [ "${M18_RESET_EXEMPT:-0}" -ge 1 ] && [ "${M18_FN:-0}" -ge 1 ] && [ "${M18_CASE:-0}" -ge 1 ]; then
+  pass "M18: graphify rebuild --debounce wired (debounced=${M18_DEBOUNCED} stale_broken=${M18_STALE_NOT_DEBOUNCED} lock_clean=${DEB_LOCK_PERSISTS} reset=${M18_RESET_EXEMPT} fn=${M18_FN} case=${M18_CASE})"
+else
+  fail "M18: rebuild --debounce wiring incomplete. debounced=${M18_DEBOUNCED} stale_not_debounced=${M18_STALE_NOT_DEBOUNCED} (want 0) lock_persists=${DEB_LOCK_PERSISTS} (want 0) reset=${M18_RESET_EXEMPT} fn=${M18_FN} case=${M18_CASE}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

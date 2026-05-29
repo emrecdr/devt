@@ -827,6 +827,84 @@ function maybeRefresh(options = {}) {
   return { ok: true, action: "refreshed", duration_ms };
 }
 
+// DEF-038 — debounced rebuild with O_CREAT|O_EXCL atomic lock. Two concurrent
+// workflows firing `graphify rebuild` would race the subprocess; an exclusive
+// lock plus a configurable debounce window de-dupes. The lock file's mtime
+// doubles as the debounce timestamp — within the window, contention skips
+// silently with reason="debounced"; outside the window the lock is
+// considered stale (probably from a crashed prior invocation) and is broken.
+// Lock path lives in .devt/state/ so it inherits gitignore + RESET_EXEMPT.
+function rebuildDebounced(options = {}) {
+  const cfg = getConfig();
+  if (!cfg.enabled) {
+    return { ok: true, action: "skip", reason: "disabled" };
+  }
+  const debounceSec = (() => {
+    const v = options.debounce;
+    if (v !== undefined && v !== null && v !== "") {
+      const n = parseInt(v, 10);
+      if (!isNaN(n) && n >= 0) return n;
+    }
+    const c = cfg.rebuild_debounce_seconds;
+    if (typeof c === "number" && c >= 0) return c;
+    return 30;
+  })();
+  const projectRoot = findProjectRoot();
+  if (!projectRoot) {
+    return { ok: false, action: "error", reason: "project_root_unresolved" };
+  }
+  const stateDir = path.join(projectRoot, ".devt", "state");
+  try {
+    if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+  } catch (e) {
+    return { ok: false, action: "error", reason: `state_dir_uncreatable: ${e.message}` };
+  }
+  const lockPath = path.join(stateDir, ".graphify-rebuild.lock");
+
+  // Atomic acquire via wx flag (O_CREAT|O_EXCL). Two callers race the
+  // openSync; exactly one wins and gets a writable fd. The other gets EEXIST.
+  let fd;
+  try {
+    fd = fs.openSync(lockPath, "wx");
+  } catch (e) {
+    if (e.code !== "EEXIST") {
+      return { ok: false, action: "error", reason: `lock_open_failed: ${e.message}` };
+    }
+    let lockMtime;
+    try { lockMtime = fs.statSync(lockPath).mtime.getTime(); }
+    catch { return { ok: true, action: "skip", reason: "in_progress" }; }
+    const ageSec = Math.round((Date.now() - lockMtime) / 1000);
+    // Within the debounce window — another caller's rebuild is either
+    // still running or just finished; skip silently.
+    if (ageSec < debounceSec) {
+      return { ok: true, action: "skip", reason: "debounced", age_seconds: ageSec, debounce_seconds: debounceSec };
+    }
+    // Past the debounce window — assume the prior holder crashed before
+    // unlinking. Break the lock and retry once.
+    try { fs.unlinkSync(lockPath); } catch { /* race with the legitimate holder; bail out */ }
+    try {
+      fd = fs.openSync(lockPath, "wx");
+    } catch (retryErr) {
+      if (retryErr.code === "EEXIST") {
+        return { ok: true, action: "skip", reason: "in_progress" };
+      }
+      return { ok: false, action: "error", reason: `lock_retry_failed: ${retryErr.message}` };
+    }
+  }
+
+  try {
+    // Record pid + start time inside the lock — diagnostic-only.
+    try {
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+    } catch { /* not load-bearing */ }
+    const refreshOptions = { force: true, timeout: options.timeout };
+    return maybeRefresh(refreshOptions);
+  } finally {
+    try { fs.closeSync(fd); } catch { /* already closed */ }
+    try { fs.unlinkSync(lockPath); } catch { /* nothing to clean up */ }
+  }
+}
+
 /**
  * Write a workflow-completion Q&A entry to `graphify-out/memory/<workflow_id>.md`
  * for graphify's memory feedback loop. On the next `graphify update .` run,
@@ -1374,6 +1452,20 @@ function run(subcommand, args) {
       json(result);
       return result.ok ? 0 : 1;
     }
+    case "rebuild": {
+      // DEF-038 — debounced rebuild gated by atomic O_CREAT|O_EXCL lock.
+      // Concurrent callers: exactly one wins, the rest return action="skip"
+      // with reason="debounced" (within window) or "in_progress" (lock
+      // contention past window). Releases lock in finally.
+      const timeoutArg = args.find(a => a.startsWith("--timeout="));
+      const debounceArg = args.find(a => a.startsWith("--debounce="));
+      const opts = {};
+      if (timeoutArg) opts.timeout = parseInt(timeoutArg.split("=")[1], 10);
+      if (debounceArg) opts.debounce = parseInt(debounceArg.split("=")[1], 10);
+      const result = rebuildDebounced(opts);
+      json(result);
+      return result.ok ? 0 : 1;
+    }
     case "write-memory": {
       // Args: --workflow-id <id> --workflow-type <t> --task <text> --summary <text> [--references=a,b,c]
       const getFlag = (name) => {
@@ -1547,6 +1639,7 @@ function probeBinary(command = "graphify", timeoutMs = 1500, options = {}) {
 
 module.exports = {
   logProbeFailure: _logProbeFailure,
+  rebuildDebounced,
   run,
   status,
   freshness,

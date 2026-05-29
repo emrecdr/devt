@@ -928,6 +928,7 @@ const RESET_EXEMPT = new Set([
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
   "probe-failures.jsonl",               // Q4 — graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
+  ".graphify-rebuild.lock",             // DEF-038 — atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
   "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:cancel-workflow
 ]);
 
