@@ -533,6 +533,7 @@ If no risk signals trip, skip the prompt and dispatch only the researcher.
      parallelism contract. -->
 
 ```
+<!-- BEGIN dispatch:researcher:dev -->
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
@@ -558,10 +559,12 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   </task>
   Write findings to .devt/state/research.md
 ")
+<!-- END dispatch:researcher:dev -->
 ```
 
 ```
 # Only when arch_health was opted-in above — dispatched in the SAME message as the researcher Task call.
+<!-- BEGIN dispatch:architect:dev-arch-health -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
@@ -594,6 +597,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   </task>
   Write findings to .devt/state/arch-health-scan.md
 ")
+<!-- END dispatch:architect:dev-arch-health -->
 ```
 
 If research.md already exists: skip the researcher dispatch.
@@ -754,6 +758,7 @@ _Skip this step if complexity is SIMPLE or STANDARD._
 Dispatch the architect agent to review the proposed approach before implementation:
 
 ```
+<!-- BEGIN dispatch:architect:dev-arch-review -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
@@ -787,6 +792,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   </task>
   Write findings to .devt/state/arch-review.md
 ")
+<!-- END dispatch:architect:dev-arch-review -->
 ```
 
 **Gate check**: Read `.devt/state/arch-review.md` and check status:
@@ -1022,6 +1028,7 @@ _Skip this step if `test` is listed in `skipped_phases` from workflow state._
 Dispatch the tester agent:
 
 ```
+<!-- BEGIN dispatch:tester:dev -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
@@ -1053,6 +1060,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   </task>
   Write summary to .devt/state/test-summary.md AND structured sidecar to .devt/state/test-summary.json (the JSON is authoritative for routing)
 ")
+<!-- END dispatch:tester:dev -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/test-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract:
@@ -1136,6 +1144,7 @@ Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_
 Dispatch the code-reviewer agent:
 
 ```
+<!-- BEGIN dispatch:code-reviewer:dev -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
@@ -1181,6 +1190,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   </task>
   Write review to .devt/state/review.md
 ")
+<!-- END dispatch:code-reviewer:dev -->
 ```
 
 **Gate check**: Read `.devt/state/review.md` and check verdict and score. Also read the current `iteration` value from workflow state (`node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read` → `iteration` field) to determine which repair operator applies:
@@ -1290,6 +1300,7 @@ Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_
 If all three artifacts exist, dispatch the verifier agent:
 
 ```
+<!-- BEGIN dispatch:verifier:dev -->
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>dev</workflow_type>
@@ -1333,6 +1344,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   </task>
   Write verification to .devt/state/verification.md
 ")
+<!-- END dispatch:verifier:dev -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing — the JSON is authoritative for control flow per the  outcome-grader contract (`references/rubrics/dev.md`):
@@ -1403,6 +1415,7 @@ These two agents are independent — dispatch both simultaneously to reduce wall
 Dispatch both agents in parallel:
 
 ```
+<!-- BEGIN dispatch:docs-writer:dev -->
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   <context>
     <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
@@ -1418,7 +1431,9 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   </task>
   Write summary to .devt/state/docs-summary.md
 ")
+<!-- END dispatch:docs-writer:dev -->
 
+<!-- BEGIN dispatch:retro:dev -->
 Task(subagent_type="devt:retro", model="{models.retro}", prompt="
   <context>
     <files_to_read>
@@ -1441,6 +1456,7 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
   </task>
   Write lessons to .devt/state/lessons.yaml
 ")
+<!-- END dispatch:retro:dev -->
 ```
 
 Wait for both to complete before proceeding to Step 9 (curation).
@@ -1524,6 +1540,7 @@ fi
 ```
 
 ```
+<!-- BEGIN dispatch:curator:dev -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
@@ -1541,6 +1558,7 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   </task>
   Write summary to .devt/state/curation-summary.md
 ")
+<!-- END dispatch:curator:dev -->
 ```
 
 ```bash

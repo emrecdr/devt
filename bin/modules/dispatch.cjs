@@ -174,9 +174,15 @@ function renderEnvelope(agent, workflowId, contracts) {
   if (!contracts.agents[agent]) {
     throw new Error(`agent '${agent}' not declared in agents/io-contracts.yaml`);
   }
-  const envelopePath = path.join(ENVELOPES_DIR, `${agent}.tmpl.md`);
+  // Prefer workflow-specific template (e.g. architect-dev-arch-health for the
+  // dispatch:architect:dev-arch-health variant) over the agent default. This
+  // lets a single agent type ship multiple envelope variants for different
+  // call sites without breaking the contract model.
+  const specificPath = path.join(ENVELOPES_DIR, `${agent}-${workflowId}.tmpl.md`);
+  const defaultPath = path.join(ENVELOPES_DIR, `${agent}.tmpl.md`);
+  const envelopePath = fs.existsSync(specificPath) ? specificPath : defaultPath;
   if (!fs.existsSync(envelopePath)) {
-    throw new Error(`no envelope template for agent '${agent}' at ${envelopePath} (templates land per-agent starting C2)`);
+    throw new Error(`no envelope template for agent '${agent}' (looked for ${specificPath}, then ${defaultPath})`);
   }
   // Strip trailing newline: the marker-region slice in cmdCompile joins inner
   // lines with "\n" and has no trailing newline. File reads include the
