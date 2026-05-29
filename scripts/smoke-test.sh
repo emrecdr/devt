@@ -8737,6 +8737,34 @@ else
   fail "M15: rubric inline wiring incomplete. single=${M15_SINGLE} (need >=2: reviewer + verifier) parallel=${M15_PARALLEL_LANE} (need >=2: per-lane bullet + consolidator) agent=${M15_AGENT}"
 fi
 
+# M16: Q4 — probe failure diagnostic logging. Greenfield calibration #7
+# noted that graphify/python probe failures were silent (catch -> return false)
+# so users seeing "graphify not detected" had no way to distinguish "not
+# installed" from "installed but timeout/segfault/permission". Wires three
+# categories (spawn-error, timeout, nonzero-exit, not-installed) into
+# .devt/state/probe-failures.jsonl. RESET_EXEMPT so health surfaces it
+# across sessions. North-stars #2 (quality — actionable diagnostics) +
+# #4 (delegate to graphify/python via clear feedback when their tools fail).
+M16_LOG_GRAPHIFY=$(/usr/bin/grep -c "_logProbeFailure(\"timeout\"" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+M16_LOG_SETUP=$(/usr/bin/grep -c "logProbeFailure(\"timeout\"" "$ROOT/bin/modules/setup.cjs" 2>/dev/null || echo 0)
+M16_RESET_EXEMPT=$(/usr/bin/grep -c "\"probe-failures.jsonl\"" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M16_HEALTH=$(/usr/bin/grep -c "PROBE_FAILURES_RECENT" "$ROOT/bin/modules/health.cjs" 2>/dev/null || echo 0)
+# End-to-end probe — call probeBinary with a missing binary, expect the
+# log to receive a not-installed category entry.
+PROBE_TMPDIR=$(mktemp -d)
+mkdir -p "${PROBE_TMPDIR}/.devt/state"
+(cd "$PROBE_TMPDIR" && node -e "
+const g = require('$ROOT/bin/modules/graphify.cjs');
+g.probeBinary('definitely-not-real-xyz', 500);
+" 2>/dev/null)
+M16_E2E=$(/usr/bin/grep -c "not-installed" "${PROBE_TMPDIR}/.devt/state/probe-failures.jsonl" 2>/dev/null || echo 0)
+rm -rf "$PROBE_TMPDIR"
+if [ "${M16_LOG_GRAPHIFY:-0}" -ge 1 ] && [ "${M16_LOG_SETUP:-0}" -ge 1 ] && [ "${M16_RESET_EXEMPT:-0}" -ge 2 ] && [ "${M16_HEALTH:-0}" -ge 2 ] && [ "${M16_E2E:-0}" -ge 1 ]; then
+  pass "M16: probe failure logging wired (graphify=${M16_LOG_GRAPHIFY} setup=${M16_LOG_SETUP} reset=${M16_RESET_EXEMPT} health=${M16_HEALTH} e2e=${M16_E2E})"
+else
+  fail "M16: probe failure logging incomplete. graphify=${M16_LOG_GRAPHIFY} setup=${M16_LOG_SETUP} reset=${M16_RESET_EXEMPT} (need >=2: RESET_EXEMPT + STATE_FILE_CONTRACT) health=${M16_HEALTH} (need >=2: CHECKS + add() call) e2e=${M16_E2E}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

@@ -927,6 +927,7 @@ const RESET_EXEMPT = new Set([
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
+  "probe-failures.jsonl",               // Q4 — graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
   "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:cancel-workflow
 ]);
 
@@ -979,6 +980,7 @@ const STATE_FILE_CONTRACT = {
     "reuse-search-attempted.txt", // marker written by workflow bash BEFORE derive-reuse-candidates CLI — distinguishes "never ran" from "ran with 0 candidates"
     "knowledge-candidates-none.txt", // declared-none artifact for assert-knowledge-candidates-tagged (escape hatch with structured reason)
     "topic-symbols-dropped.json",  // C7-2 — symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review F17 step to emit truncation notice in graph-impact.md
+    "probe-failures.jsonl",        // Q4 — append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md

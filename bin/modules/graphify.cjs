@@ -1498,17 +1498,55 @@ function run(subcommand, args) {
 // needed because `graphifyy` ships without the `mcp` subcommand unless the
 // `[mcp]` extra was installed — bare-binary detection alone is not sufficient
 // to know whether the MCP server can actually start.
+function _logProbeFailure(category, command, args, detail) {
+  try {
+    const { appendJsonl } = require("./logger.cjs");
+    const root = findProjectRoot();
+    if (!root) return;
+    const stateDir = path.join(root, ".devt", "state");
+    if (!fs.existsSync(stateDir)) return;
+    appendJsonl(path.join(stateDir, "probe-failures.jsonl"), {
+      ts: new Date().toISOString(),
+      category,
+      command,
+      args,
+      ...detail,
+    });
+  } catch { /* diagnostic side-channel; never raise */ }
+}
+
 function probeBinary(command = "graphify", timeoutMs = 1500, options = {}) {
   const args = options.subcommand ? [options.subcommand, "--help"] : ["--help"];
+  let probe;
   try {
-    const probe = require("child_process").spawnSync(command, args, { timeout: timeoutMs, stdio: "ignore" });
-    return Boolean(probe && probe.status === 0);
-  } catch {
+    probe = require("child_process").spawnSync(command, args, { timeout: timeoutMs, stdio: "ignore" });
+  } catch (e) {
+    _logProbeFailure("spawn-error", command, args, { error: String(e && e.message || e), timeout_ms: timeoutMs });
     return false;
   }
+  if (!probe) {
+    _logProbeFailure("no-result", command, args, { timeout_ms: timeoutMs });
+    return false;
+  }
+  if (probe.signal === "SIGTERM") {
+    _logProbeFailure("timeout", command, args, { timeout_ms: timeoutMs, signal: probe.signal });
+    return false;
+  }
+  if (probe.error) {
+    const code = probe.error.code || "";
+    const category = code === "ENOENT" ? "not-installed" : "spawn-error";
+    _logProbeFailure(category, command, args, { error: probe.error.message, code, timeout_ms: timeoutMs });
+    return false;
+  }
+  if (probe.status !== 0) {
+    _logProbeFailure("nonzero-exit", command, args, { status: probe.status, signal: probe.signal || null, timeout_ms: timeoutMs });
+    return false;
+  }
+  return true;
 }
 
 module.exports = {
+  logProbeFailure: _logProbeFailure,
   run,
   status,
   freshness,

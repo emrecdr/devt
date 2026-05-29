@@ -21,7 +21,7 @@ const path = require("path");
 const { findProjectRoot, deepMerge } = require("./config.cjs");
 const { validatePath, safeJsonParse } = require("./security.cjs");
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
-const { probeBinary: probeGraphifyBinary } = require("./graphify.cjs");
+const { probeBinary: probeGraphifyBinary, logProbeFailure } = require("./graphify.cjs");
 
 /**
  * Reject filesystem entry names that could break out of their parent directory.
@@ -364,12 +364,33 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // If neither path resolves but the binary is on PATH, emit an actionable hint pointing at
   // the path most likely to fix the user's setup.
   function probePythonGraphifyMcp(pythonCmd = "python3", timeoutMs = 2000) {
+    const args = ["-c", "import graphify, mcp"];
+    let probe;
     try {
-      const probe = require("child_process").spawnSync(pythonCmd, ["-c", "import graphify, mcp"], { timeout: timeoutMs, stdio: "ignore" });
-      return Boolean(probe && probe.status === 0);
-    } catch {
+      probe = require("child_process").spawnSync(pythonCmd, args, { timeout: timeoutMs, stdio: "ignore" });
+    } catch (e) {
+      logProbeFailure("spawn-error", pythonCmd, args, { error: String(e && e.message || e), timeout_ms: timeoutMs });
       return false;
     }
+    if (!probe) {
+      logProbeFailure("no-result", pythonCmd, args, { timeout_ms: timeoutMs });
+      return false;
+    }
+    if (probe.signal === "SIGTERM") {
+      logProbeFailure("timeout", pythonCmd, args, { timeout_ms: timeoutMs, signal: probe.signal });
+      return false;
+    }
+    if (probe.error) {
+      const code = probe.error.code || "";
+      const category = code === "ENOENT" ? "not-installed" : "spawn-error";
+      logProbeFailure(category, pythonCmd, args, { error: probe.error.message, code, timeout_ms: timeoutMs });
+      return false;
+    }
+    if (probe.status !== 0) {
+      logProbeFailure("nonzero-exit", pythonCmd, args, { status: probe.status, signal: probe.signal || null, timeout_ms: timeoutMs });
+      return false;
+    }
+    return true;
   }
   if (probeGraphifyBinary("uv") && probeGraphifyBinary()) {
     probedServers["graphify"] = {

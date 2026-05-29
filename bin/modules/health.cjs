@@ -49,6 +49,7 @@ const CHECKS = {
   // Graphify AFTER /devt:init don't auto-pick up the MCP entry. Warn-only by design — auto-
   // editing .mcp.json risks stomping user customizations.
   GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
+  PROBE_FAILURES_RECENT: { severity: "info", message: "Probe failures logged in .devt/state/probe-failures.jsonl — graphify/python setup detection diagnostics available", repairable: false, fix: "Inspect categories (timeout, nonzero-exit, spawn-error) to disambiguate \"not installed\" from \"installed but broken\"; common fixes: extend timeout in env, repair PATH, reinstall graphifyy[mcp] extra" },
 };
 
 const RULE_WARNING_CODES = { "coding-standards.md": "W001", "testing-patterns.md": "W002", "quality-gates.md": "W003", "architecture.md": "W004" };
@@ -394,6 +395,33 @@ function runChecks(pluginRoot) {
       add("GRAPHIFY_MCP_UNREGISTERED", null, { binary_on_path: true, mcp_json_exists: fs.existsSync(mcpPath) });
     }
   } catch { /* swallow */ }
+
+  // PROBE_FAILURES_RECENT (Q4) — surface diagnostic categories from the
+  // probe failure log. Only flag when there's recent activity (last 24h) so
+  // long-stale logs don't perpetually warn after the user fixed the cause.
+  try {
+    const probeLog = path.join(devtDir, "state", "probe-failures.jsonl");
+    if (fs.existsSync(probeLog)) {
+      const lines = fs.readFileSync(probeLog, "utf8").split("\n").filter(Boolean);
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const categories = {};
+      let recent = 0;
+      for (const line of lines.slice(-50)) {
+        try {
+          const rec = JSON.parse(line);
+          const ts = rec.ts ? new Date(rec.ts).getTime() : 0;
+          if (ts >= cutoff) {
+            recent++;
+            const c = rec.category || "unknown";
+            categories[c] = (categories[c] || 0) + 1;
+          }
+        } catch { /* skip malformed line */ }
+      }
+      if (recent > 0) {
+        add("PROBE_FAILURES_RECENT", `${recent} in last 24h`, { recent_count: recent, categories });
+      }
+    }
+  } catch { /* swallow — diagnostic surface, never raise */ }
 
   const hasErrors = issues.some((i) => i.severity === "error");
   const hasWarnings = issues.some((i) => i.severity === "warning");
