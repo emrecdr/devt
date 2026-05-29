@@ -92,11 +92,17 @@ devt itself is **zero-npm-dependency** — Node 22+, bash, and Claude Code are t
 **Repo:** [github.com/safishamsi/graphify](https://github.com/safishamsi/graphify)
 
 ```bash
+# Fresh install (latest):
 uv tool install graphifyy[mcp]   # recommended — works for both CLI and MCP server
 # alternatives:
 # pipx install graphifyy[mcp]
 # pip install graphifyy[mcp]     # CLI works; MCP server still requires uv on PATH
+
+# Already installed? Keep it current:
+uv tool upgrade graphifyy        # required for the full devt feature set (see below)
 ```
+
+> **Full devt feature set requires graphifyy ≥ 0.8.x.** Newer subcommands like `graphify prs --conflicts` (powering `/devt:ship`'s pre-PR merge-risk scan), `graphify affected`, and the v8 MCP tools (`list_prs`, `get_pr_impact`, `triage_prs`) only ship in the 0.8 line. devt capability-probes graphify at runtime and silently skips features on older versions — they activate automatically once you upgrade. Check your version with `cat /Users/$USER/.local/share/uv/tools/graphifyy/lib/python*/site-packages/graphify*.dist-info/METADATA | grep ^Version`.
 
 Tree-sitter multi-language parser that binds memory docs to actual functions/classes. Used by 6 of 10 dev agents (programmer, debugger, researcher, code-reviewer, verifier, architect), Pre-Flight Brief Lane C, blast-radius queries, and `memory validate` stale-symbol detection. See [Features in detail → Graphify](#graphify-deep-dive) for the surface-by-surface benefit comparison.
 
@@ -106,7 +112,7 @@ Tree-sitter multi-language parser that binds memory docs to actual functions/cla
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Required for Graphify v0.7.10+ — its MCP server launches via `uv run --with graphifyy --with mcp -m graphify.serve`. Without `uv`, devt scaffolds a `python3 -m graphify.serve` fallback only when graphifyy is importable from your system Python.
+Required for Graphify — its MCP server launches via `uv run --with graphifyy --with mcp -m graphify.serve`. Without `uv`, devt scaffolds a `python3 -m graphify.serve` fallback only when graphifyy is importable from your system Python.
 
 #### claude-mem — mid-session insight capture
 
