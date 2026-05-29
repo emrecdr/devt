@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [0.68.0] - 2026-05-29
 
-**Greenfield calibration #8 closure — semantic quality observability + plan-aware preflight + 4 confirmed bugfixes.** Three sequential calibration rounds against greenfield-api converged on the same architectural gap: devt's *structural* staleness was fully observable (anchors, isArtifactFresh, decision artifacts), but its *semantic* extraction quality was invisible — an orchestrator could read `scope_hint: ["Users", "VAT"]` for a billing_country task without knowing the symbols were path-leak noise. This release closes that gap: extractTopic strips absolute paths before tokenization (B3), text-leg stand-ins demote when FTS rescue promotes anything (B4), referenced `~/.claude/plans/*.md` are auto-loaded and their `## Files to change` / `## Scope` / `## Symbols` sections feed the symbol channel (G3), and `preflight-brief.json` now carries an `extraction_confidence` numeric score consumed by a new WARN-mode gate (G4). Plus three confirmed regression-class bugfixes from the calibration evidence: graphify-mcp `correlation_id` (B1, was half-shipped vs memory-mcp), pre-flight-guard `source` field (B2), multi-hop `workflow_id_history[]` for the HF-2 union (G6). Smoke: **741 → 741 passed** (gate count unchanged in this release; gates land in v0.68.1).
+**Greenfield calibration #8 closure — semantic quality observability + plan-aware preflight + 4 confirmed bugfixes.** Three sequential calibration rounds against greenfield-api converged on the same architectural gap: devt's *structural* staleness was fully observable (anchors, isArtifactFresh, decision artifacts), but its *semantic* extraction quality was invisible — an orchestrator could read `scope_hint: ["Users", "VAT"]` for a billing_country task without knowing the symbols were path-leak noise. This release closes that gap: extractTopic strips absolute paths before tokenization (B3), text-leg stand-ins demote when FTS rescue promotes anything (B4), referenced `~/.claude/plans/*.md` are auto-loaded and their `## Files to change` / `## Scope` / `## Symbols` sections feed the symbol channel (G3), and `preflight-brief.json` now carries an `extraction_confidence` numeric score consumed by a new WARN-mode gate (G4). Plus three confirmed regression-class bugfixes from the calibration evidence: graphify-mcp `correlation_id` (B1, was half-shipped vs memory-mcp), pre-flight-guard `source` field (B2), multi-hop `workflow_id_history[]` for the HF-2 union (G6). Smoke: **741 → 751 passed**, **0 failed** (+10 gates N1-N10 lock the calibration #8 contracts).
 
 ### Added
 
@@ -31,6 +31,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 - **`assertPreflightSemanticQuality` works against missing/legacy preflight-brief.json** — returns `ok: true, warn: false` with prescriptive reason when the brief is absent or predates the `extraction_confidence` field. Doesn't trip on the upgrade boundary.
 - **G3 plan-section parser uses split-on-heading instead of `\Z` lookahead** — initial implementation used `(?=^##\s|\Z)` to bound section captures, but JavaScript regex has no `\Z`; the literal `Z` truncated sections at the first occurrence (e.g. `Organization` became `Organi`). Rewrote as `body.split(/^##\s+/m)` + per-section title test — bounded correctly, last section captured.
+
+### Smoke gates added
+
+- **N1** — devt-graphify-mcp.cjs emits correlation_id in trace + _meta envelope.
+- **N2** — pre-flight-guard.sh writes source field in both deny paths (helper + fallback).
+- **N3** — extractTopic strips path tokens (greenfield's exact task as fixture).
+- **N4** — text-leg short stand-ins demote when FTS rescue fires.
+- **N5** — evict-workflow-artifacts sweeps stale slug variants, preserves fresh + canonical.
+- **N6** — aggregate-knowledge-candidates scans impl-summary*.md.
+- **N7** — list-lane-outputs flags stale review_files (mtime < first_created_at).
+- **N8** — workflow_id_history multi-hop chain union end-to-end (3-hop fixture).
+- **N9** — assert-preflight-semantic-quality WARN/PASS behavior on low/high confidence.
+- **N10** — extractSymbolsFromPlan parses `## Files to change` / `## Scope` sections.
 
 ### North-star alignment
 

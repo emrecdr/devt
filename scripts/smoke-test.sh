@@ -9155,6 +9155,240 @@ else
   pass "J2: gh CLI unavailable / unauthenticated — release-drift check skipped"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# N1–N10: greenfield calibration #8 — semantic quality + plan-aware preflight
+# + 4 confirmed bugfixes. Each gate maps 1:1 to a v0.68 backlog item.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# N1: devt-graphify-mcp.cjs emits correlation_id in trace records AND _meta
+# envelope. Field signal (greenfield calibration #8): 0 of 91 trace records
+# carried correlation_id even though v0.63 CHANGELOG documented it — only
+# memory-mcp.cjs ever adopted the pattern; graphify-mcp (which carries 95%+
+# of greenfield's MCP traffic) was missed. Static check on the file body so
+# this gate doesn't depend on a live MCP server roundtrip.
+N1_CALL_OK=$(/usr/bin/grep -c "crypto.randomBytes(4).toString(\"hex\")" "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || echo 0)
+N1_TRACE_OK=$(/usr/bin/grep -c "correlation_id: correlationId" "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || echo 0)
+N1_META_OK=$(/usr/bin/grep -c "_meta: { correlation_id: correlationId }" "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || echo 0)
+if [ "${N1_CALL_OK:-0}" -ge 1 ] && [ "${N1_TRACE_OK:-0}" -ge 2 ] && [ "${N1_META_OK:-0}" -ge 1 ]; then
+  pass "N1: devt-graphify-mcp.cjs emits correlation_id in trace + _meta (gen=${N1_CALL_OK} trace=${N1_TRACE_OK} meta=${N1_META_OK})"
+else
+  fail "N1: graphify-mcp correlation_id wiring incomplete (gen=${N1_CALL_OK} trace=${N1_TRACE_OK} meta=${N1_META_OK})"
+fi
+
+# N2: pre-flight-guard.sh writes source field in deny records. Both the
+# helper-path (logger.cjs::appendJsonl) AND the fallback-path (direct
+# fs.appendFileSync used when CLAUDE_PLUGIN_ROOT isn't set) must carry it
+# — greenfield's 359 deny entries were all source:MISSING because only
+# bash-guard.cjs wrote the field.
+N2_HOOK_SRC=$(/usr/bin/grep -c "source: 'pre-flight-guard'" "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null || echo 0)
+if [ "${N2_HOOK_SRC:-0}" -ge 2 ]; then
+  pass "N2: pre-flight-guard.sh writes source field in both deny paths (${N2_HOOK_SRC} write sites)"
+else
+  fail "N2: pre-flight-guard.sh missing source field — need 2 write sites, found ${N2_HOOK_SRC}"
+fi
+
+# N3: extractTopic strips absolute paths from tokenization. Field repro
+# (greenfield's exact task) — "Users" must NOT appear in symbols and
+# "claude"/"emrec"/"plans" must NOT appear in keywords; "billing_country"
+# must survive in keywords.
+N3_OUT=$(node -e '
+const { extractTopic } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const r = extractTopic("Implement billing_country text->FK migration + invoice VAT correctness fix per /Users/emrec/.claude/plans/hashed-sparking-cosmos.md");
+const noUsersInSyms = !r.symbols.includes("Users");
+const noPathLeak = !r.keywords.includes("claude") && !r.keywords.includes("emrec") && !r.keywords.includes("plans");
+const billingKept = r.keywords.includes("billing_country");
+console.log(noUsersInSyms && noPathLeak && billingKept ? "1" : "0");' 2>/dev/null)
+if [ "${N3_OUT:-0}" = "1" ]; then
+  pass "N3: extractTopic strips path tokens (no Users-symbol, no claude/emrec/plans-keyword, billing_country survives)"
+else
+  fail "N3: extractTopic path-strip regressed (output=${N3_OUT})"
+fi
+
+# N4: text-leg ≤6-char stand-ins demote when FTS rescue promotes anything.
+# Stubs graphifyQuery to return a real label for the snake-keyword leg;
+# asserts VAT (text-leg stand-in, 3 chars) is dropped while the FTS-promoted
+# symbol survives and resolution_path upgrades to snake_fts.
+N4_OUT=$(node -e '
+const { extractTopic } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const stub = (text) => text === "billing_country" ? { results: [{ label: "BillingCountryService" }] } : { results: [] };
+const r = extractTopic("Implement billing_country VAT fix", { graphifyQuery: stub });
+const vatDropped = !r.symbols.includes("VAT");
+const ftsPromoted = r.symbols.includes("BillingCountryService");
+const pathOk = r.resolution_path === "snake_fts";
+console.log(vatDropped && ftsPromoted && pathOk ? "1" : "0");' 2>/dev/null)
+if [ "${N4_OUT:-0}" = "1" ]; then
+  pass "N4: text-leg short stand-ins demote when FTS rescue fires (VAT dropped, BillingCountryService kept, path=snake_fts)"
+else
+  fail "N4: B4 demotion broken (output=${N4_OUT})"
+fi
+
+# N5: evict-workflow-artifacts sweeps slug variants older than first_created_at
+# while preserving fresh files + canonical task outputs. Stale review-pr*.md
+# + impl-summary-*.md from before the anchor must be evicted; fresh ones must
+# stay; canonical review.md / impl-summary.md (no slug suffix) must stay.
+N5_TMP=$(mktemp -d)
+mkdir -p "$N5_TMP/.devt/state"
+ANCHOR=$(date -u +%FT%TZ)
+cat > "$N5_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR"
+EOF
+touch -t 202604010000.00 "$N5_TMP/.devt/state/review-pr367.md"
+touch -t 202604010000.00 "$N5_TMP/.devt/state/impl-summary-c5.md"
+touch -t 202604010000.00 "$N5_TMP/.devt/state/impl-summary-c5.json"
+sleep 1
+touch "$N5_TMP/.devt/state/review-fresh.md"
+touch "$N5_TMP/.devt/state/review.md"
+touch "$N5_TMP/.devt/state/impl-summary.md"
+(cd "$N5_TMP" && node "$CLI" state evict-workflow-artifacts >/dev/null 2>&1)
+N5_STALE_GONE=$([ ! -f "$N5_TMP/.devt/state/review-pr367.md" ] && [ ! -f "$N5_TMP/.devt/state/impl-summary-c5.md" ] && [ ! -f "$N5_TMP/.devt/state/impl-summary-c5.json" ] && echo 1 || echo 0)
+N5_FRESH_KEPT=$([ -f "$N5_TMP/.devt/state/review-fresh.md" ] && echo 1 || echo 0)
+N5_CANON_KEPT=$([ -f "$N5_TMP/.devt/state/review.md" ] && [ -f "$N5_TMP/.devt/state/impl-summary.md" ] && echo 1 || echo 0)
+if [ "$N5_STALE_GONE" = "1" ] && [ "$N5_FRESH_KEPT" = "1" ] && [ "$N5_CANON_KEPT" = "1" ]; then
+  pass "N5: evict-workflow-artifacts sweeps stale slugs, preserves fresh + canonical (stale=gone fresh=kept canon=kept)"
+else
+  fail "N5: G1 eviction broken (stale_gone=$N5_STALE_GONE fresh_kept=$N5_FRESH_KEPT canon_kept=$N5_CANON_KEPT)"
+fi
+rm -rf "$N5_TMP"
+
+# N6: aggregate-knowledge-candidates pulls #KNOWLEDGE-CANDIDATE: tags from
+# impl-summary*.md alongside review-lane-*.md + review.md. Field signal:
+# greenfield's quick_implement session wrote 3 valid tags in impl-summary.md
+# that never reached scratchpad because the aggregator's filter excluded
+# the impl-summary surface.
+N6_TMP=$(mktemp -d)
+mkdir -p "$N6_TMP/.devt/state"
+cat > "$N6_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+EOF
+cat > "$N6_TMP/.devt/state/scratchpad.md" <<EOF
+# scratchpad
+EOF
+cat > "$N6_TMP/.devt/state/impl-summary.md" <<EOF
+# Impl
+
+#KNOWLEDGE-CANDIDATE: [type=quirk] N6 test candidate
+EOF
+N6_RES=$(cd "$N6_TMP" && node "$CLI" state aggregate-knowledge-candidates 2>/dev/null)
+N6_OK=$(echo "$N6_RES" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.aggregated===1 ? '1' : '0');}catch(e){console.log('err');}})" 2>/dev/null)
+N6_IN_SCRATCH=$(/usr/bin/grep -c "N6 test candidate" "$N6_TMP/.devt/state/scratchpad.md" 2>/dev/null || echo 0)
+if [ "$N6_OK" = "1" ] && [ "${N6_IN_SCRATCH:-0}" -ge 1 ]; then
+  pass "N6: aggregate-knowledge-candidates scans impl-summary.md (aggregated=1, scratchpad has tag)"
+else
+  fail "N6: G2 aggregator broken (aggregated_ok=$N6_OK scratchpad_hits=$N6_IN_SCRATCH)"
+fi
+rm -rf "$N6_TMP"
+
+# N7: list-lane-outputs flags lanes whose review_file mtime < first_created_at
+# as stale:true; missing files stay stale:false (absence is its own signal,
+# distinct from on-disk staleness).
+N7_TMP=$(mktemp -d)
+mkdir -p "$N7_TMP/.devt/state"
+touch -t 202604010000.00 "$N7_TMP/.devt/state/review-old.md"
+ANCHOR=$(date -u +%FT%TZ)
+cat > "$N7_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR"
+lanes:
+  - id: "L1"
+    community: "x"
+    review_file: ".devt/state/review-old.md"
+    status: "substance_pass"
+  - id: "L2"
+    community: "y"
+    review_file: ".devt/state/review-absent.md"
+    status: "substance_pass"
+EOF
+N7_OUT=$(cd "$N7_TMP" && node "$CLI" state list-lane-outputs 2>/dev/null)
+N7_OK=$(echo "$N7_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l1=j.lanes.find(x=>x.id==='L1');const l2=j.lanes.find(x=>x.id==='L2');console.log(l1 && l1.stale===true && l2 && l2.stale===false && l2.file_exists===false ? '1' : '0');}catch(e){console.log('err');}})" 2>/dev/null)
+if [ "$N7_OK" = "1" ]; then
+  pass "N7: list-lane-outputs flags stale review_files (stale-on-disk=true, absent=false)"
+else
+  fail "N7: G5 stale flag broken (output=$N7_OK)"
+fi
+rm -rf "$N7_TMP"
+
+# N8: workflow_id_history captures every workflow_type transition; mcp-stats
+# --workflow-id unions the whole chain when matching current. Greenfield's
+# field case had 5 records via time filter but 0 via id filter — 1-hop HF-2
+# union missed intermediate ids. This gate simulates a 3-hop chain and
+# asserts the union catches all 3.
+N8_TMP=$(mktemp -d)
+mkdir -p "$N8_TMP/.devt/state" "$N8_TMP/.devt/memory"
+(cd "$N8_TMP" && node "$CLI" init workflow "n8 test" >/dev/null 2>&1)
+WID1=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);console.log(j.workflow_id||'')})")
+(cd "$N8_TMP" && node "$CLI" state update workflow_type=code_review >/dev/null 2>&1)
+WID2=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);console.log(j.workflow_id||'')})")
+(cd "$N8_TMP" && node "$CLI" state update workflow_type=code_review_parallel >/dev/null 2>&1)
+WID3=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);console.log(j.workflow_id||'')})")
+for wid in "$WID1" "$WID2" "$WID3"; do
+  printf '{"ts":"2026-05-29T15:00:00Z","tool":"mcp__devt-graphify__query_graph","workflow_id":"%s","ok":true,"duration_ms":1,"args_size":0,"args_fp":"x","result_size":0}\n' "$wid" >> "$N8_TMP/.devt/memory/_mcp-trace.jsonl"
+done
+N8_CUR=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID3" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
+N8_HIST=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID2" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
+if [ "$N8_CUR" = "3" ] && [ "$N8_HIST" = "1" ]; then
+  pass "N8: workflow_id_history multi-hop union (current-id matches 3, historical-id stays strict at 1)"
+else
+  fail "N8: G6 chain union broken (current=$N8_CUR historical=$N8_HIST; expected 3/1)"
+fi
+rm -rf "$N8_TMP"
+
+# N9: assert-preflight-semantic-quality + topic.extraction_confidence sidecar
+# field. Low-confidence brief returns warn:true; high-confidence returns
+# warn:false; both return ok:true (WARN-mode gate, never blocks).
+N9_TMP=$(mktemp -d)
+mkdir -p "$N9_TMP/.devt/state"
+cat > "$N9_TMP/.devt/state/preflight-brief.json" <<EOF
+{"status":"FRESH","topic":{"symbols":["VAT"],"keywords":["billing_country"],"resolution_path":"text","extraction_confidence":{"score":0.3,"band":"low","reason":"text-leg short"}}}
+EOF
+N9_LOW=$(cd "$N9_TMP" && node "$CLI" state assert-preflight-semantic-quality 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true && j.warn===true ? '1':'0');}catch(e){console.log('err');}})")
+cat > "$N9_TMP/.devt/state/preflight-brief.json" <<EOF
+{"status":"FRESH","topic":{"symbols":["BillingCountryService"],"keywords":["billing_country"],"resolution_path":"plan","extraction_confidence":{"score":1.0,"band":"high","reason":"plan-grounded"}}}
+EOF
+N9_HIGH=$(cd "$N9_TMP" && node "$CLI" state assert-preflight-semantic-quality 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true && j.warn===false ? '1':'0');}catch(e){console.log('err');}})")
+if [ "$N9_LOW" = "1" ] && [ "$N9_HIGH" = "1" ]; then
+  pass "N9: assert-preflight-semantic-quality WARNs on low confidence, passes on high (low=warn high=no-warn, both ok:true)"
+else
+  fail "N9: G4 gate broken (low_warn=$N9_LOW high_nowarn=$N9_HIGH)"
+fi
+rm -rf "$N9_TMP"
+
+# N10: extractPlanReferences + extractSymbolsFromPlan resolve a
+# ~/.claude/plans/*.md path from raw task text and pull symbols from
+# "## Files to change" / "## Scope" sections. End-to-end check uses a
+# synthetic plan in a temp dir so the gate doesn't depend on
+# user-specific state.
+N10_TMP=$(mktemp -d)
+PLAN_PATH="$N10_TMP/n10-plan.md"
+cat > "$PLAN_PATH" <<EOF
+# Plan title
+
+## Context
+Background prose without symbols of interest.
+
+## Files to change
+- \`app/services/billing/service.py\` — replace billing_country with FK
+- \`app/repositories/organization_repository.py\` — get_by_code lookup
+- \`Organization\` model: add billing_country_id
+
+## Scope
+- BillingCountryService writes
+- read-side _apply_enrichment extension
+EOF
+N10_OUT=$(node -e '
+const { extractSymbolsFromPlan } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const r = extractSymbolsFromPlan("'"$PLAN_PATH"'");
+const hasOrg = r.symbols.includes("Organization") && r.symbols.includes("BillingCountryService");
+const hasSnake = r.symbols.includes("billing_country_id") || r.symbols.includes("_apply_enrichment");
+const hasPath = r.paths.includes("app/services/billing/service.py") && r.paths.includes("app/repositories/organization_repository.py");
+console.log(hasOrg && hasSnake && hasPath ? "1" : "0");' 2>/dev/null)
+if [ "${N10_OUT:-0}" = "1" ]; then
+  pass "N10: plan-aware preflight extracts symbols + paths from ## Files to change / ## Scope sections"
+else
+  fail "N10: G3 plan extraction broken (output=$N10_OUT)"
+fi
+rm -rf "$N10_TMP"
+
 echo
 echo "== Dispatch envelope compile gate =="
 
