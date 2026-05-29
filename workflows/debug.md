@@ -144,6 +144,7 @@ Write to `.devt/state/debug-context.md`
 <step name="dispatch" gate="debugger returns a status">
 ## Step 3: Dispatch Debugger
 
+<!-- BEGIN dispatch:debugger:debug -->
 Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
@@ -160,6 +161,7 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 
 **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing debug-summary.md): per your `knowledge_candidates` step, if debugging surfaces a non-obvious pattern (recurring bug class, hidden invariant the bug violated, environmental gotcha worth documenting), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes the 5-filter test: specificity, durability, non-obviousness, evidence, actionability. When none qualify, surface that decision in debug-summary.md.
 ")
+<!-- END dispatch:debugger:debug -->
 </step>
 
 <step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
@@ -195,6 +197,7 @@ fi
 When ACTIVE, dispatch curator:
 
 ```
+<!-- BEGIN dispatch:curator:debug -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
@@ -207,6 +210,7 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
     .devt/memory/{decisions,concepts,flows,rejected}/. Write .devt/state/curation-summary.md.
   </task>
 ")
+<!-- END dispatch:curator:debug -->
 ```
 
 </step>

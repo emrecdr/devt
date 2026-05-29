@@ -247,6 +247,7 @@ fi
 Dispatch the programmer agent:
 
 ```
+<!-- BEGIN dispatch:programmer:quick_implement -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
@@ -295,6 +296,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   </task>
   Write summary to .devt/state/impl-summary.md
 ")
+<!-- END dispatch:programmer:quick_implement -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
@@ -343,6 +345,7 @@ fi
 Dispatch the tester agent:
 
 ```
+<!-- BEGIN dispatch:tester:quick_implement -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
@@ -372,6 +375,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   </task>
   Write summary to .devt/state/test-summary.md AND structured sidecar to .devt/state/test-summary.json (the JSON is authoritative for routing)
 ")
+<!-- END dispatch:tester:quick_implement -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/test-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract:
@@ -406,6 +410,7 @@ SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 Dispatch the code-reviewer agent:
 
 ```
+<!-- BEGIN dispatch:code-reviewer:quick_implement -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
@@ -442,6 +447,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   </task>
   Write review to .devt/state/review.md
 ")
+<!-- END dispatch:code-reviewer:quick_implement -->
 ```
 
 **Gate check**: Read `.devt/state/review.md` and check verdict:

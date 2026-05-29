@@ -132,6 +132,7 @@ If skipping, report why and suggest next command. Do NOT dispatch the researcher
 <step name="research" gate="research.md is written to .devt/state/">
 ## Step 3: Dispatch Researcher
 
+<!-- BEGIN dispatch:researcher:research -->
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 <context>
 <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
@@ -163,6 +164,7 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 </task>
 Write findings to .devt/state/research.md
 ")
+<!-- END dispatch:researcher:research -->
 
 Gate: Read .devt/state/research.md and check status:
 

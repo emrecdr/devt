@@ -509,6 +509,7 @@ Substitute into the `<memory_signal>` block below.
 Dispatch the code-reviewer agent with the identified file scope:
 
 ```
+<!-- BEGIN dispatch:code-reviewer:code_review -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
     <!-- KEEP IN SYNC: this <governing_rules> block is duplicated across the
@@ -581,6 +582,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
   </task>
   Write review to .devt/state/review.md
 ")
+<!-- END dispatch:code-reviewer:code_review -->
 ```
 
 ```bash
@@ -625,6 +627,7 @@ Substitute the JSON output into the `<memory_signal>` block in the dispatch prom
 Dispatch the verifier:
 
 ```
+<!-- BEGIN dispatch:verifier:code_review -->
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
@@ -669,6 +672,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
 ")
+<!-- END dispatch:verifier:code_review -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing:
@@ -745,6 +749,7 @@ fi
 When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
 
 ```
+<!-- BEGIN dispatch:curator:code_review -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
@@ -758,6 +763,7 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
     Write .devt/state/curation-summary.md with verdicts per candidate (accepted / edited / rejected with reason).
   </task>
 ")
+<!-- END dispatch:curator:code_review -->
 ```
 
 When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch — proceed to `present_findings`.
