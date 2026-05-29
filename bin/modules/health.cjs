@@ -467,6 +467,36 @@ function runRepairs(pluginRoot, checkResult) {
           break;
         }
 
+        case "MEM_INDEX_STALE": {
+          // V65-7 (greenfield calibration #6): MEM_INDEX_STALE was declared
+          // repairable: true in the issue catalogue but had no matching switch
+          // case, so `health --repair` returned repairs: [] despite the
+          // warning being repairable. Users hit "Yes — auto-repair" and the
+          // system reported success without actually rebuilding the index;
+          // they had to fall back to `memory index` manually. The repair is
+          // exactly that CLI call surfaced through the official handler so
+          // the auto-repair button works as advertised.
+          const { rebuildIndex } = require("./memory.cjs");
+          const result = rebuildIndex();
+          if (result && result.ok !== false) {
+            const docCount = (result && result.indexed_count) || (result && result.doc_count) || 0;
+            const conflictCount = (result && Array.isArray(result.conflicts)) ? result.conflicts.length : 0;
+            repairs.push({
+              code: issue.code,
+              action: `Rebuilt FTS5 index (memory index, doc_count=${docCount}, conflict_count=${conflictCount})`,
+              success: true,
+            });
+          } else {
+            const errMsg = (result && (result.error || (Array.isArray(result.errors) && result.errors.length > 0 && result.errors[0].error))) || "unknown";
+            repairs.push({
+              code: issue.code,
+              action: `Rebuild failed: ${errMsg}`,
+              success: false,
+            });
+          }
+          break;
+        }
+
       }
     } catch (e) {
       repairs.push({ code: issue.code, action: e.message, success: false });

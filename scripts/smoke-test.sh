@@ -8336,6 +8336,67 @@ else
 fi
 rm -rf "$M1_TMP"
 
+# M2: health --repair handler fires for MEM_INDEX_STALE. Greenfield
+# calibration #6 silent failure: the issue catalogue declared
+# MEM_INDEX_STALE as repairable:true but the switch in attemptRepair
+# had no case, so repairs:[] returned despite repairable:true. Users
+# clicked "Yes — auto-repair", devt reported success, nothing
+# actually got fixed. Fixture: stale index.db (mtime in the past)
+# next to a fresh .md file → health surfaces MEM_INDEX_STALE → repair
+# should now push a repairs[] entry with action including "FTS5 index"
+# and success: true.
+M2_TMP=$(mktemp -d)
+M2_TMP=$(cd "$M2_TMP" && pwd -P)
+mkdir -p "$M2_TMP/.devt/memory/decisions" "$M2_TMP/.devt/state" "$M2_TMP/.devt/rules"
+echo '{"memory":{"enabled":true}}' > "$M2_TMP/.devt/config.json"
+# Minimal rules so health doesn't flag E004
+for f in coding-standards.md testing-patterns.md quality-gates.md architecture.md; do
+  echo "# $f stub" > "$M2_TMP/.devt/rules/$f"
+done
+cat > "$M2_TMP/.devt/memory/decisions/ADR-001-test.md" <<'EOF'
+---
+id: ADR-001
+title: "Test decision"
+status: active
+domain: testing
+created_at: 2026-05-29T00:00:00.000Z
+created_by: test
+affects_paths: []
+affects_symbols: []
+links: []
+---
+Test body
+EOF
+# Build the index, then backdate it so MEM_INDEX_STALE fires
+(cd "$M2_TMP" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+# Backdate index.db an hour into the past
+touch -d "2 hours ago" "$M2_TMP/.devt/memory/index.db" 2>/dev/null || \
+  touch -t "$(date -v-2H +%Y%m%d%H%M.%S 2>/dev/null)" "$M2_TMP/.devt/memory/index.db"
+# Add a NEW .md so the staleness gap is real
+cat > "$M2_TMP/.devt/memory/decisions/ADR-002-fresh.md" <<'EOF'
+---
+id: ADR-002
+title: "Newer decision"
+status: active
+domain: testing
+created_at: 2026-05-29T00:00:00.000Z
+created_by: test
+affects_paths: []
+affects_symbols: []
+links: []
+---
+Fresh
+EOF
+M2_OUT=$(cd "$M2_TMP" && node "$ROOT/bin/devt-tools.cjs" health --repair 2>/dev/null)
+M2_REPAIR_COUNT=$(echo "$M2_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.repairs||[]).filter(r=>r.code==='MEM_INDEX_STALE').length);}catch(e){console.log(-1);}})")
+M2_SUCCESS=$(echo "$M2_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const r=(j.repairs||[]).find(x=>x.code==='MEM_INDEX_STALE');console.log(r && r.success===true && /FTS5 index/.test(r.action||'') ? '1':'0');}catch(e){console.log('0');}})")
+if [ "$M2_REPAIR_COUNT" = "1" ] && [ "$M2_SUCCESS" = "1" ]; then
+  pass "M2: health --repair handler fires for MEM_INDEX_STALE (repairs[].code=MEM_INDEX_STALE present, success=true, action mentions FTS5)"
+else
+  fail "M2: repair handler silent-failure persists. repair_count=${M2_REPAIR_COUNT} success_flag=${M2_SUCCESS}"
+fi
+rm -rf "$M2_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
