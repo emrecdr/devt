@@ -8658,6 +8658,51 @@ else
   fail "M12: C7-2 wiring incomplete. capture=${M12_CAPTURE} rm=${M12_RM} header=${M12_HEADER} state=${M12_REG}"
 fi
 
+# M13: C7-4 — lane-suggestions --target-lanes=N consolidates micro-
+# communities into N super-groups via path-prefix similarity. Greenfield
+# calibration #7: 44 micro-communities at 95% coverage was unusable for
+# the 5-lane cap. Manual override grouped by domain path. The CLI now
+# does that consolidation. Fixture: graph with 8 distinct community
+# attributes across files in 3 path domains (auth/, billing/, util/);
+# --target-lanes=3 should consolidate to exactly 3 groups, each
+# carrying merged_from_communities array showing the merge history.
+M13_TMP=$(mktemp -d)
+M13_TMP=$(cd "$M13_TMP" && pwd -P)
+mkdir -p "$M13_TMP/.devt/state" "$M13_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$M13_TMP/.devt/config.json"
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [
+    // 8 community labels across 3 path domains (auth/, billing/, util/)
+    {id:'a1',label:'AuthA',source_file:'src/auth/login.py',community:101},
+    {id:'a2',label:'AuthB',source_file:'src/auth/session.py',community:102},
+    {id:'a3',label:'AuthC',source_file:'src/auth/token.py',community:103},
+    {id:'b1',label:'BillA',source_file:'src/billing/invoice.py',community:201},
+    {id:'b2',label:'BillB',source_file:'src/billing/refund.py',community:202},
+    {id:'b3',label:'BillC',source_file:'src/billing/charge.py',community:203},
+    {id:'u1',label:'UtilA',source_file:'src/util/parse.py',community:301},
+    {id:'u2',label:'UtilB',source_file:'src/util/format.py',community:302}
+  ],
+  links: []
+};
+fs.writeFileSync('$M13_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+# Without --target-lanes — returns 8 groups
+M13_RAW=$(cd "$M13_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth/login.py src/auth/session.py src/auth/token.py src/billing/invoice.py src/billing/refund.py src/billing/charge.py src/util/parse.py src/util/format.py 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.groups||[]).length);}catch(e){console.log(-1);}})")
+# With --target-lanes=3 — consolidates to 3 groups via path-prefix similarity
+M13_OUT=$(cd "$M13_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions src/auth/login.py src/auth/session.py src/auth/token.py src/billing/invoice.py src/billing/refund.py src/billing/charge.py src/util/parse.py src/util/format.py --target-lanes=3 2>/dev/null)
+M13_GROUPS=$(echo "$M13_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.groups||[]).length);}catch(e){console.log(-1);}})")
+M13_META=$(echo "$M13_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.consolidation && j.consolidation.raw_group_count===8 && j.consolidation.consolidated_to===3 ? '1':'0');}catch(e){console.log('0');}})")
+M13_MERGE=$(echo "$M13_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const arr=(j.groups||[]).map(g=>(g.merged_from_communities||[]).length).reduce((a,b)=>a+b,0);console.log(arr);}catch(e){console.log(-1);}})")
+if [ "$M13_RAW" = "8" ] && [ "$M13_GROUPS" = "3" ] && [ "$M13_META" = "1" ] && [ "$M13_MERGE" = "8" ]; then
+  pass "M13: lane-suggestions --target-lanes=3 consolidates 8 communities to 3 super-groups via path-prefix similarity (raw=${M13_RAW}, consolidated=${M13_GROUPS}, sum-of-merged=${M13_MERGE})"
+else
+  fail "M13: consolidation broken. raw=${M13_RAW} groups=${M13_GROUPS} meta=${M13_META} merge-sum=${M13_MERGE}"
+fi
+rm -rf "$M13_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

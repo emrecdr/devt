@@ -989,7 +989,18 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
 //   - any input file has 0 matching nodes (diff entirely uncovered)
 // Caller (code-review-parallel.md::partition_lanes) handles the fallback
 // by routing to the legacy top-N-path partition.
-function laneSuggestions(diffFiles) {
+//
+// C7-4 (greenfield calibration #7): options.targetLanes consolidates groups
+// into N super-groups when the raw community count exceeds N. Greenfield's
+// PR returned 44 micro-communities at 95% coverage → unusable for the
+// 5-lane cap. Their manual override grouped by domain path (audit+obs /
+// clients+identity / external_calls / nettie+migrations / hurl+docs).
+// Path-prefix consolidation matches that pattern: when groups > targetLanes,
+// keep top-N by file count as anchors, merge remaining groups into the
+// anchor whose files share the longest common directory prefix. Result has
+// exactly `target_lanes` super-groups (or fewer if input had fewer raw groups).
+function laneSuggestions(diffFiles, options) {
+  options = options || {};
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
     return { mode: "fallback", groups: [], reason: "no input files" };
   }
@@ -1070,18 +1081,91 @@ function laneSuggestions(diffFiles) {
     if (!groupsByCommunity.has(key)) groupsByCommunity.set(key, { community: c, files: [] });
     groupsByCommunity.get(key).files.push(f);
   }
-  const groups = Array.from(groupsByCommunity.values())
+  let groups = Array.from(groupsByCommunity.values())
     .sort((a, b) => b.files.length - a.files.length);
+
+  // C7-4 — consolidate to target_lanes super-groups via path-prefix similarity
+  // when raw count exceeds target. Anchors are the top-N by file count; each
+  // remaining group merges into its best anchor.
+  let consolidationMeta = null;
+  const targetLanes = Number.isInteger(options.targetLanes) && options.targetLanes > 0
+    ? options.targetLanes : null;
+  if (targetLanes && groups.length > targetLanes) {
+    const rawGroupCount = groups.length;
+    const anchors = groups.slice(0, targetLanes).map(g => ({
+      community: g.community,
+      files: g.files.slice(),
+      mergedCommunities: [g.community],
+    }));
+    const leftovers = groups.slice(targetLanes);
+    for (const lg of leftovers) {
+      // Pick the anchor whose files share the longest common path prefix with
+      // this leftover group's files. Cheap proxy for graph-distance — matches
+      // greenfield's manual domain-based consolidation (their override grouped
+      // audit/clients/external_calls by top-level path component).
+      let bestAnchor = anchors[0];
+      let bestScore = -1;
+      for (const a of anchors) {
+        const score = _avgPrefixSimilarity(a.files, lg.files);
+        if (score > bestScore) { bestScore = score; bestAnchor = a; }
+      }
+      bestAnchor.files.push(...lg.files);
+      bestAnchor.mergedCommunities.push(lg.community);
+    }
+    groups = anchors.map(a => ({
+      community: a.community,
+      files: a.files,
+      merged_from_communities: a.mergedCommunities,
+    }));
+    consolidationMeta = {
+      raw_group_count: rawGroupCount,
+      target_lanes: targetLanes,
+      consolidated_to: groups.length,
+    };
+  }
+
   if (uncoveredCount > 0) {
-    return {
+    const result = {
       mode: "partial",
       groups,
       covered_count: byFileCommunityCounts.size,
       uncovered_count: uncoveredCount,
       coverage_ratio: Number(coverageRatio.toFixed(4)),
     };
+    if (consolidationMeta) result.consolidation = consolidationMeta;
+    return result;
   }
-  return { mode: "community", groups };
+  const result = { mode: "community", groups };
+  if (consolidationMeta) result.consolidation = consolidationMeta;
+  return result;
+}
+
+// Helper: average longest-common-prefix similarity between two file-path
+// sets. Higher = more similar. Used by lane-suggestions consolidation to
+// pick which anchor a leftover community merges into. Computes per-pair
+// LCP-depth, averages over a sample (cap at 20×20 = 400 pairs to bound
+// cost on large lanes).
+function _avgPrefixSimilarity(filesA, filesB) {
+  const sa = filesA.slice(0, 20);
+  const sb = filesB.slice(0, 20);
+  if (sa.length === 0 || sb.length === 0) return 0;
+  let totalDepth = 0;
+  let pairs = 0;
+  for (const a of sa) {
+    const aParts = a.split("/");
+    for (const b of sb) {
+      const bParts = b.split("/");
+      let depth = 0;
+      const min = Math.min(aParts.length, bParts.length) - 1; // exclude filename
+      for (let i = 0; i < min; i++) {
+        if (aParts[i] === bParts[i]) depth++;
+        else break;
+      }
+      totalDepth += depth;
+      pairs++;
+    }
+  }
+  return pairs === 0 ? 0 : totalDepth / pairs;
 }
 
 // Top-N non-noise symbols whose source_file is in the diff. Used by
@@ -1371,8 +1455,14 @@ function run(subcommand, args) {
     }
     case "lane-suggestions": {
       const files = args.filter(a => !a.startsWith("--"));
-      if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>...\n"); return 2; }
-      json(laneSuggestions(files));
+      if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>... [--target-lanes=N]\n"); return 2; }
+      const tlArg = args.find(a => a.startsWith("--target-lanes="));
+      const opts = {};
+      if (tlArg) {
+        const v = parseInt(tlArg.split("=")[1], 10);
+        if (Number.isInteger(v) && v > 0) opts.targetLanes = v;
+      }
+      json(laneSuggestions(files, opts));
       return 0;
     }
     case "adaptive-threshold": {

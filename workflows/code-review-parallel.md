@@ -109,7 +109,7 @@ fi
 # with per-file dominant-community grouping when the graph has community
 # attributes from Leiden clustering. Otherwise mode=fallback and the bash
 # branch below uses the legacy top-2-level path partition.
-LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions 2>/dev/null || echo '{"mode":"fallback"}')
+LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions --target-lanes=5 2>/dev/null || echo '{"mode":"fallback"}')
 LANE_MODE=$(echo "$LANE_SUG" | jq -r '.mode // "fallback"')
 
 GROUPS_FILE=$(mktemp)
