@@ -1491,12 +1491,25 @@ function run(subcommand, args) {
     case "suggest": {
       // Discovery engine — harvests #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-nodes
       // entries into _suggestions.md for curator review. NEVER writes permanent doc files.
+      //
+      // V65-1 (greenfield calibration #6): the auto-index PostToolUse hook
+      // reindexes per-file edits but doesn't observe writeSuggestionsReport's
+      // atomic write to _suggestions.md (atomicWriteFileSync uses rename-after-
+      // tmp-write which the hook's mtime-watch may miss). Result: FTS5 index
+      // drifts behind _suggestions.md by ~1h+ on active sessions until the
+      // next manual edit triggers a hook fire. Fix: invoke rebuildIndex
+      // immediately after writeSuggestionsReport so the index stays current
+      // with the document the CLI just produced.
       const discovery = require("./discovery.cjs");
       const result = discovery.harvest({});
       const suggestionsPath = discovery.writeSuggestionsReport(result);
+      let indexResult = null;
+      try { indexResult = rebuildIndex(); }
+      catch (e) { indexResult = { ok: false, error: e.message }; }
       json({
         ...result,
         suggestions_path: path.relative(findProjectRoot(), suggestionsPath),
+        index_refresh: indexResult,
       });
       return 0;
     }

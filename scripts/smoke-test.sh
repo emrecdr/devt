@@ -8300,6 +8300,42 @@ else
 fi
 rm -rf "$L6_TMP"
 
+# M1: memory suggest triggers index rebuild on completion.
+# Greenfield calibration #6: writeSuggestionsReport's atomic write to
+# _suggestions.md missed the auto-index hook (rename-after-tmp-write
+# pattern), leaving FTS5 index drifted ~1h+ behind on active sessions.
+# Fix: rebuildIndex called immediately after writeSuggestionsReport.
+# Fixture: empty memory dir with a seed doc, run memory suggest,
+# verify index_refresh field is present + index.db mtime moved.
+M1_TMP=$(mktemp -d)
+M1_TMP=$(cd "$M1_TMP" && pwd -P)
+mkdir -p "$M1_TMP/.devt/memory/decisions" "$M1_TMP/.devt/state"
+echo '{"memory":{"enabled":true}}' > "$M1_TMP/.devt/config.json"
+# Seed a minimal ADR so the index has something to build
+cat > "$M1_TMP/.devt/memory/decisions/ADR-001-test.md" <<'EOF'
+---
+id: ADR-001
+title: "Test decision"
+status: active
+domain: testing
+created_at: 2026-05-29T00:00:00.000Z
+created_by: test
+affects_paths: []
+affects_symbols: []
+links: []
+---
+Test body
+EOF
+M1_OUT=$(cd "$M1_TMP" && node "$ROOT/bin/devt-tools.cjs" memory suggest 2>/dev/null)
+M1_REFRESH=$(echo "$M1_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.index_refresh && (j.index_refresh.ok === true || typeof j.index_refresh === 'object')) ? '1':'0');}catch(e){console.log('0');}})")
+M1_INDEX_EXISTS=$( [ -f "$M1_TMP/.devt/memory/index.db" ] && echo "1" || echo "0" )
+if [ "$M1_REFRESH" = "1" ] && [ "$M1_INDEX_EXISTS" = "1" ]; then
+  pass "M1: memory suggest writes _suggestions.md AND rebuilds FTS5 index (index_refresh field present, index.db exists)"
+else
+  fail "M1: index rebuild not triggered. refresh=${M1_REFRESH} index_exists=${M1_INDEX_EXISTS}"
+fi
+rm -rf "$M1_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
