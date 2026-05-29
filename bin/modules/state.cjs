@@ -2175,6 +2175,22 @@ function assertKnowledgeCandidatesTagged() {
         "Orchestrator must either tag candidates during work or write knowledge-candidates-none.txt with a structured reason.",
     };
   }
+  // Q5 — session-scope check via first_created_at. Tags only count when the
+  // scratchpad was touched DURING this workflow session. If scratchpad mtime
+  // predates first_created_at (immutable session anchor), the tags are from
+  // a prior workflow whose teardown didn't reset scratchpad cleanly — the
+  // gate must fail so this session's candidates aren't silently shadowed.
+  const freshness = isArtifactFresh(scratchpadPath);
+  if (!freshness.fresh) {
+    return {
+      ok: false,
+      tag_count: tags,
+      reason: `${freshness.reason} — scratchpad.md #KNOWLEDGE-CANDIDATE lines are from a prior workflow; this session must tag its own candidates or declare none via knowledge-candidates-none.txt`,
+      artifact_mtime: freshness.artifact_mtime,
+      workflow_created_at: freshness.workflow_created_at,
+      age_seconds: freshness.age_seconds,
+    };
+  }
   return { ok: true, tag_count: tags };
 }
 

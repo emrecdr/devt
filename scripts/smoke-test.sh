@@ -8765,6 +8765,42 @@ else
   fail "M16: probe failure logging incomplete. graphify=${M16_LOG_GRAPHIFY} setup=${M16_LOG_SETUP} reset=${M16_RESET_EXEMPT} (need >=2: RESET_EXEMPT + STATE_FILE_CONTRACT) health=${M16_HEALTH} (need >=2: CHECKS + add() call) e2e=${M16_E2E}"
 fi
 
+# M17: Q5 — assert-knowledge-candidates-tagged session-scoped via
+# first_created_at. Previously the scratchpad branch only counted #KC tags
+# and skipped freshness, so tags from a prior workflow (e.g., scratchpad
+# survived /devt:cancel-workflow) would silently pass the gate. End-to-end
+# probe writes a stale scratchpad + fresh workflow.yaml first_created_at
+# and confirms the gate returns ok=false; then touches scratchpad fresh
+# and confirms ok=true. North-stars #1 (coordination — session anchors
+# everywhere) + #2 (quality — no false-pass on stale tags).
+KC_TMPDIR=$(mktemp -d)
+mkdir -p "${KC_TMPDIR}/.devt/state"
+echo "#KNOWLEDGE-CANDIDATE: [type=concept] M17-test" > "${KC_TMPDIR}/.devt/state/scratchpad.md"
+# Backdate scratchpad mtime by 10 minutes (portable across BSD + GNU touch).
+touch -t "$(date -v-10M +%Y%m%d%H%M.%S 2>/dev/null)" "${KC_TMPDIR}/.devt/state/scratchpad.md" 2>/dev/null || \
+  touch -d '10 minutes ago' "${KC_TMPDIR}/.devt/state/scratchpad.md" 2>/dev/null
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "${KC_TMPDIR}/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: review
+first_created_at: "${NOW}"
+created_at: "${NOW}"
+workflow_type: code_review
+EOF
+KC_STALE=$(cd "$KC_TMPDIR" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null)
+touch "${KC_TMPDIR}/.devt/state/scratchpad.md"
+KC_FRESH=$(cd "$KC_TMPDIR" && node "$ROOT/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged 2>/dev/null)
+M17_STALE_REJECTED=$(echo "$KC_STALE" | /usr/bin/grep -c '"ok":false' || echo 0)
+M17_FRESH_ACCEPTED=$(echo "$KC_FRESH" | /usr/bin/grep -c '"ok":true' || echo 0)
+M17_REASON_TOUCHED=$(echo "$KC_STALE" | /usr/bin/grep -c 'prior workflow' || echo 0)
+M17_CODE=$(/usr/bin/grep -c "Q5 — session-scope check via first_created_at" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+rm -rf "$KC_TMPDIR"
+if [ "${M17_STALE_REJECTED:-0}" -ge 1 ] && [ "${M17_FRESH_ACCEPTED:-0}" -ge 1 ] && [ "${M17_REASON_TOUCHED:-0}" -ge 1 ] && [ "${M17_CODE:-0}" -ge 1 ]; then
+  pass "M17: knowledge-candidates gate session-scoped (stale_rejected=${M17_STALE_REJECTED} fresh_accepted=${M17_FRESH_ACCEPTED} reason=${M17_REASON_TOUCHED} code=${M17_CODE})"
+else
+  fail "M17: session-scope gate wiring incomplete. stale_rejected=${M17_STALE_REJECTED} fresh_accepted=${M17_FRESH_ACCEPTED} reason=${M17_REASON_TOUCHED} code=${M17_CODE}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
