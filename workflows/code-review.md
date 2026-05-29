@@ -162,6 +162,19 @@ TOPIC_SYMBOLS=$(echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[:32]')
 TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
 if [ "$TOPIC_SYMBOLS_RAW_COUNT" -gt 32 ]; then
   echo "topic.symbols pre-truncated: ${TOPIC_SYMBOLS_RAW_COUNT} → 32 (MCP blast_radius cap)"
+  # C7-2 (greenfield calibration #7): capture the dropped symbols so the
+  # truncation isn't silent. Greenfield's NettieCalendarClientSetting was
+  # in the dropped 21 from a 53-symbol PR and the absence directly affected
+  # C-2's structural risk assessment. Sidecar is consumed by substep 7's
+  # F17 step which appends a "## Subject symbols dropped" notice to
+  # graph-impact.md (which doesn't exist yet at this point — substep 6
+  # writes it fresh). Reviewers can spot-check whether high-risk symbols
+  # were silently excluded from the impact analysis.
+  echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[32:]' > .devt/state/topic-symbols-dropped.json
+else
+  # Clear any stale dropped-list from a prior workflow so substep 7 doesn't
+  # emit a stale truncation notice on a fresh non-truncated run.
+  rm -f .devt/state/topic-symbols-dropped.json 2>/dev/null || true
 fi
 SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
 IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
@@ -248,6 +261,25 @@ if [ -n "$DIFF_FILES" ]; then
       echo ""
       echo "$SYMBOL_GODNODES" | jq -r '.[] | "- `\(.symbol)` (\(.source_file)) has \(.edge_count) edges; any non-additive change cascades through every caller."'
     } >> .devt/state/graph-impact.md
+  fi
+  # C7-2 (greenfield calibration #7): emit dropped-symbol truncation notice
+  # if substep 5 captured one. Reviewers see exactly which symbols were
+  # excluded from the symbol_anchored args so they can spot-check whether
+  # high-risk symbols are missing (greenfield's NettieCalendarClientSetting
+  # case). Section is informational — does not change tier routing or
+  # downstream gates. Cleared by substep 5's `rm -f` on non-truncated runs.
+  if [ -s ".devt/state/topic-symbols-dropped.json" ]; then
+    DROPPED_COUNT=$(jq 'length' .devt/state/topic-symbols-dropped.json 2>/dev/null || echo 0)
+    if [ "$DROPPED_COUNT" != "0" ] && [ "$DROPPED_COUNT" != "" ]; then
+      {
+        echo ""
+        echo "## Subject symbols dropped (truncation notice — C7-2)"
+        echo ""
+        echo "_${DROPPED_COUNT} of the ${TOPIC_SYMBOLS_RAW_COUNT:-?} extracted topic symbols were truncated by the MCP blast_radius 32-symbol cap. Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._"
+        echo ""
+        jq -r '.[] | "- \(.)"' .devt/state/topic-symbols-dropped.json
+      } >> .devt/state/graph-impact.md
+    fi
   fi
   # C7-1 (greenfield calibration #7): F17's diff-anchored CLIs are silent
   # when the diff touches CALLERS but not symbol-definition sites. Greenfield's

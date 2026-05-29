@@ -272,6 +272,7 @@ const WORKFLOW_EVICTABLE = Object.freeze([
   "reuse-analysis.md",
   "reuse-search-attempted.txt",
   "knowledge-candidates-none.txt",
+  "topic-symbols-dropped.json",
   "claude-mem-harvest.md",
   "claude-mem-skipped.txt",
   // Verification sidecars (replaced per-workflow)

@@ -8641,6 +8641,23 @@ else
   fail "M11: C7-1 wiring incomplete. fallback-bash=${M11_BASH} header-marker=${M11_HEADER} signal-doc=${M11_SIGNAL}"
 fi
 
+# M12: C7-2 — substep 5 captures dropped symbols (.devt/state/topic-symbols-
+# dropped.json) when topic.symbols exceeds 32 and substep 7 emits the
+# truncation notice into graph-impact.md. Greenfield calibration #7:
+# NettieCalendarClientSetting was in the dropped 21 from a 53-symbol PR
+# and the absence affected C-2's structural risk assessment. Drift gates
+# verify the three touch points: capture bash, sidecar rm in non-truncated
+# path, emission bash in F17 step.
+M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M12_RM=$(/usr/bin/grep -c 'rm -f .devt/state/topic-symbols-dropped' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}')
+if [ "${M12_CAPTURE:-0}" -ge 3 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
+  pass "M12: dropped-symbol capture + emit + state registration (capture refs=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state regs=${M12_REG})"
+else
+  fail "M12: C7-2 wiring incomplete. capture=${M12_CAPTURE} rm=${M12_RM} header=${M12_HEADER} state=${M12_REG}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

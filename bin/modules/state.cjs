@@ -978,6 +978,7 @@ const STATE_FILE_CONTRACT = {
     "reuse-analysis.md",        // written by programmer per-candidate decisions (assert-reuse-analyzed gate)
     "reuse-search-attempted.txt", // marker written by workflow bash BEFORE derive-reuse-candidates CLI — distinguishes "never ran" from "ran with 0 candidates"
     "knowledge-candidates-none.txt", // declared-none artifact for assert-knowledge-candidates-tagged (escape hatch with structured reason)
+    "topic-symbols-dropped.json",  // C7-2 — symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review F17 step to emit truncation notice in graph-impact.md
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
