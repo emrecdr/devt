@@ -933,6 +933,17 @@ function generate(taskText, opts) {
       effect_size: blast.effect_size,
       source: blast.source,
       direct_dependents_count: (blast.direct_dependents || []).length,
+      // HF-3 (greenfield calibration #7): god_node_match + ambiguous_bindings
+      // were emitted in the function's returned envelope but stripped on
+      // persist. Downstream consumers — workflows/code-review.md::substep_3's
+      // jq extraction for <god_node_warnings> + future ambiguous_bindings
+      // surfacing — read .blast.god_node_match from the persisted JSON and
+      // got null, then fell back to false. Code-reviewer's severity-elevation
+      // path keys on the boolean, so god-nodes silently under-elevated in
+      // every dispatch. Persist both fields explicitly so the cached state
+      // matches the function's in-memory return.
+      god_node_match: !!blast.god_node_match,
+      ambiguous_bindings: blast.ambiguous_bindings || 0,
     },
     graph_stats: graphStats,
     staleness,

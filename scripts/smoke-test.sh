@@ -8604,6 +8604,27 @@ else
 fi
 rm -rf "$M9_TMP"
 
+# M10: HF-3 — preflight sidecar persists blast.god_node_match +
+# ambiguous_bindings. Greenfield calibration #7 evidence: preflight
+# generate's stdout showed god_node_match:true but the persisted JSON
+# only carried {effect_size, source, direct_dependents_count}. The
+# substep-3 jq extraction read .blast.god_node_match → null → fell back
+# to false. Code-reviewer keys on the boolean for severity elevation;
+# every dispatch since v0.64.0 silently under-elevated god-node findings.
+# Drift gate: source-level check that the persisted sidecar shape
+# includes both fields. Source-grep is sufficient — the field-presence
+# is enforced at the writer level.
+M10_PERSIST_GNM=$(/usr/bin/grep -c "god_node_match: !!blast.god_node_match" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
+M10_PERSIST_AB=$(/usr/bin/grep -c "ambiguous_bindings: blast.ambiguous_bindings || 0" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
+# Both fields must appear TWICE: once in the persisted atomicWriteJsonSync
+# block, once in the returned in-memory envelope (the bug was that they
+# diverged — return had them, persist didn't).
+if [ "${M10_PERSIST_GNM:-0}" -ge 2 ] && [ "${M10_PERSIST_AB:-0}" -ge 2 ]; then
+  pass "M10: preflight sidecar persists god_node_match + ambiguous_bindings (return + persist parity, HF-3)"
+else
+  fail "M10: preflight sidecar drift — return/persist disagree. god_node_match refs=${M10_PERSIST_GNM} ambiguous_bindings refs=${M10_PERSIST_AB} (need ≥2 each)"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
