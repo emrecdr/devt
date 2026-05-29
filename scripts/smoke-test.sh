@@ -8454,6 +8454,22 @@ else
   fail "M4: tester graphify_status wiring incomplete. dispatch=${M4_TESTER_DISPATCH} body=${M4_TESTER_BODY}"
 fi
 
+# M5: verifier dispatch + agent body wired for <scope_trust> across all
+# 3 dispatch sites (V65-4). Plan finding from greenfield was tentative
+# ("may lack scope_trust") — investigation confirmed verifier IS wired
+# in all 3 workflows. This gate locks the wiring so a future edit doesn't
+# silently drop it. Same drift-detection pattern as M4 / L7.
+M5_CR=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M5_CRP=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+M5_DW=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+M5_VAGENT=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/agents/verifier.md" 2>/dev/null || echo 0)
+# Verifier dispatch sites: each workflow has ≥1 scope_trust ref
+if [ "${M5_CR:-0}" -ge 1 ] && [ "${M5_CRP:-0}" -ge 1 ] && [ "${M5_DW:-0}" -ge 1 ] && [ "${M5_VAGENT:-0}" -ge 1 ]; then
+  pass "M5: verifier <scope_trust> wired in all 3 workflows + agent body (code-review=${M5_CR}, parallel=${M5_CRP}, dev=${M5_DW}, agent=${M5_VAGENT})"
+else
+  fail "M5: verifier scope_trust drift. code-review=${M5_CR} parallel=${M5_CRP} dev=${M5_DW} agent=${M5_VAGENT}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
