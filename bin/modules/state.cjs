@@ -1586,9 +1586,19 @@ function assertGraphifyDecision() {
       const wfPath = path.join(dir, "workflow.yaml");
       if (fs.existsSync(wfPath)) {
         const wfYaml = fs.readFileSync(wfPath, "utf8");
+        // HF-1: build a Set of acceptable workflow_ids — current rotated value
+        // PLUS the original anchor — so trace records emitted BEFORE the
+        // workflow_type transition still match. Greenfield calibration #7
+        // hit "fabricated drill-down" false positive because the orchestrator's
+        // 3 get_neighbors calls landed under the prior workflow_id while the
+        // gate queried the rotated one. Backward-compat: when original is
+        // absent (legacy workflow.yaml), only the current id is accepted.
         const wfIdMatch = wfYaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        const workflowId = wfIdMatch ? wfIdMatch[1].trim() : null;
-        if (workflowId) {
+        const origIdMatch = wfYaml.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        const acceptedIds = new Set();
+        if (wfIdMatch) acceptedIds.add(wfIdMatch[1].trim());
+        if (origIdMatch) acceptedIds.add(origIdMatch[1].trim());
+        if (acceptedIds.size > 0) {
           // _mcp-trace.jsonl is in .devt/memory/ — sibling of .devt/state/
           const memDir = path.join(path.dirname(dir), "memory");
           // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -1600,7 +1610,7 @@ function assertGraphifyDecision() {
               if (!line) continue;
               try {
                 const rec = JSON.parse(line);
-                if (rec.workflow_id === workflowId &&
+                if (acceptedIds.has(rec.workflow_id) &&
                     typeof rec.tool === "string" &&
                     /graphify.*get_neighbors/.test(rec.tool)) {
                   mcpGetNeighborsCalls++;
@@ -2393,7 +2403,14 @@ function assertPreflightFresh() {
   let createdAt;
   try {
     const content = fs.readFileSync(workflowPath, "utf8");
-    const m = content.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    // HF-1: prefer immutable first_created_at over mutable created_at.
+    // Greenfield calibration #7: state update workflow_type=... rotates
+    // created_at, retroactively invalidating preflight-brief.json written
+    // BEFORE the transition. first_created_at anchors session start and
+    // never rotates. Backward-compat fallback for legacy workflow.yaml.
+    const mFirst = content.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const mLegacy = content.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const m = mFirst || mLegacy;
     if (!m) {
       return { ok: true, reason: "workflow.yaml has no created_at stamp (legacy workflow)" };
     }

@@ -8506,6 +8506,68 @@ else
   fail "M7: V65-6 wiring incomplete. arch=${M7_ARCH_GETNODE} table=${M7_INTERNALS_TABLE} getnode_row=${M7_INTERNALS_GETNODE}"
 fi
 
+# M8: HF-1 — assertPreflightFresh + assertGraphifyDecision read
+# first_created_at instead of mutable created_at. Greenfield calibration
+# #7 evidence: state update workflow_type=code_review_parallel rotated
+# created_at + workflow_id, retroactively invalidating assert-preflight-
+# fresh ("421s drift") and assert-graphify-decision ("fabricated drill-
+# down because mcp_get_neighbors_calls:0 in workflow_id window"). The
+# v0.65.0 isArtifactFresh fix was half-applied — these two gates have
+# their own implementations that read created_at/workflow_id directly.
+# Fixture: workflow.yaml with first_created_at older than created_at,
+# preflight-brief.json mtime BETWEEN them → without HF-1, gate fails;
+# with HF-1, gate passes because brief is after first_created_at anchor.
+M8_TMP=$(mktemp -d)
+M8_TMP=$(cd "$M8_TMP" && pwd -P)
+mkdir -p "$M8_TMP/.devt/state" "$M8_TMP/.devt/memory" "$M8_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$M8_TMP/.devt/config.json"
+# Minimal graph.json so graphify status returns ready
+echo '{"directed":true,"nodes":[],"links":[]}' > "$M8_TMP/graphify-out/graph.json"
+# workflow.yaml: first_created_at = 5 minutes ago, created_at = 1 second ago
+# (simulating a workflow_type transition that rotated created_at)
+M8_FIRST=$(date -u -d "-5 minutes" +%FT%TZ 2>/dev/null || date -u -v-5M +%FT%TZ)
+M8_NOW=$(date -u +%FT%TZ)
+cat > "$M8_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: rotated-after-transition
+original_workflow_id: original-anchor
+first_created_at: "${M8_FIRST}"
+created_at: "${M8_NOW}"
+workflow_type: code_review_parallel
+EOF
+# preflight-brief.json written 3 minutes ago — AFTER first_created_at (5min),
+# BEFORE the rotated created_at (now). Without HF-1, gate sees brief as
+# "older than created_at" and fails. With HF-1, gate compares against
+# first_created_at and passes.
+cat > "$M8_TMP/.devt/state/preflight-brief.json" <<'EOF'
+{"status":"FRESH","blast":{"effect_size":"small","source":"graphify","direct_dependents_count":3}}
+EOF
+touch -d "3 minutes ago" "$M8_TMP/.devt/state/preflight-brief.json" 2>/dev/null || \
+  touch -t "$(date -v-3M +%Y%m%d%H%M.%S 2>/dev/null)" "$M8_TMP/.devt/state/preflight-brief.json"
+M8_PFRESH=$(cd "$M8_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true?'1':'0');}catch(e){console.log('err');}})")
+# For assert-graphify-decision: fabricate graph-impact.md + trace records.
+# Trace has 1 get_neighbors call under the ORIGINAL workflow_id (the rotated
+# id has zero). Without HF-1, gate counts 0 → fabricated; with HF-1, gate
+# unions both ids → 1 found → not fabricated.
+cat > "$M8_TMP/.devt/state/graph-impact.md" <<'EOF'
+# Graph Impact
+
+## Blast radius — Foo
+
+## Drill-down: Bar
+- Real drill-down content with at least two hundred bytes of substantive narrative explaining the callers and their relationships. Each callsite is documented here to satisfy the substance gate's per-section minimum byte threshold check.
+EOF
+cat > "$M8_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
+{"ts":"2026-05-29T08:00:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true,"workflow_id":"original-anchor","correlation_id":"abcd1234"}
+EOF
+M8_GDEC=$(cd "$M8_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.mcp_get_neighbors_calls===1 && j.fabricated_drill_down===false)?'1':'0');}catch(e){console.log('err');}})")
+if [ "$M8_PFRESH" = "1" ] && [ "$M8_GDEC" = "1" ]; then
+  pass "M8: assert-preflight-fresh + assert-graphify-decision use first_created_at + original_workflow_id (HF-1)"
+else
+  fail "M8: HF-1 gate migration incomplete. preflight-fresh=${M8_PFRESH} graphify-decision=${M8_GDEC}"
+fi
+rm -rf "$M8_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
