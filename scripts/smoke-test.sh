@@ -8568,6 +8568,42 @@ else
 fi
 rm -rf "$M8_TMP"
 
+# M9: HF-2 — mcp-stats --workflow-id unions with original_workflow_id
+# when the supplied id matches the current workflow. Greenfield calibration
+# #7: 4 confirmed graphify MCP calls under the original_workflow_id became
+# invisible to --workflow-id=<rotated-current> after workflow_type
+# transition. Fixture: trace with one record under original id + one under
+# rotated id; query with --workflow-id=<rotated> should now find BOTH.
+M9_TMP=$(mktemp -d)
+M9_TMP=$(cd "$M9_TMP" && pwd -P)
+mkdir -p "$M9_TMP/.devt/state" "$M9_TMP/.devt/memory"
+echo '{}' > "$M9_TMP/.devt/config.json"
+cat > "$M9_TMP/.devt/state/workflow.yaml" <<'EOF'
+active: true
+workflow_id: current-rotated
+original_workflow_id: pre-rotation-anchor
+first_created_at: 2026-05-29T05:00:00.000Z
+created_at: 2026-05-29T07:00:00.000Z
+workflow_type: code_review_parallel
+EOF
+cat > "$M9_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
+{"ts":"2026-05-29T05:30:00.000Z","tool":"mcp__devt-graphify__blast_radius","ok":true,"workflow_id":"pre-rotation-anchor"}
+{"ts":"2026-05-29T07:15:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true,"workflow_id":"current-rotated"}
+{"ts":"2026-05-29T08:00:00.000Z","tool":"mcp__devt-graphify__blast_radius","ok":true,"workflow_id":"different-session"}
+EOF
+# Query with current (rotated) workflow_id — should union and find 2 entries
+M9_CURRENT=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current-rotated 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+# Query with a historical id that does NOT match current — strict equality, finds 1
+M9_HIST=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=different-session 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+# Query with original id alone (matches as historical, strict)
+M9_ORIG=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=pre-rotation-anchor 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+if [ "$M9_CURRENT" = "2" ] && [ "$M9_HIST" = "1" ] && [ "$M9_ORIG" = "1" ]; then
+  pass "M9: mcp-stats --workflow-id unions with original_workflow_id for current session (current=2, historical=1, original-only=1)"
+else
+  fail "M9: HF-2 union logic broken. current=${M9_CURRENT} historical=${M9_HIST} original-only=${M9_ORIG}"
+fi
+rm -rf "$M9_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

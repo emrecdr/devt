@@ -158,13 +158,37 @@ function loadEntries(opts) {
   // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
   // returning 0 entries for every wildcard query and breaking the telemetry surface.
   const toolMatcher = opts.tool ? buildToolMatcher(opts.tool) : null;
+  // HF-2 (greenfield calibration #7): when --workflow-id is supplied, union
+  // with original_workflow_id from workflow.yaml so trace records written
+  // BEFORE a workflow_type rotation still match. mcp-stats previously did
+  // strict equality against opts.workflow_id, returning 0 entries when the
+  // user passed the post-rotation id. The union recovers attribution for
+  // the entire session window even when --since-workflow-created is not used.
+  let acceptedWorkflowIds = null;
+  if (opts.workflow_id) {
+    acceptedWorkflowIds = new Set([opts.workflow_id]);
+    try {
+      const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
+      if (fs.existsSync(wfPath)) {
+        const raw = fs.readFileSync(wfPath, "utf8");
+        const wfMatch = raw.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        // Only union when the user-supplied id matches the CURRENT workflow
+        // (i.e., "I'm asking about THIS session"). If user passes a historical
+        // id, leave the filter strict so historical queries stay deterministic.
+        if (wfMatch && wfMatch[1].trim() === opts.workflow_id && origMatch) {
+          acceptedWorkflowIds.add(origMatch[1].trim());
+        }
+      }
+    } catch { /* leave acceptedWorkflowIds as just the user-supplied id */ }
+  }
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;
     if (toolMatcher && !toolMatcher(e.tool)) return false;
     // Workflow-context filters. Trace records pre-v0.39.0 (and any emitted
     // outside an active workflow) lack these fields → excluded when the
     // corresponding filter is set. Bare aggregate (no filters) still includes them.
-    if (opts.workflow_id && e.workflow_id !== opts.workflow_id) return false;
+    if (acceptedWorkflowIds && !acceptedWorkflowIds.has(e.workflow_id)) return false;
     if (opts.workflow_type && e.workflow_type !== opts.workflow_type) return false;
     if (opts.phase && e.phase !== opts.phase) return false;
     if (opts.correlation_id && e.correlation_id !== opts.correlation_id) return false;
