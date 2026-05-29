@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-05-29
+
+**Greenfield calibration #7 follow-through + Q4/Q5 + DEF-038 bundle.** Closes seven multi-agent coordination items surfaced or queued during calibration #7 and the v0.65.0 soak. Reviewer ↔ verifier alignment via inlined rubric, ambiguous_bindings carried end-to-end with `source_file`, probe failures observable, session-scoped knowledge-candidate gate, concurrent-graphify safety via O_CREAT|O_EXCL lock, plus a doc close-out for the MCP-trace external-server gap. Smoke: **730 → 738 passed**, **0 failed**.
+
+### Added
+
+- **`graphify rebuild` CLI with `--debounce=N` + atomic lock** (DEF-038). Two workflows firing rebuild within the same second would race the subprocess against `graph.json`. New subcommand acquires a lock at `.devt/state/.graphify-rebuild.lock` via `openSync(path, "wx")` (O_CREAT|O_EXCL); contention within the debounce window returns `action=skip reason=debounced`; mtime past the window assumes a crashed prior holder and breaks the lock. Default debounce 30s; override via `--debounce=N` or `config.graphify.rebuild_debounce_seconds`. Lock file is RESET_EXEMPT so a crashed prior workflow doesn't deadlock a fresh one.
+- **`code-reviewer` dispatch receives inlined `<rubric_content>`** (C7-7). Verifier already received the rubric; reviewer self-checked against agent-body conventions only, so axis drift produced extra revision loops. Now both work from the same six axes (A scope coverage, B finding specificity, C severity calibration, D remediation concreteness, E ADR Compliance, G Reuse Discipline). Wired into single-dispatch + parallel per-lane + parallel consolidator + agent body. Saves ~5K tokens per avoided verifier-revision round-trip.
+- **Probe failure diagnostic logging** (Q4). `graphify.probeBinary` + `setup.probePythonGraphifyMcp` previously caught and returned false silently — users seeing "graphify not detected" couldn't distinguish "not installed" from "installed but timeout/permission/segfault". Both probes now append structured records to `.devt/state/probe-failures.jsonl` (categories: `spawn-error` / `timeout` / `nonzero-exit` / `not-installed`). `health` surfaces `PROBE_FAILURES_RECENT` info-check when activity is logged within the last 24h. RESET_EXEMPT so root-cause survives `/devt:cancel-workflow`.
+- **`ambiguous_bindings` carries `source_file` end-to-end** (C7-3 + C7-6). `blastRadius` already returned `ambiguous_details` internally but only the count was persisted/surfaced. Calibration #4 + #7 documented unflagged `ExternalCallService` collisions causing manual cross-checks per finding. Now: `blastRadius` entries include `source_file`; preflight sidecar persists `ambiguous_details[]`; code-review F17 substep emits `## Ambiguous bindings (C7-3)` section in `graph-impact.md`; code-reviewer body parses the new field and requires every finding referencing a colliding symbol to cite `source_file` explicitly.
+
+### Changed
+
+- **`assertKnowledgeCandidatesTagged` is session-scoped via `first_created_at`** (Q5). The scratchpad branch counted `#KNOWLEDGE-CANDIDATE:` lines without freshness — tags from a prior workflow (e.g., scratchpad survived `/devt:cancel-workflow`) silently passed the gate and the auto-curator harvested them into this session's promotion queue. Now both gate branches use `isArtifactFresh()` (which prefers the immutable session anchor per v0.65.0 HF-1).
+
+### Documentation
+
+- **MCP-trace external-server gap documented as won't-fix** (C7-5). `_mcp-trace.jsonl` only captures tool calls routed through devt's OWN MCP server; calls to upstream third-party servers (graphify, claude-mem, context7) bypass devt's instrumentation point. Fix would require Claude Code harness instrumentation or a wrapping MCP proxy. Decision: `mcp-stats` output should be read as "tool calls through devt's MCP server" rather than "all MCP calls in this workflow". Added paragraph to `docs/INTERNALS.md::MCP Tool Reachability`.
+
+### Smoke gates added
+
+- **M14** — `ambiguous_bindings` consumer wiring (graphify produces `source_file`; preflight persists the array; workflow emits the section; agent body parses the field).
+- **M15** — `code_review` rubric inlined into code-reviewer dispatch (single + parallel per-lane + consolidator + agent body).
+- **M16** — probe failure logging wired end-to-end (graphify + setup log; RESET_EXEMPT + STATE_FILE_CONTRACT entries; health check; live probe of a missing binary).
+- **M17** — knowledge-candidates gate session-scoped (live probe: scratchpad with backdated mtime fails; touch-fresh passes).
+- **M18** — `graphify rebuild --debounce` E2E (fresh lock seeded returns `debounced`; stale 3-min-old lock is broken; both paths leave directory clean).
+
+### North-star alignment
+
+- **#1 coordination**: ambiguous_bindings flows producer → persistence → consumer → reviewer in one chain (C7-3+C7-6); reviewer + verifier work from the same rubric (C7-7); immutable session anchor applied uniformly across gates (Q5); two workflows can't race graphify update (DEF-038).
+- **#2 code quality**: axes walked in first pass not after a revision loop (C7-7); actionable probe diagnostics replace silent false (Q4); harvester no longer sees prior-session leak (Q5).
+- **#3 token efficiency**: ~5K tokens saved per avoided verifier-revision round-trip (C7-7).
+- **#4 3rd-party integrations**: surfaces existing graphify signal rather than re-deriving (C7-3+C7-6); surfaces clear feedback when graphify/python probes fail (Q4); delegates to graphify binary via clean serialization rather than reimplementing (DEF-038).
+
 ## [0.65.0] - 2026-05-29
 
 **Calibration #6 + #7 bug fixes + cross-agent graphify coverage.** Greenfield's calibration #6 surfaced two silent-failure bugs (`health --repair` no-op for MEM_INDEX_STALE, FTS5 index stale on active sessions) plus four coverage gaps. Calibration #7 then surfaced THREE half-applied fixes from v0.64.0's NEW-1 work — gate consumers + mcp-stats filter + preflight write-path that wasn't fully migrated. All bundled into v0.65.0 before push. Smoke: **720 → 730 passed**, **0 failed**.

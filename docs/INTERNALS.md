@@ -224,6 +224,8 @@ The upstream graphify MCP server exposes ~10 tools; devt's read path consumes th
 
 V65-6 closed `get_node`'s reachability gap by documenting the single-symbol introspection use case in `agents/architect.md`. Going forward: any new upstream tool added by the graphify MCP server gets an entry in this table during reachability audit. If a tool sits NOT WIRED for >1 release cycle, decide explicitly: wire it (with documented consumer) or remove from the audit set with a "deferred until ..." note.
 
+**MCP trace external-server gap (C7-5, won't-fix).** `_mcp-trace.jsonl` only captures tool calls routed through devt's OWN MCP server (`bin/devt-memory-mcp.cjs::recordTrace`). Calls to upstream third-party MCP servers (graphify, claude-mem, context7, etc.) made directly by the orchestrator or by sub-agents whose `tools:` frontmatter exposes those MCP names go client → upstream-server with no devt-side observability hook. Greenfield calibration #7 noted that `mcp-stats` therefore undercounts the true MCP surface used during a workflow. The fix would require either a Claude Code-level harness instrumentation point (not in devt's scope) or a wrapping MCP proxy (architecturally heavy + introduces a new failure mode in the hot path). Decision: won't-fix; instrument-where-we-can (own server) + document the gap here. `mcp-stats` output should be read as "tool calls through devt's MCP server" rather than "all MCP calls in this workflow".
+
 ---
 
 ## Skills Resolution
