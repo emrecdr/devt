@@ -8397,6 +8397,48 @@ else
 fi
 rm -rf "$M2_TMP"
 
+# M3: memory validate defers to graphify.status() before probing.
+# Greenfield calibration #6: validate's 3-probe retry budget aborted
+# with GRAPHIFY_UNREACHABLE even when the orchestrator had successfully
+# made impact-plan calls seconds earlier (two consumers, two retry
+# budgets, divergent verdicts). Fix: when graphify.status() reports
+# not-ready, skip stale-symbol checks with an info-level note instead
+# of the alarming warning. Fixture: project with graphify.enabled=false
+# → status() reports state=disabled → validate returns category=
+# graphify-not-ready info instead of graphify-unreachable warning.
+M3_TMP=$(mktemp -d)
+M3_TMP=$(cd "$M3_TMP" && pwd -P)
+mkdir -p "$M3_TMP/.devt/memory/decisions" "$M3_TMP/.devt/state"
+echo '{"memory":{"enabled":true},"graphify":{"enabled":false}}' > "$M3_TMP/.devt/config.json"
+# ADR with affects_symbols so validate has something to probe
+cat > "$M3_TMP/.devt/memory/decisions/ADR-001.md" <<'EOF'
+---
+id: ADR-001
+doc_type: decision
+title: "Token expiry"
+status: active
+domain: auth
+confidence: verified
+summary: "Tokens expire after 24h"
+created_at: 2026-05-29T00:00:00.000Z
+created_by: test
+affects_paths: []
+affects_symbols: ["AuthService", "TokenStore"]
+links: []
+---
+Body
+EOF
+(cd "$M3_TMP" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+M3_OUT=$(cd "$M3_TMP" && node "$ROOT/bin/devt-tools.cjs" memory validate 2>/dev/null)
+M3_HAS_NOTREADY=$(echo "$M3_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const i=(j.issues||[]).find(x=>x.category==='graphify-not-ready');console.log(i && i.severity==='info' ? '1':'0');}catch(e){console.log('0');}})")
+M3_NO_UNREACHABLE=$(echo "$M3_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const i=(j.issues||[]).find(x=>x.category==='graphify-unreachable');console.log(i ? '0':'1');}catch(e){console.log('0');}})")
+if [ "$M3_HAS_NOTREADY" = "1" ] && [ "$M3_NO_UNREACHABLE" = "1" ]; then
+  pass "M3: memory validate defers to graphify.status() — disabled state yields info-level graphify-not-ready, no graphify-unreachable warning"
+else
+  fail "M3: status-deferral broken. has_notready_info=${M3_HAS_NOTREADY} no_unreachable_warning=${M3_NO_UNREACHABLE}"
+fi
+rm -rf "$M3_TMP"
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

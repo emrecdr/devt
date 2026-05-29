@@ -1095,7 +1095,28 @@ function affectsSymbol(symbol) {
 function validateSymbolsViaGraphify(docs) {
   let graphify;
   try { graphify = require("./graphify.cjs"); } catch { return []; }
-  if (graphify.status().state !== "ready") return [];
+
+  // V65-2 (greenfield calibration #6): defer to graphify.status() as the
+  // authoritative readiness signal BEFORE entering the per-symbol probe
+  // loop. The legacy path ran 3 probe queries against the graph and
+  // aborted with GRAPHIFY_UNREACHABLE if any subset failed consecutively —
+  // even when the orchestrator's impact-plan path had successfully called
+  // blast_radius + get_neighbors seconds earlier. Two consumers, two
+  // retry budgets, divergent verdicts. Sharing a single status check
+  // gives validate the same "graphify is healthy" signal the orchestrator
+  // already trusted. When status reports not-ready, skip stale-symbol
+  // checks entirely with a STRUCTURED info-level note instead of the
+  // legacy silent `return []` — users see explicitly why the check was
+  // skipped rather than wondering whether validate ran the symbol pass.
+  const graphifyState = graphify.status();
+  if (!graphifyState || graphifyState.state !== "ready") {
+    return [{
+      filePath: null,
+      severity: "info",
+      category: "graphify-not-ready",
+      error: `Graphify state=${graphifyState ? graphifyState.state : "unavailable"} (${(graphifyState && graphifyState.reason) || "not_ready"}) — stale-symbol checks skipped`,
+    }];
+  }
 
   const issues = [];
   const probeCache = new Map();
@@ -1119,7 +1140,7 @@ function validateSymbolsViaGraphify(docs) {
               filePath: null,
               severity: "warning",
               category: "graphify-unreachable",
-              error: `Graphify queries failed ${consecutiveErrors}× consecutively — stale-symbol checks aborted (run \`graphify update .\`)`,
+              error: `Graphify queries failed ${consecutiveErrors}× consecutively despite graphify.status()=ready — stale-symbol checks aborted (transient outage; safe to retry or run \`graphify update .\` if persistent)`,
             });
             aborted = true;
             break;
