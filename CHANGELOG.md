@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-05-29
+
+**Option H+ — Compile-time dispatch templates + cookbook-aligned hardening.** Eliminates duplicated per-agent dispatch envelopes across 5 workflows via marker-region compile-time generation from `agents/io-contracts.yaml` + `templates/dispatch/`. Closes the "Smoke test (future)" TODO at `agents/io-contracts.yaml:29`. Adds PTC-style consolidation of the SCOPE_HINT/TRUST/staleness bash chain into one CLI verb. Tightens verifier + code-review rubrics with anti-shortcut clauses (cookbook outcome-grader pattern). Net workflow LoC reduction: ~370 lines despite added documentation. Smoke: **738 → 741 passed**, **0 failed**.
+
+### Added
+
+- **`dispatch` CLI surface** (`list`, `contracts`, `render`, `compile [--check|--write]`) — compile-time generation of per-agent dispatch envelopes from `agents/io-contracts.yaml` + `templates/dispatch/envelopes/`. Templates are the single source of truth; workflow marker regions are rendered, byte-stable, and CI-gated. `compile --check` (in `scripts/smoke-test.sh`) closes the "Smoke test (future)" TODO at `agents/io-contracts.yaml:29`. `compile --write` is the manual pre-release regeneration step. Per-workflow-id variants supported via `<agent>-<workflow_id>.tmpl.md` fallback (e.g. `architect-dev-arch-health.tmpl.md`, `architect-dev-arch-review.tmpl.md` for the two architect dispatches in dev-workflow).
+- **`preflight scope-cache` CLI verb** — single Node call replaces the prior 4-jq + conditional staleness-override + 2 CLI-call bash chain in three workflows. Reads `preflight-brief.json`, computes scope_hint + scope_trust, applies mechanical staleness override (forces `trust=sparse` + writes `staleness-suppressed.txt` when graphify `state=ready` AND lag exceeds `graphify.stale_threshold` or is null), persists both JSON blobs to `workflow.yaml`. Returns `{ok, scope_hint, scope_trust, suppress_reason, threshold}`.
+- **`## Tier Routing Manifest` in `workflows/dev-workflow.md`** — single-glance view of which steps fire for each complexity tier (TRIVIAL/SIMPLE/STANDARD/COMPLEX). Per-step `(STANDARD + COMPLEX)` annotations downstream remain operational (defense-in-depth) — the manifest is the documentation surface, the inline gates remain the live behavior.
+- **Anti-shortcut clauses in pinned verifier rubrics** (`references/rubrics/code_review.v1.md` + `references/rubrics/dev.v1.md`). Implements the cookbook outcome-grader "anticipate shortcuts" pattern. The verifier MUST reject grep-only confirmations, "I remember it passed", line-number citations without re-Reading, passing on diff size, and similar cheap-but-wrong verification paths. Gap field prefixed with `[shortcut]:` so the next writer pass recognizes the rejection class.
+
+### Changed
+
+- **All 19 `Task()` dispatch envelopes across 5 workflows** (`dev-workflow`, `quick-implement`, `code-review`, `research-task`, `debug`) — now live in `<!-- BEGIN dispatch:<agent>:<workflow_id> -->` … `<!-- END dispatch:<agent>:<workflow_id> -->` marker regions rendered from `templates/dispatch/envelopes/*.tmpl.md`. Behavior unchanged; structure deduplicated.
+- **`SCOPE_HINT` / `SCOPE_TRUST` chain in dev-workflow, code-review, quick-implement** — replaced by a single `node bin/devt-tools.cjs preflight scope-cache` call. ~25 lines of bash per workflow → 1 CLI invocation. Smoke gates updated to accept either pattern (legacy bash OR new CLI verb) — they now test presence-of-mechanism, not implementation shape.
+
+### Removed
+
+- **62 `<!-- KEEP IN SYNC -->` comment blocks** stripped from templates (then propagated to rendered marker regions across 14 workflow sites). Templates are now the single source of truth for dispatch envelope content; cross-file sync directives became obsolete. Remaining 15 KEEP IN SYNC comments live OUTSIDE marker regions (operational bash sync hints, prose footers) and are intentionally preserved.
+
+### Fixed
+
+- **`dispatch compile --write` multi-region rewrite bug.** First-pass implementation read marker-region line numbers once at the top, then rewrote regions in iteration order. The first rewrite in a file invalidated subsequent regions' begin_line/end_line. Now processes regions per-file in reverse `begin_line` order, applies rewrites to an in-memory copy, writes once at the end via `atomicWriteFileSync`. Resolves silent breakage when a single edit propagated to multiple marker regions in the same workflow file.
+
+### Skipped (mid-flight scope revisions)
+
+- **Layer 2 (collapse `code-review-parallel.md` fork)** — validation revealed it is a sanctioned exception per `docs/AGENT-CONTRACTS.md:50` with bespoke lane-partition + synthesis logic, not a deprecated fork. The dispatch envelope duplication was already absorbed by Layer 1's per-workflow-id templates. Two-workflow architecture stays.
+- **Layer 4 (context_management tool clearing)** — the cookbook's `clear_tool_uses_20250919` is an Anthropic Messages API parameter; the Claude Code `Task` tool does not expose `context_management` on subagent dispatches. Deferred until harness support.
+- **Layer 5 `graphify drill-down` half** — would lose the MCP `_meta.correlation_id` audit trail that workflows actively cite via `mcp-stats --correlation-id`. Preserved as a follow-up; `preflight scope-cache` shipped instead.
+
 ## [0.66.0] - 2026-05-29
 
 **Greenfield calibration #7 follow-through + Q4/Q5 + DEF-038 bundle.** Closes seven multi-agent coordination items surfaced or queued during calibration #7 and the v0.65.0 soak. Reviewer ↔ verifier alignment via inlined rubric, ambiguous_bindings carried end-to-end with `source_file`, probe failures observable, session-scoped knowledge-candidate gate, concurrent-graphify safety via O_CREAT|O_EXCL lock, plus a doc close-out for the MCP-trace external-server gap. Smoke: **730 → 738 passed**, **0 failed**.
