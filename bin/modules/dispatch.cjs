@@ -178,7 +178,10 @@ function renderEnvelope(agent, workflowId, contracts) {
   if (!fs.existsSync(envelopePath)) {
     throw new Error(`no envelope template for agent '${agent}' at ${envelopePath} (templates land per-agent starting C2)`);
   }
-  const envelope = fs.readFileSync(envelopePath, "utf8");
+  // Strip trailing newline: the marker-region slice in cmdCompile joins inner
+  // lines with "\n" and has no trailing newline. File reads include the
+  // trailing newline that editors add. Normalize so byte-comparison succeeds.
+  const envelope = fs.readFileSync(envelopePath, "utf8").replace(/\n+$/, "");
   return envelope.replace(/\{\{workflow_id\}\}/g, workflowId);
 }
 

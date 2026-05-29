@@ -888,6 +888,7 @@ fi
 Dispatch the programmer agent:
 
 ```
+<!-- BEGIN dispatch:programmer:dev -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
@@ -958,6 +959,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   </task>
   Write summary to .devt/state/impl-summary.md
 ")
+<!-- END dispatch:programmer:dev -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
