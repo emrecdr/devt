@@ -8,7 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [0.65.0] - 2026-05-29
 
-**Calibration #6 bug fixes + cross-agent graphify coverage.** Greenfield's second field session (against v0.63.0, before v0.64.0 was pushed) surfaced two more silent-failure bugs (`health --repair` no-op for MEM_INDEX_STALE, FTS5 index stale on active sessions) plus four coverage gaps from the prior audit-additional batch. Smoke: **720 → 727 passed**, **0 failed**.
+**Calibration #6 + #7 bug fixes + cross-agent graphify coverage.** Greenfield's calibration #6 surfaced two silent-failure bugs (`health --repair` no-op for MEM_INDEX_STALE, FTS5 index stale on active sessions) plus four coverage gaps. Calibration #7 then surfaced THREE half-applied fixes from v0.64.0's NEW-1 work — gate consumers + mcp-stats filter + preflight write-path that wasn't fully migrated. All bundled into v0.65.0 before push. Smoke: **720 → 730 passed**, **0 failed**.
+
+### Fixed (v0.64.0 half-applied corrections — found in calibration #7)
+
+- **`assertPreflightFresh` + `assertGraphifyDecision` honor `first_created_at` + `original_workflow_id`** (HF-1). v0.64.0's NEW-1 fix migrated `isArtifactFresh` + mcp-stats to immutable anchors, but two gate-specific implementations had their own freshness logic that still read mutable `created_at` / `workflow_id`. Greenfield's calibration #7: `state update workflow_type=code_review_parallel` rotated created_at, retroactively invalidating both gates even though the orchestrator had run preflight + executed 3 real `get_neighbors` MCP calls correctly. Fix: both gates' YAML regexes now prefer immutable anchors with backward-compat fallback; the graphify decision gate unions current + original workflow_ids into a Set when scanning trace records.
+- **`mcp-stats --workflow-id` unions with `original_workflow_id` for current session** (HF-2). v0.64.0's `--since-workflow-created` correctly used immutable anchor, but the ID-based filter stayed strict against current-rotated id. Greenfield: 5 entries via time filter, 0 via id filter despite 4 real MCP calls. Fix: when supplied workflow_id matches current workflow.yaml, union with original_workflow_id; historical queries stay strict.
+- **`preflight generate` persists `blast.god_node_match` + `blast.ambiguous_bindings`** (HF-3). v0.64.0's C-I.1 god_node_warnings block read `.blast.god_node_match` from the persisted sidecar, but preflight's `atomicWriteJsonSync` only wrote `{effect_size, source, direct_dependents_count}` — both fields were emitted in the function return but stripped on persist. Substep-3 jq fell back to `// false`, cached state contradicted preflight's stdout. Code-reviewer keys severity-elevation on the boolean → every code-review dispatch since v0.64.0 silently under-elevated god-node findings. Fix: persist both fields explicitly; return/persist now byte-equivalent.
+
+### Fixed (calibration #6 batch)
 
 ### Fixed
 
@@ -25,7 +33,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Smoke tests
 
-- **M1-M7** (+7 net gates): M1 memory suggest triggers index rebuild, M2 health --repair handler fires for MEM_INDEX_STALE, M3 validate defers to status() before probing, M4 tester graphify_status wiring, M5 verifier scope_trust drift, M6 io-contracts graphify_inputs reality check, M7 architect get_node + INTERNALS reachability table.
+- **M1-M10** (+10 net gates): M1 memory suggest triggers index rebuild, M2 health --repair handler fires for MEM_INDEX_STALE, M3 validate defers to status() before probing, M4 tester graphify_status wiring, M5 verifier scope_trust drift, M6 io-contracts graphify_inputs reality check, M7 architect get_node + INTERNALS reachability table, M8 gate freshness consumers honor first_created_at + original_workflow_id (HF-1), M9 mcp-stats --workflow-id unions with original (HF-2), M10 preflight sidecar persists god_node_match + ambiguous_bindings (HF-3).
 
 ## [0.64.0] - 2026-05-29
 
