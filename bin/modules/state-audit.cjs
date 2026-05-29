@@ -313,22 +313,53 @@ function evictWorkflowArtifacts(opts = {}) {
     }
   }
 
-  // Evict review-lane-*.md by readdir + regex match (no shell glob)
+  // Slug-variant sweep — calibration #8 evidence: greenfield-api accumulated
+  // 167 stale files in .devt/state/ (review-pr367-*, review-architecture.md,
+  // impl-summary-c5.md, review-slice-*, etc.) because the original allowlist
+  // only knew about the canonical filenames + review-lane-* regex. The mtime
+  // gate (file < first_created_at) prevents the current session's writes
+  // from being clobbered while still clearing prior-workflow ballast.
+  // Patterns mirror state-audit.cjs::ALLOWED_PATTERNS so audit + eviction
+  // agree on what counts as a slug variant.
+  const SLUG_VARIANT_PATTERNS = [
+    /^review-[A-Za-z0-9_.-]+\.md$/,
+    /^review-lane-[A-Za-z0-9_.-]+\.(md|json)$/,
+    /^impl-summary-[A-Za-z0-9_.-]+\.(md|json)$/,
+    /^test-summary-[A-Za-z0-9_.-]+\.(md|json)$/,
+    /^verification-[A-Za-z0-9_.-]+\.(md|json)$/,
+    /^slice-[A-Za-z0-9_.-]+\.md$/,
+  ];
+  let anchorMs = 0;
+  try {
+    const wfYaml = fs.readFileSync(path.join(stateDir, "workflow.yaml"), "utf8");
+    const m = wfYaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (m) {
+      const parsed = new Date(m[1].trim()).getTime();
+      if (Number.isFinite(parsed)) anchorMs = parsed;
+    }
+  } catch { /* no workflow.yaml — sweep without staleness gate */ }
   try {
     for (const entry of fs.readdirSync(stateDir)) {
-      if (/^review-lane-[A-Za-z0-9_.-]+\.(md|json)$/.test(entry)) {
-        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-        const fullPath = path.join(stateDir, entry);
-        if (dryRun) {
-          evicted.push({ file: entry, dry_run: true });
-          continue;
-        }
+      if (!SLUG_VARIANT_PATTERNS.some(re => re.test(entry))) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const fullPath = path.join(stateDir, entry);
+      if (anchorMs > 0) {
         try {
-          fs.unlinkSync(fullPath);
-          evicted.push({ file: entry });
-        } catch (e) {
-          skipped.push({ file: entry, reason: "unlink_failed", error: String(e && e.message || e) });
-        }
+          if (fs.statSync(fullPath).mtimeMs >= anchorMs) {
+            skipped.push({ file: entry, reason: "fresh" });
+            continue;
+          }
+        } catch { /* stat failed — fall through to attempt */ }
+      }
+      if (dryRun) {
+        evicted.push({ file: entry, dry_run: true });
+        continue;
+      }
+      try {
+        fs.unlinkSync(fullPath);
+        evicted.push({ file: entry });
+      } catch (e) {
+        skipped.push({ file: entry, reason: "unlink_failed", error: String(e && e.message || e) });
       }
     }
   } catch { /* readdir failure is non-fatal */ }

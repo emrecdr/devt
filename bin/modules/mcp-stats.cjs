@@ -158,12 +158,14 @@ function loadEntries(opts) {
   // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
   // returning 0 entries for every wildcard query and breaking the telemetry surface.
   const toolMatcher = opts.tool ? buildToolMatcher(opts.tool) : null;
-  // HF-2 (greenfield calibration #7): when --workflow-id is supplied, union
-  // with original_workflow_id from workflow.yaml so trace records written
-  // BEFORE a workflow_type rotation still match. mcp-stats previously did
-  // strict equality against opts.workflow_id, returning 0 entries when the
-  // user passed the post-rotation id. The union recovers attribution for
-  // the entire session window even when --since-workflow-created is not used.
+  // HF-2 (greenfield calibration #7) + G6 (calibration #8): when --workflow-id
+  // is supplied AND matches the current workflow, union with the entire
+  // workflow_id_history[] chain — not just the 1-hop original anchor.
+  // Sessions that chain through three or more workflow_types (e.g.
+  // dev → code_review → debug → quick_implement) accumulate trace records
+  // tagged with each intermediate id; the 1-hop union saw current ↔ original
+  // but missed everything in between. Historical-id queries stay strict so
+  // a user citing a specific id gets only that id's records.
   let acceptedWorkflowIds = null;
   if (opts.workflow_id) {
     acceptedWorkflowIds = new Set([opts.workflow_id]);
@@ -172,12 +174,20 @@ function loadEntries(opts) {
       if (fs.existsSync(wfPath)) {
         const raw = fs.readFileSync(wfPath, "utf8");
         const wfMatch = raw.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        // Only union when the user-supplied id matches the CURRENT workflow
-        // (i.e., "I'm asking about THIS session"). If user passes a historical
-        // id, leave the filter strict so historical queries stay deterministic.
-        if (wfMatch && wfMatch[1].trim() === opts.workflow_id && origMatch) {
-          acceptedWorkflowIds.add(origMatch[1].trim());
+        if (wfMatch && wfMatch[1].trim() === opts.workflow_id) {
+          const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+          if (origMatch) acceptedWorkflowIds.add(origMatch[1].trim());
+          // workflow_id_history serializes as a JSON-stringified array via
+          // state.cjs::serializeSimpleYaml (NEW-3 path). Pull the raw quoted
+          // line and JSON.parse — avoids pulling in parseSimpleYaml from a
+          // peer module and keeps this filter self-contained.
+          const histMatch = raw.match(/^workflow_id_history:\s*"(.*)"\s*$/m);
+          if (histMatch) {
+            try {
+              const arr = JSON.parse(histMatch[1].replace(/\\"/g, '"'));
+              if (Array.isArray(arr)) for (const id of arr) if (typeof id === "string") acceptedWorkflowIds.add(id);
+            } catch { /* malformed history — fall through with original union only */ }
+          }
         }
       }
     } catch { /* leave acceptedWorkflowIds as just the user-supplied id */ }

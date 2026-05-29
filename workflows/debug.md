@@ -235,7 +235,10 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 
 **Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator. Runs BEFORE the scratchpad truncate below — that order matters.
 
+Aggregate tags from `debug-summary.md` / `impl-summary*.md` first so the gate sees them.
+
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
 if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED

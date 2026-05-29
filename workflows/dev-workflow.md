@@ -1562,7 +1562,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review_deferr
 
 **Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator harvester. Runs BEFORE the scratchpad truncate below.
 
+Aggregate any tags the programmer placed inside `impl-summary*.md` (the aggregator scans those alongside `review-lane-*.md`/`review.md`) so they reach scratchpad before the gate inspects it.
+
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
 if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED

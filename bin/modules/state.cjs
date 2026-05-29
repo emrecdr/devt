@@ -242,6 +242,12 @@ const KNOWN_STATE_KEYS = {
   workflow_type: "string",
   first_created_at: "string",
   original_workflow_id: "string",
+  // Append-only chain of workflow_ids the active session has held. Populated
+  // on every workflow_type transition (state.cjs::updateState) so mcp-stats
+  // --workflow-id can union all historical ids when matching the current one,
+  // not just the original ↔ current 1-hop. Serializes as JSON-stringified
+  // array via the NEW-3 path; typeof [] is "object" for schema validation.
+  workflow_id_history: "object",
   last_session: "string",
   stopped_at: "string",
   stopped_phase: "string",
@@ -854,6 +860,9 @@ function updateState(keyValues) {
       // Freeze the immutable anchors on first activation only.
       if (!current.first_created_at) current.first_created_at = now;
       if (!current.original_workflow_id) current.original_workflow_id = current.workflow_id;
+      if (!Array.isArray(current.workflow_id_history)) {
+        current.workflow_id_history = [current.workflow_id];
+      }
     } else if (
       current.active === true &&
       previousWorkflowType &&
@@ -865,8 +874,22 @@ function updateState(keyValues) {
       // /devt:workflow would write trace records with the old workflow_id.
       // first_created_at + original_workflow_id are NOT touched here — they
       // anchor the session, not the logical workflow.
+      //
+      // Append the outgoing id to workflow_id_history BEFORE overwrite — the
+      // 1-hop union in mcp-stats.cjs (HF-2) couldn't see trace records written
+      // during intermediate workflows when the session chained through more
+      // than two workflow_types. G6 widens the union to the whole chain.
+      if (!Array.isArray(current.workflow_id_history)) {
+        current.workflow_id_history = current.original_workflow_id
+          ? [current.original_workflow_id]
+          : [];
+      }
+      if (current.workflow_id && !current.workflow_id_history.includes(current.workflow_id)) {
+        current.workflow_id_history.push(current.workflow_id);
+      }
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
+      current.workflow_id_history.push(current.workflow_id);
     }
     // Run before write so the validation verdict and the data hit disk in a single atomic write —
     // a crash between two writes would leave the flag desynced from the state it describes.
@@ -2207,17 +2230,86 @@ function assertKnowledgeCandidatesTagged() {
 // lanes might surface the same architectural rule, and the downstream
 // harvester does its own dedup, but writing the same line twice into
 // scratchpad pollutes the audit trail.
+// G4 (greenfield calibration #8): the structural side of preflight has
+// observable decision artifacts (graphify-skip-reason.txt, staleness lag);
+// the semantic side did not, so an orchestrator could read scope_hint
+// without knowing whether the underlying symbols were trustworthy. This
+// gate surfaces the extraction confidence numerically. Returns
+// `ok: true` always — the gate WARNS, it does not block (per the
+// "no defensive limits for low-risk scenarios" rule; semantic quality is
+// signal, not safety). Default warn threshold 0.4 (configurable via
+// --threshold flag). Confidence < threshold → `warn: true` with a
+// prescriptive reason citing the band.
+function assertPreflightSemanticQuality(args) {
+  let threshold = 0.4;
+  if (Array.isArray(args)) {
+    const flagIdx = args.findIndex(a => a === "--threshold" || a.startsWith("--threshold="));
+    if (flagIdx >= 0) {
+      const raw = args[flagIdx].includes("=") ? args[flagIdx].split("=")[1] : args[flagIdx + 1];
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) threshold = parsed;
+    }
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const sidecarPath = path.join(dir, "preflight-brief.json");
+  if (!fs.existsSync(sidecarPath)) {
+    return {
+      ok: true,
+      warn: false,
+      reason: "preflight-brief.json absent — run /devt:preflight or wait for the auto-fire at context_init before asserting semantic quality",
+    };
+  }
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(sidecarPath, "utf8")); }
+  catch (e) { return { ok: true, warn: false, reason: `preflight-brief.json unparseable: ${e.message}` }; }
+  const conf = parsed && parsed.topic && parsed.topic.extraction_confidence;
+  if (!conf || typeof conf.score !== "number") {
+    return {
+      ok: true,
+      warn: false,
+      reason: "preflight-brief.json predates the extraction_confidence field — regenerate via /devt:preflight to surface semantic quality",
+    };
+  }
+  if (conf.score < threshold) {
+    return {
+      ok: true,
+      warn: true,
+      confidence: conf,
+      threshold,
+      reason: `topic extraction confidence ${conf.score} (${conf.band}) below threshold ${threshold} — ${conf.reason}. Refine task text with the central subject (e.g. snake_case identifier or PascalCase class), then re-run /devt:preflight. Downstream scope_hint may be noise.`,
+    };
+  }
+  return {
+    ok: true,
+    warn: false,
+    confidence: conf,
+    threshold,
+    reason: `topic extraction confidence ${conf.score} (${conf.band}) above threshold`,
+  };
+}
+
 function aggregateKnowledgeCandidates() {
   const dir = getStateDir();
   let sources;
   try {
     sources = fs.readdirSync(dir)
-      .filter(f => /^review-lane-[A-Za-z0-9_.-]+\.md$/.test(f) || f === "review.md");
+      .filter(f =>
+        /^review-lane-[A-Za-z0-9_.-]+\.md$/.test(f) ||
+        f === "review.md" ||
+        // Programmers writing #KNOWLEDGE-CANDIDATE tags in impl-summary*.md
+        // would otherwise be stranded — the aggregator only scanned review
+        // outputs, leaving valid candidates invisible to the gate (field
+        // signal: greenfield 2026-05-29 calibration #8, quick_implement
+        // workflow producing 3 tags in impl-summary.md with zero reaching
+        // scratchpad.md).
+        /^impl-summary(?:-[A-Za-z0-9_.-]+)?\.md$/.test(f)
+      );
   } catch {
     return { ok: false, reason: "state_dir_unreadable", aggregated: 0 };
   }
   if (sources.length === 0) {
-    return { ok: true, sources_scanned: 0, aggregated: 0, reason: "no review-lane-*.md or review.md present" };
+    return { ok: true, sources_scanned: 0, aggregated: 0, reason: "no review-lane-*.md, review.md, or impl-summary*.md present" };
   }
   // Map content → first source file that surfaced it; preserves provenance
   // even when several lanes propose the same candidate (only the first
@@ -2282,6 +2374,16 @@ function listLaneOutputs() {
     return { lanes: [], reason: "no workflow.yaml" };
   }
   const yaml = fs.readFileSync(wfPath, "utf8");
+  // first_created_at lets each lane report stale=true when its review_file
+  // predates the current session anchor — calibration #8 surfaced lanes
+  // registered in a prior workflow whose physical files were long gone
+  // (file_exists:false) but whose metadata still satisfied consumers.
+  const anchorMatch = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+  let anchorMs = 0;
+  if (anchorMatch) {
+    const parsed = new Date(anchorMatch[1].trim()).getTime();
+    if (Number.isFinite(parsed)) anchorMs = parsed;
+  }
   // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
   // line-based parsing to avoid pulling in a YAML library (zero-deps rule).
   const lanes = [];
@@ -2306,12 +2408,20 @@ function listLaneOutputs() {
     if (!id) continue;
     let sizeBytes = 0;
     let exists = false;
+    let mtimeMs = 0;
     if (reviewFile) {
       try {
-        sizeBytes = fs.statSync(reviewFile).size;
+        const stat = fs.statSync(reviewFile);
+        sizeBytes = stat.size;
+        mtimeMs = stat.mtimeMs;
         exists = true;
       } catch { /* file absent — leave defaults */ }
     }
+    // stale when the on-disk file is older than this session's anchor;
+    // absent files cannot be classified (no mtime) so they stay stale=false
+    // even though file_exists:false — consumers should treat absence as its
+    // own signal.
+    const stale = exists && anchorMs > 0 && mtimeMs < anchorMs;
     lanes.push({
       id: id ? id.trim() : null,
       community: community ? community.trim() : null,
@@ -2323,6 +2433,7 @@ function listLaneOutputs() {
       oversized,
       file_exists: exists,
       file_size_bytes: sizeBytes,
+      stale,
     });
   }
   return { lanes };
@@ -2690,6 +2801,8 @@ function run(subcommand, args) {
       return assertReuseAnalyzed();
     case "assert-knowledge-candidates-tagged":
       return assertKnowledgeCandidatesTagged();
+    case "assert-preflight-semantic-quality":
+      return assertPreflightSemanticQuality(args);
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
@@ -2705,7 +2818,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, aggregate-knowledge-candidates, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, aggregate-knowledge-candidates, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }

@@ -300,19 +300,90 @@ function extractDiffSymbols(opts = {}) {
  * rank ABOVE PascalCase-on-text matches in the returned `symbols` array
  * because changed-file declarations are higher-signal than NLP-on-task-text.
  */
+// G3 — extract a referenced plan file's contributing sections so its symbols
+// reach the extractor without depending on the user redoing the work in the
+// task text. Greenfield calibration #8: a task "Implement X per
+// /Users/emrec/.claude/plans/foo.md" gave the extractor zero scope_hint signal
+// from the plan even though the plan contained an explicit `## Files to
+// change` table. Scope intentionally narrow: only `~/.claude/plans/*.md` (the
+// established convention); project-local `docs/plans/*.md` deferred to a
+// follow-up if anyone asks. Returns absolute paths so callers can read them.
+function extractPlanReferences(taskText) {
+  if (!taskText || typeof taskText !== "string") return [];
+  const homeDir = require("os").homedir();
+  const matches = [];
+  const claudePlanRe = /(?:~|\$HOME|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/\.claude\/plans\/[\w.-]+\.md/g;
+  let m;
+  while ((m = claudePlanRe.exec(taskText)) !== null) {
+    let raw = m[0];
+    if (raw.startsWith("~")) raw = raw.replace(/^~/, homeDir);
+    else if (raw.startsWith("$HOME")) raw = raw.replace(/^\$HOME/, homeDir);
+    matches.push(raw);
+  }
+  return Array.from(new Set(matches));
+}
+
+// Pull symbols + paths out of plan sections that document the touched surface
+// ("Files to change", "Scope", "Symbols"). PascalCase ≥3 chars and snake_case
+// ≥3 chars with at least one underscore. Denylist-filtered like extractTopic.
+// Cap at 200KB per plan to keep preflight cheap.
+function extractSymbolsFromPlan(planPath) {
+  const fs = require("fs");
+  const MAX_BYTES = 200000;
+  let body;
+  try {
+    const fd = fs.openSync(planPath, "r");
+    const buf = Buffer.alloc(MAX_BYTES);
+    const n = fs.readSync(fd, buf, 0, MAX_BYTES, 0);
+    fs.closeSync(fd);
+    body = buf.subarray(0, n).toString("utf8");
+  } catch { return { symbols: [], paths: [] }; }
+  // Split on H2 headings so we can match section titles cleanly without
+  // anchoring against end-of-string (JS regex has no \Z; previous version
+  // used \Z which became a literal Z and truncated sections at the first Z).
+  const sectionTitleRe = /^(Files to change|Files affected|Files touched|Scope|In scope|Symbols|Symbols to touch|Touched symbols)\b/i;
+  const sections = body.split(/^##\s+/m);
+  let combined = "";
+  for (const section of sections) {
+    if (sectionTitleRe.test(section)) combined += "\n" + section;
+  }
+  if (!combined) return { symbols: [], paths: [] };
+  const pascalSymbols = Array.from(new Set(combined.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || []))
+    .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
+    .filter(s => !isAllCapsNoise(s));
+  const snakeSymbols = Array.from(new Set(combined.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) || []))
+    .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()));
+  const paths = Array.from(new Set(combined.match(/(?:[\w-]+\/)+[\w.-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|rb|php|cs|swift|vue|svelte|md|yaml|yml|json|toml|sql)\b/g) || []));
+  return { symbols: [...pascalSymbols, ...snakeSymbols], paths };
+}
+
 function extractTopic(taskText, opts = {}) {
   if (!taskText || typeof taskText !== "string") {
     return { domains: [], symbols: [], keywords: [], raw: "", resolution_path: "none" };
   }
   const text = taskText.trim();
+  // Strip absolute path + URL tokens before tokenization. Field signal
+  // (greenfield 2026-05-29 calibration #8): a task like "...per
+  // /Users/emrec/.claude/plans/foo.md" leaked `Users`, `emrec`, `claude`,
+  // `plans` into keywords AND the PascalCase regex picked `Users` as a
+  // symbol, crowding out the real `billing_country` signal. The raw field
+  // below preserves the original text for downstream prose; only the
+  // tokenization view is sanitized.
+  const tokenizableText = text
+    .replace(/https?:\/\/[\w./?#%&=+-]+/g, " ")
+    .replace(/~\/[\w./_-]+/g, " ")
+    .replace(/\/(?:[\w.-]+\/)+[\w.-]+/g, " ");
   const diffSymbols = Array.isArray(opts.gitDiffSymbols)
     ? opts.gitDiffSymbols.filter(s => typeof s === "string" && s.length >= 3 && !SYMBOL_DENYLIST.has(s.toLowerCase()) && !isAllCapsNoise(s))
+    : [];
+  const planSymbols = Array.isArray(opts.planDerivedSymbols)
+    ? opts.planDerivedSymbols.filter(s => typeof s === "string" && s.length >= 3 && !SYMBOL_DENYLIST.has(s.toLowerCase()) && !isAllCapsNoise(s))
     : [];
 
   // Symbols: PascalCase identifiers ≥3 chars, deduped, denylist-filtered,
   // ALL-CAPS noise filtered. Preserves mixed-case identifiers
   // (DeviceSummary) while rejecting project labels (CHANGELOG, GFBUGS).
-  const symbolMatches = text.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
+  const symbolMatches = tokenizableText.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
   const textSymbols = Array.from(new Set(symbolMatches))
     .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
     .filter(s => !isAllCapsNoise(s));
@@ -328,13 +399,29 @@ function extractTopic(taskText, opts = {}) {
   // snake_fts/kebab_fts(3) < full_text_fts(4). A leg only upgrades the
   // recorded path when it contributes — silent fallbacks stay invisible.
   let resolutionPath = "none";
-  const pathRank = { none: 0, diff: 1, text: 2, snake_fts: 3, kebab_fts: 3, full_text_fts: 4 };
+  // G3: "plan" ranks alongside "diff" — both are grounded, high-trust sources
+  // (diff comes from changed code, plan from a referenced design doc). Rank
+  // numbers represent depth of fallback chain, NOT confidence — see
+  // computeExtractionConfidence for the confidence mapping.
+  const pathRank = { none: 0, plan: 1, diff: 1, text: 2, snake_fts: 3, kebab_fts: 3, full_text_fts: 4 };
   const promotePath = (next) => { if (pathRank[next] > pathRank[resolutionPath]) resolutionPath = next; };
+  // Track which symbols came from the text leg so FTS rescue can demote
+  // short text-leg stand-ins after producing higher-quality matches (B4).
+  const textLegContributions = new Set();
+  for (const s of planSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("plan"); } }
   for (const s of diffSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("diff"); } }
-  for (const s of textSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("text"); } }
+  for (const s of textSymbols) {
+    if (!seen.has(s)) {
+      seen.add(s);
+      symbols.push(s);
+      textLegContributions.add(s);
+      promotePath("text");
+    }
+  }
 
-  // Lowercased word stream for domain + keyword extraction
-  const words = (text.toLowerCase().match(/[a-z][a-z0-9_-]{1,30}/g) || []);
+  // Lowercased word stream for domain + keyword extraction. Uses the
+  // path-stripped view so absolute paths don't leak segments into keywords.
+  const words = (tokenizableText.toLowerCase().match(/[a-z][a-z0-9_-]{1,30}/g) || []);
   const domains = Array.from(new Set(words.filter(w => DOMAIN_HINTS.includes(w)))).sort();
 
   // Keywords: words ≥3 chars, not stop-words, not domains, not symbols (lowered)
@@ -401,6 +488,26 @@ function extractTopic(taskText, opts = {}) {
           symbols.push(label);
           promotePath("full_text_fts");
         }
+      }
+    }
+  }
+
+  // B4 — when FTS rescue produced real symbols, drop the short text-leg
+  // stand-ins that triggered the rescue gate. Field signal (greenfield
+  // 2026-05-29 calibration #8): a task containing `VAT` (3 chars) +
+  // path-leaked `Users` (5 chars) "succeeded" at the text leg with two
+  // junk symbols, polluting downstream blast_radius args even when FTS
+  // resolved the real snake_case identifier. Demotion only applies to
+  // text-leg contributions that are ≤6 chars (the same threshold that
+  // gates FTS rescue) so diff-derived symbols and longer text symbols
+  // are preserved.
+  if (
+    textLegContributions.size > 0 &&
+    (resolutionPath === "snake_fts" || resolutionPath === "kebab_fts" || resolutionPath === "full_text_fts")
+  ) {
+    for (let i = symbols.length - 1; i >= 0; i--) {
+      if (textLegContributions.has(symbols[i]) && symbols[i].length <= 6) {
+        symbols.splice(i, 1);
       }
     }
   }
@@ -783,6 +890,59 @@ function resolveTripleBudget(taskText, cfg, opts) {
   return (pre && pre.lane_budget && pre.lane_budget[tier]) || 50;
 }
 
+// Deterministic 0.0–1.0 score for how much we trust the extracted symbols.
+// Greenfield calibration #8 surfaced the gap: the structural side of preflight
+// (lag, decision artifact, threshold) was fully observable, but the semantic
+// side (do symbols actually match the task's subject?) was invisible. Without
+// a numeric handle, orchestrators couldn't degrade scope_hint when extraction
+// produced noise; with one, downstream gates can warn and v0.69 R3/R4 can
+// fold it into adaptive-threshold decisions.
+//
+// Scoring tiers:
+//   1.0  diff symbols present — grounded in actual code touched
+//   0.8  FTS rescue fired — graph matched a snake/kebab keyword
+//   0.6  text symbols with ≥1 long token (>6 chars) — likely meaningful
+//   0.3  text symbols, all ≤6 chars — likely acronym/path-leak stand-ins
+//   0.0  no symbols at all
+// Overlap bonus: +0.2 capped at 1.0 when any symbol token (CamelCase split)
+// appears in keywords. Catches the case where short symbols are real but
+// happen to be the canonical term (e.g. "VAT" alongside "vat_rate" keyword).
+function computeExtractionConfidence(topic) {
+  if (!topic || !Array.isArray(topic.symbols) || topic.symbols.length === 0) {
+    return { score: 0.0, band: "none", reason: "no symbols extracted" };
+  }
+  const path = topic.resolution_path;
+  let base, band, reason;
+  if (path === "diff") {
+    base = 1.0; band = "high"; reason = "diff-derived symbols (grounded in touched code)";
+  } else if (path === "plan") {
+    base = 1.0; band = "high"; reason = "plan-referenced symbols (grounded in design doc)";
+  } else if (path === "snake_fts" || path === "kebab_fts" || path === "full_text_fts") {
+    base = 0.8; band = "high"; reason = `FTS rescue (${path}) matched graph nodes`;
+  } else {
+    const anyLong = topic.symbols.some(s => typeof s === "string" && s.length > 6);
+    if (anyLong) { base = 0.6; band = "medium"; reason = "text-leg symbols with ≥1 long token"; }
+    else { base = 0.3; band = "low"; reason = "text-leg symbols all ≤6 chars (likely stand-ins)"; }
+  }
+  // Overlap bonus: do any symbol tokens overlap with keywords? Split CamelCase
+  // so "BillingCountry" → ["billing","country"] can match keyword "billing_country".
+  const keywordSet = new Set((topic.keywords || []).map(k => String(k).toLowerCase()));
+  let overlap = false;
+  for (const sym of topic.symbols) {
+    const tokens = String(sym).split(/(?=[A-Z])|[_-]/).filter(t => t.length >= 3).map(t => t.toLowerCase());
+    if (tokens.some(t => keywordSet.has(t) || [...keywordSet].some(k => k.includes(t)))) {
+      overlap = true;
+      break;
+    }
+  }
+  let score = base;
+  if (overlap) {
+    score = Math.min(1.0, base + 0.2);
+    if (band === "low") band = "medium";
+  }
+  return { score: Number(score.toFixed(2)), band, reason: overlap ? `${reason}; symbol↔keyword overlap detected` : reason };
+}
+
 /**
  * Generate the Brief end-to-end and write it to .devt/state/preflight-brief.md.
  * Returns { brief_path, topic, counts, blast }.
@@ -810,8 +970,23 @@ function generate(taskText, opts) {
   // when nothing has changed — extractTopic still produces text-derived
   // symbols in that case.
   const diffSymbols = extractDiffSymbols();
+  // G3 — load any plan files referenced in taskText (e.g.
+  // `~/.claude/plans/foo.md`) and lift their `## Files to change` /
+  // `## Scope` / `## Symbols` sections into the extractor's symbol channel.
+  // High-trust signal: equivalent priority to diff-derived symbols.
+  let planSymbols = [];
+  try {
+    for (const planPath of extractPlanReferences(taskText)) {
+      const extracted = extractSymbolsFromPlan(planPath);
+      if (extracted && Array.isArray(extracted.symbols)) {
+        for (const s of extracted.symbols) planSymbols.push(s);
+      }
+    }
+    planSymbols = Array.from(new Set(planSymbols));
+  } catch { /* plan extraction is best-effort */ }
   const topic = extractTopic(taskText, {
     gitDiffSymbols: diffSymbols,
+    planDerivedSymbols: planSymbols,
     graphifyQuery: (text, qOpts) => graphify.queryGraph(text, qOpts),
   });
 
@@ -924,11 +1099,20 @@ function generate(taskText, opts) {
   let topGods = [];
   try { topGods = (graphify.godNodes(3) || []).slice(0, 3); } catch { /* empty */ }
 
+  const extractionConfidence = computeExtractionConfidence(topic);
+  // scope_hint confidence is a placeholder — without observed dispatch
+  // hit-rate against suggested_reading paths we'd be guessing thresholds.
+  // V0.69 R3 will fold real signal here once G4's confidence data accrues.
+  const scopeHintConfidence = suggestedReading.length === 0
+    ? { score: 0.0, band: "none", reason: "no suggested_reading entries" }
+    : { score: 1.0, band: "high", reason: "placeholder pending v0.69 R3 calibration" };
+  const topicWithConfidence = { ...topic, extraction_confidence: extractionConfidence };
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
-    topic,
+    topic: topicWithConfidence,
     governing_ids: governingUnion.map(d => d.id),
     suggested_reading: suggestedReading,
+    scope_hint: { confidence: scopeHintConfidence },
     blast: {
       effect_size: blast.effect_size,
       source: blast.source,
@@ -1179,6 +1363,9 @@ module.exports = {
   generate,
   pickCentralSymbol,
   extractTopic,
+  computeExtractionConfidence,
+  extractPlanReferences,
+  extractSymbolsFromPlan,
   extractDiffSymbols,
   resolveScopeHintCap,
   SCOPE_HINT_CAP_BY_TIER,

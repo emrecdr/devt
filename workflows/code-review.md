@@ -763,7 +763,10 @@ When the gate trips, surface the reason to the user and recommend re-running the
 
 **Knowledge-candidates-tagged gate.** Before presenting findings, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none explicitly via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in review.md prose but never tagged in scratchpad → never reached the curator harvester. The gate forces an explicit decision.
 
+Aggregate first so any tags the reviewer placed in `review.md` / `impl-summary*.md` reach scratchpad before the gate inspects it (the aggregator is idempotent + cheap, safe to always run).
+
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
 if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED

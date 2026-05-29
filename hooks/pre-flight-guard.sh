@@ -136,6 +136,7 @@ node -e "
       if (loggerPath && fs.existsSync(loggerPath)) {
         const { appendJsonl } = require(loggerPath);
         appendJsonl(logPath, {
+          source: 'pre-flight-guard',
           mode: mode,
           ts: new Date().toISOString(),
           action: (d.tool_name || 'edit').toLowerCase(),
@@ -147,6 +148,7 @@ node -e "
         // JSONL format. Used when CLAUDE_PLUGIN_ROOT isn't set (e.g. direct
         // test invocation of the hook outside Claude Code).
         const rec = JSON.stringify({
+          source: 'pre-flight-guard',
           mode: mode,
           ts: new Date().toISOString(),
           action: (d.tool_name || 'edit').toLowerCase(),
