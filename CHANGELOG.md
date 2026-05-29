@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-05-29
+
+**Calibration #6 bug fixes + cross-agent graphify coverage.** Greenfield's second field session (against v0.63.0, before v0.64.0 was pushed) surfaced two more silent-failure bugs (`health --repair` no-op for MEM_INDEX_STALE, FTS5 index stale on active sessions) plus four coverage gaps from the prior audit-additional batch. Smoke: **720 → 727 passed**, **0 failed**.
+
+### Fixed
+
+- **`memory suggest` now rebuilds the FTS5 index immediately after writing `_suggestions.md`** (V65-1). The auto-index PostToolUse hook can miss the atomic rename-after-tmp-write pattern used by `writeSuggestionsReport`, leaving index.db drifted 1h+ behind active sessions. Fix: invoke `rebuildIndex` from the CLI path itself; failures surface in a new `index_refresh` field of the suggest response.
+- **`health --repair` handler wired for MEM_INDEX_STALE** (V65-7). The issue catalogue declared MEM_INDEX_STALE as `repairable: true` with prescriptive fix text, but the `attemptRepair` switch had NO matching case — `health --repair` returned `repairs: []` despite `repairable: true`. Users clicked "Yes — auto-repair", devt reported success, nothing actually got fixed. Now wired with the same `rebuildIndex` call referenced in the prose.
+- **`memory validate` defers to `graphify.status()` before probing** (V65-2). The legacy path ran 3 probe queries and reported GRAPHIFY_UNREACHABLE warning if any subset failed — even when the orchestrator's impact-plan path had successfully called graphify seconds earlier in the same session. Two consumers, two retry budgets, divergent verdicts. Now: when status reports not-ready, return a single structured info-level note (category: graphify-not-ready) instead of the alarming warning. Persistent-failure path's message frames the discrepancy as a transient outage worth retrying.
+
+### Added
+
+- **`<graphify_status>` block consumed by tester** (V65-3). Tester previously received scope_hint + scope_trust but no skip-awareness — it couldn't distinguish "graphify was deliberately skipped" from "the orchestrator forgot to populate graph-impact.md". dev-workflow.md::tester dispatch + tester.md::scope_trust step extended with the parse protocol; when graphify reports an impact map with god-node listings, tests on code touching those symbols get priority because regressions ripple to all callers.
+- **`graphify_inputs` schema in io-contracts.yaml** (V65-5). Each agent now declares which graphify-derived blocks it consumes (subset of `scope_hint`, `scope_trust`, `graphify_status`, `god_node_warnings`, `graph_impact_md`). Drift gate M6 enforces alignment with actual dispatch templates + agent body parsing instructions. The architectural intent "lanes are MCP-blind by design" (CLAUDE.md) is now machine-readable in the contract registry — curator + retro declare `graphify_inputs: []`.
+- **`graphify node <symbol>` wired into architect's investigation toolkit** (V65-6). The CLI surface was previously dead code; architect.md::boundaries step now documents the single-symbol introspection use case alongside the C-I.2 cross-service-path protocol. Cheaper than a full file read when only the source_file + dependencies are needed. INTERNALS.md gains a new "MCP Tool Reachability" sub-section tracking every upstream graphify tool's wire status — future audits don't re-flag dead-tool concerns without context.
+- **`<scope_trust>` drift gate for verifier** (V65-4). Plan finding was tentative ("verifier may lack scope_trust"); investigation confirmed verifier IS fully wired across all 3 dispatch sites (code-review, dev-workflow, code-review-parallel). M5 smoke gate locks the behavior so a future edit can't silently regress it.
+
+### Smoke tests
+
+- **M1-M7** (+7 net gates): M1 memory suggest triggers index rebuild, M2 health --repair handler fires for MEM_INDEX_STALE, M3 validate defers to status() before probing, M4 tester graphify_status wiring, M5 verifier scope_trust drift, M6 io-contracts graphify_inputs reality check, M7 architect get_node + INTERNALS reachability table.
+
 ## [0.64.0] - 2026-05-29
 
 **Calibration #5 bug fixes + MCP wiring improvements.** Greenfield's first field session on v0.63.0 surfaced five real bugs (workflow_id mutation cascade, lanes[] flattening, JSON scalar coercion, mcp-stats namespace mismatch, drill-down oversize) and validated five P1 improvements (lane-suggestions partial mode, workflow-aware reuse gate, god_node_warnings, shortest_path verification, adaptive threshold). Smoke: **711 → 720 passed**, **0 failed**.
