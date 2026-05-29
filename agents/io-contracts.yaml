@@ -28,6 +28,17 @@
 #     context_blocks   — static blocks the workflow dispatch template MUST inject
 #                        into <context>. Smoke test (future) asserts the dispatch
 #                        actually references them.
+#     graphify_inputs  — (V65-5) declares which graphify-derived context blocks
+#                        the agent consumes. Subset of:
+#                          scope_hint           — graphify-derived file list
+#                          scope_trust          — staleness + sparsity signal
+#                          graphify_status      — skip-awareness envelope
+#                          god_node_warnings    — structured high-blast-radius hint
+#                          graph_impact_md      — agent reads .devt/state/graph-impact.md
+#                                                 directly (orchestrator-prepared)
+#                        Empty list (or absent) means the agent is graphify-blind by
+#                        design (e.g., curator, retro). Drift gate compares against
+#                        actual dispatch templates + agent body parsing instructions.
 
 agents:
   programmer:
@@ -38,6 +49,7 @@ agents:
       sidecar: impl-summary.json
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task, plan]
+      graphify_inputs: [scope_hint, scope_trust, graph_impact_md]
 
   tester:
     frontmatter_skills: [devt:memory-pre-flight, devt:tdd-patterns]
@@ -47,6 +59,7 @@ agents:
       sidecar: test-summary.json
     inputs:
       context_blocks: [governing_rules, agent_skills, task]
+      graphify_inputs: [scope_hint, scope_trust, graphify_status]
 
   code-reviewer:
     frontmatter_skills: [devt:memory-pre-flight, devt:code-review-guide]
@@ -56,6 +69,7 @@ agents:
       sidecar: review.json
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
+      graphify_inputs: [scope_hint, scope_trust, graphify_status, god_node_warnings, graph_impact_md]
 
   docs-writer:
     frontmatter_skills: [devt:memory-pre-flight]
@@ -65,6 +79,7 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [agent_skills, task]
+      graphify_inputs: []
 
   architect:
     frontmatter_skills: [devt:memory-pre-flight, devt:graphify-helpers]
@@ -74,6 +89,7 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [governing_rules, agent_skills, task]
+      graphify_inputs: [scope_hint, scope_trust]
 
   retro:
     frontmatter_skills: []
@@ -83,6 +99,7 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [agent_skills]
+      graphify_inputs: []
 
   verifier:
     frontmatter_skills: [devt:memory-pre-flight, devt:verification-patterns]
@@ -92,6 +109,7 @@ agents:
       sidecar: verification.json
     inputs:
       context_blocks: [governing_rules, memory_signal, agent_skills, rubric_path, workflow_type, task]
+      graphify_inputs: [scope_hint, scope_trust, god_node_warnings]
 
   researcher:
     frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
@@ -101,6 +119,7 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [governing_rules, agent_skills, task]
+      graphify_inputs: [scope_hint, scope_trust]
 
   debugger:
     frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
@@ -110,6 +129,7 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [agent_skills, bug]
+      graphify_inputs: [scope_hint, scope_trust, graph_impact_md]
 
   curator:
     frontmatter_skills: [devt:memory-curation]
@@ -119,3 +139,4 @@ agents:
       sidecar: null
     inputs:
       context_blocks: [agent_skills]
+      graphify_inputs: []

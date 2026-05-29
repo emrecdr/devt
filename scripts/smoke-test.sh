@@ -8470,6 +8470,25 @@ else
   fail "M5: verifier scope_trust drift. code-review=${M5_CR} parallel=${M5_CRP} dev=${M5_DW} agent=${M5_VAGENT}"
 fi
 
+# M6: io-contracts.yaml graphify_inputs schema agrees with reality.
+# V65-5: prior to this change io-contracts declared context_blocks but
+# had no graphify-specific axis — the architectural intent "lanes are
+# MCP-blind by design" was documented in CLAUDE.md but not in the
+# machine-readable contract registry. Now each agent declares which
+# graphify-derived blocks it consumes; gate asserts the declarations
+# match what the agent bodies actually parse. Three high-impact agents
+# checked: code-reviewer must claim god_node_warnings (matches L7),
+# tester must claim graphify_status (matches M4), curator must declare
+# empty (MCP-blind by design).
+M6_CR_HAS_GOD=$(awk '/^  code-reviewer:/{f=1;next} /^  [a-z]/{f=0} f' "$ROOT/agents/io-contracts.yaml" | /usr/bin/grep -c "god_node_warnings" 2>/dev/null || echo 0)
+M6_TESTER_HAS_STATUS=$(awk '/^  tester:/{f=1;next} /^  [a-z]/{f=0} f' "$ROOT/agents/io-contracts.yaml" | /usr/bin/grep -c "graphify_status" 2>/dev/null || echo 0)
+M6_CURATOR_EMPTY=$(awk '/^  curator:/{f=1;next} /^  [a-z]/{f=0} f' "$ROOT/agents/io-contracts.yaml" | /usr/bin/grep -c "graphify_inputs: \[\]" 2>/dev/null || echo 0)
+if [ "${M6_CR_HAS_GOD:-0}" -ge 1 ] && [ "${M6_TESTER_HAS_STATUS:-0}" -ge 1 ] && [ "${M6_CURATOR_EMPTY:-0}" -ge 1 ]; then
+  pass "M6: io-contracts graphify_inputs reflects reality (code-reviewer→god_node_warnings, tester→graphify_status, curator→empty)"
+else
+  fail "M6: io-contracts drift. cr_god=${M6_CR_HAS_GOD} tester_status=${M6_TESTER_HAS_STATUS} curator_empty=${M6_CURATOR_EMPTY}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
