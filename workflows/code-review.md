@@ -124,8 +124,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${
 ```bash
 GOD_NODE_WARNINGS=$(jq -c '{
   god_node_match: (.blast.god_node_match // false),
-  matches: (.god_nodes // [])
-}' .devt/state/preflight-brief.json 2>/dev/null || echo '{"god_node_match":false,"matches":[]}')
+  matches: (.god_nodes // []),
+  ambiguous: (.blast.ambiguous_details // [])
+}' .devt/state/preflight-brief.json 2>/dev/null || echo '{"god_node_match":false,"matches":[],"ambiguous":[]}')
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update god_node_warnings_json="${GOD_NODE_WARNINGS}"
 ```
 
@@ -280,6 +281,24 @@ if [ -n "$DIFF_FILES" ]; then
         jq -r '.[] | "- \(.)"' .devt/state/topic-symbols-dropped.json
       } >> .devt/state/graph-impact.md
     fi
+  fi
+  # C7-3+C7-6 (greenfield calibration #4 + #7): when blast_radius reports
+  # ambiguous_bindings > 0, emit the colliding symbols with their source_file
+  # so reviewers know which module each finding's symbol refers to. Greenfield
+  # session: two ExternalCallService modules (Nettie vs Vicasa legacy)
+  # collided unflagged → manual cross-check per finding. The persisted
+  # ambiguous_details (HF-3 + this commit) carries the data once; emit here
+  # so it travels into graph-impact.md alongside the god-node sections.
+  AMB_COUNT=$(jq '.blast.ambiguous_bindings // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
+  if [ "$AMB_COUNT" != "0" ] && [ "$AMB_COUNT" != "" ] && [ "$AMB_COUNT" != "null" ]; then
+    {
+      echo ""
+      echo "## Ambiguous bindings (C7-3)"
+      echo ""
+      echo "_${AMB_COUNT} symbol(s) resolve to multiple definition sites — reviewers should cite the module path explicitly when a finding references one of these symbols. Greenfield calibration evidence: two ExternalCall* modules collided unflagged across calibrations #4 + #7._"
+      echo ""
+      jq -r '.blast.ambiguous_details // [] | .[] | "- `\(.symbol)` → resolves at `\(.node.source_file // "(no source_file)")` (label: `\(.node.label)`)"' .devt/state/preflight-brief.json 2>/dev/null
+    } >> .devt/state/graph-impact.md
   fi
   # C7-1 (greenfield calibration #7): F17's diff-anchored CLIs are silent
   # when the diff touches CALLERS but not symbol-definition sites. Greenfield's

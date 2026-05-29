@@ -8703,6 +8703,25 @@ else
 fi
 rm -rf "$M13_TMP"
 
+# M14: C7-3+C7-6 — ambiguous_bindings consumer wiring. Greenfield
+# calibrations #4 + #7: two ExternalCallService modules collided unflagged;
+# reviewers manually cross-checked every finding. blastRadius already
+# returned ambiguous_details but the count was the only persisted/surfaced
+# value. Drift gates verify all four touch points: graphify includes
+# source_file in ambiguous_details, preflight persists the array, workflow
+# emits "## Ambiguous bindings" section, code-reviewer body parses the
+# new field.
+M14_GRAPHIFY=$(/usr/bin/grep -c "source_file: (node && node.source_file)" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+M14_PERSIST=$(/usr/bin/grep -c "ambiguous_details: Array.isArray" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
+M14_WORKFLOW=$(/usr/bin/grep -c "Ambiguous bindings (C7-3)" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M14_AGENT=$(/usr/bin/grep -cE "ambiguous.*non-empty" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+M14_JQ=$(/usr/bin/grep -c "ambiguous: (.blast.ambiguous_details // \[\])" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "${M14_GRAPHIFY:-0}" -ge 1 ] && [ "${M14_PERSIST:-0}" -ge 1 ] && [ "${M14_WORKFLOW:-0}" -ge 1 ] && [ "${M14_AGENT:-0}" -ge 1 ] && [ "${M14_JQ:-0}" -ge 1 ]; then
+  pass "M14: ambiguous_bindings consumer wiring complete (graphify=${M14_GRAPHIFY}, persist=${M14_PERSIST}, workflow=${M14_WORKFLOW}, agent=${M14_AGENT}, jq=${M14_JQ})"
+else
+  fail "M14: ambiguous_bindings wiring incomplete. graphify=${M14_GRAPHIFY} persist=${M14_PERSIST} workflow=${M14_WORKFLOW} agent=${M14_AGENT} jq=${M14_JQ}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

@@ -944,6 +944,14 @@ function generate(taskText, opts) {
       // matches the function's in-memory return.
       god_node_match: !!blast.god_node_match,
       ambiguous_bindings: blast.ambiguous_bindings || 0,
+      // C7-3+C7-6 (greenfield calibration #7): the ambiguous_bindings COUNT
+      // was visible but the colliding symbols + their source_files were not.
+      // Greenfield's session had two ExternalCallService modules (external_calls
+      // Nettie vs external_calling Vicasa legacy); reviewers had to manually
+      // cross-check every finding against both modules. Persist the full
+      // details list so workflows can surface them in <god_node_warnings> +
+      // graph-impact.md without re-running blast_radius.
+      ambiguous_details: Array.isArray(blast.ambiguous_details) ? blast.ambiguous_details : [],
     },
     graph_stats: graphStats,
     staleness,

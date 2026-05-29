@@ -637,7 +637,17 @@ function blastRadius(symbols, _options) {
       if (info.depth === 1) direct.add(label);
       else if (info.depth === 2) indirect.add(label);
       if (node && node.source_file) modules.add(path.dirname(node.source_file));
-      if (info.edge && info.edge.confidence === "AMBIGUOUS") ambiguous.push({ symbol: sym, node: { id, label } });
+      // C7-3+C7-6: include source_file so consumers can show the colliding
+      // module (greenfield calibration #4 + #7: two ExternalCallService
+      // modules collided unflagged — reviewers had no signal which module
+      // each finding referenced). source_file may be empty for synthetic
+      // nodes, kept as "" then.
+      if (info.edge && info.edge.confidence === "AMBIGUOUS") {
+        ambiguous.push({
+          symbol: sym,
+          node: { id, label, source_file: (node && node.source_file) || "" },
+        });
+      }
     }
   }
 
