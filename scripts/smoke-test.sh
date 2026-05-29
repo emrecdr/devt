@@ -9150,5 +9150,20 @@ else
 fi
 
 echo
+echo "== Dispatch envelope compile gate =="
+
+# K1: every marker region in workflows/*.md renders identically to the committed
+# content. Drift means an author edited a template (or io-contracts.yaml) without
+# running `dispatch compile --write`. Closes the "Smoke test (future)" TODO at
+# agents/io-contracts.yaml:29. Returns 0 in the bootstrap phase (no marker
+# regions present yet); becomes a real gate as workflows migrate to markers.
+run "K1: dispatch list (marker regions structurally valid)" \
+  node "$CLI" dispatch list
+run "K1: dispatch contracts (io-contracts.yaml parseable)" \
+  node "$CLI" dispatch contracts
+run "K1: dispatch compile --check (no drift)" \
+  node "$CLI" dispatch compile --check
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -125,6 +125,14 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "dispatch": {
+        // dispatch — compile-time generation of per-agent dispatch envelopes
+        // from agents/io-contracts.yaml + templates/dispatch/. Closes the
+        // "Smoke test (future)" TODO at agents/io-contracts.yaml:29.
+        const code = require("./modules/dispatch.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
@@ -201,6 +209,11 @@ Commands:
   graphify neighbors <sym>  Connected concepts (--direction=in|out|both, --depth=N)
   graphify path <a> <b>     Shortest path between two symbols
   graphify blast-radius <s> Effect-size estimate for editing a symbol (small|medium|large)
+  dispatch list             List dispatch marker regions present in workflows/
+  dispatch contracts        Print per-agent context_blocks resolved from io-contracts.yaml
+  dispatch render <a>:<w>   Render one envelope to stdout (after templates land)
+  dispatch compile --check  Diff would-be-rendered vs committed marker regions; exit 1 on drift
+  dispatch compile --write  Re-render marker regions atomically (manual pre-release step)
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
   preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md
