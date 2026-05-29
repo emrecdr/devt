@@ -533,6 +533,13 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
+    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <!-- Inline rubric body from init payload — reviewer self-checks against
+         the same axes the verifier will grade, reducing verifier-revision
+         loops. Falls back to <rubric_path> on-disk Read when omitted
+         (oversized rubric → init returns null inline_rubrics). KEEP IN SYNC
+         with the verifier dispatch <rubric_content> block below. -->
+    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <review_scope>Read .devt/state/code-review-input.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
@@ -544,6 +551,17 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review the following files for quality, correctness, and standards compliance.
     Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
     Every valid finding must be reported with file, line, severity, and rule reference.
+
+    **Self-grade against the rubric as you write (C7-7).** The same axes the
+    verifier will use to grade your review are inlined in <rubric_content> (or
+    readable at <rubric_path> as fallback). Walk axes A–G before emitting
+    review.md: scope coverage (every input file mentioned), finding specificity
+    (file:line + rule ref or pattern citation), severity calibration (no
+    Critical-rated nits, no Minor-rated security issues), remediation
+    concreteness (Critical/Important findings include a fix direction), ADR
+    Compliance section when memory affects-paths returned hits, Reuse
+    Discipline section when reuse-candidates.md is non-empty. Closing these
+    gaps in your first pass avoids a verifier revision loop.
 
     Graph-impact map: the orchestrator wrote `.devt/state/graph-impact.md` (or `graphify-skip-reason.txt`)
     during context_init using upstream Graphify MCP. You consume that file READ-ONLY — your tool surface

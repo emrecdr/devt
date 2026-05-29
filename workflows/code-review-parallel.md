@@ -250,6 +250,8 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules>{governing_rules.content from init payload}</governing_rules>`
+- `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` (C7-7)
+- `<rubric_content>{inline_rubrics.code_review}</rubric_content>` (C7-7 — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice)
 
 Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate.`
 
@@ -380,6 +382,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt=
     <scope_hint>{from workflow.yaml}</scope_hint>
     <memory_signal>{from workflow.yaml}</memory_signal>
     <governing_rules>{from init payload}</governing_rules>
+    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_content>{inline_rubrics.code_review}</rubric_content>
   </context>
   <task>
     Synthesize the N lane review files listed in <lane_files> into a single

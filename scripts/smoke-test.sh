@@ -8722,6 +8722,21 @@ else
   fail "M14: ambiguous_bindings wiring incomplete. graphify=${M14_GRAPHIFY} persist=${M14_PERSIST} workflow=${M14_WORKFLOW} agent=${M14_AGENT} jq=${M14_JQ}"
 fi
 
+# M15: C7-7 — code_review rubric inlined into code-reviewer dispatch
+# (not just verifier). Greenfield calibration #7: reviewer was self-checking
+# against agent-body conventions only; verifier graded against the rubric;
+# axes drift caused extra revision loops. Wiring the rubric into the
+# reviewer's first dispatch eliminates the loop and aligns reviewer↔verifier
+# on the same axes (north-stars #1 coordination, #3 token efficiency).
+M15_SINGLE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M15_PARALLEL_LANE=$(/usr/bin/grep -c "rubric_content>{inline_rubrics.code_review}</rubric_content" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+M15_AGENT=$(/usr/bin/grep -c "Rubric self-check (C7-7)" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+if [ "${M15_SINGLE:-0}" -ge 2 ] && [ "${M15_PARALLEL_LANE:-0}" -ge 2 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
+  pass "M15: code_review rubric inlined into reviewer dispatch (single=${M15_SINGLE} parallel=${M15_PARALLEL_LANE} agent=${M15_AGENT})"
+else
+  fail "M15: rubric inline wiring incomplete. single=${M15_SINGLE} (need >=2: reviewer + verifier) parallel=${M15_PARALLEL_LANE} (need >=2: per-lane bullet + consolidator) agent=${M15_AGENT}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
