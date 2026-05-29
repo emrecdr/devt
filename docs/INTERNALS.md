@@ -50,6 +50,8 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 
 **Workflow_id chain.** Each `workflow_type` transition appends the outgoing `workflow_id` to `workflow_id_history[]` before overwriting (serialized via the JSON-stringify path in `serializeSimpleYaml`; round-tripped via `parseSimpleYaml`). `mcp-stats --workflow-id=<current>` unions the whole chain when the supplied id matches `workflow_id` — sessions chaining through three or more `workflow_type` rotations (e.g. dev → code_review → debug → quick_implement) stay attributable across every intermediate id. Historical-id queries (a user citing a specific past id) stay strict against that id alone.
 
+**Upgrade-boundary seeding.** When `updateState` writes `workflow_id_history` for the first time on a workflow.yaml that already carries an `original_workflow_id` distinct from the current `workflow_id` — i.e., the session was active before the field was introduced — the history is seeded with `[original_workflow_id, workflow_id]` rather than just `[workflow_id]`. Recovers attribution for any trace records written under the original id before the upgrade.
+
 ### `model-profiles.cjs`
 
 Maps agent types to model tiers (quality / balanced / budget / inherit). Per-agent overrides from `.devt/config.json::models`.

@@ -2730,9 +2730,22 @@ function stateHistory(limit) {
 // Extract --flag <value> from a positional args array. Returns null when absent.
 function _getFlag(args, name) {
   if (!Array.isArray(args)) return null;
-  const i = args.indexOf(name);
-  if (i === -1 || i + 1 >= args.length) return null;
-  return args[i + 1];
+  // Accept both `--flag value` (space-separated) and `--flag=value` (equals-
+  // separated) forms — historically only the former worked, which silently
+  // dropped equals-form invocations (state cleanup --stale-days=1 became a
+  // no-op because parseInt(null) is NaN and the cleanup left staleDays at
+  // the default).
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === name) {
+      if (i + 1 < args.length) return args[i + 1];
+      return null;
+    }
+    if (typeof arg === "string" && arg.startsWith(name + "=")) {
+      return arg.slice(name.length + 1);
+    }
+  }
+  return null;
 }
 
 function run(subcommand, args) {
@@ -2774,8 +2787,10 @@ function run(subcommand, args) {
       const audit = require("./state-audit.cjs");
       const dryRun = !args.includes("--apply");
       const staleArg = _getFlag(args, "--stale-days");
+      const adHocArg = _getFlag(args, "--ad-hoc-stale-days");
       const opts = { dryRun };
       if (staleArg) opts.staleDays = parseInt(staleArg, 10);
+      if (adHocArg) opts.adHocStaleDays = parseInt(adHocArg, 10);
       return audit.cleanupStateFiles(opts);
     }
     case "evict-graphify": {

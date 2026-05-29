@@ -278,6 +278,11 @@ node bin/devt-tools.cjs memory links <id>        # transitive link traversal
 node bin/devt-tools.cjs memory active [domain]   # status: active filter
 node bin/devt-tools.cjs memory rejected-keywords # all REJ search_keywords
 node bin/devt-tools.cjs memory validate          # schema + link integrity + (Graphify-enabled) stale-symbol detection
+                                                 # validate's own graphify probe is trace-aware: if 3 consecutive probe queries fail
+                                                 # BUT _mcp-trace.jsonl shows ≥1 successful graphify MCP call in the last 5 minutes,
+                                                 # severity downgrades from `warning/graphify-unreachable` to `info/graphify-probe-transient`
+                                                 # (probe path is independent from orchestrator's MCP transport — distinguishes "graphify
+                                                 # down" from "internal probe broken while orchestrator path works")
 node bin/devt-tools.cjs memory backlinks <id>    # incoming refs
 node bin/devt-tools.cjs memory orphans           # no-link docs
 node bin/devt-tools.cjs memory stale-links       # broken cross-refs

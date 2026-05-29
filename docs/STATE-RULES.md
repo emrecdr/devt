@@ -181,14 +181,16 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 
 **Rule of thumb**: `state reset` is for "I'm done with this workflow, sweep the workspace." `state cleanup` is for "I want to keep the active workflow but garbage-collect old slices and ad-hoc dumps."
 
-### `state evict-workflow-artifacts` (auto-fired on every `init *`)
+### `state evict-workflow-artifacts` + `state cleanup` (both auto-fired on every `init *`)
 
-The eviction sweep `init.cjs` runs before re-stamping `workflow.yaml` clears stale gate-satisfaction markers plus slug variants that survive across sessions otherwise. Eviction covers:
+`init.cjs` runs two complementary sweeps before re-stamping `workflow.yaml`. Together they cover the three classes of stale state that calibration #8 + #9 surfaced:
 
-1. **Explicit allowlist** — gate-satisfaction markers (`consolidator-ran.txt`, `auto-curator-considered.txt`, `reuse-search-attempted.txt`, `knowledge-candidates-none.txt`, etc.) plus verification sidecars (`verification.{md,json}`).
-2. **Slug-variant regex sweep** — matches `ALLOWED_PATTERNS` from `state-audit.cjs` (`review-*.md`, `review-lane-*.{md,json}`, `impl-summary-*.{md,json}`, `test-summary-*.{md,json}`, `verification-*.{md,json}`, `slice-*.md`), gated by `mtime < workflow.yaml::first_created_at`. Canonical task outputs (`review.md`, `impl-summary.md`, etc., no slug suffix) are excluded by design — their regexes require a `-suffix`.
+1. **Explicit allowlist** (evict-workflow-artifacts) — gate-satisfaction markers (`consolidator-ran.txt`, `auto-curator-considered.txt`, `reuse-search-attempted.txt`, `knowledge-candidates-none.txt`, etc.) plus verification sidecars (`verification.{md,json}`).
+2. **Workflow-scoped canonical sweep** (evict-workflow-artifacts) — `WORKFLOW_SCOPED_CANONICAL` set in `state-audit.cjs` covers `review.{md,json}`, `test-summary.{md,json}`, `impl-summary.{md,json}`, `verification.{md,json}`, `debug-summary.md`. Each is single-PR; eviction is gated by `mtime < first_created_at` so current-session writes survive. Greenfield calibration #9 evidence: verifier first-pass-failed because it graded against PR #374's stale `review.md` still on disk during PR #376's review session.
+3. **Slug-variant regex sweep** (evict-workflow-artifacts) — matches `ALLOWED_PATTERNS` (`review-*.md`, `review-lane-*.{md,json}`, `impl-summary-*.{md,json}`, `test-summary-*.{md,json}`, `verification-*.{md,json}`, `slice-*.md`), also gated by `mtime < first_created_at`.
+4. **Ad-hoc bucket sweep** (cleanupStateFiles) — `init.cjs` calls `cleanupStateFiles({ staleDays: 1, adHocStaleDays: 1 })`. Anything classified as `ad_hoc` by the audit (not in canonical + pattern_allowed + ephemeral) older than 1 day gets archived. `adHocStaleDays=1` preserves recent ad-hoc files (likely current-session work-in-progress) while clearing accumulated cruft. Greenfield calibration #9 audit: 29 of 30 stale files cleared via this sweep alone.
 
-Current-session writes are preserved by the mtime gate. Greenfield calibration #8 evidence: a project that hadn't been reset in days accumulated 167 of 201 stale files in `.devt/state/`; with this sweep, init * keeps fresh state + current-session writes and clears the rest.
+Current-session writes are preserved by the mtime gates in (2), (3), and (4). Cross-workflow task outputs (`spec.md`, `plan.md`, `decisions.md`, `scratchpad.md`) are NOT in any sweep — they persist by design. Calibration timeline: #8 added (1)+(3); #9 added (2)+(4) after greenfield's session showed yesterday's `review.md` + accumulated ad-hoc files were still contaminating today's workflow.
 
 ---
 
