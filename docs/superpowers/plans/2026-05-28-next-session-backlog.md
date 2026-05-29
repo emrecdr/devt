@@ -921,6 +921,28 @@ git commit -m "refactor(workflows): split context_init into named substeps (code
 
 ---
 
+## Phase C — MCP Wiring Gaps + Bitbucket PR Tier (v0.64.0) — ✅ PARTIAL SHIP 2026-05-29
+
+> **Status**: 3 of 9 Phase C tasks landed in v0.64.0 (C-I.1 god_node_warnings, C-I.2 shortest_path architect, C-III.1 adaptive threshold) plus 7 calibration-#5 bug fixes (NEW-1 through NEW-7). Smoke 711 → 720/0.
+>
+> **Remaining**: C-II Bitbucket PR tier deferred to v0.65.0 — calibration #6 will confirm whether B-XI's symbol_anchored fallback is sufficient or pr_scoped is still needed. C-I.3 get_community + C-I.4 get_node deferred.
+>
+> Task bodies below preserved as audit trail.
+
+## Phase E — Calibration #5/#6 Backlog (v0.65.0)
+
+**Theme**: address greenfield calibration findings from v0.63.0 implementation session + Phase B audit-additional gaps. Pure bug fixes + observability + dispatch coverage; no architectural changes.
+
+**Smoke target**: ~720 → ~730 (+~10 gates)
+**Effort**: ~6-8 hours
+
+- **V65-1**: `memory suggest` triggers `memory index` rebuild on completion. Greenfield calibration: `_suggestions.md` write at workflow finalize doesn't trip the auto-index hook, leaving FTS5 index stale by 1h+. Fix: append `memory index` call to discovery.harvest's CLI path. ~30min.
+- **V65-2**: Graphify retry budget shared across consumers. `memory validate`'s 3-probe budget reports UNREACHABLE even when the orchestrator's impact-plan path verified graphify is healthy seconds earlier. Fix: have `memory validate`'s graphify check defer to `graphify status` (already-verified path), OR add session-scoped circuit-breaker. ~1h.
+- **V65-3**: tester.md gains `<graphify_status>` skip-awareness signal. Tester already gets scope_hint + scope_trust; the gap is the skip-awareness block that tells it whether graphify was deliberately skipped vs failed. ~30min.
+- **V65-4**: Verifier scope_trust dispatch verification. Verifier agent body already parses scope_trust; this is just a smoke gate confirming all 3 verifier dispatch sites (code-review, dev-workflow, code-review-parallel) actually inject the block. ~30min (mostly drift detection).
+- **V65-5**: io-contracts.yaml gains `graphify_inputs` schema. Documents which agents consume graph-impact.md / graphify_status / god_node_warnings. Smoke gate enforces agreement with reality. ~1.5h.
+- **V65-6**: Dead MCP tools (get_node, graph_stats) wire-or-remove. Investigate whether these are reachable via any workflow path; if not, document the intentional non-wire in INTERNALS.md OR remove from devt's MCP tool list. ~1h.
+
 ## Phase C — MCP Wiring Gaps + Bitbucket PR Tier (v0.64.0)
 
 **Theme**: close the graphify-coverage gaps greenfield's review report ranked #3-5, plus the Bitbucket PR tier that's blocking every greenfield-api PR review.
