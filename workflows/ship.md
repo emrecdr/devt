@@ -84,6 +84,47 @@ Run these checks in order. If any fails, report the specific issue and STOP.
 
 </step>
 
+<step name="merge_risk_scan" gate="merge-risk scan complete (or graphify lacks the capability)">
+
+## Merge-Risk Scan (capability-gated)
+
+When the installed graphify exposes `prs --conflicts` (v0.8.x+) AND `graphify-out/graph.json` exists, scan the open PRs targeting the same base branch for graph-community overlap with the current branch's scope. Surface conflicts to the user before opening the new PR so merge order can be coordinated.
+
+```bash
+SCAN_VERDICT="skipped"
+if command -v graphify >/dev/null 2>&1 && graphify prs --help >/dev/null 2>&1; then
+  if [ -f "graphify-out/graph.json" ]; then
+    BASE_BRANCH=$(node -e "try{const c=JSON.parse(require('fs').readFileSync('.devt/config.json','utf8'));process.stdout.write((c.git&&c.git.base_branch)||'')}catch{}" 2>/dev/null)
+    [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+    [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
+
+    # stderr suppressed: graphify warns about skill-version mismatches that don't affect functionality
+    SCAN_OUTPUT=$(graphify prs --conflicts --base="$BASE_BRANCH" 2>/dev/null || echo "")
+
+    if echo "$SCAN_OUTPUT" | grep -q "Community conflicts"; then
+      SCAN_VERDICT="conflicts"
+      echo "---"
+      echo "MERGE-RISK SCAN — community conflicts detected on base '$BASE_BRANCH':"
+      echo "$SCAN_OUTPUT"
+      echo "---"
+    else
+      SCAN_VERDICT="clear"
+    fi
+  fi
+fi
+echo "merge_risk_scan: $SCAN_VERDICT"
+```
+
+**If `SCAN_VERDICT=conflicts`**: present the conflicting PRs to the user via AskUserQuestion:
+
+- Question: "Open PRs share graph communities with your branch — merge order matters. Proceed anyway?"
+- Options: "Proceed — I'll coordinate merge order"; "Cancel — review conflicts first"
+- On Cancel: STOP with BLOCKED.
+
+**If `SCAN_VERDICT=clear` or `SCAN_VERDICT=skipped`**: continue silently. `clear` means `graphify prs --conflicts` ran and found no overlap; `skipped` means graphify lacks the subcommand, no `graph.json` exists, or the base branch couldn't be detected.
+
+</step>
+
 <step name="changelog" gate="changelog updated or skipped">
 
 ## Changelog (conditional)
