@@ -102,30 +102,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json=
 **Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
 
 ```bash
-SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
-
-# Mechanical staleness override — force scope_trust.trust='sparse' + write a suppression artifact when
-# graph_stats.state=ready AND (lag_commits is null OR exceeds threshold). Bash-mechanical because the
-# prior prose-only spec ("In autonomous mode, force sparse") was found violated in field validation:
-# the orchestrator wrote scope_trust before the prose, then never re-wrote.
-GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
-STALE_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.stale_threshold 2>/dev/null | jq -r '.value // 30')
-LAG=$(echo "$SCOPE_TRUST" | jq -r '.lag_commits // "null"')
-SUPPRESS=""
-if [ "$GRAPHIFY_STATE" = "ready" ]; then
-  if [ "$LAG" = "null" ]; then
-    SUPPRESS="lag_commits=null, state=ready (unreachable SHA / shallow clone)"
-  elif [ "$LAG" -gt "$STALE_THRESHOLD" ] 2>/dev/null; then
-    SUPPRESS="lag_commits=$LAG > stale_threshold=$STALE_THRESHOLD"
-  fi
-fi
-if [ -n "$SUPPRESS" ]; then
-  SCOPE_TRUST=$(echo "$SCOPE_TRUST" | jq '.trust = "sparse"')
-  printf '%s — %s\n' "$(date -u +%FT%TZ)" "$SUPPRESS" > .devt/state/staleness-suppressed.txt
-fi
-
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
+# Single CLI call replaces the prior 4-jq + conditional + state-update chain.
+# Reads preflight-brief.json, computes scope_hint + scope_trust, applies the
+# mechanical staleness override (forces trust='sparse' + writes
+# staleness-suppressed.txt when state=ready AND lag exceeds graphify.stale_threshold
+# or is null), and persists both JSON blobs to workflow.yaml.
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scope-cache
 ```
 
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the programmer dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; symbol-to-file mappings may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.

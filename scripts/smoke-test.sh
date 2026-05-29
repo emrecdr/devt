@@ -4050,7 +4050,10 @@ fi
 # at least one dispatch. Coverage matches dev/quick/code-review/debug/research.
 SCOPE_HINT_WORKFLOWS="dev-workflow.md quick-implement.md code-review.md debug.md research-task.md"
 for WF in $SCOPE_HINT_WORKFLOWS; do
-  if grep -q 'scope_hint_json=' "$ROOT/workflows/$WF"; then
+  # Accept either the legacy bash chain (scope_hint_json=...) or the consolidated
+  # `preflight scope-cache` CLI verb that took its place. Both produce the same
+  # workflow.yaml state mutation; this gate tests presence-of-mechanism, not shape.
+  if grep -qE 'scope_hint_json=|preflight scope-cache' "$ROOT/workflows/$WF"; then
     pass "$WF caches scope_hint_json at context_init"
   else
     fail "$WF missing scope_hint_json cache step"
@@ -5648,7 +5651,10 @@ echo "== Mechanical staleness override + suppression artifact =="
 # orchestrator-LLM-independent.
 STALENESS_WORKFLOW_FAILURES=""
 for wf in code-review.md debug.md quick-implement.md research-task.md dev-workflow.md; do
-  if ! /usr/bin/grep -q "Mechanical staleness override" "workflows/$wf"; then
+  # Accept either the legacy inline bash override (with "Mechanical staleness
+  # override" comment) or the consolidated `preflight scope-cache` CLI verb
+  # which implements the same override mechanically inside Node.
+  if ! /usr/bin/grep -qE "Mechanical staleness override|preflight scope-cache" "workflows/$wf"; then
     STALENESS_WORKFLOW_FAILURES="${STALENESS_WORKFLOW_FAILURES}$wf "
   fi
   if ! /usr/bin/grep -q "staleness-suppressed.txt" "workflows/$wf"; then

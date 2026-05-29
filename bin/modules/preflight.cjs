@@ -1092,13 +1092,86 @@ function run(subcommand, args) {
       process.stdout.write((picked || "") + "\n");
       return 0;
     }
+    case "scope-cache": {
+      // Consolidates the SCOPE_HINT + SCOPE_TRUST + staleness-override bash
+      // chain (4 jq calls + 2 CLI calls + conditional) into one Node call.
+      // Reads .devt/state/preflight-brief.json, computes scope_hint +
+      // scope_trust, applies mechanical staleness override when graphify
+      // state=ready AND lag exceeds threshold (or is null), writes
+      // staleness-suppressed.txt when the override fires, persists both JSON
+      // blobs to workflow.yaml. Returns the cached values + suppress reason.
+      json(scopeCache());
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown preflight subcommand: ${subcommand}\n` +
-        `Valid: generate | topic | status | mark-stale | pick-central-symbol\n`
+        `Valid: generate | topic | status | mark-stale | pick-central-symbol | scope-cache\n`
       );
       return 2;
   }
+}
+
+function scopeCache() {
+  let root;
+  try { root = findProjectRoot(); }
+  catch (e) { return { ok: false, error: `findProjectRoot: ${e.message}`, scope_hint: [], scope_trust: {} }; }
+
+  const briefPath = path.join(root, ".devt", "state", "preflight-brief.json");
+  if (!fs.existsSync(briefPath)) {
+    return { ok: false, error: "no preflight-brief.json", scope_hint: [], scope_trust: {} };
+  }
+  let brief;
+  try { brief = JSON.parse(fs.readFileSync(briefPath, "utf8")); }
+  catch (e) { return { ok: false, error: `parse preflight-brief.json: ${e.message}`, scope_hint: [], scope_trust: {} }; }
+
+  const scope_hint = Array.isArray(brief.suggested_reading) ? brief.suggested_reading : [];
+  const scope_trust = {
+    trust: (brief.graph_stats && brief.graph_stats.trust) || "empty",
+    lag_commits: brief.staleness ? brief.staleness.lag_commits : null,
+    fresh: !!(brief.staleness && brief.staleness.fresh),
+  };
+
+  // Mechanical staleness override — match the bash semantics exactly:
+  // force scope_trust.trust='sparse' when graph_stats.state=ready AND
+  // (lag_commits is null OR exceeds the configured threshold).
+  const graphifyState = (brief.graph_stats && brief.graph_stats.state) || "not_ready";
+  const cfg = getMergedConfig();
+  const threshold = (cfg && cfg.graphify && cfg.graphify.stale_threshold !== undefined)
+    ? cfg.graphify.stale_threshold
+    : 30;
+  let suppress_reason = null;
+  if (graphifyState === "ready") {
+    const lag = scope_trust.lag_commits;
+    if (lag === null || lag === undefined) {
+      suppress_reason = "lag_commits=null, state=ready (unreachable SHA / shallow clone)";
+    } else if (Number.isFinite(lag) && lag > threshold) {
+      suppress_reason = `lag_commits=${lag} > stale_threshold=${threshold}`;
+    }
+  }
+  if (suppress_reason) {
+    scope_trust.trust = "sparse";
+    const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const suppressPath = path.join(root, ".devt", "state", "staleness-suppressed.txt");
+    atomicWriteFileSync(suppressPath, `${ts} — ${suppress_reason}\n`);
+  }
+
+  // Persist to workflow.yaml via the state module's key=value update path.
+  const state = require("./state.cjs");
+  try {
+    state.run("update", [
+      `scope_hint_json=${JSON.stringify(scope_hint)}`,
+      `scope_trust_json=${JSON.stringify(scope_trust)}`,
+    ]);
+  } catch (e) {
+    return {
+      ok: false,
+      error: `state update: ${e.message}`,
+      scope_hint, scope_trust, suppress_reason,
+    };
+  }
+
+  return { ok: true, scope_hint, scope_trust, suppress_reason, threshold };
 }
 
 module.exports = {
