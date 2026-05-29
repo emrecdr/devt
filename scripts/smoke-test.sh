@@ -8625,6 +8625,22 @@ else
   fail "M10: preflight sidecar drift — return/persist disagree. god_node_match refs=${M10_PERSIST_GNM} ambiguous_bindings refs=${M10_PERSIST_AB} (need ≥2 each)"
 fi
 
+# M11: C7-1 — F17 cross-checks preflight.god_nodes when both diff-anchored
+# CLIs return 0. Greenfield calibration #7 finding: routine pattern for
+# their PRs is diff touches callers but not symbol definition sites →
+# check-large-files + check-symbol-godnodes both return 0 → orchestrator
+# manually synthesized "## Symbol-level god-nodes" from preflight every
+# time. Drift gate verifies the workflow body carries the fallback bash +
+# the section header marker "(from preflight, not diff-anchored)".
+M11_BASH=$(/usr/bin/grep -c 'PREFLIGHT_GODS=$(jq' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M11_HEADER=$(/usr/bin/grep -c "from preflight, not diff-anchored" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M11_SIGNAL=$(/usr/bin/grep -c "four signals now feed the reviewer" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "${M11_BASH:-0}" -ge 1 ] && [ "${M11_HEADER:-0}" -ge 1 ] && [ "${M11_SIGNAL:-0}" -ge 1 ]; then
+  pass "M11: F17 cross-checks preflight.god_nodes when CLIs return 0 (bash=${M11_BASH}, header=${M11_HEADER}, signal-doc=${M11_SIGNAL})"
+else
+  fail "M11: C7-1 wiring incomplete. fallback-bash=${M11_BASH} header-marker=${M11_HEADER} signal-doc=${M11_SIGNAL}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the

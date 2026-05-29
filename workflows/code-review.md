@@ -249,6 +249,27 @@ if [ -n "$DIFF_FILES" ]; then
       echo "$SYMBOL_GODNODES" | jq -r '.[] | "- `\(.symbol)` (\(.source_file)) has \(.edge_count) edges; any non-additive change cascades through every caller."'
     } >> .devt/state/graph-impact.md
   fi
+  # C7-1 (greenfield calibration #7): F17's diff-anchored CLIs are silent
+  # when the diff touches CALLERS but not symbol-definition sites. Greenfield's
+  # most-common PR pattern is exactly that — changes in app/services/ reference
+  # symbols defined in app/core/, neither CLI fires. Fall back to preflight's
+  # graph-global god_nodes[] (already cached in preflight-brief.json) so the
+  # signal still reaches the dispatch context. Section is explicitly labelled
+  # "from preflight, not diff-anchored" so reviewers know the scope.
+  if [ "${GOD_COUNT:-0}" = "0" ] && [ "${SYM_COUNT:-0}" = "0" ]; then
+    PREFLIGHT_GODS=$(jq -c '.god_nodes // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
+    PG_COUNT=$(echo "$PREFLIGHT_GODS" | jq 'length')
+    if [ "$PG_COUNT" != "0" ] && [ "$PG_COUNT" != "" ]; then
+      {
+        echo ""
+        echo "## Symbol-level god-nodes (from preflight, not diff-anchored)"
+        echo ""
+        echo "_File-level + symbol-level diff CLIs returned 0 — surfacing graph-global top god-nodes from preflight.god_nodes so severity calibration has structural signal. These symbols may not be in the diff; weight findings that touch them or their callers higher because changes ripple to many sites._"
+        echo ""
+        echo "$PREFLIGHT_GODS" | jq -r '.[] | "- `\(.symbol)` has \(.edge_count) edges (graph-wide rank)"'
+      } >> .devt/state/graph-impact.md
+    fi
+  fi
 fi
 ```
 
@@ -256,12 +277,13 @@ Field rationale (greenfield 2026-05-26): `routes.py` at 2,463 LOC was almost cer
 
 Symbol-level rationale (greenfield 2026-05-28 calibration #4, graph-impact.md:62 verbatim): *"0 file-level god-nodes in PR #374 diff despite symbol-level god-node match on AuditMapping."* — `check-large-files` aggregates per-file (one max-degree symbol per basename) and missed AuditMapping when SmallHelper happened to be the file's reported top symbol. `check-symbol-godnodes` returns every above-threshold symbol whose `source_file` is in the diff with no per-file collapse, so a high-degree symbol cannot be eclipsed by a same-file sibling.
 
-**Note on signal independence**: three signals now feed the reviewer, all independent:
+**Note on signal independence**: four signals now feed the reviewer, all independent:
 - `blast_radius::god_node_match` — symbol-aggregated; at least one input symbol matches a god-node in the graph.
 - `check-large-files` — file-aggregated; reports the max-degree symbol per diff file.
 - `check-symbol-godnodes` — symbol-level; reports every above-threshold symbol whose source_file is in the diff, no per-file aggregation.
+- `preflight.god_nodes` fallback (C7-1) — graph-global top god-nodes; only emitted when both diff-anchored CLIs return 0. Provides structural signal for the common pattern where the diff touches callers, not definition sites.
 
-Any of the three can fire while the others stay silent — surface all three verbatim in the reviewer dispatch context.
+Any of the four can fire while the others stay silent — surface all four verbatim in the reviewer dispatch context. The fallback is mutually exclusive with the diff-anchored CLIs (only emits when they both go silent).
 
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
