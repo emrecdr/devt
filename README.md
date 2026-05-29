@@ -2,7 +2,7 @@
 
 **devt** (short for **dev**elopment **t**eam) — a multi-agent development workflow plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
-[![Version](https://img.shields.io/github/v/tag/emrecdr/devt?sort=semver&label=version&color=blue)](https://github.com/emrecdr/devt/releases)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Femrecdr%2Fdevt%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue&prefix=v)](https://github.com/emrecdr/devt/releases)
 [![CI](https://github.com/emrecdr/devt/actions/workflows/ci.yml/badge.svg)](https://github.com/emrecdr/devt/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-22%2B-brightgreen)](https://nodejs.org)
 [![Changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-orange)](CHANGELOG.md)
