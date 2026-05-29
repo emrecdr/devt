@@ -205,6 +205,25 @@ Each trace record appended to `.devt/memory/_mcp-trace.jsonl` carries `workflow_
 
 **CLI wrappers do NOT write to `_mcp-trace.jsonl`.** The trace records direct MCP tool invocations only. Workflows that go entirely through CLI wrappers (`preflight generate`, `state derive-reuse-candidates`, `state assert-graphify-decision`, `state evict-graphify`) will produce empty `mcp-stats` output even when graphify is fully active and load-bearing — the trace is "correctly empty" because no direct MCP calls occurred. To validate the namespace-prefix invariant (each trace record's `tool` field is the *unprefixed* form like `query_graph`, while orchestrator-side MCP calls use the *prefixed* form like `mcp__plugin_devt_devt-graphify__query_graph`) or to measure direct MCP usage, exercise a workflow that dispatches code-reviewer's `symbol_anchored` / `bulk_scoped` / `pr_scoped` tiers (which call `query_graph`, `get_neighbors`, `blast_radius` directly), or call MCP tools from the orchestrator during context_init's drill-down protocol.
 
+### MCP Tool Reachability
+
+The upstream graphify MCP server exposes ~10 tools; devt's read path consumes them via either the orchestrator (direct MCP calls in workflow context_init / F16 drill-down) or the CLI surface (`bin/devt-tools.cjs graphify *`). Mapping (V65-6 audit):
+
+| Tool | Workflow consumer | CLI consumer | Status |
+|---|---|---|---|
+| `blast_radius` | code-review.md::F16, dev-workflow.md::scan_prep | `graphify blast-radius` | LIVE |
+| `get_neighbors` | F16 drill-down (top-3 dependents) + `graphify neighbors --max-bytes` fallback | `graphify neighbors` | LIVE |
+| `query_graph` | bulk_scoped tier (legacy) + RECOVERY mode | `graphify query` | LIVE |
+| `get_pr_impact` | pr_scoped tier (GitHub-only) | — | LIVE (GitHub) |
+| `graph_stats` | preflight.cjs:907 (Pre-Flight Brief), `graphify adaptive-threshold` | `graphify stats` | LIVE |
+| `get_node` | architect.md::cross-service-path verification (V65-6) | `graphify node` | LIVE (architect) |
+| `shortest_path` | architect.md::cross-service-path verification (C-I.2) | `graphify path` | LIVE |
+| `god_nodes` | preflight.cjs::renderPreflightSidecar (top-3 cached) | `graphify god-nodes` | LIVE |
+| `get_community` | code-review-parallel.md::partition_lanes (via `lane-suggestions`) | `graphify lane-suggestions` | LIVE |
+| `list_prs` / `triage_prs` | — | — | NOT WIRED — GitHub-only PR triage tier, deferred until calibration evidence justifies the work |
+
+V65-6 closed `get_node`'s reachability gap by documenting the single-symbol introspection use case in `agents/architect.md`. Going forward: any new upstream tool added by the graphify MCP server gets an entry in this table during reachability audit. If a tool sits NOT WIRED for >1 release cycle, decide explicitly: wire it (with documented consumer) or remove from the audit set with a "deferred until ..." note.
+
 ---
 
 ## Skills Resolution

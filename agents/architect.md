@@ -86,6 +86,8 @@ Every boundary violation is a finding. Boundaries are the most important archite
 3. **No path returned** — the symbols are not yet connected; the planned change would create the boundary cross. Flag as a NEW boundary violation in `## Proposed Boundary Crossings`.
 
 Example: when reviewing a plan to call `BillingService.charge()` from `AuthService.login()`, run `node bin/devt-tools.cjs graphify path AuthService BillingService` to confirm whether they currently share a transitive dependency. If they do, the new direct call may be the cleaner option; if they don't, the new dependency is a true boundary cross.
+
+**Single-symbol introspection (V65-6)** — when a plan or scope_hint references a symbol you don't recognize, run `node bin/devt-tools.cjs graphify node <symbol>` to fetch its source_file, declared dependencies, and metadata in one call. Cheaper than reading the file when you only need to know which module owns the symbol. Pair with `graphify neighbors <symbol> --direction=in --max-bytes=60000` to discover its current call sites without overflowing on god-nodes.
 </step>
 
 <step name="duplication">

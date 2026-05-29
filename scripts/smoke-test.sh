@@ -8489,6 +8489,23 @@ else
   fail "M6: io-contracts drift. cr_god=${M6_CR_HAS_GOD} tester_status=${M6_TESTER_HAS_STATUS} curator_empty=${M6_CURATOR_EMPTY}"
 fi
 
+# M7: MCP tool reachability documented + get_node wired into architect
+# (V65-6). graph_stats was already alive (preflight + adaptive-threshold);
+# get_node previously had only the CLI surface with no consumer. Now
+# architect.md documents the single-symbol introspection use case
+# (`graphify node <symbol>`) alongside the C-I.2 cross-service-path
+# protocol. INTERNALS.md::MCP Tool Reachability table tracks every
+# upstream tool's wire-status so future audits don't re-flag dead-tool
+# concerns without context.
+M7_ARCH_GETNODE=$(/usr/bin/grep -c "graphify node <symbol>" "$ROOT/agents/architect.md" 2>/dev/null || echo 0)
+M7_INTERNALS_TABLE=$(/usr/bin/grep -c "MCP Tool Reachability" "$ROOT/docs/INTERNALS.md" 2>/dev/null || echo 0)
+M7_INTERNALS_GETNODE=$(awk '/^### MCP Tool Reachability/,/^---/' "$ROOT/docs/INTERNALS.md" | /usr/bin/grep -c "get_node" 2>/dev/null || echo 0)
+if [ "${M7_ARCH_GETNODE:-0}" -ge 1 ] && [ "${M7_INTERNALS_TABLE:-0}" -ge 1 ] && [ "${M7_INTERNALS_GETNODE:-0}" -ge 1 ]; then
+  pass "M7: get_node wired into architect (arch=${M7_ARCH_GETNODE}, INTERNALS table=${M7_INTERNALS_TABLE}, get_node row=${M7_INTERNALS_GETNODE})"
+else
+  fail "M7: V65-6 wiring incomplete. arch=${M7_ARCH_GETNODE} table=${M7_INTERNALS_TABLE} getnode_row=${M7_INTERNALS_GETNODE}"
+fi
+
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
 # hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
