@@ -57,6 +57,8 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 
 Safe to re-run — the includes-check makes the pass idempotent. Greenfield calibration #10 evidence: history `[995823e0, ..., 38c12b15]` was missing BOTH the original (`647d32e5`) AND the current (`a57aa9c2`); single `state update` call restored both, length 5 → 7.
 
+**Trace backfill (H2-v3).** The self-heal post-step also scans `_mcp-trace.jsonl` (last 5000 lines) for `workflow_id` values with `ts >= first_created_at` that are NOT in `workflow_id_history`. Found orphans get spliced between the original anchor and the current id (preserves chronological intent). Covers the residue case where pre-fix rotation bugs orphaned trace workflow_ids that never reached state: those records were invisible to `mcp-stats --workflow-id=<current>` until backfill. Greenfield calibration #11 evidence: 4 trace ids never made it into history under pre-fix code paths; `mcp-stats --workflow-id` reported `entries_considered: 16` vs `--since-workflow-created: 21`. Post-backfill: matching counts (22 vs 22). Capped at 5000 trace lines to bound I/O cost per state update.
+
 ### `model-profiles.cjs`
 
 Maps agent types to model tiers (quality / balanced / budget / inherit). Per-agent overrides from `.devt/config.json::models`.

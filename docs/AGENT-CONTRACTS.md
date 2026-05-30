@@ -59,6 +59,8 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Exception.** The architect agent preloads `graphify-helpers` skill which uses `node bin/devt-tools.cjs graphify <subcmd>` CLI wrappers (Bash-callable, not MCP-callable) — that path is correct and stays.
 
+**Corollary (L1-v2 — greenfield calibration #11).** Per-lane filtering of the shared cache happens at the ORCHESTRATOR, not the lane. `code-review-parallel.md::dispatch_lanes` detects prose-only lanes (`<lane_files>` containing only `.md` / `.rst` / `.txt` / `.adoc` files) and replaces the `graph-impact.md` injection with a `<graphify_status>not_applicable</graphify_status>` stub. Lanes never query graphify themselves; the orchestrator decides what each lane sees based on the lane's scope. Greenfield's L3 README-review lane was receiving the GLOBAL preflight cache (`effect_size: large`, `god_node_match: true` computed against the full PR scope including code files) — pure noise for a markdown-only review.
+
 ---
 
 ## Scope Hint + Trust Contract
