@@ -50,7 +50,12 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 
 **Workflow_id chain.** Each `workflow_type` transition appends the outgoing `workflow_id` to `workflow_id_history[]` before overwriting (serialized via the JSON-stringify path in `serializeSimpleYaml`; round-tripped via `parseSimpleYaml`). `mcp-stats --workflow-id=<current>` unions the whole chain when the supplied id matches `workflow_id` — sessions chaining through three or more `workflow_type` rotations (e.g. dev → code_review → debug → quick_implement) stay attributable across every intermediate id. Historical-id queries (a user citing a specific past id) stay strict against that id alone.
 
-**Upgrade-boundary seeding.** When `updateState` writes `workflow_id_history` for the first time on a workflow.yaml that already carries an `original_workflow_id` distinct from the current `workflow_id` — i.e., the session was active before the field was introduced — the history is seeded with `[original_workflow_id, workflow_id]` rather than just `[workflow_id]`. Recovers attribution for any trace records written under the original id before the upgrade.
+**Idempotent self-healing.** Every `updateState` call runs a post-step that ensures `{original_workflow_id, workflow_id} ⊆ workflow_id_history`. The original id is prepended if missing (preserving chronological order — original is the first id the session ever held); the current id is appended if missing. Three failure modes this covers:
+1. **Upgrade-boundary**: sessions whose history was seeded by an older tool version as `[current_only]` (no original) get the original backfilled on the next state update.
+2. **Init-driven rotation**: `init.cjs` strips `workflow_id + created_at`, forcing `updateState`'s first-activation branch — which historically didn't append the NEW workflow_id to an existing history array. The self-heal pass catches it.
+3. **Manual edits**: any manual workflow.yaml edit that left history out of sync with `original_workflow_id` / `workflow_id` self-corrects on the next CLI write.
+
+Safe to re-run — the includes-check makes the pass idempotent. Greenfield calibration #10 evidence: history `[995823e0, ..., 38c12b15]` was missing BOTH the original (`647d32e5`) AND the current (`a57aa9c2`); single `state update` call restored both, length 5 → 7.
 
 ### `model-profiles.cjs`
 

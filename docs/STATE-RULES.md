@@ -29,7 +29,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 
 | Filename | Written by | Purpose | RESET_EXEMPT |
 |---|---|---|---|
-| `workflow.yaml` | orchestrator (`state update`) | Active workflow state — `workflow_id`, `phase`, `workflow_type`, `status`, `verdict`, autonomous flags, plus immutable session anchors `first_created_at` + `original_workflow_id` and the append-only `workflow_id_history[]` chain populated on every `workflow_type` rotation | No — wiped on reset |
+| `workflow.yaml` | orchestrator (`state update`) | Active workflow state — `workflow_id`, `phase`, `workflow_type`, `status`, `verdict`, autonomous flags, plus immutable session anchors `first_created_at` + `original_workflow_id` and the append-only `workflow_id_history[]` chain. History is idempotently self-healing — every `state update` ensures `{original, current} ⊆ history` (rotation appends + post-step backfills any missing anchor or current id) | No — wiped on reset |
 | `scratchpad.md` | any agent | Ephemeral cross-agent notes; reset between workflows | No |
 | `.lock` | `state update` | PID-based mutex preventing concurrent writes | ✓ Yes |
 
