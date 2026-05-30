@@ -9625,6 +9625,138 @@ else
 fi
 rm -rf "$P3_TMP"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Q1-Q7: greenfield calibration #11 v0.69.0 fixes. Each maps 1:1 to a backlog
+# item. Live fixture-based.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Q1 (H4-v2): applySymbolFilter applied consistently to plan + diff + text
+# channels. Pytest test classes filtered from ALL channels, not just text.
+Q1_OUT=$(node -e '
+const { extractTopic } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+// Plan channel — pre-v0.69 leaked Test* here
+const r1 = extractTopic("Update X", { planDerivedSymbols: ["Organization","TestGetActivitySummary","TestAdd","BillingService"] });
+const planTestLeak = r1.symbols.filter(s => /^Test[A-Z]/.test(s)).length;
+// Diff channel — pre-v0.69 leaked Test* here too
+const r2 = extractTopic("Update Y", { gitDiffSymbols: ["TestSomething", "RealClass"] });
+const diffTestLeak = r2.symbols.filter(s => /^Test[A-Z]/.test(s)).length;
+console.log(planTestLeak === 0 && diffTestLeak === 0 ? "1" : "0");' 2>/dev/null)
+if [ "${Q1_OUT:-0}" = "1" ]; then
+  pass "Q1 (H4-v2): applySymbolFilter blocks Test* from plan + diff + text channels"
+else
+  fail "Q1: H4-v2 multi-channel filter broken (output=$Q1_OUT)"
+fi
+
+# Q2 (H4.1-v2): assert-graphify-decision rejects ### Drill-down: headings
+# with malformed_drill_down_headings count + reason.
+Q2_TMP=$(mktemp -d)
+mkdir -p "$Q2_TMP/.devt/state" "$Q2_TMP/graphify-out"
+echo '{"directed":true,"nodes":[],"links":[]}' > "$Q2_TMP/graphify-out/graph.json"
+cat > "$Q2_TMP/.devt/config.json" <<EOF
+{"graphify": {"enabled": true}}
+EOF
+cat > "$Q2_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: review
+workflow_id: q2-wid
+EOF
+cat > "$Q2_TMP/.devt/state/graph-impact.md" <<EOF
+# Graph Impact
+## Affected Communities
+- Foo
+### Drill-down: TestSymbol
+body body body body body body
+EOF
+Q2_OUT=$(cd "$Q2_TMP" && node "$CLI" state assert-graphify-decision 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===false && j.malformed_drill_down_headings>=1 ? '1' : '0');}catch(e){console.log('err');}})")
+if [ "${Q2_OUT:-0}" = "1" ]; then
+  pass "Q2 (H4.1-v2): assert-graphify-decision rejects ### Drill-down: headings (malformed count + ok:false)"
+else
+  fail "Q2: H4.1-v2 heading regex tightening broken (output=$Q2_OUT)"
+fi
+rm -rf "$Q2_TMP"
+
+# Q3 (H1-v3): cleanupStateFiles patternAllowedCutoffMtime gates pattern_allowed
+# files (review-lane-*.md etc.) by explicit timestamp, not calendar age.
+Q3_TMP=$(mktemp -d)
+mkdir -p "$Q3_TMP/.devt/state"
+touch -t 202604010000.00 "$Q3_TMP/.devt/state/review-lane-stale.md"
+touch "$Q3_TMP/.devt/state/review-lane-fresh.md"
+Q3_OUT=$(cd "$Q3_TMP" && node -e '
+process.chdir(process.cwd());
+const audit = require("'"$ROOT"'/bin/modules/state-audit.cjs");
+const r = audit.cleanupStateFiles({ dryRun: true, staleDays: 1, patternAllowedCutoffMtime: "2026-04-15T00:00:00.000Z" });
+const archived = (r.archived || []).map(a => a.name);
+const oldEvicted = archived.includes("review-lane-stale.md");
+const freshPreserved = !archived.includes("review-lane-fresh.md");
+console.log(oldEvicted && freshPreserved ? "1" : "0");' 2>/dev/null)
+if [ "${Q3_OUT:-0}" = "1" ]; then
+  pass "Q3 (H1-v3): patternAllowedCutoffMtime evicts stale review-lane, preserves fresh"
+else
+  fail "Q3: H1-v3 patternAllowedCutoffMtime broken (output=$Q3_OUT)"
+fi
+rm -rf "$Q3_TMP"
+
+# Q4 (H2-v3): updateState backfills workflow_id_history from trace records
+# that carry in-session workflow_ids missing from history.
+Q4_TMP=$(mktemp -d)
+mkdir -p "$Q4_TMP/.devt/state" "$Q4_TMP/.devt/memory"
+ANCHOR=$(node -e "console.log(new Date(Date.now() - 3*60*60*1000).toISOString())")
+cat > "$Q4_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: review
+first_created_at: "$ANCHOR"
+original_workflow_id: q4-orig
+workflow_type: code_review
+workflow_id: q4-current
+workflow_id_history: "[\"q4-orig\",\"q4-current\"]"
+EOF
+TS_NOW=$(date -u +%FT%TZ)
+printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","workflow_id":"q4-orphan-A","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$TS_NOW" >> "$Q4_TMP/.devt/memory/_mcp-trace.jsonl"
+printf '{"ts":"%s","tool":"mcp__devt-graphify__get_neighbors","workflow_id":"q4-orphan-B","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$TS_NOW" >> "$Q4_TMP/.devt/memory/_mcp-trace.jsonl"
+(cd "$Q4_TMP" && node "$CLI" state update phase=review >/dev/null 2>&1)
+Q4_OUT=$(cd "$Q4_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const h=j.workflow_id_history;const hasOrphans=h.includes('q4-orphan-A') && h.includes('q4-orphan-B');console.log(hasOrphans ? '1' : '0');}catch(e){console.log('err');}})")
+if [ "${Q4_OUT:-0}" = "1" ]; then
+  pass "Q4 (H2-v3): workflow_id_history backfills orphan trace ids (q4-orphan-A + q4-orphan-B both present)"
+else
+  fail "Q4: H2-v3 trace backfill broken (output=$Q4_OUT)"
+fi
+rm -rf "$Q4_TMP"
+
+# Q5 (L1-v2): prose-only lane detection documentation present in
+# code-review-parallel.md::dispatch_lanes (orchestrator-side cache suppression).
+Q5_PROSE_HITS=$(/usr/bin/grep -c "L1-v2.*prose-only\|prose-only lane cache suppression" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+if [ "${Q5_PROSE_HITS:-0}" -ge 1 ]; then
+  pass "Q5 (L1-v2): code-review-parallel.md documents prose-only lane cache suppression (${Q5_PROSE_HITS} ref)"
+else
+  fail "Q5: L1-v2 prose-only lane docs missing"
+fi
+
+# Q6 (G4-v2): extractTopic returns symbol_provenance map; preflight-brief.json
+# carries it under .topic.symbol_provenance.
+Q6_OUT=$(node -e '
+const { extractTopic } = require("'"$ROOT"'/bin/modules/preflight.cjs");
+const r = extractTopic("Review OrgService BillingFlow", { planDerivedSymbols: ["PlanSym"] });
+const hasMap = r.symbol_provenance && typeof r.symbol_provenance === "object";
+const planSrc = hasMap && r.symbol_provenance["PlanSym"] === "plan";
+const textSrc = hasMap && (r.symbol_provenance["OrgService"] === "text" || r.symbol_provenance["BillingFlow"] === "text");
+console.log(hasMap && planSrc && textSrc ? "1" : "0");' 2>/dev/null)
+if [ "${Q6_OUT:-0}" = "1" ]; then
+  pass "Q6 (G4-v2): extractTopic returns symbol_provenance map (plan + text sources tagged)"
+else
+  fail "Q6: G4-v2 symbol_provenance broken (output=$Q6_OUT)"
+fi
+
+# Q7 (Option A): getHyperedgesContaining returns hyperedges + completeness;
+# ship.md has hyperedge_completeness_scan step.
+Q7_HYPER_FN=$(/usr/bin/grep -c "getHyperedgesContaining" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+Q7_SHIP_STEP=$(/usr/bin/grep -c "hyperedge_completeness_scan\|hyperedges_matched" "$ROOT/workflows/ship.md" 2>/dev/null || echo 0)
+Q7_PREFLIGHT_WIRE=$(/usr/bin/grep -c "hyperedges_matched" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
+if [ "${Q7_HYPER_FN:-0}" -ge 2 ] && [ "${Q7_SHIP_STEP:-0}" -ge 2 ] && [ "${Q7_PREFLIGHT_WIRE:-0}" -ge 1 ]; then
+  pass "Q7 (Option A): hyperedge plumbing complete (graphify fn=${Q7_HYPER_FN}, ship step=${Q7_SHIP_STEP}, preflight wire=${Q7_PREFLIGHT_WIRE})"
+else
+  fail "Q7: Option A plumbing incomplete (fn=$Q7_HYPER_FN ship=$Q7_SHIP_STEP preflight=$Q7_PREFLIGHT_WIRE)"
+fi
+
 echo
 echo "== Dispatch envelope compile gate =="
 

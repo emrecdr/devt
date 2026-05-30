@@ -151,6 +151,15 @@ function cleanupStateFiles(opts = {}) {
   const adHocCutoffMs = Number.isFinite(cutoffMtimeParsed)
     ? cutoffMtimeParsed
     : (adHocStaleDays != null ? Date.now() - (adHocStaleDays * 24 * 60 * 60 * 1000) : null);
+  // H1-v3 (greenfield calibration #11): pattern_allowed bucket suffers the
+  // same residue problem as ad_hoc did pre-H1-v2 — calendar-age `staleDays`
+  // doesn't catch ~19h-old prior-workflow files (greenfield's 5 stale
+  // review-lane-*.md leak). Mirror adHocCutoffMtime: when caller passes
+  // an explicit cutoff timestamp, it takes precedence over staleDays.
+  // init.cjs uses workflow.yaml::created_at BEFORE strip so the prior
+  // workflow's start defines the cutoff.
+  const patternAllowedCutoffParsed = opts.patternAllowedCutoffMtime ? new Date(opts.patternAllowedCutoffMtime).getTime() : NaN;
+  const patternAllowedCutoffMs = Number.isFinite(patternAllowedCutoffParsed) ? patternAllowedCutoffParsed : staleCutoffMs;
 
   const toArchive = [];
   for (const f of audit.buckets.ad_hoc) {
@@ -159,7 +168,12 @@ function cleanupStateFiles(opts = {}) {
   }
   for (const f of audit.buckets.ephemeral) toArchive.push({ ...f, reason: "ephemeral" });
   for (const f of audit.buckets.pattern_allowed) {
-    if (f.mtimeMs < staleCutoffMs) toArchive.push({ ...f, reason: `stale_pattern_allowed (>${staleDays}d)` });
+    if (f.mtimeMs < patternAllowedCutoffMs) {
+      const reasonLabel = Number.isFinite(patternAllowedCutoffParsed)
+        ? "stale_pattern_allowed (older than prior workflow's start)"
+        : `stale_pattern_allowed (>${staleDays}d)`;
+      toArchive.push({ ...f, reason: reasonLabel });
+    }
   }
 
   if (toArchive.length === 0) {

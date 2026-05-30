@@ -6,6 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-05-30
+
+**Greenfield calibration #11 closure + Option A hyperedge-aware preflight.** Seven items across three architectural categories: extractor consistency (H4-v2 closes a multi-channel filter leak; H4.1-v2 closes a silent heading-regex bypass), state cleanup completeness (H1-v3 extends cutoff to pattern_allowed bucket; H2-v3 backfills history from trace), workflow plumbing (L1-v2 orchestrator-side per-lane cache suppression for prose-only lanes; G4-v2 per-symbol provenance ledger), and the v0.69 marquee feature: Option A — hyperedge-aware preflight that lifts graphify's machine-discovered semantic groupings into the symbol channel, plus a /devt:ship completeness gate that warns when a PR touches some-but-not-all members of a hyperedge. Smoke: **761 → 768 passed**, **0 failed** (+7 gates Q1-Q7).
+
+### Added
+
+- **`graphify.getHyperedgesContaining(symbols, opts)`** — new sibling of `godNodes` / `laneSuggestions` / `symbolsInFiles`. Loads `graph.json::hyperedges[]` and returns those whose member nodes intersect any input symbol or source_file. Each result carries `{id, label, member_count, members, members_in_scope, completeness, confidence, confidence_score, source_file, relation}`. Sorted by completeness descending so reviewers see most-overlapping hyperedges first. Greenfield's 3 hyperedges (billing_country_fk_flow, vat_resolution_chain, audit_jurisdiction_snapshot) each bind multi-file scopes that should change together — partial coverage is the "you fixed code, forgot the readme/test/migration" signal.
+- **`preflight-brief.json::hyperedges_matched[]`** — preflight.generate now probes hyperedges with topic.symbols and persists the matches in the sidecar. Downstream consumers (orchestrators, /devt:ship gate) read it without re-querying the graph.
+- **`/devt:ship::hyperedge_completeness_scan` step** — when matched hyperedges have `completeness < 1.0`, AskUserQuestion surfaces the partial coverage with member counts and missing-member counts before opening the PR. Three outcomes: proceed (intentional partial), cancel (expand scope first), or skipped (no hyperedges matched / preflight absent). Capability-probe style — fails open when graphify is disabled.
+- **`preflight-brief.json::topic.symbol_provenance{}`** — per-symbol source ledger (G4-v2). Each symbol mapped to its extraction channel: `"plan"`, `"diff"`, `"text"`, `"snake_fts"`, `"kebab_fts"`, or `"full_text_fts"`. Lets reviewers triage god-node noise faster — ignore aggregates when no anchor is diff-anchored or plan-anchored. Foundation for v0.70 ranking improvements.
+- **`cleanupStateFiles({adHocCutoffMtime, patternAllowedCutoffMtime})` opts** — H1-v3 adds the second cutoff opt mirroring H1-v2's pattern. init.cjs passes the prior workflow's `created_at` for BOTH buckets so cross-PR-same-day residue clears uniformly. Greenfield calibration #11: 5 stale review-lane-*.md files from prior-day session that escaped the calendar-age `staleDays=1` gate.
+
+### Fixed
+
+- **`applySymbolFilter` extracted helper + applied to plan + diff + text channels** (H4-v2). The original H4 fix at v0.68.1 only applied `^Test[A-Z]` to textSymbols — planSymbols and diffSymbols channels still leaked pytest test classes. Greenfield calibration #11 evidence: `TestGetActivitySymmary`, `TestAddUserToOrganization` (etc.) appeared in topic.symbols positions 142-146 because they came from a plan file's `## Files to change` section that referenced test files. New helper applies `SYMBOL_DENYLIST + isAllCapsNoise + ^Test[A-Z]` consistently to all three channels.
+- **`assert-graphify-decision` detects malformed drill-down headings** (H4.1-v2). The gate regex `/^##\s+Drill-down:/gim` literally requires exactly two pounds — `### Drill-down:` (three pounds) silently doesn't match. Greenfield calibration #11: writer used `###`, gate returned `drill_down_sections: 0` AND `ok: true`. Now: a second regex `/^#+\s+Drill-down:/gim` counts all depths; the delta surfaces as `malformed_drill_down_headings`. When > 0, `ok` becomes false with a prescriptive reason naming the canonical heading form (`## Drill-down: <SYMBOL> [call: <correlation_id>]`).
+- **`workflow_id_history` backfills from `_mcp-trace.jsonl`** (H2-v3). H2-v2 (v0.68.2) self-heals when state.yaml carries orphan ids, but trace records from BEFORE the fix carry workflow_ids that never made it into history under pre-v0.68.2 rotation bugs. Greenfield calibration #11: 4 trace ids (8d2c91a1, 3a96bd9b, 9eeb1ae3, 7db622ee) not in history → mcp-stats `--workflow-id` reported 5-record gap vs `--since-workflow-created`. Fix: state.cjs::updateState's self-heal post-step now scans the trace's last 5000 lines for ids with `ts >= first_created_at` and splices them between original anchor and current. Idempotent. Greenfield live verification: 5-record gap → 0-record gap on first state update.
+- **`/devt:ship` gains hyperedge_completeness_scan** — paired with Option A above; called out separately because it's a workflow contract change in addition to the new preflight signal.
+
+### Changed
+
+- **`code-review-parallel.md::dispatch_lanes` orchestrator-side prose-only filter** (L1-v2). When ALL files in a lane have prose extensions (`.md`, `.rst`, `.txt`, `.adoc`), the orchestrator replaces the `graph-impact.md` cache injection with a `<graphify_status>not_applicable</graphify_status>` stub. Greenfield calibration #11 L3 evidence: prose-only README review lane received the GLOBAL preflight cache (`effect_size: large, god_node_match: true` computed against the FULL PR scope including code files) — pure noise for a markdown-only review. Per-lane filtering happens at the orchestrator (respects CLAUDE.md's "lanes are MCP-blind by design" contract); lanes still never query graphify themselves.
+
+### Smoke gates added
+
+- **Q1** — applySymbolFilter blocks Test* from plan + diff + text channels.
+- **Q2** — assert-graphify-decision rejects ### Drill-down: headings (malformed count + ok:false).
+- **Q3** — patternAllowedCutoffMtime evicts stale review-lane, preserves fresh.
+- **Q4** — workflow_id_history backfills orphan trace ids end-to-end.
+- **Q5** — code-review-parallel.md documents prose-only lane cache suppression.
+- **Q6** — extractTopic returns symbol_provenance map (plan + text sources tagged).
+- **Q7** — Option A hyperedge plumbing complete (graphify fn + ship step + preflight wire).
+
+### North-star alignment
+
+- **#1 coordination**: hyperedge completeness propagates from graphify discovery → preflight sidecar → ship gate (Option A); orchestrator filters lane cache per-lane scope (L1-v2); state history backfills from trace so query layer matches state layer (H2-v3).
+- **#2 code quality**: symbol filter applied uniformly across extraction channels (H4-v2); drill-down format violations surface as gate failures (H4.1-v2); per-symbol provenance lets reviewers triage god-node noise faster (G4-v2).
+- **#3 token efficiency**: prose-only lanes skip graphify cache injection (L1-v2 — saves dispatch budget per lane); hyperedge signal redirects review attention to high-leverage missing changes rather than per-file noise (Option A).
+- **#4 3rd-party integrations**: hyperedges are graphify's most sophisticated output and now drive a first-class devt feature, not a wrapper (Option A); state cleanup uses prior-workflow created_at uniformly across all classified buckets (H1-v3).
+
 ## [0.68.2] - 2026-05-30
 
 **Greenfield calibration #10 hotfix bundle — three v0.68.1 follow-throughs.** Direct codebase validation against greenfield's running state confirmed two FAILs and one PARTIAL from the calibration #9 fixes that need v2 treatment. All three are surgical: idempotent self-healing for `workflow_id_history`, switching the graphify probe trace-check from a fixed minutes window to the session anchor, and switching the ad-hoc cleanup cutoff from calendar age to the prior workflow's `created_at`. Smoke: **758 → 761 passed**, **0 failed** (+3 gates P1-P3).

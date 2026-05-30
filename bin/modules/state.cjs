@@ -886,6 +886,15 @@ function updateState(keyValues) {
     //      original (647d32e5) and the current (a57aa9c2) ids.
     // Fix: always ensure {original, current} ⊆ history. Runs after either
     // branch above. Idempotent — repeat runs add nothing.
+    //
+    // H2-v3 (greenfield calibration #11): backfill from _mcp-trace.jsonl.
+    // Pre-v0.68.2 rotation bugs orphaned workflow_ids in trace records that
+    // never reached history. Greenfield evidence: 4 ids (8d2c91a1, 3a96bd9b,
+    // 9eeb1ae3, 7db622ee) in recent trace not in history — `mcp-stats
+    // --workflow-id` reports 5-record gap vs --since-workflow-created. Scan
+    // trace for in-session ids and merge into history. Capped at last 5000
+    // lines to bound I/O cost. Inserts orphan ids in trace-appearance order
+    // (between original at index 0 and current at end).
     if (current.active === true) {
       if (!Array.isArray(current.workflow_id_history)) current.workflow_id_history = [];
       // Prepend original if missing — preserves chronological order
@@ -895,6 +904,47 @@ function updateState(keyValues) {
         !current.workflow_id_history.includes(current.original_workflow_id)
       ) {
         current.workflow_id_history.unshift(current.original_workflow_id);
+      }
+      // H2-v3 trace backfill — collect in-session orphan ids first, then
+      // splice them between original anchor and current (preserves
+      // chronological intent).
+      const anchorIso = current.first_created_at;
+      if (anchorIso) {
+        try {
+          const anchorMs = new Date(anchorIso).getTime();
+          // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+          const tracePath = path.join(getStateDir(), "..", "memory", "_mcp-trace.jsonl");
+          if (fs.existsSync(tracePath)) {
+            const body = fs.readFileSync(tracePath, "utf8");
+            const lines = body.split("\n").slice(-5000);
+            const seen = new Set(current.workflow_id_history);
+            const orphans = [];
+            for (const line of lines) {
+              if (!line) continue;
+              try {
+                const rec = JSON.parse(line);
+                if (typeof rec.workflow_id !== "string") continue;
+                if (typeof rec.ts !== "string") continue;
+                if (new Date(rec.ts).getTime() < anchorMs) continue;
+                if (seen.has(rec.workflow_id)) continue;
+                seen.add(rec.workflow_id);
+                orphans.push(rec.workflow_id);
+              } catch { /* malformed — skip */ }
+            }
+            if (orphans.length > 0) {
+              // Splice orphans before current id if current is already in history;
+              // otherwise append. Keeps original at index 0 + current at end.
+              const currentIdx = current.workflow_id
+                ? current.workflow_id_history.indexOf(current.workflow_id)
+                : -1;
+              if (currentIdx >= 0) {
+                current.workflow_id_history.splice(currentIdx, 0, ...orphans);
+              } else {
+                current.workflow_id_history.push(...orphans);
+              }
+            }
+          }
+        } catch { /* trace read failure — backfill best-effort, leave existing history intact */ }
       }
       // Append current if missing — covers init-driven rotations that
       // didn't go through the workflow_type-transition branch.
@@ -1567,6 +1617,7 @@ function assertGraphifyDecision() {
   let fileBytes = 0;
   let sectionCount = 0;
   let drillDownSections = 0;
+  let malformedDrillDownHeadings = 0;
   // Per-section substance bookkeeping. Field (greenfield 2026-05-27 PR #372 P5):
   // F26 counted sections but didn't measure each section's body. A response can
   // have 3 headings with empty bodies and pass the count gate. We measure each
@@ -1585,6 +1636,16 @@ function assertGraphifyDecision() {
       sectionCount = m ? m.length : 0;
       const dm = content.match(/^##\s+Drill-down:/gim);
       drillDownSections = dm ? dm.length : 0;
+      // H4.1-v2 (greenfield calibration #11): detect non-spec drill-down
+      // headings (### or ####) so the gate doesn't silently award credit
+      // when format violates the canonical `## Drill-down: <SYM>` shape.
+      // Greenfield evidence: writer used ### → drillDownSections returned 0
+      // AND gate returned ok:true (no sections to validate). Now: if ANY
+      // `#+ Drill-down:` heading exists outside the strict `^## ` form,
+      // flag it and let the substance check fail.
+      const anyDepthDrillDown = content.match(/^#+\s+Drill-down:/gim);
+      const anyDepthCount = anyDepthDrillDown ? anyDepthDrillDown.length : 0;
+      malformedDrillDownHeadings = anyDepthCount - drillDownSections;
       if (drillDownSections > 0) {
         // Split on drill-down headings; track each section's body length.
         // Each section runs until the next ^## heading or EOF.
@@ -1665,12 +1726,13 @@ function assertGraphifyDecision() {
     fabricatedDrillDown = mcpGetNeighborsCalls === 0;
   }
   const result = {
-    ok: !fabricatedDrillDown && !hasThinDrillDowns,
+    ok: !fabricatedDrillDown && !hasThinDrillDowns && !(malformedDrillDownHeadings > 0),
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
     file_bytes: fileBytes,
     section_count: sectionCount,
     drill_down_sections: drillDownSections,
+    malformed_drill_down_headings: malformedDrillDownHeadings,
     mcp_get_neighbors_calls: mcpGetNeighborsCalls,
     thin_content: thin,
     under_three_drill_downs: underThreeDrillDowns,
@@ -1678,7 +1740,12 @@ function assertGraphifyDecision() {
     thin_drill_down_sections: thinDrillDownSections,
     thin_drill_downs: thinDrillDowns,
   };
-  if (fabricatedDrillDown) {
+  if (malformedDrillDownHeadings > 0) {
+    result.reason =
+      `${malformedDrillDownHeadings} drill-down heading(s) use non-spec depth (###+ or #) — ` +
+      `canonical form is "## Drill-down: <SYMBOL> [call: <correlation_id>]". Fix the writer ` +
+      `agent's heading depth so the substance check counts them.`;
+  } else if (fabricatedDrillDown) {
     result.reason =
       `drill-down sections present (${drillDownSections}) but no get_neighbors ` +
       `MCP calls recorded in workflow_id window — fabricated drill-down`;

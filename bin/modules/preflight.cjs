@@ -357,6 +357,30 @@ function extractSymbolsFromPlan(planPath) {
   return { symbols: [...pascalSymbols, ...snakeSymbols], paths };
 }
 
+// H4-v2 (greenfield calibration #11): unified symbol filter applied
+// consistently to ALL three extraction channels (plan, diff, text). The
+// original H4 fix only filtered textSymbols, leaking pytest test classes
+// from plan-derived and diff-derived channels. Greenfield post-v0.68.2:
+// 5 TestGet*/TestAdd*/TestRemove* classes still present in topic.symbols
+// because they came via planDerivedSymbols (extractSymbolsFromPlan reads
+// "Files to change" sections that mention test files).
+//
+// Filter rules — same across all channels:
+//   - length ≥ 3 (avoid 1-2 char acronyms)
+//   - not in SYMBOL_DENYLIST (PascalCase verbs, project labels, etc.)
+//   - not isAllCapsNoise (CHANGELOG, GFBUGS, etc.)
+//   - not /^Test[A-Z]/ (pytest test classes)
+function applySymbolFilter(symbols) {
+  if (!Array.isArray(symbols)) return [];
+  return symbols.filter(s =>
+    typeof s === "string" &&
+    s.length >= 3 &&
+    !SYMBOL_DENYLIST.has(s.toLowerCase()) &&
+    !isAllCapsNoise(s) &&
+    !/^Test[A-Z]/.test(s)
+  );
+}
+
 function extractTopic(taskText, opts = {}) {
   if (!taskText || typeof taskText !== "string") {
     return { domains: [], symbols: [], keywords: [], raw: "", resolution_path: "none" };
@@ -373,32 +397,26 @@ function extractTopic(taskText, opts = {}) {
     .replace(/https?:\/\/[\w./?#%&=+-]+/g, " ")
     .replace(/~\/[\w./_-]+/g, " ")
     .replace(/\/(?:[\w.-]+\/)+[\w.-]+/g, " ");
-  const diffSymbols = Array.isArray(opts.gitDiffSymbols)
-    ? opts.gitDiffSymbols.filter(s => typeof s === "string" && s.length >= 3 && !SYMBOL_DENYLIST.has(s.toLowerCase()) && !isAllCapsNoise(s))
-    : [];
-  const planSymbols = Array.isArray(opts.planDerivedSymbols)
-    ? opts.planDerivedSymbols.filter(s => typeof s === "string" && s.length >= 3 && !SYMBOL_DENYLIST.has(s.toLowerCase()) && !isAllCapsNoise(s))
-    : [];
+  const diffSymbols = applySymbolFilter(opts.gitDiffSymbols);
+  const planSymbols = applySymbolFilter(opts.planDerivedSymbols);
 
   // Symbols: PascalCase identifiers ≥3 chars, deduped, denylist-filtered,
   // ALL-CAPS noise filtered. Preserves mixed-case identifiers
   // (DeviceSummary) while rejecting project labels (CHANGELOG, GFBUGS).
   const symbolMatches = tokenizableText.match(/\b[A-Z][a-zA-Z0-9]{2,}\b/g) || [];
-  const textSymbols = Array.from(new Set(symbolMatches))
-    .filter(s => !SYMBOL_DENYLIST.has(s.toLowerCase()))
-    .filter(s => !isAllCapsNoise(s))
-    // H4 (greenfield calibration #9): pytest test class names (TestFooBar)
-    // leak into symbol extraction and pollute blast_radius. Test classes have
-    // no graph edges in production code and occupy slot budget the real
-    // symbols need. Filter pattern is strict (^Test followed by uppercase)
-    // so legit identifiers like TestableBase or testing-utility-name don't
-    // match. Greenfield: zero non-test production classes match this pattern.
-    .filter(s => !/^Test[A-Z]/.test(s));
+  const textSymbols = applySymbolFilter(Array.from(new Set(symbolMatches)));
   // Diff symbols come first; text symbols only contribute their delta. Order
   // matters because downstream consumers (blast_radius args, scope_hint cap)
   // may truncate to top-N — the higher-signal source wins.
   const seen = new Set();
   const symbols = [];
+  // G4-v2 (greenfield calibration #11): per-symbol provenance ledger.
+  // Reviewers triaging god-node noise need to know WHY a symbol landed in
+  // the topic — was it diff-anchored, plan-referenced, text-fallback, or
+  // FTS-rescued? `symbolProvenance` maps symbol → source channel; surfaces
+  // in preflight-brief.json::topic.symbol_provenance for downstream
+  // graphify-impact-plan.json consumers.
+  const symbolProvenance = {};
   // resolution_path tracks the DEEPEST fallback leg that contributed at least
   // one unique symbol. Calibrations use this to measure how often each leg
   // actually rescues a task vs. the upstream legs being sufficient on their
@@ -415,12 +433,17 @@ function extractTopic(taskText, opts = {}) {
   // Track which symbols came from the text leg so FTS rescue can demote
   // short text-leg stand-ins after producing higher-quality matches (B4).
   const textLegContributions = new Set();
-  for (const s of planSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("plan"); } }
-  for (const s of diffSymbols) { if (!seen.has(s)) { seen.add(s); symbols.push(s); promotePath("diff"); } }
+  for (const s of planSymbols) {
+    if (!seen.has(s)) { seen.add(s); symbols.push(s); symbolProvenance[s] = "plan"; promotePath("plan"); }
+  }
+  for (const s of diffSymbols) {
+    if (!seen.has(s)) { seen.add(s); symbols.push(s); symbolProvenance[s] = "diff"; promotePath("diff"); }
+  }
   for (const s of textSymbols) {
     if (!seen.has(s)) {
       seen.add(s);
       symbols.push(s);
+      symbolProvenance[s] = "text";
       textLegContributions.add(s);
       promotePath("text");
     }
@@ -470,6 +493,7 @@ function extractTopic(taskText, opts = {}) {
         if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
           seen.add(label);
           symbols.push(label);
+          symbolProvenance[label] = candPath;
           promotePath(candPath);
         }
       }
@@ -493,6 +517,7 @@ function extractTopic(taskText, opts = {}) {
         if (!seen.has(label) && !SYMBOL_DENYLIST.has(label.toLowerCase()) && !isAllCapsNoise(label)) {
           seen.add(label);
           symbols.push(label);
+          symbolProvenance[label] = "full_text_fts";
           promotePath("full_text_fts");
         }
       }
@@ -519,7 +544,7 @@ function extractTopic(taskText, opts = {}) {
     }
   }
 
-  return { domains, symbols, keywords, raw: text, resolution_path: resolutionPath };
+  return { domains, symbols, keywords, raw: text, resolution_path: resolutionPath, symbol_provenance: symbolProvenance };
 }
 
 /**
@@ -1106,6 +1131,18 @@ function generate(taskText, opts) {
   let topGods = [];
   try { topGods = (graphify.godNodes(3) || []).slice(0, 3); } catch { /* empty */ }
 
+  // Option A (greenfield calibration #11): hyperedge intersection lookup.
+  // For every hyperedge whose members include any of topic.symbols (or
+  // diff-file basenames), record the match + which members are in/out of
+  // scope. Surfaces in sidecar so /devt:ship completeness gate can warn
+  // when a PR touches some-but-not-all members of a semantic grouping.
+  let hyperedgesMatched = [];
+  try {
+    const hyperResult = graphify.getHyperedgesContaining(topic.symbols, { limit: 10 });
+    if (hyperResult && Array.isArray(hyperResult.results)) {
+      hyperedgesMatched = hyperResult.results;
+    }
+  } catch { /* hyperedge lookup is best-effort */ }
   const extractionConfidence = computeExtractionConfidence(topic);
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
@@ -1120,6 +1157,7 @@ function generate(taskText, opts) {
     governing_ids: governingUnion.map(d => d.id),
     suggested_reading: suggestedReading,
     scope_hint: { confidence: scopeHintConfidence },
+    hyperedges_matched: hyperedgesMatched,
     blast: {
       effect_size: blast.effect_size,
       source: blast.source,

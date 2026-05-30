@@ -125,6 +125,42 @@ echo "merge_risk_scan: $SCAN_VERDICT"
 
 </step>
 
+<step name="hyperedge_completeness_scan" gate="hyperedge coverage scan complete (or no hyperedges to scan)">
+
+## Hyperedge Completeness Scan (Option A — greenfield calibration #11)
+
+Graphify's hyperedges are machine-discovered semantic groupings — multi-file scopes that "should change together" (e.g., route + service + repo + readme + test for a billing flow). When this PR's scope touches some-but-not-all members of a hyperedge, flag it before opening the PR so the user can decide: expand scope, defer the missing pieces, or accept partial coverage.
+
+```bash
+HYPEREDGES_JSON=$(jq -c '.hyperedges_matched // []' .devt/state/preflight-brief.json 2>/dev/null || echo "[]")
+HYPER_COUNT=$(echo "$HYPEREDGES_JSON" | jq 'length')
+if [ "${HYPER_COUNT:-0}" -eq 0 ]; then
+  echo "hyperedge_completeness_scan: no hyperedges matched — skipping"
+else
+  # Partial-coverage hyperedges = completeness < 1.0
+  PARTIAL=$(echo "$HYPEREDGES_JSON" | jq -c '[.[] | select(.completeness < 1.0)]')
+  PARTIAL_COUNT=$(echo "$PARTIAL" | jq 'length')
+  if [ "${PARTIAL_COUNT:-0}" -eq 0 ]; then
+    echo "hyperedge_completeness_scan: all $HYPER_COUNT matched hyperedges fully covered"
+  else
+    echo "hyperedge_completeness_scan: $PARTIAL_COUNT of $HYPER_COUNT hyperedges have partial coverage:"
+    echo "$PARTIAL" | jq -r '.[] | "  - " + .id + " (" + (.completeness * 100 | floor | tostring) + "% covered, members missing: " + ((.members | length) - (.members_in_scope | length) | tostring) + ")"'
+  fi
+fi
+```
+
+**If partial-coverage hyperedges exist**: surface via AskUserQuestion. For each partial-coverage entry, name the missing members so the user can decide whether the PR should expand to include them.
+
+- Question: "This PR partially covers $PARTIAL_COUNT semantic grouping(s) from graphify's hyperedge analysis. Missing members may indicate forgotten changes (readme, test, repo, migration). Proceed anyway?"
+- Options: "Proceed — partial coverage is intentional"; "Cancel — let me expand scope first"
+- On Cancel: STOP with BLOCKED.
+
+**If all hyperedges fully covered OR no hyperedges matched**: continue silently.
+
+This step is non-fatal when `preflight-brief.json` is absent or has no `hyperedges_matched` field — graphify capability-probe-style, fails open.
+
+</step>
+
 <step name="changelog" gate="changelog updated or skipped">
 
 ## Changelog (conditional)

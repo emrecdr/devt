@@ -453,6 +453,10 @@ function initWorkflow(task, pluginRoot, initVerb) {
       staleDays: 1,
       adHocStaleDays: 1,
       adHocCutoffMtime: priorCreatedAt,
+      // H1-v3 (greenfield calibration #11): same cutoff for pattern_allowed
+      // catches stale review-lane-*.md from prior same-day workflows that
+      // calendar-age `staleDays=1` couldn't catch.
+      patternAllowedCutoffMtime: priorCreatedAt,
     });
   } catch { /* non-fatal */ }
 

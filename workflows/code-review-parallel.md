@@ -253,6 +253,12 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` (C7-7)
 - `<rubric_content>{inline_rubrics.code_review}</rubric_content>` (C7-7 — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice)
 
+**L1-v2 (greenfield calibration #11) — prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the orchestrator MUST replace the `<graph_impact>` cache injection with a `<graphify_status>not_applicable</graphify_status>` stub instead of pasting `graph-impact.md` content. Greenfield calibration #11 L3 evidence: a prose-only README lane received the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect via:
+```bash
+LANE_FILES_PROSE_ONLY=$(echo "$LANE_FILES_JSON" | jq -r 'all(. as $f | ["md","rst","txt","adoc"] | any($f | test("\\.\(.)$"; "i")))' 2>/dev/null || echo "false")
+```
+When `LANE_FILES_PROSE_ONLY=true`, inject a stub `<graph_impact>not_applicable: prose-only lane — graphify cache suppressed (no AST relationships on prose files)</graph_impact>` and omit `<scope_hint>` (or set it to the lane's own file list). Respects the MCP-blind lane contract — the orchestrator filters per-lane, lanes never query graphify themselves.
+
 Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate.`
 
 Output path: each lane's `review_file` from the registry.

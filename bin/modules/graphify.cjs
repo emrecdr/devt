@@ -1372,6 +1372,84 @@ function getCommunity(communityId, options = {}) {
   return { source: "graphify", results: matches.slice(0, limit) };
 }
 
+// Option A (greenfield calibration #11): hyperedges are graphify's machine-
+// discovered "design plans" — semantic groupings that span multiple files
+// (route + service + repo + readme + test). When a task's symbols/paths
+// overlap any hyperedge's member set, lifting ALL members into preflight's
+// symbol channel auto-catches the "fixed code, forgot the readme/test/
+// migration" failure mode. Greenfield's graph has 3 hyperedges:
+//   hyper_billing_country_fk_flow (route → service → repo → event → audit)
+//   hyper_vat_resolution_chain (invoice → country → billing)
+//   hyper_audit_jurisdiction_snapshot (org lifecycle + invoice events)
+// Each is a high-confidence (≥0.85) cross-file binding.
+//
+// Returns hyperedges whose `nodes[]` intersects ANY input symbol or
+// source_file. Mirrors the shape of laneSuggestions / checkLargeFilesGodNodes
+// — load graph, scan, return structured payload, no MCP write.
+function getHyperedgesContaining(symbols, options = {}) {
+  const limit = Math.min(Math.max(parseInt(options.limit, 10) || 10, 1), 50);
+  const loaded = loadGraph();
+  if (!loaded.ok) {
+    return { source: "grep", results: [], degraded: true, fallback_trigger: loaded.degraded.fallback_trigger };
+  }
+  const graph = loaded.cache.graph || {};
+  const hyperedges = Array.isArray(graph.hyperedges) ? graph.hyperedges
+                   : (graph.graph && Array.isArray(graph.graph.hyperedges) ? graph.graph.hyperedges : []);
+  if (hyperedges.length === 0) {
+    return { source: "graphify", results: [], reason: "no_hyperedges_in_graph" };
+  }
+  const wantedLowered = new Set();
+  for (const s of (Array.isArray(symbols) ? symbols : [])) {
+    if (typeof s === "string" && s.length > 0) wantedLowered.add(s.toLowerCase());
+  }
+  if (wantedLowered.size === 0) {
+    return { source: "graphify", results: [], reason: "no_input_symbols" };
+  }
+  // Build node-id → source_file + label lookup so we can intersect against
+  // both symbol-name matches AND source-file matches in one pass.
+  const nodeMeta = new Map();
+  for (const n of loaded.cache.nodes) {
+    if (!n || !n.id) continue;
+    nodeMeta.set(n.id, {
+      label: (n.label || "").toLowerCase(),
+      source_file: (n.source_file || "").toLowerCase(),
+    });
+  }
+  const matches = [];
+  for (const h of hyperedges) {
+    if (!h || !Array.isArray(h.nodes)) continue;
+    const overlap = [];
+    for (const nodeId of h.nodes) {
+      const meta = nodeMeta.get(nodeId);
+      if (!meta) continue;
+      // Match if node label or source_file is wanted (case-insensitive,
+      // basename for path matches).
+      const labelHit = meta.label && wantedLowered.has(meta.label);
+      const idHit = wantedLowered.has(nodeId.toLowerCase());
+      const fileHit = meta.source_file && wantedLowered.has(meta.source_file);
+      if (labelHit || idHit || fileHit) overlap.push(nodeId);
+    }
+    if (overlap.length > 0) {
+      matches.push({
+        id: h.id,
+        label: h.label || h.id,
+        member_count: h.nodes.length,
+        members: h.nodes,
+        members_in_scope: overlap,
+        completeness: Number((overlap.length / h.nodes.length).toFixed(2)),
+        confidence: h.confidence || null,
+        confidence_score: h.confidence_score || null,
+        source_file: h.source_file || null,
+        relation: h.relation || null,
+      });
+    }
+  }
+  // Highest completeness first so reviewers see "most overlapping" hyperedges
+  // when triaging.
+  matches.sort((a, b) => b.completeness - a.completeness);
+  return { source: "graphify", results: matches.slice(0, limit) };
+}
+
 /**
  * Summary statistics over graph.json for the trust-gate consumer. Uses the
  * Phase A loader cache so this is O(1) after the first parse. Trust thresholds:
@@ -1657,6 +1735,7 @@ module.exports = {
   laneSuggestions,
   adaptiveImpactThreshold,
   getCommunity,
+  getHyperedgesContaining,
   maybeRefresh,
   writeMemoryEntry,
   parseReportSections,
