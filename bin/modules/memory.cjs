@@ -124,15 +124,51 @@ function getDbPath() {
   return path.join(getMemoryRoot(), "index.db");
 }
 
-// H10 helper — count successful graphify MCP trace records in the last N
-// minutes. Lets validate() distinguish "graphify is actually down" from
-// "internal probe is broken while orchestrator path works". Returns 0 on any
-// read failure (safe degradation: caller treats absence as "no recent ok").
-function recentSuccessfulGraphifyTraceCount(minutes) {
+// H10 helper — count successful graphify MCP trace records.
+// Lets validate() distinguish "graphify is actually down" from "internal probe
+// is broken while orchestrator path works". Returns 0 on any read failure
+// (safe degradation: caller treats absence as "no recent ok").
+//
+// Three modes for the cutoff:
+//   - number argument (minutes)         → sliding window of last N minutes
+//   - {sinceSessionAnchor: true}        → use workflow.yaml::first_created_at
+//                                          (anchored to session, not clock)
+//   - default (no arg)                  → session-anchor with 24h fallback
+//
+// H10-v2 (greenfield calibration #10): the 5-min minutes-based default was
+// too tight for real sessions (greenfield's validate ran 10h after the
+// graphify call burst — a 5-min OR 60-min window both miss). Session anchor
+// is the right semantic: "if THIS session ever successfully called graphify,
+// the probe failure is anomalous and the warning is a false positive".
+function recentSuccessfulGraphifyTraceCount(arg) {
   try {
     const tracePath = path.join(getMemoryRoot(), "_mcp-trace.jsonl");
     if (!fs.existsSync(tracePath)) return 0;
-    const cutoffMs = Date.now() - (minutes * 60 * 1000);
+    let cutoffMs;
+    const opts = (arg && typeof arg === "object") ? arg : {};
+    const wantsSessionAnchor = opts.sinceSessionAnchor === true || typeof arg === "undefined";
+    if (typeof arg === "number" && Number.isFinite(arg) && arg >= 0) {
+      cutoffMs = Date.now() - (arg * 60 * 1000);
+    } else if (wantsSessionAnchor) {
+      // Read first_created_at from workflow.yaml. Fall back to 24h window
+      // when workflow.yaml is absent or anchor unparseable.
+      let anchorMs = 0;
+      try {
+        const root = require("./config.cjs").findProjectRoot();
+        const wfPath = path.join(root, ".devt", "state", "workflow.yaml");
+        if (fs.existsSync(wfPath)) {
+          const yaml = fs.readFileSync(wfPath, "utf8");
+          const m = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+          if (m) {
+            const parsed = new Date(m[1].trim()).getTime();
+            if (Number.isFinite(parsed)) anchorMs = parsed;
+          }
+        }
+      } catch { /* fall through to 24h default */ }
+      cutoffMs = anchorMs > 0 ? anchorMs : Date.now() - (24 * 60 * 60 * 1000);
+    } else {
+      cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
+    }
     const body = fs.readFileSync(tracePath, "utf8");
     let count = 0;
     for (const line of body.split("\n")) {
@@ -1167,16 +1203,40 @@ function validateSymbolsViaGraphify(docs) {
             // dispatches. Greenfield evidence: 95 successful graphify MCP
             // calls in the last hour, 0 errors, but the validator still
             // claimed "3× consecutive failures". Check _mcp-trace.jsonl for
-            // any successful graphify call in the last 5 minutes — if found,
+            // any successful graphify call in the recent window — if found,
             // the probe path is the one that's broken, not graphify itself.
             // Downgrade to info-only so the warning surface doesn't cry wolf.
-            const recentOk = recentSuccessfulGraphifyTraceCount(5);
+            //
+            // H10-v2 (greenfield calibration #10): use session-anchor (first_created_at)
+            // instead of a fixed minutes window. Graphify activity is bursty in real
+            // sessions (~100 calls during context_init, then quiet); memory validate
+            // typically runs HOURS after the burst, well past any reasonable minutes
+            // window. Session-anchor semantic: "if THIS session ever successfully
+            // called graphify, the probe failure is anomalous". Override via
+            // memory.graphify_probe_trace_window_minutes config for projects that
+            // prefer a sliding window.
+            let recentOk;
+            let modeDescription;
+            try {
+              const cfg = require("./config.cjs").getMergedConfig();
+              const cfgVal = cfg && cfg.memory && cfg.memory.graphify_probe_trace_window_minutes;
+              if (Number.isFinite(cfgVal) && cfgVal > 0) {
+                recentOk = recentSuccessfulGraphifyTraceCount(cfgVal);
+                modeDescription = `in the last ${cfgVal} minutes`;
+              } else {
+                recentOk = recentSuccessfulGraphifyTraceCount({ sinceSessionAnchor: true });
+                modeDescription = `since session start`;
+              }
+            } catch {
+              recentOk = recentSuccessfulGraphifyTraceCount({ sinceSessionAnchor: true });
+              modeDescription = `since session start`;
+            }
             if (recentOk > 0) {
               issues.push({
                 filePath: null,
                 severity: "info",
                 category: "graphify-probe-transient",
-                error: `Internal stale-symbol probe failed ${consecutiveErrors}× but ${recentOk} graphify MCP calls succeeded in the last 5 minutes — probe path independent from orchestrator's MCP transport. Stale-symbol checks deferred to next session.`,
+                error: `Internal stale-symbol probe failed ${consecutiveErrors}× but ${recentOk} graphify MCP calls succeeded ${modeDescription} — probe path independent from orchestrator's MCP transport. Stale-symbol checks deferred to next session.`,
               });
             } else {
               issues.push({

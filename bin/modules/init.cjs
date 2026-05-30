@@ -429,13 +429,31 @@ function initWorkflow(task, pluginRoot, initVerb) {
     evictWorkflowArtifacts({ dryRun: false });
     // H1 (greenfield calibration #9): the workflow-artifact evict is keyed to a
     // fixed allowlist + slug-variant regex, but state accumulates ad-hoc
-    // filenames (council-*, simplify-*, validated-*, graphify-*-review.md,
-    // *.json sidecars for slug variants) that no regex catches. Greenfield's
-    // calibration #9 audit: 29 of 30 stale files clear via the existing
-    // ad_hoc classifier when cleanup runs with staleDays=1. Wire it here so
-    // every init * sweep covers both gate markers AND the ad_hoc bucket.
-    // Non-fatal — failure to clean ad_hoc files never blocks workflow init.
-    cleanupStateFiles({ dryRun: false, staleDays: 1, adHocStaleDays: 1 });
+    // filenames that no regex catches. Wire cleanup here so every init *
+    // sweep covers both gate markers AND the ad_hoc bucket.
+    //
+    // H1-v2 (greenfield calibration #10): read the PRIOR workflow's
+    // created_at from workflow.yaml BEFORE init's strip+restamp. Pass it
+    // as adHocCutoffMtime so ad-hoc files older than the prior workflow's
+    // start get archived — catches multi-PR-per-day residue (greenfield's
+    // 16 leftover files like simplify-agent*-*.md, impl-wave-{A..E}.md).
+    // Falls back to staleDays=1 when created_at is unavailable.
+    let priorCreatedAt = null;
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const wfPath = path.join(projectRoot, ".devt", "state", "workflow.yaml");
+      if (fs.existsSync(wfPath)) {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+        if (m) priorCreatedAt = m[1].trim();
+      }
+    } catch { /* fall through with null — adHocStaleDays takes over */ }
+    cleanupStateFiles({
+      dryRun: false,
+      staleDays: 1,
+      adHocStaleDays: 1,
+      adHocCutoffMtime: priorCreatedAt,
+    });
   } catch { /* non-fatal */ }
 
   // Reset workflow.yaml unconditionally on every init * call so stale prior-session

@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.68.2] - 2026-05-30
+
+**Greenfield calibration #10 hotfix bundle — three v0.68.1 follow-throughs.** Direct codebase validation against greenfield's running state confirmed two FAILs and one PARTIAL from the calibration #9 fixes that need v2 treatment. All three are surgical: idempotent self-healing for `workflow_id_history`, switching the graphify probe trace-check from a fixed minutes window to the session anchor, and switching the ad-hoc cleanup cutoff from calendar age to the prior workflow's `created_at`. Smoke: **758 → 761 passed**, **0 failed** (+3 gates P1-P3).
+
+### Fixed
+
+- **`workflow_id_history` self-healing on every state update** (H2-v2). The original H2 fix only seeded history when the array was absent — but greenfield's history was created by v0.68.0 as `[current_only]` (missing original), then accumulated rotations, never gaining the original_workflow_id. Worse: when init.cjs strips `workflow_id + created_at` and forces the first-activation branch, the NEW workflow_id wasn't appended to existing history either. Greenfield's evidence: history `[995823e0, 9fa91f3a, 5ab90124, 4e954a3d, 38c12b15]` was missing BOTH the original (`647d32e5`) AND the current (`a57aa9c2`). Fix moves history maintenance OUT of the conditional branches into an idempotent post-step that always ensures `{original, current} ⊆ history` — prepends original if missing, appends current if missing. Safe to run on every `updateState` call. Resolves the G6 PARTIAL (5-call gap between `mcp-stats --workflow-id` and `--since-workflow-created`) as a downstream consequence.
+- **`memory validate` graphify probe uses session anchor by default** (H10-v2). The v0.68.1 H10 fix used a 5-minute window to check whether orchestrator MCP calls succeeded recently; greenfield's calibration #10 evidence showed the validate runs HOURS after the graphify burst (last call at 23:39, validate at 10:00 next day — 10h gap). No fixed minutes window works for bursty + quiet patterns. New default: read `workflow.yaml::first_created_at` and count successful graphify calls since session start. The semantic: "if THIS session ever successfully called graphify, the probe failure is anomalous and the warning is a false positive". `memory.graphify_probe_trace_window_minutes` config key still available for projects preferring a sliding window. Greenfield live check: validate now correctly downgrades to `info/graphify-probe-transient` ("16 graphify MCP calls succeeded since session start") instead of `warning/graphify-unreachable`.
+- **`cleanupStateFiles` accepts `adHocCutoffMtime` for explicit cutoff** (H1-v2). The v0.68.1 `adHocStaleDays=1` calendar-age gate was too lenient for greenfield's multi-PR-per-day pattern — 16 ad-hoc files from yesterday's session survived because they were <24h old. New `adHocCutoffMtime` opt (ISO timestamp string) takes precedence when set; `init.cjs` reads `workflow.yaml::created_at` BEFORE the strip+restamp and passes it as the cutoff. Anything ad-hoc with mtime older than the PRIOR workflow's start gets archived. Falls back to `adHocStaleDays` when `created_at` unavailable. Catches the multi-PR-per-day residue without breaking current-session work-in-progress.
+
+### Added
+
+- **`memory.graphify_probe_trace_window_minutes` config key** — override the session-anchor default with a sliding window in minutes when project's call cadence prefers a strict time bound.
+- **3 smoke gates P1-P3** locking each H-v2 fix to a live fixture (workflow_id_history idempotency, session-anchor trace count, adHocCutoffMtime semantics).
+
+### Changed
+
+- **`recentSuccessfulGraphifyTraceCount(arg)` signature widened.** Backward-compatible with the legacy `(minutes)` call form (including `0` for explicit empty window). New `({sinceSessionAnchor: true})` opts-object form uses `workflow.yaml::first_created_at` as cutoff. Default (no arg) is session-anchor with 24h fallback when no workflow.yaml exists.
+
+### North-star alignment
+
+- **#1 coordination**: history is now self-healing across upgrade boundaries (H2-v2); validate's verdict aligns with orchestrator's reality (H10-v2); init's ad-hoc sweep aligns with workflow-start semantics (H1-v2).
+- **#2 code quality**: false-positive `graphify-unreachable` warnings stop appearing in healthy sessions (H10-v2); cross-PR ad-hoc residue clears (H1-v2).
+- **#3 token efficiency**: validate's diagnostic prose is honest (info vs warning) — orchestrator stops allocating attention budget to false alarms (H10-v2).
+- **#4 3rd-party integrations**: mcp-stats `--workflow-id` queries return correct counts after upgrade (H2-v2 + G6).
+
 ## [0.68.1] - 2026-05-29
 
 **Greenfield calibration #9 hotfix bundle — stale-state cluster + extractor noise + diagnostic accuracy.** Field session against PR #376 surfaced seven bugs across three categories: stale prior-PR state contaminating fresh workflows (review.md/test-summary surviving init, lanes[] persisting across PRs, ad-hoc files accumulating with no eviction), extractor noise (pytest test classes leaking into symbols), and diagnostic accuracy (memory validate false-positive on healthy graphify, health --repair always reporting doc_count=0). All seven are surgical fixes — no architectural changes. Smoke: **751 → 758 passed**, **0 failed** (+7 gates O1-O7).

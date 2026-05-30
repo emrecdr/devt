@@ -860,20 +860,6 @@ function updateState(keyValues) {
       // Freeze the immutable anchors on first activation only.
       if (!current.first_created_at) current.first_created_at = now;
       if (!current.original_workflow_id) current.original_workflow_id = current.workflow_id;
-      if (!Array.isArray(current.workflow_id_history)) {
-        // H2 (greenfield calibration #9): upgrade-boundary recovery — when
-        // workflow_id_history is missing on a workflow.yaml that already
-        // carries an original_workflow_id distinct from current, seed history
-        // with both ids so mcp-stats --workflow-id can attribute pre-upgrade
-        // trace records. Greenfield's session: 4 entries via --workflow-id
-        // vs 9 via --since-workflow-created — the 5-record gap was the
-        // original_workflow_id chain dropped during v0.67→v0.68 install.
-        if (current.original_workflow_id && current.original_workflow_id !== current.workflow_id) {
-          current.workflow_id_history = [current.original_workflow_id, current.workflow_id];
-        } else {
-          current.workflow_id_history = [current.workflow_id];
-        }
-      }
     } else if (
       current.active === true &&
       previousWorkflowType &&
@@ -885,22 +871,39 @@ function updateState(keyValues) {
       // /devt:workflow would write trace records with the old workflow_id.
       // first_created_at + original_workflow_id are NOT touched here — they
       // anchor the session, not the logical workflow.
-      //
-      // Append the outgoing id to workflow_id_history BEFORE overwrite — the
-      // 1-hop union in mcp-stats.cjs (HF-2) couldn't see trace records written
-      // during intermediate workflows when the session chained through more
-      // than two workflow_types. G6 widens the union to the whole chain.
-      if (!Array.isArray(current.workflow_id_history)) {
-        current.workflow_id_history = current.original_workflow_id
-          ? [current.original_workflow_id]
-          : [];
-      }
-      if (current.workflow_id && !current.workflow_id_history.includes(current.workflow_id)) {
-        current.workflow_id_history.push(current.workflow_id);
-      }
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
-      current.workflow_id_history.push(current.workflow_id);
+    }
+    // H2-v2 (greenfield calibration #10): idempotent self-healing for
+    // workflow_id_history. Three failure modes the original H2 fix missed:
+    //   1. History was seeded by v0.68.0 as [current_only] (no original) —
+    //      stuck that way because v0.68.1's H2 logic only fired when history
+    //      was absent.
+    //   2. init.cjs strips workflow_id + created_at, forcing updateState's
+    //      first-activation branch — which never appended the new workflow_id
+    //      to an existing history array.
+    //   3. Greenfield's session ended up with history missing BOTH the
+    //      original (647d32e5) and the current (a57aa9c2) ids.
+    // Fix: always ensure {original, current} ⊆ history. Runs after either
+    // branch above. Idempotent — repeat runs add nothing.
+    if (current.active === true) {
+      if (!Array.isArray(current.workflow_id_history)) current.workflow_id_history = [];
+      // Prepend original if missing — preserves chronological order
+      // (original is the first id the session ever held).
+      if (
+        current.original_workflow_id &&
+        !current.workflow_id_history.includes(current.original_workflow_id)
+      ) {
+        current.workflow_id_history.unshift(current.original_workflow_id);
+      }
+      // Append current if missing — covers init-driven rotations that
+      // didn't go through the workflow_type-transition branch.
+      if (
+        current.workflow_id &&
+        !current.workflow_id_history.includes(current.workflow_id)
+      ) {
+        current.workflow_id_history.push(current.workflow_id);
+      }
     }
     // Run before write so the validation verdict and the data hit disk in a single atomic write —
     // a crash between two writes would leave the flag desynced from the state it describes.

@@ -9533,6 +9533,98 @@ else
   fail "O7: H12 docCount field-name fix missing (result.inserted reference count: $O7_FIELD_USED)"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# P1-P3: greenfield calibration #10 v0.68.2 hotfixes. Each maps 1:1 to an H-v2
+# scope item. All use live fixture-based assertions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# P1: workflow_id_history self-healing — when history exists but is missing
+# both original_workflow_id and current workflow_id (greenfield calibration #10
+# scenario), state update prepends original AND appends current. Idempotent —
+# repeat updates don't grow the array.
+P1_TMP=$(mktemp -d)
+mkdir -p "$P1_TMP/.devt/state"
+cat > "$P1_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+phase: review
+first_created_at: "2026-05-28T22:00:00.000Z"
+original_workflow_id: 647d32e5-orig
+workflow_type: code_review
+workflow_id: a57aa9c2-curr
+created_at: "2026-05-30T00:21:00.000Z"
+workflow_id_history: "[\"middle-1\",\"middle-2\",\"middle-3\"]"
+EOF
+(cd "$P1_TMP" && node "$CLI" state update active=true >/dev/null 2>&1)
+P1_HIST=$(cd "$P1_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const h=j.workflow_id_history;const ok=h[0]==='647d32e5-orig' && h[h.length-1]==='a57aa9c2-curr' && h.length===5;console.log(ok ? '1' : '0');}catch(e){console.log('err');}})")
+# Idempotency — second update should not grow history
+(cd "$P1_TMP" && node "$CLI" state update phase=test >/dev/null 2>&1)
+P1_LEN_AFTER=$(cd "$P1_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.workflow_id_history.length);}catch(e){console.log('err');}})")
+if [ "$P1_HIST" = "1" ] && [ "$P1_LEN_AFTER" = "5" ]; then
+  pass "P1 (H2-v2): workflow_id_history self-heals (prepend original + append current), idempotent on repeat"
+else
+  fail "P1: H2-v2 self-heal broken (shape=$P1_HIST idempotent_len=$P1_LEN_AFTER expected 5)"
+fi
+rm -rf "$P1_TMP"
+
+# P2: memory.recentSuccessfulGraphifyTraceCount supports session-anchor mode.
+# When passed {sinceSessionAnchor:true}, reads first_created_at from
+# workflow.yaml and counts graphify trace records since then. Catches the
+# greenfield calibration #10 case where the burst was hours ago but still in
+# THIS session — minutes-based window misses it.
+P2_TMP=$(mktemp -d)
+mkdir -p "$P2_TMP/.devt/state" "$P2_TMP/.devt/memory"
+# Anchor: 2 hours ago
+ANCHOR=$(node -e "console.log(new Date(Date.now() - 2*60*60*1000).toISOString())")
+cat > "$P2_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR"
+EOF
+# Graphify call 90 minutes ago — outside any 5/60-minute window but inside session
+TS_90M=$(node -e "console.log(new Date(Date.now() - 90*60*1000).toISOString())")
+printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$TS_90M" >> "$P2_TMP/.devt/memory/_mcp-trace.jsonl"
+# Graphify call BEFORE session anchor — should NOT count
+TS_OLD=$(node -e "console.log(new Date(Date.now() - 5*60*60*1000).toISOString())")
+printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","ok":true,"duration_ms":1,"args_size":1,"args_fp":"x","result_size":1}\n' "$TS_OLD" >> "$P2_TMP/.devt/memory/_mcp-trace.jsonl"
+P2_OUT=$(cd "$P2_TMP" && node -e '
+process.chdir(process.cwd());
+const m = require("'"$ROOT"'/bin/modules/memory.cjs");
+const session = m.recentSuccessfulGraphifyTraceCount({ sinceSessionAnchor: true });
+const win5 = m.recentSuccessfulGraphifyTraceCount(5);
+console.log(session === 1 && win5 === 0 ? "1" : "0");' 2>/dev/null)
+if [ "${P2_OUT:-0}" = "1" ]; then
+  pass "P2 (H10-v2): recentSuccessfulGraphifyTraceCount session-anchor mode counts in-session calls (session=1, 5min=0)"
+else
+  fail "P2: H10-v2 session-anchor broken (output=$P2_OUT)"
+fi
+rm -rf "$P2_TMP"
+
+# P3: cleanupStateFiles honors adHocCutoffMtime — ad-hoc files older than the
+# explicit ISO cutoff get archived, newer ones preserve. init.cjs uses this
+# to pass the PRIOR workflow's created_at so cross-PR-same-day residue clears.
+P3_TMP=$(mktemp -d)
+mkdir -p "$P3_TMP/.devt/state"
+cat > "$P3_TMP/.devt/state/workflow.yaml" <<EOF
+active: false
+created_at: "2026-05-29T10:00:00.000Z"
+EOF
+touch -t 202604010000.00 "$P3_TMP/.devt/state/old-simplify-agent2.md"
+touch -t 202604010000.00 "$P3_TMP/.devt/state/old-impl-wave-A.md"
+touch "$P3_TMP/.devt/state/fresh-current-wip.md"
+P3_OUT=$(cd "$P3_TMP" && node -e '
+process.chdir(process.cwd());
+const audit = require("'"$ROOT"'/bin/modules/state-audit.cjs");
+const r = audit.cleanupStateFiles({ dryRun: true, staleDays: 1, adHocStaleDays: 1, adHocCutoffMtime: "2026-05-29T10:00:00.000Z" });
+const archived = (r.archived || []).map(a => a.name).sort();
+const oldEvicted = archived.includes("old-simplify-agent2.md") && archived.includes("old-impl-wave-A.md");
+const freshPreserved = !archived.includes("fresh-current-wip.md");
+console.log(oldEvicted && freshPreserved ? "1" : "0");' 2>/dev/null)
+if [ "${P3_OUT:-0}" = "1" ]; then
+  pass "P3 (H1-v2): cleanupStateFiles adHocCutoffMtime evicts stale ad-hoc, preserves current-session WIP"
+else
+  fail "P3: H1-v2 cutoff-based sweep broken (output=$P3_OUT)"
+fi
+rm -rf "$P3_TMP"
+
 echo
 echo "== Dispatch envelope compile gate =="
 

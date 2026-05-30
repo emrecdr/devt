@@ -136,13 +136,21 @@ function cleanupStateFiles(opts = {}) {
   const staleDays = Number.isFinite(opts.staleDays) ? opts.staleDays : (contract.stale_days_default || 14);
   const staleCutoffMs = Date.now() - (staleDays * 24 * 60 * 60 * 1000);
   // H1 (greenfield calibration #9): when invoked from init.cjs's auto-sweep,
-  // we want to preserve recent ad-hoc files (likely current-session work in
-  // progress) and only archive accumulated cruft. The opt-in adHocStaleDays
-  // parameter gates ad_hoc archiving by mtime — when unset (default for
-  // manual `state cleanup`), preserves legacy "archive all ad_hoc" behavior
-  // so explicit operator runs stay aggressive.
+  // preserve recent ad-hoc files (likely current-session work in progress)
+  // and only archive accumulated cruft. Two opt-in gates:
+  //   - adHocStaleDays: calendar-age gate (legacy v0.68.1)
+  //   - adHocCutoffMtime: explicit ISO timestamp gate (H1-v2 — greenfield
+  //     calibration #10). init.cjs reads workflow.yaml::created_at BEFORE
+  //     the strip+restamp and passes it as the cutoff. Anything ad-hoc
+  //     older than the PRIOR workflow's start is fair game for archive.
+  //     Strictly better than calendar age — catches multi-PR-per-day
+  //     residue (greenfield's 16 leftover files from yesterday's session).
+  // adHocCutoffMtime takes precedence when both are set.
   const adHocStaleDays = Number.isFinite(opts.adHocStaleDays) ? opts.adHocStaleDays : null;
-  const adHocCutoffMs = adHocStaleDays != null ? Date.now() - (adHocStaleDays * 24 * 60 * 60 * 1000) : null;
+  const cutoffMtimeParsed = opts.adHocCutoffMtime ? new Date(opts.adHocCutoffMtime).getTime() : NaN;
+  const adHocCutoffMs = Number.isFinite(cutoffMtimeParsed)
+    ? cutoffMtimeParsed
+    : (adHocStaleDays != null ? Date.now() - (adHocStaleDays * 24 * 60 * 60 * 1000) : null);
 
   const toArchive = [];
   for (const f of audit.buckets.ad_hoc) {
