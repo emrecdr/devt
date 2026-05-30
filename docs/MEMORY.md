@@ -137,6 +137,10 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
     "symbols": [...],          // filtered via SYMBOL_DENYLIST + isAllCapsNoise
     "keywords": [...],
     "resolution_path": "none" | "plan" | "diff" | "text" | "snake_fts" | "kebab_fts" | "full_text_fts",
+    "symbol_provenance": { // G4-v2: per-symbol source channel for reviewer triage
+      // "Organization": "plan", "BillingService": "diff", "VAT": "text", ...
+      // Values: "plan" | "diff" | "text" | "snake_fts" | "kebab_fts" | "full_text_fts"
+    },
     "extraction_confidence": { // numeric trust score; consumed by state assert-preflight-semantic-quality
       "score": 0.0,            // 0.0 (none) → 0.3 (text-leg short stand-ins) → 0.6 (text-leg with long tokens) → 0.8 (FTS rescue) → 1.0 (diff or plan)
       "band": "none" | "low" | "medium" | "high",
@@ -152,6 +156,17 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
       "reason": "..."
     }
   },
+  "hyperedges_matched": [     // Option A: graphify hyperedges intersecting topic.symbols
+    {
+      "id": "hyper_billing_country_fk_flow",
+      "label": "...",
+      "member_count": 5,        // total members in the hyperedge
+      "members": ["route_x", "service_y", ...],
+      "members_in_scope": ["service_y"],  // members in current PR scope
+      "completeness": 0.2,      // ratio in_scope/total — consumed by /devt:ship gate
+      "confidence_score": 0.85
+    }
+  ],
   "blast": {
     "effect_size": "...",
     "source": "graphify" | "grep",

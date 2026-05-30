@@ -240,6 +240,7 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 
 - `graphify.*` config (optional but recommended; auto-flips `enabled: true` when binary on PATH at first setup). → docs/GRAPHIFY.md.
 - `graphify_scan_prep` orchestrator gate in `dev-workflow` + `quick-implement` — threshold-gated MCP scan writing to `.devt/state/graph-impact.md`. → docs/GRAPHIFY.md (`graphify_scan_prep` Orchestrator Gate).
+- Hyperedge-aware preflight (Option A) — `graphify.getHyperedgesContaining()` discovers semantic multi-file groupings; `preflight-brief.json::hyperedges_matched[]` carries matches; `/devt:ship::hyperedge_completeness_scan` warns on partial coverage. → docs/GRAPHIFY.md (Hyperedge-aware preflight).
 - Universal stale-graphify eviction via `state evict-graphify` CLI — called by all 5 graphify-touching workflows at context_init top. → docs/GRAPHIFY.md (Universal Stale-Graphify Eviction).
 - Three-option AskUserQuestion for post-impl graphify refresh (`graphify.auto_refresh_post_impl ∈ {ask, true, false}`). → docs/GRAPHIFY.md (Post-Implementation Refresh Prompt).
 

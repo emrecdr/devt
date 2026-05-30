@@ -198,6 +198,27 @@ The pattern mirrors the one in `bin/devt-memory-mcp.cjs` (which adopted it earli
 
 ---
 
+## Hyperedge-aware preflight (Option A)
+
+Graphify's hyperedges are machine-discovered semantic groupings — multi-file scopes that "should change together" (e.g., route + service + repo + readme + test for a billing flow). Greenfield's graph has 3 such hyperedges, each binding 4-6 nodes with `confidence_score ≥ 0.85`.
+
+`bin/modules/graphify.cjs::getHyperedgesContaining(symbols, opts)` loads `graph.json::hyperedges[]` and returns those whose member nodes intersect any input symbol or source_file. Each result carries:
+
+| Field | Meaning |
+|---|---|
+| `id` / `label` | hyperedge identity + human-readable description |
+| `member_count` | total nodes in the hyperedge |
+| `members[]` | full node-id list |
+| `members_in_scope[]` | subset present in current input |
+| `completeness` | `members_in_scope.length / member_count` (0.0–1.0) |
+| `confidence`, `confidence_score`, `source_file`, `relation` | graphify metadata |
+
+`preflight.generate` probes hyperedges with `topic.symbols` and persists matches in `preflight-brief.json::hyperedges_matched[]`. `/devt:ship::hyperedge_completeness_scan` consumes that array — when any hyperedge has `completeness < 1.0`, AskUserQuestion surfaces the partial coverage so the user can decide: expand scope, defer the missing pieces, or accept partial coverage. Capability-probe style — fails open when graphify is disabled or graph has no hyperedges.
+
+The intent: catch the "you fixed code, forgot the readme/test/migration" failure mode automatically. Greenfield calibration #11 evidence: PR #376's task matched 3 hyperedges with 83% / 50% / 20% completeness — the 20% (1 of 5 members) case would have caught "you fixed the service but forgot the route + repo + event + audit_mapper".
+
+---
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP; scope_hint contract
