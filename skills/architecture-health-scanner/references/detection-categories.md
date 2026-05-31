@@ -114,6 +114,27 @@ Generic taxonomy of architecture scanner findings. Each category describes what 
 
 **Investigation**: API responses should return DTOs, never raw database models. Internal integer IDs should not appear in API responses (use UUIDs or other external identifiers). Check that response models explicitly define their fields rather than inheriting all model fields.
 
+## Canonical Entity Drift
+
+**What**: Models or DTOs reference a domain concept (country, currency, language, calling-settings, etc.) without being structurally connected to its canonical entity. Six sub-categories detected by `arch-scan.py`:
+
+- **CANONICAL-MISSING-FK** (high) — field name signals a known concept (e.g. `billing_country`, `country_code`), type is bare `str`/`int`, no `Field(..., foreign_key=...)` declared.
+- **CANONICAL-WRONG-OWNER** (critical) — entity has FK to a class listed in `forbid_owners` (e.g. nettie `calling_settings` attached to `User` when owner must be `Client`).
+- **CANONICAL-OWNERSHIP-MISSING** (high) — registry says `must_belong_to: X` but class has no FK to X AND Graphify shows file doesn't import X.
+- **CANONICAL-ENTITY-MISSING** (low) — trigger fires but registry says `entity_status: MISSING` (no canonical entity exists yet, e.g. Currency, Language).
+- **CANONICAL-WIRING-ORPHAN** (medium) — non-domain file has FK to canonical entity in AST but graph shows no import edge. Typo / dead scaffold / dynamic load.
+- **CANONICAL-DUPLICATE-ENTITY** (medium) — file defines a class with the same name as a canonical entity outside its canonical home (echo / shadow anti-pattern).
+
+**Typical severity**: Low to Critical depending on sub-category.
+
+**Investigation**: Read `.devt/rules/canonical-entities.yaml` to understand which concepts are registered and what their canonical entities are. For HIGH/CRITICAL findings on DTOs and events: many are *intentional* string-typed transport fields (ISO codes from/to API) — those belong in the baseline. For domain models: bare `str` country fields ARE bugs (this was the root cause of PR #376). The fix is to add an FK column and an ISO ↔ FK resolver in the service.
+
+For `CANONICAL-WRONG-OWNER`: this catches actual misrouted relationships (e.g. settings attached to the wrong owner). Always a true positive worth investigating.
+
+For `CANONICAL-ENTITY-MISSING` (LOW): not a bug, just a question — should the project create the Currency/Language entity, or accept string-only? Move to a deferred decision doc, don't fix in PR.
+
+See `docs/CANONICAL-ENTITY-DRIFT.md` for full registry schema and detection logic.
+
 ## Convention Drift
 
 **What**: Code that uses outdated patterns, deprecated APIs, or legacy conventions when the project has established newer standards. Detected by comparing code against `.devt/rules/coding-standards.md` and `.devt/rules/patterns/common-smells.md`.
