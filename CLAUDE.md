@@ -109,10 +109,10 @@ node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4
 node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
-node bin/devt-tools.cjs models get <profile>
-node bin/devt-tools.cjs models resolve <profile> # Get with aliases resolved to model IDs
-node bin/devt-tools.cjs models list # List available profiles
-node bin/devt-tools.cjs models table <profile> # Formatted table output
+node bin/devt-tools.cjs models get [profile]     # Default: balanced. Profiles: quality / balanced / budget / inherit
+node bin/devt-tools.cjs models resolve [profile] # Aliases resolved to model IDs (opus → claude-opus-4-6 etc.)
+node bin/devt-tools.cjs models list              # List 4 available profiles
+node bin/devt-tools.cjs models table [profile]   # Per-agent assignments — see README.md::Model profiles for the full table
 node bin/devt-tools.cjs setup --template <name> [--mode create|update|reinit] [--detect]
 node bin/devt-tools.cjs semantic sync
 node bin/devt-tools.cjs semantic query <search terms>

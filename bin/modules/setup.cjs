@@ -250,7 +250,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
 
   // Create or update .devt/config.json
   const defaultConfig = {
-    model_profile: "quality",
+    model_profile: "balanced",
     git: {
       provider: null,
       workspace: null,

@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-06-01
+
+**Default model_profile changed from `quality` to `balanced` + Model profiles documentation.** Two coordinated changes: the hardcoded default tier shifts to `balanced` (protects token budget out of the box while keeping the 5 strategic agents — architect, verifier, debugger, code-reviewer, programmer — on opus), and the previously-undocumented model_profile system gets a full README section explaining the four profiles, their per-agent assignments, and the override mechanism. Smoke: **768 → 769 passed**, **0 failed** (+1 gate R1 locking the new default).
+
+### Changed
+
+- **Default `model_profile`: `quality` → `balanced`.** Affects (1) project-init scaffolding (`bin/modules/setup.cjs`) so new `.devt/config.json` files write `balanced`; (2) merged-config default (`bin/modules/config.cjs`) so existing projects without an explicit `model_profile` key now resolve to `balanced` instead of `quality`; (3) `models get` / `models resolve` / `models table` CLI defaults (`bin/modules/model-profiles.cjs`) so unspecified-profile invocations show balanced assignments; (4) docstring (`bin/modules/model-profiles.cjs:6`). Existing projects with explicit `"model_profile": "quality"` in their config are unaffected — the override mechanism takes precedence over the new default. **Impact:** ~50-60% token cost reduction vs `quality` for projects that never explicitly chose; 5 synthesis/exploration agents (tester, docs-writer, retro, curator, researcher) drop from opus to sonnet. The 5 strategic agents (architect, verifier, debugger, code-reviewer, programmer) remain opus. Projects that prefer `quality` should set it explicitly.
+
+### Added
+
+- **`README.md::Model profiles` section** — closes the documentation gap surfaced by user feedback: the four profiles (`quality` / `balanced` / `budget` / `inherit`) and their per-agent assignments were only discoverable via `model-profiles.cjs:5` docstring. New section includes (a) the full 10-agent × 4-profile assignment table, (b) one-sentence character summary per profile, (c) inspection + override CLI reference, (d) `model_overrides` schema with valid agent + alias keys.
+- **CLAUDE.md `models` CLI block** — updated to surface `balanced` as the default + cross-reference the README section for the full assignment table.
+- **Smoke gate R1** — live fixture asserts `config get model_profile` resolves to `balanced` AND `models get` returns balanced assignments (`programmer: opus, tester: sonnet`). Locks the default so future refactors of config/setup/model-profiles can't silently regress.
+
+### Fixed
+
+- N/A — pure default + docs release.
+
+### North-star alignment
+
+- **#3 token efficiency**: new projects no longer pay the `quality` premium by accident; the 50% reduction is automatic and reversible by one config line.
+- **#2 code quality**: protects judgment-critical paths (5 strategic agents stay opus) while delegating execution/synthesis to sonnet — sensible tradeoff for routine work.
+
 ## [0.69.0] - 2026-05-30
 
 **Greenfield calibration #11 closure + Option A hyperedge-aware preflight.** Seven items across three architectural categories: extractor consistency (H4-v2 closes a multi-channel filter leak; H4.1-v2 closes a silent heading-regex bypass), state cleanup completeness (H1-v3 extends cutoff to pattern_allowed bucket; H2-v3 backfills history from trace), workflow plumbing (L1-v2 orchestrator-side per-lane cache suppression for prose-only lanes; G4-v2 per-symbol provenance ledger), and the v0.69 marquee feature: Option A — hyperedge-aware preflight that lifts graphify's machine-discovered semantic groupings into the symbol channel, plus a /devt:ship completeness gate that warns when a PR touches some-but-not-all members of a hyperedge. Smoke: **761 → 768 passed**, **0 failed** (+7 gates Q1-Q7).

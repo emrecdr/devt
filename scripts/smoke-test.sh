@@ -9757,6 +9757,20 @@ else
   fail "Q7: Option A plumbing incomplete (fn=$Q7_HYPER_FN ship=$Q7_SHIP_STEP preflight=$Q7_PREFLIGHT_WIRE)"
 fi
 
+# R1: default model_profile is "balanced" (changed from "quality"). Locks the
+# default so a future refactor of config.cjs/setup.cjs/model-profiles.cjs can't
+# silently regress to "quality" or some other tier. Live check — instantiate
+# a fresh config from defaults, verify model_profile resolves to "balanced".
+R1_TMP=$(mktemp -d)
+R1_OUT=$(cd "$R1_TMP" && node "$CLI" config get model_profile 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.value === 'balanced' ? '1' : '0');}catch(e){console.log('err');}})")
+R1_PROFILE_DEFAULT=$(cd "$R1_TMP" && node "$CLI" models get 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.programmer==='opus' && j.tester==='sonnet' ? '1':'0');}catch(e){console.log('err');}})")
+if [ "${R1_OUT:-0}" = "1" ] && [ "${R1_PROFILE_DEFAULT:-0}" = "1" ]; then
+  pass "R1: default model_profile is 'balanced' (config.cjs + models CLI both resolve correctly)"
+else
+  fail "R1: default model_profile regressed (config_get=$R1_OUT models_default=$R1_PROFILE_DEFAULT)"
+fi
+rm -rf "$R1_TMP"
+
 echo
 echo "== Dispatch envelope compile gate =="
 

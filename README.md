@@ -161,7 +161,7 @@ Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/co
 
 ```json
 {
-  "model_profile": "quality",
+  "model_profile": "balanced",
   "memory": { "preflight_mode": "block" },
   "graphify": { "enabled": true },
   "scope_mode": "surgical",
@@ -171,7 +171,7 @@ Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/co
 
 | Key | What it controls | Default |
 |---|---|---|
-| `model_profile` | Per-agent model tier — `quality` / `balanced` / `budget` / `inherit` | `quality` |
+| `model_profile` | Per-agent model tier — `quality` / `balanced` / `budget` / `inherit` (see [Model profiles](#model-profiles) for per-agent assignments) | `balanced` |
 | `memory.preflight_mode` | Pre-flight guard strictness — `off` / `warn` / `block` | `block` |
 | `graphify.enabled` | Enable AST-anchored code search | `false` (auto-set to `true` if `graphify` is on PATH at first setup) |
 | `scope_mode` | How agents handle unrelated findings — `surgical` (ask first) / `boyscout` (small mechanical fixes ok) | `surgical` |
@@ -377,7 +377,7 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 
 ```json
 {
-  "model_profile": "quality",
+  "model_profile": "balanced",
   "model_overrides": { "tester": "opus" },
   "git": {
     "provider": "github", "workspace": "my-team", "slug": "my-repo",
@@ -402,7 +402,7 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 
 | Key | Values | Default |
 |---|---|---|
-| `model_profile` | `quality` / `balanced` / `budget` / `inherit` | `quality` |
+| `model_profile` | `quality` / `balanced` / `budget` / `inherit` (see [Model profiles](#model-profiles)) | `balanced` |
 | `model_overrides` | Per-agent model tier (opus / sonnet / haiku / inherit) | from `model_profile` |
 | `git.provider` | `github` / `gitlab` / `bitbucket` | auto-detect from remote |
 | `git.workspace` / `git.slug` | Repo identifiers (used by `/devt:ship`) | auto-detect |
@@ -451,6 +451,59 @@ The setting is **declarative** — no enforcement code reads it. Agents self-reg
 | `prompt-guard.sh` | – | – | ✓ |
 
 Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`. Disable the universal hook trace (advanced): `DEVT_HOOK_TRACE=0`.
+
+---
+
+## Model profiles
+
+`model_profile` picks one of four per-agent model assignments. Set in `.devt/config.json`:
+
+```json
+{ "model_profile": "balanced" }
+```
+
+The four profiles and what each agent gets:
+
+| Agent | `quality` | `balanced` (default) | `budget` | `inherit` |
+|---|---|---|---|---|
+| **architect** | opus | opus | sonnet | inherit session model |
+| **verifier** | opus | opus | sonnet | inherit session model |
+| **debugger** | opus | opus | sonnet | inherit session model |
+| **code-reviewer** | opus | opus | sonnet | inherit session model |
+| **programmer** | opus | opus | sonnet | inherit session model |
+| tester | opus | sonnet | sonnet | inherit session model |
+| docs-writer | opus | sonnet | haiku | inherit session model |
+| researcher | opus | sonnet | haiku | inherit session model |
+| retro | opus | sonnet | haiku | inherit session model |
+| curator | opus | sonnet | haiku | inherit session model |
+
+**`balanced` (default)** — keeps the 5 strategic agents (architect, verifier, debugger, code-reviewer, programmer) on opus while downgrading the 5 synthesis/exploration agents to sonnet. ~50-60% of `quality`'s token cost; protects judgment-critical paths.
+
+**`quality`** — all 10 agents on opus. Highest cost, highest reasoning depth. Use for production codebases, high-stakes reviews, complex debugging.
+
+**`budget`** — sonnet for strategic agents, haiku for synthesis agents. ~15-20% of `quality`'s cost. Use for prototypes, exploratory work, throw-away branches.
+
+**`inherit`** — every agent inherits whatever model your CC session is using. Useful when you've manually picked a model via `/model` and don't want devt to override per-agent.
+
+### Inspecting + overriding
+
+```bash
+node bin/devt-tools.cjs models list                    # All available profiles
+node bin/devt-tools.cjs models table balanced          # Per-agent table for a specific profile
+node bin/devt-tools.cjs models resolve balanced        # Resolved Anthropic model IDs (after alias map)
+node bin/devt-tools.cjs config set model_profile=quality   # Switch profiles
+```
+
+Override a single agent without changing the profile via `model_overrides`:
+
+```json
+{
+  "model_profile": "balanced",
+  "model_overrides": { "curator": "opus" }
+}
+```
+
+Valid agent keys: `programmer`, `tester`, `code-reviewer`, `docs-writer`, `architect`, `retro`, `curator`, `debugger`, `verifier`, `researcher`. Valid model aliases: `opus`, `sonnet`, `haiku`, `inherit`.
 
 ---
 

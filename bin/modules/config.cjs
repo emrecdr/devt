@@ -18,7 +18,7 @@ const { atomicWriteJsonSync } = require("./io.cjs");
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const DEFAULTS = {
-  model_profile: "quality",
+  model_profile: "balanced",
   scope_mode: "surgical",
   // L1 — dispatch hygiene mode for the PreToolUse:Agent hook
   // (hooks/dispatch-hygiene-guard.sh). Controls behavior when a raw `devt:*`

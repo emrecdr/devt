@@ -3,7 +3,7 @@
 /**
  * Model profiles — maps agent types to model tiers.
  *
- * Profiles: quality (default), balanced, budget, inherit
+ * Profiles: quality, balanced (default), budget, inherit
  * Per-agent overrides via .devt/config.json "model_overrides" key.
  */
 
@@ -134,11 +134,11 @@ function formatAsTable(agentModelMap) {
 function run(subcommand, args) {
   switch (subcommand) {
     case "get": {
-      const profileName = args[0] || "quality";
+      const profileName = args[0] || "balanced";
       return getModels(profileName);
     }
     case "resolve": {
-      const profileName = args[0] || "quality";
+      const profileName = args[0] || "balanced";
       return resolveAll(getModels(profileName));
     }
     case "list":
@@ -147,7 +147,7 @@ function run(subcommand, args) {
         agents: Object.keys(PROFILES.balanced),
       };
     case "table": {
-      const profileName = args[0] || "quality";
+      const profileName = args[0] || "balanced";
       return { table: formatAsTable(getModels(profileName)) };
     }
     default:
