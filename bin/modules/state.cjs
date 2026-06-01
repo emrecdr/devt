@@ -2382,9 +2382,18 @@ function assertPreflightSemanticQuality(args) {
 //
 // This gate is the post-hoc mitigation: at workflow finalize/present_findings
 // time, scan dispatch-warnings.jsonl for `source:"raw_dispatch"` entries
-// with ts >= first_created_at (this session's window) and BLOCK the workflow
-// if any are present. Same pattern as assert-knowledge-candidates-tagged
-// (gate-cluster sibling that also runs at finalize).
+// with ts >= workflow.yaml::created_at (current WORKFLOW's window) and BLOCK
+// the workflow if any are present. Same pattern as
+// assert-knowledge-candidates-tagged (gate-cluster sibling at finalize).
+//
+// S1-v2 (greenfield calibration #13): scope corrected from `first_created_at`
+// (immutable session anchor) to `created_at` (current workflow's start, rotates
+// on every init * and workflow_type transition). Original session-scope was
+// too aggressive for pattern-C open-ended sessions — greenfield's evidence:
+// 31 historical raw dispatches across 18 prior workflows blocked a CURRENT
+// workflow whose 2 dispatches were both properly enveloped. The right scope
+// is per-workflow: each new init * gives a clean window so legitimate
+// per-workflow review remains independent of historical accumulation.
 //
 // Setting `dispatch_hygiene_mode:"warn"` in .devt/config.json opts out — the
 // gate respects the same config knob the PreToolUse hook reads. Useful for
@@ -2409,22 +2418,26 @@ function assertNoRawDispatchesThisSession() {
     }
   } catch { /* keep default 'block' on any failure */ }
 
-  // Read session anchor — only count dispatches from THIS session, not history.
+  // Read workflow anchor — only count dispatches from the CURRENT workflow.
+  // S1-v2: `created_at` (rotates on init *) not `first_created_at` (immutable
+  // session anchor). Workflow-scope matches the gate's intent: each new
+  // workflow gets a clean window, so a workflow's pass/fail reflects ONLY
+  // its own dispatch hygiene, not accumulated history across the session.
   let anchorMs = 0;
   try {
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const wfPath = path.join(dir, "workflow.yaml");
     if (fs.existsSync(wfPath)) {
       const yaml = fs.readFileSync(wfPath, "utf8");
-      const m = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+      const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
       if (m) {
         const parsed = new Date(m[1].trim()).getTime();
         if (Number.isFinite(parsed)) anchorMs = parsed;
       }
     }
-  } catch { /* no anchor — gate auto-passes since we can't bound the session window */ }
+  } catch { /* no anchor — gate auto-passes since we can't bound the workflow window */ }
   if (anchorMs === 0) {
-    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::first_created_at absent — session window undefined; gate inapplicable" };
+    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
   }
 
   const body = fs.readFileSync(warningsPath, "utf8");
@@ -2441,7 +2454,7 @@ function assertNoRawDispatchesThisSession() {
   }
   const rawDispatchCount = agents.length;
   if (rawDispatchCount === 0) {
-    return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this session" };
+    return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this workflow's window" };
   }
   if (mode === "warn" || mode === "off") {
     return {
@@ -2450,7 +2463,7 @@ function assertNoRawDispatchesThisSession() {
       raw_dispatch_count: rawDispatchCount,
       agents,
       mode,
-      reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this session (${agents.join(", ")}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
+      reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this workflow (${agents.join(", ")}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
     };
   }
   return {
@@ -2459,10 +2472,11 @@ function assertNoRawDispatchesThisSession() {
     agents,
     mode,
     reason:
-      `${rawDispatchCount} raw devt:* dispatch(es) detected this session: ${agents.join(", ")}. ` +
+      `${rawDispatchCount} raw devt:* dispatch(es) detected in THIS workflow: ${agents.join(", ")}. ` +
       `These bypassed the workflow contract (no <scope_trust>/<scope_hint>/<memory_signal> blocks injected) — agents fell back to grep-quality discovery without graphify-anchored impact maps. ` +
       `Remediation: re-dispatch the agents via the workflow path (/devt:review, /devt:workflow, /devt:debug) which injects the canonical context envelope. ` +
-      `If raw dispatch was intentional (ad-hoc orchestration), set 'dispatch_hygiene_mode: "warn"' in .devt/config.json to opt the gate out.`,
+      `If raw dispatch was intentional (ad-hoc orchestration), set 'dispatch_hygiene_mode: "warn"' in .devt/config.json to opt the gate out. ` +
+      `Note: scope is THIS workflow only (since workflow.yaml::created_at) — prior workflows in the same session are excluded.`,
   };
 }
 

@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.69.4] - 2026-06-01
+
+**Greenfield calibration #13 — S1 scope correction (workflow vs session).** Closes the false-positive failure mode greenfield calibration #13 surfaced 12 hours after v0.69.3 shipped: the `assert-no-raw-dispatches-this-session` gate was scoping by `workflow.yaml::first_created_at` (immutable session anchor — set on the first workflow of a session, never updated), so a clean current workflow blocked because 31 raw dispatches lived in `dispatch-warnings.jsonl` from 18 prior workflows across the same multi-day session. Greenfield direct evidence: `first_created_at: "2026-05-28T22:33:05Z"` (session start, 4 days ago) → 31 raw_dispatch matches; `created_at: "2026-06-01T21:01:05Z"` (current workflow start) → 0 matches. Each workflow gets its own hygiene budget; dispatches in prior workflows are not the current workflow's problem. Smoke: **769 → 769 passed**, **1 pre-existing failure** (opus-4-8-upgrade-report.md transient planning doc — unchanged from v0.69.2).
+
+### Changed
+
+- **`assertNoRawDispatchesThisSession` scope anchor switched from `first_created_at` to `created_at`** (`bin/modules/state.cjs`). The gate now counts raw dispatches occurring in the CURRENT WORKFLOW's window — exactly the window the orchestrator is finalizing. Before: a multi-day session that accumulated raw dispatches across many workflows would block every subsequent finalize regardless of that workflow's actual hygiene. After: each workflow is evaluated against its own dispatches only; prior-workflow dispatches stay attributable in the historical record but don't gate clean finalizes.
+- **Smoke gate S1 fixture extended to test the new scope semantics** — fixture now sets BOTH `first_created_at` (session: 24h ago) AND `created_at` (workflow: 1h ago) in test workflow.yaml, AND includes a raw_dispatch entry between the two anchors that the gate MUST ignore. Confirms the gate uses workflow-scope, not session-scope.
+
+### Captured for v0.70 (calibration #13 follow-throughs)
+
+- **DEF-053 D19** — Sibling-test glob fallback before FTS in reuse-candidate search. Greenfield F#1: reuse search by stem (e.g. `ssrf_v2` → `ssrf_v2_test.go`) misses due to FTS keyword tokenization; add basename-glob first-pass, then FTS.
+- **DEF-054 D20** — God-node noise suppression for leaf-change tasks. Greenfield F#2: surface god-node warnings only when impl-summary changes touch the god-node itself; otherwise demote to brief.json::nullable_warnings.
+- **DEF-055 D21** — Skip tester when impl-summary contains only test files. Greenfield F#5: when programmer wrote only `*_test.*` files, tester re-runs the same tests. Add fast-skip in dev-workflow tester gate when impl-summary.files all match test patterns.
+
+### Direct validation of greenfield's calibration #13 findings
+
+- **Finding #4 (S1 gate scope bug)**: confirmed exactly via direct filesystem inspection of greenfield's `.devt/state/workflow.yaml` + `dispatch-warnings.jsonl`. Old scope counted 31 across 18 prior workflows; new scope counts 0 in current workflow window (which had only properly-enveloped dispatches via `/devt:review`). Fix shipped this release.
+- **Finding #3 (hyperedges still dark)**: same root cause as v0.69.3 — greenfield's graphify skill 0.7.10 vs binary 0.8.24 mismatch. Greenfield-side fix: `graphify install`. Already tracked as DEF-052 D18.
+- **Findings #1, #2, #5**: legitimate calibration signal but not regressions; captured as DEF-053/D19, DEF-054/D20, DEF-055/D21 for v0.70 scope.
+
+### North-star alignment
+
+- **#1 coordination**: removes the v0.69.3 over-correction (treating prior-workflow dispatches as current-workflow violations) that would have eroded trust in the dispatch-hygiene gate. The gate now matches the unit of orchestration (one workflow = one hygiene check).
+- **#3 code quality**: validates the v0.68.2 self-healing `workflow_id_history[]` work — the session has a stable identity (`first_created_at`) AND each workflow has its own boundary (`created_at`); both are load-bearing and each gates the right thing.
+
 ## [0.69.3] - 2026-06-01
 
 **Greenfield calibration #12 — post-hoc dispatch-hygiene enforcement (S1).** Closes the systemic gap calibration #12 surfaced: Claude Code's PreToolUse `decision:"deny"` is **not enforced for the Task tool**, so the `dispatch-hygiene-guard.sh` hook can detect raw devt:* dispatches and write `{decision:"deny"}` but the orchestrator proceeds anyway. Greenfield calibration #12 evidence: 4 hook invocations, 4 raw_dispatch entries written to dispatch-warnings.jsonl, 4 sub-agents ran without `<scope_trust>`/`<scope_hint>`/`<memory_signal>` envelope — fell back to grep-quality discovery. New post-hoc enforcement gate scans dispatch-warnings.jsonl at workflow finalize/present_findings time and BLOCKS if any in-session raw dispatches occurred. The orchestrator can rationalize past the pre-dispatch advisory but cannot reach finalize with raw dispatches in their session. Smoke: **769 → 770 passed**, **1 pre-existing failure** (opus-4-8-upgrade-report.md transient planning doc — unchanged from v0.69.2).
