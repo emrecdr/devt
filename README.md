@@ -418,6 +418,7 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 | `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
 | `arch_scanner.report_dir` | Where scan output lands | `docs/reports` |
 | `scope_mode` | `surgical` / `boyscout` — see below | `surgical` |
+| `dispatch_hygiene_mode` | `warn` / `block` — controls `hooks/dispatch-hygiene-guard.sh` behavior when an orchestrator raw-dispatches a `devt:*` subagent without the canonical context envelope (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`). `warn` (default) logs to `.devt/state/dispatch-warnings.jsonl` as `source: "raw_dispatch"`; `block` prevents the dispatch entirely. Useful when CI must enforce workflow-routed dispatches. | `warn` |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
 ### `scope_mode` — surgical (default) vs boy-scout
@@ -561,6 +562,8 @@ The loop is fully closed — lessons flow from completed work back into future a
 - **Triage mode** — interactive review of findings via AskUserQuestion: fix now, defer (`/devt:defer`), or accept-as-baseline
 
 The python-fastapi reference template ships an `arch-scan.py` that detects 6 layer-violation patterns (LAYER-IMPORT-DOMAIN, LAYER-IMPORT-API, DB-IN-APPLICATION, INLINE-IMPORT, GOD-FILE, …). Other templates can wire any scanner — output must be JSON with a `findings` array.
+
+**Auto-discovery** — when `arch_scanner.command` is unset but a conventional scanner exists at `.devt/rules/arch-scan.{py,sh}`, `tests/architecture/arch-scan.py`, or `scripts/arch-scan.py`, the workflow surfaces it via AskUserQuestion before falling back to manual analysis. Three branches: auto-wire (writes a sensible default `arch_scanner.command` to `.devt/config.json`), show-the-command (prints the exact `config set` invocation for external execution), or skip. Mirrors the `graphify` capability-probe pattern — zero config needed when the scanner follows the convention.
 
 ### Quality gates
 

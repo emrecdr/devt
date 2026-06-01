@@ -236,6 +236,10 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 - Pinned rubric versions (`DEFAULTS.rubrics`, `<workflow_type>.v<N>.md` naming, project-local rubric escape hatch). → docs/GRADER.md (Pinned Rubric Versions).
 - Code-review grader (5 axes, code-reviewer re-dispatched on `needs_revision`). → docs/GRADER.md (Code-Review Grader).
 
+### Architecture health
+
+- `arch_scanner.command` config wires a project-supplied scanner into `/devt:arch-health`. When unset, the workflow probes `.devt/rules/arch-scan.{py,sh}` + `tests/architecture/arch-scan.py` + `scripts/arch-scan.py` and AskUserQuestion offers auto-wire / show-command / skip. python-fastapi template ships the canonical scanner at the convention path.
+
 ### Graphify
 
 - `graphify.*` config (optional but recommended; auto-flips `enabled: true` when binary on PATH at first setup). → docs/GRAPHIFY.md.

@@ -444,7 +444,7 @@ const PERSISTENT_ARTIFACTS = [
   "scratchpad.md", "baseline-gates.md",
   "debug-context.md", "debug-investigation.md",
   "code-review-input.md", "session-report.md", "autoskill-proposals.md",
-  "arch-baseline.json", "arch-triage.json", "scanner-output.txt", "scan-delta.md",
+  "arch-baseline.json", "arch-triage.json", "arch-scan-report.md", "scanner-output.txt", "scan-delta.md",
 ];
 
 const VALID_WORKFLOW_TYPES = new Set([
@@ -1047,7 +1047,7 @@ const STATE_FILE_CONTRACT = {
     "lessons.yaml",             // retro hand-off draft
     "debug-context.md", "debug-investigation.md", "debug-summary.md",
     "arch-review.md", "arch-health-scan.md", "arch-baseline.json",
-    "arch-triage.json", "scanner-output.txt",
+    "arch-triage.json", "arch-scan-report.md", "scanner-output.txt",
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
     "claude-mem-harvest.md", "claude-mem-skipped.txt", "last-curator-run.txt",

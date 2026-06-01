@@ -15,6 +15,10 @@ Hooks use a Node.js runner (`hooks/run-hook.js`) with profile support:
 | `DEVT_HOOK_PROFILE` | `standard` | Selects the hook set — `minimal`, `standard`, or `full` |
 | `DEVT_DISABLED_HOOKS` | (unset) | Comma-separated list of hook scripts to disable regardless of profile (e.g. `bash-guard.sh,dispatch-scope-guard.sh`) |
 | `DEVT_HOOK_TRACE` | `1` | Set to `0` to disable the universal invocation trace |
+| `DEVT_VALIDATE_SHADOW` | `1` | Set to `0` to disable the shadow-mode state validation that runs on every `state update` and persists `validation_status` to `workflow.yaml` |
+| `DEVT_VALIDATE_ENFORCE` | `0` | Set to `1` to make `state update` HARD-fail on validation mismatches (default: shadow-only — log + persist warning but don't block) |
+| `DEVT_AUTO_INDEX_DEBOUNCE_SEC` | `30` | Debounce window for the memory-auto-index PostToolUse hook. Edits to `.devt/memory/*.md` within the window are coalesced into one FTS5 rebuild |
+| `DEVT_MCP_ALLOW_WRITES` | (unset) | Set to `1` to enable write-tools on the memory MCP server (`memory_upsert_doc` etc.). Default disabled — read-only MCP surface unless explicitly opted-in per project |
 
 The `run-hook.cmd` polyglot delegates to `run-hook.js` for cross-platform support.
 

@@ -84,10 +84,33 @@ node -e "
 "
 ```
 
+**D1 (greenfield calibration #11) — convention probe when NO_SCANNER.** Before falling through to manual analysis, probe conventional scanner locations and surface any discovery so the user can wire it. Mirrors the `graphify.probeBinary` capability-probe pattern. Probe order: `.devt/rules/arch-scan.py` (the project-scoped devt convention used by python-fastapi template + greenfield), `.devt/rules/arch-scan.sh`, `tests/architecture/arch-scan.py`, `scripts/arch-scan.py`.
+
+```bash
+if [ "$(echo "$SCANNER_RESULT" | head -1)" = "NO_SCANNER" ]; then
+  for candidate in .devt/rules/arch-scan.py .devt/rules/arch-scan.sh tests/architecture/arch-scan.py scripts/arch-scan.py; do
+    if [ -f "$candidate" ]; then
+      DETECTED_SCANNER="$candidate"
+      break
+    fi
+  done
+fi
+```
+
+If `$DETECTED_SCANNER` is non-empty, AskUserQuestion before continuing:
+
+- **Question**: "Found a project scanner at `$DETECTED_SCANNER` but it's not wired into `.devt/config.json::arch_scanner.command`. Wire it now so future arch-health scans use it?"
+- **Options**:
+  - **Wire automatically** — runs `node bin/devt-tools.cjs config set arch_scanner.command="python3 $DETECTED_SCANNER --baseline .devt/state/arch-baseline.json --report .devt/state/arch-scan-report.md --json --fail-on critical,high"`, then re-reads config and continues with the new scanner.
+  - **Show me the command** — prints the exact `config set` invocation so the user can run it externally, then continues with manual analysis for THIS run.
+  - **Skip — manual only** — continues with the manual-analysis path; no config change.
+
+Recovery for first-run baseline (only needed when wiring): the scanner expects `--baseline .devt/state/arch-baseline.json` to exist. If it doesn't, the user should run `python3 $DETECTED_SCANNER --write-baseline .devt/state/arch-baseline.json` once to capture current findings as "accepted floor". The wire-automatically branch handles this by writing the baseline if absent before the next scan.
+
 Record the result:
 
-- If a scanner command is configured: it will be run in the next step
-- If no scanner is configured: the architect agent will perform a manual analysis
+- If a scanner command is configured (originally or via auto-wire): it will be run in the next step
+- If no scanner is configured AND no candidate detected (or user chose Skip): the architect agent will perform a manual analysis
 
 Also check for existing baseline and triage data:
 

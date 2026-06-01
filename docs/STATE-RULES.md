@@ -100,7 +100,8 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `preflight-brief.md` | preflight.cjs::generate (human-readable Brief; sidecar `.json` is the machine surface) |
 | `arch-baseline.json` | arch-health-scan |
 | `arch-triage.json` | arch-health-scan |
-| `scanner-output.txt` | arch-health-scan |
+| `arch-scan-report.md` | arch-health-scan (Markdown report from project scanner, e.g. `.devt/rules/arch-scan.py --report`) |
+| `scanner-output.txt` | arch-health-scan (legacy stdout capture; new projects use `arch-scan-report.md` via the convention probe) |
 
 ---
 

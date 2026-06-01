@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.69.2] - 2026-06-01
+
+**Doc-gap closure + deferred-queue housekeeping.** Three coordinated changes — arch-scan auto-discovery in `/devt:arch-health` (probe + AskUserQuestion when `arch_scanner.command` is unset and a conventional scanner exists at `.devt/rules/arch-scan.{py,sh}`), three additional env vars added to the HOOKS.md reference table, `dispatch_hygiene_mode` config key documented in README, plus 4 stale DEF items closed and 10 new D1-D10 items captured to the deferred queue for v0.69.2+v0.70 scope. Smoke: **769 passed, 0 failed** (after state contract widened for `arch-scan-report.md`).
+
+### Added
+
+- **`/devt:arch-health` convention probe** — when `arch_scanner.command` is unset, the workflow now probes `.devt/rules/arch-scan.py`, `.devt/rules/arch-scan.sh`, `tests/architecture/arch-scan.py`, `scripts/arch-scan.py` (in order) and AskUserQuestion offers three paths: auto-wire (writes a sensible default command to `.devt/config.json`), show-the-command (prints the `config set` invocation for external execution), or skip (continues with manual architect analysis). Mirrors the `graphify.probeBinary` capability-probe pattern. Field signal: greenfield-api ships a 681-line `arch-scan.py` at the convention path, but devt's workflow had no way to surface it without explicit config.
+- **`arch-scan-report.md` added to STATE_FILE_CONTRACT** — recognizes the canonical scanner output path under `.devt/state/`. Pairs with the convention probe above so projects following the `.devt/rules/arch-scan.{py,sh}` convention write their report to a contract-recognized location without tripping the smoke-gate "non-contract state filename" check.
+- **`docs/HOOKS.md` env-var table extended** — adds 4 previously-undocumented runtime knobs: `DEVT_VALIDATE_SHADOW` (shadow-mode state validation kill switch), `DEVT_VALIDATE_ENFORCE` (hard-fail mode for state mismatches), `DEVT_AUTO_INDEX_DEBOUNCE_SEC` (memory FTS5 rebuild debounce window), `DEVT_MCP_ALLOW_WRITES` (opt-in write surface on the memory MCP server). Closes a real discoverability gap — these vars existed only as inline comments in code/hooks before.
+- **`README.md::Basic configuration` table now documents `dispatch_hygiene_mode`** — the previously-undocumented config key read by `hooks/dispatch-hygiene-guard.sh`. Default `warn`; `block` mode prevents raw-dispatched subagent Task() calls entirely.
+
+### Changed
+
+- **Deferred-queue housekeeping** — 4 stale items closed as superseded:
+  - DEF-007 (v0.40 Path A bash exfil patterns) — SOAK criteria never met; bash-guard maturity in v0.65+ covered the concern
+  - DEF-010 (token-report-regression CI promotion) — SOAK criteria never met
+  - DEF-011 (Wave C3 expected_levels handshake) — superseded by v0.65 deterministic grader pre-verifier gate + v0.66 inlined rubric_content
+  - DEF-016 (push v0.38.1 + v0.39.0) — long since shipped
+- **10 new items captured (DEF-039 through DEF-048)** as v0.69.2 + v0.70 scope:
+  - DEF-039 D1 — arch-scan auto-discovery (shipped this release)
+  - DEF-040 D2 — dispatch_hygiene_mode docs (shipped this release)
+  - DEF-041 D3 — env-var doc additions (shipped this release)
+  - DEF-042 D4 — stale DEF triage (shipped this release)
+  - DEF-043 D5 — Snapshot-diff drift detection (Option B, v0.70)
+  - DEF-044 D6 — Rerank symbols by relevance-to-diff (v0.70)
+  - DEF-045 D7 — H9 verifier-retry repair operator (v0.70)
+  - DEF-046 D8 — INFERRED-edge verification queue (Option C, v0.70+)
+  - DEF-047 D9 — Per-init marker for ad-hoc cleanup (v0.70)
+  - DEF-048 D10 — Drill-down +1 hop retry for dynamic-dispatch nodes (v0.70)
+
+### North-star alignment
+
+- **#2 code quality**: arch-scan auto-discovery turns greenfield's existing 681-line scanner into a first-class devt capability without re-implementation; documented config + env vars close discoverability holes that cause user "WTF" debugging sessions.
+- **#4 third-party integrations**: arch-scan probe pattern is a general-purpose plug-in convention for any project-supplied scanner that follows `.devt/rules/arch-scan.{py,sh}` placement.
+
 ## [0.69.1] - 2026-06-01
 
 **Default model_profile changed from `quality` to `balanced` + Model profiles documentation.** Two coordinated changes: the hardcoded default tier shifts to `balanced` (protects token budget out of the box while keeping the 5 strategic agents — architect, verifier, debugger, code-reviewer, programmer — on opus), and the previously-undocumented model_profile system gets a full README section explaining the four profiles, their per-agent assignments, and the override mechanism. Smoke: **768 → 769 passed**, **0 failed** (+1 gate R1 locking the new default).
