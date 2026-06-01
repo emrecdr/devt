@@ -9757,6 +9757,40 @@ else
   fail "Q7: Option A plumbing incomplete (fn=$Q7_HYPER_FN ship=$Q7_SHIP_STEP preflight=$Q7_PREFLIGHT_WIRE)"
 fi
 
+# S1 (greenfield calibration #12): post-hoc enforcement gate for raw devt:*
+# agent dispatches. Hook detects them at dispatch time but CC doesn't enforce
+# PreToolUse Task-deny — gate is the post-hoc enforcement at finalize. Live
+# fixture: synthetic raw_dispatch entry with ts >= first_created_at triggers
+# gate failure with prescriptive reason.
+S1_TMP=$(mktemp -d)
+mkdir -p "$S1_TMP/.devt/state"
+ANCHOR=$(node -e "console.log(new Date(Date.now() - 60*60*1000).toISOString())")
+cat > "$S1_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR"
+workflow_type: code_review
+EOF
+TS_RECENT=$(node -e "console.log(new Date(Date.now() - 5*60*1000).toISOString())")
+TS_OLD=$(node -e "console.log(new Date(Date.now() - 10*60*60*1000).toISOString())")
+printf '{"ts":"%s","source":"raw_dispatch","agent":"devt:code-reviewer","prompt_bytes":100,"prompt_preview":"raw"}\n' "$TS_RECENT" >> "$S1_TMP/.devt/state/dispatch-warnings.jsonl"
+printf '{"ts":"%s","source":"raw_dispatch","agent":"devt:programmer","prompt_bytes":100,"prompt_preview":"raw"}\n' "$TS_RECENT" >> "$S1_TMP/.devt/state/dispatch-warnings.jsonl"
+# Old entry should NOT count (pre-anchor)
+printf '{"ts":"%s","source":"raw_dispatch","agent":"devt:debugger","prompt_bytes":100,"prompt_preview":"raw"}\n' "$TS_OLD" >> "$S1_TMP/.devt/state/dispatch-warnings.jsonl"
+# Non-raw entries should NOT count
+printf '{"ts":"%s","source":"task_output_bytes","agent":"devt:code-reviewer","output_bytes":5000}\n' "$TS_RECENT" >> "$S1_TMP/.devt/state/dispatch-warnings.jsonl"
+S1_OUT=$(cd "$S1_TMP" && node "$CLI" state assert-no-raw-dispatches-this-session 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===false && j.raw_dispatch_count===2 && j.agents.length===2 ? '1':'0');}catch(e){console.log('err');}})")
+# Opt-out: with dispatch_hygiene_mode=warn, ok:true + warn:true
+cat > "$S1_TMP/.devt/config.json" <<EOF
+{"dispatch_hygiene_mode":"warn"}
+EOF
+S1_WARN=$(cd "$S1_TMP" && node "$CLI" state assert-no-raw-dispatches-this-session 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true && j.warn===true && j.raw_dispatch_count===2 ? '1':'0');}catch(e){console.log('err');}})")
+if [ "$S1_OUT" = "1" ] && [ "$S1_WARN" = "1" ]; then
+  pass "S1: assert-no-raw-dispatches-this-session blocks 2 in-session raw entries (ignores pre-anchor + non-raw); opts out cleanly on mode=warn"
+else
+  fail "S1: gate broken (block=$S1_OUT warn=$S1_WARN)"
+fi
+rm -rf "$S1_TMP"
+
 # R1: default model_profile is "balanced" (changed from "quality"). Locks the
 # default so a future refactor of config.cjs/setup.cjs/model-profiles.cjs can't
 # silently regress to "quality" or some other tier. Live check — instantiate

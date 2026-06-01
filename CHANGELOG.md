@@ -6,6 +6,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.69.3] - 2026-06-01
+
+**Greenfield calibration #12 — post-hoc dispatch-hygiene enforcement (S1).** Closes the systemic gap calibration #12 surfaced: Claude Code's PreToolUse `decision:"deny"` is **not enforced for the Task tool**, so the `dispatch-hygiene-guard.sh` hook can detect raw devt:* dispatches and write `{decision:"deny"}` but the orchestrator proceeds anyway. Greenfield calibration #12 evidence: 4 hook invocations, 4 raw_dispatch entries written to dispatch-warnings.jsonl, 4 sub-agents ran without `<scope_trust>`/`<scope_hint>`/`<memory_signal>` envelope — fell back to grep-quality discovery. New post-hoc enforcement gate scans dispatch-warnings.jsonl at workflow finalize/present_findings time and BLOCKS if any in-session raw dispatches occurred. The orchestrator can rationalize past the pre-dispatch advisory but cannot reach finalize with raw dispatches in their session. Smoke: **769 → 770 passed**, **1 pre-existing failure** (opus-4-8-upgrade-report.md transient planning doc — unchanged from v0.69.2).
+
+### Added
+
+- **`state assert-no-raw-dispatches-this-session`** (`bin/modules/state.cjs::assertNoRawDispatchesThisSession`) — reads `.devt/state/dispatch-warnings.jsonl`, filters by `source:"raw_dispatch"` AND `ts >= workflow.yaml::first_created_at` (this session's window), returns `{ok:false, raw_dispatch_count, agents, mode, reason}` when any present. Respects `dispatch_hygiene_mode` config (mode=`block` BLOCKS, mode=`warn` returns `ok:true, warn:true` with count surfaced, mode=`off` returns `ok:true` silent). Same config knob the PreToolUse hook reads — opt-out is one-line.
+- **Gate wired into 4 workflows** at the finalize/present_findings/report cluster: `code-review.md::present_findings`, `dev-workflow.md::finalize`, `quick-implement.md::finalize`, `debug.md::report`. Runs BEFORE the existing knowledge-candidates aggregation so dispatch-hygiene violations surface first. Blocked workflows set `phase=<phase> status=BLOCKED verdict=FAILED` with prescriptive remediation message (re-dispatch via /devt:review, or set mode=warn if intentional).
+- **`docs/HOOKS.md::Dispatch-Hygiene Guard` section expanded** with "Known Claude Code limitation" callout documenting that PreToolUse Task-deny doesn't enforce, plus "Defense layer 1.5" explaining the post-hoc gate's role in the layered protection model.
+- **Smoke gate S1** — live fixture: synthetic dispatch-warnings.jsonl with 2 in-session raw_dispatch + 1 pre-anchor + 1 non-raw entries triggers gate (`raw_dispatch_count: 2`); switching `dispatch_hygiene_mode` to `warn` flips ok:true with warn:true and count surfaced.
+
+### Captured for v0.70 (calibration #12 follow-throughs)
+
+- **DEF-049 D15** — Plan-file review variant or markdown-scope branch in code-review.md. Current workflow assumes source-code scope; orchestrator silently skips graphify substeps when reviewing markdown plans.
+- **DEF-050 D16** — Per-phase artifact precondition gates. `state update phase=X` is permissive; add `state assert-phase-preconditions` so each phase verifies prior phase's required artifacts exist.
+- **DEF-051 D17** — EXECUTE THE PLAN imperative refactor. Workflow's substep 6 buried in prose; replace with concrete one-liner + bash block.
+- **DEF-052 D18** — Graphify skill-version mismatch advisory. Greenfield's `graphify 0.8.24` binary warns about `skill is from 0.7.10`; devt should surface this in `graphify.cjs::status()` so Option A's silent hyperedge gap becomes diagnosable.
+
+### Direct validation of greenfield's calibration #12 findings
+
+- **Finding #1 (Option A hyperedges silent)**: root cause is greenfield's graphify skill-vs-binary version mismatch (0.7.10 vs 0.8.24), not a devt bug. Greenfield-side fix: `graphify install`. Captured as DEF-052 D18 for devt-side advisory.
+- **Finding #2 (arch-scan-report.md asymmetric registration)**: NOT a bug — ARTIFACT_SCHEMA is intentionally Status-only (validates `## Status:` line). arch-scan-report.md correctly belongs in PERSISTENT_ARTIFACTS only.
+- **Finding #3 (doc-discipline gate failing)**: pre-existing planning doc `opus-4-8-upgrade-report.md` with version refs. Transient, will absorb into CHANGELOG when v0.70 ships.
+
+### North-star alignment
+
+- **#1 coordination**: closes the rationalize-past-the-warning failure mode that calibration #12 directly exposed; post-hoc enforcement is the only durable mitigation while CC platform Task-deny doesn't enforce.
+- **#2 code quality**: greenfield's calibration #12 had agents running on grep-quality discovery (no graphify-anchored impact maps) because raw dispatches bypassed the workflow envelope; preventing this regression at finalize forces orchestrators back to the workflow path.
+
 ## [0.69.2] - 2026-06-01
 
 **Doc-gap closure + deferred-queue housekeeping.** Three coordinated changes — arch-scan auto-discovery in `/devt:arch-health` (probe + AskUserQuestion when `arch_scanner.command` is unset and a conventional scanner exists at `.devt/rules/arch-scan.{py,sh}`), three additional env vars added to the HOOKS.md reference table, `dispatch_hygiene_mode` config key documented in README, plus 4 stale DEF items closed and 10 new D1-D10 items captured to the deferred queue for v0.69.2+v0.70 scope. Smoke: **769 passed, 0 failed** (after state contract widened for `arch-scan-report.md`).

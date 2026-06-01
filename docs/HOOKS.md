@@ -140,9 +140,13 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 **Hook.** `hooks/dispatch-hygiene-guard.sh` — PreToolUse matcher on `Task`.
 
-**Behavior.** Emits advisory `additionalContext` and appends `source: "raw_dispatch"` to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`).
+**Behavior.** Emits advisory `additionalContext` and appends `source: "raw_dispatch"` to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`). When `dispatch_hygiene_mode: "block"` (the default), the hook returns `{decision: "deny"}` for INVESTIGATIVE agents (code-reviewer, programmer, verifier, researcher, debugger, architect, tester).
 
-**Why.** Defense layer 1 of the "never raw-dispatch devt agents" contract. Layer 2 is `agents/code-reviewer.md::workflow_context_assertion` which hard-stops with `status=BLOCKED`. See `docs/AGENT-CONTRACTS.md` (Never raw-dispatch).
+**Known Claude Code limitation.** As of the CC versions tested through greenfield calibration #12, PreToolUse `decision: "deny"` is **not enforced for the Task tool** — the hook returns the deny payload correctly, but CC proceeds with the dispatch anyway. The hook's advisory still surfaces in `additionalContext` but the block is effectively a no-op for Task dispatches. Greenfield's calibration #12 evidence: 4 hook invocations, 4 raw_dispatch entries written, 4 agents ran anyway despite `decision:deny` payloads in stdout. This is a platform limitation, not a hook bug.
+
+**Defense layer 1.5 (post-hoc enforcement, greenfield calibration #12).** Because PreToolUse deny is unreliable on Task, the workflow gates `code-review.md::present_findings`, `dev-workflow.md::finalize`, `quick-implement.md::finalize`, and `debug.md::report` now also call `state assert-no-raw-dispatches-this-session` BEFORE the knowledge-candidates-tagged gate. The CLI scans `dispatch-warnings.jsonl` for `source:"raw_dispatch"` entries with `ts >= workflow.yaml::first_created_at` and BLOCKS the workflow if any are present. Set `dispatch_hygiene_mode: "warn"` in `.devt/config.json` to opt out (the gate respects the same config knob the hook reads).
+
+**Why layered.** Defense layer 1 (the hook) advises at dispatch time but can be ignored. Layer 1.5 (the post-hoc gate) enforces at finalize time and cannot be ignored — the orchestrator can rationalize past the advisory but cannot reach `present_findings` with raw dispatches in their session. Layer 2 (`agents/code-reviewer.md::workflow_context_assertion`) hard-stops the agent itself with `status=BLOCKED` when dispatched without context. See `docs/AGENT-CONTRACTS.md` (Never raw-dispatch).
 
 ---
 

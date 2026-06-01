@@ -2370,6 +2370,102 @@ function assertPreflightSemanticQuality(args) {
   };
 }
 
+// S1 (greenfield calibration #12): post-hoc enforcement gate for raw devt:*
+// agent dispatches. The PreToolUse `dispatch-hygiene-guard.sh` hook detects
+// raw dispatches correctly and returns `{decision:"deny"}` — but Claude Code
+// does NOT enforce PreToolUse deny verdicts on the Task tool in current
+// versions (verified empirically against greenfield's session: hook fired 4
+// times, 4 raw_dispatch entries written to dispatch-warnings.jsonl, but all
+// 4 sub-agents ran anyway). The hook's `mode:"block"` is functionally a
+// no-op for Task dispatches; the advisory surfaces in additionalContext but
+// the orchestrator can rationalize past it.
+//
+// This gate is the post-hoc mitigation: at workflow finalize/present_findings
+// time, scan dispatch-warnings.jsonl for `source:"raw_dispatch"` entries
+// with ts >= first_created_at (this session's window) and BLOCK the workflow
+// if any are present. Same pattern as assert-knowledge-candidates-tagged
+// (gate-cluster sibling that also runs at finalize).
+//
+// Setting `dispatch_hygiene_mode:"warn"` in .devt/config.json opts out — the
+// gate respects the same config knob the PreToolUse hook reads. Useful for
+// projects that intentionally orchestrate ad-hoc agent dispatches.
+function assertNoRawDispatchesThisSession() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
+  if (!fs.existsSync(warningsPath)) {
+    return { ok: true, raw_dispatch_count: 0, reason: "dispatch-warnings.jsonl absent — no dispatches recorded" };
+  }
+  // Honor the same config knob the PreToolUse hook reads. When mode is "warn"
+  // or "off", this gate returns ok:true with the count surfaced so consumers
+  // can choose to log it without blocking.
+  let mode = "block";
+  try {
+    const { findProjectRoot, getMergedConfig } = require("./config.cjs");
+    void findProjectRoot;
+    const cfg = getMergedConfig();
+    if (cfg && typeof cfg.dispatch_hygiene_mode === "string") {
+      mode = cfg.dispatch_hygiene_mode.toLowerCase();
+    }
+  } catch { /* keep default 'block' on any failure */ }
+
+  // Read session anchor — only count dispatches from THIS session, not history.
+  let anchorMs = 0;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      const yaml = fs.readFileSync(wfPath, "utf8");
+      const m = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+      if (m) {
+        const parsed = new Date(m[1].trim()).getTime();
+        if (Number.isFinite(parsed)) anchorMs = parsed;
+      }
+    }
+  } catch { /* no anchor — gate auto-passes since we can't bound the session window */ }
+  if (anchorMs === 0) {
+    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::first_created_at absent — session window undefined; gate inapplicable" };
+  }
+
+  const body = fs.readFileSync(warningsPath, "utf8");
+  const agents = [];
+  for (const line of body.split("\n")) {
+    if (!line) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec.source !== "raw_dispatch") continue;
+      if (typeof rec.ts !== "string") continue;
+      if (new Date(rec.ts).getTime() < anchorMs) continue;
+      agents.push(rec.agent || "(unknown)");
+    } catch { /* malformed line — skip */ }
+  }
+  const rawDispatchCount = agents.length;
+  if (rawDispatchCount === 0) {
+    return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this session" };
+  }
+  if (mode === "warn" || mode === "off") {
+    return {
+      ok: true,
+      warn: true,
+      raw_dispatch_count: rawDispatchCount,
+      agents,
+      mode,
+      reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this session (${agents.join(", ")}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
+    };
+  }
+  return {
+    ok: false,
+    raw_dispatch_count: rawDispatchCount,
+    agents,
+    mode,
+    reason:
+      `${rawDispatchCount} raw devt:* dispatch(es) detected this session: ${agents.join(", ")}. ` +
+      `These bypassed the workflow contract (no <scope_trust>/<scope_hint>/<memory_signal> blocks injected) — agents fell back to grep-quality discovery without graphify-anchored impact maps. ` +
+      `Remediation: re-dispatch the agents via the workflow path (/devt:review, /devt:workflow, /devt:debug) which injects the canonical context envelope. ` +
+      `If raw dispatch was intentional (ad-hoc orchestration), set 'dispatch_hygiene_mode: "warn"' in .devt/config.json to opt the gate out.`,
+  };
+}
+
 function aggregateKnowledgeCandidates() {
   const dir = getStateDir();
   let sources;
@@ -2899,6 +2995,8 @@ function run(subcommand, args) {
       return assertKnowledgeCandidatesTagged();
     case "assert-preflight-semantic-quality":
       return assertPreflightSemanticQuality(args);
+    case "assert-no-raw-dispatches-this-session":
+      return assertNoRawDispatchesThisSession();
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
@@ -2914,7 +3012,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, aggregate-knowledge-candidates, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, list-lane-outputs, update-lane, history`,
       );
   }
 }

@@ -235,6 +235,17 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 
 **Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator. Runs BEFORE the scratchpad truncate below — that order matters.
 
+**Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Block report on any in-session raw devt:* dispatches. CC doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
+
+```bash
+RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
+if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$RD_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
 Aggregate tags from `debug-summary.md` / `impl-summary*.md` first so the gate sees them.
 
 ```bash

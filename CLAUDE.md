@@ -106,6 +106,7 @@ node bin/devt-tools.cjs state update-lane <id> status=<status> # Mutate a single
 node bin/devt-tools.cjs state assert-knowledge-candidates-tagged # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
 node bin/devt-tools.cjs state aggregate-knowledge-candidates # Pulls #KNOWLEDGE-CANDIDATE: tags from review-lane-*.md / review.md / impl-summary*.md into scratchpad with dedup + provenance comments
 node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4] # WARN-mode gate reading preflight-brief.json::topic.extraction_confidence; never blocks, returns {ok:true, warn:bool, confidence, threshold, reason}
+node bin/devt-tools.cjs state assert-no-raw-dispatches-this-session # Post-hoc enforcement (greenfield calibration #12). Scans dispatch-warnings.jsonl for source:raw_dispatch with ts >= first_created_at; BLOCKS workflow finalize when any. Honors dispatch_hygiene_mode={block|warn|off}. Compensates for CC PreToolUse Task-deny not enforcing
 node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value
