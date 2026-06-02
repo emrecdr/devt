@@ -211,7 +211,8 @@ Commands:
   graphify blast-radius <s> Effect-size estimate for editing a symbol (small|medium|large)
   dispatch list             List dispatch marker regions present in workflows/
   dispatch contracts        Print per-agent context_blocks resolved from io-contracts.yaml
-  dispatch render <a>:<w>   Render one envelope to stdout (after templates land)
+  dispatch render <a>:<w>   Render one envelope to stdout (template form with placeholders)
+  dispatch render-filled <a>:<w|auto>  Render envelope with state-driven placeholder substitution (use :auto to resolve workflow_id from active state)
   dispatch compile --check  Diff would-be-rendered vs committed marker regions; exit 1 on drift
   dispatch compile --write  Re-render marker regions atomically (manual pre-release step)
   discovery harvest         Same as 'memory suggest' — full discovery sweep

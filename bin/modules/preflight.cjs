@@ -1406,6 +1406,7 @@ function scopeCache() {
 module.exports = {
   run,
   generate,
+  scopeCache,
   pickCentralSymbol,
   extractTopic,
   computeExtractionConfidence,

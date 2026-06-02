@@ -9902,6 +9902,55 @@ run "K1: dispatch contracts (io-contracts.yaml parseable)" \
 run "K1: dispatch compile --check (no drift)" \
   node "$CLI" dispatch compile --check
 
+# K2: render-filled substitutes recognized data-ref placeholders so the rendered
+# envelope is paste-ready. Unknown placeholders (prose descriptions like
+# `{learning_context — ...}`) are correctly preserved as agent-read-time
+# instructions; the regression-relevant invariant is that the known
+# data-ref shapes ({scope_trust_json}, {scope_hint_json}, {memory_signal_json},
+# {models.programmer}) MUST be filled. Active workflow seeded by `init workflow`
+# at L43 above.
+K2_OUT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null || echo "K2_FAILED")
+if [ "$K2_OUT" = "K2_FAILED" ]; then
+  fail "K2: dispatch render-filled programmer:dev (CLI returned non-zero)"
+elif echo "$K2_OUT" | grep -qE '\{scope_trust_json\}|\{scope_hint_json\}|\{memory_signal_json\}|\{models\.programmer\}'; then
+  fail "K2: render-filled left known data-ref placeholders unfilled"
+elif echo "$K2_OUT" | head -1 | grep -q 'Task(subagent_type="devt:programmer"'; then
+  pass "K2: dispatch render-filled substitutes data refs + structured lookups"
+else
+  fail "K2: render-filled output did not start with expected Task() dispatch line"
+fi
+
+# K3: state refresh-scope-context returns valid JSON with an ok-boolean field.
+# Idempotent best-effort — succeeds even when preflight-brief.json is absent
+# (returns {ok:false, error:"no preflight-brief.json"}). The contract is that
+# the call NEVER throws, NEVER blocks, always returns parseable JSON.
+K3_OUT=$(node "$CLI" state refresh-scope-context 2>/dev/null)
+if echo "$K3_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(typeof j.ok==='boolean'?0:1);}catch{process.exit(2);}})" 2>/dev/null; then
+  pass "K3: state refresh-scope-context returns {ok:bool, ...} JSON"
+else
+  fail "K3: state refresh-scope-context output not parseable JSON with ok field"
+fi
+
+# K4: dispatch-hygiene-guard.sh attaches <canonical_envelope> block in warn mode.
+# Simulates a raw Agent() dispatch (prompt missing all three scope blocks) and
+# asserts the hook responds with hookSpecificOutput.additionalContext that
+# includes the rendered envelope. State may have been reset by earlier tests
+# (L622, L631), so seed a fresh active workflow first — `:auto` resolution
+# needs workflow.yaml::active=true to render successfully.
+node "$CLI" init workflow "K4 hook envelope test" >/dev/null 2>&1
+K4_CFG_BAK=$(mktemp)
+[ -f .devt/config.json ] && cp .devt/config.json "$K4_CFG_BAK"
+echo '{"dispatch_hygiene_mode":"warn"}' > .devt/config.json
+K4_INPUT='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:programmer","prompt":"do a thing"}}'
+K4_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" bash -c "echo '$K4_INPUT' | bash '$ROOT/hooks/dispatch-hygiene-guard.sh'" 2>/dev/null)
+if echo "$K4_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const ctx=(j.hookSpecificOutput||{}).additionalContext||'';process.exit(ctx.includes('<canonical_envelope>')?0:1);}catch{process.exit(2);}})" 2>/dev/null; then
+  pass "K4: dispatch-hygiene-guard.sh attaches <canonical_envelope> in warn mode"
+else
+  fail "K4: hook did not attach <canonical_envelope> in warn mode"
+fi
+if [ -s "$K4_CFG_BAK" ]; then cp "$K4_CFG_BAK" .devt/config.json; else rm -f .devt/config.json; fi
+rm -f "$K4_CFG_BAK"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

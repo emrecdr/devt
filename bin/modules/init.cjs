@@ -601,4 +601,4 @@ function run(subcommand, args, pluginRoot) {
   }
 }
 
-module.exports = { run, REQUIRED_DEV_RULES };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics };

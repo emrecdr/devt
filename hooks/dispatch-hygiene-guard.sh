@@ -142,10 +142,39 @@ node -e "
   }
 
   // Warn mode (or non-investigative agent in block mode) — emit advisory, allow.
+  // Attach the canonical envelope as a structured <canonical_envelope> block
+  // (Choice C2) so the orchestrator can copy-paste rather than hand-compose
+  // <scope_trust>/<scope_hint>/<memory_signal>/governing_rules/guardrails_inline
+  // tags from cached state. Fail-open: any error (no active workflow, no
+  // template for this agent, plugin root missing) falls back to advisory-only.
+  let envelope = null;
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    if (pluginRoot) {
+      const path = require('path');
+      const fs = require('fs');
+      const dispatchPath = path.join(pluginRoot, 'bin', 'modules', 'dispatch.cjs');
+      if (fs.existsSync(dispatchPath)) {
+        const dispatch = require(dispatchPath);
+        envelope = dispatch.cmdRenderFilled(subagentName + ':auto');
+      }
+    }
+  } catch { /* fall back to advisory-only — envelope rendering is best-effort */ }
+
+  const advisoryParts = ['[devt dispatch hygiene] ' + advisory];
+  if (envelope) {
+    advisoryParts.push(
+      '',
+      'Canonical envelope for this agent (paste into Task() prompt to satisfy the workflow contract):',
+      '<canonical_envelope>',
+      envelope,
+      '</canonical_envelope>'
+    );
+  }
   const output = JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      additionalContext: '[devt dispatch hygiene] ' + advisory,
+      additionalContext: advisoryParts.join('\n'),
     },
   });
   process.stdout.write(output);

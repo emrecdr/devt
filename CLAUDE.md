@@ -107,6 +107,7 @@ node bin/devt-tools.cjs state assert-knowledge-candidates-tagged # Session-scope
 node bin/devt-tools.cjs state aggregate-knowledge-candidates # Pulls #KNOWLEDGE-CANDIDATE: tags from review-lane-*.md / review.md / impl-summary*.md into scratchpad with dedup + provenance comments
 node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4] # WARN-mode gate reading preflight-brief.json::topic.extraction_confidence; never blocks, returns {ok:true, warn:bool, confidence, threshold, reason}
 node bin/devt-tools.cjs state assert-no-raw-dispatches-this-session # Post-hoc enforcement (greenfield calibration #12). Scans dispatch-warnings.jsonl for source:raw_dispatch with ts >= first_created_at; BLOCKS workflow finalize when any. Honors dispatch_hygiene_mode={block|warn|off}. Compensates for CC PreToolUse Task-deny not enforcing
+node bin/devt-tools.cjs state refresh-scope-context # Alias for `preflight scope-cache`. Re-derives scope_trust from preflight-brief.json::graph_stats + staleness (with staleness-threshold override) and persists to workflow.yaml::scope_trust_json. Idempotent, ~50ms. Wired into each dispatch site so cached scope_trust always reflects current graph state, not the value computed at workflow start
 node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
 node bin/devt-tools.cjs config get
 node bin/devt-tools.cjs config set key=value

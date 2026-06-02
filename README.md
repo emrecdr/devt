@@ -418,7 +418,7 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 | `arch_scanner.command` | Architecture scanner invocation | `null` (manual analysis) |
 | `arch_scanner.report_dir` | Where scan output lands | `docs/reports` |
 | `scope_mode` | `surgical` / `boyscout` — see below | `surgical` |
-| `dispatch_hygiene_mode` | `warn` / `block` — controls `hooks/dispatch-hygiene-guard.sh` behavior when an orchestrator raw-dispatches a `devt:*` subagent without the canonical context envelope (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`). `warn` (default) logs to `.devt/state/dispatch-warnings.jsonl` as `source: "raw_dispatch"`; `block` prevents the dispatch entirely. Useful when CI must enforce workflow-routed dispatches. | `warn` |
+| `dispatch_hygiene_mode` | `block` / `warn` / `off` — controls `hooks/dispatch-hygiene-guard.sh` behavior when an orchestrator raw-dispatches a `devt:*` subagent without the canonical context envelope (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`). `block` (default) returns `{decision:"deny"}` for investigative agents with `/devt:review` redirect in the reason. `warn` allows the call AND attaches the fully-rendered canonical envelope as a `<canonical_envelope>` block in `additionalContext` (paste-ready, derived from current state via `dispatch render-filled <agent>:auto`). `off` is a no-op. All modes append `source: "raw_dispatch"` to `.devt/state/dispatch-warnings.jsonl` for forensics. | `block` |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
 ### `scope_mode` — surgical (default) vs boy-scout

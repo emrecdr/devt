@@ -26,7 +26,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 1. `hooks/dispatch-hygiene-guard.sh` emits an advisory `additionalContext` and appends `source: "raw_dispatch"` to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks.
 2. `agents/code-reviewer.md::workflow_context_assertion` hard-stops with `status=BLOCKED` + `verdict=NEEDS_WORK` + a Critical finding pointing at the raw dispatch rather than producing a shallow review.
 
-**Custom parallelism over multi-slice reviews?** Run `/devt:review` once to get the bash plan + graph-impact map computed, then re-dispatch the sliced reviewers manually with `<scope_trust>` + `<scope_hint>` + reference to `.devt/state/graph-impact.md` injected into each prompt.
+**Custom parallelism over multi-slice reviews?** Run `/devt:review` once to get the bash plan + graph-impact map computed, then re-dispatch the sliced reviewers manually. The `dispatch render-filled <agent>:auto` CLI generates the paste-ready envelope with `<scope_trust>` + `<scope_hint>` + `<memory_signal>` + governing rules + guardrails substituted from current state; append per-lane scope details to its `<task>` block before each manual `Task()` call. The `dispatch-helpers` skill (`skills/dispatch-helpers/`) autoloads on fan-out phrasing and teaches the lane-customization pattern. In `warn` mode the hook auto-attaches the canonical envelope to `additionalContext` at the moment of decision.
 
 ### Workflow body loading is explicit
 
@@ -45,7 +45,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Canonical recovery path for large reviews.** The code-reviewer's built-in `community-filter for large reviews` restricts deep review to files in the `affected_communities` listed in `graph-impact.md` when scope > 10 files; the rest go into an `## Out-of-Scope Files (Deferred)` section in `review.md`. The orchestrator then dispatches follow-up `/devt:review` calls for the deferred set.
 
-**If parallel fan-out is genuinely needed.** The orchestrator must inject `<scope_trust>` + `<scope_hint>` + a reference to `.devt/state/graph-impact.md` into each manual dispatch and synthesize the results.
+**If parallel fan-out is genuinely needed.** The orchestrator must inject `<scope_trust>` + `<scope_hint>` + a reference to `.devt/state/graph-impact.md` into each manual dispatch and synthesize the results. The `dispatch render-filled <agent>:auto` CLI produces a paste-ready envelope with all context blocks pre-substituted, eliminating the hand-composition friction that historically drove orchestrators toward prose-only dispatches.
 
 **Sanctioned exception.** `workflows/code-review-parallel.md` dispatches N code-reviewers in foreground parallel (single message, multi-Task) when scope > 10 files AND the user opts in via AskUserQuestion. The parallel workflow inherits the same context-block contract (`scope_trust` + `scope_hint` + `memory_signal` injected per dispatch); the L1 dispatch-hygiene hook accepts all lane Task() calls. Substance gates per-lane (via `state check-agent-output`) and a consolidator dispatch enforce the same quality bar. Orchestrator improvisation OUTSIDE this workflow remains prohibited.
 

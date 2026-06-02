@@ -9,16 +9,17 @@
  * of workflow files between `<!-- BEGIN dispatch:<agent>:<workflow> -->` and
  * `<!-- END dispatch:<agent>:<workflow> -->`.
  *
- * Closes the "Smoke test (future)" TODO at `agents/io-contracts.yaml:29` — the
- * `compile --check` subcommand IS the gate that asserts dispatch markup matches
- * the per-agent contract.
- *
  * Subcommands:
- *   list                    Print agent → workflow regions map (from marker scan)
- *   contracts               Print per-agent context_blocks resolved from io-contracts.yaml
- *   render <agent>:<wf>     Render one envelope to stdout
- *   compile --check         Diff would-be-rendered vs committed; exit 1 on drift
- *   compile --write         Re-render and write marker regions atomically
+ *   list                            Print agent → workflow regions map (from marker scan)
+ *   contracts                       Print per-agent context_blocks resolved from io-contracts.yaml
+ *   render <agent>:<wf>             Render one envelope to stdout (template with placeholders)
+ *   render-filled <agent>:<wf|auto> Render envelope with state-driven placeholder substitution.
+ *                                   `auto` resolves workflow_id from .devt/state/workflow.yaml.
+ *                                   Unknown placeholders preserved verbatim (prose-descriptions
+ *                                   like `{learning_context — ...}` instruct the orchestrator,
+ *                                   not the substituter).
+ *   compile --check                 Diff would-be-rendered vs committed; exit 1 on drift
+ *   compile --write                 Re-render and write marker regions atomically
  *
  * Zero-dep: io-contracts.yaml is parsed by a purpose-built `parseIoContracts`
  * following the `init.cjs::parseSkillIndex` precedent — no YAML library.
@@ -220,6 +221,146 @@ function cmdRender(target) {
   return renderEnvelope(agent, workflowId, readContracts());
 }
 
+// Resolves `<agent>:auto` against the active workflow. Returns the resolved
+// workflow_id or throws with an exit-2 hint when no workflow is active —
+// callers should treat the throw as a hard failure (no fallback to a guessed
+// workflow_id), so the orchestrator sees an explicit "pass --workflow-id"
+// message rather than silently rendering against a stale workflow_id_history
+// entry.
+function resolveAutoWorkflowId() {
+  const state = require("./state.cjs");
+  let s;
+  try { s = state.readState(); }
+  catch (e) { throw new Error(`auto-workflow-id: state read failed (${e.message})`); }
+  if (!s || !s.active || !s.workflow_id) {
+    throw new Error("auto-workflow-id: no active workflow; pass <agent>:<workflow_id> explicitly");
+  }
+  return s.workflow_id;
+}
+
+// Walks the envelope template and substitutes known placeholders against the
+// state-driven context. Three placeholder classes:
+//   (a) Simple data refs — {scope_trust_json}, {task_description}, etc.
+//   (b) Structured lookups — {governing_rules.content["X"]}, {inline_guardrails["X"]},
+//       {governing_rules.rules_hash}, {models.X}, {rubrics.X}, {inline_rubrics.X}
+//   (c) Prose descriptions — {learning_context — ...}, {injected from .devt/config.json ...}
+//       Left verbatim. These instruct the agent to look up context at read-time;
+//       not substitution targets.
+// Both `{X["key"]}` and `{X[\"key\"]}` shell-escaped variants are handled —
+// templates carry the escape form because they're meant to be pasted inside
+// double-quoted bash heredocs, but `render-filled` is for informational paste,
+// not shell-eval. Both match the same substitution.
+function applySubstitutions(template, subs) {
+  let out = template;
+
+  // Structured lookups — order matters: replace the bracketed forms BEFORE
+  // any prefix-overlapping simple ref (e.g. {governing_rules.rules_hash}
+  // would partial-match if the .content[X] regex were too loose).
+  out = out.replace(/\{governing_rules\.content\[\\?"([^"\\]+)\\?"\]\}/g, (m, key) => {
+    const v = subs.governing_rules && subs.governing_rules.content && subs.governing_rules.content[key];
+    return v !== undefined ? v : m;
+  });
+  out = out.replace(/\{governing_rules\.rules_hash\}/g, () =>
+    (subs.governing_rules && subs.governing_rules.rules_hash) || ""
+  );
+  out = out.replace(/\{inline_guardrails\[\\?"([^"\\]+)\\?"\]\}/g, (m, key) => {
+    const v = subs.inline_guardrails && subs.inline_guardrails[key];
+    return v !== undefined ? v : m;
+  });
+  out = out.replace(/\{inline_rubrics\.([\w-]+)\}/g, (m, key) => {
+    const v = subs.inline_rubrics && subs.inline_rubrics[key];
+    return v !== undefined ? v : m;
+  });
+  out = out.replace(/\{rubrics\.([\w-]+)\}/g, (m, key) => {
+    const v = subs.rubrics && subs.rubrics[key];
+    return v !== undefined ? v : m;
+  });
+  out = out.replace(/\{models\.([\w-]+)\}/g, (m, key) => {
+    const v = subs.models && subs.models[key];
+    return v !== undefined ? v : m;
+  });
+
+  // Simple data refs. Each key maps 1:1 to a placeholder shape `{key}`.
+  // Three distinct task-description aliases all map to state.task — the
+  // workflow type determines which one appears in the envelope, but the
+  // semantic content is the same task field.
+  const DATA_REFS = {
+    scope_trust_json: () => JSON.stringify(subs.scope_trust_json || {}),
+    scope_hint_json: () => JSON.stringify(subs.scope_hint_json || []),
+    memory_signal_json: () => JSON.stringify(subs.memory_signal_json || {}),
+    god_node_warnings_json: () => JSON.stringify(subs.god_node_warnings_json || {}),
+    graphify_status_json: () => JSON.stringify(subs.graphify_status_json || {}),
+    task_description: () => subs.task || "",
+    bug_description: () => subs.task || "",
+    review_scope_description: () => subs.task || "",
+    CLAUDE_PLUGIN_ROOT: () => subs.CLAUDE_PLUGIN_ROOT || "",
+  };
+  for (const [key, getter] of Object.entries(DATA_REFS)) {
+    // Anchor with negative-lookahead to skip prose-description placeholders
+    // that START with the same key but carry additional text — e.g.
+    // `{learning_context from context_init — ...}` should NOT match a
+    // hypothetical `{learning_context}` rule. Each DATA_REFS key matches
+    // ONLY `{key}` exactly.
+    const re = new RegExp(`\\{${key}\\}`, "g");
+    out = out.replace(re, getter());
+  }
+
+  return out;
+}
+
+function buildSubstitutionTable() {
+  const { findProjectRoot } = require("./config.cjs");
+  const { getMergedConfig } = require("./config.cjs");
+  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics } = require("./init.cjs");
+  const { getModels } = require("./model-profiles.cjs");
+  const state = require("./state.cjs");
+
+  let projectRoot;
+  try { projectRoot = findProjectRoot(); }
+  catch { projectRoot = process.cwd(); }
+
+  const config = getMergedConfig();
+  const models = getModels(config.model_profile || "balanced", config.model_overrides);
+
+  // loadGoverningRules / loadInlineGuardrails return { content, ... } shapes;
+  // we hoist `content` to the top level so the regex substitution can index
+  // by-key without an extra .content prop dance.
+  const gr = loadGoverningRules(projectRoot);
+  const ig = loadInlineGuardrails(PLUGIN_ROOT);
+  const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
+
+  let s = {};
+  try { s = state.readState() || {}; } catch { s = {}; }
+
+  return {
+    governing_rules: { content: gr.content || {}, rules_hash: gr.rules_hash || "" },
+    inline_guardrails: ig.content || {},
+    inline_rubrics: ir.content || {},
+    rubrics: config.rubrics || {},
+    models: models || {},
+    scope_trust_json: s.scope_trust_json,
+    scope_hint_json: s.scope_hint_json,
+    memory_signal_json: s.memory_signal_json,
+    god_node_warnings_json: s.god_node_warnings_json,
+    graphify_status_json: s.graphify_status_json,
+    task: s.task || s.task_description || "",
+    CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
+  };
+}
+
+function cmdRenderFilled(target) {
+  if (!target || !target.includes(":")) {
+    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto>");
+  }
+  let [agent, workflowId] = target.split(":");
+  if (workflowId === "auto") {
+    workflowId = resolveAutoWorkflowId();
+  }
+  const template = renderEnvelope(agent, workflowId, readContracts());
+  const subs = buildSubstitutionTable();
+  return applySubstitutions(template, subs);
+}
+
 function cmdCompile(mode) {
   const regions = listMarkerRegions();
   const drift = [];
@@ -283,6 +424,16 @@ function run(subcommand, args) {
       process.stdout.write(out + (out.endsWith("\n") ? "" : "\n"));
       return 0;
     }
+    case "render-filled": {
+      let out;
+      try { out = cmdRenderFilled(args[0]); }
+      catch (err) {
+        process.stderr.write(err.message + "\n");
+        return 2;
+      }
+      process.stdout.write(out + (out.endsWith("\n") ? "" : "\n"));
+      return 0;
+    }
     case "compile": {
       const mode = args.includes("--write") ? "write" : "check";
       const result = cmdCompile(mode);
@@ -290,9 +441,9 @@ function run(subcommand, args) {
       return mode === "check" && result.drift.length > 0 ? 1 : 0;
     }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|compile>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile>\n");
       return 2;
   }
 }
 
-module.exports = { run, parseIoContracts, listMarkerRegions };
+module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled };

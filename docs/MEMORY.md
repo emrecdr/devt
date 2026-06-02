@@ -323,6 +323,7 @@ node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction (re
 node bin/devt-tools.cjs preflight status            # FRESH/STALE/MISSING + timestamp
 node bin/devt-tools.cjs preflight mark-stale [reason]
 node bin/devt-tools.cjs preflight scope-cache       # cache scope_hint + scope_trust to workflow.yaml from the current sidecar
+node bin/devt-tools.cjs state refresh-scope-context # alias for `preflight scope-cache` — invoked before every dispatch site so cached scope_trust reflects current graph state
 node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4]
                                                     # WARN-mode gate over topic.extraction_confidence; ok:true always
 
