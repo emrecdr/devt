@@ -1685,6 +1685,36 @@ function _logProbeFailure(category, command, args, detail) {
   } catch { /* diagnostic side-channel; never raise */ }
 }
 
+// DEF-052 (greenfield calibration #16 field confirmation). When the locally-installed
+// graphify skill bundle drifts from the binary version, graphify silently emits an
+// empty hyperedges list — workflows downstream see hyperedges_matched=[] and assume
+// "no semantic groupings found" when the real cause is version drift. Greenfield's
+// case: skill 0.7.10 vs binary 0.8.24 across multiple calibrations. Surface format:
+//   stderr: "  warning: skill is from graphify X.Y.Z, package is A.B.C. Run 'graphify install' to update."
+// Best-effort: spawn failure / no graphify on PATH / unrecognized warning format
+// all return `{detected:false}` so callers can layer this on top of existing
+// fallback behavior without changing it.
+function detectSkillVersionDrift() {
+  let r;
+  try {
+    r = require("child_process").spawnSync("graphify", ["--version"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch { return { detected: false }; }
+  if (!r || r.error || r.signal === "SIGTERM") return { detected: false };
+  const stderr = r.stderr || "";
+  const match = stderr.match(/warning:\s*skill is from graphify\s+(\d+\.\d+\.\d+),\s*package is\s+(\d+\.\d+\.\d+)/);
+  if (!match) return { detected: false };
+  return {
+    detected: true,
+    skill_version: match[1],
+    binary_version: match[2],
+    advisory: `graphify skill ${match[1]} drift from binary ${match[2]}`,
+  };
+}
+
 function probeBinary(command = "graphify", timeoutMs = 1500, options = {}) {
   const args = options.subcommand ? [options.subcommand, "--help"] : ["--help"];
   let probe;
@@ -1725,6 +1755,7 @@ module.exports = {
   graphStats,
   queryGraph,
   getNode,
+  detectSkillVersionDrift,
   getNeighbors,
   shortestPath,
   blastRadius,

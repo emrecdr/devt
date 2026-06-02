@@ -66,6 +66,8 @@ When this workflow is dispatched WITHOUT a prior `code-review.md::context_init` 
 Initialize the workflow (delegated from code-review.md; the upstream step already wrote workflow.yaml::active=true and ran preflight + memory_signal cache). Re-read the cached context blocks:
 
 ```bash
+# Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 REVIEW_SCOPE=$(echo "$STATE" | jq -r '.task // ""')
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
@@ -448,6 +450,8 @@ fi
 **Orchestrator-prep — read cached context blocks** (same as code-review.md::verify):
 
 ```bash
+# Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
 MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
 SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')

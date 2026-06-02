@@ -1143,6 +1143,20 @@ function generate(taskText, opts) {
       hyperedgesMatched = hyperResult.results;
     }
   } catch { /* hyperedge lookup is best-effort */ }
+  // DEF-052 (greenfield calibration #16): when hyperedges_matched is empty AND
+  // the locally-installed graphify skill drifts from the binary version, surface
+  // the version mismatch as a reason in the sidecar. Workflows that consume
+  // hyperedges_matched can flag "no hyperedges due to skill 0.7.10 vs binary 0.8.24
+  // drift" instead of silently treating empty as "no semantic groupings found".
+  let hyperedgesSuppressedReason = null;
+  if (!hyperedgesMatched || hyperedgesMatched.length === 0) {
+    try {
+      const drift = graphify.detectSkillVersionDrift();
+      if (drift.detected) {
+        hyperedgesSuppressedReason = `graphify skill ${drift.skill_version} drift from binary ${drift.binary_version}; hyperedges may be silently empty — run 'graphify install' to refresh`;
+      }
+    } catch { /* drift detection is best-effort */ }
+  }
   const extractionConfidence = computeExtractionConfidence(topic);
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
@@ -1158,6 +1172,7 @@ function generate(taskText, opts) {
     suggested_reading: suggestedReading,
     scope_hint: { confidence: scopeHintConfidence },
     hyperedges_matched: hyperedgesMatched,
+    hyperedges_suppressed_reason: hyperedgesSuppressedReason,
     blast: {
       effect_size: blast.effect_size,
       source: blast.source,

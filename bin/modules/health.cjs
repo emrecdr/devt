@@ -49,6 +49,10 @@ const CHECKS = {
   // Graphify AFTER /devt:init don't auto-pick up the MCP entry. Warn-only by design — auto-
   // editing .mcp.json risks stomping user customizations.
   GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
+  // DEF-052 (greenfield calibration #16): graphify silently emits empty hyperedges
+  // when skill/binary versions drift. Field-confirmed at greenfield: skill 0.7.10 vs
+  // binary 0.8.24 across multiple calibrations, never surfaced until cal #16 audit.
+  GRAPHIFY_SKILL_DRIFT: { severity: "warning", message: "Graphify skill version drifted from binary — hyperedges may silently return empty", repairable: false, fix: "Run `graphify install` to refresh the local skill bundle to match the binary version" },
   PROBE_FAILURES_RECENT: { severity: "info", message: "Probe failures logged in .devt/state/probe-failures.jsonl — graphify/python setup detection diagnostics available", repairable: false, fix: "Inspect categories (timeout, nonzero-exit, spawn-error) to disambiguate \"not installed\" from \"installed but broken\"; common fixes: extend timeout in env, repair PATH, reinstall graphifyy[mcp] extra" },
 };
 
@@ -393,6 +397,19 @@ function runChecks(pluginRoot) {
     }
     if (!registered && require("./graphify.cjs").probeBinary()) {
       add("GRAPHIFY_MCP_UNREGISTERED", null, { binary_on_path: true, mcp_json_exists: fs.existsSync(mcpPath) });
+    }
+  } catch { /* swallow */ }
+
+  // DEF-052 (greenfield calibration #16): detect graphify skill/binary version drift.
+  // Only probes when the binary is on PATH (otherwise nothing to compare against).
+  // Skipping the probe when graphify is absent keeps health fast on projects that
+  // don't use graphify at all.
+  try {
+    if (require("./graphify.cjs").probeBinary()) {
+      const drift = require("./graphify.cjs").detectSkillVersionDrift();
+      if (drift.detected) {
+        add("GRAPHIFY_SKILL_DRIFT", `skill ${drift.skill_version} vs binary ${drift.binary_version}`, drift);
+      }
     }
   } catch { /* swallow */ }
 

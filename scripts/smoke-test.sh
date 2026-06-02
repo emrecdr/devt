@@ -9951,6 +9951,28 @@ fi
 if [ -s "$K4_CFG_BAK" ]; then cp "$K4_CFG_BAK" .devt/config.json; else rm -f .devt/config.json; fi
 rm -f "$K4_CFG_BAK"
 
+# K5 (greenfield calibration #16): every workflow that reads STATE=$(... state read)
+# to extract scope_trust_json must invoke `state refresh-scope-context` immediately
+# before. Count-equality assertion across the 4 workflow files that use this pattern;
+# debug.md and research-task.md are exempt because they read scope_trust directly from
+# preflight-brief.json (self-refreshing pattern). Cal #16 evidence: greenfield's
+# code-review-parallel.md had 2 STATE= sites vs 0 refresh calls — silent stale-cache
+# bug across 5-lane parallel review. Count-equality catches new workflows that add
+# STATE= without the refresh.
+K5_FAIL=""
+for wf in workflows/quick-implement.md workflows/code-review.md workflows/code-review-parallel.md workflows/dev-workflow.md; do
+  STATE_N=$(grep -cE 'STATE=\$\(node.*state read' "$ROOT/$wf" 2>/dev/null || echo 0)
+  REFRESH_N=$(grep -c 'state refresh-scope-context' "$ROOT/$wf" 2>/dev/null || echo 0)
+  if [ "$STATE_N" != "$REFRESH_N" ]; then
+    K5_FAIL="$K5_FAIL $(basename $wf)(STATE=$STATE_N,refresh=$REFRESH_N)"
+  fi
+done
+if [ -z "$K5_FAIL" ]; then
+  pass "K5: every STATE= site in scope-trust workflows has paired refresh-scope-context (4 files checked)"
+else
+  fail "K5: refresh-scope-context wiring gap —$K5_FAIL"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
