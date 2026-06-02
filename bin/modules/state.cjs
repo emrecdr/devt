@@ -819,6 +819,15 @@ function updateState(keyValues) {
     // mcp-trace records would silently attribute the new workflow's MCP calls
     // to the old workflow_id, breaking telemetry attribution across boundaries.
     const previousWorkflowType = current.workflow_type;
+    // S1-v3 (greenfield calibration #14): snapshot active state BEFORE the
+    // update loop so the deactivation gate (after the loop, before write)
+    // can detect the true→false transition. CLI-driven orchestrators that
+    // flip `active=false` via direct `state update active=false ...` bypass
+    // the workflow .md finalize step where the gate originally lived.
+    // Hooking the gate here closes that escape hatch regardless of caller.
+    // releaseWorkflow() routes through this same updateState call (L1403),
+    // so `state release` is covered automatically.
+    const wasActive = current.active === true;
     for (const kv of keyValues) {
       const eqIndex = kv.indexOf("=");
       if (eqIndex === -1) {
@@ -953,6 +962,24 @@ function updateState(keyValues) {
         !current.workflow_id_history.includes(current.workflow_id)
       ) {
         current.workflow_id_history.push(current.workflow_id);
+      }
+    }
+    // S1-v3 deactivation gate (greenfield calibration #14). On active=true→false
+    // transition, invoke assertNoRawDispatchesThisSession before write. Block
+    // (throw) when mode=block and raw dispatches present in workflow window;
+    // warn to stderr when mode=warn|off; pass silently when clean. The gate
+    // reads workflow.yaml from disk for its `created_at` anchor — that's the
+    // unchanged pre-write value, which correctly bounds the workflow window.
+    if (wasActive && current.active === false) {
+      const gateResult = assertNoRawDispatchesThisSession();
+      if (gateResult.ok === false) {
+        throw new Error(
+          `[devt:dispatch-hygiene] BLOCKED workflow deactivation — ${gateResult.reason}`
+        );
+      } else if (gateResult.warn) {
+        process.stderr.write(
+          `[devt:dispatch-hygiene] ${gateResult.reason}\n`
+        );
       }
     }
     // Run before write so the validation verdict and the data hit disk in a single atomic write —

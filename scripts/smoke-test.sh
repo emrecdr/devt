@@ -9806,6 +9806,73 @@ else
 fi
 rm -rf "$S1_TMP"
 
+# S1-v3 (greenfield calibration #14): deactivation hook in updateState().
+# CLI-driven orchestrators bypass the workflow .md finalize step by running
+# direct `state update active=false`, escaping the post-hoc gate. Hooking the
+# gate into the active=true→false transition closes the escape hatch. Also
+# covers `state release` since releaseWorkflow() calls updateState internally.
+# Fixture exercises 4 behaviors:
+#   (a) deactivation BLOCKS (exit 1, no write) when raw_dispatch in window
+#   (b) warn mode allows the deactivation + writes stderr alert
+#   (c) activation (false→true) does NOT trigger the gate
+#   (d) idempotent re-deactivation (already false) does NOT trigger the gate
+S1V3_TMP=$(mktemp -d)
+mkdir -p "$S1V3_TMP/.devt/state"
+ANCHOR_V3=$(node -e "console.log(new Date(Date.now() - 60*60*1000).toISOString())")
+RECENT_V3=$(node -e "console.log(new Date(Date.now() - 5*60*1000).toISOString())")
+cat > "$S1V3_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+first_created_at: "$ANCHOR_V3"
+created_at: "$ANCHOR_V3"
+workflow_type: code_review
+EOF
+printf '{"ts":"%s","source":"raw_dispatch","agent":"devt:programmer","prompt_bytes":100,"prompt_preview":"raw"}\n' "$RECENT_V3" >> "$S1V3_TMP/.devt/state/dispatch-warnings.jsonl"
+# (a) block mode (default) — exit 1 + write prevented
+set +e
+(cd "$S1V3_TMP" && node "$CLI" state update active=false phase=cancelled >/dev/null 2>&1)
+S1V3_BLOCK_EXIT=$?
+set -e
+S1V3_BLOCK_PRESERVED=$(awk '/^active:/{gsub(/[ ,]/, ""); print}' "$S1V3_TMP/.devt/state/workflow.yaml")
+# (b) warn mode — exit 0 + write succeeds + stderr alert
+echo '{"dispatch_hygiene_mode":"warn"}' > "$S1V3_TMP/.devt/config.json"
+set +e
+S1V3_WARN_STDERR=$(cd "$S1V3_TMP" && node "$CLI" state update active=false phase=cancelled 2>&1 >/dev/null)
+S1V3_WARN_EXIT=$?
+set -e
+S1V3_WARN_HAS_ALERT=$(echo "$S1V3_WARN_STDERR" | awk '/dispatch-hygiene.*mode=warn/{print "1"; exit}')
+S1V3_WARN_WRITTEN=$(awk '/^active:/{gsub(/[ ,]/, ""); print}' "$S1V3_TMP/.devt/state/workflow.yaml")
+# (c) activation does NOT trigger gate (fresh dir, no prior state)
+S1V3_ACT_TMP=$(mktemp -d)
+mkdir -p "$S1V3_ACT_TMP/.devt/state"
+set +e
+(cd "$S1V3_ACT_TMP" && node "$CLI" state update active=true phase=research workflow_type=dev >/dev/null 2>&1)
+S1V3_ACT_EXIT=$?
+set -e
+# (d) idempotent re-deactivation — already deactivated, gate must NOT re-fire
+S1V3_IDEM_TMP=$(mktemp -d)
+mkdir -p "$S1V3_IDEM_TMP/.devt/state"
+cat > "$S1V3_IDEM_TMP/.devt/state/workflow.yaml" <<EOF
+active: false
+first_created_at: "$ANCHOR_V3"
+created_at: "$ANCHOR_V3"
+workflow_type: code_review
+phase: cancelled
+EOF
+printf '{"ts":"%s","source":"raw_dispatch","agent":"devt:programmer","prompt_bytes":100}\n' "$RECENT_V3" >> "$S1V3_IDEM_TMP/.devt/state/dispatch-warnings.jsonl"
+set +e
+(cd "$S1V3_IDEM_TMP" && node "$CLI" state update active=false phase=cancelled >/dev/null 2>&1)
+S1V3_IDEM_EXIT=$?
+set -e
+if [ "$S1V3_BLOCK_EXIT" = "1" ] && [ "$S1V3_BLOCK_PRESERVED" = "active:true" ] \
+   && [ "$S1V3_WARN_EXIT" = "0" ] && [ "$S1V3_WARN_HAS_ALERT" = "1" ] && [ "$S1V3_WARN_WRITTEN" = "active:false" ] \
+   && [ "$S1V3_ACT_EXIT" = "0" ] \
+   && [ "$S1V3_IDEM_EXIT" = "0" ]; then
+  pass "S1-v3: updateState() deactivation gate — blocks active=true→false (write prevented, exit 1); warn mode allows + stderr alerts; activation untouched; idempotent re-deactivation untouched"
+else
+  fail "S1-v3: deactivation gate broken (block_exit=$S1V3_BLOCK_EXIT preserved=$S1V3_BLOCK_PRESERVED warn_exit=$S1V3_WARN_EXIT warn_alert=$S1V3_WARN_HAS_ALERT warn_written=$S1V3_WARN_WRITTEN act_exit=$S1V3_ACT_EXIT idem_exit=$S1V3_IDEM_EXIT)"
+fi
+rm -rf "$S1V3_TMP" "$S1V3_ACT_TMP" "$S1V3_IDEM_TMP"
+
 # R1: default model_profile is "balanced" (changed from "quality"). Locks the
 # default so a future refactor of config.cjs/setup.cjs/model-profiles.cjs can't
 # silently regress to "quality" or some other tier. Live check — instantiate
