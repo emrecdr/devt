@@ -355,17 +355,21 @@ const MISMATCH_REASONS = Object.freeze({
 // schema and the markdown ARTIFACT_SCHEMA below can't drift independently.
 // `verification.json::verdict` is the workflow-routing enum; `verification.md`
 // status mirrors the four terminal values for human-readable parity.
-const VERIFICATION_STATUSES = ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS"];
+const VERIFICATION_STATUSES = ["VERIFIED", "GAPS_FOUND", "FAILED", "DONE_WITH_CONCERNS", "PARTIAL"];
 const VERIFICATION_VERDICTS = ["satisfied", "needs_revision", "failed"];
 
 const JSON_SIDECAR_SCHEMAS = {
   "impl-summary.json": {
-    status: ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+    // PARTIAL (greenfield calibration #16/#17 Q8 contract): work-doer subagents
+    // that hit the per-dispatch tool budget mid-task signal incomplete work via
+    // Status: PARTIAL + a Next-section marker. Workflow runners route PARTIAL to
+    // SendMessage-resume instead of advancing phase=DONE.
+    status: ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["programmer"],
   },
   "test-summary.json": {
-    status: ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+    status: ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["tester"],
   },
@@ -379,7 +383,7 @@ const JSON_SIDECAR_SCHEMAS = {
   // and validateConsistency persisted a NO_STATUS_LINE warning. Sidecar
   // routing via SIDECAR_FOR_MARKDOWN bypasses extractStatus entirely.
   "review.json": {
-    status: ["DONE", "BLOCKED"],
+    status: ["DONE", "PARTIAL", "BLOCKED"],
     verdict: ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
     agent: ["code-reviewer"],
   },
@@ -2425,6 +2429,81 @@ function assertPreflightSemanticQuality(args) {
 // Setting `dispatch_hygiene_mode:"warn"` in .devt/config.json opts out — the
 // gate respects the same config knob the PreToolUse hook reads. Useful for
 // projects that intentionally orchestrate ad-hoc agent dispatches.
+// WI-4 / Q11 (greenfield calibration #16): mechanical claim-check. Workflow
+// runners call this AFTER each output-writing dispatch to verify the agent
+// actually wrote its declared output, instead of trusting the agent's verbal
+// "I wrote X" claim. Greenfield's cal #17 §G evidence: architect returned a
+// 2391-byte verbal summary claiming "wrote arch-review.md" but the file was
+// never on disk — main thread had to reconstruct it. This gate catches
+// exactly that case before phase advances.
+//
+// Reads agent → primary output from agents/io-contracts.yaml (single source of
+// truth — see WI-4b / M8 artifact manifest). Returns:
+//   {ok:true, agent, expected_path, exists:true, size_bytes, reason}
+//   {ok:false, agent, expected_path, exists:false, reason}
+//   {ok:false, agent, reason: "agent not declared in io-contracts"}
+function assertArtifactPresent(agent) {
+  if (typeof agent !== "string" || !agent) {
+    return { ok: false, reason: "missing agent argument" };
+  }
+  let contracts;
+  try {
+    const dispatch = require("./dispatch.cjs");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const contractsPath = path.join(__dirname, "..", "..", "agents", "io-contracts.yaml");
+    if (!fs.existsSync(contractsPath)) {
+      return { ok: false, agent, reason: "agents/io-contracts.yaml not found" };
+    }
+    contracts = dispatch.parseIoContracts(fs.readFileSync(contractsPath, "utf8"));
+  } catch (e) {
+    return { ok: false, agent, reason: `io-contracts parse failed: ${e.message}` };
+  }
+  const agentContract = contracts.agents && contracts.agents[agent];
+  if (!agentContract) {
+    return { ok: false, agent, reason: `agent "${agent}" not declared in agents/io-contracts.yaml` };
+  }
+  const primary = agentContract.outputs && agentContract.outputs.primary;
+  if (!primary || primary === "null") {
+    // Agent has no output artifact by design (e.g., curator's outputs.primary
+    // could legitimately be null in some configs) — gate auto-passes.
+    return { ok: true, agent, expected_path: null, exists: null, reason: "agent declares no primary output" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const artifactPath = path.join(dir, primary);
+  const exists = fs.existsSync(artifactPath);
+  if (!exists) {
+    return {
+      ok: false,
+      agent,
+      expected_path: `.devt/state/${primary}`,
+      exists: false,
+      reason: `Expected output .devt/state/${primary} (per agents/io-contracts.yaml::${agent}.outputs.primary) does not exist. The ${agent} dispatch returned without writing its declared artifact — re-dispatch with explicit instruction to write ${primary} before returning.`,
+    };
+  }
+  let sizeBytes;
+  try { sizeBytes = fs.statSync(artifactPath).size; }
+  catch (e) { return { ok: false, agent, expected_path: `.devt/state/${primary}`, exists: true, reason: `stat failed: ${e.message}` }; }
+  if (sizeBytes === 0) {
+    return {
+      ok: false,
+      agent,
+      expected_path: `.devt/state/${primary}`,
+      exists: true,
+      size_bytes: 0,
+      reason: `Expected output .devt/state/${primary} exists but is empty (0 bytes). Likely a stub-first protocol write that the agent didn't follow through on — re-dispatch.`,
+    };
+  }
+  return {
+    ok: true,
+    agent,
+    expected_path: `.devt/state/${primary}`,
+    exists: true,
+    size_bytes: sizeBytes,
+    reason: `${primary} present (${sizeBytes} bytes)`,
+  };
+}
+
 function assertNoRawDispatchesThisSession() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -3038,6 +3117,8 @@ function run(subcommand, args) {
       return assertPreflightSemanticQuality(args);
     case "assert-no-raw-dispatches-this-session":
       return assertNoRawDispatchesThisSession();
+    case "assert-artifact-present":
+      return assertArtifactPresent(args[0]);
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
@@ -3055,7 +3136,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, list-lane-outputs, update-lane, history`,
       );
   }
 }

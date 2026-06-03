@@ -94,6 +94,32 @@ The per-lane outputs (`.devt/state/review-lane-{1,2,3}.md`) are picked up by the
 
 Unknown placeholders (prose-descriptions like `{learning_context — relevant lessons from .devt/memory/lessons/...}`) are left verbatim — they're instructions for the orchestrator to look up context at agent-read time, not substitution targets.
 
+## Long-running synthesis — SendMessage-resume pattern
+
+A single subagent dispatched for multi-section work (programmer doing R1-R10 implementation, code-reviewer doing community-filter on 10+ files, verifier walking N revisions) can hit the per-dispatch tool-call budget (~91 calls in field observation) before finishing. The Q8 contract addresses this with explicit Status: PARTIAL declaration; the SendMessage-resume pattern is the cheap recovery primitive.
+
+**Architecture.** When a subagent hits a section boundary AND has more work remaining AND has done significant tool calls, it emits Status: PARTIAL with a Next-section marker (per `agents/<name>.md::section_completion_protocol`). The workflow's claim-check (Q11) reads the sidecar; PARTIAL routes to SendMessage-resume primary, re-dispatch fallback.
+
+**Why SendMessage is the cheap path.** SendMessage to the same subagent re-uses the full conversation cache — every prior Read, Edit, Bash result stays available at the cost of one new prompt. A fresh re-dispatch via `Task(subagent_type=...)` starts cold, paying the full context-loading cost (skill injection, governing rules, file Reads to re-discover working set). Field observation (greenfield cal #17): ~15-20 file Reads saved per SendMessage-resume vs cold re-dispatch.
+
+**When to use re-dispatch instead.** After session boundary (`/devt:pause` + resume in new session), or when the subagent-id is no longer addressable. Re-dispatch reads the partial artifact via `<continue_from_checkpoint>` block instead of conversation history.
+
+**Worked example** — programmer with 6-section impl (B.1-B.6), hit wall at B.5 mid-Edit:
+
+```
+SendMessage(to=<programmer-subagent-id>, content="
+<continue_from_section>B.5</continue_from_section>
+<context>
+  <prior_work>Read .devt/state/impl-summary.md — B.1-B.4 complete; B.5 partially done in events.py.</prior_work>
+  <task>Continue B.5 from where you left off + complete B.6 + tests. Same Q8 protocol — emit Status: PARTIAL with Next-section if you hit the wall again.</task>
+</context>
+")
+```
+
+If the same subagent hits the wall again, the workflow loops: SendMessage → PARTIAL detection → next SendMessage. Each iteration progresses by one or more sections.
+
+See `docs/AGENT-CONTRACTS.md::Q8 worked example` for the full sidecar shape + re-dispatch fallback.
+
 ## Failure modes
 
 | Symptom | Cause | Fix |

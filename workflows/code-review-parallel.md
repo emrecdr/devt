@@ -225,6 +225,16 @@ fi
 
 **Foreground parallel dispatch.** Issue ONE message containing N `Task(subagent_type="devt:code-reviewer", …)` calls — one per lane in `workflow.yaml::lanes[]`. Sequential Task calls serialize; only multi-Task-in-one-message gets true parallelism per the Anthropic Task contract (same idiom as `dev-workflow.md:506` researcher+architect parallel dispatch).
 
+**Discoverability tip (F7/F16)**: Each lane needs the canonical envelope per the Q8/Q11 contracts. Rather than hand-rolling N prompts (a documented field-evidence failure mode), generate the paste-ready envelope per lane via:
+
+```bash
+for LANE_ID in $(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | jq -r '.[].id'); do
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:auto > "/tmp/lane-${LANE_ID}-envelope.txt"
+done
+```
+
+Then customize each `/tmp/lane-*-envelope.txt` with per-lane `<lane_id>` + `<lane_files>` injection before pasting into the parallel Task() calls. See `skills/dispatch-helpers/SKILL.md` for the worked example.
+
 ```bash
 LANES_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-lanes-registered)
 if echo "$LANES_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then

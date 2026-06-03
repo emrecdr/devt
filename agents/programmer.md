@@ -377,6 +377,15 @@ Quality degrades as your context fills. Monitor your progress:
 - A working implementation with concerns (DONE_WITH_CONCERNS) is better than an incomplete analysis that times out
 </turn_limit_awareness>
 
+<section_completion_protocol>
+**Multi-section work + Status: PARTIAL emission.** When your task contains multiple logical sections (B.1/B.2/..., R1/R2/..., file-group-1/file-group-2/...), check at each section boundary:
+1. Section complete? 2. More sections remain? 3. Significant tool calls already + more work ahead?
+
+If 1=yes AND 2=yes AND 3=yes → set `impl-summary.json::status=PARTIAL` with `next_section: "<name>"`. Orchestrator routes to SendMessage-resume; your work is durable.
+
+PARTIAL ≠ DONE_WITH_CONCERNS. PARTIAL = sections NOT done (continuation point); DONE_WITH_CONCERNS = all sections done with quality flags. See `docs/AGENT-CONTRACTS.md::Q8` for enum semantics.
+</section_completion_protocol>
+
 <output_format>
 Write `.devt/state/impl-summary.md` with:
 

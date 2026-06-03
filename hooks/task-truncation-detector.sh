@@ -85,6 +85,37 @@ node -e "
 
   const nearCliff = outputBytes >= threshold;
 
+  // WI-3b (greenfield calibration #17): LOW-output cliff detection. Greenfield's
+  // 'Now B.5' case returned 140 bytes from a programmer at the 91-tool wall;
+  // the existing 40KB near_cliff didn't fire because the byte count was tiny.
+  // A suspiciously SMALL return often signals mid-task truncation just as much
+  // as a suspiciously LARGE return signals context overflow. Field evidence:
+  // 140 bytes; chosen threshold 500 gives 3.5x headroom over the observed case.
+  const LOW_OUTPUT_THRESHOLD = 500;
+  const lowOutput = outputBytes < LOW_OUTPUT_THRESHOLD;
+
+  // WI-3b: opportunistic stop_reason capture. Claude API messages carry a
+  // stop_reason field (end_turn / max_tokens / tool_use / pause_turn / refusal).
+  // If the Claude Code Task tool surfaces it through PostToolUse.tool_response,
+  // we capture it as a structured signal. Fail-open: null when absent.
+  let stopReason = null;
+  if (resp && typeof resp === 'object' && !Array.isArray(resp) && typeof resp.stop_reason === 'string') {
+    stopReason = resp.stop_reason;
+  }
+
+  // WI-5b / M9 (greenfield calibration #16/#17 H section): mid-task language
+  // backup signal. Catches agents that hit a budget wall and returned a short
+  // continuation message ('Now B.5', 'continuing with phase 2', 'paused after
+  // step 3') instead of emitting Status: PARTIAL explicitly per the Q8 contract.
+  // Three patterns kept tight to minimize false positives:
+  //   - phase markers: 'Now B.5', 'then C.3', 'Next R2'
+  //   - paused-language: 'paused at...', 'paused after...'
+  //   - continuation prefixes followed by section names
+  // Workflow runners combine this with low_output and Status field to decide
+  // whether to advance or SendMessage-resume.
+  const midTaskRegex = /\b(now|then|next)\s+[A-Z]\.?\d+(\.\d+)?\b|\bpaused?\s+(at|on|after)\b|\bcontinu(e|ing)\s+(with|from|later)\b/i;
+  const midTaskLanguage = midTaskRegex.test(responseText);
+
   // Forensic append — best-effort, never fails the hook.
   if (stateDir) {
     try {
@@ -97,6 +128,10 @@ node -e "
         output_bytes: outputBytes,
         threshold_bytes: threshold,
         near_cliff: nearCliff,
+        low_output: lowOutput,
+        low_output_threshold: LOW_OUTPUT_THRESHOLD,
+        stop_reason: stopReason,
+        mid_task_language: midTaskLanguage,
       });
       // stateDir is derived from a process.cwd() walk locating .devt/state — not user input.
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -104,17 +139,32 @@ node -e "
     } catch { /* forensic write failure must NEVER affect the hook */ }
   }
 
-  if (!nearCliff) process.exit(0);
+  if (!nearCliff && !lowOutput && !midTaskLanguage) process.exit(0);
 
-  // Near-cliff path — surface an advisory. PostToolUse additionalContext is
-  // visible to the orchestrator on the next turn.
-  const advisory = [
-    '[devt task-truncation] Sub-agent ' + subagent + ' returned ' + outputBytes +
-      ' bytes (threshold ' + threshold + '). Output is approaching the budget cliff where ',
-    'context can be silently truncated by upstream layers. If the next agent in the chain depends on this output, ',
-    'consider (a) reading the structured sidecar artifact written by this agent instead of the prose return, ',
-    '(b) re-dispatching with a tighter scope, or (c) splitting the work across multiple Task calls.',
-  ].join('');
+  // Compose advisory based on which cliff triggered. The two cliffs are mutually
+  // exclusive by definition (output can't be both > 40KB and < 500 bytes).
+  let advisory;
+  if (nearCliff) {
+    advisory = [
+      '[devt task-truncation] Sub-agent ' + subagent + ' returned ' + outputBytes +
+        ' bytes (threshold ' + threshold + '). Output is approaching the budget cliff where ',
+      'context can be silently truncated by upstream layers. If the next agent in the chain depends on this output, ',
+      'consider (a) reading the structured sidecar artifact written by this agent instead of the prose return, ',
+      '(b) re-dispatching with a tighter scope, or (c) splitting the work across multiple Task calls.',
+    ].join('');
+  } else {
+    // lowOutput OR midTaskLanguage branch — both signal possible mid-task return
+    const signals = [];
+    if (lowOutput) signals.push('low output (' + outputBytes + ' bytes, threshold ' + LOW_OUTPUT_THRESHOLD + ')');
+    if (midTaskLanguage) signals.push('mid-task language detected in return text');
+    advisory = [
+      '[devt task-truncation] Sub-agent ' + subagent + ' return looks like mid-task wall hit: ' + signals.join(', ') + '. ',
+      stopReason ? 'Claude stop_reason=' + stopReason + '. ' : '',
+      'Verify completeness: (a) read the sidecar artifact and check Status field; ',
+      '(b) if Status is PARTIAL or sidecar is absent, SendMessage-resume the same agent with <continue_from_section>...</continue_from_section> ',
+      'rather than advancing phase=DONE. See docs/AGENT-CONTRACTS.md::Q8 for PARTIAL semantics.',
+    ].join('');
+  }
 
   const output = JSON.stringify({
     hookSpecificOutput: {

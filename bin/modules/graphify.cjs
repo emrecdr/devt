@@ -1685,6 +1685,41 @@ function _logProbeFailure(category, command, args, detail) {
   } catch { /* diagnostic side-channel; never raise */ }
 }
 
+// WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
+// graphify's _resolveOne returns ONE node arbitrarily by Map iteration order
+// when two distinct definitions share a label. Greenfield's case: two
+// `update_license_rights` methods (LicenseDetailService.update_license_rights
+// + LicenseService.update_license_rights). Memory entry 14398 wrongly flagged
+// "2-caller risk" because the resolver picked one and missed the other. This
+// helper finds ALL nodes with the exact (case-insensitive) label match, so
+// preflight can surface the collision in the brief before downstream agents
+// trust a single-binding picture. Returns {source, collisions, count} where
+// count > 1 means a real collision; count == 1 is normal; count == 0 means
+// the symbol isn't in the graph.
+function getSymbolCollisions(label) {
+  if (!label || typeof label !== "string") {
+    return { source: "graphify", collisions: [], count: 0 };
+  }
+  const loaded = loadGraph();
+  if (!loaded.ok) return { source: "grep", collisions: [], count: 0, degraded: true, reason: loaded.degraded && loaded.degraded.reason };
+  const targetLower = label.toLowerCase();
+  const collisions = [];
+  for (const [id, node] of loaded.cache.adj.nodeMap) {
+    if (typeof node.label === "string" && node.label.toLowerCase() === targetLower) {
+      collisions.push({
+        id,
+        label: node.label,
+        source_file: node.source_file || "",
+        source_location: node.source_location || null,
+        // Class qualifier derived from id (e.g. LicenseDetailService.update_license_rights
+        // → "LicenseDetailService"). Null when the id has no dotted scoping.
+        class_qualifier: id.includes(".") ? id.split(".").slice(0, -1).join(".") : null,
+      });
+    }
+  }
+  return { source: "graphify", collisions, count: collisions.length };
+}
+
 // DEF-052 (greenfield calibration #16 field confirmation). When the locally-installed
 // graphify skill bundle drifts from the binary version, graphify silently emits an
 // empty hyperedges list — workflows downstream see hyperedges_matched=[] and assume
@@ -1756,6 +1791,7 @@ module.exports = {
   queryGraph,
   getNode,
   detectSkillVersionDrift,
+  getSymbolCollisions,
   getNeighbors,
   shortestPath,
   blastRadius,

@@ -153,7 +153,7 @@ Write `.devt/state/docs-summary.md` with:
 
 ## Status
 
-DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT
 
 ## Changes Made
 

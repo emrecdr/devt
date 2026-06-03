@@ -5859,19 +5859,32 @@ fi
 # Functional smoke — run the hook in an isolated tmp project with .devt/state present.
 TRUNC_TMP=$(mktemp -d)
 mkdir -p "$TRUNC_TMP/.devt/state"
-# Low-byte path: no advisory, but a record IS written tagged near_cliff:false.
+# WI-3b (greenfield calibration #17): LOW-output path NOW emits an advisory.
+# Suspiciously small returns are a mid-task wall signal greenfield's "Now B.5"
+# case (140 bytes) exposed. Threshold: <500 bytes triggers LOW cliff advisory.
 LOW_OUT=$(cd "$TRUNC_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
-if [ -z "$LOW_OUT" ]; then
-  pass "task-truncation-detector emits NO advisory on low-byte sub-agent return"
+if echo "$LOW_OUT" | grep -q "below LOW threshold\|SendMessage-resume"; then
+  pass "task-truncation-detector emits LOW-output advisory (WI-3b) on tiny sub-agent return"
 else
-  fail "task-truncation-detector unexpectedly emitted advisory on low-byte return: $LOW_OUT"
+  fail "task-truncation-detector missed LOW-output advisory on 2-byte return: $LOW_OUT"
 fi
 if [ -s "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" ] && \
    tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"source":"task_output_bytes"' && \
+   tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"low_output":true' && \
    tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"near_cliff":false'; then
-  pass "task-truncation-detector writes task_output_bytes record (near_cliff:false) on low-byte return"
+  pass "task-truncation-detector writes low_output:true + near_cliff:false record on tiny return"
 else
-  fail "task-truncation-detector failed to write near_cliff:false record"
+  fail "task-truncation-detector failed to write low_output:true / near_cliff:false record"
+fi
+# Mid-byte path (1000 bytes): no advisory, both cliffs false.
+rm -f "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl"
+MID_BLOB=$(node -e "process.stdout.write('x'.repeat(1000))")
+MID_OUT=$(cd "$TRUNC_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\"},\"tool_response\":\"$MID_BLOB\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+if [ -z "$MID_OUT" ] && tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"low_output":false' && \
+   tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"near_cliff":false'; then
+  pass "task-truncation-detector stays silent on normal mid-byte return (both cliffs false)"
+else
+  fail "task-truncation-detector misbehaved on 1KB mid-byte return: $MID_OUT"
 fi
 # High-byte path: advisory IS emitted, record tagged near_cliff:true.
 BIG_BLOB=$(node -e "process.stdout.write('x'.repeat(45000))")
@@ -9971,6 +9984,61 @@ if [ -z "$K5_FAIL" ]; then
   pass "K5: every STATE= site in scope-trust workflows has paired refresh-scope-context (4 files checked)"
 else
   fail "K5: refresh-scope-context wiring gap —$K5_FAIL"
+fi
+
+# K6 (greenfield calibration #16 + #17 Q8): every output-writing agent declares
+# a Status enum that includes PARTIAL. 6 non-sidecar agents declare via markdown
+# `## Status` body section; 4 sidecar agents declare via JSON_SIDECAR_SCHEMAS in
+# state.cjs. Field evidence: greenfield's cal #17 documented programmer return
+# "Now B.5" being treated as DONE because no PARTIAL state existed.
+K6_FAIL=""
+for agent_file in agents/architect.md agents/researcher.md agents/docs-writer.md agents/curator.md agents/retro.md agents/debugger.md; do
+  if ! grep -qE '^[#]+ Status' "$ROOT/$agent_file" 2>/dev/null; then
+    K6_FAIL="$K6_FAIL $(basename $agent_file)(no_status_section)"
+    continue
+  fi
+  if ! grep -qE 'PARTIAL' "$ROOT/$agent_file" 2>/dev/null; then
+    K6_FAIL="$K6_FAIL $(basename $agent_file)(no_PARTIAL)"
+  fi
+done
+# 4 sidecar agents — schema in state.cjs JSON_SIDECAR_SCHEMAS
+for sidecar_pattern in "impl-summary.json" "test-summary.json" "review.json" "verification.json"; do
+  if ! awk -v p="$sidecar_pattern" 'BEGIN{seen=0;inblk=0} $0 ~ p && /:/{inblk=1} inblk && /PARTIAL/{seen=1; exit} inblk && /^  }/{inblk=0} END{exit !seen}' "$ROOT/bin/modules/state.cjs"; then
+    K6_FAIL="$K6_FAIL $sidecar_pattern(no_PARTIAL_in_schema)"
+  fi
+done
+if [ -z "$K6_FAIL" ]; then
+  pass "K6: every output-writing agent declares Status enum with PARTIAL (10 agents checked: 6 markdown + 4 sidecar)"
+else
+  fail "K6: missing PARTIAL state declaration —$K6_FAIL"
+fi
+
+# K7 (greenfield calibration #16 §G + cal #17): every wired dispatch site has
+# the Q11 mechanical claim-check (state assert-artifact-present) before phase
+# advance. Pilot scope: 5 dispatch sites wired in WI-5. Future v0.71.1 may
+# expand to verifier + tester + other sites based on cal #18 field evidence.
+K7_FAIL=""
+K7_DISPATCH_SITES=(
+  "workflows/dev-workflow.md:architect"
+  "workflows/dev-workflow.md:programmer"
+  "workflows/code-review.md:code-reviewer"
+  "workflows/quick-implement.md:programmer"
+  "workflows/quick-implement.md:code-reviewer"
+)
+for site in "${K7_DISPATCH_SITES[@]}"; do
+  wf_file="${site%:*}"
+  agent="${site#*:}"
+  # Look for "state assert-artifact-present <agent>" within the workflow file.
+  # We don't require positional adjacency to END markers (workflows vary in
+  # wiring); presence of the agent-specific assertion is the contract.
+  if ! grep -qE "state assert-artifact-present ${agent}\b" "$ROOT/$wf_file" 2>/dev/null; then
+    K7_FAIL="$K7_FAIL $(basename $wf_file):${agent}"
+  fi
+done
+if [ -z "$K7_FAIL" ]; then
+  pass "K7: every wired dispatch site has state assert-artifact-present claim-check (5 sites checked)"
+else
+  fail "K7: missing claim-check at —$K7_FAIL"
 fi
 
 echo

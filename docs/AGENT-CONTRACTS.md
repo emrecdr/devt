@@ -141,6 +141,79 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Enforcement.** Smoke gates: agent markdown templates must NOT emit `^## Status$` for sidecar-covered artifacts; `ARTIFACT_SCHEMA` must NOT list them; `SIDECAR_FOR_MARKDOWN` must reference all three.
 
+### Status enum + PARTIAL semantics (Q8 contract)
+
+**Rule.** Every output-writing agent declares a Status from a controlled enum. The enum varies by agent role but ALWAYS includes `PARTIAL` so a subagent that hits its per-dispatch tool budget mid-task can signal incomplete work without faking completion.
+
+**Per-agent enums** (canonical source: `bin/modules/state.cjs::JSON_SIDECAR_SCHEMAS` for sidecar agents; agent markdown templates for non-sidecar agents):
+
+| Agent | Status enum |
+|---|---|
+| programmer (sidecar) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| tester (sidecar) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| code-reviewer (sidecar) | `DONE / PARTIAL / BLOCKED` |
+| verifier (sidecar) | `VERIFIED / GAPS_FOUND / FAILED / DONE_WITH_CONCERNS / PARTIAL` |
+| architect (markdown) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| researcher (markdown) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| debugger (markdown) | `FIXED / NEEDS_MORE_INVESTIGATION / DONE_WITH_CONCERNS / PARTIAL / BLOCKED` |
+| docs-writer (markdown) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| curator (markdown) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+| retro (yaml) | `DONE / DONE_WITH_CONCERNS / PARTIAL / BLOCKED / NEEDS_CONTEXT` |
+
+**PARTIAL emission convention.** When emitting Status: PARTIAL, the agent also writes a Next-section indicator pointing at the work remaining:
+- Sidecar agents: `{"status": "PARTIAL", "next_section": "B.5", ...}` in the JSON sidecar (no schema validation on the field — informational only)
+- Non-sidecar agents: `## Next-section: B.5` markdown section after the `## Status: PARTIAL` block
+
+**Workflow routing on PARTIAL.** Detection happens in two layers:
+1. **Sidecar agents** → workflow reads `<sidecar>.status === "PARTIAL"` directly
+2. **Non-sidecar agents** → workflow greps `^## Status: PARTIAL` in the markdown output
+3. **Backup (M9 regex)** → workflow scans the agent's return text for mid-task language (`\b(now|next|remaining|continue|then\s+B\.\d+)\b`) when in {STANDARD, COMPLEX} tier; catches agents that forgot to emit the explicit token
+
+On PARTIAL detection, workflow routes to SendMessage-resume (in-session continuation) primary, re-dispatch with `<continue_from_checkpoint>` block fallback (cross-session resume).
+
+### Q8 worked example — resume protocol
+
+**Scenario.** Workflow dispatches programmer for a 6-section implementation (`B.1` through `B.6`). Programmer completes B.1-B.4 + part of B.5, hits the ~91-tool-call wall mid-Edit on `events.py`. Per `agents/programmer.md::section_completion_protocol`, programmer writes:
+
+```json
+{
+  "status": "PARTIAL",
+  "next_section": "B.5",
+  "verdict": "INDETERMINATE",
+  "summary": "B.1-B.4 complete + tests passing (427). B.5 mid-implementation in events.py — completed event class definitions, started subscriber wiring."
+}
+```
+
+**Detection.** Workflow's claim-check (Q11) confirms `impl-summary.md` exists and `impl-summary.json::status === "PARTIAL"`. Workflow does NOT advance `phase=implement status=DONE`.
+
+**Recovery — SendMessage primary path** (in-session, ~one-prompt cost, full subagent context preserved):
+
+```
+SendMessage(to=<programmer-subagent-id>, content="
+<continue_from_section>B.5</continue_from_section>
+<context>
+  <prior_work>Read .devt/state/impl-summary.md — B.1-B.4 complete; B.5 partially implemented in events.py.</prior_work>
+  <task>Continue B.5 from where you left off: complete subscriber wiring + B.6 + tests. Maintain the same Q8 protocol — emit Status: PARTIAL if you hit the wall again.</task>
+</context>
+")
+```
+
+Why SendMessage primary: re-uses the subagent's full conversation cache (~15-20 file Reads saved vs cold re-dispatch). Field evidence: greenfield cal #17 documented ~60+ wasted file Reads avoided across one session's 4 resumes.
+
+**Recovery — re-dispatch fallback path** (cross-session, after CC compaction, or when subagent-id is no longer addressable):
+
+```
+Task(subagent_type="devt:programmer", prompt="
+<continue_from_checkpoint>
+  Read .devt/state/impl-summary.md for prior work (B.1-B.4 complete; B.5 partially implemented in events.py per impl-summary.json::next_section).
+  Continue with B.5 subscriber wiring + B.6 + tests.
+</continue_from_checkpoint>
+<context>...standard envelope blocks per dispatch render-filled...</context>
+")
+```
+
+Re-dispatch is more expensive but survives session boundaries. Workflows choose based on whether the original subagent-id is still addressable (in-session = SendMessage; after `/devt:pause` + new session = re-dispatch).
+
 ### Agent artifact provenance
 
 **Rule.** Agent-written artifacts include provenance sections (agent name, timestamp, workflow context) for traceability across the pipeline.

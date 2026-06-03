@@ -267,15 +267,27 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <!-- END dispatch:programmer:quick_implement -->
 ```
 
+**Claim-check (Q11)**: Before reading the sidecar, mechanically verify the programmer wrote its declared output.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present programmer)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If BLOCKED: programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume if a budget wall is suspected (check `.devt/state/dispatch-warnings.jsonl` for `near_cliff`/`low_output`/`mid_task_language` records).
+
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar impl-summary.json
 ```
 
-Route on `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`):
+Route on `status` (`DONE|DONE_WITH_CONCERNS|PARTIAL|BLOCKED|NEEDS_CONTEXT`):
 
 - DONE or DONE_WITH_CONCERNS: proceed to test
+- PARTIAL: programmer signaled mid-task wall. SendMessage-resume the programmer with `<continue_from_section>` set to `sidecar.next_section`. Do NOT advance to test.
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
 
@@ -405,6 +417,17 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 ")
 <!-- END dispatch:code-reviewer:quick_implement -->
 ```
+
+**Claim-check (Q11)**: Before reading the review, mechanically verify the code-reviewer wrote review.md.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present code-reviewer)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If BLOCKED: re-dispatch the code-reviewer or SendMessage-resume if mid-task wall is suspected. Check sidecar.status for PARTIAL (→ resume with `<continue_from_section>`) vs DONE/BLOCKED.
 
 **Gate check**: Read `.devt/state/review.md` and check verdict:
 

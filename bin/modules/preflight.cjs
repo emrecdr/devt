@@ -178,6 +178,12 @@ const SYMBOL_DENYLIST = new Set([
   "lane", "lanes", "tier", "tiers", "phase", "phases",
   // devt-internal terminology that appears in task descriptions about devt itself
   "graphify", "claudemem", "devt", "preflight",
+  // Field signal (greenfield calibration #16 + #17): task-text noise tokens
+  // that win the central-symbol picker by string-overlap with the task
+  // description. "Batch B" scored 1.0 against task "Batch B refactor…",
+  // beating real graph symbols. Single-token English words that LOOK like
+  // PascalCase identifiers slip past the PascalCase regex.
+  "batch", "wave", "section", "full", "skip", "semver",
 ]);
 
 // Tokens of pure ALL-CAPS letters (≥4 chars, no lowercase) are usually
@@ -1157,6 +1163,29 @@ function generate(taskText, opts) {
       }
     } catch { /* drift detection is best-effort */ }
   }
+
+  // WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
+  // For each topic.symbol, check whether MORE THAN ONE node in the graph shares
+  // its label. When count > 1, surface the collision in blast.collisions[]
+  // so downstream agents see ALL distinct definitions rather than the single
+  // arbitrarily-resolved one (greenfield's update_license_rights × 2 case).
+  // Empty array when no collisions OR graphify unavailable — fail-open.
+  const symbolCollisions = [];
+  try {
+    if (Array.isArray(topic.symbols)) {
+      for (const sym of topic.symbols) {
+        const result = graphify.getSymbolCollisions(sym);
+        if (result && result.count > 1) {
+          symbolCollisions.push({
+            symbol: sym,
+            count: result.count,
+            bindings: result.collisions,
+          });
+        }
+      }
+    }
+  } catch { /* collision detection is best-effort */ }
+
   const extractionConfidence = computeExtractionConfidence(topic);
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
@@ -1196,6 +1225,12 @@ function generate(taskText, opts) {
       // details list so workflows can surface them in <god_node_warnings> +
       // graph-impact.md without re-running blast_radius.
       ambiguous_details: Array.isArray(blast.ambiguous_details) ? blast.ambiguous_details : [],
+      // WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
+      // For each topic.symbol whose label has > 1 matching node, surface every
+      // distinct binding so downstream agents see all definitions, not just
+      // the one arbitrarily resolved by _resolveOne's Map-iteration order.
+      // Empty array when no collisions OR graphify unavailable.
+      collisions: symbolCollisions,
     },
     graph_stats: graphStats,
     staleness,
@@ -1272,23 +1307,60 @@ function readBriefMeta() {
 // when no symbol scores above zero.
 function pickCentralSymbol(symbols, taskText) {
   if (!Array.isArray(symbols) || symbols.length === 0) return null;
+
+  // M1 (greenfield calibration #16 + #17): filter candidates by graph existence
+  // BEFORE token-overlap scoring. Without this filter the picker can return a
+  // task-text noise word ("Batch") that scores 1.0 against the task description
+  // even though it has no graph node — downstream blast_radius then runs against
+  // a fictional symbol and returns degraded results. When graphify is unavailable
+  // (not setup, disabled, or graph degraded), fall through to legacy scoring on
+  // raw symbols so projects without graphify behave as before. Gate via the
+  // exported graphify.status() so we distinguish "graph not loaded" from
+  // "graph loaded but symbol absent" — both look like source:"grep" through
+  // getNode but only the former should trigger legacy fallback.
+  let graphValidSymbols = [];
+  let graphAvailable = false;
+  try {
+    const graphify = require("./graphify.cjs");
+    const graphStatus = graphify.status();
+    if (graphStatus && graphStatus.state === "ready") {
+      graphAvailable = true;
+      for (const sym of symbols) {
+        const result = graphify.getNode(sym);
+        if (result && Array.isArray(result.results) && result.results.length > 0) {
+          graphValidSymbols.push(sym);
+        }
+      }
+    }
+  } catch { /* graphify module load failed — keep graphAvailable=false */ }
+
+  // Choose candidate set:
+  // - Graph available + valid candidates → score those (the M1 fix)
+  // - Graph available + zero valid candidates → return null (no real symbol exists;
+  //   callers' bash fallback to symbols[0] is the documented degraded behavior)
+  // - Graph not available → score raw symbols (legacy, projects without graphify)
+  const candidates = graphAvailable
+    ? (graphValidSymbols.length > 0 ? graphValidSymbols : null)
+    : symbols;
+  if (candidates === null) return null;
+
   const task = (taskText || "").toLowerCase();
-  if (!task) return symbols[0];
+  if (!task) return candidates[0];
   const tokenize = (sym) => sym
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_.]/g, " ")
     .toLowerCase()
     .split(/\s+/)
     .filter(t => t.length >= 3);
-  let best = { sym: symbols[0], score: 0, idx: -1 };
-  symbols.forEach((sym, i) => {
+  let best = { sym: candidates[0], score: 0, idx: -1 };
+  candidates.forEach((sym, i) => {
     const tokens = tokenize(sym);
     if (tokens.length === 0) return;
     const hits = tokens.filter(t => task.includes(t)).length;
     const score = hits / tokens.length;
     if (score > best.score) best = { sym, score, idx: i };
   });
-  return best.score > 0 ? best.sym : symbols[0];
+  return best.score > 0 ? best.sym : candidates[0];
 }
 
 function run(subcommand, args) {

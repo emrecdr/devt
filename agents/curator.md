@@ -183,7 +183,7 @@ Write `.devt/state/curation-summary.md` with:
 
 ## Status
 
-DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT
 
 ## Actions Taken
 

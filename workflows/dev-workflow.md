@@ -526,6 +526,8 @@ If no risk signals trip, skip the prompt and dispatch only the researcher.
 
 **Auto-Research (parallel dispatch)**: If no `.devt/state/research.md` exists, dispatch the researcher. If arch_health was opted-in AND `.devt/state/arch-health-scan.md` does not exist, dispatch the architect alongside it. Both dispatches MUST be issued in **one message with two Task tool calls** to actually run in parallel — sequential Task calls serialize.
 
+**Discoverability tip (Q11 + Q8 contract — F7/F16)**: When the canonical envelope below isn't sufficient (custom parallelism, mid-task resume, or hand-rolled lane scope), use `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled <agent>:auto` to generate the paste-ready envelope with current state + governing rules + guardrails substituted. See `skills/dispatch-helpers/SKILL.md` for the lane-customization + SendMessage-resume patterns.
+
 <!-- parallel-dispatch: researcher + architect (arch_health mode). Both must
      be in the SAME message for true parallelism per the Anthropic Task
      parallelism contract. -->
@@ -778,11 +780,23 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 <!-- END dispatch:architect:dev-arch-review -->
 ```
 
+**Claim-check (Q11)**: Before reading the artifact, mechanically verify the architect wrote its declared output. Catches the case where the architect returned a verbal summary without actually writing arch-review.md.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present architect)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If the claim-check BLOCKED: architect did not write its declared output. Re-dispatch with explicit instruction to write the artifact before returning, OR SendMessage-resume if a budget wall is suspected. Do NOT advance phase=architect.
+
 **Gate check**: Read `.devt/state/arch-review.md` and check status:
 
 - DONE: proceed to implement
 - DONE_WITH_CONCERNS: proceed to implement, but pass concerns to programmer as context:
   "Architecture review flagged concerns: [extract from arch-review.md]. Address these during implementation."
+- PARTIAL: architect signaled incomplete work with `## Next-section: <name>` indicator. SendMessage-resume the architect with `<continue_from_section>` pointing at the remaining work. Do NOT advance to implement.
 - BLOCKED: surface the blocking issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-run this step
 
@@ -931,15 +945,27 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <!-- END dispatch:programmer:dev -->
 ```
 
+**Claim-check (Q11)**: Before reading the sidecar, mechanically verify the programmer wrote its declared output. Catches the case where the programmer returned a verbal summary (mid-task wall) without actually writing impl-summary.md.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present programmer)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If the claim-check BLOCKED: programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume the same programmer with `<continue_from_section>` if a budget wall is suspected (often paired with `near_cliff` or `low_output` or `mid_task_language` records in `.devt/state/dispatch-warnings.jsonl`).
+
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar impl-summary.json
 ```
 
-The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), `requirements_covered[]`, and `requirements_missing[]`. Route on `status`:
+The sidecar exposes `status` (`DONE|DONE_WITH_CONCERNS|PARTIAL|BLOCKED|NEEDS_CONTEXT`), `verdict` (`PASS|FAIL|INDETERMINATE`), `requirements_covered[]`, `requirements_missing[]`, and `next_section` (when status=PARTIAL). Route on `status`:
 
 - DONE or DONE_WITH_CONCERNS: proceed to test
+- PARTIAL: programmer signaled mid-task wall. SendMessage-resume the programmer with `<continue_from_section>` set to `sidecar.next_section`. Do NOT advance to test.
 - BLOCKED: surface the issue to the user and STOP
 - NEEDS_CONTEXT: ask the user for clarification, then re-dispatch
 

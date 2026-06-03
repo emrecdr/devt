@@ -201,6 +201,15 @@ You have a limited number of turns (see maxTurns in frontmatter). As you approac
 Never let a turn limit expire silently. Partial output > no output.
 </turn_limit_awareness>
 
+<section_completion_protocol>
+**Multi-section work + Status: PARTIAL emission.** When your task contains multiple logical sections (lanes, file groups, phases), check at each section boundary:
+1. Section complete? 2. More sections remain? 3. Significant tool calls already + more work ahead?
+
+If 1=yes AND 2=yes AND 3=yes → emit Status: PARTIAL with Next-section indicator. Orchestrator routes to SendMessage-resume; your work is durable.
+
+PARTIAL ≠ DONE_WITH_CONCERNS. PARTIAL = sections NOT done (continuation point); DONE_WITH_CONCERNS = all sections done with quality flags. See `docs/AGENT-CONTRACTS.md::Q8` for per-agent enum + emission convention.
+</section_completion_protocol>
+
 <output_format>
 Write .devt/state/research.md with these sections:
 
@@ -235,7 +244,7 @@ Overall HIGH/MEDIUM/LOW with reasoning
 
 ## Status
 
-DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT
 
 ## Provenance
 - Agent: {agent_type}

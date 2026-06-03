@@ -155,7 +155,7 @@ Never let a turn limit expire silently. Partial output > no output.
 Write `.devt/state/lessons.yaml` with:
 
 ```yaml
-# Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+# Status: DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT
 # Lessons extracted from workflow: <brief task description>
 # Date: <extraction date>
 # Artifacts reviewed: impl-summary.md, test-summary.md, review.md, ...
