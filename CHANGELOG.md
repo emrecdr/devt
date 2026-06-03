@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.73.1] - 2026-06-03
+
+**Documentation completeness for the v0.71→v0.73 gate enforcement architecture.** Pure documentation patch — v0.71.0 / v0.72.0 / v0.72.1 / v0.73.0 shipped 4 new architectural surfaces (Layer-1 + Layer-2 claim-check, gate-trace.jsonl, advance-phase CLI, YAML registry) but none were documented in the canonical reference docs (CLAUDE.md, INTERNALS.md, README.md). Future Claude sessions load CLAUDE.md at SessionStart and stitch mental models from INTERNALS.md — without coverage of new surfaces, sessions fall back to older patterns and bypass the architectural floor cal #14-#18 worked to establish.
+
+No code changes. Smoke 789/0 stable.
+
+### Added (documentation only)
+
+- **CLAUDE.md** state CLI table now includes:
+  - `state assert-artifact-present <agent>` — Layer-1 mechanical claim-check
+  - `state assert-claim-checks-resolved` — Layer-2 post-hoc finalize gate
+  - `state advance-phase <phase> [key=value ...]` — runtime gate-at-transition
+- **docs/INTERNALS.md** new `Gate Enforcement Architecture (Layer-1 + Layer-2 + advance-phase)` section under Workflow Mechanics. Covers the architecture progression from warn-at-dispatch through block-at-transition, the mechanical claim-check + resolution semantic, the YAML registry single-source-of-truth pattern, belt-and-suspenders coexistence during migration cadence, and unified gate-trace.jsonl observability.
+- **README.md** config defaults table now includes `claim_check_mode` and `graphify.blast_magnification_threshold` rows alongside the existing `dispatch_hygiene_mode` row — coordination-via-clear-protocols (N1 north star) requires the config surface to be documented at the project entry point.
+
 ## [0.73.0] - 2026-06-03
 
 **Runtime gate enforcement via `state advance-phase` CLI (Phase B of greenfield cal #18 response).** Greenfield's cal #18 first-assessment top recommendation: "replace prose contracts with `state advance-phase <name>` CLI" so phase transitions become atomic CLI-gated operations. v0.69.5+v0.71.0+v0.72 shipped post-hoc finalize gates; v0.73 ships the **gate-at-transition** layer — phase advances run all required gates atomically and refuse to advance on failure. The orchestrator can't reach the target phase without the CLI running every required gate first.
