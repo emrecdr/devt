@@ -1028,6 +1028,36 @@ function generate(taskText, opts) {
     graphifyQuery: (text, qOpts) => graphify.queryGraph(text, qOpts),
   });
 
+  // v0.73 WI-4 (greenfield cal #18 assessment #2): extend v0.71 M1 graph-
+  // existence filter from just-the-central-symbol to ALL topic.symbols.
+  // Without this, downstream blast_radius wastes cycles on phantom symbols
+  // and the dispatch envelope shows misleading "topic.symbols=[A,B,C]" when
+  // only one of them actually exists in graphify. When graphify is ready,
+  // keep only symbols whose getNode returns a real graph node; surface
+  // dropped non-existent symbols as topic.symbols_dropped_no_graph_node so
+  // downstream agents (and cal #19 observability) can see what was filtered.
+  // Falls through to legacy (no filtering) when graphify unavailable —
+  // identical degradation pattern to M1 in pickCentralSymbol.
+  let symbolsDroppedNoGraphNode = [];
+  try {
+    const graphStatus = graphify.status();
+    if (graphStatus && graphStatus.state === "ready" && Array.isArray(topic.symbols) && topic.symbols.length > 0) {
+      const kept = [];
+      for (const sym of topic.symbols) {
+        if (typeof sym !== "string" || sym.length === 0) continue;
+        try {
+          const res = graphify.getNode(sym);
+          if (res && Array.isArray(res.results) && res.results.length > 0) {
+            kept.push(sym);
+          } else {
+            symbolsDroppedNoGraphNode.push(sym);
+          }
+        } catch { /* per-symbol getNode error — keep symbol (defensive) */ kept.push(sym); }
+      }
+      topic.symbols = kept;
+    }
+  } catch { /* graphify unavailable — leave topic.symbols intact (legacy) */ }
+
   // Run lanes
   const A = laneA(topic);
   const B = laneB(topic);
@@ -1247,7 +1277,14 @@ function generate(taskText, opts) {
   const scopeHintConfidence = suggestedReading.length === 0
     ? { score: 0.0, band: "none", reason: "no suggested_reading entries" }
     : { score: 1.0, band: "high", reason: "placeholder pending v0.69 R3 calibration" };
-  const topicWithConfidence = { ...topic, extraction_confidence: extractionConfidence };
+  const topicWithConfidence = {
+    ...topic,
+    extraction_confidence: extractionConfidence,
+    // v0.73 WI-4: surface symbols that were extracted but had no matching
+    // graphify node (when graphify was ready). Empty array when graphify
+    // disabled OR all extracted symbols were graph-anchored.
+    symbols_dropped_no_graph_node: symbolsDroppedNoGraphNode,
+  };
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
     topic: topicWithConfidence,

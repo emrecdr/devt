@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.72.1] - 2026-06-03
+
+**Greenfield cal #18 first-assessment quick wins (Phase A).** Greenfield's first assessment of v0.71.0 validated the post-hoc enforcement architecture (S1 dispatch-hygiene gate fired correctly, blocked deactivation on 6 raw parallel devt:code-reviewer dispatches) AND identified the next layer (runtime gate enforcement via `state advance-phase` CLI). v0.72.1 ships the **3 independent quick wins** from greenfield's top 5: graph-node existence filter on all topic.symbols (#2), hyperedge completeness in reviewer prompt (#3), unified gate-trace.jsonl observability (#4). The big structural fix — `state advance-phase` CLI (#1) — and edge-relation filter on `blast_radius::modules_touched` (#5) are scoped for v0.73 / v0.74 respectively where their blast-radius warrants focused validation cycles.
+
+Smoke: **781 → 784 passed** (K37 gate-trace + K38 graph_node_exists field + K39 hyperedge surface). 1 pre-existing failure unchanged. Locking 3/3.
+
+### Added
+
+- **WI-3 unified gate-trace.jsonl observability** (`bin/modules/state.cjs::traceGate` + `persistGateTrace`). Every `assert-*` CLI invocation now appends one record `{ts, source:"gate_trace", gate, verdict:"ok"|"warn"|"fail", reason, workflow_id, phase}` to `.devt/state/gate-trace.jsonl`. Wraps all 14 assert-* cases in the state.cjs run() switch via `traceGate(name, fn)` — single wrap point per gate. Cal #19 has unified observability (firing rates + verdict timelines across the entire gate surface) instead of stitching together dispatch-warnings.jsonl + claim-check-failures.jsonl + preflight-denies.jsonl. End-to-end verified across 3 gate types with workflow_id + phase enrichment from workflow.yaml. Fail-open persistence (matches dispatch-warnings pattern). **N1 strong** (observability supports protocol coordination), **N2 moderate** (substance gate firing-rate visibility), **N3 mod** (~100 bytes per gate fire, bounded).
+- **WI-4 graph_node_exists filter on ALL topic.symbols** (`bin/modules/preflight.cjs::generate`). v0.71's M1 added the existence filter to `pickCentralSymbol` (one symbol at a time). v0.72.1 extends the filter to ALL topic.symbols at preflight-write time so downstream `blast_radius`, dispatch envelopes, and reviewer prompts only see graph-anchored symbols. Falls through to legacy (no filter) when graphify unavailable — identical degradation pattern to M1. Phantom symbols surfaced as `topic.symbols_dropped_no_graph_node` so cal #19 + downstream agents see what was filtered. **N4 strong** (delegates to graphify.getNode — coordination wrapper, no reimplementation), **N2 strong** (cleaner downstream signal). End-to-end verified with mock graph: 2 real symbols kept, 2 phantoms dropped.
+- **WI-5 hyperedge completeness reaches reviewer prompt** (`workflows/code-review.md`). Preflight computed `hyperedges_matched` with completeness ratio (e.g., greenfield's `license_update_rights_flow` at 14% = 1/7 RBAC chain members in scope) but the data never reached the code-reviewer dispatch — it sat in `preflight-brief.json` and was consumed only by `/devt:ship`'s completeness scan. v0.72.1 surfaces partial-coverage hyperedges (completeness < 1.0) in `graph-impact.md` alongside existing topic-symbols-dropped + ambiguous_bindings sections, with member-list breakdown showing which members are in-scope vs out-of-scope. Reviewers see the gap inline and can recommend scope expansion OR explicit deferral in their verdict. **N1 strong** (protocol-level surfacing of semantic-grouping signal), **N2 strong** (catches "fixed code, forgot related route/migration/test" failure mode).
+
+### Smoke gates
+
+- **K37**: `gate-trace.jsonl` captures every assert-* gate firing with verdict + workflow_id enrichment
+- **K38**: `preflight-brief.json::topic.symbols_dropped_no_graph_node` field present (empty when graphify disabled OR all symbols graph-anchored)
+- **K39**: `code-review.md` graph-impact.md compose block surfaces hyperedge completeness section
+
+### Greenfield cal #18 first-assessment finding closure
+
+| Finding | Status in v0.72.1 |
+|---|---|
+| **#1 Runtime gate enforcement via `state advance-phase` CLI** | **DEFERRED to v0.73** — structural fix; deserves focused release. v0.72's Layer-2 + v0.72.1's gate-trace.jsonl give cal #19 the observability to validate the transition point. |
+| **#2 graph_node_exists filter on topic.symbols** | **SHIPPED** (WI-4). Extends v0.71 M1 pattern from central-symbol to all symbols. |
+| **#3 Hyperedge completeness in reviewer prompt** | **SHIPPED** (WI-5). Surfaced in graph-impact.md with in-scope/out-of-scope breakdown. |
+| **#4 gate-trace.jsonl** | **SHIPPED** (WI-3). Unified observability across all 14 assert-* gates. |
+| **#5 Edge-relation filter on `blast_radius::modules_touched` (M2)** | **DEFERRED to v0.74 OR cal evidence trigger** — partial calibration shipped in v0.72 (Q2 caller_count_via_grep cross-check + magnification_advisory). Sunset trigger: Q2's magnification_advisory must fire in field for M2 to be the right fix path (otherwise cross-check is sufficient). |
+
+### Sunset trigger update (anti plan-debt-rot)
+
+Updated v0.72's deferred-items sunset criteria based on cal #18 first-assessment evidence:
+
+- **M2 sunset** (was: "field finding where caller_count_grep differs ≥3× AND downstream over-dispatched"): now reads "ship in v0.74 OR when cal evidence shows Q2 magnification_advisory firing rate >20% — high false-positive rate means M2 proper fix needed; low rate means cross-check is sufficient calibration".
+- **advance-phase CLI** (new, was implicit in plan): explicit v0.73 target. Sunset already satisfied by greenfield's cal #18 #1.
+
 ## [0.72.0] - 2026-06-03
 
 **Close the cycle — Layer-2 enforcement + automation + delegation.** v0.71.0 shipped the architectural floor (mechanical contracts: Q11 claim-check, Q8 PARTIAL state, M5 sentinel). Four consecutive calibrations followed the same pattern — devt ships a contract, orchestrator ignores warnings, next calibration documents the bypass. v0.72 closes the cycle by adding the **Layer-2 enforcement** that turns warnings into hard gates at finalize, mirroring v0.69.5's `assertNoRawDispatchesThisSession` pattern that has held up across 4 cals. Plus two automation gaps (L1-v2 prose-only suppression moved from prose to bash; Q2 grep cross-check as graphify calibration) and one delegation win (memory `--validate-refs` leverages claude-mem + git grep without reimplementation).

@@ -5309,10 +5309,13 @@ echo "== Documentation discipline: no devt-internal version refs =="
 # devt's version range is v0.X.Y; "since v[0-9]" catches future-proofing language.
 # Exclusions: CHANGELOG.md (release notes are the canonical home for version refs)
 # and docs/superpowers/plans/ (immutable historical plan archives).
-VERSION_REF_HITS=$(grep -rnE "v0\.[0-9]+\.[0-9]+|\bsince v[0-9]" \
-  "$ROOT/agents" "$ROOT/workflows" "$ROOT/skills" "$ROOT/docs" \
-  --include="*.md" \
-  2>/dev/null | grep -vE "/docs/superpowers/plans/|/CHANGELOG\.md" || true)
+# Use `git grep` (tracked-files only) instead of `grep -r` (filesystem scan) so
+# untracked local planning docs (per .gitignore or .git/info/exclude) are
+# correctly skipped. CI runs against fresh clones with no untracked files —
+# this aligns local behavior with CI behavior.
+VERSION_REF_HITS=$(cd "$ROOT" && git grep -nE "v0\.[0-9]+\.[0-9]+|\bsince v[0-9]" -- \
+  'agents/*.md' 'workflows/*.md' 'skills/**/*.md' 'docs/*.md' 2>/dev/null \
+  | grep -vE "^docs/superpowers/plans/|^CHANGELOG\.md|/CHANGELOG\.md" || true)
 if [ -z "$VERSION_REF_HITS" ]; then
   pass "no devt-internal version refs in agents/workflows/skills/docs"
 else
@@ -10103,6 +10106,55 @@ if [ "$K36_HAS" = "yes" ]; then
   pass "K36: preflight-brief.json::blast carries caller_count_grep + magnification_advisory fields"
 else
   fail "K36: preflight Q2 cross-check fields missing from brief"
+fi
+
+# K37 (v0.73 WI-3): unified gate-trace.jsonl captures every assert-* gate
+# firing with verdict + workflow_id + phase enrichment.
+K37_TMP=$(mktemp -d)
+cd "$K37_TMP"
+node "$CLI" init workflow "K37 test" >/dev/null 2>&1
+node "$CLI" state assert-claim-checks-resolved >/dev/null 2>&1
+K37_HAS=$(node -e "if(!require('fs').existsSync('.devt/state/gate-trace.jsonl')){console.log('absent');process.exit(0)}const l=require('fs').readFileSync('.devt/state/gate-trace.jsonl','utf8').trim().split('\n')[0];try{const j=JSON.parse(l);console.log(j.source==='gate_trace'&&j.gate&&j.verdict&&'workflow_id'in j?'yes':'no')}catch{console.log('parse_err')}" 2>/dev/null)
+cd "$ROOT"
+rm -rf "$K37_TMP"
+cd "$TMP"
+if [ "$K37_HAS" = "yes" ]; then
+  pass "K37: gate-trace.jsonl captures gate firings with verdict + workflow_id enrichment"
+else
+  fail "K37: gate-trace.jsonl missing or malformed ($K37_HAS)"
+fi
+
+# K38 (v0.73 WI-4): preflight-brief.json::topic carries symbols_dropped_no_graph_node
+# field. Empty when graphify disabled OR all symbols were graph-anchored; populated
+# when graphify ready AND some symbols had no matching node.
+K38_TMP=$(mktemp -d)
+cd "$K38_TMP"
+git init -q
+mkdir -p .devt graphify-out
+echo '{"graphify":{"enabled":true}}' > .devt/config.json
+echo '{"nodes":[{"id":"S1","label":"RealK38","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
+echo "class RealK38: pass" > a.py
+git add -A && git commit -q -m "init"
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K38 test" >/dev/null 2>&1
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor RealK38 FakeK38" >/dev/null 2>&1
+K38_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));process.exit('symbols_dropped_no_graph_node' in j.topic ? 0 : 1)" 2>/dev/null && echo "yes" || echo "no")
+cd "$ROOT"
+rm -rf "$K38_TMP"
+cd "$TMP"
+if [ "$K38_HAS" = "yes" ]; then
+  pass "K38: preflight-brief.json::topic.symbols_dropped_no_graph_node field present"
+else
+  fail "K38: WI-4 graph_node_exists filter field missing from topic"
+fi
+
+# K39 (v0.73 WI-5): code-review.md graph-impact.md compose block surfaces
+# hyperedge completeness when partial-coverage hyperedges exist. Structural
+# check (workflow .md contains the surfacing block) — full runtime exercise
+# requires graphify hyperedges which aren't reproducible in this smoke env.
+if grep -qE "Hyperedge completeness \(partial-coverage" "$ROOT/workflows/code-review.md"; then
+  pass "K39: code-review.md surfaces hyperedge completeness in graph-impact.md"
+else
+  fail "K39: code-review.md missing hyperedge completeness surface (WI-5 not wired)"
 fi
 
 echo

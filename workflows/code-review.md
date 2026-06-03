@@ -264,6 +264,24 @@ if [ -n "$DIFF_FILES" ]; then
       } >> .devt/state/graph-impact.md
     fi
   fi
+  # v0.73 WI-5 (greenfield cal #18 assessment #3): surface partial-coverage
+  # hyperedges. Preflight computes hyperedges_matched with completeness ratio
+  # but the data never reached the code-reviewer prompt — greenfield's
+  # license_update_rights_flow at 14% (1/7 RBAC members in scope) was lost.
+  # Reviewers see the gap inline now: "task scope covers N/M members; consider
+  # expanding OR explicitly defer remaining in your verdict".
+  HYPER_PARTIAL=$(jq -c '[.hyperedges_matched[]? | select(.completeness < 1.0)]' .devt/state/preflight-brief.json 2>/dev/null || echo "[]")
+  HYPER_PARTIAL_COUNT=$(echo "$HYPER_PARTIAL" | jq 'length' 2>/dev/null || echo 0)
+  if [ "$HYPER_PARTIAL_COUNT" != "0" ] && [ "$HYPER_PARTIAL_COUNT" != "" ]; then
+    {
+      echo ""
+      echo "## Hyperedge completeness (partial-coverage semantic groupings)"
+      echo ""
+      echo "_${HYPER_PARTIAL_COUNT} graphify-discovered semantic grouping(s) below 100% completeness. Members outside the current scope may indicate forgotten changes (related route/repo/migration/test/doc). Review whether scope should expand OR explicitly defer the missing members in your verdict._"
+      echo ""
+      echo "$HYPER_PARTIAL" | jq -r '.[] | "- **\(.label)** — \((.members_in_scope | length)) of \(.member_count) members in scope (\(((.completeness // 0) * 100) | floor)% complete). Out-of-scope members: \(.members - .members_in_scope | join(\", \"))"'
+    } >> .devt/state/graph-impact.md
+  fi
   # C7-3+C7-6 (greenfield calibration #4 + #7): when blast_radius reports
   # ambiguous_bindings > 0, emit the colliding symbols with their source_file
   # so reviewers know which module each finding's symbol refers to. Greenfield

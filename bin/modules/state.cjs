@@ -2520,6 +2520,58 @@ function _assertArtifactPresentInner(agent) {
 // after a failure RESOLVE the failure (the orchestrator re-dispatched).
 // Fail-open: jsonl write errors are silenced (matches dispatch-warnings.jsonl
 // pattern — forensic best-effort, never affect the caller).
+// v0.73 WI-3 (greenfield cal #18 assessment #4): unified gate-trace.jsonl
+// observability. Every assert-* CLI subcommand appends one record so cal #19+
+// has a single source of truth for "did gate X fire? what verdict? when?".
+// Complements the per-class jsonls (dispatch-warnings, claim-check-failures)
+// without duplicating them — those carry rich per-gate forensic data; this
+// carries the firing-rate + verdict timeline.
+//
+// Verdict derivation: ok:true → "ok"; ok:true + warn:true → "warn"; ok:false
+// → "fail". Mirrors the standard {ok, warn?, reason} shape every gate returns.
+// Fail-open persistence (matches dispatch-warnings.jsonl pattern).
+function persistGateTrace(name, result) {
+  try {
+    const dir = getStateDir();
+    let workflowId = null;
+    let phase = null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      try {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const idMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        if (idMatch) workflowId = idMatch[1].trim();
+        const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
+        if (phaseMatch) phase = phaseMatch[1].trim();
+      } catch { /* unreadable — fields stay null */ }
+    }
+    const verdict = result && result.ok === true
+      ? (result.warn === true ? "warn" : "ok")
+      : "fail";
+    const record = JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "gate_trace",
+      gate: name,
+      verdict,
+      reason: (result && typeof result.reason === "string") ? result.reason : "",
+      workflow_id: workflowId,
+      phase,
+    });
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    fs.appendFileSync(path.join(dir, "gate-trace.jsonl"), record + "\n");
+  } catch { /* trace persistence is best-effort */ }
+}
+
+// Wrapper that runs the gate function and traces the result. Mirrors how
+// persistClaimCheckResult wraps assertArtifactPresent — single wrap point
+// per gate so future changes (e.g., adding latency field) live in one place.
+function traceGate(name, fn) {
+  const result = fn();
+  persistGateTrace(name, result);
+  return result;
+}
+
 function persistClaimCheckResult(result) {
   if (!result || !result.agent) return;
   try {
@@ -3231,36 +3283,40 @@ function run(subcommand, args) {
       const opts = { dryRun: args.includes("--dry-run") };
       return audit.evictWorkflowArtifacts(opts);
     }
+    // v0.73 WI-3: every assert-* gate firing logs to gate-trace.jsonl via
+    // traceGate wrapper for unified observability (cal #19+). assertArtifactPresent
+    // already persists to claim-check-failures.jsonl; gate-trace.jsonl adds the
+    // unified firing-rate + verdict timeline across all 14 gates.
     case "assert-graphify-decision":
-      return assertGraphifyDecision();
+      return traceGate("assert-graphify-decision", () => assertGraphifyDecision());
     case "assert-preflight-fresh":
-      return assertPreflightFresh();
+      return traceGate("assert-preflight-fresh", () => assertPreflightFresh());
     case "assert-claude-mem-harvest":
-      return assertClaudeMemHarvest();
+      return traceGate("assert-claude-mem-harvest", () => assertClaudeMemHarvest());
     case "check-agent-output":
       return checkAgentOutput(args[0]);
     case "assert-verifier-ran":
-      return assertVerifierRan();
+      return traceGate("assert-verifier-ran", () => assertVerifierRan());
     case "assert-scope-check-handled":
-      return assertScopeCheckHandled();
+      return traceGate("assert-scope-check-handled", () => assertScopeCheckHandled());
     case "assert-lanes-registered":
-      return assertLanesRegistered();
+      return traceGate("assert-lanes-registered", () => assertLanesRegistered());
     case "assert-consolidator-dispatched":
-      return assertConsolidatorDispatched();
+      return traceGate("assert-consolidator-dispatched", () => assertConsolidatorDispatched());
     case "assert-auto-curator-considered":
-      return assertAutoCuratorConsidered();
+      return traceGate("assert-auto-curator-considered", () => assertAutoCuratorConsidered());
     case "assert-reuse-analyzed":
-      return assertReuseAnalyzed();
+      return traceGate("assert-reuse-analyzed", () => assertReuseAnalyzed());
     case "assert-knowledge-candidates-tagged":
-      return assertKnowledgeCandidatesTagged();
+      return traceGate("assert-knowledge-candidates-tagged", () => assertKnowledgeCandidatesTagged());
     case "assert-preflight-semantic-quality":
-      return assertPreflightSemanticQuality(args);
+      return traceGate("assert-preflight-semantic-quality", () => assertPreflightSemanticQuality(args));
     case "assert-no-raw-dispatches-this-session":
-      return assertNoRawDispatchesThisSession();
+      return traceGate("assert-no-raw-dispatches-this-session", () => assertNoRawDispatchesThisSession());
     case "assert-artifact-present":
-      return assertArtifactPresent(args[0]);
+      return traceGate("assert-artifact-present", () => assertArtifactPresent(args[0]));
     case "assert-claim-checks-resolved":
-      return assertClaimChecksResolved();
+      return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
