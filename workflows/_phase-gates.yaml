@@ -1,0 +1,66 @@
+# v0.73 Phase B — phase-gate registry (greenfield cal #18 first-assessment #1).
+#
+# Single source of truth for which gates must pass before entering a given
+# phase under a given workflow_type. The `state advance-phase <phase>` CLI
+# reads this file, looks up the gates for the target phase under the current
+# workflow.yaml::workflow_type, runs each gate in declared order via the
+# existing assert-* functions, and refuses to advance on any failure (mode:
+# block default per config.claim_check_mode, mirrors v0.69.5 dispatch_hygiene
+# pattern).
+#
+# Why phase-gates instead of transition-gates: simpler. Each phase has gates
+# that must pass to ENTER. The previous phase doesn't matter — the gates
+# verify the work-state needed to BE in the target phase. This matches the
+# existing v0.72 architecture where finalize-time gates check work-product
+# regardless of which transition led there.
+#
+# Scope (v0.73 initial): the FINAL-DEACTIVATION phase per workflow_type (the
+# `complete` / `debug` deactivation step). Workflow .md files invoke
+# `state advance-phase complete active=false` at the end; this YAML declares
+# which gates must pass first. v0.72's inline gate-check bash blocks remain
+# as belt-and-suspenders during the transition cadence — v0.74 cleanup
+# removes them once cal #19+ confirms the YAML path catches everything.
+# Untracked phases auto-pass — advance-phase falls through to a plain phase
+# update without running any gates, preserving backwards compatibility.
+
+workflow_types:
+  code_review:
+    complete:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session
+        - assert-knowledge-candidates-tagged
+        - assert-auto-curator-considered
+        - assert-verifier-ran
+
+  code_review_parallel:
+    complete:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session
+        - assert-knowledge-candidates-tagged
+        - assert-auto-curator-considered
+        - assert-verifier-ran
+
+  dev:
+    complete:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session
+        - assert-knowledge-candidates-tagged
+        - assert-auto-curator-considered
+
+  quick_implement:
+    complete:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session
+        - assert-knowledge-candidates-tagged
+        - assert-auto-curator-considered
+
+  debug:
+    debug:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session
+        - assert-knowledge-candidates-tagged

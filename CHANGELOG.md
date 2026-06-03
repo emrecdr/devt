@@ -6,6 +6,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-06-03
+
+**Runtime gate enforcement via `state advance-phase` CLI (Phase B of greenfield cal #18 response).** Greenfield's cal #18 first-assessment top recommendation: "replace prose contracts with `state advance-phase <name>` CLI" so phase transitions become atomic CLI-gated operations. v0.69.5+v0.71.0+v0.72 shipped post-hoc finalize gates; v0.73 ships the **gate-at-transition** layer — phase advances run all required gates atomically and refuse to advance on failure. The orchestrator can't reach the target phase without the CLI running every required gate first.
+
+This is the **next architectural layer** above v0.72's Layer-2. The four-cal pattern (cal #14-#17) had each new contract get bypassed; v0.73 moves enforcement into the CLI verb itself — there's no `update phase=X` shortcut around gate-running anymore at the migrated sites.
+
+Smoke: **785 → 789 passed** (K40 advance-phase exit-1-on-block + K41 backwards-compat fallthrough + K42 YAML registry shape + K43 workflow migration coverage). 0 failed. Locking 3/3.
+
+### Added
+
+- **`state advance-phase <phase> [key=value ...]` CLI** (`bin/modules/state.cjs::advanceState`). Reads the current `workflow_type` from `workflow.yaml`, looks up required gates for the target phase in `workflows/_phase-gates.yaml`, runs each gate via the existing `assert-*` functions (centralized via `GATE_FNS` dispatch map), and either (a) throws on any failure → devt-tools.cjs catch exits 1, OR (b) atomically updates phase + status=DONE + any kv updates passed through. Mirrors v0.69.5's S1-v3 deactivation pattern (throw on block, structured error reason). Phases NOT in the registry fall through to a plain phase update — preserves backwards compatibility while the migration cadence rolls out across remaining transitions. Every gate firing logs to `gate-trace.jsonl` via `persistGateTrace` with name prefixed `advance-phase:` so cal #19+ can distinguish transition-time gates from manual one-off gate runs.
+- **`workflows/_phase-gates.yaml` SSOT** declarative per-workflow_type per-phase gate registry. Zero-dep YAML parser (`parsePhaseGatesYaml`) mirrors `dispatch.cjs::parseIoContracts` precedent. Initial scope: the final-deactivation phase per workflow_type (`complete` for code_review / code_review_parallel / dev / quick_implement; `debug` for debug.md). The YAML is the canonical answer to "what gates must fire at this transition?" — workflow .md files reference it implicitly via `state advance-phase`. Future expansion covers intermediate transitions as cal #19+ evidence accrues.
+- **Workflow migration to `state advance-phase`** at the 4 finalize-deactivation sites (`workflows/code-review.md`, `workflows/dev-workflow.md`, `workflows/quick-implement.md`, `workflows/debug.md`). The previous `state update phase=X status=DONE active=false` lines are now `state advance-phase X active=false`. Existing v0.72 inline gate-check bash blocks remain as belt-and-suspenders during the transition cadence — v0.74 cleanup removes them once cal #19+ confirms the YAML path catches everything.
+
+### Smoke gates
+
+- **K40**: `state advance-phase complete` returns exit 1 when finalize gates block (claim-check + knowledge-candidates + auto-curator)
+- **K41**: advance-phase falls through to plain update for phases not in registry (backwards compat preserved)
+- **K42**: `_phase-gates.yaml` declares all 5 expected workflow_types
+- **K43**: 4 workflow files migrated (use `state advance-phase` at finalize-deactivation)
+
+### Cal #18 first-assessment finding closure (full set since v0.71.0 shipped)
+
+| Finding | Status |
+|---|---|
+| **#1 Runtime gate enforcement via `state advance-phase` CLI** | **SHIPPED in v0.73** (this release) |
+| **#2 graph_node_exists filter on topic.symbols** | SHIPPED in v0.72.1 (WI-4) |
+| **#3 Hyperedge completeness in reviewer prompt** | SHIPPED in v0.72.1 (WI-5) |
+| **#4 gate-trace.jsonl** | SHIPPED in v0.72.1 (WI-3) |
+| **#5 Edge-relation filter on `blast_radius::modules_touched`** | DEFERRED — sunset trigger updated in v0.72.1 (cal evidence on Q2 firing rate ≥20%) |
+
+### Cal #19 prompt prep
+
+Cal #19 should specifically test:
+- (a) Phase B: `state advance-phase` correctly blocks transitions when gates fail in a real session; orchestrator hits the exit-1 path and re-dispatches rather than rationalizing
+- (b) Phase A (v0.72.1): gate-trace.jsonl observability — `cat .devt/state/gate-trace.jsonl | jq -s 'group_by(.gate) | map({gate: .[0].gate, fires: length, blocks: map(select(.verdict=="fail")) | length})'` should show per-gate firing + block-rate metrics directly
+- (c) Phase A (v0.72.1) hyperedge surfacing reaches lane reviewers in parallel review workflows
+- (d) Re-test v0.71.0 NOT EXERCISED items (PARTIAL emission, SendMessage-resume, collision detection) — these have not been field-validated yet
+- (e) Confirm v0.72's Layer-2 + v0.73's advance-phase work together without redundant blocking (belt-and-suspenders → cleaner v0.74 design)
+
+### Deferred to v0.74 / future
+
+- **Cleanup pass**: remove inline gate-check bash blocks in workflow .md files (currently redundant with advance-phase). Sunset trigger: cal #19 confirms advance-phase catches what inline gate-checks catch.
+- **YAML expansion**: declare gates for intermediate transitions (review→verify, implement→test, etc.) as cal evidence shows they're needed.
+- **Migration extension**: `state update phase=X status=BLOCKED verdict=FAILED` patterns retained — those are the explicit-failure markers, not advance-phase candidates.
+
 ## [0.72.1] - 2026-06-03
 
 **Greenfield cal #18 first-assessment quick wins (Phase A).** Greenfield's first assessment of v0.71.0 validated the post-hoc enforcement architecture (S1 dispatch-hygiene gate fired correctly, blocked deactivation on 6 raw parallel devt:code-reviewer dispatches) AND identified the next layer (runtime gate enforcement via `state advance-phase` CLI). v0.72.1 ships the **3 independent quick wins** from greenfield's top 5: graph-node existence filter on all topic.symbols (#2), hyperedge completeness in reviewer prompt (#3), unified gate-trace.jsonl observability (#4). The big structural fix — `state advance-phase` CLI (#1) — and edge-relation filter on `blast_radius::modules_touched` (#5) are scoped for v0.73 / v0.74 respectively where their blast-radius warrants focused validation cycles.

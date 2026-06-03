@@ -1645,7 +1645,7 @@ fi
 ```
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=complete status=DONE active=false
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state advance-phase complete active=false
 ```
 
 **Clear ephemeral scratchpad.** The `scratchpad.md` PREFLIGHT lines and Deferred sections served their purpose: discovery harvested any `#KNOWLEDGE-CANDIDATE` tags (Step 9), `review_deferred` surfaced any deferred findings to the user (Step 11). Truncate now so the next workflow in this session starts clean and stale PREFLIGHT lines do not falsely satisfy the pre-flight-guard hook for unrelated files:

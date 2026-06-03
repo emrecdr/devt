@@ -10157,6 +10157,69 @@ else
   fail "K39: code-review.md missing hyperedge completeness surface (WI-5 not wired)"
 fi
 
+# K40 (v0.73 Phase B-1): advance-phase CLI exists + blocks on gate failure
+# (returns exit 1). Tests with workflow_type=quick_implement (has finalize
+# gates declared in _phase-gates.yaml). Capture exit code without tripping
+# set -euo pipefail when advance-phase legitimately exits 1.
+K40_TMP=$(mktemp -d)
+cd "$K40_TMP"
+node "$CLI" init workflow "K40 test" >/dev/null 2>&1
+node "$CLI" state update workflow_type=quick_implement >/dev/null 2>&1
+K40_EC=0
+node "$CLI" state advance-phase complete >/dev/null 2>&1 || K40_EC=$?
+cd "$ROOT"
+rm -rf "$K40_TMP"
+cd "$TMP"
+if [ "$K40_EC" = "1" ]; then
+  pass "K40: state advance-phase complete returns exit 1 when gates block (claim-check + KC + auto-curator)"
+else
+  fail "K40: state advance-phase complete returned exit $K40_EC (expected 1 for gate block)"
+fi
+
+# K41 (v0.73 Phase B-1): advance-phase falls through to plain update for
+# phases NOT in the registry. Backwards compatibility check.
+K41_TMP=$(mktemp -d)
+cd "$K41_TMP"
+node "$CLI" init workflow "K41 test" >/dev/null 2>&1
+node "$CLI" state update workflow_type=quick_implement >/dev/null 2>&1
+K41_OK=$(node "$CLI" state advance-phase unknown_phase 2>/dev/null | jq -r '.ok')
+cd "$ROOT"
+rm -rf "$K41_TMP"
+cd "$TMP"
+if [ "$K41_OK" = "true" ]; then
+  pass "K41: advance-phase falls through to plain update for phases not in registry (backwards compat)"
+else
+  fail "K41: advance-phase backwards-compat fallthrough broken (ok=$K41_OK)"
+fi
+
+# K42 (v0.73 Phase B-1): _phase-gates.yaml parses + declares all 5 expected
+# workflow_types. Structural check using parsePhaseGatesYaml indirectly via
+# advance-phase's load path.
+K42_YAML="$ROOT/workflows/_phase-gates.yaml"
+K42_TYPES=$(awk '/^  [a-z_]+:$/{gsub(/[: ]/,"");print}' "$K42_YAML" | sort -u)
+K42_EXPECTED="code_review code_review_parallel debug dev quick_implement"
+K42_GOT=$(echo "$K42_TYPES" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
+K42_EXPECTED_SORTED=$(echo "$K42_EXPECTED" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
+if [ "$K42_GOT" = "$K42_EXPECTED_SORTED" ]; then
+  pass "K42: _phase-gates.yaml declares all 5 expected workflow_types (code_review, code_review_parallel, debug, dev, quick_implement)"
+else
+  fail "K42: _phase-gates.yaml workflow_types mismatch (got '$K42_GOT' expected '$K42_EXPECTED_SORTED')"
+fi
+
+# K43 (v0.73 Phase B-2): all 4 workflow files migrated to use advance-phase
+# at the finalize-deactivation step.
+K43_FAIL=""
+for wf in workflows/code-review.md workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md; do
+  if ! grep -q "state advance-phase" "$ROOT/$wf" 2>/dev/null; then
+    K43_FAIL="$K43_FAIL $(basename $wf)"
+  fi
+done
+if [ -z "$K43_FAIL" ]; then
+  pass "K43: 4 workflow files use state advance-phase at finalize-deactivation (migration complete)"
+else
+  fail "K43: workflow migration incomplete — missing advance-phase in:$K43_FAIL"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -279,7 +279,7 @@ Read `.devt/state/debug-summary.md`:
 - **BLOCKED**: surface root cause analysis, suggest architectural review
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=debug status=DONE active=false
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state advance-phase debug active=false
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
 

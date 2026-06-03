@@ -2530,6 +2530,126 @@ function _assertArtifactPresentInner(agent) {
 // Verdict derivation: ok:true → "ok"; ok:true + warn:true → "warn"; ok:false
 // → "fail". Mirrors the standard {ok, warn?, reason} shape every gate returns.
 // Fail-open persistence (matches dispatch-warnings.jsonl pattern).
+// v0.73 Phase B (greenfield cal #18 assessment #1): YAML parser for
+// workflows/_phase-gates.yaml. Zero-dep purpose-built parser mirroring
+// dispatch.cjs::parseIoContracts. Schema:
+//   workflow_types:
+//     <workflow_type>:
+//       <phase>:
+//         gates:
+//           - <gate-name>
+function parsePhaseGatesYaml(content) {
+  const lines = content.split("\n");
+  const result = { workflow_types: {} };
+  let currentType = null;
+  let currentPhase = null;
+  let inGates = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0 && trimmed === "workflow_types:") continue;
+    if (indent === 2 && trimmed.endsWith(":")) {
+      currentType = trimmed.slice(0, -1);
+      result.workflow_types[currentType] = {};
+      currentPhase = null;
+      inGates = false;
+    } else if (indent === 4 && trimmed.endsWith(":") && currentType) {
+      currentPhase = trimmed.slice(0, -1);
+      result.workflow_types[currentType][currentPhase] = { gates: [] };
+      inGates = false;
+    } else if (indent === 6 && trimmed === "gates:" && currentPhase) {
+      inGates = true;
+    } else if (indent === 8 && trimmed.startsWith("- ") && inGates && currentPhase) {
+      const gate = trimmed.slice(2).trim();
+      result.workflow_types[currentType][currentPhase].gates.push(gate);
+    }
+  }
+  return result;
+}
+
+// v0.73 Phase B (greenfield cal #18 assessment #1): runtime gate enforcement.
+// `state advance-phase <phase> [key=value ...]` reads the workflow_type from
+// workflow.yaml, looks up gates for the target phase in _phase-gates.yaml,
+// runs each gate via the existing assert-* functions, and refuses to advance
+// on any failure. Throws on block (devt-tools.cjs outer catch exits 1).
+//
+// Phases NOT in the registry → falls through to a plain phase update,
+// preserving backwards compatibility. Gates NOT recognized → reported as
+// blocking failures (catches typos in the YAML).
+//
+// Every gate firing logs to gate-trace.jsonl via persistGateTrace, with
+// gate name prefixed by "advance-phase:" so cal #19+ can distinguish
+// transition-time gates from manual one-off gate runs.
+function advanceState(targetPhase, kvUpdates) {
+  if (typeof targetPhase !== "string" || !targetPhase) {
+    throw new Error("advance-phase: missing target phase argument (Usage: state advance-phase <phase> [key=value ...])");
+  }
+  let current;
+  try { current = readState(); }
+  catch (e) { throw new Error(`advance-phase: state read failed: ${e.message}`); }
+  const workflowType = current.workflow_type;
+  const baseUpdates = [`phase=${targetPhase}`, "status=DONE", ...(Array.isArray(kvUpdates) ? kvUpdates : [])];
+  if (!workflowType) {
+    // No workflow_type → fall through to plain update (workflow may be
+    // pre-init or in a non-typed state).
+    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: null, gates_run: [], note: "no workflow_type set — plain phase update", update: updateState(baseUpdates) };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const yamlPath = path.join(__dirname, "..", "..", "workflows", "_phase-gates.yaml");
+  if (!fs.existsSync(yamlPath)) {
+    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: [], note: "_phase-gates.yaml absent — plain phase update", update: updateState(baseUpdates) };
+  }
+  let registry;
+  try { registry = parsePhaseGatesYaml(fs.readFileSync(yamlPath, "utf8")); }
+  catch (e) { throw new Error(`advance-phase: registry load failed: ${e.message}`); }
+  const phaseEntry = registry.workflow_types[workflowType] && registry.workflow_types[workflowType][targetPhase];
+  const gates = (phaseEntry && Array.isArray(phaseEntry.gates)) ? phaseEntry.gates : [];
+  if (gates.length === 0) {
+    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: [], note: `no gates declared for ${workflowType}.${targetPhase} — plain phase update`, update: updateState(baseUpdates) };
+  }
+  // Dispatch gate name → assert function. Centralizes the mapping so YAML
+  // entries are validated against this registry; unknown names block.
+  const GATE_FNS = {
+    "assert-claim-checks-resolved": assertClaimChecksResolved,
+    "assert-no-raw-dispatches-this-session": assertNoRawDispatchesThisSession,
+    "assert-knowledge-candidates-tagged": assertKnowledgeCandidatesTagged,
+    "assert-auto-curator-considered": assertAutoCuratorConsidered,
+    "assert-verifier-ran": assertVerifierRan,
+    "assert-graphify-decision": assertGraphifyDecision,
+    "assert-preflight-fresh": assertPreflightFresh,
+    "assert-claude-mem-harvest": assertClaudeMemHarvest,
+    "assert-scope-check-handled": assertScopeCheckHandled,
+    "assert-lanes-registered": assertLanesRegistered,
+    "assert-consolidator-dispatched": assertConsolidatorDispatched,
+    "assert-reuse-analyzed": assertReuseAnalyzed,
+  };
+  const gateResults = [];
+  const blockedBy = [];
+  for (const gateName of gates) {
+    const fn = GATE_FNS[gateName];
+    let result;
+    if (!fn) {
+      result = { ok: false, reason: `unknown gate name in registry: ${gateName} (typo in _phase-gates.yaml or missing GATE_FNS entry)` };
+    } else {
+      try { result = fn(); }
+      catch (e) { result = { ok: false, reason: `gate ${gateName} threw: ${e.message}` }; }
+    }
+    persistGateTrace(`advance-phase:${gateName}`, result);
+    gateResults.push({ gate: gateName, ok: !!result.ok, reason: result.reason || "" });
+    if (result.ok === false) blockedBy.push({ gate: gateName, reason: result.reason || "" });
+  }
+  if (blockedBy.length > 0) {
+    throw new Error(
+      `[devt advance-phase] ${blockedBy.length} gate(s) blocked transition to ${workflowType}.${targetPhase}: ` +
+      blockedBy.map(b => `${b.gate} (${b.reason})`).join(" | ")
+    );
+  }
+  const updateResult = updateState(baseUpdates);
+  return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: gateResults, update: updateResult };
+}
+
 function persistGateTrace(name, result) {
   try {
     const dir = getStateDir();
@@ -3317,6 +3437,8 @@ function run(subcommand, args) {
       return traceGate("assert-artifact-present", () => assertArtifactPresent(args[0]));
     case "assert-claim-checks-resolved":
       return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
+    case "advance-phase":
+      return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
@@ -3334,7 +3456,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }
