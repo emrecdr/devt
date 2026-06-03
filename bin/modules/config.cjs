@@ -39,6 +39,15 @@ const DEFAULTS = {
   // Soft warning lost to perceived urgency. block-default makes ceremony
   // involuntary — friction beats protocol.
   dispatch_hygiene_mode: "block",
+  // Layer-2 claim-check enforcement (greenfield cal #16+#17). Mirrors
+  // dispatch_hygiene_mode pattern. Workflow Layer-1 (state assert-artifact-
+  // present) prints [BLOCKED] inline; Layer-2 (state assert-claim-checks-
+  // resolved) reads claim-check-failures.jsonl at finalize phases. block:
+  // unresolved failures fail the finalize gate. warn: surfaces summary but
+  // allows advance. off: gate auto-passes. Same default rationale as
+  // dispatch_hygiene_mode — block-default makes the audit-trail review
+  // involuntary rather than perceived-urgency optional.
+  claim_check_mode: "block",
   // Memory layer — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
   // preflight_mode: "off" (Phase 1-2) | "warn" | "block".
   // off — hook is a no-op (escape hatch for projects that opt out entirely)
@@ -115,6 +124,12 @@ const DEFAULTS = {
     // the user to refresh the graph before proceeding. Set to null to disable
     // the staleness gate entirely (warning still surfaces in the Brief).
     stale_threshold: 30,
+    // WI-4 / Q2 (greenfield cal #17 §F2): when graphify's BFS-derived
+    // direct_dependents_count is ≥ N× the literal git-grep caller count,
+    // emit a magnification advisory in the brief. Field evidence: 33 modules
+    // reported vs 1 ground-truth = 33× — clearly above 3× threshold. Set to
+    // null to disable the cross-check entirely.
+    blast_magnification_threshold: 3,
     // After an implementation phase writes new code (impl-summary.json with
     // non-empty files_modified), the workflow decides how to handle the now-
     // stale graph. Three accepted values:

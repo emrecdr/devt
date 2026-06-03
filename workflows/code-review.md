@@ -776,6 +776,17 @@ fi
 
 When the gate trips, surface the reason to the user and recommend re-running the verify step. Do not present findings until verification has actually been performed (or `config.workflow.verification` is explicitly set to `false`).
 
+**Layer-2 claim-check resolution gate.** Before finalize, assert all Layer-1 `assert-artifact-present` failures in this workflow window have been resolved. An unresolved failure means an agent dispatch returned without writing its declared output (per `agents/io-contracts.yaml::outputs.primary`) and was never re-dispatched. Mirrors the dispatch-hygiene S1 pattern — post-hoc enforcement at finalize. Set `claim_check_mode: "warn"` in `.devt/config.json` to opt out.
+
+```bash
+CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
+if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$CC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
 **Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Before knowledge-candidates aggregation, assert no raw devt:* dispatches happened this session. Claude Code does NOT enforce PreToolUse `decision:deny` on the Task tool — the existing `dispatch-hygiene-guard.sh` hook detects raw dispatches and writes them to `dispatch-warnings.jsonl` but cannot actually block. This gate is the post-hoc enforcement: any raw_dispatch entries with ts >= first_created_at blocks present_findings. Set `dispatch_hygiene_mode: "warn"` in `.devt/config.json` to opt out.
 
 ```bash

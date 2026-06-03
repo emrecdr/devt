@@ -6,6 +6,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-06-03
+
+**Close the cycle — Layer-2 enforcement + automation + delegation.** v0.71.0 shipped the architectural floor (mechanical contracts: Q11 claim-check, Q8 PARTIAL state, M5 sentinel). Four consecutive calibrations followed the same pattern — devt ships a contract, orchestrator ignores warnings, next calibration documents the bypass. v0.72 closes the cycle by adding the **Layer-2 enforcement** that turns warnings into hard gates at finalize, mirroring v0.69.5's `assertNoRawDispatchesThisSession` pattern that has held up across 4 cals. Plus two automation gaps (L1-v2 prose-only suppression moved from prose to bash; Q2 grep cross-check as graphify calibration) and one delegation win (memory `--validate-refs` leverages claude-mem + git grep without reimplementation).
+
+Plan alignment scored against verbatim north-star definitions:
+- **N1 coordination**: WI-1 + WI-2 strong (workflow gates as protocol handshakes; orchestrator-judgment paths removed)
+- **N2 code quality**: WI-1 + WI-3 strong (substance gate prevents shallow-completion; refutes false-positive risks)
+- **N3 token efficiency**: WI-2 strong (saves ~5-10KB graph-impact injection per prose-only lane)
+- **N4 delegate to graphify+claude-mem**: WI-3 + WI-4 strong (`memory query --validate-refs` uses claude-mem + git grep; Q2 cross-check uses git grep as graphify calibration — pure coordination wrapper, zero reimplementation)
+
+Smoke: **777 → 781 passed** (K33 Layer-2 round-trip + K34 LANE_GRAPH_IMPACT_BLOCK bash + K35 --validate-refs accepts flag + K36 Q2 cross-check fields). 1 pre-existing failure unchanged.
+
+### Added
+
+- **Layer-2 claim-check post-hoc enforcement** (`bin/modules/state.cjs::assertClaimChecksResolved` + new CLI `state assert-claim-checks-resolved`). Mirrors the v0.69.5 `assertNoRawDispatchesThisSession` pattern exactly: append-only audit trail in `.devt/state/claim-check-failures.jsonl` (every Layer-1 `assert-artifact-present` call appends success or failure record), per-agent last-write-wins resolution semantic (successful re-runs overwrite prior failures), post-hoc finalize gate fires on unresolved failures in workflow window. Wired adjacent to existing `assert-no-raw-dispatches-this-session` calls in all 4 finalize sites (code-review.md, debug.md, dev-workflow.md, quick-implement.md). New config knob `claim_check_mode: "block"` (default) / "warn" / "off" — same pattern as `dispatch_hygiene_mode`. End-to-end verified across 7 lifecycle test cases.
+- **L1-v2 prose-only lane automation** (`workflows/code-review-parallel.md`). Bash now COMPUTES the actual `LANE_GRAPH_IMPACT_BLOCK` + `LANE_SCOPE_HINT_BLOCK` per lane based on `LANE_FILES_PROSE_ONLY` detection (the detection bash already existed). Task() prompt examples updated to use `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly — the orchestrator no longer needs to remember to swap in the not_applicable stub. Removes the "MUST replace" verbal-contract anti-pattern at L1-v2 (cal #15 + #17 evidence of bypass).
+- **Memory query --validate-refs flag** (`bin/modules/memory.cjs::validateRefs` + flag handler in `query` CLI). Scope-filtered: ONLY validates entries with `doc_type ∈ {lesson, rejected}` (devt's analog of "concern|risk|warning" — entries that propagate as actionable warnings). For each in-scope entry, takes first 5 from `doc.affects_symbols`, runs `git grep -l -F` per symbol, reports `still_present + sample_locations` per symbol + `has_drift + summary` per entry. Cal #17 §J evidence: memory entry 14398 wrongly flagged "2-caller risk" for `update_license_rights` — `--validate-refs` catches stale entries whose declared symbols are no longer in the codebase. Strong N4 delegation: git grep + claude-mem entries as coordination layer, no reimplementation.
+- **Q2 caller_count_via_grep cross-check** in `preflight-brief.json::blast` (`bin/modules/preflight.cjs::generate`). For each top topic.symbol (cap at 5), runs `git grep -c -F "<sym>("` and sums caller counts across files. Compares with graphify's BFS-derived `direct_dependents_count`: when `bfs >= grep * threshold` (default 3x, config knob `graphify.blast_magnification_threshold`), emits a `magnification_advisory` flagging potential interface-edge amplification. Cal #17 §F2 evidence: greenfield's `update_license_rights` reported 33 modules via BFS-in depth-2 vs 1 literal caller — 33x magnification. Pure N4 coordination wrapper around git grep + graphify; both fields surface in `blast` so downstream agents calibrate their decisions.
+
+### Smoke gates
+
+- **K33**: Layer-2 round-trip (empty→ok, failure→block, success-resolution)
+- **K34**: code-review-parallel.md bash-computes `LANE_GRAPH_IMPACT_BLOCK`
+- **K35**: `memory query --validate-refs` accepts flag + surfaces `validate_refs:true` envelope field
+- **K36**: `preflight-brief.json::blast` carries `caller_count_grep` + `magnification_advisory` fields
+
+### Changed
+
+- `bin/modules/config.cjs` — two new defaults: `claim_check_mode: "block"` (mirrors `dispatch_hygiene_mode`) + `graphify.blast_magnification_threshold: 3` (Q2 cross-check trigger threshold).
+- `bin/modules/state.cjs::assertArtifactPresent` — now wraps an inner function and persists every result (success + failure) to `claim-check-failures.jsonl`. Persistence is fail-open. Authoritative return value unchanged.
+- `bin/modules/memory.cjs::queryFTS` ↔ `query` CLI — `--validate-refs` flag added (full-mode only; aggregate modes unchanged).
+
+### Direct cal #16/#17 finding closure
+
+- **§G + §K (Section trust-but-verify + architect-output completeness, scored 3/10)**: Layer-2 turns Layer-1's `[BLOCKED]` warnings into hard gates at finalize. Architect-skip case (greenfield's documented failure) now mechanically caught.
+- **§J (auto-mode decision quality, scored 5/10)**: `memory query --validate-refs` provides the auto-refutation greenfield Q9/M11 specified. Stale entries flagged with `has_drift: true`.
+- **§F2 (blast_radius magnification, 33 vs 1)**: Q2 cross-check surfaces magnification ratio in brief; downstream agents can calibrate.
+- **§6.6 (prose-only lane noise)**: L1-v2 now bash-automated; orchestrator-judgment opportunity removed.
+
+### Deferred items + explicit sunset criteria (anti plan-debt-rot)
+
+| Deferred item | Sunset trigger |
+|---|---|
+| WI-5 expansion to 14 remaining dispatch sites | Cal #18 confirms v0.71.0 Layer-1 + v0.72 Layer-2 pattern works in field → expand. OR cal #18 documents specific failures at currently-uncovered sites → expand to those sites only. |
+| M7 parallel sub-dispatch for COMPLEX with parallelism guarantee | 2 consecutive cals show >1 budget-wall hit per session despite Layer-2 in place → prevention layer becomes needed. Currently cal #17 = 4 walls; need cal #18 baseline to compare. |
+| M2 modules_touched BFS tightening | Cal evidence documents a field finding where `blast.caller_count_grep` (new in WI-4) differs from `direct_dependents_count` by ≥3× AND a downstream agent over-dispatched on the inflated count → trigger design conversation. |
+| Section I (Read-tracker bleed) | Claude Code releases note for parent/subagent tracker isolation OR cal documents this as load-bearing for a specific failure. |
+| M3 existence_check helper | 2+ code paths in devt need the existence-vs-no-callers distinction. Currently only `pickCentralSymbol` uses the pattern (1/2 needed). |
+| 5a 32-symbol surfacing extension (to dev-workflow + quick-implement) | Cal #18 documents a missing-surface case in one of those workflows → ship as v0.72.1. |
+| 5c inline-import grep fallback (graphify-helpers Skill body) | 2+ cal findings cite missing inline-import edges. Currently 1 finding (cal #16). |
+
+### Cal #18 prompt prep
+
+Cal #18 audit prompt should explicitly test: (a) Layer-1 + Layer-2 claim-check round-trip in real session; (b) `memory query --validate-refs` flag usage + drift detection; (c) Q2 magnification advisory when present; (d) L1-v2 bash-computed block at parallel-lane dispatch; (e) re-test v0.71.0 NOT EXERCISED items (PARTIAL emission, SendMessage-resume, collision detection).
+
 ## [0.71.0] - 2026-06-03
 
 **Greenfield calibrations #16 + #17 — verbal-contracts-to-mechanical-enforcement architectural fix.** Two consecutive calibrations independently surfaced the same root cause from different angles: devt's workflow contracts were prose-only declarations (`gate="arch-review.md is written"` in workflow frontmatter; "Read sidecar status" in prose) without mechanical enforcement. Cal #17's graphify-integration-review.md (54/110 score) made this explicit — sections G (subagent claim-checking, 3/10), H (mid-stream completion detection, 2/10), K (architect-output completeness, 3/10) all scored at the bottom because the contracts existed in markdown but no `[ -s file ]` shell guard, no return-token parser, no Status: PARTIAL state existed to catch mid-task wall hits. Cal #17 also delivered direct field evidence: 4 budget walls hit + 3 SendMessage-resumes manually performed in one session; architect returned a 2391-byte verbal summary claiming "wrote arch-review.md" but the file was never on disk; programmer returned "Now B.5" at the 91-tool-call wall and devt silently treated it as DONE.

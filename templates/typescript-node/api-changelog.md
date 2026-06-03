@@ -194,6 +194,39 @@ The changelog file starts with a Version Index table. When adding a new version:
 3. Anchor format: version with dots removed — `0.20.7` becomes `#0207---2026-03-17`
 4. Versions without API changes: append "— no API changes" to summary
 
+### Summary cell length — KEEP IT SHORT
+
+The summary cell is a **one-line index**, not a mini-section. Cells longer than ~350 characters break Bitbucket's repository markdown viewer (the table layout collapses visually); Bitbucket Cloud is the most fragile renderer here. Aim for **~200 characters**, hard cap **~350**.
+
+**The summary cell is for theme-level navigation. The detail belongs in the per-version `## [X.Y.Z]` section body below.**
+
+❌ **Bad — bloated summary (one cell crammed with every endpoint path, ticket ID, class / DTO name):**
+
+```
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (TICKET-184 / TICKET-132 Phase 1a)**: `PATCH /api/v1/resources/{id}/rights` accepts new role with new permission, new domain event; **Added (TICKET-144 / TICKET-176)**: `DELETE /api/v1/parents/{pid}/children?qid=<uid>` (moderation) + self-delete + new event class; **Added (TICKET-177)**: `DELETE /api/v1/parents/{pid}/items/mine` (self-delete; reuses existing event); **Changed (TICKET-134)**: `POST /api/v1/resources/{id}/unlock` rejects narrow-scope callers; **Operational**: ... |
+```
+
+✅ **Good — concise summary (~200 chars, theme-only):**
+
+```
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added**: narrow-role self-service rights edit; parent-resource moderation + self-delete; self-service item delete. **Changed**: unlock rejects narrow-scope callers on tenant-owned resources. |
+```
+
+**Rules of thumb for keeping the cell short:**
+
+| What | In summary cell? | In section body? |
+|---|---|---|
+| Thematic high-level change (e.g., "parent-resource moderation") | ✅ yes | ✅ also expanded |
+| `Added` / `Changed` / `Fixed` group labels | ✅ yes | ✅ section headings |
+| Full endpoint paths (`PATCH /api/v1/resources/{id}/rights`) | ❌ no | ✅ yes |
+| Ticket IDs (TICKET-XXX) | ❌ no | ✅ yes |
+| Event / DTO / handler class names | ❌ no | ✅ yes |
+| Permission codes, error codes, status codes | ❌ no | ✅ yes |
+| Before/After JSON examples | ❌ no | ✅ yes |
+| Migration checklist | ❌ no | ✅ yes |
+
+**Never drop information** — shorten by **relocating**. Every detail removed from the index row MUST appear in the per-version `## [X.Y.Z] - YYYY-MM-DD` section below. The index is a pointer; the section is the source of truth.
+
 ---
 
 ## Workflow

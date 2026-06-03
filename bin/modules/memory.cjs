@@ -967,6 +967,58 @@ function listRejectedKeywords() {
   `).all());
 }
 
+// WI-3 (greenfield cal #17 §J): validate that an entry's declared symbols
+// still exist in the current codebase. Catches stale memory entries that
+// propagate as false-positive risk warnings (cal #17 entry 14398 case:
+// memory wrongly flagged "2-caller risk" for update_license_rights; the
+// symbol existed but stale claims propagated). Scope: ONLY entries whose
+// doc_type is in the "risk warning" set — lessons + rejected (REJ
+// tombstones). Decisions/concepts/flows are reference material, not
+// propagating warnings — validating them adds cost without payback.
+//
+// Implementation uses doc.affects_symbols as the canonical list (no body
+// regex extraction needed). Caps at 5 symbols per entry to bound cost.
+// Fail-open: git unavailable / grep timeout → returns still_present:false
+// (defensive — treat as missing rather than silently pass).
+function validateRefs(doc) {
+  const RISK_DOC_TYPES = ["lesson", "rejected"];
+  if (!doc || !RISK_DOC_TYPES.includes(doc.doc_type)) return null;
+  const symbols = Array.isArray(doc.affects_symbols)
+    ? doc.affects_symbols.slice(0, 5).map(s => s.symbol || s).filter(s => typeof s === "string" && s.length > 0)
+    : [];
+  if (symbols.length === 0) {
+    return { symbols: [], has_drift: false, summary: "no affects_symbols declared — nothing to validate" };
+  }
+  const { execFileSync } = require("child_process");
+  const validated = [];
+  for (const sym of symbols) {
+    let stillPresent = false;
+    let sample = null;
+    try {
+      // -l lists files; -F treats pattern as literal (avoids regex meta in
+      // identifiers like dotted names); -- separator prevents flag parsing
+      // of identifiers starting with -.
+      const out = execFileSync("git", ["grep", "-l", "-F", "--", sym], {
+        encoding: "utf8",
+        timeout: 2000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const files = out.split("\n").filter(Boolean);
+      stillPresent = files.length > 0;
+      if (stillPresent) sample = files.slice(0, 3);
+    } catch { /* not found OR git failure — fail-defensive */ }
+    validated.push({ symbol: sym, still_present: stillPresent, sample_locations: sample });
+  }
+  const missing = validated.filter(v => !v.still_present);
+  return {
+    symbols: validated,
+    has_drift: missing.length > 0,
+    summary: missing.length > 0
+      ? `${missing.length}/${validated.length} declared symbols no longer in codebase — entry may be stale`
+      : `all ${validated.length} declared symbols still present`,
+  };
+}
+
 function queryFTS(terms, opts) {
   const limit = (opts && opts.limit) || 20;
   // Optional doc_type filter: when set, restricts results to one of DOC_TYPES.
@@ -1388,9 +1440,10 @@ function run(subcommand, args) {
     case "query": {
       const terms = args.filter(a => !a.startsWith("--")).join(" ");
       if (!terms.trim()) {
-        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson] [--count|--top=N|--domain-counts|--json-compact|--signal[=N]]\n");
+        process.stderr.write("Usage: memory query <terms> [--limit=N] [--doc-type=decision|concept|flow|rejected|lesson] [--count|--top=N|--domain-counts|--json-compact|--signal[=N]] [--validate-refs]\n");
         return 2;
       }
+      const wantValidateRefs = args.includes("--validate-refs");
       const limitArg = args.find(a => a.startsWith("--limit="));
       const topArg = args.find(a => a.startsWith("--top="));
       const signalArg = args.find(a => a === "--signal" || a.startsWith("--signal="));
@@ -1426,9 +1479,24 @@ function run(subcommand, args) {
       else if (hasTop) { mode = "compact"; limit = Math.max(1, parseInt(topArg.split("=")[1], 10) || 5); }
       else if (wantCompact) mode = "compact";
       const out = queryFTS(terms, { limit, docType, mode });
+      // WI-3: --validate-refs enriches full-mode results with affects_symbols
+      // existence check. Only fires on full mode (aggregates have no row-level
+      // payload). Scope-filtered inside validateRefs (only lesson/rejected
+      // entries get validated; others return null).
+      if (wantValidateRefs && mode === "full" && Array.isArray(out)) {
+        for (const result of out) {
+          if (result && result.id) {
+            try {
+              const doc = getDoc(result.id);
+              const refs = validateRefs(doc);
+              if (refs) result.validated_refs = refs;
+            } catch { /* validate-refs is best-effort enrichment */ }
+          }
+        }
+      }
       if (mode === "count") json({ query: terms, doc_type: docType, count: out.count });
       else if (mode === "domain-counts") json({ query: terms, doc_type: docType, counts: out.counts });
-      else json({ query: terms, limit, doc_type: docType, mode, results: out });
+      else json({ query: terms, limit, doc_type: docType, mode, results: out, validate_refs: wantValidateRefs });
       return 0;
     }
     case "get": {
@@ -1732,6 +1800,7 @@ module.exports = {
   init,
   rebuildIndex,
   validate,
+  validateRefs,
   getDoc,
   getAffectsPathsByIds,
   getByPath,

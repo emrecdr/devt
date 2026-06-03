@@ -1186,6 +1186,60 @@ function generate(taskText, opts) {
     }
   } catch { /* collision detection is best-effort */ }
 
+  // WI-4 / Q2 (greenfield cal #17 §F2): caller_count_via_grep cross-check.
+  // For each top topic.symbol (cap at 5 to bound cost), run git grep for the
+  // literal seed pattern + "(" — the canonical callsite shape. Compare with
+  // graphify's direct_dependents_count: when graphify's count is ≥ Nx the
+  // grep count (default 3x), emit a magnification advisory in the brief.
+  // Field evidence: greenfield's update_license_rights reported 33 modules
+  // via BFS-in depth 2 (interface transitive reach), grep showed 1 literal
+  // caller — 33x magnification. The advisory lets downstream agents calibrate.
+  // Strong N4 alignment: delegates to git grep + graphify rather than
+  // reimplementing caller-counting; pure coordination wrapper around two
+  // existing tools.
+  let callerCountGrep = null;
+  let magnificationAdvisory = null;
+  try {
+    const topSyms = Array.isArray(topic.symbols) ? topic.symbols.slice(0, 5) : [];
+    if (topSyms.length > 0) {
+      const { execFileSync } = require("child_process");
+      let totalGrepCount = 0;
+      let probedSymbols = 0;
+      for (const sym of topSyms) {
+        if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
+        try {
+          // -F treats pattern as literal (no regex interpretation of identifiers).
+          // -c counts matching lines per file; we sum across files. -- separator
+          // prevents flag parsing on identifiers like dotted names.
+          const out = execFileSync("git", ["grep", "-c", "-F", "--", sym + "("], {
+            encoding: "utf8",
+            timeout: 2000,
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+          for (const line of out.split("\n")) {
+            const colon = line.lastIndexOf(":");
+            if (colon < 0) continue;
+            const n = parseInt(line.slice(colon + 1), 10);
+            if (Number.isFinite(n)) totalGrepCount += n;
+          }
+          probedSymbols += 1;
+        } catch { /* git unavailable / no matches → contribute 0 */ }
+      }
+      if (probedSymbols > 0) {
+        callerCountGrep = totalGrepCount;
+        const cfg = getMergedConfig();
+        const threshold = (cfg && cfg.graphify && cfg.graphify.blast_magnification_threshold !== undefined)
+          ? cfg.graphify.blast_magnification_threshold
+          : 3;
+        const bfsCount = (blast.direct_dependents || []).length;
+        if (threshold !== null && totalGrepCount > 0 && bfsCount >= totalGrepCount * threshold) {
+          const ratio = (bfsCount / totalGrepCount).toFixed(1);
+          magnificationAdvisory = `direct_dependents_count=${bfsCount} is ${ratio}× the literal git-grep caller count (${totalGrepCount} across ${probedSymbols} probed symbols, threshold ${threshold}×). BFS-in depth-2 likely amplified through interface/contract edges. Treat blast scope as upper-bound; cross-check critical decisions against the grep count.`;
+        }
+      }
+    }
+  } catch { /* Q2 cross-check is best-effort */ }
+
   const extractionConfidence = computeExtractionConfidence(topic);
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
@@ -1231,6 +1285,12 @@ function generate(taskText, opts) {
       // the one arbitrarily resolved by _resolveOne's Map-iteration order.
       // Empty array when no collisions OR graphify unavailable.
       collisions: symbolCollisions,
+      // WI-4 / Q2 (greenfield cal #17 §F2): grep-derived caller count
+      // cross-check for the top topic.symbols. When BFS-derived count is
+      // >= threshold × grep count, magnification_advisory flags potential
+      // interface-edge amplification (e.g., 33 vs 1 case).
+      caller_count_grep: callerCountGrep,
+      magnification_advisory: magnificationAdvisory,
     },
     graph_stats: graphStats,
     staleness,

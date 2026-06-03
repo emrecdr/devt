@@ -194,6 +194,39 @@ The changelog file starts with a Version Index table. When adding a new version:
 3. Anchor format: version with dots removed — `0.20.7` becomes `#0207---2026-03-17`
 4. Versions without API changes: append "— no API changes" to summary
 
+### Summary cell length — KEEP IT SHORT
+
+The summary cell is a **one-line index**, not a mini-section. Cells longer than ~350 characters break Bitbucket's repository markdown viewer (the table layout collapses visually); Bitbucket Cloud is the most fragile renderer here. Aim for **~200 characters**, hard cap **~350**.
+
+**The summary cell is for theme-level navigation. The detail belongs in the per-version `## [X.Y.Z]` section body below.**
+
+❌ **Bad — bloated summary (773 chars, broke Bitbucket rendering):**
+
+```
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (GFBUGS-184 / GFBUGS-132 Phase 1a)**: `PATCH /api/v1/licenses/{id}/rights` now accepted for `head_relative` on B2C licenses (new `LICENSE_UPDATE_RIGHTS` permission, new `LicenseRightsUpdatedEvent` audit). **Added (GFBUGS-144 / GFBUGS-176)**: `DELETE /api/v1/clients/{client_id}/messages?sender_user_id=<uid>` (moderation) and `DELETE /api/v1/clients/{client_id}/messages/mine` (self-delete) + new `MessageDeletedEvent`. **Added (GFBUGS-177)**: `DELETE /api/v1/clients/{client_id}/photos/mine` (self-delete; reuses `PhotoBulkDeletedEvent`). **Changed (GFBUGS-134)**: `POST /api/v1/licenses/{id}/unlock` rejects RELATIVE-scope callers on organisation-owned licenses with `403`. **Operational**: ... |
+```
+
+✅ **Good — concise summary (212 chars):**
+
+```
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added**: `head_relative` self-service rights edit on B2C licenses; tablet message moderation + self-delete; self-service photo delete. **Changed**: unlock rejects RELATIVE-scope callers on org-owned licenses. |
+```
+
+**Rules of thumb for keeping the cell short:**
+
+| What | In summary cell? | In section body? |
+|---|---|---|
+| Thematic high-level change (e.g., "tablet message moderation") | ✅ yes | ✅ also expanded |
+| `Added` / `Changed` / `Fixed` group labels | ✅ yes | ✅ section headings |
+| Full endpoint paths (`PATCH /api/v1/licenses/{id}/rights`) | ❌ no | ✅ yes |
+| Ticket IDs (GFBUGS-XXX, GF-XXX) | ❌ no | ✅ yes |
+| Event class names (`LicenseRightsUpdatedEvent`) | ❌ no | ✅ yes |
+| Permission codes, error codes, status codes | ❌ no | ✅ yes |
+| Before/After JSON examples | ❌ no | ✅ yes |
+| Migration checklist | ❌ no | ✅ yes |
+
+**Never drop information** — shorten by **relocating**. Every detail removed from the index row MUST appear in the per-version `## [X.Y.Z] - YYYY-MM-DD` section below. The index is a pointer; the section is the source of truth.
+
 ---
 
 ## Workflow

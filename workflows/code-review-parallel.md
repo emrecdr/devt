@@ -265,22 +265,31 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` (C7-7)
 - `<rubric_content>{inline_rubrics.code_review}</rubric_content>` (C7-7 — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice)
 
-**L1-v2 (greenfield calibration #11) — prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the orchestrator MUST replace the `<graph_impact>` cache injection with a `<graphify_status>not_applicable</graphify_status>` stub instead of pasting `graph-impact.md` content. Greenfield calibration #11 L3 evidence: a prose-only README lane received the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect via:
+**L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Field evidence: a prose-only README lane received the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
+
 ```bash
 LANE_FILES_PROSE_ONLY=$(echo "$LANE_FILES_JSON" | jq -r 'all(. as $f | ["md","rst","txt","adoc"] | any($f | test("\\.\(.)$"; "i")))' 2>/dev/null || echo "false")
+if [ "$LANE_FILES_PROSE_ONLY" = "true" ]; then
+  LANE_GRAPH_IMPACT_BLOCK="<graph_impact>not_applicable: prose-only lane — graphify cache suppressed (no AST relationships on prose files)</graph_impact>"
+  LANE_SCOPE_HINT_BLOCK="<scope_hint>$(echo "$LANE_FILES_JSON" | jq -c '.')</scope_hint>"
+else
+  LANE_GRAPH_IMPACT_BLOCK='<graph_impact>Read .devt/state/graph-impact.md — pre-computed caller set + blast radius for this lane scope</graph_impact>'
+  LANE_SCOPE_HINT_BLOCK="<scope_hint>${SCOPE_HINT}</scope_hint>"
+fi
 ```
-When `LANE_FILES_PROSE_ONLY=true`, inject a stub `<graph_impact>not_applicable: prose-only lane — graphify cache suppressed (no AST relationships on prose files)</graph_impact>` and omit `<scope_hint>` (or set it to the lane's own file list). Respects the MCP-blind lane contract — the orchestrator filters per-lane, lanes never query graphify themselves.
+
+The orchestrator uses `${LANE_GRAPH_IMPACT_BLOCK}` and `${LANE_SCOPE_HINT_BLOCK}` verbatim in the lane's `<context>` — the bash already filtered prose-only vs mixed. Respects the MCP-blind lane contract: the orchestrator filters per-lane, lanes never query graphify themselves.
 
 Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate.`
 
 Output path: each lane's `review_file` from the registry.
 
-**Issue all N Task() calls in ONE message.** Example for 3 lanes:
+**Issue all N Task() calls in ONE message.** Each lane's `<context>` uses the bash-computed `${LANE_GRAPH_IMPACT_BLOCK}` + `${LANE_SCOPE_HINT_BLOCK}` directly (the L1-v2 prose-only suppression already filtered by lane). Example for 3 lanes:
 
 ```
-Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L1</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-auth_subgraph.md.</task>")
-Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L2</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-billing_subgraph.md.</task>")
-Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context>...<lane_id>L3</lane_id>...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-payments.md.</task>")
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context><lane_id>L1</lane_id>${LANE_GRAPH_IMPACT_BLOCK}${LANE_SCOPE_HINT_BLOCK}...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-auth_subgraph.md.</task>")
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context><lane_id>L2</lane_id>${LANE_GRAPH_IMPACT_BLOCK}${LANE_SCOPE_HINT_BLOCK}...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-billing_subgraph.md.</task>")
+Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="<context><lane_id>L3</lane_id>${LANE_GRAPH_IMPACT_BLOCK}${LANE_SCOPE_HINT_BLOCK}...</context><task>Review the files listed in <lane_files>. Write your review to .devt/state/review-lane-payments.md.</task>")
 ```
 
 When all Task() calls return (foreground blocks until all complete — each agent bounded by its `maxTurns` frontmatter), proceed to substance_check_lanes.

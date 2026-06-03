@@ -2442,7 +2442,16 @@ function assertPreflightSemanticQuality(args) {
 //   {ok:true, agent, expected_path, exists:true, size_bytes, reason}
 //   {ok:false, agent, expected_path, exists:false, reason}
 //   {ok:false, agent, reason: "agent not declared in io-contracts"}
+// WI-1 / Layer-2: wrapper that persists every result (success + failure) to
+// claim-check-failures.jsonl. Layer-2 assertClaimChecksResolved reads the
+// jsonl at finalize. Persistence is fail-open; the wrapped result is the
+// authoritative return value.
 function assertArtifactPresent(agent) {
+  const result = _assertArtifactPresentInner(agent);
+  persistClaimCheckResult(result);
+  return result;
+}
+function _assertArtifactPresentInner(agent) {
   if (typeof agent !== "string" || !agent) {
     return { ok: false, reason: "missing agent argument" };
   }
@@ -2501,6 +2510,137 @@ function assertArtifactPresent(agent) {
     exists: true,
     size_bytes: sizeBytes,
     reason: `${primary} present (${sizeBytes} bytes)`,
+  };
+}
+
+// WI-1 / Layer-2 (greenfield cal #16+#17): persistence helper for
+// assertArtifactPresent results. Every Layer-1 call appends a record so
+// Layer-2 (assertClaimChecksResolved) can compute per-agent latest verdict
+// at finalize. Last write per agent in window wins — successful re-runs
+// after a failure RESOLVE the failure (the orchestrator re-dispatched).
+// Fail-open: jsonl write errors are silenced (matches dispatch-warnings.jsonl
+// pattern — forensic best-effort, never affect the caller).
+function persistClaimCheckResult(result) {
+  if (!result || !result.agent) return;
+  try {
+    const dir = getStateDir();
+    // Read workflow_id from workflow.yaml if present (audit-trail enrichment)
+    let workflowId = null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      try {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const m = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        if (m) workflowId = m[1].trim();
+      } catch { /* unreadable — workflow_id stays null */ }
+    }
+    const record = JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "claim_check",
+      agent: result.agent,
+      verdict: result.ok ? "success" : "failure",
+      reason: result.reason || "",
+      expected_path: result.expected_path || null,
+      workflow_id: workflowId,
+    });
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    fs.appendFileSync(path.join(dir, "claim-check-failures.jsonl"), record + "\n");
+  } catch { /* persistence is best-effort */ }
+}
+
+// WI-1 / Layer-2 (greenfield cal #16+#17): post-hoc finalize gate. Mirrors
+// the assertNoRawDispatchesThisSession pattern from v0.69.5 (which has held
+// up across 4 cals). Walks claim-check-failures.jsonl, builds per-agent
+// latest verdict in workflow window, counts unresolved failures.
+//
+// Resolution semantic: append-only audit trail with verdict field. For each
+// agent in the window, the LAST record wins — orchestrator re-dispatches that
+// succeed overwrite prior failures (verdict=success). Workflow finalize
+// blocks only when an agent's latest verdict in window is still "failure".
+//
+// Respects claim_check_mode config (block default; warn surfaces summary
+// without blocking; off auto-passes). Same config-knob pattern as
+// dispatch_hygiene_mode.
+function assertClaimChecksResolved() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const failsPath = path.join(dir, "claim-check-failures.jsonl");
+  if (!fs.existsSync(failsPath)) {
+    return { ok: true, unresolved_count: 0, reason: "claim-check-failures.jsonl absent — no Layer-1 checks recorded yet" };
+  }
+  let mode = "block";
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    if (cfg && typeof cfg.claim_check_mode === "string") {
+      mode = cfg.claim_check_mode.toLowerCase();
+    }
+  } catch { /* keep default 'block' on any failure */ }
+  if (mode === "off") {
+    return { ok: true, unresolved_count: 0, mode, reason: "claim_check_mode=off — gate disabled" };
+  }
+  // Workflow window anchor — same pattern as assertNoRawDispatchesThisSession.
+  // Scope is per-workflow: each new init * gets a clean window.
+  let anchorMs = 0;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      const yaml = fs.readFileSync(wfPath, "utf8");
+      const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+      if (m) {
+        const parsed = new Date(m[1].trim()).getTime();
+        if (Number.isFinite(parsed)) anchorMs = parsed;
+      }
+    }
+  } catch { /* no anchor — gate auto-passes since we can't bound the window */ }
+  if (anchorMs === 0) {
+    return { ok: true, unresolved_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
+  }
+  const body = fs.readFileSync(failsPath, "utf8");
+  const latestByAgent = new Map();
+  for (const line of body.split("\n")) {
+    if (!line) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec.source !== "claim_check") continue;
+      if (typeof rec.ts !== "string") continue;
+      if (new Date(rec.ts).getTime() < anchorMs) continue;
+      if (!rec.agent) continue;
+      // Last write wins per agent — successful re-dispatch resolves prior failures
+      latestByAgent.set(rec.agent, rec);
+    } catch { /* malformed line — skip */ }
+  }
+  const unresolved = [];
+  for (const [agent, rec] of latestByAgent) {
+    if (rec.verdict === "failure") {
+      unresolved.push({ agent, reason: rec.reason, ts: rec.ts, expected_path: rec.expected_path });
+    }
+  }
+  if (unresolved.length === 0) {
+    return { ok: true, unresolved_count: 0, mode, reason: "all claim-checks in window resolved (latest verdict=success per agent)" };
+  }
+  if (mode === "warn") {
+    return {
+      ok: true,
+      warn: true,
+      unresolved_count: unresolved.length,
+      unresolved,
+      mode,
+      reason: `${unresolved.length} unresolved claim-check failure(s); claim_check_mode=warn so gate does not block. Re-dispatch missing artifacts OR set mode=block to enforce.`,
+    };
+  }
+  return {
+    ok: false,
+    unresolved_count: unresolved.length,
+    unresolved,
+    mode,
+    reason:
+      `${unresolved.length} unresolved claim-check failure(s) in this workflow window: ${unresolved.map(u => u.agent).join(", ")}. ` +
+      `Each named agent's most recent dispatch returned without writing its declared output (per io-contracts.yaml::outputs.primary). ` +
+      `Remediation: re-dispatch the agent(s) so they write the missing artifact, OR SendMessage-resume if a budget wall is suspected (check dispatch-warnings.jsonl for near_cliff / low_output / mid_task_language records). ` +
+      `Successful re-runs overwrite the failure record. Opt out via 'claim_check_mode: "warn"' or "off" in .devt/config.json.`,
   };
 }
 
@@ -3119,6 +3259,8 @@ function run(subcommand, args) {
       return assertNoRawDispatchesThisSession();
     case "assert-artifact-present":
       return assertArtifactPresent(args[0]);
+    case "assert-claim-checks-resolved":
+      return assertClaimChecksResolved();
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
     case "derive-reuse-candidates":
@@ -3136,7 +3278,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, list-lane-outputs, update-lane, history`,
       );
   }
 }

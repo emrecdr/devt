@@ -7816,10 +7816,10 @@ else
   fail "K17: terminal fallback broken; path=${K17_PATH} output=${K17_OUT}"
 fi
 
-K18_TMP=$(mktemp -d)
-K18_TMP=$(cd "$K18_TMP" && pwd -P)
-mkdir -p "$K18_TMP/.devt/state"
-echo '{}' > "$K18_TMP/.devt/config.json"
+K36_TMP=$(mktemp -d)
+K36_TMP=$(cd "$K36_TMP" && pwd -P)
+mkdir -p "$K36_TMP/.devt/state"
+echo '{}' > "$K36_TMP/.devt/config.json"
 # preflight-brief.json::topic.resolution_path is populated even on degraded
 # runs — extractTopic is the source of truth and the sidecar mirrors it.
 K18_OUT=$(node -e "
@@ -7832,7 +7832,7 @@ if [ "$K18_OUT" = "string" ]; then
 else
   fail "K18: resolution_path not in return shape; typeof=${K18_OUT}"
 fi
-rm -rf "$K18_TMP"
+rm -rf "$K36_TMP"
 
 # K19: assert-reuse-analyzed three-state matrix. Field signal (greenfield
 # calibration #2): the legacy `ok:true` escape clause on missing
@@ -10039,6 +10039,70 @@ if [ -z "$K7_FAIL" ]; then
   pass "K7: every wired dispatch site has state assert-artifact-present claim-check (5 sites checked)"
 else
   fail "K7: missing claim-check at —$K7_FAIL"
+fi
+
+# K15 (v0.72 WI-1): Layer-2 claim-check resolution gate round-trips correctly.
+# Empty jsonl → ok:true. Failure record → ok:false with mode=block. Success
+# overwrite → ok:true again (resolution semantic). Reads ok from JSON output
+# directly (avoids PIPESTATUS-in-cmd-substitution traps per cal #15 lesson).
+K33_TMP=$(mktemp -d)
+mkdir -p "$K33_TMP/.devt/state"
+cd "$K33_TMP"
+node "$CLI" init workflow "K33 test" >/dev/null 2>&1
+K33_EMPTY=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
+node "$CLI" state assert-artifact-present architect >/dev/null 2>&1
+K33_BLOCK=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
+echo "# Arch Review" > .devt/state/arch-review.md
+node "$CLI" state assert-artifact-present architect >/dev/null 2>&1
+K33_RESOLVED=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
+cd "$ROOT"
+rm -rf "$K33_TMP"
+if [ "$K33_EMPTY" = "true" ] && [ "$K33_BLOCK" = "false" ] && [ "$K33_RESOLVED" = "true" ]; then
+  pass "K33: Layer-2 claim-check resolution gate round-trips (empty→ok, failure→block, success→resolved)"
+else
+  fail "K33: Layer-2 round-trip broken (empty=$K33_EMPTY block=$K33_BLOCK resolved=$K33_RESOLVED)"
+fi
+cd "$TMP"
+
+# K16 (v0.72 WI-2): code-review-parallel.md DOES compute LANE_GRAPH_IMPACT_BLOCK
+# in bash (not just prose-instructs it). Bash-computed block removes orchestrator
+# judgment from the L1-v2 prose-only lane suppression path.
+if grep -qE 'LANE_GRAPH_IMPACT_BLOCK=' "$ROOT/workflows/code-review-parallel.md"; then
+  pass "K34: code-review-parallel.md bash-computes LANE_GRAPH_IMPACT_BLOCK (no orchestrator judgment)"
+else
+  fail "K34: code-review-parallel.md missing LANE_GRAPH_IMPACT_BLOCK bash computation"
+fi
+
+# K17 (v0.72 WI-3): memory query --validate-refs accepts the flag and surfaces
+# validate_refs:true in the result envelope without breaking baseline behavior.
+K35_VALIDATE=$(node "$CLI" memory query "anything" --validate-refs --limit=1 2>/dev/null | jq -r '.validate_refs // "absent"')
+if [ "$K35_VALIDATE" = "true" ]; then
+  pass "K35: memory query --validate-refs accepts flag + surfaces validate_refs:true in output"
+else
+  fail "K35: memory query --validate-refs flag broken (validate_refs=$K35_VALIDATE)"
+fi
+
+# K18 (v0.72 WI-4 / Q2): preflight-brief.json::blast carries caller_count_grep
+# field (may be null when graphify disabled OR no symbols extracted, but the
+# field MUST be present). Verified end-to-end in an isolated temp project.
+K36_TMP=$(mktemp -d)
+cd "$K36_TMP"
+git init -q
+mkdir -p .devt graphify-out
+echo '{"graphify":{"enabled":true}}' > .devt/config.json
+echo '{"nodes":[{"id":"S1","label":"TestSymbol","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
+echo "class TestSymbol: pass" > a.py
+git add -A && git commit -q -m "init"
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K36 TestSymbol test" >/dev/null 2>&1
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor TestSymbol" >/dev/null 2>&1
+K36_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));console.log(j.blast && 'caller_count_grep' in j.blast && 'magnification_advisory' in j.blast ? 'yes' : 'no')" 2>/dev/null)
+cd "$ROOT"
+rm -rf "$K36_TMP"
+cd "$TMP"
+if [ "$K36_HAS" = "yes" ]; then
+  pass "K36: preflight-brief.json::blast carries caller_count_grep + magnification_advisory fields"
+else
+  fail "K36: preflight Q2 cross-check fields missing from brief"
 fi
 
 echo

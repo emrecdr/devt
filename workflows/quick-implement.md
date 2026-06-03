@@ -477,6 +477,17 @@ Best-effort. Never fails the workflow.
 
 **Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator harvester. Runs BEFORE the scratchpad truncate below — that order matters because the truncate would otherwise erase the very tags the gate checks for.
 
+**Layer-2 claim-check resolution gate.** Block finalize on any unresolved Layer-1 `assert-artifact-present` failures in this workflow window. Mirrors S1's post-hoc pattern. Set `claim_check_mode: "warn"` in config to opt out.
+
+```bash
+CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
+if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(echo "$CC_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
 **Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Block finalize on any in-session raw devt:* dispatches. CC doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
 
 ```bash
