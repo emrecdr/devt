@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.73.3] - 2026-06-04
+
+**Greenfield-validation cycle: reverse-direction sync of a silent false-negative bug + upstream template hygiene cleanup.** Working with greenfield as the field-validation target surfaced two structural template issues: (1) `detectors/layer_imports.py` had a `str.endswith()` over-exemption that silently allowed nested non-composition-root `dependencies.py` files to bypass `LAYER-IMPORT-API` enforcement — greenfield had already fixed this with a regex-anchored implementation; (2) `templates/python-fastapi/canonical-entities.yaml` shipped greenfield's actual production domain registry (Country / Client / User / Organization with `app.services.*` import paths) as the example, leaking one project's domain to every other adopter. Both fixes ship in this release. Plus an unrelated skill-layer hardening from the same session: tier-selection sanity cross-check.
+
+Smoke: 792 passed, 0 failed (+3 from K44, arch_scanner auto-wire gate, canonical-entities-clean gate). Locking: 3/3.
+
+### Added
+
+- **`detectors/layer_imports.py` regex-anchored composition-root check** (reverse-sync from greenfield-api field validation). Replaces `_API_DEPENDENCIES_SUFFIXES` tuple + `str.endswith()` with `_COMPOSITION_ROOT_PATTERNS` regex tuple + `pattern.match()`. The endswith version exempted any file ending in `dependencies.py` from `LAYER-IMPORT-API` enforcement — so a nested `app/services/<svc>/feature/api/v1/dependencies.py` got silently exempted despite NOT being the canonical FastAPI DI composition root. Regex anchors to `^app/services/[^/]+/api[/v1]/dependencies\.py$` matching only the canonical service-tree shape (per the template's `architecture.md`). Field-validated in greenfield; backported with `_is_composition_root` docstring explaining the structural rationale.
+- **Regression test `test_t2_nested_dependencies_py_not_exempted`** in `templates/python-fastapi/tests/architecture/test_arch_scan_internals.py`. Writes a `dependencies.py` at `app/services/x/feature/api/v1/` with an infrastructure import; asserts `LAYER-IMPORT-API` fires. Anchors the regex-anchored behavior so any future revert to suffix-matching is caught. Mirrors the existing `test_t2_non_dependencies_api_files_still_fire` shape.
+- **Auto-wire `arch_scanner.command` in `setup --template python-fastapi`** (`bin/modules/setup.cjs`). When `mode === "create"` or `mode === "reinit"`, sets `arch_scanner.command = "python3 .devt/rules/arch-scan.py --baseline .devt/state/arch-baseline.json --report .devt/state/arch-scan-report.md --json --fail-on critical,high"` in the generated `.devt/config.json`. Field-validated by greenfield as the working command. Without this, every new python-fastapi adopter had to discover the canonical CLI invocation themselves. Users can still override at any time; `mode === "update"` doesn't touch existing config.
+- **Tier-selection sanity cross-check** in `skills/complexity-assessment/SKILL.md`. The Layer 1 (5-dim task score) ↔ Layer 2 (graphify blast-radius effect_size) wiring previously trusted graphify's verdict with no cross-check. Known failure mode: bulk_scoped blast_radius over-reports `large` for 1-file localised changes (diffuse keyword matches against a dense graph), promoting typo-fixes to COMPLEX. Override rule: when `effect_size == "large"` BUT `Scope ≤ 1 AND Integration ≤ 1`, use the 5-dim total alone and document the override inline. Converse trust-rule (5-dim high + effect_size==small → trust 5-dim) also documented — risk/dependency dimensions encode information graphify cannot derive from call edges.
+
+### Changed
+
+- **`templates/python-fastapi/canonical-entities.yaml`** now ships a clean generic skeleton (`entities: {}`) plus three commented-out illustrative examples covering all three `entity_status` modes (`EXISTS`, `ENUM`, `MISSING`) using neutral domain names (`widget`, `size`, `region`). Previous version leaked greenfield's actual registry (Country / Client / User / Organization / Role / License / Photo / calling_settings / scope / currency / language) with `app.services.*` import paths — every new python-fastapi adopter inherited greenfield's domain and had to manually delete it before populating their own. The schema documentation header is preserved verbatim. Greenfield's existing `.devt/rules/canonical-entities.yaml` is unaffected (the template only writes new files in `setup --mode update`).
+
+### Smoke gates
+
+- **K44**: `complexity-assessment` skill declares the sanity cross-check (two-anchor anti-regression: section heading + rule clause)
+- **setup auto-wire gate**: `setup --template python-fastapi` writes `arch_scanner.command` containing the canonical CLI invocation
+- **canonical-entities clean gate**: `templates/python-fastapi/canonical-entities.yaml` contains no `app.services.{countries,clients,identity,organizations,licences,photos}` import paths (guards against future re-leak)
+
+### Field-validation cycle observations
+
+This release demonstrates the bidirectional sync pattern: greenfield's vendored `.devt/rules/` copy is field-validated production usage. When it diverges from upstream devt's template, the divergence direction tells you which side has the improvement. The `layer_imports.py` regex anchor is one such instance — greenfield evolved a structural fix that never made it back upstream. The `canonical-entities.yaml` leak is the inverse: upstream devt shipped greenfield's domain as the example, which propagates one project's domain shape to every other adopter. Both are signals that the field-validation relationship should be active rather than passive — drift detection + bidirectional sync is now a documented memory ([[greenfield-devt-sync]]).
+
 ## [0.73.2] - 2026-06-04
 
 **Architectural alignment patch: extend the v0.71→v0.73 gate enforcement floor to the arch-health workflow.** When v0.73 migrated 4 workflows to `state advance-phase`, `arch-health-scan.md` was left out — it still used the legacy `state update phase=X status=DONE active=false` pattern at finalize, and its `workflow_type` (`arch_health_scan`) was absent from `_phase-gates.yaml`. Result: the 6th workflow could exit successfully without running any of the gates that protect the other 5. Cal #18's architectural floor was a 5-of-6 floor, not a 6-of-6 floor. This release closes the gap and also extends report-archive retention so trend analysis across scans is possible without breaking the canonical-name reference downstream consumers use.

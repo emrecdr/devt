@@ -807,6 +807,24 @@ def test_t2_non_dependencies_api_files_still_fire(tmp_path: Path) -> None:
     assert "LAYER-IMPORT-API" in cats, "non-dependencies api files MUST still fire LAYER-IMPORT-API"
 
 
+def test_t2_nested_dependencies_py_not_exempted(tmp_path: Path) -> None:
+    """T2 negative (composition-root anchoring): a `dependencies.py` at a
+    nested non-canonical path MUST still fire LAYER-IMPORT-API. The
+    composition-root exemption is anchored to the canonical
+    `app/services/<svc>/api[/v1]/dependencies.py` shape via regex, NOT to
+    any file ending in `dependencies.py`. Guards against silent over-
+    exemption of deep-nested DI-helper files that share the filename but
+    are NOT structural composition roots."""
+    proj = tmp_path / "proj"
+    _write_py(
+        proj / "app" / "services" / "x" / "feature" / "api" / "v1" / "dependencies.py",
+        "from app.services.x.infrastructure.repository import XRepository\ndef nested_helper(): return XRepository()\n",
+    )
+    report = _run_scanner_in_tmp(proj, "--disable=canonical-entities,inline-imports,god-size,db-in-application")
+    cats = {f["category"] for f in report["findings"]}
+    assert "LAYER-IMPORT-API" in cats, "nested dependencies.py at non-canonical path MUST still fire LAYER-IMPORT-API"
+
+
 def test_t3_free_text_suffix_fields_skipped(tmp_path: Path) -> None:
     """T3: fields ending in `_description`, `_label`, `_note`, `_comment`,
     `_text`, `_title` are human-readable strings, not canonical references.

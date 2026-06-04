@@ -45,164 +45,54 @@ defaults:
   forbid_string_only: false
   fk_column_pattern: "{entity_name}_id"
 
-entities:
+# Populate this registry with the canonical entities your project depends on.
+# Three illustrative patterns are commented out below — uncomment and rename
+# them to match your domain. An empty `entities: {}` is a valid starting state;
+# the canonical-entities detector just produces zero CANONICAL-* findings until
+# the registry is populated.
 
-  # --- Real entities -----------------------------------------------------
+entities: {}
 
-  country:
-    entity_status: EXISTS
-    import_path: app.services.countries.domain.models.Country
-    canonical_file: app/services/countries/domain/models.py
-    table_name: countries
-    pk_column: id
-    pk_type: int
-    triggers:
-      - country
-      - country_code
-      - country_name
-      - billing_country
-      - operational_country
-    allowed_fk_columns:
-      - country_id
-      - billing_country_id
-      - operational_country_id
-    forbid_string_only: true
+# --- Example 1: EXISTS entity with FK enforcement (most common pattern) ----
+# Models a concept that has a canonical class in the codebase. Bare-string
+# fields whose names match the triggers are flagged as missing FK.
+#
+#  widget:
+#    entity_status: EXISTS
+#    import_path: app.services.widgets.domain.models.Widget
+#    canonical_file: app/services/widgets/domain/models.py
+#    table_name: widgets
+#    pk_column: id
+#    pk_type: int
+#    triggers:
+#      - widget
+#      - widget_id
+#      - widget_code
+#    allowed_fk_columns:
+#      - widget_id
+#    forbid_string_only: true
 
-  client:
-    entity_status: EXISTS
-    import_path: app.services.clients.domain.models.Client
-    canonical_file: app/services/clients/domain/models.py
-    table_name: clients
-    pk_column: id
-    pk_type: UUID
-    triggers:
-      - client
-    allowed_fk_columns:
-      - client_id
+# --- Example 2: ENUM-backed concept (no DB table; StrEnum in code) ---------
+# Use for concepts modeled as Python enums rather than entities. Bare strings
+# whose field names match the triggers are flagged.
+#
+#  size:
+#    entity_status: ENUM
+#    import_path: app.core.domain.enums.Size
+#    triggers:
+#      - size
+#      - size_code
+#    allowed_types:
+#      - Size
+#    forbid_string_only: true
 
-  user:
-    entity_status: EXISTS
-    import_path: app.services.identity.domain.models.User
-    canonical_file: app/services/identity/domain/models.py
-    table_name: users
-    pk_column: id
-    pk_type: UUID
-    triggers:
-      - user
-    allowed_fk_columns:
-      - user_id
-      - created_by
-      - updated_by
-      - assigned_by
-      - initiator_user_id
-      - actor_user_id
-
-  organization:
-    entity_status: EXISTS
-    import_path: app.services.organizations.domain.models.Organization
-    canonical_file: app/services/organizations/domain/models.py
-    table_name: organization
-    pk_column: id
-    pk_type: UUID
-    triggers:
-      - organization
-      - org_id
-    allowed_fk_columns:
-      - organization_id
-      - parent_id
-
-  role:
-    entity_status: EXISTS
-    import_path: app.services.identity.domain.models.Role
-    canonical_file: app/services/identity/domain/models.py
-    table_name: roles
-    pk_column: id
-    pk_type: UUID
-    triggers:
-      - role
-    allowed_fk_columns:
-      - role_id
-
-  license:
-    entity_status: EXISTS
-    import_path: app.services.licences.domain.models.License
-    canonical_file: app/services/licences/domain/models.py
-    table_name: licenses
-    pk_column: id
-    pk_type: UUID
-    triggers:
-      - license
-      - licence
-    allowed_fk_columns:
-      - license_id
-
-  photo:
-    entity_status: EXISTS
-    import_path: app.services.photos.domain.models.Photo
-    canonical_file: app/services/photos/domain/models.py
-    triggers:
-      - photo
-      - album
-    allowed_fk_columns:
-      - photo_id
-      - album_id
-
-  # --- Conceptual entities (backed by another entity's ownership) --------
-
-  calling_settings:
-    entity_status: EXISTS
-    import_path: app.services.clients.domain.models.Client
-    canonical_file: app/services/clients/domain/models.py
-    triggers:
-      - calling_settings
-      - video_call_settings
-      - video_autoanswer
-      - can_be_called
-    must_belong_to: Client
-    forbid_owners:
-      - User
-
-  # --- Enum-backed concepts ----------------------------------------------
-
-  scope:
-    entity_status: ENUM
-    import_path: app.core.domain.enums.RoleScope
-    triggers:
-      - scope
-      - role_scope
-    allowed_types:
-      - RoleScope
-    forbid_string_only: true
-    # OAuth-protocol `scope` (space-separated strings per RFC-6749) lives at
-    # the external-calling boundary, NOT the RBAC layer. Suppress trigger
-    # matches for files in that namespace so OAuth DTOs don't get advised
-    # to use RoleScope.
-    denylist_paths:
-      - "app/services/external_calling/**"
-
-  # --- Concepts without a canonical entity (surfaced as WARN) ------------
-
-  # --- Enum-backed concepts (no DB table; StrEnum lives in code) ----------
-
-  currency:
-    entity_status: ENUM
-    import_path: app.core.domain.enums.Currency
-    triggers:
-      - currency
-      - currency_code
-      - iso_currency
-    allowed_types:
-      - Currency
-    forbid_string_only: true
-
-  # --- Free strings (intentionally NOT modeled as entity or enum) ---------
-
-  # Language codes follow ISO 639-1 and are stable; the project is i18n-light
-  # so a Language enum or table would be overkill. Leaving as bare str.
-  language:
-    entity_status: MISSING
-    triggers:
-      - language
-      - language_code
-      - locale
-    forbid_string_only: false
+# --- Example 3: MISSING concept (referenced project-wide, no canonical yet) -
+# Use when a concept is referenced project-wide but no canonical entity or
+# enum exists yet. Produces low-severity WARN findings to track the gap.
+#
+#  region:
+#    entity_status: MISSING
+#    triggers:
+#      - region
+#      - region_code
+#    forbid_string_only: false

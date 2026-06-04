@@ -278,6 +278,18 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     if (probeGraphifyBinary()) {
       finalConfig = deepMerge(finalConfig, { graphify: { enabled: true } });
     }
+    // Auto-wire arch_scanner.command for templates that ship a runnable
+    // scanner. Without this, every new adopter has to discover the canonical
+    // CLI invocation by reading the template. Field-validated by greenfield
+    // as the working command. Users can override at any time.
+    if (templateName === "python-fastapi") {
+      finalConfig = deepMerge(finalConfig, {
+        arch_scanner: {
+          command:
+            "python3 .devt/rules/arch-scan.py --baseline .devt/state/arch-baseline.json --report .devt/state/arch-scan-report.md --json --fail-on critical,high",
+        },
+      });
+    }
     if (extraConfig) {
       finalConfig = deepMerge(finalConfig, extraConfig);
     }

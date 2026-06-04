@@ -126,6 +126,25 @@ else
   fail "setup --template python-fastapi did not deploy expected files"
   ls "$SETUP_TMP_PY/.devt/rules/" 2>&1 | head
 fi
+# Auto-wire arch_scanner.command — every python-fastapi adopter gets the
+# canonical CLI invocation without having to discover it from prose docs.
+ARCH_CMD=$(node -e "const c=JSON.parse(require('fs').readFileSync('$SETUP_TMP_PY/.devt/config.json','utf8'));process.stdout.write(c.arch_scanner&&c.arch_scanner.command||'')" 2>/dev/null)
+if [[ "$ARCH_CMD" == *"arch-scan.py"* ]] && [[ "$ARCH_CMD" == *"--fail-on critical,high"* ]]; then
+  pass "setup --template python-fastapi auto-wires arch_scanner.command in config.json"
+else
+  fail "setup --template python-fastapi did not auto-wire arch_scanner.command (got: '$ARCH_CMD')"
+fi
+# Template canonical-entities.yaml ships generic illustrative examples, NOT
+# any specific project's production registry. Guards against the upstream
+# template re-leaking a downstream project's domain — every new adopter
+# should start from a clean skeleton.
+ENT_LEAK=$(awk '/app\.services\.(countries|clients|identity|organizations|licences|photos)/' "$SETUP_TMP_PY/.devt/rules/canonical-entities.yaml" 2>/dev/null)
+if [ -z "$ENT_LEAK" ]; then
+  pass "templates/python-fastapi/canonical-entities.yaml ships clean (no greenfield-specific import paths)"
+else
+  fail "templates/python-fastapi/canonical-entities.yaml leaks project-specific paths:"
+  echo "$ENT_LEAK" | sed 's/^/    /'
+fi
 rm -rf "$SETUP_TMP_PY"
 
 echo "== run-quality-gates.sh: parallel batch runs concurrently and reports failures =="

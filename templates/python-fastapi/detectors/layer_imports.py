@@ -21,21 +21,32 @@ Acceptable cross-layer references this detector deliberately ignores:
 
 from __future__ import annotations
 
+import re
+
 from . import Finding, ScanContext, register
 
 _FORBIDDEN_FOR_DOMAIN = ("application", "infrastructure", "api")
 
 # Composition-root files allowed to import infrastructure for DI wiring.
 # Matched on relative-path suffix (works for both ``api/dependencies.py`` and
-# the versioned ``api/v1/dependencies.py`` variant).
-_API_DEPENDENCIES_SUFFIXES = (
-    "api/dependencies.py",
-    "api/v1/dependencies.py",
+# the versioned ``api/v1/dependencies.py`` variant). Matched as a structural
+# path-prefix anchor on the canonical service-tree shape so a nested
+# ``app/services/<svc>/feature/api/v1/dependencies.py`` (NOT a composition root)
+# does not get accidentally exempted — only ``app/services/<svc>/api/...`` is.
+_COMPOSITION_ROOT_PATTERNS = (
+    re.compile(r"^app/services/[^/]+/api/dependencies\.py$"),
+    re.compile(r"^app/services/[^/]+/api/v1/dependencies\.py$"),
 )
 
 
 def _is_composition_root(rel: str) -> bool:
-    return any(rel.endswith(suffix) for suffix in _API_DEPENDENCIES_SUFFIXES)
+    """Return True iff ``rel`` is the canonical FastAPI DI composition root.
+
+    Uses a path-prefix anchor instead of ``str.endswith()`` so files at deeper
+    paths named ``dependencies.py`` are NOT exempted from LAYER-IMPORT-API
+    enforcement — only ``app/services/<svc>/api[/v1]/dependencies.py``.
+    """
+    return any(pattern.match(rel) for pattern in _COMPOSITION_ROOT_PATTERNS)
 
 
 class LayerImportsDetector:
