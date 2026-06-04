@@ -6,6 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.73.4] - 2026-06-04
+
+**Integration alignment patch: close cal #19's coverage gaps + surface friction fixes + ship the rate-limit-mid-section recovery diagnostic.** Strategic mandate from the user post-cal #19 was explicit: "instead of adding new and more features we should make all current existing structure are fully integrated with each other and fully aligned with each other." Both cal #19 evaluations (PR #387 review + GFBUGS-241 implement) surfaced 8-of-16 surfaces NOT EXERCISED — gates wired but unused in normal workflow. v0.73.4 closes the silent-coverage gaps (Layer-1 in parallel reviews), wires the rate-limit-mid-section diagnostic (PARTIAL contract broken for non-boundary stops), restores per-workflow observability (workflow_type in gate-trace), preserves the args-VERBATIM audit trail past evict-graphify, and aligns docs + UX with field-validated behavior.
+
+Smoke: 795 passed, 0 failed (+3 from K45 + K46 + K47). Locking: 3/3.
+
+### Added
+
+- **Polymorphic `state assert-artifact-present <agent>:lane-<id>`** (`bin/modules/state.cjs`). Closes the cal #19 coverage gap where `code-review-parallel.md` had no Layer-1 integration despite being output-writing. Agent argument now accepts canonical form (`<agent>`, resolves from `io-contracts.yaml::outputs.primary`) OR lane form (`<agent>:lane-<id>`, resolves from `workflow.yaml::lanes[].review_file`). The agent key in the persisted record includes the lane suffix so Layer-2's per-agent latest-verdict computation treats each lane as a distinct stream within the workflow window. `code-review-parallel.md` fires a per-lane call at `substance_check_lanes` AND `redispatch_lanes`; successful re-dispatch overwrites prior stub/missing failure records.
+- **`state recover-partial-impl <agent>` CLI** (`bin/modules/state.cjs`) — rate-limit-mid-section recovery diagnostic. cal #19 §5 Q17 documented a rate-limit MID-section interrupt that left programmer `impl-summary.md` at the stub-first sentinel with no structured sidecar. The agent provably cannot detect rate-limits from inside; only the orchestrator has the signals. CLI reads `dispatch-warnings.jsonl::task_output_bytes` for `low_output:true` records + on-disk primary substance, returns a JSON decision matrix: `recovery_needed=true + suggested_action=SendMessage-resume` when stub+low_output pattern matches; `recovery_needed=true + suggested_action=investigate` when stub but no rate-limit signal; `recovery_needed=false + primary_state=substantive | missing` for cleaner outcomes; `recovery_needed=false + sidecar_status=<terminal>` short-circuit when sidecar declares terminal status.
+- **`dev-workflow.md` + `quick-implement.md` recover-partial-impl orchestrator hooks** — bash block after programmer's `assert-artifact-present` call invokes the diagnostic and surfaces `[PARTIAL_IMPL_RECOVERY]` echo with `suggested_action`. Prose tells the orchestrator how to route each suggestion.
+- **`agents/programmer.md` migration safety preflight rule** — cal #19 §7 F2: a programmer wrote a migration with revision-id collision → alembic "Cycle detected" → app refused to start. New paragraph in `execution_flow` tells the programmer to grep `^revision = '<new-id>'` across the migrations dir BEFORE writing any `migrations/versions/*.py` (or framework equivalent). One-line preflight; project-agnostic prose.
+
+### Changed
+
+- **`assertClaimChecksResolved` "absent" reason clarification** (`bin/modules/state.cjs`). Previously the file-absent path returned `ok:true` with reason `"no Layer-1 checks recorded yet"` which sounded like normal early-phase state but actually masked total Layer-1 inactivity (cal #19 Surprise 3 — `code-review-parallel` ran without any Layer-1 calls). Reason now flags the ambiguity: ok if workflow_type doesn't dispatch output-writers OR hasn't reached an output-writing phase; investigate as coverage gap if dispatches DID happen but Layer-1 calls were skipped (cross-check `gate-trace.jsonl` for `assert-artifact-present` entries in this window).
+- **`persistGateTrace` reads `workflow_type` from `workflow.yaml`** (`bin/modules/state.cjs`). Cal #19 friction #1: `workflow_type=null` in 17/17 trace entries blocked per-workflow trend analysis. All future gate-trace records include `workflow_type` alongside `workflow_id` + `phase`.
+- **`graphify-impact-plan.json` audit-survives-reset** (R-2 from cal #19 secondary audit). Removed from `GRAPHIFY_EVICTABLE` in `state-audit.cjs` (so `state evict-graphify` doesn't delete it mid-session). Added to `RESET_EXEMPT` in `state.cjs` (so `state reset` doesn't delete it across sessions). The `{tier, tool, args}` audit trail is now preserved alongside the other forensic JSONLs — closes the "args VERBATIM" unauditable gap.
+- **`dispatch render-filled` accepts space-separator alongside colon** (`bin/modules/dispatch.cjs`). Cal #19 §7 F3: colon-only syntax surprised users who typed space-separated form first. Now `dispatch render-filled programmer auto` AND `dispatch render-filled programmer:auto` both work. Usage message updated.
+
+### Smoke gates
+
+- **K45**: `assert-artifact-present` polymorphic `<agent>:lane-<id>` form (L1 pass + L2 absent + UNKNOWN not-registered)
+- **K46**: `recover-partial-impl` 4-state decision matrix (missing | substantive | stub+low_output | sidecar-DONE)
+- **K47**: `gate-trace.jsonl` carries `workflow_type` + `workflow_id` + `phase` (no nulls when workflow.yaml is well-formed)
+
+### Docs alignment
+
+- `docs/INTERNALS.md`: `dispatch-warnings.jsonl` discriminated-union schema (2-source table: `raw_dispatch` + `task_output_bytes`); `gate-trace.jsonl` cross-session retention semantics + filtering pattern.
+- `workflows/code-review.md::Substep 6`: substance-byte-threshold heuristic — `assert-graphify-decision` checks drill-down section density, not MCP-call presence (cal #19 Surprise 1).
+- `docs/AGENT-CONTRACTS.md::SendMessage primary path`: cal #19 §5 Q18 field validation of the "no active task" success-path semantic. The 3-strike NOT EXERCISED demote (PARTIAL emission + SendMessage-resume) is REVERSED: PARTIAL flipped to EXERCISED-AND-FAILED (covered by `recover-partial-impl`), SendMessage flipped to EXERCISED-AND-WORKED (documented as field-validated). Only M4 collisions remains as a 3-strike → filed as DEF-058 with sunset trigger.
+
+### Deferred items
+
+- **DEF-058**: M4 symbol collisions surface — 3rd strike NOT EXERCISED. Sunset trigger: cal #20+ documents a missed finding traced to a colliding symbol the per-lane prompt didn't disambiguate. R-6 (collision injection per lane) remains alive for v0.74 once Layer-2 lane records soak.
+
+### Strategic note
+
+This release deliberately ships NO new features. Every fix targets an integration gap, friction point, or alignment issue surfaced by cal #19's empirical findings. Per the user's mandate: "instead of adding new and more features we should make all current existing structure are fully integrated with each other and fully aligned with each other." v0.74.0 holds the larger architectural work (per-lane scope_hint via `graphify symbols-in-files` — R-4; state-subcommand integration audit — 15 of 23 subcommands unreferenced by any workflow; dispatch render-filled inline-task design question).
+
 ## [0.73.3] - 2026-06-04
 
 **Greenfield-validation cycle: reverse-direction sync of a silent false-negative bug + upstream template hygiene cleanup.** Working with greenfield as the field-validation target surfaced two structural template issues: (1) `detectors/layer_imports.py` had a `str.endswith()` over-exemption that silently allowed nested non-composition-root `dependencies.py` files to bypass `LAYER-IMPORT-API` enforcement — greenfield had already fixed this with a regex-anchored implementation; (2) `templates/python-fastapi/canonical-entities.yaml` shipped greenfield's actual production domain registry (Country / Client / User / Organization with `app.services.*` import paths) as the example, leaking one project's domain to every other adopter. Both fixes ship in this release. Plus an unrelated skill-layer hardening from the same session: tier-selection sanity cross-check.
