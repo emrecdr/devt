@@ -10221,6 +10221,21 @@ else
   fail "K43: workflow migration incomplete — missing advance-phase in:$K43_FAIL"
 fi
 
+# K44 — complexity-assessment skill declares the sanity cross-check that
+# guards against false-large effect_size from bulk_scoped blast_radius.
+# Anti-regression: if a future edit silently drops the override rule, the
+# tier-selection layer 1↔2 wiring degrades back to single-point-of-failure.
+# Two anchor phrases must both be present: the section heading and the
+# override-rule clause.
+K44_PATH="$ROOT/skills/complexity-assessment/SKILL.md"
+K44_HAS_SECTION=$(grep -c "Sanity cross-check" "$K44_PATH" 2>/dev/null || echo 0)
+K44_HAS_RULE=$(grep -c "false-large" "$K44_PATH" 2>/dev/null || echo 0)
+if [ "$K44_HAS_SECTION" -ge 1 ] && [ "$K44_HAS_RULE" -ge 1 ]; then
+  pass "K44: complexity-assessment skill declares sanity cross-check for effect_size override"
+else
+  fail "K44: complexity-assessment skill missing sanity cross-check (section=$K44_HAS_SECTION rule=$K44_HAS_RULE)"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

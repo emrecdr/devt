@@ -169,3 +169,41 @@ small | medium | large. LARGE → COMPLEX tier (council offramp recommended). ME
 STANDARD. SMALL → SIMPLE. Without Graphify, fall back to file count + module spread
 heuristics (see `skills/graphify-helpers/SKILL.md` for the protocol). Pre-Flight Brief
 (Phase 3) carries the effect_size estimate forward to plan/implement workflows.
+
+### Sanity cross-check (override false-large)
+
+The Graphify effect_size and the 5-dim score are independent signals — coupling-graph
+fan-out vs. task-shape scoring. When they AGREE, take the higher tier between them and
+proceed. When they DISAGREE by ≥2 tiers, the disagreement itself is a signal worth
+checking before promoting the task.
+
+**Known failure mode: false-large from bulk_scoped blast_radius.** When the topic
+extractor returns few symbols and graphify falls back to bulk_scoped tier, the
+effect_size can over-report `large` for what is actually a 1-file localised change
+(diffuse keyword matches against a dense graph). Trusting that signal blindly promotes
+a typo-fix to COMPLEX → full architect dispatch → wasted tokens.
+
+**Override rule:** when `effect_size == "large"` BUT the 5-dim breakdown shows
+`Scope ≤ 1` (single file/function) AND `Integration ≤ 1` (no integration crossings),
+treat the coupling signal as a false-large and use the 5-dim total alone for tier
+selection. Document the override inline so the audit trail is explicit:
+
+```
+Complexity: SIMPLE (6/15) [override: effect_size=large contradicted by Scope=1 + Integration=1; bulk_scoped diffuse-match suspected]
+  Scope:          1 — Single file (typo fix in users/router.py)
+  Integration:    1 — No integration boundaries crossed
+  Infrastructure: 1 — No infra changes
+  Dependencies:   1 — Standalone change
+  Risk:           2 — Touches auth-adjacent code, surface inspection needed
+```
+
+**The converse is NOT a failure mode.** When `effect_size == "small"` BUT 5-dim scores
+high (`Risk ≥ 2` OR `Dependencies ≥ 2`), trust the 5-dim total — graphify may not see
+the symbol (recent code, parser gap, or sparse graph). Risk/dependency dimensions
+encode information graphify cannot derive from call edges alone, so they take
+precedence. No override note needed; just use the 5-dim tier.
+
+**When in doubt: prefer the more conservative tier (lower).** Over-tiering wastes
+tokens; under-tiering misses real complexity. The override rule trades a small risk of
+the latter for a large savings on the former, on the specific failure mode where the
+two signals provably disagree.
