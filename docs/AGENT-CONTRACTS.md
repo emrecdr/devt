@@ -141,6 +141,22 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Enforcement.** Smoke gates: agent markdown templates must NOT emit `^## Status$` for sidecar-covered artifacts; `ARTIFACT_SCHEMA` must NOT list them; `SIDECAR_FOR_MARKDOWN` must reference all three.
 
+### Layer-1 claim-check — canonical + polymorphic lane forms
+
+**Rule.** Workflow orchestrators verify "agent claims it wrote X" against ground truth via `state assert-artifact-present <agent>` after each output-writing dispatch. The CLI reads the agent's `outputs.primary` from `agents/io-contracts.yaml`, asserts the file exists + is non-empty, and persists the result to `claim-check-failures.jsonl` for Layer-2 (`assertClaimChecksResolved`) to read at finalize.
+
+**Polymorphic form (per-lane).** When an agent writes per-lane artifacts (currently only `code-reviewer` in `code-review-parallel.md`), the CLI accepts `state assert-artifact-present <agent>:lane-<id>`. The lane form resolves `expected_path` from `workflow.yaml::lanes[].review_file` instead of `io-contracts.yaml`, and the persisted agent key includes the suffix so Layer-2's per-agent latest-verdict computation treats each lane as a distinct stream within the workflow window. Successful re-dispatch overwrites prior stub/missing records (last-write-wins per agent key).
+
+**Why per-lane**: `assert-artifact-present code-reviewer` alone would only check the consolidated `review.md` at finalize. A lane that returned without writing its `review-lane-<id>.md` would slip through if the consolidator had still synthesized a final review from the surviving lanes. The per-lane records surface lane-level failures into Layer-2 immediately.
+
+### Q2-E recover-partial-impl — rate-limit-mid-section diagnostic
+
+**Rule.** The PARTIAL contract (§ below) triggers at section boundaries. When a rate-limit interrupts the agent MID-section, no PARTIAL emits and the primary artifact stays at its stub-first sentinel. The agent provably cannot detect rate-limits from inside (the API just stops responding) — only the orchestrator has the signals: `dispatch-warnings.jsonl::task_output_bytes` carries the `low_output:true` flag, and on-disk primary substance reveals stub vs. substantive state.
+
+**Mechanism.** `state recover-partial-impl <agent>` reads both signals and returns a JSON decision: `recovery_needed=true + suggested_action=SendMessage-resume` when stub+low_output pattern matches (the rate-limit shape); `recovery_needed=true + suggested_action=investigate` when stub but no low_output (abnormal stop, not rate-limit); `recovery_needed=false + primary_state=substantive | missing` for cleaner outcomes; `recovery_needed=false + sidecar_status=<terminal>` short-circuit when sidecar declares terminal status.
+
+**Wiring.** `dev-workflow.md` + `quick-implement.md` call the CLI immediately after their programmer claim-check and surface the suggestion via `[PARTIAL_IMPL_RECOVERY]` echo. The orchestrator routes on `suggested_action` before dispatching the tester or proceeding past the implement phase. `debug.md` does NOT wire this — debugger has no PARTIAL contract (`io-contracts.yaml::debugger.outputs.sidecar: null`).
+
 ### Status enum + PARTIAL semantics (Q8 contract)
 
 **Rule.** Every output-writing agent declares a Status from a controlled enum. The enum varies by agent role but ALWAYS includes `PARTIAL` so a subagent that hits its per-dispatch tool budget mid-task can signal incomplete work without faking completion.

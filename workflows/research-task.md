@@ -64,7 +64,7 @@ fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
-The `state evict-graphify` call clears stale `graph-impact.md` / `graphify-impact-plan.json` from prior workflows so this research session doesn't inherit a different topic's blast radius.
+The `state evict-graphify` call clears stale `graph-impact.md` + related MCP-response artifacts from prior workflows so this research session doesn't inherit a different topic's blast radius. **Note**: `graphify-impact-plan.json` is **NOT** evicted — it carries the args+tier audit trail for the impact step and is preserved across workflows (it's idempotently overwritten by substep 5 each session AND on `state reset` survives via RESET_EXEMPT). This keeps the "args VERBATIM" contract auditable post-hoc.
 
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Smoke tests for devt CLI — exercises every subcommand with a temp project.
 # Used by CI and as a local pre-commit sanity check.
+#
+# CONVENTION (learned from K49 first-pass failure): every `node -e` invocation
+# that requires a devt module MUST use the absolute `$ROOT/bin/modules/...`
+# path, not a relative `./bin/modules/...`. The smoke loop runs many tests in
+# subshells that briefly `cd` into temp projects; while the parent shell stays
+# at the invocation cwd, certain test patterns (mktemp + cd in command
+# substitution + later module require) can interact with `set -euo pipefail`
+# in ways that surface a MODULE_NOT_FOUND silently. Absolute paths via $ROOT
+# are immune. Pair with `|| echo ""` to keep set -e from aborting on a
+# best-effort failure.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
