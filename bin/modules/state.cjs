@@ -1048,6 +1048,7 @@ const RESET_EXEMPT = new Set([
   "probe-failures.jsonl",               // Q4 — graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
   ".graphify-rebuild.lock",             // DEF-038 — atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
   "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:cancel-workflow
+  "graphify-impact-plan.json",          // R-2 (cal #19 secondary audit) — args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2861,6 +2862,7 @@ function persistGateTrace(name, result) {
   try {
     const dir = getStateDir();
     let workflowId = null;
+    let workflowType = null;
     let phase = null;
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const wfPath = path.join(dir, "workflow.yaml");
@@ -2869,6 +2871,8 @@ function persistGateTrace(name, result) {
         const yaml = fs.readFileSync(wfPath, "utf8");
         const idMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
         if (idMatch) workflowId = idMatch[1].trim();
+        const typeMatch = yaml.match(/^workflow_type:\s*"?([^"\n]+)"?\s*$/m);
+        if (typeMatch) workflowType = typeMatch[1].trim();
         const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
         if (phaseMatch) phase = phaseMatch[1].trim();
       } catch { /* unreadable — fields stay null */ }
@@ -2883,6 +2887,7 @@ function persistGateTrace(name, result) {
       verdict,
       reason: (result && typeof result.reason === "string") ? result.reason : "",
       workflow_id: workflowId,
+      workflow_type: workflowType,
       phase,
     });
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal

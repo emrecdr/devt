@@ -10347,6 +10347,35 @@ else
 fi
 rm -rf "$K46_TMP"
 
+# K47 — gate-trace.jsonl carries workflow_type (+ existing workflow_id, phase).
+# cal #19 friction #1: workflow_type=null in 17/17 entries blocked
+# per-workflow trend analysis. persistGateTrace now reads workflow_type from
+# workflow.yaml so every trace record includes it.
+K47_TMP=$(mktemp -d)
+mkdir -p "$K47_TMP/.devt/state"
+cat > "$K47_TMP/.devt/state/workflow.yaml" <<EOF_K47
+active: true
+workflow_id: test-wf-id-K47
+workflow_type: dev
+phase: scan
+first_created_at: "2026-06-04T10:00:00Z"
+created_at: "2026-06-04T10:00:00Z"
+EOF_K47
+echo '{}' > "$K47_TMP/.devt/config.json"
+# Fire any traceGate-wrapped gate to generate a record (assert-verifier-ran is
+# stable + lightweight; ok:true on absence of verification.json).
+(cd "$K47_TMP" && node "$CLI" state assert-verifier-ran >/dev/null 2>&1) || true
+K47_RECORD=$(tail -1 "$K47_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null)
+K47_TYPE=$(echo "$K47_RECORD" | jq -r '.workflow_type' 2>/dev/null || echo "")
+K47_ID=$(echo "$K47_RECORD" | jq -r '.workflow_id' 2>/dev/null || echo "")
+K47_PHASE=$(echo "$K47_RECORD" | jq -r '.phase' 2>/dev/null || echo "")
+if [ "$K47_TYPE" = "dev" ] && [ "$K47_ID" = "test-wf-id-K47" ] && [ "$K47_PHASE" = "scan" ]; then
+  pass "K47: gate-trace.jsonl carries workflow_type + workflow_id + phase (no nulls when workflow.yaml is well-formed)"
+else
+  fail "K47: gate-trace.jsonl missing fields (workflow_type=$K47_TYPE workflow_id=$K47_ID phase=$K47_PHASE)"
+fi
+rm -rf "$K47_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -218,8 +218,15 @@ function cleanupStateFiles(opts = {}) {
 // data thinking it's current). Eviction is called from every workflow's context_init
 // BEFORE any graphify MCP calls — workflows that don't call graphify still benefit
 // (no stale data from a sibling workflow lingers).
+// R-2 (greenfield cal #19 secondary audit) — graphify-impact-plan.json is
+// DELIBERATELY NOT evicted here. The plan carries the {tier, tool, args}
+// audit trail for the impact step. Evicting it before regeneration loses the
+// "args VERBATIM" evidence the workflow contract depends on. The plan IS
+// idempotently overwritten in context_init substep 5 each session, so
+// staleness from a crashed prior session is bounded to the next workflow
+// start. The plan is also RESET_EXEMPT in state.cjs so forensics across
+// sessions remain available.
 const GRAPHIFY_EVICTABLE = Object.freeze([
-  "graphify-impact-plan.json",
   "graph-impact.md",
   "graphify-skip-reason.txt",
   "staleness-suppressed.txt",
