@@ -302,7 +302,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lane
 
 <step name="substance_check_lanes" gate="every lane has terminal status (substance_pass | stub_redispatched | deferred)">
 
-After dispatch_lanes returns, run `state check-agent-output` on each lane's review file. F28 catches stub outputs (greenfield 2026-05-26 PR #372 5/6-lanes-stub failure mode).
+After dispatch_lanes returns, run `state check-agent-output` on each lane's review file. F28 catches stub outputs (greenfield 2026-05-26 PR #372 5/6-lanes-stub failure mode). Each lane also fires a per-lane Layer-1 claim-check (`state assert-artifact-present code-reviewer:lane-<id>`) so Layer-2's `assertClaimChecksResolved` at finalize sees lane-level resolution semantics — closes the cal #19 coverage gap where parallel reviews had Layer-1 silently absent.
 
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
@@ -310,6 +310,11 @@ STUB_LANE_IDS=""
 for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
   LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
   LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
+  # Per-lane Layer-1 — persists file-existence + size > 0 record to
+  # claim-check-failures.jsonl. Coarser than the substance check below (which
+  # catches stubs); this catches "lane wrote nothing at all". Both records
+  # overwrite on successful re-dispatch (last-write-wins per agent key).
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present "code-reviewer:lane-${LANE_ID}" > /dev/null
   # Hard-defer impossibly-fast empty returns (file size < 30 bytes — that's
   # not even a real stub, it's a harness/dispatch failure). No retry.
   if [ "$LANE_SIZE" -lt 30 ]; then
@@ -368,6 +373,10 @@ After all Task() calls return, re-run substance_check_lanes via the bash loop �
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
   LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
+  # Per-lane Layer-1 — overwrites the prior stub-redispatched failure record
+  # with the new verdict. Successful re-dispatch resolves the failure for
+  # Layer-2; another stub leaves the failure record in place for finalize.
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present "code-reviewer:lane-${LANE_ID}" > /dev/null
   RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output "$LANE_FILE")
   if echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred

@@ -274,9 +274,22 @@ ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-ar
 if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
   echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
+# Rate-limit-mid-section recovery diagnostic. The PARTIAL contract triggers at
+# section boundaries; a rate-limit mid-section leaves impl-summary.md at its
+# stub-first sentinel with no structured sidecar. recover-partial-impl reads
+# dispatch-warnings.jsonl::task_output_bytes + on-disk impl-summary substance
+# and returns a recovery decision the orchestrator routes on.
+PARTIAL_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state recover-partial-impl programmer 2>/dev/null || echo '{}')
+if [ "$(echo "$PARTIAL_CHECK" | jq -r '.recovery_needed // false')" = "true" ]; then
+  SUGGESTED=$(echo "$PARTIAL_CHECK" | jq -r '.suggested_action // ""')
+  echo "[PARTIAL_IMPL_RECOVERY] suggested_action=${SUGGESTED}"
+  echo "[PARTIAL_IMPL_RECOVERY] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+fi
 ```
 
 If BLOCKED: programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume if a budget wall is suspected (check `.devt/state/dispatch-warnings.jsonl` for `near_cliff`/`low_output`/`mid_task_language` records).
+
+If `[PARTIAL_IMPL_RECOVERY]` surfaced with `suggested_action=SendMessage-resume`: the programmer was rate-limited mid-section (stub-only output + `low_output:true` signal). SendMessage the agent ID from the most recent programmer dispatch rather than re-dispatching from scratch — the stub-first sentinel + the orchestrator's section progress are recoverable context. If `suggested_action=investigate`: stub-only output without a rate-limit signal — investigate the dispatch transcript before re-dispatching.
 
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
 

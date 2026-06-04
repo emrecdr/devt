@@ -10255,6 +10255,98 @@ else
   fail "K44: complexity-assessment skill missing sanity cross-check (section=$K44_HAS_SECTION rule=$K44_HAS_RULE)"
 fi
 
+# K45 — assert-artifact-present accepts polymorphic <agent>:lane-<id> form.
+# Closes the cal #19 coverage gap where code-review-parallel had no Layer-1
+# integration for per-lane outputs. The test stands up an isolated workflow
+# with two registered lanes (one file-present, one file-absent) and asserts
+# the per-lane CLI returns correct verdicts.
+K45_TMP=$(mktemp -d)
+mkdir -p "$K45_TMP/.devt/state"
+cat > "$K45_TMP/.devt/state/workflow.yaml" <<EOF_K45
+active: true
+workflow_type: code_review_parallel
+phase: substance_check_lanes
+first_created_at: "2026-06-04T10:00:00Z"
+created_at: "2026-06-04T10:00:00Z"
+lanes:
+  - id: L1
+    community: auth
+    review_file: .devt/state/review-lane-L1.md
+    status: pending
+    redispatch_count: 0
+  - id: L2
+    community: billing
+    review_file: .devt/state/review-lane-L2.md
+    status: pending
+    redispatch_count: 0
+EOF_K45
+echo '{}' > "$K45_TMP/.devt/config.json"
+cat > "$K45_TMP/.devt/state/review-lane-L1.md" <<EOF_K45_L1
+# Lane L1 review
+
+## Finding 1: SQL injection in users/router.py
+The endpoint at /users/{id} concatenates user input directly into the SQL
+query without parameterization. Exploitable via a crafted id value.
+EOF_K45_L1
+K45_L1=$(cd "$K45_TMP" && node "$CLI" state assert-artifact-present "code-reviewer:lane-L1" 2>/dev/null)
+K45_L2=$(cd "$K45_TMP" && node "$CLI" state assert-artifact-present "code-reviewer:lane-L2" 2>/dev/null)
+K45_UNK=$(cd "$K45_TMP" && node "$CLI" state assert-artifact-present "code-reviewer:lane-UNKNOWN" 2>/dev/null)
+K45_L1_OK=$(echo "$K45_L1" | jq -r '.ok' 2>/dev/null || echo "")
+K45_L2_OK=$(echo "$K45_L2" | jq -r '.ok' 2>/dev/null || echo "")
+K45_UNK_OK=$(echo "$K45_UNK" | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K45_L1_OK" = "true" ] && [ "$K45_L2_OK" = "false" ] && [ "$K45_UNK_OK" = "false" ]; then
+  pass "K45: assert-artifact-present polymorphic <agent>:lane-<id> form (L1 pass, L2 absent, UNKNOWN not-registered)"
+else
+  fail "K45: polymorphic form misfired (L1=$K45_L1_OK L2=$K45_L2_OK UNK=$K45_UNK_OK)"
+fi
+rm -rf "$K45_TMP"
+
+# K46 — recover-partial-impl CLI returns the 4-state decision matrix. Covers
+# the cal #19 §5 Q17 silent-skip failure mode where rate-limit mid-section
+# stops left programmer impl-summary.md at the stub-first sentinel with no
+# structured sidecar emitted. CLI returns recovery_needed=true with
+# suggested_action=SendMessage-resume when the stub+low_output pattern hits.
+K46_TMP=$(mktemp -d)
+mkdir -p "$K46_TMP/.devt/state"
+echo '{}' > "$K46_TMP/.devt/config.json"
+K46_S1=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
+cat > "$K46_TMP/.devt/state/impl-summary.md" <<EOF_K46_S2
+# Implementation Summary
+
+## Files Modified
+- src/auth.py: added rate-limit middleware with redis backend
+- tests/test_auth.py: coverage for limit / refill / fail-open / overflow
+
+Implementation complete; tests pass.
+EOF_K46_S2
+K46_S2=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
+cat > "$K46_TMP/.devt/state/impl-summary.md" <<EOF_K46_S3
+# Implementation Summary — in progress
+
+Working on B.1 (rate limit middleware).
+EOF_K46_S3
+cat > "$K46_TMP/.devt/state/dispatch-warnings.jsonl" <<EOF_K46_S3J
+{"ts":"2026-06-04T15:00:00Z","source":"task_output_bytes","agent":"devt:programmer","output_bytes":252,"threshold_bytes":40000,"near_cliff":false,"low_output":true}
+EOF_K46_S3J
+K46_S3=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
+echo '{"status":"DONE","files_changed":["src/auth.py"]}' > "$K46_TMP/.devt/state/impl-summary.json"
+K46_S4=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
+K46_S1_NEED=$(echo "$K46_S1" | jq -r '.recovery_needed' 2>/dev/null || echo "")
+K46_S1_STATE=$(echo "$K46_S1" | jq -r '.primary_state' 2>/dev/null || echo "")
+K46_S2_NEED=$(echo "$K46_S2" | jq -r '.recovery_needed' 2>/dev/null || echo "")
+K46_S3_NEED=$(echo "$K46_S3" | jq -r '.recovery_needed' 2>/dev/null || echo "")
+K46_S3_ACTION=$(echo "$K46_S3" | jq -r '.suggested_action' 2>/dev/null || echo "")
+K46_S4_STATUS=$(echo "$K46_S4" | jq -r '.sidecar_status' 2>/dev/null || echo "")
+if [ "$K46_S1_NEED" = "false" ] && [ "$K46_S1_STATE" = "missing" ] && \
+   [ "$K46_S2_NEED" = "false" ] && \
+   [ "$K46_S3_NEED" = "true" ] && [ "$K46_S3_ACTION" = "SendMessage-resume" ] && \
+   [ "$K46_S4_STATUS" = "DONE" ]; then
+  pass "K46: recover-partial-impl 4-state matrix (missing|substantive|stub+low_output|sidecar-DONE)"
+else
+  fail "K46: recover-partial-impl matrix misfired (S1=$K46_S1_NEED/$K46_S1_STATE S2=$K46_S2_NEED S3=$K46_S3_NEED/$K46_S3_ACTION S4=$K46_S4_STATUS)"
+fi
+rm -rf "$K46_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

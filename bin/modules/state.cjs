@@ -2455,6 +2455,16 @@ function _assertArtifactPresentInner(agent) {
   if (typeof agent !== "string" || !agent) {
     return { ok: false, reason: "missing agent argument" };
   }
+  // Polymorphic argument: `<agent>` (canonical, resolves from io-contracts) or
+  // `<agent>:lane-<id>` (per-lane, resolves from workflow.yaml::lanes[]). The
+  // per-lane form closes the Layer-1 coverage gap in code-review-parallel.md
+  // where lane dispatches had no claim-check trail despite being output-writing.
+  // Each lane persists a distinct record (agent key includes the suffix) so
+  // Layer-2 sees lane-level resolution semantics.
+  const laneMatch = agent.match(/^([^:]+):lane-(.+)$/);
+  if (laneMatch) {
+    return _assertLaneArtifactPresent(laneMatch[1], laneMatch[2]);
+  }
   let contracts;
   try {
     const dispatch = require("./dispatch.cjs");
@@ -2510,6 +2520,203 @@ function _assertArtifactPresentInner(agent) {
     exists: true,
     size_bytes: sizeBytes,
     reason: `${primary} present (${sizeBytes} bytes)`,
+  };
+}
+
+// Per-lane Layer-1 — resolves expected_path from workflow.yaml::lanes[].review_file
+// instead of io-contracts.yaml::outputs.primary. The agent key in the persisted
+// record is `<canonicalAgent>:lane-<id>` so Layer-2's per-agent latest-verdict
+// computation treats each lane as a distinct stream within the workflow window.
+function _assertLaneArtifactPresent(canonicalAgent, laneId) {
+  const tag = `${canonicalAgent}:lane-${laneId}`;
+  const { lanes } = listLaneOutputs();
+  const lane = (lanes || []).find((l) => l.id === laneId);
+  if (!lane) {
+    return {
+      ok: false,
+      agent: tag,
+      reason: `lane "${laneId}" not registered in workflow.yaml::lanes[]. Either the lane id is wrong or partition_lanes has not run yet.`,
+    };
+  }
+  if (!lane.review_file) {
+    return {
+      ok: false,
+      agent: tag,
+      reason: `lane "${laneId}" has no review_file field in workflow.yaml::lanes[]. partition_lanes must register a review_file per lane.`,
+    };
+  }
+  if (!lane.file_exists) {
+    return {
+      ok: false,
+      agent: tag,
+      expected_path: lane.review_file,
+      exists: false,
+      reason: `Expected lane output ${lane.review_file} does not exist. Lane ${laneId} dispatch returned without writing its declared review file — re-dispatch with explicit instruction to write ${lane.review_file} before returning.`,
+    };
+  }
+  if (lane.file_size_bytes === 0) {
+    return {
+      ok: false,
+      agent: tag,
+      expected_path: lane.review_file,
+      exists: true,
+      size_bytes: 0,
+      reason: `Lane output ${lane.review_file} exists but is empty (0 bytes). Likely a stub-first protocol write that the lane reviewer did not follow through on — re-dispatch.`,
+    };
+  }
+  return {
+    ok: true,
+    agent: tag,
+    expected_path: lane.review_file,
+    exists: true,
+    size_bytes: lane.file_size_bytes,
+    reason: `${lane.review_file} present (${lane.file_size_bytes} bytes)`,
+  };
+}
+
+// Q2-E / greenfield cal #19 §5 Q17 — rate-limit-mid-section recovery diagnostic.
+// The PARTIAL contract in programmer.md triggers at section boundaries. When a
+// rate-limit interrupts the agent MID-section, no PARTIAL sidecar emits and
+// impl-summary.md stays at its stub-first sentinel. The agent provably cannot
+// detect rate-limits from inside the model (the API just stops responding) —
+// only the orchestrator has the signals: dispatch-warnings.jsonl carries the
+// task_output_bytes record with low_output:true, and the on-disk primary
+// artifact reveals stub vs substantive state.
+//
+// Returns a JSON decision the orchestrator routes on:
+//   recovery_needed=true + suggested_action=SendMessage-resume — rate-limit
+//     pattern matches (stub + low_output) — resume rather than re-dispatch
+//   recovery_needed=true + suggested_action=investigate — stub but no
+//     low_output signal — abnormal stop without rate-limit shape
+//   recovery_needed=false + primary_state=substantive — agent finished
+//     enough work to count, just didn't write a sidecar (status unknown but
+//     not stub-equivalent)
+//   recovery_needed=false + primary_state=missing — never wrote anything,
+//     dispatch from scratch (not a partial case)
+//   recovery_needed=false + sidecar_status=<terminal> — sidecar declares
+//     explicit terminal status (DONE / PARTIAL / DONE_WITH_CONCERNS), no
+//     recovery needed
+function recoverPartialImpl(agent) {
+  if (typeof agent !== "string" || !agent) {
+    return { ok: false, reason: "missing agent argument" };
+  }
+  let primary, sidecar;
+  try {
+    const dispatch = require("./dispatch.cjs");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const contractsPath = path.join(__dirname, "..", "..", "agents", "io-contracts.yaml");
+    if (!fs.existsSync(contractsPath)) {
+      return { ok: false, agent, reason: "agents/io-contracts.yaml not found" };
+    }
+    const contracts = dispatch.parseIoContracts(fs.readFileSync(contractsPath, "utf8"));
+    const ac = contracts.agents && contracts.agents[agent];
+    if (!ac) {
+      return { ok: false, agent, reason: `agent "${agent}" not declared in agents/io-contracts.yaml` };
+    }
+    primary = ac.outputs && ac.outputs.primary;
+    sidecar = ac.outputs && ac.outputs.sidecar;
+  } catch (e) {
+    return { ok: false, agent, reason: `io-contracts parse failed: ${e.message}` };
+  }
+  if (!primary || primary === "null") {
+    return { ok: true, agent, recovery_needed: false, reason: "agent declares no primary output — nothing to recover" };
+  }
+  const dir = getStateDir();
+  // Sidecar is authoritative when it declares a terminal status — short-circuit.
+  if (sidecar && sidecar !== "null") {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const sidecarPath = path.join(dir, sidecar);
+    if (fs.existsSync(sidecarPath)) {
+      try {
+        const sc = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+        if (sc.status && typeof sc.status === "string" && sc.status !== "WIP") {
+          return {
+            ok: true,
+            agent,
+            recovery_needed: false,
+            sidecar_status: sc.status,
+            reason: `${sidecar}::status=${sc.status} — agent declared its terminal state explicitly; no recovery needed`,
+          };
+        }
+      } catch { /* malformed JSON — fall through to primary inspection */ }
+    }
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const primaryPath = path.join(dir, primary);
+  if (!fs.existsSync(primaryPath)) {
+    return {
+      ok: true,
+      agent,
+      recovery_needed: false,
+      primary_state: "missing",
+      reason: `${primary} does not exist — agent dispatch never wrote anything. Re-dispatch from scratch (not a partial-recovery case).`,
+    };
+  }
+  let sizeBytes = 0, head = "";
+  try {
+    sizeBytes = fs.statSync(primaryPath).size;
+    head = fs.readFileSync(primaryPath, "utf8").slice(0, 500);
+  } catch (e) {
+    return { ok: false, agent, reason: `read failed: ${e.message}` };
+  }
+  // Stub heuristic — matches the stub-first protocol's canonical header pattern.
+  // Threshold 500 bytes is generous to cover "# Title — in progress\n\nMetadata".
+  const STUB_BYTES_THRESHOLD = 500;
+  const stubPattern = /^#\s+.+\s+—\s+in progress\b/m;
+  const isStub = sizeBytes < STUB_BYTES_THRESHOLD && stubPattern.test(head);
+  // Latest task_output_bytes record for this agent in dispatch-warnings.jsonl.
+  // The hook prefixes agent with "devt:" so match accordingly.
+  let latestOutputRecord = null;
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
+  if (fs.existsSync(warningsPath)) {
+    try {
+      const lines = fs.readFileSync(warningsPath, "utf8").split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i]) continue;
+        try {
+          const rec = JSON.parse(lines[i]);
+          if (rec.source !== "task_output_bytes") continue;
+          const recAgent = (rec.agent || "").replace(/^devt:/, "");
+          if (recAgent === agent) {
+            latestOutputRecord = rec;
+            break;
+          }
+        } catch { /* malformed line */ }
+      }
+    } catch { /* read failed — fall through */ }
+  }
+  const lowOutput = !!(latestOutputRecord && latestOutputRecord.low_output === true);
+  if (isStub && lowOutput) {
+    return {
+      ok: true,
+      agent,
+      recovery_needed: true,
+      primary_state: "stub",
+      low_output: true,
+      output_bytes: latestOutputRecord.output_bytes,
+      suggested_action: "SendMessage-resume",
+      reason: `${primary} is stub-equivalent (${sizeBytes} bytes, header-only) AND dispatch-warnings.jsonl shows the agent's last dispatch had low_output:true (${latestOutputRecord.output_bytes} bytes). Likely rate-limited mid-section. SendMessage-resume the agent rather than re-dispatching — the stub-first sentinel + orchestrator's section progress are recoverable context.`,
+    };
+  }
+  if (isStub) {
+    return {
+      ok: true,
+      agent,
+      recovery_needed: true,
+      primary_state: "stub",
+      low_output: false,
+      suggested_action: "investigate",
+      reason: `${primary} is stub-equivalent (${sizeBytes} bytes, header-only) but no low_output signal in dispatch-warnings.jsonl. The dispatch either never started writing content OR stopped for a reason other than rate-limit. Investigate before re-dispatching.`,
+    };
+  }
+  return {
+    ok: true,
+    agent,
+    recovery_needed: false,
+    primary_state: "substantive",
+    size_bytes: sizeBytes,
+    reason: `${primary} appears substantive (${sizeBytes} bytes, no stub-pattern match). No partial-recovery needed — agent may simply not have written a sidecar.`,
   };
 }
 
@@ -2739,7 +2946,17 @@ function assertClaimChecksResolved() {
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const failsPath = path.join(dir, "claim-check-failures.jsonl");
   if (!fs.existsSync(failsPath)) {
-    return { ok: true, unresolved_count: 0, reason: "claim-check-failures.jsonl absent — no Layer-1 checks recorded yet" };
+    // Honest read of the absent file: structurally fine (nothing to resolve)
+    // but ambiguous about coverage. cal #19 surfaced that code-review-parallel
+    // had zero Layer-1 calls → file stayed absent → gate auto-passed without
+    // ever verifying any lane output. Reason now flags the ambiguity so
+    // /devt:next and the audit trail can distinguish "workflow doesn't dispatch
+    // output-writers" from "workflow should have but Layer-1 never fired."
+    return {
+      ok: true,
+      unresolved_count: 0,
+      reason: "claim-check-failures.jsonl absent — no Layer-1 assert-artifact-present calls fired in this workflow window. OK if the workflow_type doesn't dispatch output-writing agents or hasn't reached an output-writing phase yet. Investigate as a coverage gap if dispatches DID happen but Layer-1 calls were skipped (cross-check gate-trace.jsonl for assert-artifact-present entries in this window).",
+    };
   }
   let mode = "block";
   try {
@@ -3437,6 +3654,8 @@ function run(subcommand, args) {
       return traceGate("assert-artifact-present", () => assertArtifactPresent(args[0]));
     case "assert-claim-checks-resolved":
       return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
+    case "recover-partial-impl":
+      return recoverPartialImpl(args[0]);
     case "advance-phase":
       return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
@@ -3456,7 +3675,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }
