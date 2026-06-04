@@ -84,6 +84,15 @@ Output the new REJ-id and the absolute path of the written file.
 ")
 ```
 
+**Claim-check (Q11)**: mechanically verify the curator wrote its declared output:
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present curator)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
 Gate: Read `.devt/state/curation-summary.md`. Status must be DONE.
 </step>
 

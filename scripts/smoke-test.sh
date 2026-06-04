@@ -10423,6 +10423,42 @@ else
   fail "K49: graphify-impact-plan.json wrong status (off_evictable=$K49_EVICT_OK on_reset_exempt=$K49_RESET_OK)"
 fi
 
+# K50 — every workflow that dispatches an output-writing agent MUST have at
+# least one assert-artifact-present Layer-1 call. cal #19 §9 Surprise 3:
+# greenfield discovered 23 state subcommands exist but only 8 referenced in
+# workflows — exactly the integration gap this gate locks. Coverage matrix:
+# any workflow that contains `Task(subagent_type="devt:<agent>"` for an
+# agent declared in io-contracts.yaml MUST also reference
+# `assert-artifact-present` at least once. Curator dispatches with
+# `outputs.primary: null` would auto-pass the runtime check but the gate
+# still requires the call for audit-trail consistency.
+K50_FAIL=""
+# Agents whose outputs.primary is NOT null per io-contracts.yaml.
+# (Curator IS included even though its primary is curation-summary.md,
+# matching its io-contract.)
+K50_OUTPUT_WRITERS="programmer tester code-reviewer docs-writer architect retro verifier researcher debugger curator"
+for wf in "$ROOT"/workflows/*.md; do
+  # Skip if no Task dispatch at all (orchestration-only workflows like next.md, pause.md).
+  if ! grep -q 'Task(subagent_type="devt:' "$wf" 2>/dev/null; then continue; fi
+  # Determine which output-writing agents this workflow dispatches.
+  dispatched=""
+  for ag in $K50_OUTPUT_WRITERS; do
+    if grep -q "Task(subagent_type=\"devt:${ag}\"" "$wf" 2>/dev/null; then
+      dispatched="$dispatched $ag"
+    fi
+  done
+  if [ -z "$dispatched" ]; then continue; fi
+  # Workflow dispatches at least one output-writer — require Layer-1.
+  if ! grep -q "assert-artifact-present" "$wf" 2>/dev/null; then
+    K50_FAIL="$K50_FAIL $(basename "$wf")"
+  fi
+done
+if [ -z "$K50_FAIL" ]; then
+  pass "K50: every workflow dispatching output-writing agents has Layer-1 assert-artifact-present (11 workflows checked)"
+else
+  fail "K50: workflows missing Layer-1 claim-check despite dispatching output-writers:$K50_FAIL"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

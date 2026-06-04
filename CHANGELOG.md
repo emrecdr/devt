@@ -34,6 +34,20 @@ Smoke: 795 passed, 0 failed (+3 from K45 + K46 + K47). Locking: 3/3.
 - **K48**: `dispatch render-filled` accepts both colon-joined (`agent:wf`) AND space-separated (`agent wf`) forms with byte-identical output (parity anti-regression)
 - **K49**: `graphify-impact-plan.json` audit-survives-reset (off `GRAPHIFY_EVICTABLE` + on `RESET_EXEMPT`)
 
+### Layer-1 coverage expansion (round 4 validation)
+
+Workflow-coverage validation discovered **5 additional workflows** dispatching output-writing agents without Layer-1 claim-check:
+
+| Workflow | Dispatches | Layer-1 sites added |
+|---|---|---|
+| `create-plan.md` | researcher + architect | 2 |
+| `lesson-extraction.md` | retro + curator | 2 |
+| `memory-promote.md` | curator | 1 |
+| `memory-reject.md` | curator | 1 |
+| `research-task.md` | researcher | 1 |
+
+7 total Layer-1 sites added. Closes the cal #19 §9 Surprise 3 gap (greenfield: "23 state subcommands exist but only 8 used by workflows"). **K50 smoke gate** enforces ongoing coverage: every workflow dispatching output-writers must reference `assert-artifact-present` at least once (11 workflows checked, all pass).
+
 ### Validation amendment
 
 Post-implementation validation pass surfaced 2 real bugs + 3 alignment gaps:

@@ -91,6 +91,15 @@ Check if research is needed before planning:
    ")
    ```
 
+   **Claim-check (Q11)**: mechanically verify the researcher wrote its declared output:
+
+   ```bash
+   ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present researcher)
+   if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+     echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+   fi
+   ```
+
    Gate: Read `.devt/state/research.md` — if DONE or DONE_WITH_CONCERNS, proceed. If NEEDS_CONTEXT, ask user and re-dispatch.
 
 5. **If research skipped:** proceed to Step 3 without research context.
@@ -247,6 +256,15 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   </task>
   Write review to .devt/state/arch-review.md
 ")
+```
+
+**Claim-check (Q11)**: mechanically verify the architect wrote its declared output:
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present architect)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
 ```
 
 **Gate check**: Read `.devt/state/arch-review.md`:

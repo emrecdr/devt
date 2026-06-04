@@ -114,6 +114,15 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 ")
 ```
 
+**Claim-check (Q11)**: mechanically verify the retro wrote its declared output:
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present retro)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
 **Gate check**: Read `.devt/state/lessons.yaml`:
 
 - If it contains at least one lesson: proceed to curate
@@ -181,6 +190,15 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   </task>
   Write summary to .devt/state/curation-summary.md
 ")
+```
+
+**Claim-check (Q11)**: mechanically verify the curator wrote its declared output:
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present curator)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
 ```
 
 </step>
