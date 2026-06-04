@@ -162,6 +162,18 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing debug-summary.md): per your `knowledge_candidates` step, if debugging surfaces a non-obvious pattern (recurring bug class, hidden invariant the bug violated, environmental gotcha worth documenting), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes the 5-filter test: specificity, durability, non-obviousness, evidence, actionability. When none qualify, surface that decision in debug-summary.md.
 ")
 <!-- END dispatch:debugger:debug -->
+
+**Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Closes the cal #19 coverage gap — debug.md's Layer-2 `assert-claim-checks-resolved` ran at finalize but no Layer-1 calls ever fired, so `claim-check-failures.jsonl` stayed absent and the gate passed vacuously regardless of dispatch outcome.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present debugger)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If BLOCKED: debugger did not write debug-summary.md. Re-dispatch with explicit instruction.
+
 </step>
 
 <step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">

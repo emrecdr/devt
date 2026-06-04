@@ -10376,6 +10376,43 @@ else
 fi
 rm -rf "$K47_TMP"
 
+# K48 — dispatch render-filled accepts both colon-joined and space-separated
+# forms. cal #19 §7 F3: users intuitively typed space-separated first and
+# hit the colon-only Usage error. Anti-regression: future refactors must
+# not silently drop the space-separated path.
+K48_TMP=$(mktemp -d)
+mkdir -p "$K48_TMP/.devt/state"
+cat > "$K48_TMP/.devt/state/workflow.yaml" <<EOF_K48
+active: true
+workflow_id: test-wf-id-K48
+workflow_type: dev
+phase: implement
+first_created_at: "2026-06-04T10:00:00Z"
+created_at: "2026-06-04T10:00:00Z"
+EOF_K48
+echo '{}' > "$K48_TMP/.devt/config.json"
+K48_COLON=$(cd "$K48_TMP" && node "$CLI" dispatch render-filled programmer:test-wf-id-K48 2>/dev/null | head -1)
+K48_SPACE=$(cd "$K48_TMP" && node "$CLI" dispatch render-filled programmer test-wf-id-K48 2>/dev/null | head -1)
+if [ -n "$K48_COLON" ] && [ -n "$K48_SPACE" ] && [ "$K48_COLON" = "$K48_SPACE" ]; then
+  pass "K48: dispatch render-filled accepts both 'agent:wf' AND 'agent wf' (parity)"
+else
+  fail "K48: dispatch render-filled forms diverged (colon='$K48_COLON' space='$K48_SPACE')"
+fi
+rm -rf "$K48_TMP"
+
+# K49 — graphify-impact-plan.json survives both evict-graphify AND state reset
+# (R-2 from cal #19 secondary audit). The args-VERBATIM contract becomes
+# unauditable if the plan disappears with the workflow. Two assertions:
+# (a) GRAPHIFY_EVICTABLE no longer includes the plan; (b) RESET_EXEMPT
+# includes the plan.
+K49_EVICT_OK=$(node -e "const a=require('$ROOT/bin/modules/state-audit.cjs'); process.stdout.write(a.GRAPHIFY_EVICTABLE && !a.GRAPHIFY_EVICTABLE.includes('graphify-impact-plan.json') ? 'true' : 'false')" 2>/dev/null || echo "")
+K49_RESET_OK=$(node -e "const s=require('$ROOT/bin/modules/state.cjs'); process.stdout.write(s.RESET_EXEMPT && [...s.RESET_EXEMPT].includes('graphify-impact-plan.json') ? 'true' : 'false')" 2>/dev/null || echo "")
+if [ "$K49_EVICT_OK" = "true" ] && [ "$K49_RESET_OK" = "true" ]; then
+  pass "K49: graphify-impact-plan.json audit-survives-reset (off GRAPHIFY_EVICTABLE + on RESET_EXEMPT)"
+else
+  fail "K49: graphify-impact-plan.json wrong status (off_evictable=$K49_EVICT_OK on_reset_exempt=$K49_RESET_OK)"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

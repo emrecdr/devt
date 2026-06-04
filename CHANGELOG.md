@@ -31,6 +31,18 @@ Smoke: 795 passed, 0 failed (+3 from K45 + K46 + K47). Locking: 3/3.
 - **K45**: `assert-artifact-present` polymorphic `<agent>:lane-<id>` form (L1 pass + L2 absent + UNKNOWN not-registered)
 - **K46**: `recover-partial-impl` 4-state decision matrix (missing | substantive | stub+low_output | sidecar-DONE)
 - **K47**: `gate-trace.jsonl` carries `workflow_type` + `workflow_id` + `phase` (no nulls when workflow.yaml is well-formed)
+- **K48**: `dispatch render-filled` accepts both colon-joined (`agent:wf`) AND space-separated (`agent wf`) forms with byte-identical output (parity anti-regression)
+- **K49**: `graphify-impact-plan.json` audit-survives-reset (off `GRAPHIFY_EVICTABLE` + on `RESET_EXEMPT`)
+
+### Validation amendment
+
+Post-implementation validation pass surfaced 2 real bugs + 3 alignment gaps:
+
+- **Bug fix**: `recover-partial-impl` stub-pattern regex now accepts both em-dash (`—`, canonical convention) and regular hyphen (`-`, common typo). Previously only em-dash matched, so a hyphenated stub like `# Impl - in progress` was misclassified as substantive → orchestrator skipped the SendMessage-resume suggestion. Test case `# Impl - in progress` (21 bytes) now correctly returns `primary_state: stub`.
+- **Docs accuracy**: `docs/INTERNALS.md` `dispatch-warnings.jsonl` schema previously documented 2 sources (`raw_dispatch`, `task_output_bytes`) — actual file is **3-source** including `dispatch_scope` from `hooks/dispatch-scope-guard.sh`. Also added 3 missing fields to `task_output_bytes` (`low_output_threshold`, `stop_reason`, `mid_task_language`). Schema now matches source-of-truth.
+- **CLAUDE.md discoverability**: added inventory entries for the polymorphic `assert-artifact-present <agent>:lane-<id>` form and the new `state recover-partial-impl <agent>` CLI. Future Claude sessions discover the new surfaces at SessionStart.
+- **`debug.md` Layer-1 coverage gap**: closed the same gap that v0.73.4 closed for `code-review-parallel.md`. `debug.md` had Layer-2 `assert-claim-checks-resolved` at finalize but no Layer-1 `assert-artifact-present` calls — Layer-2 passed vacuously regardless of debugger dispatch outcome. New claim-check after `dispatch:debugger:debug` step.
+- **DEF-059** filed for the architectural enhancement (`assertClaimChecksResolved` reads `_phase-gates.yaml` to declare per-workflow_type Layer-1 expectations) — deferred from v0.73.4 scope, sunset trigger: cal #20+ documents a real coverage gap the "absent" reason failed to surface.
 
 ### Docs alignment
 

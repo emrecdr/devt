@@ -258,14 +258,15 @@ Architecture progression across calibrations #14-#18: warn-at-dispatch (cal #14)
 
 **Unified gate-trace.jsonl observability.** `bin/modules/state.cjs::traceGate(name, fn)` wraps every `assert-*` CLI subcommand in the `run()` switch. Records appended: `{ts, source:"gate_trace", gate, verdict:"ok"|"warn"|"fail", reason, workflow_id, workflow_type, phase}`. Cal #18 #4: gives unified observability across the entire gate surface in one file instead of stitching together `dispatch-warnings.jsonl` + `claim-check-failures.jsonl` + `preflight-denies.jsonl`. Query patterns: `jq -s 'group_by(.gate) | map({gate: .[0].gate, fires: length, blocks: map(select(.verdict=="fail")) | length})'`. **Cross-session retention**: gate-trace.jsonl is append-only — it persists across `/devt:cancel-workflow` and accumulates across workflows. Entries from prior workflows surface in the file with their original `workflow_id`. Filter to the current session with `jq 'select(.workflow_id == "<id-from-workflow.yaml>")'` or union the full `workflow_id_history[]` chain in `workflow.yaml` to span all ids belonging to the current logical session (per the immutable session anchors pattern).
 
-**`dispatch-warnings.jsonl` — discriminated-union schema.** The filename suggests single-source dispatch-warning records but the file actually carries multi-source telemetry. Every record has a `source:` discriminator + source-specific fields. The active sources (see `bin/modules/state.cjs::RESET_EXEMPT`):
+**`dispatch-warnings.jsonl` — discriminated-union schema.** The filename suggests single-source dispatch-warning records but the file actually carries multi-source telemetry. Every record has a `source:` discriminator + source-specific fields. Three active sources (writers in `hooks/`):
 
-| `source` | Writer | Per-record fields |
+| `source` | Writer | Per-record fields (after `ts` + `source`) |
 |---|---|---|
 | `raw_dispatch` | `hooks/dispatch-hygiene-guard.sh` | `agent`, `prompt_bytes`, `prompt_preview` |
-| `task_output_bytes` | `hooks/task-truncation-detector.sh` | `agent`, `output_bytes`, `threshold_bytes`, `near_cliff`, `low_output` |
+| `dispatch_scope` | `hooks/dispatch-scope-guard.sh` | `agent`, `prompt_bytes`, `scope_hint_count`, `cap_bytes`, `cap_files`, `warnings` |
+| `task_output_bytes` | `hooks/task-truncation-detector.sh` | `agent`, `output_bytes`, `threshold_bytes`, `near_cliff`, `low_output`, `low_output_threshold`, `stop_reason`, `mid_task_language` |
 
-Consumers MUST filter by `source:` before interpreting payload fields — different sources have disjoint schemas. Common pitfall (cal #19 Surprise 2): reading the file expecting unified `{dispatch_type, subagent_type, reason}` fields → mostly-null payloads because the actual schema is per-source. `state.cjs::recoverPartialImpl` is the canonical example of a correct consumer — it filters `rec.source === "task_output_bytes"` before reading `rec.low_output`.
+Consumers MUST filter by `source:` before interpreting payload fields — different sources have disjoint schemas. Common pitfall (cal #19 Surprise 2): reading the file expecting unified `{dispatch_type, subagent_type, reason}` fields → mostly-null payloads because the actual schema is per-source. `state.cjs::recoverPartialImpl` is the canonical example of a correct consumer — it filters `rec.source === "task_output_bytes"` before reading `rec.low_output`. `state.cjs::assertNoRawDispatchesThisSession` does the same for `rec.source === "raw_dispatch"`.
 
 **Mirroring the S1 dispatch-hygiene pattern.** This architecture reuses `assertNoRawDispatchesThisSession`'s shape (a battle-tested pattern across multiple calibrations): write to jsonl, post-hoc gate at finalize, config knob with block default. advance-phase mirrors the same pattern at transition time. Reusing established patterns is intentional — coordination via clear protocols (N1 north star) is strengthened by NOT introducing new contract patterns.
 

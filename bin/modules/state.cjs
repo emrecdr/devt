@@ -2662,8 +2662,11 @@ function recoverPartialImpl(agent) {
   }
   // Stub heuristic — matches the stub-first protocol's canonical header pattern.
   // Threshold 500 bytes is generous to cover "# Title — in progress\n\nMetadata".
+  // The dash class accepts both em-dash (U+2014, canonical convention) and
+  // regular hyphen (U+002D, common typo) so the gate fails open to "stub
+  // detected" rather than misclassifying a hyphenated stub as substantive.
   const STUB_BYTES_THRESHOLD = 500;
-  const stubPattern = /^#\s+.+\s+—\s+in progress\b/m;
+  const stubPattern = /^#\s+.+\s+[—\-]\s+in progress\b/m;
   const isStub = sizeBytes < STUB_BYTES_THRESHOLD && stubPattern.test(head);
   // Latest task_output_bytes record for this agent in dispatch-warnings.jsonl.
   // The hook prefixes agent with "devt:" so match accordingly.
