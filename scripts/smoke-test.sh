@@ -10197,25 +10197,26 @@ fi
 # advance-phase's load path.
 K42_YAML="$ROOT/workflows/_phase-gates.yaml"
 K42_TYPES=$(awk '/^  [a-z_]+:$/{gsub(/[: ]/,"");print}' "$K42_YAML" | sort -u)
-K42_EXPECTED="code_review code_review_parallel debug dev quick_implement"
+K42_EXPECTED="arch_health_scan code_review code_review_parallel debug dev quick_implement"
 K42_GOT=$(echo "$K42_TYPES" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 K42_EXPECTED_SORTED=$(echo "$K42_EXPECTED" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 if [ "$K42_GOT" = "$K42_EXPECTED_SORTED" ]; then
-  pass "K42: _phase-gates.yaml declares all 5 expected workflow_types (code_review, code_review_parallel, debug, dev, quick_implement)"
+  pass "K42: _phase-gates.yaml declares all 6 expected workflow_types (arch_health_scan, code_review, code_review_parallel, debug, dev, quick_implement)"
 else
   fail "K42: _phase-gates.yaml workflow_types mismatch (got '$K42_GOT' expected '$K42_EXPECTED_SORTED')"
 fi
 
-# K43 (v0.73 Phase B-2): all 4 workflow files migrated to use advance-phase
-# at the finalize-deactivation step.
+# K43 (v0.73 Phase B-2 + v0.73.2): all 5 workflow files migrated to use
+# advance-phase at finalize-deactivation. v0.73.2 added arch-health-scan.md
+# to close the cycle-coherence gap.
 K43_FAIL=""
-for wf in workflows/code-review.md workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md; do
+for wf in workflows/code-review.md workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md workflows/arch-health-scan.md; do
   if ! grep -q "state advance-phase" "$ROOT/$wf" 2>/dev/null; then
     K43_FAIL="$K43_FAIL $(basename $wf)"
   fi
 done
 if [ -z "$K43_FAIL" ]; then
-  pass "K43: 4 workflow files use state advance-phase at finalize-deactivation (migration complete)"
+  pass "K43: 5 workflow files use state advance-phase at finalize-deactivation (migration complete)"
 else
   fail "K43: workflow migration incomplete — missing advance-phase in:$K43_FAIL"
 fi

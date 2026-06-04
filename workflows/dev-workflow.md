@@ -594,7 +594,7 @@ If research.md already exists: skip the researcher dispatch.
 If arch-health-scan.md already exists OR arch_health was skipped: skip the architect dispatch.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health status=DONE
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state advance-phase arch_health
 ```
 
 **Open Questions gate** (applies when `.devt/state/research.md` exists with status DONE or DONE_WITH_CONCERNS):

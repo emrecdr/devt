@@ -64,3 +64,9 @@ workflow_types:
         - assert-claim-checks-resolved
         - assert-no-raw-dispatches-this-session
         - assert-knowledge-candidates-tagged
+
+  arch_health_scan:
+    arch_health_scan:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session

@@ -270,6 +270,17 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 ```
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/` for additional analysis patterns the architect can use.
+
+**Claim-check (Q11)**: Before reading the artifact for the report step, mechanically verify the architect wrote its declared output. Catches the case where the architect returned a verbal summary without actually writing arch-review.md.
+
+```bash
+ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present architect)
+if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+fi
+```
+
+If the claim-check BLOCKED: architect did not write arch-review.md. Re-dispatch with explicit instruction to write the artifact before returning, OR SendMessage-resume if a budget wall is suspected (check `.devt/state/dispatch-warnings.jsonl` for `near_cliff` / `low_output` / `mid_task_language` records). Layer-2 at finalize will catch unresolved failures.
 </step>
 
 <step name="report" gate="findings are presented to the user with priorities">
@@ -323,15 +334,22 @@ Save the report to `.devt/state/arch-review.md` and also to the report directory
 ```bash
 REPORT_DIR=$(node -e "const c=JSON.parse(require('fs').readFileSync('.devt/config.json','utf8'));process.stdout.write((c.arch_scanner&&c.arch_scanner.report_dir)||'docs/reports')" 2>/dev/null || echo "docs/reports")
 mkdir -p "$REPORT_DIR"
+# Write BOTH the canonical "latest" pointer AND a dated archive so report
+# history is preserved without breaking downstream references to the canonical
+# name. ARCHITECTURE-HEALTH-REPORT.md gets overwritten each scan (always
+# current); ARCHITECTURE-HEALTH-REPORT-YYYY-MM-DD.md is the permanent archive
+# entry for trend analysis.
+SCAN_DATE=$(date +%Y-%m-%d)
 cp .devt/state/arch-review.md "$REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md"
+cp .devt/state/arch-review.md "$REPORT_DIR/ARCHITECTURE-HEALTH-REPORT-${SCAN_DATE}.md"
 ```
 
-Report: "Saved to $REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md"
+Report: "Saved to $REPORT_DIR/ARCHITECTURE-HEALTH-REPORT.md (latest) + ARCHITECTURE-HEALTH-REPORT-${SCAN_DATE}.md (archive)"
 
 Final status: **DONE**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=arch_health_scan status=DONE active=false
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state advance-phase arch_health_scan active=false
 ```
 </step>
 

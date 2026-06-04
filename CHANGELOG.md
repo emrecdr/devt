@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.73.2] - 2026-06-04
+
+**Architectural alignment patch: extend the v0.71→v0.73 gate enforcement floor to the arch-health workflow.** When v0.73 migrated 4 workflows to `state advance-phase`, `arch-health-scan.md` was left out — it still used the legacy `state update phase=X status=DONE active=false` pattern at finalize, and its `workflow_type` (`arch_health_scan`) was absent from `_phase-gates.yaml`. Result: the 6th workflow could exit successfully without running any of the gates that protect the other 5. Cal #18's architectural floor was a 5-of-6 floor, not a 6-of-6 floor. This release closes the gap and also extends report-archive retention so trend analysis across scans is possible without breaking the canonical-name reference downstream consumers use.
+
+Smoke: 789 passed, 0 failed (stable). Locking: 3/3.
+
+### Added
+
+- **`arch_health_scan` registered in `workflows/_phase-gates.yaml`** with 2 finalize-deactivation gates: `assert-claim-checks-resolved` (Layer-2 post-hoc) and `assert-no-raw-dispatches-this-session` (S1 dispatch-hygiene). The arch-health flow doesn't dispatch reviewers (no knowledge-candidate tagging applicable) and doesn't run a verifier (architect's report IS the verification surface) — gates are scoped accordingly rather than rote-copied from dev/code-review.
+- **Layer-1 mechanical claim-check after architect dispatch** in `workflows/arch-health-scan.md::architect_analysis` step. Runs `state assert-artifact-present architect` before the report step, surfaces a `[BLOCKED]` marker on substance-failure (stub heuristic + word-count + heading-only detection per the existing assert-artifact-present contract). Persists to `claim-check-failures.jsonl` for the Layer-2 finalize gate to read.
+- **Timestamped report archive** in `workflows/arch-health-scan.md` report step. Each scan now writes BOTH `ARCHITECTURE-HEALTH-REPORT.md` (canonical "latest" pointer — overwritten each scan) AND `ARCHITECTURE-HEALTH-REPORT-YYYY-MM-DD.md` (dated archive — permanent). Trend analysis across scans is possible without rebuilding the canonical-name reference downstream consumers depend on.
+
+### Changed
+
+- **`workflows/arch-health-scan.md` finalize** migrated from `state update phase=arch_health_scan status=DONE active=false` → `state advance-phase arch_health_scan active=false`. The 6th workflow now runs through the same gate-at-transition layer as the other 5.
+- **`workflows/dev-workflow.md` arch_health pre-decision phase update** migrated from `state update phase=arch_health status=DONE` → `state advance-phase arch_health`. Intermediate phases fall through to the plain phase update via the YAML registry's backwards-compat path; the migration is for architectural consistency across the codebase (one verb at finalize-style transitions, regardless of registry coverage).
+
+### Smoke gates
+
+- **K42** updated: now expects 6 `workflow_types` in `_phase-gates.yaml` (added `arch_health_scan` to the expected list)
+- **K43** updated: now expects 5 workflow files using `state advance-phase` at finalize-deactivation (added `workflows/arch-health-scan.md` to the migrated set)
+
+### Architectural floor status (post-v0.73.2)
+
+The post-hoc-to-runtime axis is at the floor for **all 6 workflows** as of this release:
+- cal #14 → warn at dispatch (`dispatch-hygiene-guard.sh` hook)
+- cal #15+#16+#17 → warn at finalize (S1 + Layer-1 inline checks)
+- cal #18 → block at finalize (Layer-2 post-hoc gate)
+- cal #18 Phase B → block at transition (`advance-phase` CLI) — **now covering all 6 workflows including arch_health_scan**
+
+There's nowhere lower than blocking the phase transition itself. Cal #19+ will reveal whether further work points to a new layer OR to refining the existing floor.
+
 ## [0.73.1] - 2026-06-03
 
 **Documentation completeness for the v0.71→v0.73 gate enforcement architecture.** Pure documentation patch — v0.71.0 / v0.72.0 / v0.72.1 / v0.73.0 shipped 4 new architectural surfaces (Layer-1 + Layer-2 claim-check, gate-trace.jsonl, advance-phase CLI, YAML registry) but none were documented in the canonical reference docs (CLAUDE.md, INTERNALS.md, README.md). Future Claude sessions load CLAUDE.md at SessionStart and stitch mental models from INTERNALS.md — without coverage of new surfaces, sessions fall back to older patterns and bypass the architectural floor cal #14-#18 worked to establish.
