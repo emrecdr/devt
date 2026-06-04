@@ -198,7 +198,7 @@ SendMessage(to=<programmer-subagent-id>, content="
 ")
 ```
 
-Why SendMessage primary: re-uses the subagent's full conversation cache (~15-20 file Reads saved vs cold re-dispatch). Field evidence: greenfield cal #17 documented ~60+ wasted file Reads avoided across one session's 4 resumes.
+Why SendMessage primary: re-uses the subagent's full conversation cache (~15-20 file Reads saved vs cold re-dispatch). Field evidence: greenfield cal #17 documented ~60+ wasted file Reads avoided across one session's 4 resumes. Cal #19 re-validated the resume mechanism end-to-end: SendMessage to a rate-limited programmer's agent id (e.g. `a25f97a8cc1277148`) returned "Agent had no active task; resumed from transcript in the background with your message", and the resumed agent picked up at the correct section boundary and authored ~324 lines of new content before the next rate-limit. The "no active task" response is the success path — it confirms the agent process accepted the message and queued the resume; cold re-dispatch would have lost the multi-phase context from the prior run.
 
 **Recovery — re-dispatch fallback path** (cross-session, after CC compaction, or when subagent-id is no longer addressable):
 

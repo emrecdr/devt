@@ -350,7 +350,7 @@ function buildSubstitutionTable() {
 
 function cmdRenderFilled(target) {
   if (!target || !target.includes(":")) {
-    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto>");
+    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto> (colon-joined) OR dispatch render-filled <agent> <workflow_id|auto> (space-separated)");
   }
   let [agent, workflowId] = target.split(":");
   if (workflowId === "auto") {
@@ -425,8 +425,16 @@ function run(subcommand, args) {
       return 0;
     }
     case "render-filled": {
+      // Accept both colon-joined `<agent>:<workflow_id|auto>` (canonical) and
+      // space-separated `<agent> <workflow_id|auto>` (more intuitive for typed
+      // CLI use). cal #19 §7 F3: colon-only is non-obvious; users naturally
+      // try space-separated first. Both forms render the same envelope.
+      let target = args[0];
+      if (target && !target.includes(":") && args[1]) {
+        target = args[0] + ":" + args[1];
+      }
       let out;
-      try { out = cmdRenderFilled(args[0]); }
+      try { out = cmdRenderFilled(target); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
