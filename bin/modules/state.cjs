@@ -17,7 +17,44 @@ const WORKFLOW_FILE = "workflow.yaml";
 const LOCK_TIMEOUT_MS = 3000;
 const LOCK_RETRY_MS = 50;
 
+// Multi-instance state isolation.
+//
+// When `DEVT_WORKFLOW_ID` is set in the environment, getStateDir() returns
+// a per-instance subdirectory at `<projectRoot>/.devt/state/<DEVT_WORKFLOW_ID>/`.
+// Otherwise it returns the legacy `<projectRoot>/.devt/state/` path. This is
+// fully backwards-compatible: existing users who don't set the env var see
+// no behavior change.
+//
+// Rationale: multiple devt sessions on the same project would collide on
+// flat-named artifacts (decisions.md, plan.md, impl-summary.md, etc.). Each
+// terminal exports `DEVT_WORKFLOW_ID=$(devt-tools state new-instance)` to
+// scope its writes to a dedicated subdirectory.
+//
+// Cross-instance files (deferred.md, council transcripts, last-curator-run.txt,
+// probe-failures.jsonl, .graphify-rebuild.lock, .archive/, .instances/) use
+// getStateRoot() instead — they're project-wide by design.
+//
+// The DEVT_WORKFLOW_ID is also validated for path-traversal safety: only
+// hex/alphanumeric/hyphen IDs are honored; anything else falls back to the
+// legacy root path with a stderr warning. This prevents an attacker-controlled
+// env var from escaping the project state directory.
+const _INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 function getStateDir() {
+  const instanceId = process.env.DEVT_WORKFLOW_ID;
+  if (instanceId && _INSTANCE_ID_PATTERN.test(instanceId)) {
+    return path.join(findProjectRoot(), STATE_DIR, instanceId);
+  }
+  if (instanceId) {
+    // Invalid format — fall back and warn (path safety).
+    try { process.stderr.write(`[devt] DEVT_WORKFLOW_ID="${instanceId}" rejected (not [A-Za-z0-9_-]{1,64}) — using legacy state dir\n`); } catch { /* ignore */ }
+  }
+  return path.join(findProjectRoot(), STATE_DIR);
+}
+// Always returns the project-level state root, regardless of DEVT_WORKFLOW_ID.
+// Use this for files that MUST be shared across instances: deferred.md,
+// council transcripts, last-curator-run.txt cooldown markers, project-wide
+// locks, .archive/ ring buffer, .instances/ registry.
+function getStateRoot() {
   return path.join(findProjectRoot(), STATE_DIR);
 }
 
@@ -2953,6 +2990,95 @@ function councilTrace(stage, args) {
   }
 }
 
+// Multi-instance state isolation — instance management CLIs.
+//
+// newInstance(): generates a fresh 8-character hex ID (truncated UUID v4),
+// creates the per-instance subdirectory at .devt/state/<id>/, writes an
+// index entry at .devt/state/.instances/<id>.json. Prints the ID to stdout
+// so users can capture it via shell substitution:
+//   export DEVT_WORKFLOW_ID=$(devt-tools state new-instance)
+//
+// Optional --tag=<short label> records a user-friendly label in the index
+// entry for the discovery flow (state list-instances).
+function newInstance(args) {
+  args = args || [];
+  const tag = _getFlag(args, "--tag") || null;
+  const uuid = require("crypto").randomUUID();
+  const id = uuid.split("-")[0]; // 8-char hex from the first UUID segment
+  const root = getStateRoot();
+  const instanceDir = path.join(root, id);
+  const indexDir = path.join(root, ".instances");
+  const indexPath = path.join(indexDir, `${id}.json`);
+  try {
+    fs.mkdirSync(instanceDir, { recursive: true });
+    fs.mkdirSync(indexDir, { recursive: true });
+    const entry = {
+      wf_id: id,
+      created_at: new Date().toISOString(),
+      last_active: new Date().toISOString(),
+      tag,
+    };
+    fs.writeFileSync(indexPath, JSON.stringify(entry, null, 2));
+  } catch (e) {
+    return { ok: false, reason: `instance creation failed: ${e.message}` };
+  }
+  // Returns JSON like all state subcommands. Typical shell capture:
+  //   export DEVT_WORKFLOW_ID=$(devt-tools state new-instance | jq -r .wf_id)
+  return { ok: true, wf_id: id, instance_dir: instanceDir, index_entry: indexPath, tag };
+}
+
+// listInstances(): enumerates all instance subdirectories under .devt/state/
+// and returns a structured table with {wf_id, created_at, last_active, phase,
+// tag, file_count}. The phase comes from each instance's workflow.yaml; tag
+// from the index entry; file_count helps the user identify which instance
+// has the most activity.
+function listInstances() {
+  const root = getStateRoot();
+  const indexDir = path.join(root, ".instances");
+  const instances = [];
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+  catch { return { ok: true, instances: [], reason: "no .devt/state/ root yet" }; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue; // skip .archive, .instances, etc.
+    if (!_INSTANCE_ID_PATTERN.test(entry.name)) continue;
+    const dir = path.join(root, entry.name);
+    let phase = null, createdAt = null, lastActive = null, tag = null, fileCount = 0;
+    try {
+      const wfPath = path.join(dir, "workflow.yaml");
+      if (fs.existsSync(wfPath)) {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
+        if (phaseMatch) phase = phaseMatch[1].trim();
+        const createdMatch = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+        if (createdMatch) createdAt = createdMatch[1].trim();
+        const stat = fs.statSync(wfPath);
+        lastActive = new Date(stat.mtimeMs).toISOString();
+      }
+      // Read index entry for tag + canonical created_at
+      const idxPath = path.join(indexDir, `${entry.name}.json`);
+      if (fs.existsSync(idxPath)) {
+        try {
+          const idx = JSON.parse(fs.readFileSync(idxPath, "utf8"));
+          if (idx.tag) tag = idx.tag;
+          if (!createdAt && idx.created_at) createdAt = idx.created_at;
+        } catch { /* malformed index — ignore */ }
+      }
+      fileCount = fs.readdirSync(dir).filter((f) => !f.startsWith(".")).length;
+    } catch { /* per-instance read failures are non-fatal */ }
+    instances.push({ wf_id: entry.name, created_at: createdAt, last_active: lastActive, phase, tag, file_count: fileCount });
+  }
+  // Sort newest last_active first so the discovery flow shows the recently-
+  // touched instances at the top.
+  instances.sort((a, b) => {
+    const aMs = a.last_active ? Date.parse(a.last_active) : 0;
+    const bMs = b.last_active ? Date.parse(b.last_active) : 0;
+    return bMs - aMs;
+  });
+  return { ok: true, instances, count: instances.length };
+}
+
 // WI-1 / Layer-2 (greenfield cal #16+#17): persistence helper for
 // assertArtifactPresent results. Every Layer-1 call appends a record so
 // Layer-2 (assertClaimChecksResolved) can compute per-agent latest verdict
@@ -3924,6 +4050,10 @@ function run(subcommand, args) {
       return traceGate("assert-lanes-quiesced", () => assertLanesQuiesced());
     case "council-trace":
       return councilTrace(args[0], args.slice(1));
+    case "new-instance":
+      return newInstance(args);
+    case "list-instances":
+      return listInstances();
     case "advance-phase":
       return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
@@ -3943,7 +4073,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

@@ -47,7 +47,15 @@ function getSuggestionsPath() {
   return path.join(getMemoryRoot(), "_suggestions.md");
 }
 
+// Multi-instance state isolation — mirrors state.cjs::getStateDir.
+// When DEVT_WORKFLOW_ID is a safe id, returns the per-instance subdir;
+// otherwise legacy root path. See state.cjs for the canonical doc.
+const _DISCOVERY_INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 function getStateDir() {
+  const id = process.env.DEVT_WORKFLOW_ID;
+  if (id && _DISCOVERY_INSTANCE_ID_PATTERN.test(id)) {
+    return path.join(findProjectRoot(), ".devt", "state", id);
+  }
   return path.join(findProjectRoot(), ".devt", "state");
 }
 

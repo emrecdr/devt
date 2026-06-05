@@ -10658,6 +10658,48 @@ else
 fi
 rm -rf "$K55_TMP"
 
+# K56 — multi-instance isolation via DEVT_WORKFLOW_ID env var. Three states:
+# (a) unset → getStateDir() returns legacy path; existing writes work unchanged
+# (b) set with safe id → writes route to per-instance subdir
+# (c) set with unsafe id (path traversal attempt) → falls back to legacy + stderr warn
+K56_TMP=$(mktemp -d)
+mkdir -p "$K56_TMP/.devt/state"
+echo '{}' > "$K56_TMP/.devt/config.json"
+# State (a): env unset
+(cd "$K56_TMP" && unset DEVT_WORKFLOW_ID && node "$CLI" state update k56_legacy=true >/dev/null 2>&1) || true
+K56_A_OK=$([ -f "$K56_TMP/.devt/state/workflow.yaml" ] && echo "true" || echo "false")
+# State (b): env set with safe id
+(cd "$K56_TMP" && DEVT_WORKFLOW_ID=test_inst node "$CLI" state update k56_perinst=true >/dev/null 2>&1) || true
+K56_B_OK=$([ -f "$K56_TMP/.devt/state/test_inst/workflow.yaml" ] && echo "true" || echo "false")
+# State (c): unsafe id → expected legacy fallback + stderr warn
+K56_C_STDERR=$(cd "$K56_TMP" && DEVT_WORKFLOW_ID="../etc" node "$CLI" state update k56_unsafe=true 2>&1 >/dev/null || true)
+K56_C_WARN=$(echo "$K56_C_STDERR" | grep -c "rejected" || true)
+if [ "$K56_A_OK" = "true" ] && [ "$K56_B_OK" = "true" ] && [ "$K56_C_WARN" -ge 1 ]; then
+  pass "K56: DEVT_WORKFLOW_ID isolation (unset→legacy | safe→perinst | unsafe→legacy+warn)"
+else
+  fail "K56: multi-instance isolation misfired (a=$K56_A_OK b=$K56_B_OK c-warn=$K56_C_WARN)"
+fi
+rm -rf "$K56_TMP"
+
+# K57 — new-instance + list-instances CLI round-trip. new-instance creates
+# subdir + index entry; list-instances enumerates with tag + file_count.
+K57_TMP=$(mktemp -d)
+mkdir -p "$K57_TMP/.devt/state"
+echo '{}' > "$K57_TMP/.devt/config.json"
+K57_WFID=$(cd "$K57_TMP" && node "$CLI" state new-instance --tag=K57-test 2>/dev/null | jq -r .wf_id 2>/dev/null || echo "")
+K57_SUBDIR_OK=$([ -n "$K57_WFID" ] && [ -d "$K57_TMP/.devt/state/$K57_WFID" ] && echo "true" || echo "false")
+K57_INDEX_OK=$([ -n "$K57_WFID" ] && [ -f "$K57_TMP/.devt/state/.instances/$K57_WFID.json" ] && echo "true" || echo "false")
+K57_LIST=$(cd "$K57_TMP" && node "$CLI" state list-instances 2>/dev/null)
+K57_LIST_COUNT=$(echo "$K57_LIST" | jq -r '.count' 2>/dev/null || echo "0")
+K57_LIST_TAG=$(echo "$K57_LIST" | jq -r '.instances[0].tag' 2>/dev/null || echo "")
+if [ "$K57_SUBDIR_OK" = "true" ] && [ "$K57_INDEX_OK" = "true" ] && \
+   [ "$K57_LIST_COUNT" = "1" ] && [ "$K57_LIST_TAG" = "K57-test" ]; then
+  pass "K57: new-instance + list-instances round-trip (subdir + index + enumeration with tag)"
+else
+  fail "K57: instance lifecycle misfired (subdir=$K57_SUBDIR_OK index=$K57_INDEX_OK count=$K57_LIST_COUNT tag=$K57_LIST_TAG)"
+fi
+rm -rf "$K57_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
