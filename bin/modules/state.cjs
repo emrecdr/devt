@@ -2768,6 +2768,126 @@ function recoverPartialImpl(agent) {
   };
 }
 
+// Substance-check race fix (cal #20 §3) — mtime-stability primitive.
+// PRIMARY mechanism for guarding against premature substance reads.
+//
+// Failure mode (cal #20 §10): an orchestrator's substance check on a lane file
+// fired BEFORE the agent's Task() returned; the read saw a 72-byte stub
+// because the agent's write hadn't completed. The orchestrator then dispatched
+// a retry based on the false stub signal; the retry's smaller output
+// overwrote the first-pass's substantive output → 28 KB of findings lost.
+//
+// Mtime-stability is mechanically robust without orchestrator burden: stat
+// the file at T0, sleep settle-ms, stat again at T1. If size and mtime
+// are unchanged, the file is quiescent (no active writer) → safe to read.
+// If different, the file is still being written → wait and retry.
+//
+// Default settle window: 500ms. Default timeout: 5000ms. Both tunable.
+//
+// Returns: {ok, path, size_bytes, mtime_ms, attempts, settle_ms, total_ms,
+//           reason}. ok=false on timeout (file never stabilized) or path
+// not found. Workflows can choose: BLOCK on ok=false (strict) or warn-and-
+// proceed (best-effort with sentinel logging).
+function assertFileQuiescent(filePath, args) {
+  if (!filePath || typeof filePath !== "string") {
+    return { ok: false, reason: "missing path argument" };
+  }
+  args = args || [];
+  const settleMs = parseInt(_getFlag(args, "--settle-ms") || "500", 10);
+  const timeoutMs = parseInt(_getFlag(args, "--timeout-ms") || "5000", 10);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const abs = path.isAbsolute(filePath)
+    ? filePath
+    : path.join(findProjectRoot(), filePath);
+  if (!fs.existsSync(abs)) {
+    return { ok: false, path: filePath, reason: `file does not exist: ${filePath}` };
+  }
+  const startMs = Date.now();
+  let attempts = 0;
+  let prev = null;
+  while (Date.now() - startMs < timeoutMs) {
+    attempts += 1;
+    let cur;
+    try {
+      const st = fs.statSync(abs);
+      cur = { size: st.size, mtimeMs: st.mtimeMs };
+    } catch (e) {
+      return { ok: false, path: filePath, attempts, reason: `stat failed: ${e.message}` };
+    }
+    if (prev !== null && prev.size === cur.size && prev.mtimeMs === cur.mtimeMs) {
+      return {
+        ok: true,
+        path: filePath,
+        size_bytes: cur.size,
+        mtime_ms: cur.mtimeMs,
+        attempts,
+        settle_ms: settleMs,
+        total_ms: Date.now() - startMs,
+        reason: `file quiescent (size + mtime stable across ${settleMs}ms window)`,
+      };
+    }
+    prev = cur;
+    // Synchronous sleep — settle window is short (default 500ms) and the CLI
+    // is single-purpose; busy-loop is acceptable and matches the existing
+    // synchronous-CLI pattern used elsewhere in this module.
+    const sleepEnd = Date.now() + settleMs;
+    while (Date.now() < sleepEnd) { /* spin */ }
+  }
+  return {
+    ok: false,
+    path: filePath,
+    attempts,
+    settle_ms: settleMs,
+    timeout_ms: timeoutMs,
+    total_ms: Date.now() - startMs,
+    reason: `file did not stabilize within ${timeoutMs}ms (still being written or system is slow). Workflows should either retry, increase --timeout-ms, OR proceed with sentinel warning.`,
+  };
+}
+
+// Substance-check race fix (cal #20 §3) — workflow-mechanical OPT-IN.
+//
+// SECONDARY mechanism — available for workflows that enforce explicit
+// lane-status discipline (orchestrator advances lanes[].status from in_flight
+// to a non-in_flight terminal state AFTER each Task() returns). When that
+// discipline holds, this gate is stricter than mtime-stability because it
+// rejects ANY in_flight lane regardless of file activity. When the discipline
+// is loose (orchestrator might forget to update status), this gate gives a
+// false sense of security — that's why mtime-stability is the PRIMARY default
+// path; this gate is opt-in for workflows that own the lane lifecycle tightly.
+//
+// Returns: {ok, in_flight_count, terminal_count, lanes_in_flight, reason}.
+function assertLanesQuiesced() {
+  const { lanes } = listLaneOutputs();
+  if (!Array.isArray(lanes) || lanes.length === 0) {
+    return { ok: true, in_flight_count: 0, terminal_count: 0, reason: "no lanes registered — nothing to quiesce" };
+  }
+  const inFlight = [];
+  const terminal = [];
+  for (const lane of lanes) {
+    if (!lane.id) continue;
+    if (lane.status === "in_flight") {
+      inFlight.push(lane.id);
+    } else {
+      terminal.push(lane.id);
+    }
+  }
+  if (inFlight.length === 0) {
+    return {
+      ok: true,
+      in_flight_count: 0,
+      terminal_count: terminal.length,
+      reason: `all ${terminal.length} lane(s) reached terminal status (substance_pass | stub_redispatched | deferred)`,
+    };
+  }
+  return {
+    ok: false,
+    in_flight_count: inFlight.length,
+    terminal_count: terminal.length,
+    lanes_in_flight: inFlight,
+    reason: `${inFlight.length} lane(s) still in_flight: ${inFlight.join(", ")}. Workflow must wait for all Task() calls to return AND advance lanes[].status away from in_flight before substance_check_lanes runs.`,
+  };
+}
+
 // WI-1 / Layer-2 (greenfield cal #16+#17): persistence helper for
 // assertArtifactPresent results. Every Layer-1 call appends a record so
 // Layer-2 (assertClaimChecksResolved) can compute per-agent latest verdict
@@ -3733,6 +3853,10 @@ function run(subcommand, args) {
       return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
     case "recover-partial-impl":
       return recoverPartialImpl(args[0]);
+    case "assert-file-quiescent":
+      return assertFileQuiescent(args[0], args.slice(1));
+    case "assert-lanes-quiesced":
+      return traceGate("assert-lanes-quiesced", () => assertLanesQuiesced());
     case "advance-phase":
       return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
@@ -3752,7 +3876,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

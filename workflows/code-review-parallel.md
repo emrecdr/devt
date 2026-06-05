@@ -310,10 +310,23 @@ STUB_LANE_IDS=""
 for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
   LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
   LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
-  # Per-lane Layer-1 — persists file-existence + size > 0 record to
-  # claim-check-failures.jsonl. Coarser than the substance check below (which
-  # catches stubs); this catches "lane wrote nothing at all". Both records
-  # overwrite on successful re-dispatch (last-write-wins per agent key).
+  # Substance-check race guard (cal #20 §3) — mtime-stability before any
+  # read. Mechanically robust against premature substance checks regardless
+  # of orchestrator polling discipline. Stats the file at T0, sleeps 500ms,
+  # stats again — only proceeds when size + mtime are identical (no active
+  # writer). Default 5s timeout; on timeout, proceeds with sentinel warning
+  # rather than blocking forever (lane behaves as if the agent never wrote).
+  QUIESCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-file-quiescent "$LANE_FILE" 2>/dev/null || echo '{}')
+  if [ "$(echo "$QUIESCE" | jq -r '.ok // false')" != "true" ]; then
+    echo "[QUIESCE-WARN] lane $LANE_ID: $(echo "$QUIESCE" | jq -r '.reason // "file not quiescent"') — proceeding with current read; result may be premature"
+  fi
+  # Re-stat after quiescence wait so LANE_SIZE reflects post-settle state.
+  LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
+  if [ -f "$LANE_FILE" ]; then LANE_SIZE=$(wc -c < "$LANE_FILE" | tr -d ' '); fi
+  # Per-lane Layer-1 — persists file-existence + size > 0 record + substance
+  # verdict (post-substance-aware Layer-1) to claim-check-failures.jsonl.
+  # Coarser than the substance check below; this catches "lane wrote nothing
+  # at all". Both records overwrite on successful re-dispatch.
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present "code-reviewer:lane-${LANE_ID}" > /dev/null
   # Hard-defer impossibly-fast empty returns (file size < 30 bytes — that's
   # not even a real stub, it's a harness/dispatch failure). No retry.

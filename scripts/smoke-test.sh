@@ -10525,6 +10525,82 @@ else
 fi
 rm -rf "$K51_TMP"
 
+# K52 — assert-file-quiescent mtime-stability primitive. cal #20 §3 fix:
+# substance-check-race guard that ensures the file isn't actively being
+# written before any reader fires. Three states: stable file passes; missing
+# file fails fast; settle window honored (≥ requested settle_ms latency).
+K52_TMP=$(mktemp -d)
+mkdir -p "$K52_TMP/.devt/state"
+echo '{}' > "$K52_TMP/.devt/config.json"
+echo "stable content for quiescence test" > "$K52_TMP/.devt/state/stable.md"
+K52_STABLE=$(cd "$K52_TMP" && node "$CLI" state assert-file-quiescent .devt/state/stable.md --settle-ms=100 --timeout-ms=2000 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K52_MISSING=$(cd "$K52_TMP" && node "$CLI" state assert-file-quiescent .devt/state/missing.md --settle-ms=100 --timeout-ms=500 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K52_LATENCY=$(cd "$K52_TMP" && node "$CLI" state assert-file-quiescent .devt/state/stable.md --settle-ms=100 --timeout-ms=2000 2>/dev/null | jq -r '.total_ms' 2>/dev/null || echo "0")
+if [ "$K52_STABLE" = "true" ] && [ "$K52_MISSING" = "false" ] && [ "$K52_LATENCY" -ge 100 ]; then
+  pass "K52: assert-file-quiescent (stable=true | missing=false | latency≥settle_ms — got ${K52_LATENCY}ms)"
+else
+  fail "K52: mtime-stability misfired (stable=$K52_STABLE missing=$K52_MISSING latency=$K52_LATENCY)"
+fi
+rm -rf "$K52_TMP"
+
+# K53 — assert-lanes-quiesced workflow-mechanical opt-in gate. Reads
+# workflow.yaml::lanes[*].status; blocks if any are still in_flight; passes
+# when all are terminal. Available for workflows that own the lane lifecycle
+# tightly (orchestrator updates status away from in_flight after each Task
+# returns). Not the default path — mtime-stability is the mechanical primary;
+# this is the strict opt-in for projects that prefer the explicit contract.
+K53_TMP=$(mktemp -d)
+mkdir -p "$K53_TMP/.devt/state"
+echo '{}' > "$K53_TMP/.devt/config.json"
+cat > "$K53_TMP/.devt/state/workflow.yaml" <<EOF_K53_BLOCK
+active: true
+workflow_type: code_review_parallel
+phase: dispatch_lanes
+first_created_at: "2026-06-05T10:00:00Z"
+created_at: "2026-06-05T10:00:00Z"
+lanes:
+  - id: L1
+    community: auth
+    review_file: .devt/state/review-lane-L1.md
+    status: in_flight
+    redispatch_count: 0
+  - id: L2
+    community: billing
+    review_file: .devt/state/review-lane-L2.md
+    status: in_flight
+    redispatch_count: 0
+EOF_K53_BLOCK
+K53_BLOCK=$(cd "$K53_TMP" && node "$CLI" state assert-lanes-quiesced 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K53_INFLIGHT=$(cd "$K53_TMP" && node "$CLI" state assert-lanes-quiesced 2>/dev/null | jq -r '.in_flight_count' 2>/dev/null || echo "")
+# Now flip both to terminal
+cat > "$K53_TMP/.devt/state/workflow.yaml" <<EOF_K53_PASS
+active: true
+workflow_type: code_review_parallel
+phase: substance_check_lanes
+first_created_at: "2026-06-05T10:00:00Z"
+created_at: "2026-06-05T10:00:00Z"
+lanes:
+  - id: L1
+    community: auth
+    review_file: .devt/state/review-lane-L1.md
+    status: substance_pass
+    redispatch_count: 0
+  - id: L2
+    community: billing
+    review_file: .devt/state/review-lane-L2.md
+    status: deferred
+    redispatch_count: 0
+EOF_K53_PASS
+K53_PASS=$(cd "$K53_TMP" && node "$CLI" state assert-lanes-quiesced 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K53_TERMINAL=$(cd "$K53_TMP" && node "$CLI" state assert-lanes-quiesced 2>/dev/null | jq -r '.terminal_count' 2>/dev/null || echo "")
+if [ "$K53_BLOCK" = "false" ] && [ "$K53_INFLIGHT" = "2" ] && \
+   [ "$K53_PASS" = "true" ] && [ "$K53_TERMINAL" = "2" ]; then
+  pass "K53: assert-lanes-quiesced (in_flight×2 → block | terminal×2 → pass)"
+else
+  fail "K53: lanes-quiesced gate misfired (block=$K53_BLOCK in_flight=$K53_INFLIGHT pass=$K53_PASS terminal=$K53_TERMINAL)"
+fi
+rm -rf "$K53_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
