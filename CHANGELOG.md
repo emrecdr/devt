@@ -6,6 +6,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-06-05
+
+**Cal #20 integration response — substance-aware Layer-1 + Layer-2 stub-blocking + substance-check race fix.** Cal #20 produced two field-evidenced costs from the v0.73.4 cycle: (1) the only WORKS-BUT-FRICTION verdict was Layer-1 reporting `success` on 65/72-byte stubs because the contract was file-presence-only, leaving Layer-2 vulnerable to false-positive PASS when a stub won the latest-timestamp slot; (2) a 28 KB data-loss event where an orchestrator's substance check on a lane file fired BEFORE the agent's Task() returned, the premature read saw a stub, a retry was dispatched, and the retry's smaller output overwrote the first-pass's substantive output. v0.74.0 closes both with mechanical gates that don't require orchestrator discipline.
+
+Smoke: 801 passed, 0 failed (+2 from K52 + K53; +1 from K51 already shipped). Locking: 3/3.
+
+### Added
+
+- **Substance-aware Layer-1** (`bin/modules/state.cjs`). `_assertArtifactPresentInner` and `_assertLaneArtifactPresent` now call a shared `_computeSubstanceVerdict` helper after the file-presence + size > 0 checks. The helper returns `substance_verdict: "stub" | "substantive" | "unknown"`. Size-threshold short-circuit at `STUB_SIZE_THRESHOLD = 1000` bytes: files above this cap fast-path to `substantive` without the deeper regex scan; files at or below run `checkAgentOutput` for the stub-phrase + word-count + heading-only heuristic. Cal #20 stubs were 65/72 B; substantive lane outputs were 7–42 KB — 1000 B threshold gives ~10x headroom. `persistClaimCheckResult` writes the `substance_verdict` field to `claim-check-failures.jsonl` only when present (backwards compat: historical records without the field treated as substantive by Layer-2).
+- **Substance-aware Layer-2 stub-blocking** (`bin/modules/state.cjs::assertClaimChecksResolved`). Now treats `verdict=success + substance_verdict=stub` as unresolved. Substantive retry overwriting the stub record stays the happy path (last-write-wins per agent). The `kind` field on each unresolved entry distinguishes `"failure"` (missing/empty artifact) from `"stub"` (present but substance-thin) so remediation prose can specialize.
+- **`state assert-file-quiescent <path> [--settle-ms=N] [--timeout-ms=N]`** — mtime-stability primitive. PRIMARY mechanism for guarding against premature substance reads. Stats the file at T0, sleeps settle-ms, stats again at T1; returns `ok:true` when size + mtime are identical (no active writer). Default settle 500ms, default timeout 5000ms. On timeout, returns `ok:false` with reason — workflows can BLOCK (strict) or warn-and-proceed (best-effort with sentinel logging). Mechanically robust without orchestrator burden — closes the cal #20 §10 data-loss bug regardless of orchestrator polling discipline.
+- **`state assert-lanes-quiesced`** — workflow-mechanical OPT-IN gate. Reads `workflow.yaml::lanes[*].status`; returns `ok:false` if any are still `in_flight`; `ok:true` when all are terminal (`substance_pass | stub_redispatched | deferred`). Available for workflows that own the lane lifecycle tightly (orchestrator updates lane status away from `in_flight` after each Task returns). NOT the default path — `assert-file-quiescent` is the mechanical primary; this is the strict opt-in for projects that prefer the explicit contract.
+- **`code-review-parallel.md::substance_check_lanes` wired with `assert-file-quiescent`** at the top of the per-lane loop. Each lane's file is checked for quiescence before any substance read; on timeout, the workflow logs a `[QUIESCE-WARN]` sentinel and proceeds (the hard-defer-on-<30-bytes catches genuinely empty results downstream). Latency cost per lane: 100-500ms on the happy path (file already stable on first stat pair); higher only when an agent is actively writing.
+
+### Changed
+
+- **K33 fixture updated to substantive content**. The prior fixture wrote `# Arch Review\n` (13 bytes, heading-only) as the "substantive" arch-review test case. The new substance-aware Layer-1 correctly classifies that as stub; Layer-2 then blocks per the new contract. K33 now writes multi-paragraph content above the substance threshold to test the post-substance-aware Layer-2 happy path honestly.
+
+### Smoke gates
+
+- **K51**: substance-aware Layer-1 + Layer-2 stub-blocking 5-state matrix (large→substantive | stub→stub | L2-blocks-on-stub | retry→substantive | L2-passes-after-retry)
+- **K52**: `assert-file-quiescent` (stable→ok | missing→fail | settle-window honored)
+- **K53**: `assert-lanes-quiesced` (in_flight×2 → block | terminal×2 → pass)
+
+### Design decision: §3 mtime-stability primary (rationale)
+
+Cal #20's third top-priority was the substance-check race fix. Greenfield's stated preference: workflow-mechanical (A) primary + mtime-stability (B) secondary. Code-level analysis surfaced a tension: workflow-mechanical requires orchestrator discipline (Claude updates `workflow.yaml::lanes[].status` away from `in_flight` after each Task returns) — but lanes register at `in_flight` from `partition_lanes` and there is no canonical step that flips them to a non-`in_flight` intermediate state before `substance_check_lanes` runs. Implementing A as default would require ADDING a new orchestrator discipline — precisely the kind of discipline whose absence caused the cal #20 28 KB data-loss bug. Mtime-stability (B) is mechanically robust without orchestrator burden; B was promoted to PRIMARY and A is shipped as OPT-IN for projects that own the lane lifecycle tightly. Both gates exist; only the default wiring changed.
+
+### Deferred from v0.74.0 scope
+
+Per the Option C release-cycle discipline (split-and-validate over big bundles), the following cal #20 work ships in v0.74.1 after cal #21 validates §1 + §3 in the field:
+
+- **§2 — `/devt:repair-review` slash command** (auto-discover from `verification.json::verdict=needs_revision` + W1 whitelist + parallel re-consolidator). Greenfield's #2 priority; closes 3 cal #20 frictions but introduces a NEW orchestrator surface with no prior field history — benefits from cal-validation of §1+§3 before piling on.
+- **§5 — `assert-preflight-semantic-quality` wiring** into `dev-workflow.md::context_init`. Greenfield's add-on for closing the 1-of-7 still-unused state subcommand classified as "real gap."
+- **DEF-059 — `assertClaimChecksResolved` + `_phase-gates.yaml` registry expansion** for per-workflow_type Layer-1 expectations. The new gates (`assert-file-quiescent`, `assert-lanes-quiesced`) are intra-workflow gates that don't belong in `_phase-gates.yaml` (which declares finalize-phase gates). The architectural extension that would let the registry declare per-workflow_type Layer-1 expectations is larger scope; deferred.
+
+### Cal-evidence anchoring
+
+- §1 closes the ONLY WORKS-BUT-FRICTION verdict from cal #20 (Layer-1 verdict on stub files).
+- §3 closes the cal #20 §10 negative surprise (28 KB data loss).
+- v0.74.0 ships exactly the field-evidenced fixes; v0.74.1 picks up the NEW surface (§2) after cal #21 confirms §1+§3 don't have hidden issues.
+
 ## [0.73.4] - 2026-06-04
 
 **Integration alignment patch: close cal #19's coverage gaps + surface friction fixes + ship the rate-limit-mid-section recovery diagnostic.** Strategic mandate from the user post-cal #19 was explicit: "instead of adding new and more features we should make all current existing structure are fully integrated with each other and fully aligned with each other." Both cal #19 evaluations (PR #387 review + GFBUGS-241 implement) surfaced 8-of-16 surfaces NOT EXERCISED — gates wired but unused in normal workflow. v0.73.4 closes the silent-coverage gaps (Layer-1 in parallel reviews), wires the rate-limit-mid-section diagnostic (PARTIAL contract broken for non-boundary stops), restores per-workflow observability (workflow_type in gate-trace), preserves the args-VERBATIM audit trail past evict-graphify, and aligns docs + UX with field-validated behavior.
