@@ -10601,6 +10601,63 @@ else
 fi
 rm -rf "$K53_TMP"
 
+# K54 — council surface integrity. Anti-regression for the 4-file council
+# surface (SKILL.md, commands/council.md, references/council-offramp.md,
+# workflow integrations). Verifies: (a) all 3 canonical files exist; (b)
+# 4 workflows that integrate council still reference the canonical offramp
+# path. Protects against quiet drift between SKILL.md prose and workflow
+# references — a known failure shape from v0.73.x prose-drift incidents.
+K54_FAIL=""
+[ -f "$ROOT/skills/council/SKILL.md" ] || K54_FAIL="$K54_FAIL skills/council/SKILL.md"
+[ -f "$ROOT/commands/council.md" ] || K54_FAIL="$K54_FAIL commands/council.md"
+[ -f "$ROOT/references/council-offramp.md" ] || K54_FAIL="$K54_FAIL references/council-offramp.md"
+# Workflows that reference the canonical offramp path. Greenfield + canonical
+# integration paths per offramp doc §3 (clarify, research, specify) plus the
+# memory workflows that surface council in their context (memory-promote,
+# memory-reject). All MUST cite the canonical path.
+K54_REF_PATH="references/council-offramp.md"
+for wf in clarify-task.md research-task.md; do
+  if [ -f "$ROOT/workflows/$wf" ]; then
+    if ! grep -q "$K54_REF_PATH" "$ROOT/workflows/$wf" 2>/dev/null; then
+      K54_FAIL="$K54_FAIL workflows/$wf-missing-offramp-ref"
+    fi
+  fi
+done
+if [ -z "$K54_FAIL" ]; then
+  pass "K54: council surface integrity (SKILL + command + offramp + 2 workflow integrations all present)"
+else
+  fail "K54: council surface drift:$K54_FAIL"
+fi
+
+# K55 — council-trace CLI emits records to gate-trace.jsonl with stage,
+# slug, model metadata + workflow_id/workflow_type/phase enrichment.
+# Enables cal cycles to measure council usage (per workflow_type, per
+# session, per stage). Three-stage matrix exercised: stage-2 (advisor
+# batch), stage-3 (peer review batch), stage-4 (chairman with model).
+K55_TMP=$(mktemp -d)
+mkdir -p "$K55_TMP/.devt/state"
+echo '{}' > "$K55_TMP/.devt/config.json"
+cat > "$K55_TMP/.devt/state/workflow.yaml" <<EOF_K55
+active: true
+workflow_id: test-wf-K55
+workflow_type: code_review
+phase: implement
+first_created_at: "2026-06-05T10:00:00Z"
+created_at: "2026-06-05T10:00:00Z"
+EOF_K55
+(cd "$K55_TMP" && node "$CLI" state council-trace stage-2 --slug=test-decision >/dev/null 2>&1) || true
+(cd "$K55_TMP" && node "$CLI" state council-trace stage-3 --slug=test-decision >/dev/null 2>&1) || true
+(cd "$K55_TMP" && node "$CLI" state council-trace stage-4 --slug=test-decision --model=opus >/dev/null 2>&1) || true
+K55_COUNT=$(awk '/"source":"council"/' "$K55_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | wc -l | tr -d ' ')
+K55_S4_MODEL=$(awk '/"stage":"stage-4"/{print}' "$K55_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | jq -r '.model' 2>/dev/null || echo "")
+K55_S2_TYPE=$(awk '/"stage":"stage-2"/{print}' "$K55_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | jq -r '.workflow_type' 2>/dev/null || echo "")
+if [ "$K55_COUNT" = "3" ] && [ "$K55_S4_MODEL" = "opus" ] && [ "$K55_S2_TYPE" = "code_review" ]; then
+  pass "K55: council-trace emits 3 records with stage + metadata + workflow_type enrichment"
+else
+  fail "K55: council-trace misfired (records=$K55_COUNT s4_model=$K55_S4_MODEL s2_type=$K55_S2_TYPE)"
+fi
+rm -rf "$K55_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

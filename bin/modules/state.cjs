@@ -2888,6 +2888,71 @@ function assertLanesQuiesced() {
   };
 }
 
+// Council observability — gate-trace.jsonl entries for council Stages 2/3/4.
+// Each council dispatch (advisor batch, peer-review batch, chairman) emits
+// one record via the existing traceGate-style append so cal cycles can
+// measure council usage patterns (sessions per workflow_type, advisor model
+// distribution, clash rate via stage-4 outcomes).
+//
+// Usage:
+//   state council-trace stage-2 --slug=<slug> [--model=<m>] [--advisor=<n>]
+//   state council-trace stage-3 --slug=<slug>
+//   state council-trace stage-4 --slug=<slug> [--verdict=converge|clash|dissent]
+//
+// All arguments are pass-through metadata; the CLI doesn't enforce shape so
+// future stages or telemetry shapes can extend without a CLI change. workflow_id
+// + workflow_type + phase come from workflow.yaml automatically (same enrichment
+// path as persistGateTrace).
+function councilTrace(stage, args) {
+  if (!stage || typeof stage !== "string") {
+    return { ok: false, reason: "missing stage argument (expected: stage-2 | stage-3 | stage-4 | <other>)" };
+  }
+  args = args || [];
+  const meta = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      if (eq > 2) {
+        meta[a.slice(2, eq)] = a.slice(eq + 1);
+      } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+        meta[a.slice(2)] = args[++i];
+      }
+    }
+  }
+  try {
+    const dir = getStateDir();
+    let workflowId = null, workflowType = null, phase = null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      try {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const idMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        if (idMatch) workflowId = idMatch[1].trim();
+        const typeMatch = yaml.match(/^workflow_type:\s*"?([^"\n]+)"?\s*$/m);
+        if (typeMatch) workflowType = typeMatch[1].trim();
+        const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
+        if (phaseMatch) phase = phaseMatch[1].trim();
+      } catch { /* enrichment best-effort */ }
+    }
+    const record = JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "council",
+      stage,
+      ...meta,
+      workflow_id: workflowId,
+      workflow_type: workflowType,
+      phase,
+    });
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    fs.appendFileSync(path.join(dir, "gate-trace.jsonl"), record + "\n");
+    return { ok: true, stage, meta, workflow_id: workflowId, workflow_type: workflowType, phase, reason: `council-trace stage=${stage} recorded` };
+  } catch (e) {
+    return { ok: false, stage, reason: `trace append failed: ${e.message}` };
+  }
+}
+
 // WI-1 / Layer-2 (greenfield cal #16+#17): persistence helper for
 // assertArtifactPresent results. Every Layer-1 call appends a record so
 // Layer-2 (assertClaimChecksResolved) can compute per-agent latest verdict
@@ -3857,6 +3922,8 @@ function run(subcommand, args) {
       return assertFileQuiescent(args[0], args.slice(1));
     case "assert-lanes-quiesced":
       return traceGate("assert-lanes-quiesced", () => assertLanesQuiesced());
+    case "council-trace":
+      return councilTrace(args[0], args.slice(1));
     case "advance-phase":
       return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
@@ -3876,7 +3943,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

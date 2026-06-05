@@ -134,6 +134,13 @@ question, then proceed.
 
 ### Stage 2 — Convene the council (5 advisors in parallel)
 
+**Observability emit (before the Task batch).** Append a council-trace record so
+calibration cycles can measure council usage:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-2 --slug="<derived-slug>" >/dev/null
+```
+
 Dispatch all 5 advisors **in a single Task tool batch** — sequential dispatch wastes
 time and risks earlier responses bleeding into later ones. This is the most common
 implementation mistake; it defeats the design.
@@ -235,6 +242,12 @@ is off — turn on when the decision is high-stakes enough to justify the cost.
 
 ### Stage 3 — Anonymized peer review (5 reviewers in parallel)
 
+**Observability emit (before the Task batch).**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-3 --slug="<derived-slug>" >/dev/null
+```
+
 Collect all 5 advisor responses. **Shuffle** them and label A through E with a *random*
 mapping (do not preserve advisor order — Contrarian must not always be A). Hold the
 mapping privately in orchestrator context only.
@@ -283,6 +296,12 @@ preferred thinking style instead of evaluating on merit. Anonymization is the
 load-bearing mechanic of Karpathy's design — do not skip it.
 
 ### Stage 4 — Chairman synthesis
+
+**Observability emit (before the chairman dispatch).**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-4 --slug="<derived-slug>" --model=opus >/dev/null
+```
 
 One final dispatch. Reveal the mapping (advisor → letter) so the chairman can see who
 said what, and pass all 5 advisor responses + all 5 peer reviews. **Use the strongest
