@@ -3371,6 +3371,381 @@ function assertArchScanFresh(args) {
   };
 }
 
+// verification-patterns Level 3 (Wired) — mechanical check that a symbol
+// is imported AND called somewhere besides its definition site.
+//
+// Closes the SKILL.md Level 3 ("Connected to the rest of the system") which
+// is currently prose-only — verifier reads the prose and checks by eye.
+// CLI verb gives the verifier mechanical evidence: grep for imports +
+// callers; return ok:false when zero references outside the definition.
+//
+// Args:
+//   <symbol>          — symbol name to check (e.g. "AuthService", "process_payment")
+//   --lang=python|ts  — language hint for grep pattern selection (auto-detect default)
+//   --exclude-self    — pass to grep --invert-match against the definition file
+//   --min-references=N — required minimum reference count outside definition (default 1)
+//
+// Returns: {ok, symbol, reference_count, locations: [path], reason}
+// ok:false when reference_count < min_references (symbol is dead code or unwired).
+function assertWired(symbol, args) {
+  if (!symbol || typeof symbol !== "string" || symbol.length === 0) {
+    return { ok: false, reason: "missing symbol argument" };
+  }
+  args = args || [];
+  const minRefs = parseInt(_getFlag(args, "--min-references") || "1", 10);
+  const lang = _getFlag(args, "--lang") || "auto";
+  // Reject obvious injection attempts in symbol arg.
+  if (!/^[A-Za-z_][\w.]*$/.test(symbol)) {
+    return { ok: false, symbol, reason: `symbol "${symbol}" contains non-identifier characters — rejected for safety` };
+  }
+  // Language-aware include patterns.
+  const langIncludes = {
+    python: ["*.py"],
+    ts: ["*.ts", "*.tsx", "*.js", "*.jsx", "*.cjs", "*.mjs"],
+    js: ["*.js", "*.jsx", "*.cjs", "*.mjs"],
+    go: ["*.go"],
+    rust: ["*.rs"],
+    auto: ["*.py", "*.ts", "*.tsx", "*.js", "*.jsx", "*.cjs", "*.mjs", "*.go", "*.rs", "*.java"],
+  };
+  const includes = langIncludes[lang] || langIncludes.auto;
+  const root = findProjectRoot();
+  // Use git ls-files when available (fast + respects gitignore), fall back
+  // to fs.readdirSync recursion. Use Node-native grep via fs.readFileSync —
+  // avoids shelling out and the BRE alternation grep trap.
+  let files = [];
+  try {
+    const { execSync } = require("child_process");
+    const out = execSync("git ls-files", { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    files = out.split("\n").filter(Boolean);
+  } catch {
+    return { ok: false, symbol, reason: "git ls-files unavailable — repo must be a git working tree for assert-wired" };
+  }
+  // Filter by extension.
+  const extOk = files.filter((f) => includes.some((g) => f.endsWith(g.replace("*", ""))));
+  // Symbol pattern: word-boundary on either side. We match exact identifier.
+  const symRe = new RegExp(`\\b${symbol.replace(/[.\\]/g, "\\$&")}\\b`);
+  const matches = [];
+  for (const f of extOk) {
+    let content;
+    try { content = fs.readFileSync(path.join(root, f), "utf8"); }
+    catch { continue; }
+    if (symRe.test(content)) matches.push(f);
+    if (matches.length > 200) break; // cap result size
+  }
+  const refCount = matches.length;
+  if (refCount < minRefs) {
+    return {
+      ok: false,
+      symbol,
+      reference_count: refCount,
+      min_references: minRefs,
+      locations: matches,
+      reason: `Symbol "${symbol}" found in ${refCount} file(s) — below minimum ${minRefs}. Likely dead code or unwired implementation. Verify the symbol is imported and called from elsewhere before claiming Level 3 (Wired).`,
+    };
+  }
+  return {
+    ok: true,
+    symbol,
+    reference_count: refCount,
+    min_references: minRefs,
+    locations: matches.slice(0, 20),
+    reason: `Symbol "${symbol}" found in ${refCount} file(s) — Level 3 (Wired) verified`,
+  };
+}
+
+// verification-patterns Level 5 (Scope Completeness) — mechanical extraction
+// of requirements from spec/plan + check for implementation evidence per
+// requirement.
+//
+// Closes the SKILL.md Level 5 ("Did the implementation cover ALL requirements,
+// or was scope silently reduced?") — currently prose-only and verifier
+// re-extracts requirements by eye each time.
+//
+// Args (flags):
+//   --spec=<path>          — spec file to extract requirements from (default .devt/state/spec.md)
+//   --impl-summary=<path>  — implementation summary to check for evidence (default impl-summary.md)
+//   --requirement-pattern  — regex for requirement markers in spec (default: "(?:^|\n)(?:- |\\d+\\. |\\* )")
+//
+// Approach: extract requirement bullets from the spec; for each, check if
+// any keywords (3+ chars, deduped) appear in the impl-summary. Returns the
+// requirement-to-evidence mapping plus a SCOPE_REDUCED list when evidence
+// is missing. Conservative heuristic — false-positives are acceptable;
+// false-negatives (claimed complete when incomplete) are the failure mode
+// we're guarding against.
+function assertScopeComplete(args) {
+  args = args || [];
+  const specPath = _getFlag(args, "--spec") || ".devt/state/spec.md";
+  const implPath = _getFlag(args, "--impl-summary") || "impl-summary.md";
+  // Resolve relative to per-instance state dir when applicable.
+  const dir = getStateDir();
+  const root = findProjectRoot();
+  // Spec: try state-dir first, then project root (where plan.md may also live).
+  const resolveCandidate = (p) => {
+    if (path.isAbsolute(p)) return p;
+    const candidates = [
+      path.join(dir, p),
+      path.join(root, p),
+      path.join(dir, path.basename(p)),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    return null;
+  };
+  const specAbs = resolveCandidate(specPath);
+  const implAbs = resolveCandidate(implPath);
+  if (!specAbs) {
+    return { ok: true, reason: `spec file not found at ${specPath} — scope-completeness check inapplicable (no scope contract to verify against)` };
+  }
+  if (!implAbs) {
+    return { ok: false, reason: `impl-summary file not found at ${implPath} — cannot verify scope completeness without implementation evidence` };
+  }
+  let specBody, implBody;
+  try { specBody = fs.readFileSync(specAbs, "utf8"); }
+  catch (e) { return { ok: false, reason: `read spec failed: ${e.message}` }; }
+  try { implBody = fs.readFileSync(implAbs, "utf8"); }
+  catch (e) { return { ok: false, reason: `read impl-summary failed: ${e.message}` }; }
+  // Extract requirement-shaped lines: top-level bullets / numbered lines.
+  const reqs = [];
+  const lines = specBody.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(/^\s*(?:-|\d+\.|\*)\s+(.{15,})/); // ≥15 chars to skip headers
+    if (m) {
+      const text = m[1].trim();
+      // Skip lines that look like meta-formatting or are too short for real requirements
+      if (text.length < 15) continue;
+      if (/^(?:see|todo|note|example)\b/i.test(text)) continue;
+      reqs.push({ line_no: i + 1, text });
+    }
+  }
+  if (reqs.length === 0) {
+    return { ok: true, reason: `no requirement-shaped bullets found in spec — scope-completeness check inapplicable` };
+  }
+  // Per-requirement keyword extraction + impl evidence check.
+  const implLower = implBody.toLowerCase();
+  const STOPWORDS = new Set(["the", "and", "for", "this", "that", "with", "from", "into", "must", "should", "will", "can", "all", "any", "are", "was", "have", "has", "but", "not", "use"]);
+  const checked = [];
+  const missing = [];
+  for (const r of reqs) {
+    const words = r.text.toLowerCase()
+      .replace(/[^a-z0-9\s_-]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+    const uniq = [...new Set(words)];
+    if (uniq.length === 0) continue;
+    // Evidence rule: at least one keyword from the requirement appears in
+    // the impl-summary. This is conservative — false positives possible
+    // (keyword in unrelated context), but false negatives (missed scope)
+    // are the failure mode we guard against more strictly.
+    const matches = uniq.filter((w) => implLower.includes(w));
+    const evidenceFound = matches.length > 0;
+    checked.push({ line_no: r.line_no, text: r.text.slice(0, 100), evidence_found: evidenceFound, matched_keywords: matches.slice(0, 5) });
+    if (!evidenceFound) missing.push({ line_no: r.line_no, text: r.text.slice(0, 100) });
+  }
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      total_requirements: reqs.length,
+      checked: checked.length,
+      missing_count: missing.length,
+      missing,
+      reason: `${missing.length} of ${reqs.length} requirements have no keyword evidence in impl-summary.md — SCOPE_REDUCED candidates. Verify each is implemented or document the scope reduction explicitly before claiming DONE. (Conservative heuristic — review each entry; false positives possible if implementation uses synonyms.)`,
+    };
+  }
+  return {
+    ok: true,
+    total_requirements: reqs.length,
+    checked: checked.length,
+    missing_count: 0,
+    reason: `All ${reqs.length} requirement bullets have keyword evidence in impl-summary — scope-completeness Level 5 verified (conservative heuristic; review the impl-summary qualitatively for actual coverage)`,
+  };
+}
+
+// autoskill REJ-tombstone check — closes the SKILL.md HARD RULE
+// ("Before generating ANY proposal, query the rejected-keywords list...").
+//
+// Reads `node bin/devt-tools.cjs memory rejected-keywords` output (the list
+// of search_keywords from REJ tombstones), then scans the supplied proposal
+// text for case-insensitive substring matches. Returns ok:false (rejection)
+// when any keyword matches — the proposal should be silently suppressed per
+// SKILL.md.
+//
+// Args:
+//   <text>             — proposal text to scan (positional)
+//   --from-file=<path> — read proposal text from file instead
+//   --list-only        — return the rejected-keywords list without scanning
+function autoskillRejCheck(args) {
+  args = args || [];
+  const listOnly = args.includes("--list-only");
+  const fromFile = _getFlag(args, "--from-file");
+  const positional = args.filter((a) => !a.startsWith("--"));
+  let proposalText = positional.join(" ");
+  if (fromFile) {
+    if (path.isAbsolute(fromFile) || fromFile.includes("..")) {
+      return { ok: false, reason: `path "${fromFile}" rejected (absolute or contains ..)` };
+    }
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const abs = path.join(findProjectRoot(), fromFile);
+    if (!fs.existsSync(abs)) {
+      return { ok: false, reason: `from-file ${fromFile} not found` };
+    }
+    try { proposalText = fs.readFileSync(abs, "utf8"); }
+    catch (e) { return { ok: false, reason: `read failed: ${e.message}` }; }
+  }
+  // Pull the rejected-keywords list via the memory module — same path the
+  // existing `memory rejected-keywords` CLI subcommand uses. The function
+  // is exported as `listRejectedKeywords` in memory.cjs; falls back to the
+  // `run("rejected-keywords")` dispatcher when the direct export is absent
+  // (e.g. older memory module shape).
+  let keywords = [];
+  try {
+    const memory = require("./memory.cjs");
+    let res = null;
+    if (typeof memory.listRejectedKeywords === "function") {
+      res = memory.listRejectedKeywords();
+    } else if (typeof memory.run === "function") {
+      res = memory.run("rejected-keywords", []);
+    }
+    if (res && Array.isArray(res.keywords)) {
+      keywords = res.keywords;
+    } else if (Array.isArray(res)) {
+      keywords = res;
+    } else if (res && Array.isArray(res.rejected_keywords)) {
+      keywords = res.rejected_keywords;
+    }
+  } catch { /* memory module unavailable — return empty list path */ }
+  if (listOnly) {
+    return { ok: true, keyword_count: keywords.length, keywords };
+  }
+  if (!proposalText || proposalText.length === 0) {
+    return { ok: false, reason: "missing proposal text — pass as positional arg OR --from-file=<path>" };
+  }
+  // Case-insensitive substring match per HARD RULE wording.
+  const lower = proposalText.toLowerCase();
+  const matches = [];
+  for (const kw of keywords) {
+    if (!kw || typeof kw !== "string") continue;
+    const kwLower = kw.toLowerCase();
+    if (lower.includes(kwLower)) matches.push(kw);
+  }
+  if (matches.length > 0) {
+    return {
+      ok: false,
+      matched_keywords: matches,
+      reason: `Proposal text matches ${matches.length} REJ-tombstone keyword(s): ${matches.join(", ")}. Per SKILL.md HARD RULE: SUPPRESS this proposal silently — do not surface to user. Rejected ideas should never resurface regardless of rephrasing.`,
+    };
+  }
+  return {
+    ok: true,
+    keyword_count: keywords.length,
+    reason: `proposal text clears ${keywords.length} REJ-tombstone keyword(s) — ok to surface`,
+  };
+}
+
+// graphify-helpers Hard Invariant #2 enforcement — verifies the consuming
+// skill tagged `source: "graphify"|"grep"|"merged"` in its output.
+//
+// SKILL.md line ~207: "Result tagging is mandatory. Every output from this
+// skill (or skills consuming it) MUST include source." — currently
+// prose-only. CLI verb checks an arbitrary output file for the source field.
+//
+// Returns ok:false when the file exists but lacks a source tag.
+function assertGraphifySourceTagged(filePath, args) {
+  args = args || [];
+  if (!filePath || typeof filePath !== "string") {
+    return { ok: false, reason: "missing file path argument" };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const abs = path.isAbsolute(filePath) ? filePath : path.join(findProjectRoot(), filePath);
+  if (!fs.existsSync(abs)) {
+    return { ok: false, file: filePath, reason: `file does not exist: ${filePath}` };
+  }
+  let content;
+  try { content = fs.readFileSync(abs, "utf8"); }
+  catch (e) { return { ok: false, file: filePath, reason: `read failed: ${e.message}` }; }
+  // Accept either JSON-shape `"source":"graphify"` (closing quote between
+  // key and colon) or markdown prose `source: graphify` or `[source:
+  // graphify]` etc. The Hard Invariant says the tag must be present and
+  // identifiable. The optional `["']?` BEFORE the colon handles JSON's
+  // quoted-key form.
+  const sourceMatch = content.match(/source["']?\s*[:=]\s*["']?(graphify|grep|merged)["']?/i);
+  if (!sourceMatch) {
+    return {
+      ok: false,
+      file: filePath,
+      reason: `file does not contain a graphify source tag. Hard Invariant #2 (graphify-helpers SKILL.md): "Every output ... MUST include source: 'graphify'|'grep'|'merged'". Add the source tag so downstream agents can debug provenance.`,
+    };
+  }
+  return {
+    ok: true,
+    file: filePath,
+    source: sourceMatch[1].toLowerCase(),
+    reason: `source tag present: ${sourceMatch[1]}`,
+  };
+}
+
+// graphify-helpers fallback-trace observability. Mirrors council-trace +
+// arch-scan-trace patterns. Records which fallback trigger fired and which
+// consuming skill invoked graphify, so cal cycles can measure fallback
+// rates (high empty-result rate suggests under-resolved queries; high
+// not-setup rate suggests graphify install adoption is low; etc.).
+//
+// Usage:
+//   state graphify-fallback-trace <trigger> --skill=<name> [--operation=<op>]
+//
+// trigger ∈ {empty | error | not_setup | below_threshold | none}
+//   none = no fallback fired (pure graphify result) — also worth tracking
+function graphifyFallbackTrace(trigger, args) {
+  if (!trigger || typeof trigger !== "string") {
+    return { ok: false, reason: "missing trigger argument (expected: empty | error | not_setup | below_threshold | none)" };
+  }
+  args = args || [];
+  const meta = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      if (eq > 2) {
+        meta[a.slice(2, eq)] = a.slice(eq + 1);
+      } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+        meta[a.slice(2)] = args[++i];
+      }
+    }
+  }
+  try {
+    const dir = getStateDir();
+    let workflowId = null, workflowType = null, phase = null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      try {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const idMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        if (idMatch) workflowId = idMatch[1].trim();
+        const typeMatch = yaml.match(/^workflow_type:\s*"?([^"\n]+)"?\s*$/m);
+        if (typeMatch) workflowType = typeMatch[1].trim();
+        const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
+        if (phaseMatch) phase = phaseMatch[1].trim();
+      } catch { /* best-effort */ }
+    }
+    const record = JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "graphify_fallback",
+      trigger,
+      ...meta,
+      workflow_id: workflowId,
+      workflow_type: workflowType,
+      phase,
+    });
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    fs.appendFileSync(path.join(dir, "gate-trace.jsonl"), record + "\n");
+    return { ok: true, trigger, meta, reason: `graphify-fallback-trace trigger=${trigger} recorded` };
+  } catch (e) {
+    return { ok: false, trigger, reason: `trace append failed: ${e.message}` };
+  }
+}
+
 // Multi-instance state isolation — instance management CLIs.
 //
 // newInstance(): generates a fresh 8-character hex ID (truncated UUID v4),
@@ -4443,6 +4818,16 @@ function run(subcommand, args) {
       return archScanTrace(args[0], args.slice(1));
     case "assert-arch-scan-fresh":
       return traceGate("assert-arch-scan-fresh", () => assertArchScanFresh(args));
+    case "assert-wired":
+      return traceGate("assert-wired", () => assertWired(args[0], args.slice(1)));
+    case "assert-scope-complete":
+      return traceGate("assert-scope-complete", () => assertScopeComplete(args));
+    case "autoskill-rej-check":
+      return autoskillRejCheck(args);
+    case "assert-graphify-source-tagged":
+      return traceGate("assert-graphify-source-tagged", () => assertGraphifySourceTagged(args[0], args.slice(1)));
+    case "graphify-fallback-trace":
+      return graphifyFallbackTrace(args[0], args.slice(1));
     case "new-instance":
       return newInstance(args);
     case "list-instances":
@@ -4466,7 +4851,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

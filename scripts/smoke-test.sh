@@ -10844,6 +10844,125 @@ else
 fi
 rm -rf "$K63_TMP"
 
+# K64 — assert-wired (verification-patterns Level 3). Checks symbol has at
+# least N references across the codebase. Uses git ls-files + node-native
+# regex match. Three states: known symbol → ok | unknown symbol → block
+# | injection attempt → reject.
+K64_TMP=$(mktemp -d)
+mkdir -p "$K64_TMP/.devt/state" "$K64_TMP/bin/modules"
+echo '{}' > "$K64_TMP/.devt/config.json"
+(cd "$K64_TMP" && git init -q 2>/dev/null) || true
+cat > "$K64_TMP/bin/modules/io.cjs" <<'EOF_K64'
+function findProjectRoot() { return process.cwd(); }
+module.exports = { findProjectRoot };
+EOF_K64
+cat > "$K64_TMP/bin/modules/use.cjs" <<'EOF_K64_USE'
+const { findProjectRoot } = require("./io.cjs");
+console.log(findProjectRoot());
+EOF_K64_USE
+(cd "$K64_TMP" && git add -A && git commit -qm fixture 2>/dev/null) || true
+K64_KNOWN=$(cd "$K64_TMP" && node "$CLI" state assert-wired findProjectRoot --min-references=1 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K64_UNKNOWN=$(cd "$K64_TMP" && node "$CLI" state assert-wired NeverDefinedSymbol 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K64_INJECT=$(cd "$K64_TMP" && node "$CLI" state assert-wired 'foo; rm -rf' 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K64_KNOWN" = "true" ] && [ "$K64_UNKNOWN" = "false" ] && [ "$K64_INJECT" = "false" ]; then
+  pass "K64: assert-wired (known symbol → pass | unknown → block | injection → reject)"
+else
+  fail "K64: assert-wired misfired (known=$K64_KNOWN unknown=$K64_UNKNOWN inject=$K64_INJECT)"
+fi
+rm -rf "$K64_TMP"
+
+# K65 — assert-scope-complete (verification-patterns Level 5). Extracts
+# requirement bullets from spec.md, checks for keyword evidence in
+# impl-summary.md. Three states: requirements + matching impl → ok |
+# requirements + partial impl → block + missing list | no spec → inapplicable.
+K65_TMP=$(mktemp -d)
+mkdir -p "$K65_TMP/.devt/state"
+echo '{}' > "$K65_TMP/.devt/config.json"
+cat > "$K65_TMP/.devt/state/spec.md" <<'EOF_K65_SPEC'
+# Spec
+- Add user authentication middleware
+- Configure rate limiting with redis backend
+- Implement email notification on signup
+EOF_K65_SPEC
+cat > "$K65_TMP/.devt/state/impl-summary.md" <<'EOF_K65_IMPL_FULL'
+# Impl Summary
+Authentication middleware added in src/auth.py.
+Rate limiting configured using redis at src/middleware.py.
+Email notification implemented in src/notifications.py.
+EOF_K65_IMPL_FULL
+K65_COVERED=$(cd "$K65_TMP" && node "$CLI" state assert-scope-complete 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+cat > "$K65_TMP/.devt/state/impl-summary.md" <<'EOF_K65_IMPL_PART'
+# Impl Summary
+Authentication middleware added in src/auth.py.
+EOF_K65_IMPL_PART
+K65_PARTIAL=$(cd "$K65_TMP" && node "$CLI" state assert-scope-complete 2>/dev/null | jq -r '.ok, .missing_count' 2>/dev/null | tr '\n' '|')
+if [ "$K65_COVERED" = "true" ] && [ "$K65_PARTIAL" = "false|2|" ]; then
+  pass "K65: assert-scope-complete (full coverage→ok | partial→block + 2 missing)"
+else
+  fail "K65: assert-scope-complete misfired (covered=$K65_COVERED partial=$K65_PARTIAL)"
+fi
+rm -rf "$K65_TMP"
+
+# K66 — autoskill-rej-check. Calls memory.listRejectedKeywords and scans
+# proposal text for case-insensitive substring matches. Two states:
+# --list-only → returns keyword count | proposal text → ok or block.
+K66_TMP=$(mktemp -d)
+mkdir -p "$K66_TMP/.devt/state"
+echo '{}' > "$K66_TMP/.devt/config.json"
+K66_LIST=$(cd "$K66_TMP" && node "$CLI" state autoskill-rej-check --list-only 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K66_CLEAN=$(cd "$K66_TMP" && node "$CLI" state autoskill-rej-check "Add support for new feature" 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K66_EMPTY=$(cd "$K66_TMP" && node "$CLI" state autoskill-rej-check 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K66_LIST" = "true" ] && [ "$K66_CLEAN" = "true" ] && [ "$K66_EMPTY" = "false" ]; then
+  pass "K66: autoskill-rej-check (--list-only→ok | clean text→ok | empty arg→reject)"
+else
+  fail "K66: autoskill-rej-check misfired (list=$K66_LIST clean=$K66_CLEAN empty=$K66_EMPTY)"
+fi
+rm -rf "$K66_TMP"
+
+# K67 — assert-graphify-source-tagged. Hard Invariant #2 enforcement.
+# Three states: file without source → block | file with JSON source → ok
+# | file with prose source → ok.
+K67_TMP=$(mktemp -d)
+mkdir -p "$K67_TMP/.devt/state"
+echo '{}' > "$K67_TMP/.devt/config.json"
+echo "# Output with no tag" > "$K67_TMP/no-tag.md"
+echo '{"source":"graphify","results":[]}' > "$K67_TMP/json-tag.json"
+echo "Found things — source: grep" > "$K67_TMP/prose-tag.md"
+K67_MISSING=$(cd "$K67_TMP" && node "$CLI" state assert-graphify-source-tagged no-tag.md 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K67_JSON=$(cd "$K67_TMP" && node "$CLI" state assert-graphify-source-tagged json-tag.json 2>/dev/null | jq -r '.ok, .source' 2>/dev/null | tr '\n' '|')
+K67_PROSE=$(cd "$K67_TMP" && node "$CLI" state assert-graphify-source-tagged prose-tag.md 2>/dev/null | jq -r '.ok, .source' 2>/dev/null | tr '\n' '|')
+if [ "$K67_MISSING" = "false" ] && [ "$K67_JSON" = "true|graphify|" ] && [ "$K67_PROSE" = "true|grep|" ]; then
+  pass "K67: assert-graphify-source-tagged (missing→block | JSON→ok | prose→ok)"
+else
+  fail "K67: graphify-source-tagged misfired (missing=$K67_MISSING json=$K67_JSON prose=$K67_PROSE)"
+fi
+rm -rf "$K67_TMP"
+
+# K68 — graphify-fallback-trace observability. Four triggers + none emit
+# records to gate-trace.jsonl with workflow_type enrichment.
+K68_TMP=$(mktemp -d)
+mkdir -p "$K68_TMP/.devt/state"
+echo '{}' > "$K68_TMP/.devt/config.json"
+cat > "$K68_TMP/.devt/state/workflow.yaml" <<EOF_K68
+active: true
+workflow_id: test-K68
+workflow_type: dev
+phase: implement
+first_created_at: "2026-06-05T10:00:00Z"
+created_at: "2026-06-05T10:00:00Z"
+EOF_K68
+for t in empty error not_setup below_threshold; do
+  (cd "$K68_TMP" && node "$CLI" state graphify-fallback-trace $t --skill=codebase-scan >/dev/null 2>&1) || true
+done
+K68_COUNT=$(awk '/"source":"graphify_fallback"/' "$K68_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | wc -l | tr -d ' ')
+K68_TYPE=$(awk '/"trigger":"empty"/{print}' "$K68_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | jq -r '.workflow_type' 2>/dev/null || echo "")
+if [ "$K68_COUNT" = "4" ] && [ "$K68_TYPE" = "dev" ]; then
+  pass "K68: graphify-fallback-trace 4-trigger emit with workflow_type enrichment"
+else
+  fail "K68: graphify-fallback-trace misfired (count=$K68_COUNT type=$K68_TYPE)"
+fi
+rm -rf "$K68_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

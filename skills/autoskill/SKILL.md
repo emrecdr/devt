@@ -258,3 +258,15 @@ silently — do NOT surface it to the user. This is the tombstone mechanism: rej
 ideas should never resurface, regardless of how the AI rephrases them. Under-coverage
 of search_keywords is a curator problem (skills/memory-curation/SKILL.md) — your job is
 to honor the existing list without exception.
+
+**Mechanical enforcement (`state autoskill-rej-check`)** — closes the prose-only HARD RULE:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state autoskill-rej-check "Add prefer-default-export rule to coding-standards"
+# {ok:false, matched_keywords:["default export","prefer-default"]} → SUPPRESS silently
+# {ok:true,  keyword_count:23} → proposal clears all 23 REJ keywords; ok to surface
+# Or read from a file: --from-file=proposal.md
+# Or just dump the list: --list-only
+```
+
+Returns `ok:false` when ANY rejected-keyword matches the proposal text as a case-insensitive substring. Per HARD RULE: matching proposals must be silently dropped, not surfaced. Run this as the LAST gate before presenting any proposal to the user.

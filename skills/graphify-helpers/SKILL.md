@@ -207,6 +207,26 @@ For tools without a devt wrapper, call them via the registered `graphify` MCP se
 2. **Result tagging is mandatory.** Every output from this skill (or skills consuming
    it) MUST include `source: "graphify" | "grep" | "merged"` so the user can debug
    "why did Graphify miss this?" cases.
+
+   **Mechanical enforcement (`state assert-graphify-source-tagged`)** — verifies the
+   output file carries the source tag. Closes the prose-only HARD INVARIANT:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-source-tagged .devt/state/graph-impact.md
+   # {ok:false, ...} → missing source tag; reject the output
+   # {ok:true, source:"graphify"} → tag present, output is consumable
+   ```
+
+   Accepts both JSON form (`"source":"graphify"`) and markdown prose form (`source: grep`).
+
+3. **Fallback observability (`state graphify-fallback-trace`)** — when a fallback fires,
+   emit a trace record to gate-trace.jsonl so cal cycles can measure trigger rates:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state graphify-fallback-trace empty --skill=codebase-scan --operation=symbol-lookup
+   ```
+
+   Trigger values: `empty | error | not_setup | below_threshold | none`. The trace records workflow_id/workflow_type/phase automatically. Cal #21+ analytics: high empty-result rate signals under-resolved queries; high not_setup rate signals graphify install adoption is low.
 3. **Setup wizard pitch is "strongly recommended", not required.** `/devt:init` offers
    Graphify install with a clear value prop, but a "no thanks" answer produces a fully
    working install. No feature is locked behind Graphify.

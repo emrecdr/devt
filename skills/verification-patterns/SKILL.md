@@ -58,6 +58,16 @@ Connected to the rest of the system:
 - Is the service injected via dependency injection?
 - Is the test actually run by the test runner?
 
+**Mechanical check (`state assert-wired`)** — for symbols, mechanical evidence:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-wired AuthService --min-references=2
+# {ok:false, reference_count:0, ...} → symbol unwired (dead code)
+# {ok:true,  reference_count:5, ...} → symbol referenced in 5 files
+```
+
+Uses `git ls-files` + Node-native regex to grep for `\bSymbolName\b` across project files. Returns `ok:false` when the symbol appears in fewer than `--min-references` files (default 1). Rejects non-identifier inputs (path-traversal / shell-injection safety). Run when machine-checkable evidence of wiring is required — verbal "I checked the imports" doesn't survive Level 3 scrutiny.
+
 ### Level 4: Functional
 
 Actually works when invoked:
@@ -76,6 +86,16 @@ Did the implementation cover ALL requirements, or was scope silently reduced?
 4. Any scope reduction forces GAPS_FOUND verdict — silent omissions are now visible
 
 This level is automatically applied by the verifier agent when spec.md or plan.md exists. It catches the dangerous case where an agent implements 3 of 5 requirements and claims DONE.
+
+**Mechanical check (`state assert-scope-complete`)**:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-scope-complete --spec=.devt/state/spec.md --impl-summary=impl-summary.md
+# {ok:false, missing_count:2, missing:[...]} → 2 requirements with no keyword evidence
+# {ok:true,  total_requirements:5, missing_count:0} → all requirements have evidence
+```
+
+Extracts bullet-shaped requirements from the spec (top-level `-` / `*` / `N.` lines ≥15 chars), then checks whether any keyword from each requirement appears in the impl-summary. Conservative heuristic — false positives possible (keyword in unrelated context); false negatives (claimed complete when scope was reduced) are the failure mode the gate guards against. Use to mechanically catch `SCOPE_REDUCED` candidates before reviewing impl-summary qualitatively.
 
 ## Gate Function
 
