@@ -10084,7 +10084,21 @@ node "$CLI" init workflow "K33 test" >/dev/null 2>&1
 K33_EMPTY=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
 node "$CLI" state assert-artifact-present architect >/dev/null 2>&1
 K33_BLOCK=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
-echo "# Arch Review" > .devt/state/arch-review.md
+# Substance-aware Layer-1: fixture must write substantive content (above
+# checkAgentOutput's word-count + heading-only thresholds), otherwise the
+# new contract correctly classifies the file as stub and Layer-2 keeps
+# blocking. The prior "# Arch Review" one-liner was below substance.
+cat > .devt/state/arch-review.md <<'EOF_K33'
+# Architecture Review
+
+## Layering
+
+Services depend only on application; no upward dependencies observed in the modules under review. Repository implementations are wired through the composition root at api/dependencies.py per the documented Clean-Architecture contract.
+
+## Findings
+
+No critical or high-severity issues found in this review window. The reuse-analysis flagged two utility helpers that would benefit from extraction but neither qualifies as architectural debt for this iteration.
+EOF_K33
 node "$CLI" state assert-artifact-present architect >/dev/null 2>&1
 K33_RESOLVED=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
 cd "$ROOT"
@@ -10458,6 +10472,58 @@ if [ -z "$K50_FAIL" ]; then
 else
   fail "K50: workflows missing Layer-1 claim-check despite dispatching output-writers:$K50_FAIL"
 fi
+
+# K51 — substance-aware Layer-1 + Layer-2 stub-blocking. cal #20 §1 friction:
+# Layer-1 recorded verdict=success on 65/72-byte stubs because the check was
+# file-presence-only; Layer-2 would PASS false-positive if a stub won the
+# latest-timestamp slot. Substance-aware Layer-1 now persists
+# substance_verdict; Layer-2 BLOCKS when latest=success but
+# substance_verdict=stub. Successful retry overwriting stub-record stays the
+# happy path. Five-state matrix: large-substantive | stub | substantive
+# | Layer-2-blocks-on-stub | Layer-2-resolves-on-retry.
+K51_TMP=$(mktemp -d)
+mkdir -p "$K51_TMP/.devt/state"
+echo '{}' > "$K51_TMP/.devt/config.json"
+cat > "$K51_TMP/.devt/state/workflow.yaml" <<EOF_K51
+active: true
+workflow_id: test-wf-K51
+workflow_type: dev
+phase: implement
+first_created_at: "2026-06-04T10:00:00Z"
+created_at: "2026-06-04T10:00:00Z"
+EOF_K51
+# Large substantive file (>1000 B → size short-circuit)
+{ yes "fill line for size short-circuit test" 2>/dev/null || true; } | head -50 > "$K51_TMP/.devt/state/impl-summary.md" || true
+K51_LARGE=$(cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
+# Stub file (header-only — em-dash)
+echo "# Impl — in progress" > "$K51_TMP/.devt/state/impl-summary.md"
+rm -f "$K51_TMP/.devt/state/claim-check-failures.jsonl"
+cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer > /dev/null 2>&1
+cd "$ROOT"
+K51_STUB=$(tail -1 "$K51_TMP/.devt/state/claim-check-failures.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
+K51_L2_BLOCK=$(cd "$K51_TMP" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+# Substantive retry
+cat > "$K51_TMP/.devt/state/impl-summary.md" <<EOF_K51_SUB
+# Implementation Summary
+
+## Files Modified
+
+- src/auth.py — redis-backed rate-limit middleware enforcing 100 requests per minute per token. Token resolution uses the existing decode_jwt helper; configurable via RATE_LIMIT_PER_MINUTE env var. Fail-open on redis outage with a structured warning log.
+- tests/test_auth.py — covers limit reached, token refill, fail-open, overflow burst, concurrent-request paths.
+
+Sliding-window counters chosen over fixed-window to avoid boundary burst effect.
+EOF_K51_SUB
+cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer > /dev/null 2>&1
+cd "$ROOT"
+K51_RETRY=$(tail -1 "$K51_TMP/.devt/state/claim-check-failures.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
+K51_L2_PASS=$(cd "$K51_TMP" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K51_LARGE" = "substantive" ] && [ "$K51_STUB" = "stub" ] && [ "$K51_L2_BLOCK" = "false" ] && \
+   [ "$K51_RETRY" = "substantive" ] && [ "$K51_L2_PASS" = "true" ]; then
+  pass "K51: substance-aware Layer-1 + Layer-2 stub-blocking (large→substantive | stub→stub+L2-blocks | retry→substantive+L2-passes)"
+else
+  fail "K51: substance-aware verdict misfired (large=$K51_LARGE stub=$K51_STUB L2-block=$K51_L2_BLOCK retry=$K51_RETRY L2-pass=$K51_L2_PASS)"
+fi
+rm -rf "$K51_TMP"
 
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="

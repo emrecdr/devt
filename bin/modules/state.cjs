@@ -2514,13 +2514,26 @@ function _assertArtifactPresentInner(agent) {
       reason: `Expected output .devt/state/${primary} exists but is empty (0 bytes). Likely a stub-first protocol write that the agent didn't follow through on — re-dispatch.`,
     };
   }
+  // Substance-aware Layer-1 — call checkAgentOutput internally to add
+  // substance_verdict alongside the file-presence verdict. Size-threshold
+  // short-circuit: files above STUB_SIZE_THRESHOLD bytes are empirically
+  // substantive (lane stubs observed at 65/72 B; substantive lanes at
+  // 7–42 KB). Skipping the regex scan for large files keeps the per-call
+  // cost flat for the common case. Field signal: cal #20 §1 documented
+  // Layer-1 recording success on 65-byte stubs — Layer-2 would PASS
+  // false-positive if a stub won the latest-timestamp slot. substance_verdict
+  // closes that gap. Backwards compat: assertClaimChecksResolved treats
+  // missing field as "substantive" so historical records keep passing.
+  const substance = _computeSubstanceVerdict(artifactPath, sizeBytes);
   return {
     ok: true,
     agent,
     expected_path: `.devt/state/${primary}`,
     exists: true,
     size_bytes: sizeBytes,
-    reason: `${primary} present (${sizeBytes} bytes)`,
+    substance_verdict: substance.verdict,
+    ...(substance.detail ? { substance_detail: substance.detail } : {}),
+    reason: `${primary} present (${sizeBytes} bytes, substance=${substance.verdict})`,
   };
 }
 
@@ -2565,14 +2578,45 @@ function _assertLaneArtifactPresent(canonicalAgent, laneId) {
       reason: `Lane output ${lane.review_file} exists but is empty (0 bytes). Likely a stub-first protocol write that the lane reviewer did not follow through on — re-dispatch.`,
     };
   }
+  // Substance-aware Layer-1 (lane variant) — same semantic as the canonical
+  // form: size-threshold short-circuit + checkAgentOutput for small files.
+  // Closes the cal #20 §1 friction where lane Layer-1 recorded success on
+  // 65/72-byte stubs that substance_check_lanes correctly flagged later.
+  const substance = _computeSubstanceVerdict(lane.review_file, lane.file_size_bytes);
   return {
     ok: true,
     agent: tag,
     expected_path: lane.review_file,
     exists: true,
     size_bytes: lane.file_size_bytes,
-    reason: `${lane.review_file} present (${lane.file_size_bytes} bytes)`,
+    substance_verdict: substance.verdict,
+    ...(substance.detail ? { substance_detail: substance.detail } : {}),
+    reason: `${lane.review_file} present (${lane.file_size_bytes} bytes, substance=${substance.verdict})`,
   };
+}
+
+// Substance-verdict helper shared by canonical + lane forms. Returns
+// {verdict: "stub"|"substantive"|"unknown", detail?: string}.
+// Size-threshold short-circuit at STUB_SIZE_THRESHOLD bytes: empirically,
+// outputs above this cap are substantive (no field-observed false negatives);
+// outputs at or below the cap warrant the regex scan + word-count check.
+// The threshold is generous — common stubs are sub-100 bytes; this gives
+// nearly 10x headroom before triggering the deeper check.
+const STUB_SIZE_THRESHOLD = 1000;
+function _computeSubstanceVerdict(artifactPath, sizeBytes) {
+  if (sizeBytes > STUB_SIZE_THRESHOLD) {
+    return { verdict: "substantive" };
+  }
+  let subRes;
+  try { subRes = checkAgentOutput(artifactPath); }
+  catch (e) { return { verdict: "unknown", detail: `substance check error: ${e.message}` }; }
+  if (!subRes || typeof subRes.looks_like_stub !== "boolean") {
+    return { verdict: "unknown", detail: (subRes && subRes.reason) || "substance check returned no boolean verdict" };
+  }
+  if (subRes.looks_like_stub === true) {
+    return { verdict: "stub", detail: subRes.reason || "stub heuristic match" };
+  }
+  return { verdict: "substantive" };
 }
 
 // Q2-E / greenfield cal #19 §5 Q17 — rate-limit-mid-section recovery diagnostic.
@@ -2927,6 +2971,13 @@ function persistClaimCheckResult(result) {
       source: "claim_check",
       agent: result.agent,
       verdict: result.ok ? "success" : "failure",
+      // Substance-aware Layer-1 — substance_verdict added alongside the
+      // file-presence verdict so Layer-2 can distinguish "file present
+      // but stub" from "file present and substantive". Backwards compat:
+      // historical records (pre-substance-aware) lack this field; the
+      // Layer-2 reader treats missing as "substantive" so old records
+      // continue to resolve cleanly.
+      ...(result.substance_verdict ? { substance_verdict: result.substance_verdict } : {}),
       reason: result.reason || "",
       expected_path: result.expected_path || null,
       workflow_id: workflowId,
@@ -3012,11 +3063,29 @@ function assertClaimChecksResolved() {
   const unresolved = [];
   for (const [agent, rec] of latestByAgent) {
     if (rec.verdict === "failure") {
-      unresolved.push({ agent, reason: rec.reason, ts: rec.ts, expected_path: rec.expected_path });
+      unresolved.push({ agent, reason: rec.reason, ts: rec.ts, expected_path: rec.expected_path, kind: "failure" });
+      continue;
+    }
+    // Substance-aware Layer-2 — verdict=success with substance_verdict=stub
+    // is treated as unresolved. Closes the cal #20 §1 friction where Layer-1
+    // recorded success on 65/72-byte stubs (file present + size > 0 = ok)
+    // but the agent dispatch produced no substantive output. The retry path
+    // is unchanged: a substantive re-dispatch overwrites the stub record
+    // (last-write-wins per agent), so stub-then-substantive-retry stays the
+    // happy path. Backwards compat: records without substance_verdict
+    // (pre-substance-aware) default-resolve as substantive.
+    if (rec.verdict === "success" && rec.substance_verdict === "stub") {
+      unresolved.push({
+        agent,
+        reason: rec.reason || "latest claim-check has substance_verdict=stub — agent wrote a header-only or stub-phrase artifact, not substantive content",
+        ts: rec.ts,
+        expected_path: rec.expected_path,
+        kind: "stub",
+      });
     }
   }
   if (unresolved.length === 0) {
-    return { ok: true, unresolved_count: 0, mode, reason: "all claim-checks in window resolved (latest verdict=success per agent)" };
+    return { ok: true, unresolved_count: 0, mode, reason: "all claim-checks in window resolved (latest verdict=success + substance=substantive per agent)" };
   }
   if (mode === "warn") {
     return {
