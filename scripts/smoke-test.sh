@@ -10700,6 +10700,150 @@ else
 fi
 rm -rf "$K57_TMP"
 
+# K58 — assert-council-not-recent re-run prevention. Closes offramp §4
+# anti-pattern: re-running council on a decision a transcript already exists
+# for. Glob check on .devt/state/council-<slug>-*.md at the root.
+K58_TMP=$(mktemp -d)
+mkdir -p "$K58_TMP/.devt/state"
+echo '{}' > "$K58_TMP/.devt/config.json"
+K58_NONE=$(cd "$K58_TMP" && node "$CLI" state assert-council-not-recent "test-slug" 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+touch "$K58_TMP/.devt/state/council-test-slug-20260605-100000.md"
+K58_FOUND=$(cd "$K58_TMP" && node "$CLI" state assert-council-not-recent "test-slug" 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K58_WARN=$(cd "$K58_TMP" && node "$CLI" state assert-council-not-recent "test-slug" --warn 2>/dev/null | jq -r '.warn' 2>/dev/null || echo "")
+if [ "$K58_NONE" = "true" ] && [ "$K58_FOUND" = "false" ] && [ "$K58_WARN" = "true" ]; then
+  pass "K58: assert-council-not-recent (no-prior→ok | prior→block | --warn→ok+warn)"
+else
+  fail "K58: re-run prevention misfired (none=$K58_NONE found=$K58_FOUND warn=$K58_WARN)"
+fi
+rm -rf "$K58_TMP"
+
+# K59 — council-validation-material annotated JSON. Existence tags + optional
+# inline file contents for direct prompt injection. Closes SKILL.md Stage 1
+# prose-only "tag EXISTS/MISSING" instruction.
+K59_TMP=$(mktemp -d)
+mkdir -p "$K59_TMP/.devt/state" "$K59_TMP/.devt/rules"
+echo '{}' > "$K59_TMP/.devt/config.json"
+echo "# coding standards content" > "$K59_TMP/.devt/rules/coding-standards.md"
+K59_OUT=$(cd "$K59_TMP" && node "$CLI" state council-validation-material .devt/rules/coding-standards.md .devt/rules/missing.md --inline 2>/dev/null)
+K59_EXISTS=$(echo "$K59_OUT" | jq -r '.entries[0].exists' 2>/dev/null || echo "")
+K59_MISSING=$(echo "$K59_OUT" | jq -r '.entries[1].exists' 2>/dev/null || echo "")
+K59_CONTENT=$(echo "$K59_OUT" | jq -r '.entries[0].content' 2>/dev/null || echo "")
+# Path-traversal rejection
+K59_TRAVERSAL=$(cd "$K59_TMP" && node "$CLI" state council-validation-material "../etc/passwd" 2>/dev/null | jq -r '.entries[0].reason' 2>/dev/null || echo "")
+if [ "$K59_EXISTS" = "true" ] && [ "$K59_MISSING" = "false" ] && \
+   [ "${K59_CONTENT:0:1}" = "#" ] && [[ "$K59_TRAVERSAL" == *"rejected"* ]]; then
+  pass "K59: council-validation-material (exists+missing tags + --inline contents + path-traversal rejected)"
+else
+  fail "K59: validation-material misfired (exists=$K59_EXISTS missing=$K59_MISSING content-head=${K59_CONTENT:0:1} traversal=${K59_TRAVERSAL:0:30})"
+fi
+rm -rf "$K59_TMP"
+
+# K60 — assert-advisor-diversity. Catches the degenerate case where all 5
+# advisors return identical Recommendation (SKILL.md natural-tensions design
+# collapsed). Three states: collapsed → block, diverse → pass, fewer than 2
+# files → not applicable.
+K60_TMP=$(mktemp -d)
+mkdir -p "$K60_TMP/.devt/state"
+echo '{}' > "$K60_TMP/.devt/config.json"
+# State (a): 5 identical recommendations → block
+mkdir -p "$K60_TMP/collapsed"
+for i in 1 2 3 4 5; do
+  cat > "$K60_TMP/collapsed/advisor-$i.md" <<EOF_K60_COL
+## Options Considered
+- Option A
+- Option B
+
+## Recommendation
+Pick Option A and proceed with the standard approach.
+EOF_K60_COL
+done
+K60_COLLAPSED=$(cd "$K60_TMP" && node "$CLI" state assert-advisor-diversity collapsed 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+# State (b): 5 diverse recommendations → pass
+mkdir -p "$K60_TMP/diverse"
+for i in 1 2 3 4 5; do
+  cat > "$K60_TMP/diverse/advisor-$i.md" <<EOF_K60_DIV
+## Recommendation
+Approach $i: different reasoning chain $i
+EOF_K60_DIV
+done
+K60_DIVERSE=$(cd "$K60_TMP" && node "$CLI" state assert-advisor-diversity diverse 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K60_COLLAPSED" = "false" ] && [ "$K60_DIVERSE" = "true" ]; then
+  pass "K60: assert-advisor-diversity (5 identical → block | 5 different → pass)"
+else
+  fail "K60: diversity check misfired (collapsed=$K60_COLLAPSED diverse=$K60_DIVERSE)"
+fi
+rm -rf "$K60_TMP"
+
+# K61 — assert-council-budget soft-cap. Counts council-trace stage-4 emits
+# in the current workflow window (anchored at first_created_at). Default
+# budget = 1 per offramp §4 anti-pattern.
+K61_TMP=$(mktemp -d)
+mkdir -p "$K61_TMP/.devt/state"
+echo '{}' > "$K61_TMP/.devt/config.json"
+cat > "$K61_TMP/.devt/state/workflow.yaml" <<EOF_K61
+active: true
+workflow_id: test-wf-K61
+workflow_type: dev
+phase: clarify
+first_created_at: "2026-06-05T00:00:00Z"
+created_at: "2026-06-05T00:00:00Z"
+EOF_K61
+K61_ZERO=$(cd "$K61_TMP" && node "$CLI" state assert-council-budget --max-per-workflow=1 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+(cd "$K61_TMP" && node "$CLI" state council-trace stage-4 --slug=decision-1 >/dev/null 2>&1) || true
+K61_ONE=$(cd "$K61_TMP" && node "$CLI" state assert-council-budget --max-per-workflow=1 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+K61_TWO=$(cd "$K61_TMP" && node "$CLI" state assert-council-budget --max-per-workflow=2 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+if [ "$K61_ZERO" = "true" ] && [ "$K61_ONE" = "false" ] && [ "$K61_TWO" = "true" ]; then
+  pass "K61: assert-council-budget (0 → ok | 1+max=1 → block | 1+max=2 → ok)"
+else
+  fail "K61: budget gate misfired (zero=$K61_ZERO one=$K61_ONE two=$K61_TWO)"
+fi
+rm -rf "$K61_TMP"
+
+# K62 — arch-scan-trace 3-event emit with workflow_type enrichment.
+# Mirrors the council-trace observability pattern (K55) for arch scanner.
+K62_TMP=$(mktemp -d)
+mkdir -p "$K62_TMP/.devt/state"
+echo '{}' > "$K62_TMP/.devt/config.json"
+cat > "$K62_TMP/.devt/state/workflow.yaml" <<EOF_K62
+active: true
+workflow_id: test-wf-K62
+workflow_type: arch_health_scan
+phase: scan
+first_created_at: "2026-06-05T10:00:00Z"
+created_at: "2026-06-05T10:00:00Z"
+EOF_K62
+(cd "$K62_TMP" && node "$CLI" state arch-scan-trace scan-start --scan-id=K62 >/dev/null 2>&1) || true
+(cd "$K62_TMP" && node "$CLI" state arch-scan-trace scan-complete --scan-id=K62 --finding-count=12 --baseline-delta=3 >/dev/null 2>&1) || true
+(cd "$K62_TMP" && node "$CLI" state arch-scan-trace triage --scan-id=K62 --classification=fix-now >/dev/null 2>&1) || true
+K62_COUNT=$(awk '/"source":"arch_scan"/' "$K62_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | wc -l | tr -d ' ')
+K62_TYPE=$(awk '/"event":"scan-start"/{print}' "$K62_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | jq -r '.workflow_type' 2>/dev/null || echo "")
+K62_DELTA=$(awk '/"event":"scan-complete"/{print}' "$K62_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | jq -r '."baseline-delta"' 2>/dev/null || echo "")
+if [ "$K62_COUNT" = "3" ] && [ "$K62_TYPE" = "arch_health_scan" ] && [ "$K62_DELTA" = "3" ]; then
+  pass "K62: arch-scan-trace 3-event emit with workflow_type + metadata preservation"
+else
+  fail "K62: arch-scan-trace misfired (count=$K62_COUNT type=$K62_TYPE delta=$K62_DELTA)"
+fi
+rm -rf "$K62_TMP"
+
+# K63 — assert-arch-scan-fresh. Three states: missing report → ok:false |
+# fresh report → ok:true warn:false | stale report → ok:true warn:true.
+# Advisory-only gate by default (blocks only with --block flag).
+K63_TMP=$(mktemp -d)
+mkdir -p "$K63_TMP/.devt/state"
+echo '{}' > "$K63_TMP/.devt/config.json"
+K63_MISSING=$(cd "$K63_TMP" && node "$CLI" state assert-arch-scan-fresh 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
+echo "# Arch Scan Report" > "$K63_TMP/.devt/state/arch-scan-report.md"
+K63_FRESH=$(cd "$K63_TMP" && node "$CLI" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null | jq -r '.ok, .warn' 2>/dev/null | tr '\n' '|')
+# Set mtime back 48 hours
+touch -t 202605231000 "$K63_TMP/.devt/state/arch-scan-report.md" 2>/dev/null || true
+K63_STALE=$(cd "$K63_TMP" && node "$CLI" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null | jq -r '.ok, .warn' 2>/dev/null | tr '\n' '|')
+if [ "$K63_MISSING" = "false" ] && [ "$K63_FRESH" = "true|false|" ] && [ "$K63_STALE" = "true|true|" ]; then
+  pass "K63: assert-arch-scan-fresh 3-state (missing→fail | fresh→ok+no-warn | stale→ok+warn)"
+else
+  fail "K63: arch-scan-fresh misfired (missing=$K63_MISSING fresh=$K63_FRESH stale=$K63_STALE)"
+fi
+rm -rf "$K63_TMP"
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -2990,6 +2990,387 @@ function councilTrace(stage, args) {
   }
 }
 
+// Council A — re-run prevention (offramp §4 anti-pattern).
+// Checks whether a council transcript for the given decision slug already
+// exists in .devt/state/council-{slug}-{timestamp}.md form. When --cooldown-
+// days=N is set, only transcripts within the last N days count as "recent."
+// Council transcripts live at the project state ROOT (cross-instance) so
+// the cooldown is naturally shared across concurrent devt sessions.
+//
+// Returns ok:false when a transcript matches (blocks re-run by default);
+// caller can opt out by passing --warn (changes verdict to ok:true with
+// warn:true so workflow proceeds with a sentinel).
+function assertCouncilNotRecent(slug, args) {
+  if (!slug || typeof slug !== "string" || slug.length === 0) {
+    return { ok: false, reason: "missing slug argument (expected: <decision-slug>)" };
+  }
+  args = args || [];
+  const cooldownDays = parseInt(_getFlag(args, "--cooldown-days") || "0", 10);
+  const warnMode = args.includes("--warn");
+  const root = getStateRoot();
+  let entries = [];
+  try { entries = fs.readdirSync(root); } catch { return { ok: true, slug, reason: "no .devt/state/ root yet — no prior councils" }; }
+  // Match files matching council-<slug>-*.md exactly (anchored on hyphen
+  // boundary so similarly-prefixed slugs don't collide). The trailing
+  // timestamp segment can be any non-slash; the .md suffix is required.
+  const prefix = `council-${slug}-`;
+  const matches = entries.filter((f) => f.startsWith(prefix) && f.endsWith(".md"));
+  if (matches.length === 0) {
+    return { ok: true, slug, matched_count: 0, reason: `no prior council transcript with slug "${slug}"` };
+  }
+  // Optional cooldown filter — only count transcripts within the last N days.
+  let inWindow = matches;
+  if (cooldownDays > 0) {
+    const cutoffMs = Date.now() - cooldownDays * 86400 * 1000;
+    inWindow = matches.filter((f) => {
+      try {
+        const stat = fs.statSync(path.join(root, f));
+        return stat.mtimeMs >= cutoffMs;
+      } catch { return false; }
+    });
+    if (inWindow.length === 0) {
+      return { ok: true, slug, matched_count: 0, matches_outside_window: matches.length, cooldown_days: cooldownDays, reason: `${matches.length} prior transcript(s) found but all are older than ${cooldownDays} days — outside cooldown window` };
+    }
+  }
+  const verdict = warnMode ? { ok: true, warn: true } : { ok: false };
+  return {
+    ...verdict,
+    slug,
+    matched_count: inWindow.length,
+    matches: inWindow.map((f) => path.join(".devt", "state", f)),
+    cooldown_days: cooldownDays > 0 ? cooldownDays : null,
+    reason: `Prior council transcript(s) found for slug "${slug}": ${inWindow.join(", ")}. Surface the existing transcript instead of running a new council (offramp §4 anti-pattern: re-running wastes spend + risks contradictory verdicts). Pass --warn to proceed anyway with a sentinel.`,
+  };
+}
+
+// Council C — validation_material helper.
+// Takes paths and returns an annotated JSON array suitable for direct
+// inclusion in advisor prompts. Each entry has {path, exists, size_bytes?,
+// mtime?, content?}. Default mode emits EXISTS/MISSING tags only; with
+// --inline=true, file contents are returned so the council orchestrator
+// doesn't need to Read each file separately (token-economy win + closes
+// the SKILL.md Stage 1 prose-only "check existence and tag" rule).
+//
+// Path-safety: each path is resolved relative to project root; absolute
+// paths and ../ traversal are rejected.
+function councilValidationMaterial(args) {
+  args = args || [];
+  const inline = args.includes("--inline") || args.includes("--inline=true");
+  const maxBytes = parseInt(_getFlag(args, "--max-bytes-per-file") || "65536", 10);
+  // Positional args are paths; flags are filtered out.
+  const paths = args.filter((a) => !a.startsWith("--"));
+  if (paths.length === 0) {
+    return { ok: false, reason: "no paths provided" };
+  }
+  const root = findProjectRoot();
+  const results = [];
+  for (const p of paths) {
+    if (typeof p !== "string" || p.length === 0) continue;
+    // Reject path traversal — only project-relative paths allowed.
+    if (path.isAbsolute(p) || p.includes("..")) {
+      results.push({ path: p, exists: false, reason: "path rejected (absolute or contains ..)" });
+      continue;
+    }
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const abs = path.join(root, p);
+    if (!fs.existsSync(abs)) {
+      results.push({ path: p, exists: false });
+      continue;
+    }
+    let stat;
+    try { stat = fs.statSync(abs); }
+    catch (e) { results.push({ path: p, exists: false, reason: `stat failed: ${e.message}` }); continue; }
+    const entry = {
+      path: p,
+      exists: true,
+      size_bytes: stat.size,
+      mtime: new Date(stat.mtimeMs).toISOString(),
+    };
+    if (inline) {
+      try {
+        const content = fs.readFileSync(abs, "utf8");
+        entry.content = content.length > maxBytes
+          ? content.slice(0, maxBytes) + `\n[... truncated at ${maxBytes} bytes; original size ${stat.size} bytes ...]`
+          : content;
+        if (content.length > maxBytes) entry.truncated = true;
+      } catch (e) {
+        entry.read_error = e.message;
+      }
+    }
+    results.push(entry);
+  }
+  return { ok: true, inline, max_bytes_per_file: maxBytes, count: results.length, entries: results };
+}
+
+// Council advisor diversity check.
+// SKILL.md's "natural tensions" design depends on 5 advisors producing
+// DIFFERENT Recommendations. When all 5 converge on identical text, the
+// tensions weren't generated — either the prompt is too steering, the model
+// inheritance is too aligned, or the question doesn't actually have viable
+// alternatives. This gate detects the degenerate case and warns.
+//
+// Args:
+//   <responses-dir>   — directory containing 5 advisor response .md files
+//   --threshold=N     — number of identical Recommendations to trigger warn
+//                       (default 4 — 4-of-5 collapsed counts as collapsed)
+//
+// Returns ok:true with diversity_score; ok:false when collapse detected.
+function assertAdvisorDiversity(args) {
+  args = args || [];
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const dir = positional[0];
+  const threshold = parseInt(_getFlag(args, "--threshold") || "4", 10);
+  if (!dir || typeof dir !== "string") {
+    return { ok: false, reason: "missing responses-dir argument" };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const abs = path.isAbsolute(dir) ? dir : path.join(findProjectRoot(), dir);
+  if (!fs.existsSync(abs)) {
+    return { ok: false, reason: `responses dir not found: ${dir}` };
+  }
+  let entries = [];
+  try { entries = fs.readdirSync(abs).filter((f) => f.endsWith(".md")); }
+  catch (e) { return { ok: false, reason: `read failed: ${e.message}` }; }
+  if (entries.length < 2) {
+    return { ok: true, advisor_count: entries.length, reason: "fewer than 2 advisor responses — diversity check not applicable" };
+  }
+  // Extract the body of the "## Recommendation" section from each file.
+  // The section ends at the next "##" heading or end-of-file.
+  const recommendations = [];
+  for (const f of entries) {
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const content = fs.readFileSync(path.join(abs, f), "utf8");
+      const recMatch = content.match(/##\s+Recommendation\s*\n([\s\S]*?)(?=\n##\s|\n$|$)/i);
+      if (recMatch) {
+        // Normalize: lowercase, collapse whitespace, strip leading/trailing.
+        const normalized = recMatch[1].toLowerCase().replace(/\s+/g, " ").trim();
+        recommendations.push({ file: f, recommendation: normalized });
+      } else {
+        recommendations.push({ file: f, recommendation: null, missing_section: true });
+      }
+    } catch (e) {
+      recommendations.push({ file: f, error: e.message });
+    }
+  }
+  // Count identical Recommendations.
+  const counts = new Map();
+  for (const r of recommendations) {
+    if (r.recommendation === null || r.error) continue;
+    counts.set(r.recommendation, (counts.get(r.recommendation) || 0) + 1);
+  }
+  let maxCount = 0, dominantRec = null;
+  for (const [rec, n] of counts) {
+    if (n > maxCount) { maxCount = n; dominantRec = rec; }
+  }
+  const diversityScore = recommendations.length > 0 ? (counts.size / recommendations.length) : 0;
+  if (maxCount >= threshold) {
+    return {
+      ok: false,
+      advisor_count: recommendations.length,
+      max_identical: maxCount,
+      threshold,
+      diversity_score: parseFloat(diversityScore.toFixed(2)),
+      dominant_recommendation: dominantRec && dominantRec.slice(0, 200),
+      reason: `${maxCount} of ${recommendations.length} advisors returned identical Recommendation — natural-tensions design (Contrarian ⇄ Generalizer, First Principles ⇄ Pragmatist) didn't generate. Check: prompt steering, model alignment, or whether the question actually has viable alternatives. Surface this to the user before accepting the chairman verdict.`,
+    };
+  }
+  return {
+    ok: true,
+    advisor_count: recommendations.length,
+    max_identical: maxCount,
+    threshold,
+    diversity_score: parseFloat(diversityScore.toFixed(2)),
+    reason: `advisor diversity acceptable (${maxCount} of ${recommendations.length} identical; threshold ${threshold})`,
+  };
+}
+
+// Council L — soft-cap enforcement (offramp §4 anti-pattern).
+// Counts council stage-4 emits (one per completed council) in the current
+// workflow window via gate-trace.jsonl records written by councilTrace.
+// Returns ok:false when count >= max-per-workflow (default 1).
+//
+// The workflow window is anchored at workflow.yaml::first_created_at,
+// matching the per-workflow filtering used by assertClaimChecksResolved.
+function assertCouncilBudget(args) {
+  args = args || [];
+  const max = parseInt(_getFlag(args, "--max-per-workflow") || "1", 10);
+  const dir = getStateDir();
+  // Anchor on workflow.yaml::first_created_at to scope the count to the
+  // current workflow window. Without an anchor, all prior records would
+  // count and the gate would always block.
+  let anchorMs = 0;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      const yaml = fs.readFileSync(wfPath, "utf8");
+      const m = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+      if (m) {
+        const parsed = new Date(m[1].trim()).getTime();
+        if (Number.isFinite(parsed)) anchorMs = parsed;
+      }
+    }
+  } catch { /* no anchor — gate auto-passes */ }
+  if (anchorMs === 0) {
+    return { ok: true, count: 0, max, reason: "workflow.yaml::first_created_at absent — no anchor for windowing; gate inapplicable" };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const tracePath = path.join(dir, "gate-trace.jsonl");
+  if (!fs.existsSync(tracePath)) {
+    return { ok: true, count: 0, max, reason: "no gate-trace.jsonl in window — zero councils run" };
+  }
+  let count = 0;
+  try {
+    const lines = fs.readFileSync(tracePath, "utf8").split("\n");
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.source !== "council") continue;
+        if (rec.stage !== "stage-4") continue; // stage-4 = chairman = completed council
+        if (!rec.ts) continue;
+        if (new Date(rec.ts).getTime() < anchorMs) continue;
+        count += 1;
+      } catch { /* malformed line — skip */ }
+    }
+  } catch { /* read failure — count stays 0 */ }
+  if (count >= max) {
+    return {
+      ok: false,
+      count,
+      max,
+      reason: `${count} council(s) already completed in this workflow window — soft-cap is ${max} per offramp §4 anti-pattern (cumulative time + fatigue). Surface deferred decisions or strategic-analysis prompts instead of running another council. Override with --max-per-workflow=<higher-N> if the case genuinely warrants.`,
+    };
+  }
+  return {
+    ok: true,
+    count,
+    max,
+    reason: `${count} of ${max} council budget used in this workflow window`,
+  };
+}
+
+// Arch scanner observability — gate-trace.jsonl entries for arch-health-scan
+// events. Mirrors the council-trace pattern: each significant scan event
+// emits one record with workflow_id/workflow_type/phase enrichment so cal
+// cycles can measure scanner usage patterns (detector firing rates, finding
+// counts over time, false-positive trends).
+//
+// Usage:
+//   state arch-scan-trace scan-start --scan-id=<id> [--scanner=<cmd>]
+//   state arch-scan-trace scan-complete --scan-id=<id> --finding-count=N
+//                                       [--severity-dist=JSON]
+//                                       [--baseline-delta=N]
+//   state arch-scan-trace triage --scan-id=<id> --classification=<class>
+//
+// All --flag=value args land in the record verbatim; future event shapes
+// extend without a CLI change.
+function archScanTrace(event, args) {
+  if (!event || typeof event !== "string") {
+    return { ok: false, reason: "missing event argument (expected: scan-start | scan-complete | triage | <other>)" };
+  }
+  args = args || [];
+  const meta = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      if (eq > 2) {
+        meta[a.slice(2, eq)] = a.slice(eq + 1);
+      } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+        meta[a.slice(2)] = args[++i];
+      }
+    }
+  }
+  try {
+    const dir = getStateDir();
+    let workflowId = null, workflowType = null, phase = null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      try {
+        const yaml = fs.readFileSync(wfPath, "utf8");
+        const idMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+        if (idMatch) workflowId = idMatch[1].trim();
+        const typeMatch = yaml.match(/^workflow_type:\s*"?([^"\n]+)"?\s*$/m);
+        if (typeMatch) workflowType = typeMatch[1].trim();
+        const phaseMatch = yaml.match(/^phase:\s*"?([^"\n]+)"?\s*$/m);
+        if (phaseMatch) phase = phaseMatch[1].trim();
+      } catch { /* enrichment best-effort */ }
+    }
+    const record = JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "arch_scan",
+      event,
+      ...meta,
+      workflow_id: workflowId,
+      workflow_type: workflowType,
+      phase,
+    });
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    fs.appendFileSync(path.join(dir, "gate-trace.jsonl"), record + "\n");
+    return { ok: true, event, meta, workflow_id: workflowId, workflow_type: workflowType, phase, reason: `arch-scan-trace event=${event} recorded` };
+  } catch (e) {
+    return { ok: false, event, reason: `trace append failed: ${e.message}` };
+  }
+}
+
+// Arch scanner freshness check — closes the cal #19 §9 Surprise 3 pattern
+// ("23 subcommands but only 8 used by workflows"). When wired into
+// /devt:review's context_init, surfaces a [STALE-ARCH-SCAN] sentinel if the
+// arch-scan-report.md is older than --max-age-hours (default 24) — orchestrator
+// can decide whether to surface to user or proceed silently.
+//
+// Returns ok:true + warn:true on stale; ok:true + warn:false on fresh; ok:false
+// only on missing report (advisory-only gate by default).
+function assertArchScanFresh(args) {
+  args = args || [];
+  const maxAgeHours = parseInt(_getFlag(args, "--max-age-hours") || "24", 10);
+  const blockOnStale = args.includes("--block");
+  // arch-scan-report.md is workflow-output but currently written to the
+  // legacy state root by the python-fastapi convention. Check BOTH the
+  // per-instance dir (where future runs may write) and the legacy root.
+  const candidates = [
+    path.join(getStateDir(), "arch-scan-report.md"),
+    path.join(getStateRoot(), "arch-scan-report.md"),
+  ];
+  let reportPath = null;
+  for (const p of candidates) {
+    if (fs.existsSync(p)) { reportPath = p; break; }
+  }
+  if (!reportPath) {
+    return {
+      ok: false,
+      reason: "arch-scan-report.md not found in either per-instance dir or legacy root — no arch scan has run for this project. Suggest /devt:arch-health before review.",
+    };
+  }
+  let mtime;
+  try { mtime = fs.statSync(reportPath).mtimeMs; }
+  catch (e) { return { ok: false, reason: `stat failed: ${e.message}` }; }
+  const ageHours = (Date.now() - mtime) / (1000 * 3600);
+  const fresh = ageHours <= maxAgeHours;
+  if (!fresh && blockOnStale) {
+    return {
+      ok: false,
+      report_path: reportPath,
+      age_hours: parseFloat(ageHours.toFixed(1)),
+      max_age_hours: maxAgeHours,
+      reason: `arch-scan-report.md is ${ageHours.toFixed(1)}h old (limit ${maxAgeHours}h with --block). Re-run /devt:arch-health before review.`,
+    };
+  }
+  return {
+    ok: true,
+    warn: !fresh,
+    report_path: reportPath,
+    age_hours: parseFloat(ageHours.toFixed(1)),
+    max_age_hours: maxAgeHours,
+    reason: fresh
+      ? `arch-scan-report.md fresh (${ageHours.toFixed(1)}h old, limit ${maxAgeHours}h)`
+      : `arch-scan-report.md is ${ageHours.toFixed(1)}h old (advisory — exceeds ${maxAgeHours}h fresh window). Review may miss recent architectural drift; consider /devt:arch-health refresh.`,
+  };
+}
+
 // Multi-instance state isolation — instance management CLIs.
 //
 // newInstance(): generates a fresh 8-character hex ID (truncated UUID v4),
@@ -4050,6 +4431,18 @@ function run(subcommand, args) {
       return traceGate("assert-lanes-quiesced", () => assertLanesQuiesced());
     case "council-trace":
       return councilTrace(args[0], args.slice(1));
+    case "assert-council-not-recent":
+      return traceGate("assert-council-not-recent", () => assertCouncilNotRecent(args[0], args.slice(1)));
+    case "council-validation-material":
+      return councilValidationMaterial(args);
+    case "assert-advisor-diversity":
+      return assertAdvisorDiversity(args);
+    case "assert-council-budget":
+      return traceGate("assert-council-budget", () => assertCouncilBudget(args));
+    case "arch-scan-trace":
+      return archScanTrace(args[0], args.slice(1));
+    case "assert-arch-scan-fresh":
+      return traceGate("assert-arch-scan-fresh", () => assertArchScanFresh(args));
     case "new-instance":
       return newInstance(args);
     case "list-instances":
@@ -4073,7 +4466,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

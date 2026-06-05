@@ -124,6 +124,20 @@ When `god_node_match=true`, the agent sees a structured warning ("you're about t
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 ```
 
+**Arch-scan freshness advisory.** Check whether an arch-scan-report.md is available and how recent it is. Advisory-only by default — surfaces a `[STALE-ARCH-SCAN]` sentinel if the report is older than 24h so the reviewer can decide whether to refresh before reviewing structural changes. Closes the cal #19 §9 Surprise 3 pattern (state subcommands available but not wired into workflows):
+
+```bash
+ARCH_FRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null || echo '{}')
+if [ "$(echo "$ARCH_FRESH" | jq -r '.warn // false')" = "true" ]; then
+  echo "[STALE-ARCH-SCAN] $(echo "$ARCH_FRESH" | jq -r '.reason')"
+fi
+if [ "$(echo "$ARCH_FRESH" | jq -r '.ok // false')" != "true" ]; then
+  echo "[ARCH-SCAN-MISSING] $(echo "$ARCH_FRESH" | jq -r '.reason')"
+fi
+```
+
+If the diff under review touches files that arch-scan has flagged (cross-reference arch-scan-report.md::findings vs the review's `scope_files`), surface the overlap explicitly to the reviewer — known architectural drift in the review's scope is a strong signal worth elevating.
+
 ### Substep 5: Compute the Graphify impact-plan
 
 **Compute the Graphify impact-map plan.** This bash step decides which tier the orchestrator MUST execute next. It writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.

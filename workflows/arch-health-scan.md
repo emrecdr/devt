@@ -123,6 +123,13 @@ test -f .devt/state/arch-triage.json && echo "TRIAGE_EXISTS" || echo "NO_TRIAGE"
 
 <step name="run_scanner" gate="scanner output is captured (or skipped if no scanner)">
 
+**Observability emit (before scanner runs).** Append a scan-start record to gate-trace.jsonl so cal cycles can measure scanner usage patterns:
+
+```bash
+SCAN_ID="$(date +%Y%m%d-%H%M%S)"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state arch-scan-trace scan-start --scan-id="$SCAN_ID" --scanner="$SCANNER_COMMAND" >/dev/null
+```
+
 **If a scanner command is configured**: Execute it and capture the output.
 
 ```bash
@@ -130,6 +137,20 @@ $SCANNER_COMMAND 2>&1 | tee .devt/state/scanner-output.txt
 ```
 
 Capture the exit code. Even if the scanner reports findings (non-zero exit), continue to the architect step — the architect will interpret the results.
+
+**Observability emit (after scanner completes).** Compute finding count + baseline delta from the scanner output JSON when available, then trace:
+
+```bash
+if [ -f .devt/state/arch-scan-report.md ]; then
+  # Best-effort finding count from the report's "## Findings (N)" header
+  FINDING_COUNT=$(grep -oE 'Findings \([0-9]+\)' .devt/state/arch-scan-report.md | grep -oE '[0-9]+' | head -1)
+  FINDING_COUNT="${FINDING_COUNT:-0}"
+  # Baseline delta from arch-baseline.json + scan-delta.md if both present
+  BASELINE_DELTA="${BASELINE_DELTA:-0}"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state arch-scan-trace scan-complete \
+    --scan-id="$SCAN_ID" --finding-count="$FINDING_COUNT" --baseline-delta="$BASELINE_DELTA" >/dev/null
+fi
+```
 
 If the scanner command fails to execute (command not found, permission denied), report the error and fall through to manual analysis by the architect.
 

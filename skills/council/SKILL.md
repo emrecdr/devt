@@ -134,12 +134,39 @@ question, then proceed.
 
 ### Stage 2 — Convene the council (5 advisors in parallel)
 
-**Observability emit (before the Task batch).** Append a council-trace record so
-calibration cycles can measure council usage:
+**Pre-dispatch mechanical gates.** Before the Task batch, run three guards in sequence:
 
 ```bash
+# Re-run prevention (offramp §4 anti-pattern). Blocks if a transcript for this
+# slug already exists at the project state root. Pass --warn to proceed anyway.
+RECENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-not-recent "<derived-slug>")
+if [ "$(echo "$RECENT" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] $(echo "$RECENT" | jq -r '.reason')"
+  # Surface existing transcripts and exit unless user opts in.
+fi
+
+# Soft-cap (offramp §4 anti-pattern). Default max 1 council per workflow window.
+BUDGET=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-budget --max-per-workflow=1)
+if [ "$(echo "$BUDGET" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] $(echo "$BUDGET" | jq -r '.reason')"
+fi
+
+# Observability emit. Cal cycles measure council usage via gate-trace.jsonl.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-2 --slug="<derived-slug>" >/dev/null
 ```
+
+**Validation_material mechanical helper.** Instead of manually reading each path and tagging EXISTS/MISSING, use the CLI helper to get the annotated list (with optional inline contents for direct prompt injection):
+
+```bash
+# Returns JSON array: [{path, exists, size_bytes?, mtime?, content?}]
+# --inline=true mode embeds file contents (saves Read calls in the advisor prompt)
+VALIDATION_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-validation-material \
+  .devt/rules/architecture.md .devt/rules/coding-standards.md .devt/rules/golden-rules.md \
+  .devt/state/research.md .devt/state/decisions.md .devt/state/spec.md \
+  --inline)
+```
+
+Pass the JSON verbatim into each advisor prompt's "Validation material available" block — replaces the prose-only "check existence and tag EXISTS/MISSING" instruction with a mechanical contract.
 
 Dispatch all 5 advisors **in a single Task tool batch** — sequential dispatch wastes
 time and risks earlier responses bleeding into later ones. This is the most common
@@ -296,6 +323,18 @@ preferred thinking style instead of evaluating on merit. Anonymization is the
 load-bearing mechanic of Karpathy's design — do not skip it.
 
 ### Stage 4 — Chairman synthesis
+
+**Advisor diversity gate (before chairman dispatch).** Verifies the 5 advisor responses didn't collapse into identical Recommendations — if they did, the natural-tensions design (Contrarian ⇄ Generalizer, First Principles ⇄ Pragmatist) didn't generate and chairman synthesis produces noise. Write the 5 advisor responses to a temp dir first, then check:
+
+```bash
+DIVERSITY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-advisor-diversity /tmp/council-advisors-${COUNCIL_ID})
+if [ "$(echo "$DIVERSITY" | jq -r '.ok')" != "true" ]; then
+  echo "[DIVERSITY-WARN] $(echo "$DIVERSITY" | jq -r '.reason')"
+  # Surface to user — chairman synthesis may amplify noise. Options: re-dispatch
+  # with mixed-models, narrow the question to actual viable alternatives, or
+  # proceed and let the chairman flag the collapse explicitly.
+fi
+```
 
 **Observability emit (before the chairman dispatch).**
 
