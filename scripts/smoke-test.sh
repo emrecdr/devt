@@ -10963,6 +10963,60 @@ else
 fi
 rm -rf "$K68_TMP"
 
+# K69 — setup --template rust. Verifies the rust template is registered in
+# AVAILABLE_TEMPLATES and `setup --template rust` produces the 6 canonical
+# rules files at .devt/rules/. Mirrors what other templates ship; without
+# this gate a typo in setup.cjs::AVAILABLE_TEMPLATES would only surface to
+# end users when they ran setup.
+K69_TMP=$(mktemp -d)
+(cd "$K69_TMP" && node "$CLI" setup --template rust --mode create >/dev/null 2>&1) || true
+K69_FILES=0
+for f in coding-standards.md architecture.md quality-gates.md golden-rules.md review-checklist.md testing-patterns.md; do
+  if [ -s "$K69_TMP/.devt/rules/$f" ]; then
+    K69_FILES=$((K69_FILES + 1))
+  fi
+done
+K69_CANON=0
+if [ -s "$K69_TMP/.devt/rules/canonical-entities.yaml" ]; then
+  K69_CANON=1
+fi
+if [ "$K69_FILES" = "6" ] && [ "$K69_CANON" = "1" ]; then
+  pass "K69: setup --template rust scaffolds 6 .md files + canonical-entities.yaml"
+else
+  fail "K69: setup --template rust missing files (md=$K69_FILES/6 canon=$K69_CANON)"
+fi
+rm -rf "$K69_TMP"
+
+# K70 — template-shape consistency. Walks every template registered in
+# bin/modules/setup.cjs::AVAILABLE_TEMPLATES and asserts each ships the 9
+# baseline files (8 .md at top level + patterns/common-smells.md). Closes
+# the structural gap that K69 (and earlier per-template gates) leave open:
+# a new template can silently omit standard files. The baseline is what the
+# 'blank' template ships, since blank IS the canonical empty shape.
+# Templates may ship MORE than the baseline (e.g. python-fastapi's hurl-*
+# files, rust's canonical-entities.yaml) — extra files are fine. The gate
+# only flags missing baseline files.
+TEMPLATES_ROOT="$(dirname "$CLI")/../templates"
+K70_BASELINE="architecture.md coding-standards.md documentation.md git-workflow.md golden-rules.md quality-gates.md review-checklist.md testing-patterns.md patterns/common-smells.md"
+# Read AVAILABLE_TEMPLATES from setup.cjs source (not via Node — keep gate
+# self-contained + fail-fast if the structure changes).
+K70_TEMPLATES=$(node -e "process.stdout.write(require('$(dirname "$CLI")/modules/setup.cjs').AVAILABLE_TEMPLATES.join(' '))" 2>/dev/null)
+K70_MISSING_TOTAL=0
+K70_MISSING_REPORT=""
+for tpl in $K70_TEMPLATES; do
+  for f in $K70_BASELINE; do
+    if [ ! -s "$TEMPLATES_ROOT/$tpl/$f" ]; then
+      K70_MISSING_TOTAL=$((K70_MISSING_TOTAL + 1))
+      K70_MISSING_REPORT="$K70_MISSING_REPORT $tpl/$f"
+    fi
+  done
+done
+if [ "$K70_MISSING_TOTAL" = "0" ]; then
+  pass "K70: template-shape consistency — all AVAILABLE_TEMPLATES ship the 9-file baseline"
+else
+  fail "K70: template-shape drift — $K70_MISSING_TOTAL missing:$K70_MISSING_REPORT"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

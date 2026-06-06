@@ -183,7 +183,7 @@ One-time setup for a new project. Scaffolds `.devt/rules/` with project conventi
 
 **What happens:**
 
-1. Asks which template: `python-fastapi`, `go`, `typescript-node`, `vue-bootstrap`, `blank` (language-agnostic defaults)
+1. Asks which template: `python-fastapi`, `go`, `typescript-node`, `vue-bootstrap`, `rust`, `blank` (language-agnostic defaults)
 2. Asks for project metadata: git provider, workspace, branch name
 3. Copies template files to `.devt/rules/`
 4. Creates `.devt/config.json`, `.devt/state/`, `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`

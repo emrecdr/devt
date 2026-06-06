@@ -401,7 +401,7 @@ Version is tracked in both `plugin.json` and `VERSION` file. **`plugin.json` is 
 
 ## Templates
 
-Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, blank) provide `.devt/rules/` scaffolding files:
+Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank) provide `.devt/rules/` scaffolding files:
 
 | Template file | Purpose |
 |---|---|

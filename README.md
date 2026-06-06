@@ -136,7 +136,7 @@ Captures ⚖️ (decisions) and 🔵 (insights) tags during sessions. devt's dis
 /devt:init
 ```
 
-Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/config.json`. devt auto-detects your stack and selects the matching template (python-fastapi, go, typescript-node, vue-bootstrap, or blank). The wizard pitches optional integrations and confirms detected primary branch. Declining still produces a fully working install.
+Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/config.json`. devt auto-detects your stack and selects the matching template (python-fastapi, go, typescript-node, vue-bootstrap, rust, or blank). The wizard pitches optional integrations and confirms detected primary branch. Declining still produces a fully working install.
 
 **Your first workflow:**
 
@@ -853,7 +853,7 @@ devt/
   guardrails/            Protective guidelines
   references/            Technique libraries (questioning guide, domain probes, council offramp)
   scripts/               smoke-test.sh, test-locking.cjs, extract-changelog.sh
-  templates/             Project templates (python-fastapi, go, typescript-node, vue-bootstrap, blank)
+  templates/             Project templates (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank)
                          + memory/ (ADR/CON/FLOW/REJ/LES frontmatter scaffolds)
   .github/workflows/     CI: smoke-test on Node 22/24, version coherence,
                          CHANGELOG coverage, tag-driven GitHub releases

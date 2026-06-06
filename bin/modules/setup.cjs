@@ -46,6 +46,7 @@ const AVAILABLE_TEMPLATES = [
   "go",
   "typescript-node",
   "vue-bootstrap",
+  "rust",
   "blank",
 ];
 
