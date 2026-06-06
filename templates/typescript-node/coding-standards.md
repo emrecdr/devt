@@ -2,18 +2,121 @@
 
 ## Language & Runtime
 
-- TypeScript 5+ with strict mode enabled
+- TypeScript 5.2+ (5.4+ recommended) with strict mode enabled
 - `strict: true` in `tsconfig.json` — non-negotiable
-- Node.js LTS version
-- ESM modules preferred (`"type": "module"` in package.json)
+- Node.js current LTS (22+ recommended)
+- ESM modules required (`"type": "module"` in `package.json`) — CommonJS only for legacy interop
+
+## Built-in Node APIs (Node 22+)
+
+Modern Node projects use first-party features instead of reaching for dependencies:
+
+- **`node:` prefix imports** (required for clarity):
+  ```typescript
+  import { readFile } from "node:fs/promises"   // ✓ explicit, future-proof
+  import { readFile } from "fs/promises"        // ✗ ambiguous with bare-specifier resolution
+  ```
+- **`node --test`** — built-in test runner (stable since 18, recommended over Jest for greenfield)
+- **`node --watch`** — built-in file watcher (replaces `nodemon` for most uses)
+- **`node --env-file=.env`** — built-in env loader (replaces `dotenv` for most uses; Node 20.6+)
+- **`AsyncLocalStorage`** (`node:async_hooks`) — request-scoped context without prop-drilling
+- **`AbortSignal.timeout(ms)`** — built-in cancellation; pass to `fetch`, streams, etc.
+- **`structuredClone(value)`** — built-in deep clone; replaces `JSON.parse(JSON.stringify(...))` and `lodash.cloneDeep`
+- **`crypto.randomUUID()`** — built-in UUID v4
 
 ## Type Safety
 
 - No `any` — use `unknown` with type guards or proper generics
 - Explicit return types on all exported functions
-- Prefer `interface` over `type` for object shapes (better error messages, extendable)
+- Prefer `interface` over `type` for object shapes (better error messages, extendable via declaration merging)
+- `type` for unions, intersections, mapped + conditional types — situations interfaces can't express
 - Use discriminated unions for state machines and variants
-- Zod or similar for runtime validation at boundaries (API input, env vars)
+- Zod, valibot, or `@effect/schema` for runtime validation at boundaries (API input, env vars, JSON config)
+
+## Modern TypeScript Idioms
+
+### `satisfies` operator (TS 4.9+)
+
+Constrain a value's shape WITHOUT widening its type:
+
+```typescript
+// WRONG — type is widened to Record<string, string>, loses literal info
+const routes: Record<string, string> = {
+  home: "/",
+  user: "/users/:id",
+}
+
+// CORRECT — `satisfies` validates shape, preserves the literal type
+const routes = {
+  home: "/",
+  user: "/users/:id",
+} satisfies Record<string, string>
+
+// routes.home is `"/"`, not `string` — usable in template-literal types
+```
+
+### `using` declarations + `AsyncDisposable` (TS 5.2+)
+
+Deterministic resource cleanup without try/finally boilerplate:
+
+```typescript
+class DatabaseTransaction implements AsyncDisposable {
+  async [Symbol.asyncDispose]() {
+    await this.commit()
+  }
+}
+
+async function transfer(amount: number) {
+  await using tx = new DatabaseTransaction()
+  await tx.debit(amount)
+  await tx.credit(amount)
+  // tx.commit() runs automatically at end of scope, even on throw
+}
+```
+
+Use for: database connections, file handles, lock acquisitions, span ends. Requires `target: "es2022"` + `lib: ["esnext.disposable"]`.
+
+### Const type parameters (TS 5.0+)
+
+Preserve literal types in generic functions:
+
+```typescript
+// WITHOUT const — T is inferred as string
+function first<T>(arr: T[]): T | undefined { return arr[0] }
+first(["a", "b", "c"])  // T = string
+
+// WITH const — T is inferred as the literal union
+function first<const T>(arr: T[]): T | undefined { return arr[0] }
+first(["a", "b", "c"])  // T = "a" | "b" | "c"
+```
+
+### `NoInfer<T>` utility type (TS 5.4+)
+
+Disable inference for specific generic positions:
+
+```typescript
+function createState<T>(initial: T, validator: (value: NoInfer<T>) => boolean) { ... }
+
+createState("hello", (value) => value.length > 0)
+// `value` is `string` (inferred from initial), not contaminated by validator's narrower type
+```
+
+### Branded types (newtype pattern)
+
+Prevent primitive ID confusion at compile time:
+
+```typescript
+type UserId = string & { readonly __brand: "UserId" }
+type OrderId = string & { readonly __brand: "OrderId" }
+
+function findUser(id: UserId): Promise<User> { ... }
+function findOrder(id: OrderId): Promise<Order> { ... }
+
+declare const u: UserId
+findOrder(u)  // ❌ compile error — cannot pass UserId where OrderId expected
+```
+
+Construct via a validating factory: `function userId(s: string): UserId { ... }`.
 
 ## Naming Conventions
 
@@ -35,6 +138,21 @@
 - Always handle errors in async code (try/catch or .catch())
 - Use `Promise.all()` for independent concurrent operations
 - Use `Promise.allSettled()` when partial failure is acceptable
+- Use `AbortSignal.timeout(ms)` for cancellation; pass to `fetch`, streams, sub-tasks
+- Use `AbortSignal.any([s1, s2])` to combine cancellation signals from multiple sources
+- `AsyncLocalStorage` for request-scoped context (trace IDs, tenant IDs, user identity) — avoid prop-drilling through every function signature
+
+## Top-Level Await
+
+ESM allows `await` at module top level. Use for resource-init that must complete before first import:
+
+```typescript
+// db.ts
+const url = process.env.DATABASE_URL ?? throwError("DATABASE_URL missing")
+export const db = await connectToDatabase(url)  // module evaluation blocks until ready
+```
+
+Avoid for non-deterministic work (HTTP fetches, dynamic config) — slows every module-load on cold start.
 
 ## Exports
 

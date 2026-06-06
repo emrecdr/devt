@@ -2,10 +2,56 @@
 
 ## Frameworks
 
-- **Unit tests**: Jest or Vitest (Vitest preferred for ESM projects)
+- **Unit tests**: `node --test` (Node 18+ built-in, recommended for greenfield), Vitest (best ESM/Vite story), or Jest (legacy, large ecosystem)
 - **E2E tests**: Playwright (browser), Supertest (API)
 - **API mocking**: MSW (Mock Service Worker) for intercepting HTTP at network level
-- **Assertions**: Built-in matchers from test framework
+- **Assertions**: Built-in matchers from test framework, or `node:assert` for `node --test`
+
+### Choosing a Unit-Test Runner
+
+| Runner | Choose when |
+|---|---|
+| `node --test` | Greenfield Node 20+ project; minimize deps; ESM-native; `node:assert` is enough |
+| Vitest | Existing Vite project; need richer matchers; need watch mode with HMR; need browser-like JSDOM |
+| Jest | Existing Jest codebase; CommonJS legacy; need `jest.mock()` ecosystem |
+
+`node --test` produces TAP output by default; `--test-reporter=spec` gives human-readable output, `--test-reporter=junit` for CI.
+
+### node:test Quick Reference
+
+```typescript
+import { test, describe, before, after } from "node:test"
+import assert from "node:assert/strict"
+
+describe("UserService", () => {
+  let service: UserService
+
+  before(async () => {
+    service = await UserService.create()
+  })
+
+  test("rejects empty email", () => {
+    assert.equal(service.validate(""), false)
+  })
+
+  test("accepts valid email", async (t) => {
+    await t.test("with single dot", () => assert.ok(service.validate("a@b.c")))
+    await t.test("with subdomain", () => assert.ok(service.validate("a@b.c.d")))
+  })
+})
+```
+
+Run:
+
+```bash
+node --test                          # discover *.test.ts in cwd
+node --test --watch                  # rerun on file changes
+node --test --test-only              # only tests marked `{ only: true }`
+node --test --experimental-test-coverage   # built-in coverage (Node 22+)
+node --test --test-name-pattern="user"     # filter by name
+```
+
+TypeScript: register a loader (`tsx`, `ts-node/esm`, or `tsimp`) via `NODE_OPTIONS="--import tsx"` or run pre-compiled JS from `dist/`.
 
 ## File Naming & Organization
 
