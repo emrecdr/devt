@@ -83,7 +83,7 @@ When adding a new workflow that sets `active=true`, add its `workflow_type` to `
 
 ### Templates
 
-Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank) provide `.devt/rules/` scaffolding files: `coding-standards.md`, `testing-patterns.md`, `quality-gates.md`, `architecture.md`, `review-checklist.md`, and optional `documentation.md`, `git-workflow.md`, `golden-rules.md`, `api-changelog.md`, `patterns/common-smells.md`. Authoring templates for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
+Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank) provide `.devt/rules/` scaffolding files. The 9-file baseline (`architecture.md`, `coding-standards.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `quality-gates.md`, `review-checklist.md`, `testing-patterns.md`, `patterns/common-smells.md`) is enforced by smoke gate K70 — every template registered in `bin/modules/setup.cjs::AVAILABLE_TEMPLATES` MUST ship all 9. Optional add-ons vary per template's domain: `api-changelog.md` (HTTP-API-serving templates), `canonical-entities.yaml` (entity-aware projects), `arch-scan.py` + `detectors/` (Python arch-scanner). Authoring templates for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
 
 ## Development Commands
 

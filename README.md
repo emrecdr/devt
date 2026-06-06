@@ -356,16 +356,21 @@ Skills inject into agents at dispatch time based on `skill-index.yaml` (or `.dev
 
 Every devt-configured project gets a `.devt/rules/` directory containing project-specific rules that agents read at execution time. This keeps the plugin generic while giving agents deep project knowledge.
 
-**Required files:**
+**Baseline files** (every devt template ships all 9; enforced by smoke gate K70):
 
-| File                  | Purpose                                                |
-| --------------------- | ------------------------------------------------------ |
-| `coding-standards.md` | Language conventions, naming, formatting, import rules |
-| `testing-patterns.md` | Test framework, patterns, coverage expectations        |
-| `quality-gates.md`    | Lint, typecheck, test commands and pass criteria       |
-| `architecture.md`     | Layer structure, dependency rules, module boundaries   |
+| File                       | Purpose                                                |
+| -------------------------- | ------------------------------------------------------ |
+| `architecture.md`          | Layer structure, dependency rules, module boundaries   |
+| `coding-standards.md`      | Language conventions, naming, formatting, import rules |
+| `documentation.md`         | Docs conventions (godoc/TSDoc/rustdoc/sphinx)          |
+| `git-workflow.md`          | Branch + commit conventions, PR template               |
+| `golden-rules.md`          | Project-specific non-negotiables                       |
+| `quality-gates.md`         | Lint, typecheck, test commands and pass criteria       |
+| `review-checklist.md`      | Code review priorities                                 |
+| `testing-patterns.md`      | Test framework, patterns, coverage expectations        |
+| `patterns/common-smells.md`| Project-specific anti-patterns                         |
 
-**Optional:** `review-checklist.md`, `api-changelog.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `patterns/common-smells.md`.
+**Optional add-ons** (vary per template's domain): `api-changelog.md` (HTTP-API-serving templates), `canonical-entities.yaml` (entity-aware projects with newtype/enum drift detection), `arch-scan.py` + `detectors/` (Python arch-scanner shipped with python-fastapi).
 
 Run `/devt:init` to generate these from a template matched to your stack.
 

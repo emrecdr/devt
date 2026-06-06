@@ -405,16 +405,20 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 
 | Template file | Purpose |
 |---|---|
-| `coding-standards.md` | Naming, style, structural conventions |
-| `testing-patterns.md` | Test framework + structure |
-| `quality-gates.md` | Exact validation commands |
 | `architecture.md` | Layer boundaries, dependency rules |
+| `coding-standards.md` | Naming, style, structural conventions |
+| `documentation.md` | Docs conventions (godoc/TSDoc/rustdoc/sphinx) |
+| `git-workflow.md` | Branch / commit conventions |
+| `golden-rules.md` | Project-specific golden rules |
+| `quality-gates.md` | Exact validation commands |
 | `review-checklist.md` | Code review priorities |
-| `documentation.md` (optional) | Docs conventions |
-| `git-workflow.md` (optional) | Branch / commit conventions |
-| `golden-rules.md` (optional) | Project-specific golden rules |
-| `api-changelog.md` (optional) | API change log conventions |
-| `patterns/common-smells.md` (optional) | Project-specific anti-patterns |
+| `testing-patterns.md` | Test framework + structure |
+| `patterns/common-smells.md` | Project-specific anti-patterns |
+| `api-changelog.md` (optional) | API change log conventions (HTTP-API templates) |
+| `canonical-entities.yaml` (optional) | Canonical entity registry for arch-scanner |
+| `arch-scan.py` + `detectors/` (optional) | Project-specific architecture scanner |
+
+The 9-file baseline (architecture, coding-standards, documentation, git-workflow, golden-rules, quality-gates, review-checklist, testing-patterns, patterns/common-smells) is enforced by smoke gate K70 — every template registered in `bin/modules/setup.cjs::AVAILABLE_TEMPLATES` MUST ship all 9. Optional files vary per template's domain: `api-changelog.md` ships with python-fastapi/go/typescript-node (HTTP-API-serving); `canonical-entities.yaml` ships with python-fastapi/rust (entity-aware projects); `arch-scan.py` + `detectors/` ship only with python-fastapi (the canonical Python scanner).
 
 **Authoring templates** for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
 
