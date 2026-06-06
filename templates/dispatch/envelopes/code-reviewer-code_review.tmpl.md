@@ -12,6 +12,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
+    <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed blast radius + caller set for the changed symbols. Use as the high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. When absent, .devt/state/graphify-skip-reason.txt explains why. Your tool surface does not include `mcp__*graphify*`, so consume the data already present rather than issuing graph queries.</graph_impact>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
     <!-- Inline rubric body from init payload — reviewer self-checks against
          the same axes the verifier will grade, reducing verifier-revision
