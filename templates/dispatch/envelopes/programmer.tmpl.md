@@ -16,6 +16,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <memory_signal>{memory_signal_json}</memory_signal>
 <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed blast radius + caller set for the central symbol(s) of this task. When absent, .devt/state/graphify-skip-reason.txt explains why and grep-based investigation is the fallback. This file is orchestrator-mediated MCP output; your tool surface does not include `mcp__*graphify*`, so consume the data already present rather than issuing graph queries.</graph_impact>
     <!-- STANDARD+: include scan_results and plan -->
 <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>

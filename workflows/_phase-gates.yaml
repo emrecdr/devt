@@ -70,3 +70,9 @@ workflow_types:
       gates:
         - assert-claim-checks-resolved
         - assert-no-raw-dispatches-this-session
+
+  docs:
+    complete:
+      gates:
+        - assert-claim-checks-resolved
+        - assert-no-raw-dispatches-this-session

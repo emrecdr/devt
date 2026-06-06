@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Task truncation detector — PostToolUse hook on Task tool calls.
-# Records the byte count of every sub-agent return into
-# .devt/state/dispatch-warnings.jsonl with source: "task_output_bytes".
-# When the byte count crosses telemetry.task_truncation_warn_bytes the record
-# is tagged near_cliff:true and an additionalContext advisory is surfaced to
-# the orchestrator.
+# Records sub-agent return signals to .devt/state/dispatch-warnings.jsonl when
+# a cliff condition triggers: near_cliff (output ≥ threshold), low_output
+# (output < 500B), or mid_task_language (continuation phrasing in the return).
+# The record is tagged with the triggering signal(s) and an additionalContext
+# advisory is surfaced to the orchestrator.
 #
-# Threshold is a placeholder until field data lands — emitting on EVERY Task
-# call (not only crossings) keeps the calibration loop open: the post-hoc
-# histogram across observed dispatches is what tells us where the true cliff
-# sits. Override via .devt/config.json::telemetry.task_truncation_warn_bytes.
+# Threshold default: 40KB; override via .devt/config.json::telemetry.task_truncation_warn_bytes.
+# After greenfield calibration (June 2026) shipped enough field data to confirm
+# the cliff sits well above the typical sub-agent return, this hook only writes
+# when a cliff triggers — the calibration-mode emit-every-return was 93% noise.
 #
 # Never blocks. All forensic writes are best-effort and silenced on failure.
 # Kill switch: DEVT_DISABLED_HOOKS=task-truncation-detector.sh.
@@ -116,6 +116,11 @@ node -e "
   const midTaskRegex = /\b(now|then|next)\s+[A-Z]\.?\d+(\.\d+)?\b|\bpaused?\s+(at|on|after)\b|\bcontinu(e|ing)\s+(with|from|later)\b/i;
   const midTaskLanguage = midTaskRegex.test(responseText);
 
+  // Quiet-by-default: write a forensic record + emit advisory ONLY when a
+  // cliff signal fires. Greenfield field data (June 2026) showed 93% of
+  // emit-every-return records carried no actionable signal.
+  if (!nearCliff && !lowOutput && !midTaskLanguage) process.exit(0);
+
   // Forensic append — best-effort, never fails the hook.
   if (stateDir) {
     try {
@@ -138,8 +143,6 @@ node -e "
       fs.appendFileSync(path.join(stateDir, 'dispatch-warnings.jsonl'), record + '\n');
     } catch { /* forensic write failure must NEVER affect the hook */ }
   }
-
-  if (!nearCliff && !lowOutput && !midTaskLanguage) process.exit(0);
 
   // Compose advisory based on which cliff triggered. The two cliffs are mutually
   // exclusive by definition (output can't be both > 40KB and < 500 bytes).

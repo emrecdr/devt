@@ -61,6 +61,17 @@ node -e "
   const hasMemSig = /<memory_signal>/.test(prompt);
   if (hasScope || hasHint || hasMemSig) process.exit(0);
 
+  // Envelope-not-required agents — per agents/io-contracts.yaml, these agents
+  // declare graphify_inputs: [] AND don't consume memory_signal/scope blocks.
+  // Their dispatches LEGITIMATELY lack the envelope; the hook would over-fire
+  // and pollute dispatch-warnings.jsonl with false-positive raw_dispatch
+  // records (greenfield 2026-06-02 evidence: 2 of 11 raw_dispatch records
+  // were docs-writer + retro, both contracted to receive no envelope).
+  // devt-coordinator is a main-thread router with no envelope contract.
+  const subagentName = subagent.slice(5);  // strip 'devt:' prefix
+  const ENVELOPE_NOT_REQUIRED = new Set(['docs-writer', 'retro', 'curator', 'devt-coordinator']);
+  if (ENVELOPE_NOT_REQUIRED.has(subagentName)) process.exit(0);
+
   // Raw dispatch detected. Build advisory + forensic record.
   const advisory = [
     'Raw devt:' + subagent.split(':')[1] + ' dispatch detected (no <scope_trust>/<scope_hint>/<memory_signal> blocks in prompt).',
@@ -127,7 +138,6 @@ node -e "
     'code-reviewer', 'programmer', 'verifier', 'researcher',
     'debugger', 'architect', 'tester',
   ]);
-  const subagentName = subagent.slice(5);  // strip 'devt:' prefix
   const shouldBlock = mode === 'block' && INVESTIGATIVE.has(subagentName);
 
   if (shouldBlock) {

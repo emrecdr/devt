@@ -1415,14 +1415,30 @@ function pickCentralSymbol(symbols, taskText) {
   // exported graphify.status() so we distinguish "graph not loaded" from
   // "graph loaded but symbol absent" — both look like source:"grep" through
   // getNode but only the former should trigger legacy fallback.
+  //
+  // M2 (greenfield 2026-06-05 calibration): god-node de-ranking. Without this
+  // filter the picker promotes high-degree framework keywords like FastAPI's
+  // `Depends` (888 edges) over task-specific function names — downstream
+  // blast_radius then explodes across the whole codebase. Read god_nodes from
+  // GRAPH_REPORT.md and exclude symbols whose edge_count exceeds the threshold.
   let graphValidSymbols = [];
   let graphAvailable = false;
+  let godNodeSymbols = new Set();
   try {
     const graphify = require("./graphify.cjs");
     const graphStatus = graphify.status();
     if (graphStatus && graphStatus.state === "ready") {
       graphAvailable = true;
+      try {
+        const sections = graphify.parseReportSections();
+        if (sections && Array.isArray(sections.god_nodes)) {
+          for (const g of sections.god_nodes) {
+            if (g && typeof g.symbol === "string") godNodeSymbols.add(g.symbol);
+          }
+        }
+      } catch { /* parseReportSections failure — proceed without god-node filter */ }
       for (const sym of symbols) {
+        if (godNodeSymbols.has(sym)) continue;  // M2: skip god-nodes
         const result = graphify.getNode(sym);
         if (result && Array.isArray(result.results) && result.results.length > 0) {
           graphValidSymbols.push(sym);

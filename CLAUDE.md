@@ -203,6 +203,27 @@ The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via 
 
 - **Workflow single-dispatch contract for `/devt:review`.** The `workflows/code-review.md` spec defines EXACTLY ONE `Task(subagent_type="devt:code-reviewer", …)` dispatch + ONE `Task(subagent_type="devt:verifier", …)` dispatch — no `slice`, `partition`, or `parallel fan-out` keyword appears in the file. When a review scope exceeds the agent's per-dispatch budget, the **canonical recovery path** is the code-reviewer's built-in `community-filter for large reviews` (restrict deep review to files in the affected_communities listed in `graph-impact.md` when scope > 10 files; defer the rest into `## Out-of-Scope Files (Deferred)` in `review.md`), then the orchestrator dispatches follow-up `/devt:review` calls for the deferred set. Orchestrators MUST NOT improvise N-way parallel fan-out without the workflow contract — that pattern has no synthesis spec, no slice-aware verifier rubric, and historically produced partial completion (~40% sub-agent success rate in field). If parallel fan-out is genuinely needed, the orchestrator must inject `<scope_trust>` + `<scope_hint>` + a reference to `.devt/state/graph-impact.md` into each manual dispatch and synthesize the results.
 
+### Dispatch Escape-Hatch Recipes
+
+When a workflow pattern doesn't fit any `/devt:*` slash command (multi-lane fan-out with custom per-lane scope, secondary side audits, ad-hoc continuations after a workflow closed), use these recipes instead of hand-rolling a raw `Task()` call. Each preserves the workflow envelope (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<graph_impact>`) so the dispatch-hygiene hook doesn't fire and the agent gets the full graph context.
+
+**Get the canonical envelope for any agent + workflow combo** — render the current envelope (with all placeholders filled from `.devt/state/workflow.yaml`) and paste into your `Task()` call:
+
+```bash
+node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_type>     # e.g. code-reviewer:code_review_parallel
+node bin/devt-tools.cjs dispatch render-filled <agent>:auto                # resolves workflow_type from active workflow.yaml
+```
+
+**Recipe 1 — Multi-lane parallel review with custom scope.** Run `/devt:review` once to populate `workflow.yaml::scope_*_json` + `.devt/state/graph-impact.md`, then manually fan out N lane dispatches. For each lane, start from `dispatch render-filled code-reviewer:code_review_parallel` and edit the `<task>` block to scope the lane's files. Each lane gets the envelope automatically.
+
+**Recipe 2 — Secondary side audit of a prior review.** No standalone slash command exists. Render `dispatch render-filled code-reviewer:code_review`, then replace the `<task>` block with the audit instructions. The envelope keeps the graph context the audit needs.
+
+**Recipe 3 — Standalone post-workflow docs refresh.** Use `/devt:docs` (one-shot slash, no active workflow required) — wraps `workflows/docs-extraction.md` which dispatches `devt:docs-writer` with the proper envelope.
+
+**Recipe 4 — Standalone post-workflow retro.** Use `/devt:retro` (one-shot slash) — wraps `workflows/lesson-extraction.md` which dispatches `devt:retro` + `devt:curator`.
+
+If none of these fit your case, raise the gap — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.
+
 ### Agent + Workflow Contracts (full reference)
 
 - `scope_mode` controls how agents handle unrelated findings (surgical / boyscout). → docs/AGENT-CONTRACTS.md (Scope Mode).

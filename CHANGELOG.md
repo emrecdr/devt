@@ -6,7 +6,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-06-06
+
+**Agent context fidelity + post-workflow ergonomics pass.** Greenfield filesystem audit + Greenfield-LLM calibration-mode report converged on 5 specific gaps where field evidence + file evidence both signaled real cost. v0.76.0 closes them as a single coherent commit. Anchors: 11 raw_dispatch records (9 template-side, 2 orchestrator-side), 178 task_output_bytes records (93% noise), god-node central-symbol pick (FastAPI's `Depends` over `check_calendar_license`), nonsensical `scope_hint` (god-node depth-1 neighbors unrelated to the actual task), `assert-council-not-recent` placeholder bug, missing `/devt:docs` slash command.
+
+Smoke: 818 passed, 0 failed (+1 K71). Locking: 3/3.
+
+### Added
+
+- **`/devt:docs` standalone slash command** + `workflows/docs-extraction.md`. Wraps `devt:docs-writer` with the proper envelope; runs whether or not an active workflow exists. Closes the cluster-1 raw_dispatch pattern (Greenfield 2026-06-02: 2 raw dispatches when docs-writer + retro had no standalone slash command). New `workflow_type: docs` registered in `VALID_WORKFLOW_TYPES`, routed in `next.md` + `status.md`, gate-locked at finalize via `_phase-gates.yaml::docs.complete`. New envelope template `templates/dispatch/envelopes/docs-writer-docs.tmpl.md` with deeper context blocks than the in-workflow variant (reads recent-changes from git when state artifacts absent).
+
+- **K71 smoke gate (dispatch envelope drift)** — runs `dispatch compile --check` and fails the smoke run when ANY rendered envelope in `workflows/*.md` drifts from its source `.tmpl.md` + `agents/io-contracts.yaml` declaration. Closes the structural gap that let `<graph_impact_md>` declarations in io-contracts.yaml stay un-rendered in programmer + code-reviewer + debugger envelopes for multiple versions. Now mechanical: edit a `.tmpl.md` → run `dispatch compile --write` → smoke confirms zero drift.
+
+- **`<graph_impact>` block in 5 dispatch envelope templates** (programmer.tmpl.md, programmer-quick_implement.tmpl.md, code-reviewer.tmpl.md, code-reviewer-quick_implement.tmpl.md, plus the already-shipping code-reviewer-code_review.tmpl.md and debugger-debug.tmpl.md). Sub-agents now receive the orchestrator-computed `graph-impact.md` content directly in the dispatch envelope instead of re-grepping for it. Closes Greenfield-LLM's #3 finding ("programmer re-discovered the cross-router import edge by grep instead of inheriting the orchestrator's MCP finding — 10-15 min duplicated per workflow"). Architectural pattern preserved: sub-agents stay MCP-blind by contract; the orchestrator-mediated `.devt/state/graph-impact.md` file is the handoff.
+
+- **Dispatch escape-hatch recipes** (CLAUDE.md). New dedicated section ("Dispatch Escape-Hatch Recipes") with 4 recipes for patterns that don't fit any `/devt:*` slash command: multi-lane parallel review with custom scope, secondary side audit of a prior review, standalone post-workflow docs refresh (`/devt:docs`), standalone post-workflow retro (`/devt:retro`). Each recipe starts with `dispatch render-filled <agent>:<workflow>` to get the canonical envelope before pasting into a manual `Task()` call. Closes Greenfield-LLM clusters 2-4 ("the slash commands don't gracefully handle hand-fanout parallel lanes / meta-audits / standalone-after-workflow-closed") with an explicit, discoverable workflow rather than letting orchestrators hand-roll raw dispatches.
+
 ### Changed
+
+- **`pickCentralSymbol` god-node de-ranking (M2 calibration).** When graphify is ready, read `god_nodes` from `GRAPH_REPORT.md` via `graphify.parseReportSections()` and exclude them from the candidate set BEFORE the M1 graph-existence filter. Closes Greenfield-LLM's #1 priority fix: FastAPI's `Depends` (888+ edges) was getting picked as the central symbol for a task whose description contained `check_calendar_license` 11 times. Falls through gracefully when `parseReportSections()` fails (preserves all candidates, no false negatives).
+
+- **Dispatch-hygiene hook respects io-contracts.yaml `graphify_inputs: []` contracts.** `hooks/dispatch-hygiene-guard.sh` now exits cleanly (no raw_dispatch record, no advisory) for `devt:docs-writer`, `devt:retro`, `devt:curator`, `devt:devt-coordinator` — these agents are CONTRACTED to receive no envelope blocks per io-contracts.yaml. Closes the false-positive class that produced 2 of 11 raw_dispatch records in Greenfield's dataset. Investigative agents (programmer/code-reviewer/verifier/researcher/debugger/architect/tester) unchanged.
+
+- **`task-truncation-detector` quiet-by-default.** Hook now only writes to `dispatch-warnings.jsonl` when a cliff signal triggers (`near_cliff` || `low_output` || `mid_task_language`). Calibration loop (which required emit-on-every-return) closed June 2026 — Greenfield evidence: 178 of 192 records (93%) carried `near_cliff:false`, `low_output:false`, no actionable signal. Smoke test updated to verify the new behavior (under-threshold mid-byte return produces no record + no advisory).
+
+### Fixed
+
+- **`assert-council-not-recent` placeholder bug.** `skills/council/SKILL.md` shipped a literal `<derived-slug>` placeholder in its bash gate code: orchestrators were copy-pasting it verbatim, the CLI rejected the literal angle-bracket string, and the gate failed with `reason:"missing slug argument (expected: <decision-slug>)"`. Confirmed in Greenfield gate-trace.jsonl on 2026-06-06 08:22:58. Replaced with explicit `COUNCIL_SLUG="your-decision-topic-here"` variable + 3 worked examples + instructions to substitute. The 2 downstream `council-trace` calls in stages 3 + 4 reuse the same `$COUNCIL_SLUG`.
+
+### Documentation
+
+- **CLAUDE.md "Templates" + docs/INTERNALS.md table — baseline shape clarification.** Already-shipped K70 enforces 9-file baseline; docs now distinguish baseline (9 K70-enforced files) from optional add-ons (api-changelog.md, canonical-entities.yaml, arch-scan.py + detectors/).
 
 - **typescript-node template — Node 22 + TS 5.2+ currency pass.** Audit of `typescript-node/*.md` against the modern Node 22 + TS 5.4 vocabulary revealed 0/0/0 grep hits for `node:test`, `node --watch`, `node:` prefix imports, `AsyncLocalStorage`, `AsyncDisposable`, `satisfies`, const type params, `NoInfer`, branded types — template hadn't been updated since pre-Node 22 era. v0.76.0 closes the currency gap mechanically:
   - `coding-standards.md` (81 → 199 lines) adds two new sections — **Built-in Node APIs (Node 22+)** covering `node:` prefix imports, `node --test` / `--watch` / `--env-file`, `AsyncLocalStorage`, `AbortSignal.timeout` / `.any`, `structuredClone`, `crypto.randomUUID`; and **Modern TypeScript Idioms** covering `satisfies` operator (TS 4.9+), `using` declarations + `AsyncDisposable` (TS 5.2+), const type parameters (TS 5.0+), `NoInfer<T>` utility (TS 5.4+), branded types (newtype pattern with factory). Async Rules section expanded with `AbortSignal.timeout` / `AbortSignal.any` patterns + `AsyncLocalStorage` for request-scoped context. New Top-Level Await section.

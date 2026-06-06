@@ -139,6 +139,7 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `clarify` | `/devt:clarify` with the original task |
 | `preflight` | `/devt:preflight` with the original task (or just `cat .devt/state/preflight-brief.md` if the Brief is FRESH) |
 | `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
+| `docs` | `/devt:docs` (one-shot standalone docs refresh; usually no resume needed) |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```

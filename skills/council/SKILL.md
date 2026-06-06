@@ -134,12 +134,22 @@ question, then proceed.
 
 ### Stage 2 — Convene the council (5 advisors in parallel)
 
-**Pre-dispatch mechanical gates.** Before the Task batch, run three guards in sequence:
+**Pre-dispatch mechanical gates.** Before the Task batch, run three guards in sequence.
+
+**FIRST: derive the slug.** Council CLI verbs take the slug as `$COUNCIL_SLUG` below. Compute it from your decision topic (kebab-case, lowercase, alphanumerics + hyphens only). Replace the example below with one that captures *your* topic:
+
+```bash
+# Slug derivation — REPLACE this with kebab-case of your actual decision topic.
+# Examples: "monolith-vs-microservices", "auth-token-storage", "legacy-migration-cutoff"
+COUNCIL_SLUG="your-decision-topic-here"
+```
+
+Then run the three gates against `$COUNCIL_SLUG`:
 
 ```bash
 # Re-run prevention (offramp §4 anti-pattern). Blocks if a transcript for this
 # slug already exists at the project state root. Pass --warn to proceed anyway.
-RECENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-not-recent "<derived-slug>")
+RECENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-not-recent "$COUNCIL_SLUG")
 if [ "$(echo "$RECENT" | jq -r '.ok')" != "true" ]; then
   echo "[BLOCKED] $(echo "$RECENT" | jq -r '.reason')"
   # Surface existing transcripts and exit unless user opts in.
@@ -152,7 +162,7 @@ if [ "$(echo "$BUDGET" | jq -r '.ok')" != "true" ]; then
 fi
 
 # Observability emit. Cal cycles measure council usage via gate-trace.jsonl.
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-2 --slug="<derived-slug>" >/dev/null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-2 --slug="$COUNCIL_SLUG" >/dev/null
 ```
 
 **Validation_material mechanical helper.** Instead of manually reading each path and tagging EXISTS/MISSING, use the CLI helper to get the annotated list (with optional inline contents for direct prompt injection):
@@ -269,10 +279,10 @@ is off — turn on when the decision is high-stakes enough to justify the cost.
 
 ### Stage 3 — Anonymized peer review (5 reviewers in parallel)
 
-**Observability emit (before the Task batch).**
+**Observability emit (before the Task batch).** `$COUNCIL_SLUG` was set at Stage 2 above:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-3 --slug="<derived-slug>" >/dev/null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-3 --slug="$COUNCIL_SLUG" >/dev/null
 ```
 
 Collect all 5 advisor responses. **Shuffle** them and label A through E with a *random*
@@ -339,7 +349,7 @@ fi
 **Observability emit (before the chairman dispatch).**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-4 --slug="<derived-slug>" --model=opus >/dev/null
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state council-trace stage-4 --slug="$COUNCIL_SLUG" --model=opus >/dev/null
 ```
 
 One final dispatch. Reveal the mapping (advisor → letter) so the chairman can see who

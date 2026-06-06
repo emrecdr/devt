@@ -495,8 +495,9 @@ const VALID_WORKFLOW_TYPES = new Set([
   // memory_promote: curator promotes ephemeral DEC -> permanent ADR.
   // memory_reject: curator creates a REJ tombstone with search_keywords.
   // preflight: standalone Topic Pre-Flight Brief generation.
+  // docs: standalone documentation refresh — see workflows/docs-extraction.md.
   // (memory_init / memory_index are CLI-only subcommands — they don't set state and aren't workflow_types.)
-  "memory_promote", "memory_reject", "preflight",
+  "memory_promote", "memory_reject", "preflight", "docs",
   null,
 ]);
 

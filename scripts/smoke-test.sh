@@ -5912,11 +5912,13 @@ fi
 rm -f "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl"
 MID_BLOB=$(node -e "process.stdout.write('x'.repeat(1000))")
 MID_OUT=$(cd "$TRUNC_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\"},\"tool_response\":\"$MID_BLOB\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
-if [ -z "$MID_OUT" ] && tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"low_output":false' && \
-   tail -1 "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"near_cliff":false'; then
-  pass "task-truncation-detector stays silent on normal mid-byte return (both cliffs false)"
+# v0.76.0: quiet-by-default — under-threshold returns produce no advisory AND
+# no jsonl record. Earlier behavior wrote a near_cliff:false record on every
+# return for calibration purposes; calibration loop closed June 2026.
+if [ -z "$MID_OUT" ] && [ ! -s "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" ]; then
+  pass "task-truncation-detector stays silent on normal mid-byte return (no advisory, no jsonl record)"
 else
-  fail "task-truncation-detector misbehaved on 1KB mid-byte return: $MID_OUT"
+  fail "task-truncation-detector misbehaved on 1KB mid-byte return: advisory=$MID_OUT; jsonl_size=$(wc -c < "$TRUNC_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null || echo 0)"
 fi
 # High-byte path: advisory IS emitted, record tagged near_cliff:true.
 BIG_BLOB=$(node -e "process.stdout.write('x'.repeat(45000))")
@@ -9987,12 +9989,16 @@ K4_CFG_BAK=$(mktemp)
 [ -f .devt/config.json ] && cp .devt/config.json "$K4_CFG_BAK"
 echo '{"dispatch_hygiene_mode":"warn"}' > .devt/config.json
 K4_INPUT='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:programmer","prompt":"do a thing"}}'
-K4_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" bash -c "echo '$K4_INPUT' | bash '$ROOT/hooks/dispatch-hygiene-guard.sh'" 2>/dev/null)
-if echo "$K4_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const ctx=(j.hookSpecificOutput||{}).additionalContext||'';process.exit(ctx.includes('<canonical_envelope>')?0:1);}catch{process.exit(2);}})" 2>/dev/null; then
+K4_OUTFILE=$(mktemp)
+# The envelope can exceed 60KB; bash variable capture mangles output at that
+# scale on macOS bash 3.2. Write to a tempfile instead.
+CLAUDE_PLUGIN_ROOT="$ROOT" bash -c "printf '%s' '$K4_INPUT' | bash '$ROOT/hooks/dispatch-hygiene-guard.sh'" > "$K4_OUTFILE" 2>/dev/null
+if node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync('$K4_OUTFILE','utf8'));const ctx=(j.hookSpecificOutput||{}).additionalContext||'';process.exit(ctx.includes('<canonical_envelope>')?0:1);}catch{process.exit(2);}" 2>/dev/null; then
   pass "K4: dispatch-hygiene-guard.sh attaches <canonical_envelope> in warn mode"
 else
   fail "K4: hook did not attach <canonical_envelope> in warn mode"
 fi
+rm -f "$K4_OUTFILE"
 if [ -s "$K4_CFG_BAK" ]; then cp "$K4_CFG_BAK" .devt/config.json; else rm -f .devt/config.json; fi
 rm -f "$K4_CFG_BAK"
 
@@ -10240,7 +10246,7 @@ fi
 # advance-phase's load path.
 K42_YAML="$ROOT/workflows/_phase-gates.yaml"
 K42_TYPES=$(awk '/^  [a-z_]+:$/{gsub(/[: ]/,"");print}' "$K42_YAML" | sort -u)
-K42_EXPECTED="arch_health_scan code_review code_review_parallel debug dev quick_implement"
+K42_EXPECTED="arch_health_scan code_review code_review_parallel debug dev docs quick_implement"
 K42_GOT=$(echo "$K42_TYPES" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 K42_EXPECTED_SORTED=$(echo "$K42_EXPECTED" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 if [ "$K42_GOT" = "$K42_EXPECTED_SORTED" ]; then
@@ -11015,6 +11021,24 @@ if [ "$K70_MISSING_TOTAL" = "0" ]; then
   pass "K70: template-shape consistency — all AVAILABLE_TEMPLATES ship the 9-file baseline"
 else
   fail "K70: template-shape drift — $K70_MISSING_TOTAL missing:$K70_MISSING_REPORT"
+fi
+
+# K71 — dispatch envelope drift. After v0.76.0, every dispatch region in
+# workflows/*.md must match its envelope template (.tmpl.md). The drift
+# tracker lives in `dispatch.cjs compile --check`: it walks every
+# BEGIN dispatch:<agent>:<wf> marker and compares the rendered body against
+# the committed body. Zero drift = committed dispatches reflect their
+# templates + io-contracts.yaml. Non-zero drift = a template was edited
+# but the workflows weren't re-rendered (or vice versa). Closes the gap
+# that v0.75.x exposed: programmer/code-reviewer rendered envelopes silently
+# diverged from io-contracts.yaml's graph_impact_md declaration.
+K71_OUT=$(node "$CLI" dispatch compile --check 2>&1)
+K71_DRIFT=$(echo "$K71_OUT" | jq -r '.drift | length' 2>/dev/null)
+if [ "$K71_DRIFT" = "0" ]; then
+  pass "K71: dispatch envelope drift — zero workflows out of sync with their templates"
+else
+  K71_FILES=$(echo "$K71_OUT" | jq -r '.drift[] | "\(.file):\(.agent):\(.workflow_id)"' 2>/dev/null | tr '\n' ' ')
+  fail "K71: $K71_DRIFT dispatch region(s) drifted — run \`node bin/devt-tools.cjs dispatch compile --write\`. Drifted: $K71_FILES"
 fi
 
 echo
