@@ -534,6 +534,7 @@ These are called automatically by workflows. You can invoke them directly for fi
 | `/devt:review` | Standalone code review | Workflow review step |
 | `/devt:quality` | Run lint, typecheck, tests | Every workflow as quality gates |
 | `/devt:retro` | Extract lessons to playbook | Workflow retro step |
+| `/devt:docs` | Refresh project documentation against current state | Standalone post-workflow doc catch-up |
 | `/devt:arch-health` | Architecture violation scan | Workflow architect step |
 | `/devt:autoskill` | Propose plugin improvements from session patterns | Standalone or workflow autoskill step |
 | `/devt:weekly-report` | Git-based contribution report | Standalone utility |

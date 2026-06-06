@@ -790,7 +790,7 @@ devt scatters a few files outside `.devt/` (`.mcp.json`, `.claude/agent-memory/d
 
 **Utilities:** `/devt:status`, `/devt:pause`, `/devt:forensics`, `/devt:cancel-workflow`, `/devt:note`, `/devt:defer`, `/devt:health`, `/devt:session-report`, `/devt:update`, `/devt:thread`, `/devt:weekly-report`, `/devt:council`.
 
-**Internal (called by workflows, available to power users):** `/devt:plan`, `/devt:research`, `/devt:clarify`, `/devt:implement`, `/devt:fast`, `/devt:review`, `/devt:quality`, `/devt:retro`, `/devt:arch-health`, `/devt:autoskill`, `/devt:memory`, `/devt:preflight`.
+**Internal (called by workflows, available to power users):** `/devt:plan`, `/devt:research`, `/devt:clarify`, `/devt:implement`, `/devt:fast`, `/devt:review`, `/devt:quality`, `/devt:retro`, `/devt:docs`, `/devt:arch-health`, `/devt:autoskill`, `/devt:memory`, `/devt:preflight`.
 
 ### CLI tools
 

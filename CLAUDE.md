@@ -77,6 +77,7 @@ The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:ne
 | `preflight` | `preflight.md` | `/devt:preflight` |
 | `memory_promote` | `memory-promote.md` | `/devt:memory promote` |
 | `memory_reject` | `memory-reject.md` | `/devt:memory reject` |
+| `docs` | `docs-extraction.md` | `/devt:docs` |
 | `code_review_parallel` | `code-review-parallel.md` | `/devt:review` (re-routes via scope_check) |
 
 When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` and routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
