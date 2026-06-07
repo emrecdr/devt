@@ -9957,11 +9957,17 @@ run "K1: dispatch compile --check (no drift)" \
 # {models.programmer}) MUST be filled. Active workflow seeded by `init workflow`
 # at L43 above.
 K2_OUT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null || echo "K2_FAILED")
+# Extract line 1 via bash parameter expansion — avoids `head -1` SIGPIPE
+# under `set -o pipefail` when K2_OUT exceeds the OS pipe buffer (greenfield
+# CI hit this on 2026-06-07 after envelope growth added ~10KB to programmer
+# dispatch). `head -1` closes stdin after one line; `echo` then receives
+# SIGPIPE on the next write and pipefail propagates the failure.
+K2_FIRST_LINE="${K2_OUT%%$'\n'*}"
 if [ "$K2_OUT" = "K2_FAILED" ]; then
   fail "K2: dispatch render-filled programmer:dev (CLI returned non-zero)"
-elif echo "$K2_OUT" | grep -qE '\{scope_trust_json\}|\{scope_hint_json\}|\{memory_signal_json\}|\{models\.programmer\}'; then
+elif printf '%s' "$K2_OUT" | grep -qE '\{scope_trust_json\}|\{scope_hint_json\}|\{memory_signal_json\}|\{models\.programmer\}'; then
   fail "K2: render-filled left known data-ref placeholders unfilled"
-elif echo "$K2_OUT" | head -1 | grep -q 'Task(subagent_type="devt:programmer"'; then
+elif printf '%s' "$K2_FIRST_LINE" | grep -q 'Task(subagent_type="devt:programmer"'; then
   pass "K2: dispatch render-filled substitutes data refs + structured lookups"
 else
   fail "K2: render-filled output did not start with expected Task() dispatch line"
@@ -10144,7 +10150,7 @@ mkdir -p .devt graphify-out
 echo '{"graphify":{"enabled":true}}' > .devt/config.json
 echo '{"nodes":[{"id":"S1","label":"TestSymbol","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
 echo "class TestSymbol: pass" > a.py
-git add -A && git commit -q -m "init"
+git add -A && git -c user.email=ci@devt.local -c user.name=ci commit -q -m "init"
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K36 TestSymbol test" >/dev/null 2>&1
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor TestSymbol" >/dev/null 2>&1
 K36_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));console.log(j.blast && 'caller_count_grep' in j.blast && 'magnification_advisory' in j.blast ? 'yes' : 'no')" 2>/dev/null)
@@ -10183,7 +10189,7 @@ mkdir -p .devt graphify-out
 echo '{"graphify":{"enabled":true}}' > .devt/config.json
 echo '{"nodes":[{"id":"S1","label":"RealK38","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
 echo "class RealK38: pass" > a.py
-git add -A && git commit -q -m "init"
+git add -A && git -c user.email=ci@devt.local -c user.name=ci commit -q -m "init"
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K38 test" >/dev/null 2>&1
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor RealK38 FakeK38" >/dev/null 2>&1
 K38_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));process.exit('symbols_dropped_no_graph_node' in j.topic ? 0 : 1)" 2>/dev/null && echo "yes" || echo "no")
@@ -10866,7 +10872,7 @@ cat > "$K64_TMP/bin/modules/use.cjs" <<'EOF_K64_USE'
 const { findProjectRoot } = require("./io.cjs");
 console.log(findProjectRoot());
 EOF_K64_USE
-(cd "$K64_TMP" && git add -A && git commit -qm fixture 2>/dev/null) || true
+(cd "$K64_TMP" && git add -A && git -c user.email=ci@devt.local -c user.name=ci commit -qm fixture 2>/dev/null) || true
 K64_KNOWN=$(cd "$K64_TMP" && node "$CLI" state assert-wired findProjectRoot --min-references=1 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
 K64_UNKNOWN=$(cd "$K64_TMP" && node "$CLI" state assert-wired NeverDefinedSymbol 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
 K64_INJECT=$(cd "$K64_TMP" && node "$CLI" state assert-wired 'foo; rm -rf' 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
