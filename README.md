@@ -2,11 +2,26 @@
 
 **devt** (short for **dev**elopment **t**eam) — a multi-agent development workflow plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
+<!-- Primary topic discovery row -->
+[![Topic: claude-code](https://img.shields.io/badge/topic-claude--code-7048e8?style=flat-square&logo=github)](https://github.com/topics/claude-code)
+[![Topic: claude-code-plugin](https://img.shields.io/badge/topic-claude--code--plugin-7048e8?style=flat-square&logo=github)](https://github.com/topics/claude-code-plugin)
+[![Topic: anthropic](https://img.shields.io/badge/topic-anthropic-7048e8?style=flat-square&logo=github)](https://github.com/topics/anthropic)
+[![Topic: multi-agent](https://img.shields.io/badge/topic-multi--agent-7048e8?style=flat-square&logo=github)](https://github.com/topics/multi-agent)
+[![Topic: ai-development-tools](https://img.shields.io/badge/topic-ai--development--tools-7048e8?style=flat-square&logo=github)](https://github.com/topics/ai-development-tools)
+
+<!-- Tech-stack + secondary discovery row -->
+[![Topic: agent-workflow](https://img.shields.io/badge/topic-agent--workflow-7048e8?style=flat-square&logo=github)](https://github.com/topics/agent-workflow)
+[![Topic: mcp](https://img.shields.io/badge/topic-mcp-7048e8?style=flat-square&logo=github)](https://github.com/topics/mcp)
+[![Topic: code-review-automation](https://img.shields.io/badge/topic-code--review--automation-7048e8?style=flat-square&logo=github)](https://github.com/topics/code-review-automation)
+[![Topic: prompt-engineering](https://img.shields.io/badge/topic-prompt--engineering-7048e8?style=flat-square&logo=github)](https://github.com/topics/prompt-engineering)
+[![Topic: developer-tools](https://img.shields.io/badge/topic-developer--tools-7048e8?style=flat-square&logo=github)](https://github.com/topics/developer-tools)
+
+<!-- Release + license meta -->
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Femrecdr%2Fdevt%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue&prefix=v)](https://github.com/emrecdr/devt/releases)
 [![CI](https://github.com/emrecdr/devt/actions/workflows/ci.yml/badge.svg)](https://github.com/emrecdr/devt/actions/workflows/ci.yml)
-[![Node](https://img.shields.io/badge/node-22%2B-brightgreen)](https://nodejs.org)
-[![Changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-orange)](CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Node](https://img.shields.io/badge/node-22%2B-brightgreen?style=flat-square&logo=node.js)](https://nodejs.org)
+[![Changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-orange?style=flat-square)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 ---
 
@@ -426,6 +441,8 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 | `dispatch_hygiene_mode` | `block` / `warn` / `off` — controls `hooks/dispatch-hygiene-guard.sh` behavior when an orchestrator raw-dispatches a `devt:*` subagent without the canonical context envelope (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`). `block` (default) returns `{decision:"deny"}` for investigative agents with `/devt:review` redirect in the reason. `warn` allows the call AND attaches the fully-rendered canonical envelope as a `<canonical_envelope>` block in `additionalContext` (paste-ready, derived from current state via `dispatch render-filled <agent>:auto`). `off` is a no-op. All modes append `source: "raw_dispatch"` to `.devt/state/dispatch-warnings.jsonl` for forensics. | `block` |
 | `claim_check_mode` | `block` / `warn` / `off` — controls Layer-2 enforcement (`state assert-claim-checks-resolved`). Mirrors `dispatch_hygiene_mode` pattern. Layer-1 (`state assert-artifact-present`) prints `[BLOCKED]` inline; Layer-2 reads `.devt/state/claim-check-failures.jsonl` at finalize phases (via `state advance-phase`). `block` (default) fails the finalize gate on unresolved failures. `warn` surfaces a summary but allows phase advance. `off` auto-passes. Resolution semantic: successful re-runs of Layer-1 after a failure overwrite the failure record. | `block` |
 | `graphify.blast_magnification_threshold` | When graphify's BFS-derived `direct_dependents_count` is ≥ N× the literal `caller_count_grep` (run via `git grep -F "<sym>("`), `preflight-brief.json::blast.magnification_advisory` flags potential interface-edge over-counting. Set to `null` to disable the Q2 cross-check entirely. | `3` |
+| `telemetry.task_truncation_warn_bytes` | Hook-side threshold for `near_cliff` detection in `hooks/task-truncation-detector.sh`. The hook emits an advisory + `.devt/state/dispatch-warnings.jsonl` record when a sub-agent return exceeds this byte count. Override per-project when telemetry shows the cliff sits somewhere else than the 40 KB default. | `40000` |
+| `telemetry.task_truncation_log_all` | When `true`, `hooks/task-truncation-detector.sh` writes a forensic record to `.devt/state/dispatch-warnings.jsonl` for **every** sub-agent return — calibration-cycle mode. When `false` (default, post-v0.76.0 greenfield calibration), only cliff signals (`near_cliff` / `low_output` / `mid_task_language`) emit. Orchestrator-visible advisory stays cliff-only regardless of this flag; log-all mode adds no advisory noise. Enable for return-size histograms, latency baselines, or other coverage-dependent analyses. | `false` |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
 ### `scope_mode` — surgical (default) vs boy-scout

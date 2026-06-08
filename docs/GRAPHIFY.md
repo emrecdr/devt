@@ -177,13 +177,15 @@ preflight-brief.json
        ▼  (orchestrator writes concatenated output)
 .devt/state/graph-impact.md
        │
-       ▼  (sub-agents consume READ-ONLY)
+       ▼  (inlined into dispatch envelope at render time)
 ┌──────────────────────────────────┐
 │ code-reviewer, programmer, ...    │
 └──────────────────────────────────┘
 ```
 
 The orchestrator owns the MCP boundary; sub-agents are MCP-blind by design (see `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP).
+
+**Envelope-inlined.** Investigative-agent envelopes (programmer, code-reviewer, debugger and their workflow variants) inline `graph-impact.md` content directly into the dispatch prompt via the `{graph_impact_content}` placeholder. The helper is `bin/modules/init.cjs::loadGraphImpact(projectRoot)` — capped at 32 KB, three states: `present` (content inlined, truncation notice when over cap), `skipped` (`graphify-skip-reason.txt` content inlined), `absent` (graceful fallback line). The inlined form removes one Read tool call per dispatch and survives sub-agent attention drift (the data is right there in the prompt, not behind a Read-instruction the agent might skip). The dispatch substitution wiring lives in `bin/modules/dispatch.cjs::buildSubstitutionTable` and `applySubstitutions`.
 
 ---
 
