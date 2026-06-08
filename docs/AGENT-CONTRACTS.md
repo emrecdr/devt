@@ -61,6 +61,8 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Corollary (L1-v2 — greenfield calibration #11).** Per-lane filtering of the shared cache happens at the ORCHESTRATOR, not the lane. `code-review-parallel.md::dispatch_lanes` detects prose-only lanes (`<lane_files>` containing only `.md` / `.rst` / `.txt` / `.adoc` files) and replaces the `graph-impact.md` injection with a `<graphify_status>not_applicable</graphify_status>` stub. Lanes never query graphify themselves; the orchestrator decides what each lane sees based on the lane's scope. Greenfield's L3 README-review lane was receiving the GLOBAL preflight cache (`effect_size: large`, `god_node_match: true` computed against the full PR scope including code files) — pure noise for a markdown-only review.
 
+**Corollary (envelope inlining — greenfield calibration 2026-06-07).** `graph-impact.md` content is INLINED into the dispatch envelope at render time via the `{graph_impact_content}` placeholder (helper: `bin/modules/init.cjs::loadGraphImpact(projectRoot)`, 32 KB cap, three states: `present` / `skipped` / `absent`). Earlier envelopes shipped a `Read .devt/state/graph-impact.md if it exists` prompt — the data reached sub-agents only when they remembered to make the Read tool call. Inlining removes one Read per dispatch and survives sub-agent attention drift (the data is right there in the prompt, not behind an instruction). Sub-agents are still MCP-blind by design — the inlined content is orchestrator-mediated MCP output, not a license to query graphify directly.
+
 ---
 
 ## Scope Hint + Trust Contract

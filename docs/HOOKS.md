@@ -152,6 +152,39 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 ---
 
+## Task-Truncation Detector
+
+**`hooks/task-truncation-detector.sh`** is a PostToolUse hook on `Task` / `Agent` dispatches. It measures sub-agent return size + detects three cliff signals:
+
+- `near_cliff` — return bytes ≥ `telemetry.task_truncation_warn_bytes` threshold (default 40000)
+- `low_output` — return bytes < 500 (mid-task wall hit at the rate-limit boundary)
+- `mid_task_language` — regex match for continuation phrasing like "Now B.5", "paused at X", "continuing with phase 2"
+
+When any cliff fires, the hook:
+
+1. Appends a forensic record to `.devt/state/dispatch-warnings.jsonl` (`source: "task_output_bytes"`)
+2. Emits an `additionalContext` advisory pointing the orchestrator at the sidecar + SendMessage-resume path
+
+**Quiet-by-default + `task_truncation_log_all` opt-in.** Pre-greenfield-June-2026 calibration, every dispatch return logged a forensic record regardless of cliff signal. Field data: 178 of 192 records carried `near_cliff:false, low_output:false` — 93% noise. Default flipped to quiet-by-default; set `.devt/config.json::telemetry.task_truncation_log_all: true` to restore the emit-on-every-return behavior for calibration cycles. Orchestrator-visible advisory stays cliff-only regardless of the flag (log-all mode adds no advisory noise; the forensic record is the only delta).
+
+Use log-all mode when computing return-size histograms, latency baselines, or any coverage-dependent analysis. Flip back to default before normal workflow runs to avoid the noise tax on dispatch-warnings reads.
+
+## SessionStart What's-New Surfacing
+
+**`hooks/session-start.sh`** computes `additionalContext` for every session-start event. Beyond the standard plugin-loaded banner, it surfaces a once-per-machine-per-upgrade "what's new" excerpt from `CHANGELOG.md`.
+
+**How it works.**
+
+1. Read `VERSION` (the canonical devt version).
+2. Read `~/.cache/devt/whats-new-seen` (per-machine stamp file containing the last-acknowledged version).
+3. If the stamp differs from `VERSION`, extract the headline paragraph of the `## [X.Y.Z]` section in `CHANGELOG.md` (cap 800 chars; truncate to "… see CHANGELOG.md for the full notes." on overflow).
+4. Append to the SessionStart context as `What's new in devt v<version>:` followed by the extracted text.
+5. Update the stamp file so subsequent sessions stay silent for this version.
+
+**Why.** Greenfield calibration 2026-06-07: doc-promotion failed because users load their project's CLAUDE.md, never devt's. New slash commands (`/devt:docs`) and new CLAUDE.md sections (escape-hatch recipes) registered nowhere in user attention. The SessionStart hook is the single channel users actually see; surfacing the CHANGELOG headline once per upgrade closes the gap without spamming subsequent sessions.
+
+The mechanism is announcement-only. It does NOT change CLI behavior, does NOT block, and degrades gracefully when `CHANGELOG.md` is missing or the version section is absent (empty surfacing → no stamp update).
+
 ## Hook Messaging Is Right-Sized for Cost
 
 **Rule.** Per-fire hook output (advisories, deny/warn messages, context-injection lines) is intentionally compact — the action cue + load-bearing recovery hints, not full re-explanation of protocols agents already know from preloaded skills.

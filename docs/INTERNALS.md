@@ -420,6 +420,12 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 
 The 9-file baseline (architecture, coding-standards, documentation, git-workflow, golden-rules, quality-gates, review-checklist, testing-patterns, patterns/common-smells) is enforced by smoke gate K70 — every template registered in `bin/modules/setup.cjs::AVAILABLE_TEMPLATES` MUST ship all 9. Optional files vary per template's domain: `api-changelog.md` ships with python-fastapi/go/typescript-node (HTTP-API-serving); `canonical-entities.yaml` ships with python-fastapi/rust (entity-aware projects); `arch-scan.py` + `detectors/` ship only with python-fastapi (the canonical Python scanner).
 
+**Smoke gate K71** — dispatch envelope drift. Runs `dispatch compile --check` and fails the smoke run when any rendered envelope in `workflows/*.md` drifts from its source `.tmpl.md` + `agents/io-contracts.yaml` declaration. Closes the structural gap that let v0.75.x `graph_impact_md` declarations stay un-rendered.
+
+**Smoke gate K72** — lane-suggestions archetype classifier. Fixture: 1 covered file (community 1) + 1 `.md` + 1 `tests/*` path + 1 `.sql`. Asserts that `groups[].archetype` contains exactly `["docs", "tests"]` for the uncovered files, with the `.sql` falling to residual `ungrouped` (no archetype field). Locks the B1 archetype taxonomy against accidental regression.
+
+**Smoke gate K73** — `dispatch render-filled` graph-impact inlining. Round-trips two states: absent (envelope contains the `(no graph-impact.md available — ...)` notice) and present (envelope contains a sentinel marker from an actual file). Locks A1 against the prior-cycle regression where the placeholder shipped without substitution.
+
 **Authoring templates** for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
 
 ---

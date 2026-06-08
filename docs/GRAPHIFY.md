@@ -221,10 +221,44 @@ The intent: catch the "you fixed code, forgot the readme/test/migration" failure
 
 ---
 
+## Central-Symbol Picker Calibrations (M1–M3)
+
+`bin/modules/preflight.cjs::pickCentralSymbol(symbols, taskText)` returns the highest-precision central symbol from `topic.symbols`. The picker scores candidates by token-overlap with the task description; downstream `blast_radius` uses the result as its anchor. Three calibration layers refine the score:
+
+**M1 — Graph-existence filter.** Filter candidates by `graphify.getNode(sym).results.length > 0` BEFORE token-overlap scoring. Without it, the picker can return a task-text noise word ("Batch") that scores 1.0 on token overlap but has no graph node — `blast_radius` then runs against a fictional symbol and returns degraded results. When graphify is unavailable (not setup / disabled / graph degraded), fall through to legacy scoring on raw symbols.
+
+**M2 — God-node de-ranking.** Read `god_nodes` from `GRAPH_REPORT.md` via `graphify.parseReportSections()` and exclude symbols whose edge_count tops the god-node threshold. Without M2, the picker promotes framework keywords like FastAPI's `Depends` (888+ edges) over task-specific function names; downstream `blast_radius` then explodes across the whole codebase.
+
+**M3 — Diff-recency weighting.** Run `git diff HEAD --unified=0` (best-effort, 2s timeout, 256 KB cap) and count word-bounded occurrences of each candidate. The final score becomes `token_overlap_score + min(diffCount × 0.2, 2.0)` — a symbol mentioned 5+ times in the diff dominates token-overlap noise from unrelated test/debounce/util symbols. Greenfield field example: `DebounceService` was picked over `_check_calendar_feature_gate` for a license-gate PR because token overlap matched debounce.py test files; M3 inverted the pick to the diff-mentioned subject. Falls through gracefully when git is unavailable or the diff is empty (no boost applied; M1 + M2 still active).
+
+The helper `_diffSymbolCounts(candidates)` returns a `Map<symbol, count>`; callers do not need to know about git state.
+
+## Lane-Suggestions Archetype Classifier (B1)
+
+`bin/modules/graphify.cjs::laneSuggestions(diffFiles, options)` partitions a multi-file review into coherent lanes. Two modes:
+
+- **`community`** — every file has a graph community label (clustering ran successfully). Files group by dominant community.
+- **`partial`** — some files have community labels, some don't (no graph node OR cluster-id missing). Covered files group by community; uncovered files used to collapse into a single `community: null` mega-bucket.
+
+**Archetype sub-classifier.** Greenfield 2026-06-07 calibration: 24 of 42 files (57%) in a real PR landed in the mega-bucket — mostly hurl/docs/config files with no graph nodes. The orchestrator manually reshaped to coherent lanes every review.
+
+The new `_archetype(f)` helper sub-classifies uncovered files by extension + path:
+
+| Archetype | Matches |
+|---|---|
+| `docs` | `.md`, `.rst`, `.txt`, `.adoc`, `.mdx` |
+| `tests` | `.hurl`; paths containing `/tests/` or `/__tests__/`; basenames matching `(^|[._-])(test|spec)([._-]|$)` |
+| `config` | `.toml`, `.lock`, `.yaml`, `.yml`, `.ini`, `.env`, `.cfg`, `.conf`; specific basenames `VERSION`, `Makefile`, `Dockerfile`, `.gitignore`, `requirements.txt`, `go.mod`, `Cargo.toml`, `package-lock.json`, `pnpm-lock.yaml` |
+| `other` | residual ungrouped bucket (preserves the legacy fallback) |
+
+Groups expose an `archetype` field when the bucket comes from the classifier (community-labeled groups don't). Downstream consolidation to `target_lanes` super-groups operates on the archetype-split result, so prose-only lanes consolidate together rather than getting force-merged with code lanes.
+
+---
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP; scope_hint contract
 - `docs/MEMORY.md` — Pre-Flight Brief JSON sidecar (`blast.direct_dependents_count`, `graph_stats.trust`, `topic.symbols`)
-- `docs/HOOKS.md` — `graph_loader` deny source (graph.json size cap)
+- `docs/HOOKS.md` — `graph_loader` deny source (graph.json size cap); `task_truncation_log_all` opt-in
 - `skills/graphify-helpers/SKILL.md` — agent-side Graphify-first protocol + 4 fallback triggers
 - `skills/codebase-scan/SKILL.md` — scan skill with Graphify-first routing
