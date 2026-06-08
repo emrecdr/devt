@@ -24,6 +24,20 @@
 #                        router/classifier and writes no artifact.
 #     sidecar          — the JSON sidecar (if any) — MUST exist in state.cjs
 #                        JSON_SIDECAR_SCHEMAS and SIDECAR_FOR_MARKDOWN
+#     expected_sections — optional list of section heading titles (without
+#                        the leading `## `) the primary artifact MUST contain.
+#                        Derived from each agent's body declaration of what
+#                        sections to write. Used by structural-drift validator
+#                        (state.cjs::checkAgentOutput --structural) to catch
+#                        dropped sections between sub-agent dispatches. Only
+#                        meaningful when `validator.structural_mode != 'off'`
+#                        in config; default is 'off' so this field is dormant
+#                        until a calibration cycle confirms zero false
+#                        positives. Sections beyond this list are permitted
+#                        (superset semantics) — declare the MINIMUM common
+#                        set across all valid output paths the agent takes.
+#                        Omit for agents where output structure is
+#                        intentionally flexible (docs, lessons, debug).
 #   inputs:
 #     context_blocks   — static blocks the workflow dispatch template MUST inject
 #                        into <context>. Smoke test (future) asserts the dispatch
@@ -47,6 +61,7 @@ agents:
     outputs:
       primary: impl-summary.md
       sidecar: impl-summary.json
+      expected_sections: [Task, Files Modified, Key Decisions, Quality Gate Results, Provenance]
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task, plan]
       graphify_inputs: [scope_hint, scope_trust, graph_impact_md]
@@ -57,6 +72,7 @@ agents:
     outputs:
       primary: test-summary.md
       sidecar: test-summary.json
+      expected_sections: [Coverage, Test Files, Quality Gate Results, Provenance]
     inputs:
       context_blocks: [governing_rules, agent_skills, task]
       graphify_inputs: [scope_hint, scope_trust, graphify_status]
@@ -67,6 +83,7 @@ agents:
     outputs:
       primary: review.md
       sidecar: review.json
+      expected_sections: [Findings]
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
       graphify_inputs: [scope_hint, scope_trust, graphify_status, god_node_warnings, graph_impact_md]
@@ -107,6 +124,7 @@ agents:
     outputs:
       primary: verification.md
       sidecar: verification.json
+      expected_sections: [Task, Acceptance Criteria, Quality Gates, Summary]
     inputs:
       context_blocks: [governing_rules, memory_signal, agent_skills, rubric_path, workflow_type, task]
       graphify_inputs: [scope_hint, scope_trust, god_node_warnings]

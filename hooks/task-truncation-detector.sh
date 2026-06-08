@@ -74,10 +74,10 @@ node -e "
             const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
             const v = cfg && cfg.telemetry && cfg.telemetry.task_truncation_warn_bytes;
             if (Number.isFinite(v) && v > 0) threshold = v;
-            // task_truncation_log_all: v0.77.0 calibration-mode opt-in.
-            // When true, every dispatch return logs to dispatch-warnings.jsonl
-            // even when no cliff signal fires — restores the pre-v0.76.0
-            // emit-on-every-return behavior for telemetry analysis cycles.
+            // task_truncation_log_all: calibration-mode opt-in. When true,
+            // every dispatch return logs to dispatch-warnings.jsonl even
+            // when no cliff signal fires — full coverage for telemetry
+            // analysis cycles. Default false (quiet-by-default).
             const la = cfg && cfg.telemetry && cfg.telemetry.task_truncation_log_all;
             if (la === true) logAll = true;
           } catch { /* malformed config — keep default */ }

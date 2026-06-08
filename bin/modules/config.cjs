@@ -48,6 +48,49 @@ const DEFAULTS = {
   // dispatch_hygiene_mode — block-default makes the audit-trail review
   // involuntary rather than perceived-urgency optional.
   claim_check_mode: "block",
+  // Structural-drift validator mode for sub-agent output artifacts.
+  // checkAgentOutput's --structural --baseline=<path> flag compares the
+  // final agent artifact against the stub-first sentinel snapshot via the
+  // structural-validator module (caveman-borrowed extractors: headings, code
+  // blocks, URLs, paths, inline codes, bullets). recoverPartialImpl uses
+  // the same machinery against agents/io-contracts.yaml::outputs.
+  // expected_sections to surface targeted-fix recovery via [STRUCTURAL_DRIFT_
+  // DETECTED] in dev-workflow + quick-implement.
+  //
+  //   "off" — checkAgentOutput skips structural-drift check even when
+  //     --structural is passed; recoverPartialImpl skips drift detection.
+  //   "warn" (default) — structural drift returns suggested_action with
+  //     mode:"warn" so orchestrators can advisory-route to targeted-fix
+  //     without blocking. Default after an opt-in calibration window.
+  //   "block" — structural drift returns suggested_action with mode:"block"
+  //     so orchestrators must route to targeted-fix via SendMessage-resume.
+  //
+  // 'block' flip stays deferred until user-side field data confirms zero
+  // false positives across at least one representative workflow cycle.
+  validator: {
+    structural_mode: "warn",
+  },
+  // Opt-in static-file prose compressor. Refer to
+  // docs/static-compress-recipe.md for the full opt-in protocol.
+  //
+  //   mode: "off" (default) — CLI errors with "feature disabled"; explicit
+  //     opt-in required per project. Safest default — no surprises.
+  //   mode: "on" — `node bin/devt-tools.cjs static-compress <path>` compresses
+  //     the file in place + writes <path>.original.md backup for reversal.
+  //
+  //   size_cap_bytes: hard refuse files larger than this. Default 500 KB —
+  //     covers .devt/rules/, guardrails/, skills/SKILL.md without raising
+  //     concerns; oversized inputs are usually wrong-target mistakes.
+  //
+  // Probes for `headroom` on PATH and shells out for neural extractive
+  // compression when available; falls back to deterministic regex
+  // (prose-shrink.cjs, caveman-shrink port) when not. Either path runs
+  // through the structural-drift validator before the compressed file
+  // lands — drift detected → backup deleted, no change made.
+  static_compress: {
+    mode: "off",
+    size_cap_bytes: 500000,
+  },
   // Telemetry — calibration-mode opt-ins for hooks that emit forensic records.
   // Each flag defaults to the cost-minimizing behavior; override in
   // .devt/config.json::telemetry.<flag> when a calibration cycle needs richer

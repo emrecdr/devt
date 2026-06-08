@@ -97,6 +97,13 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "static-compress": {
+        // First positional after `static-compress` is the file path (no
+        // sub-action verbs); pass args.slice(1) so the path lands in args[0].
+        const code = require("./modules/static-compress.cjs").run(null, args.slice(1));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "mcp-stats": {
         // mcp-stats — aggregate MCP tool-call traces
         const code = require("./modules/mcp-stats.cjs").run(subcommand, args.slice(2));

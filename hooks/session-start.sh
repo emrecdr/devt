@@ -150,10 +150,10 @@ if [[ -n "$UPDATE_MSG" ]]; then
 ${UPDATE_MSG}"
 fi
 
-# ─── What's-New Surfacing (v0.77.0) ───
-# Greenfield calibration 2026-06-07: doc-promotion failed because Greenfield-LLM
-# only loads project's CLAUDE.md, not devt's. New features in CHANGELOG.md or
-# devt's CLAUDE.md never registered. Per-machine version stamp under
+# ─── What's-New Surfacing ───
+# Closes the doc-promotion gap where a project's Claude Code session only
+# loads the project's CLAUDE.md, never devt's — new CHANGELOG entries
+# never surface to the user. Per-machine version stamp under
 # ~/.cache/devt/whats-new-seen — when the cached version differs from the
 # installed VERSION, surface the CHANGELOG headline paragraph for this
 # version once, then update the stamp so subsequent sessions stay silent.

@@ -925,27 +925,14 @@ function updateState(keyValues) {
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
     }
-    // H2-v2 (greenfield calibration #10): idempotent self-healing for
-    // workflow_id_history. Three failure modes the original H2 fix missed:
-    //   1. History was seeded by v0.68.0 as [current_only] (no original) —
-    //      stuck that way because v0.68.1's H2 logic only fired when history
-    //      was absent.
-    //   2. init.cjs strips workflow_id + created_at, forcing updateState's
-    //      first-activation branch — which never appended the new workflow_id
-    //      to an existing history array.
-    //   3. Greenfield's session ended up with history missing BOTH the
-    //      original (647d32e5) and the current (a57aa9c2) ids.
-    // Fix: always ensure {original, current} ⊆ history. Runs after either
-    // branch above. Idempotent — repeat runs add nothing.
-    //
-    // H2-v3 (greenfield calibration #11): backfill from _mcp-trace.jsonl.
-    // Pre-v0.68.2 rotation bugs orphaned workflow_ids in trace records that
-    // never reached history. Greenfield evidence: 4 ids (8d2c91a1, 3a96bd9b,
-    // 9eeb1ae3, 7db622ee) in recent trace not in history — `mcp-stats
-    // --workflow-id` reports 5-record gap vs --since-workflow-created. Scan
-    // trace for in-session ids and merge into history. Capped at last 5000
-    // lines to bound I/O cost. Inserts orphan ids in trace-appearance order
-    // (between original at index 0 and current at end).
+    // Idempotent self-healing for workflow_id_history: ensure {original,
+    // current} ⊆ history regardless of how history arrived. init.cjs strips
+    // workflow_id + created_at, forcing the first-activation branch above
+    // that never appended a new id to an existing array, so the guard runs
+    // after either branch. Plus a trace-backfill pass for orphan ids that
+    // appeared in `_mcp-trace.jsonl` but never reached history — capped at
+    // the last 5000 lines to bound I/O cost; orphans land in trace-appearance
+    // order between `original` (index 0) and `current` (end).
     if (current.active === true) {
       if (!Array.isArray(current.workflow_id_history)) current.workflow_id_history = [];
       // Prepend original if missing — preserves chronological order
@@ -1866,7 +1853,7 @@ const STUB_MARKER_PATTERNS = [
 ];
 const STUB_WORD_COUNT_THRESHOLD = 50;
 
-function checkAgentOutput(filePath) {
+function checkAgentOutput(filePath, opts) {
   if (!filePath || typeof filePath !== "string") {
     return { ok: false, reason: "no path provided" };
   }
@@ -1915,6 +1902,57 @@ function checkAgentOutput(filePath) {
       `(threshold ${STUB_WORD_COUNT_THRESHOLD}), ` +
       `stub_phrases=${stubPhrasesFound.length}, heading_only=${allHeadings}`;
   }
+
+  // Optional structural-drift check against a baseline (typically the
+  // stub-first sentinel snapshot the orchestrator captured before final
+  // write). Closes the gap stub/word-count detection misses: section
+  // deletion, code-fence mangling, lost URLs between baseline and final.
+  if (opts && opts.structural && opts.baseline) {
+    const baselinePath = path.isAbsolute(opts.baseline)
+      ? opts.baseline
+      : path.join(findProjectRoot(), opts.baseline);
+    if (!fs.existsSync(baselinePath)) {
+      result.structural_drift = {
+        ok: false,
+        errors: [`baseline does not exist: ${opts.baseline}`],
+        warnings: [],
+        mode: opts.mode || "superset",
+      };
+      result.ok = false;
+      const driftReason = `structural drift: baseline does not exist: ${opts.baseline}`;
+      result.reason = result.reason ? `${result.reason}; ${driftReason}` : driftReason;
+    } else {
+      try {
+        const baseline = fs.readFileSync(baselinePath, "utf8");
+        const { validate } = require("./structural-validator.cjs");
+        result.structural_drift = validate(baseline, content, {
+          mode: opts.mode || "superset",
+        });
+        if (!result.structural_drift.ok) {
+          result.ok = false;
+          const driftReason = `structural drift: ${result.structural_drift.errors.join("; ")}`;
+          result.reason = result.reason
+            ? `${result.reason}; ${driftReason}`
+            : driftReason;
+        }
+      } catch (e) {
+        // Validator crash must not be silent — a checkAgentOutput consumer
+        // expects `ok` to reflect ALL gates, not just the stub-pattern one.
+        // Without flipping ok=false, the gate reports clean when validation
+        // is actually broken.
+        result.structural_drift = {
+          ok: false,
+          errors: [`structural-validator error: ${e.message}`],
+          warnings: [],
+          mode: opts.mode || "superset",
+        };
+        result.ok = false;
+        const driftReason = `structural-validator crashed: ${e.message}`;
+        result.reason = result.reason ? `${result.reason}; ${driftReason}` : driftReason;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -2683,7 +2721,7 @@ function recoverPartialImpl(agent) {
   if (typeof agent !== "string" || !agent) {
     return { ok: false, reason: "missing agent argument" };
   }
-  let primary, sidecar;
+  let primary, sidecar, expectedSections;
   try {
     const dispatch = require("./dispatch.cjs");
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -2698,6 +2736,7 @@ function recoverPartialImpl(agent) {
     }
     primary = ac.outputs && ac.outputs.primary;
     sidecar = ac.outputs && ac.outputs.sidecar;
+    expectedSections = (ac.outputs && ac.outputs.expected_sections) || null;
   } catch (e) {
     return { ok: false, agent, reason: `io-contracts parse failed: ${e.message}` };
   }
@@ -2751,8 +2790,12 @@ function recoverPartialImpl(agent) {
   const stubPattern = /^#\s+.+\s+[—\-]\s+in progress\b/m;
   const isStub = sizeBytes < STUB_BYTES_THRESHOLD && stubPattern.test(head);
   // Latest task_output_bytes record for this agent in dispatch-warnings.jsonl.
-  // The hook prefixes agent with "devt:" so match accordingly.
+  // The hook prefixes agent with "devt:" so match accordingly. Malformed-line
+  // counter surfaces degraded telemetry — partial JSONL writes from a hook
+  // race or disk-full event would otherwise route recovery to "investigate"
+  // (the wrong path) without any signal.
   let latestOutputRecord = null;
+  let malformedJsonlLines = 0;
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
   if (fs.existsSync(warningsPath)) {
@@ -2768,13 +2811,13 @@ function recoverPartialImpl(agent) {
             latestOutputRecord = rec;
             break;
           }
-        } catch { /* malformed line */ }
+        } catch { malformedJsonlLines++; }
       }
     } catch { /* read failed — fall through */ }
   }
   const lowOutput = !!(latestOutputRecord && latestOutputRecord.low_output === true);
   if (isStub && lowOutput) {
-    return {
+    const r = {
       ok: true,
       agent,
       recovery_needed: true,
@@ -2784,19 +2827,84 @@ function recoverPartialImpl(agent) {
       suggested_action: "SendMessage-resume",
       reason: `${primary} is stub-equivalent (${sizeBytes} bytes, header-only) AND dispatch-warnings.jsonl shows the agent's last dispatch had low_output:true (${latestOutputRecord.output_bytes} bytes). Likely rate-limited mid-section. SendMessage-resume the agent rather than re-dispatching — the stub-first sentinel + orchestrator's section progress are recoverable context.`,
     };
+    if (malformedJsonlLines > 0) r.malformed_jsonl_lines = malformedJsonlLines;
+    return r;
   }
   if (isStub) {
-    return {
+    const r = {
       ok: true,
       agent,
       recovery_needed: true,
       primary_state: "stub",
       low_output: false,
       suggested_action: "investigate",
-      reason: `${primary} is stub-equivalent (${sizeBytes} bytes, header-only) but no low_output signal in dispatch-warnings.jsonl. The dispatch either never started writing content OR stopped for a reason other than rate-limit. Investigate before re-dispatching.`,
+      reason: `${primary} is stub-equivalent (${sizeBytes} bytes, header-only) but no low_output signal in dispatch-warnings.jsonl${malformedJsonlLines > 0 ? ` (${malformedJsonlLines} malformed line(s) skipped — telemetry may be degraded)` : ""}. The dispatch either never started writing content OR stopped for a reason other than rate-limit. Investigate before re-dispatching.`,
     };
+    if (malformedJsonlLines > 0) r.malformed_jsonl_lines = malformedJsonlLines;
+    return r;
   }
-  return {
+  // Structural-drift check. When the artifact is substantive
+  // but the agent's contract declares expected_sections AND validator mode is
+  // not 'off', extract the artifact's headings and verify every declared
+  // section is present. Drops detected → return suggested_action="targeted-fix"
+  // so orchestrators can SendMessage-resume the same agent with a precise
+  // fix prompt rather than fresh re-dispatch. Mode 'warn' surfaces the
+  // signal advisory-style; mode 'block' makes the orchestrator routing
+  // mandatory. Same triad shape as dispatch_hygiene_mode / claim_check_mode.
+  let structuralCheckErrored = false;
+  if (expectedSections && Array.isArray(expectedSections) && expectedSections.length > 0) {
+    let structuralMode = "off";
+    try {
+      const { getMergedConfig } = require("./config.cjs");
+      const cfg = getMergedConfig();
+      structuralMode = (cfg && cfg.validator && cfg.validator.structural_mode) || "off";
+    } catch (e) {
+      // ENOENT (missing config file) is the expected silent case. Other
+      // errors — malformed JSON, permission, prototype-pollution rejection —
+      // are configuration mistakes the user needs to see; otherwise the
+      // feature silently no-ops and the calibration window collects no data.
+      if (e && e.code !== "ENOENT") {
+        process.stderr.write(
+          `[recover-partial-impl] config load failed: ${e.message} — defaulting structural_mode=off\n`,
+        );
+      }
+    }
+    if (structuralMode !== "off") {
+      try {
+        const content = fs.readFileSync(primaryPath, "utf8");
+        const { extractHeadings } = require("./structural-validator.cjs");
+        const headings = extractHeadings(content);
+        const present = new Set(headings.map(h => h.title));
+        const missing = expectedSections.filter(s => !present.has(s));
+        if (missing.length > 0) {
+          return {
+            ok: true,
+            agent,
+            recovery_needed: true,
+            primary_state: "substantive",
+            size_bytes: sizeBytes,
+            suggested_action: "targeted-fix",
+            mode: structuralMode,
+            drift: {
+              missing_sections: missing,
+              expected_sections: expectedSections,
+            },
+            reason: `${primary} is substantive (${sizeBytes} bytes) but missing ${missing.length} section(s) declared in io-contracts.yaml::${agent}.outputs.expected_sections: ${JSON.stringify(missing)}. SendMessage-resume the agent with templates/dispatch/envelopes/${agent}-fix.tmpl.md — preserves existing content while restoring the dropped section(s) — rather than fresh re-dispatch.`,
+          };
+        }
+      } catch (e) {
+        // Validator crash must not be silent — the calibration window
+        // relies on observing real drift. Stderr-surface and mark the
+        // return so the orchestrator can distinguish "no drift detected"
+        // from "drift detection unavailable".
+        process.stderr.write(
+          `[recover-partial-impl] structural validator failed: ${e.message}\n`,
+        );
+        structuralCheckErrored = true;
+      }
+    }
+  }
+  const substantiveReturn = {
     ok: true,
     agent,
     recovery_needed: false,
@@ -2804,6 +2912,9 @@ function recoverPartialImpl(agent) {
     size_bytes: sizeBytes,
     reason: `${primary} appears substantive (${sizeBytes} bytes, no stub-pattern match). No partial-recovery needed — agent may simply not have written a sidecar.`,
   };
+  if (structuralCheckErrored) substantiveReturn.structural_check = "errored";
+  if (malformedJsonlLines > 0) substantiveReturn.malformed_jsonl_lines = malformedJsonlLines;
+  return substantiveReturn;
 }
 
 // Substance-check race fix (cal #20 §3) — mtime-stability primitive.
@@ -4055,10 +4166,9 @@ function persistClaimCheckResult(result) {
   } catch { /* persistence is best-effort */ }
 }
 
-// WI-1 / Layer-2 (greenfield cal #16+#17): post-hoc finalize gate. Mirrors
-// the assertNoRawDispatchesThisSession pattern from v0.69.5 (which has held
-// up across 4 cals). Walks claim-check-failures.jsonl, builds per-agent
-// latest verdict in workflow window, counts unresolved failures.
+// Layer-2 post-hoc finalize gate — mirrors the assertNoRawDispatchesThisSession
+// pattern. Walks claim-check-failures.jsonl, builds per-agent latest verdict
+// in workflow window, counts unresolved failures.
 //
 // Resolution semantic: append-only audit trail with verdict field. For each
 // agent in the window, the LAST record wins — orchestrator re-dispatches that
@@ -4775,8 +4885,15 @@ function run(subcommand, args) {
       return traceGate("assert-preflight-fresh", () => assertPreflightFresh());
     case "assert-claude-mem-harvest":
       return traceGate("assert-claude-mem-harvest", () => assertClaudeMemHarvest());
-    case "check-agent-output":
-      return checkAgentOutput(args[0]);
+    case "check-agent-output": {
+      const structural = args.includes("--structural");
+      const baseline = _getFlag(args, "--baseline");
+      const mode = _getFlag(args, "--mode");
+      const opts = structural || baseline
+        ? { structural: true, baseline, ...(mode ? { mode } : {}) }
+        : undefined;
+      return checkAgentOutput(args[0], opts);
+    }
     case "assert-verifier-ran":
       return traceGate("assert-verifier-ran", () => assertVerifierRan());
     case "assert-scope-check-handled":

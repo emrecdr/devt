@@ -72,7 +72,7 @@ function parseIoContracts(content) {
       agents[currentAgent] = {
         frontmatter_skills: [],
         index_buckets: [],
-        outputs: { primary: null, sidecar: null },
+        outputs: { primary: null, sidecar: null, expected_sections: null },
         inputs: { context_blocks: [], graphify_inputs: [] },
       };
       inInputs = false;
@@ -115,6 +115,17 @@ function parseIoContracts(content) {
         if (list !== null) agents[currentAgent].inputs[key] = list;
       } else if (inOutputs && (key === "primary" || key === "sidecar")) {
         agents[currentAgent].outputs[key] = valueStr === "null" ? null : valueStr;
+      } else if (inOutputs && key === "expected_sections") {
+        const list = parseInlineList(valueStr);
+        if (list !== null) {
+          agents[currentAgent].outputs.expected_sections = list;
+        } else if (valueStr.trim().startsWith("[")) {
+          // Looks like a list but didn't parse — silent-skip would poison
+          // structural-drift detection for this agent without any signal.
+          throw new Error(
+            `io-contracts.yaml::${currentAgent}.outputs.expected_sections has malformed list value: ${JSON.stringify(valueStr)}`,
+          );
+        }
       }
     }
   }

@@ -127,12 +127,10 @@ function loadInlineGuardrails(pluginRoot) {
   return { content: result, bytes: totalBytes, warnings };
 }
 
-// loadGraphImpact (v0.77.0) — pulls .devt/state/graph-impact.md content for
-// inline injection into investigative-agent dispatch envelopes (programmer,
-// code-reviewer, debugger). v0.76.0 shipped a Read-prompt-wrapped tag that
-// required sub-agents to make a Read tool call; greenfield calibration
-// 2026-06-07 confirmed the data reached them via Read but never via inlining.
-// This helper closes that gap.
+// loadGraphImpact — pulls .devt/state/graph-impact.md content for inline
+// injection into investigative-agent dispatch envelopes (programmer,
+// code-reviewer, debugger). Sub-agents are MCP-blind by contract, so the
+// orchestrator inlines the file content rather than instructing a Read call.
 //
 // Returns { content, bytes, status } where:
 //   status = "present"  — file exists, content inlined (possibly truncated)

@@ -6,6 +6,152 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.83.0] - 2026-06-09
+
+**Strict version-marker sweep + K78 enforcement gate + 5 polish items.** Cleans up the pre-existing devt-internal version markers scattered across `bin/modules/`, `hooks/`, and `workflows/_phase-gates.yaml` that predated the rule's enforcement. K78 smoke gate scans `bin/modules/`, `hooks/`, `agents/`, `workflows/`, `templates/`, `guardrails/` for `vX.Y.Z` markers and refuses any. Skills and `templates/*/documentation.md` are exempt — they use version markers as legitimate template/example content (Option A/B prescription, `@deprecated`/`@beta` JSDoc patterns). The 5 polish items address silent-failure findings deferred from the v0.82.0 validation: prose-shrink sentinel non-convergence now throws, `isSensitivePath` throws on non-string inputs, `static-compress mode='off'` returns ok:true with skipped:true (config-as-designed not a failure), headroom failure modes differentiate, backup readback error surfaces the actual byte mismatch.
+
+Smoke: 826 passed, 0 failed (+1 K78). Locking: 3/3.
+
+### Changed
+
+- **Strict version-marker sweep across `bin/modules/`, `hooks/`, `workflows/_phase-gates.yaml`.** Stripped historical-context comments referencing `v0.X.Y` markers (`bin/modules/state.cjs`, `init.cjs`, `preflight.cjs`, `state-audit.cjs`, `mcp-stats.cjs`, `graphify.cjs`; `hooks/session-start.sh`, `task-truncation-detector.sh`, `run-hook.js`; `workflows/_phase-gates.yaml`). Each comment block was rewritten to keep the architectural rationale that mattered (WHY the code is shaped the way it is) and drop the WHEN (the version provenance). `bin/modules/update.cjs:185` is the CHANGELOG-header regex parser — version literals there are functional code, exempt from the sweep.
+
+- **`static-compress mode='off'` returns `ok:true, skipped:true`.** Configuration-as-designed isn't a failure; the prior `ok:false, exit 1` behavior tripped callers running under `set -e`. CLI exits 0 in skipped mode. K77 fixture A's `|| true` workaround is now functionally redundant but kept as defense-in-depth.
+
+- **`_runHeadroom` timeout 60s → 30s.** Original 60s was over-generous for a 500 KB input cap × neural compressor's realistic wall time. 30s preserves headroom for slow Apple-Silicon-MPS first-load while halving the wait when something hangs.
+
+### Added
+
+- **K78 smoke gate — convention enforcement against banned version markers.** Scans `bin/modules/`, `hooks/`, `agents/`, `workflows/`, `templates/`, `guardrails/` for `\bv\d+\.\d+\.\d+\b`. Exempts the CHANGELOG-parser regex line in `update.cjs` and `templates/*/documentation.md` template-example content. Closes the systemic gap that let the H1 trajectory ship with 9 violations across new files — any future regression now fails CI.
+
+### Fixed
+
+- **`prose-shrink` sentinel non-convergence throws explicit error.** Previously the 8-pass restoration loop could exit with `ZZZPROTZZZ` markers still embedded in output on pathological nested-protection inputs. The structural validator downstream would catch the resulting corruption but report misleading errors ("URL lost"). Now throws a clear error naming the actual cause; the static-compress orchestrator's catch surfaces it to the user verbatim.
+
+- **`isSensitivePath` throws `TypeError` on non-string inputs.** Previously returned `false` for `undefined`/`null`/numbers — silently treating programming errors as a "safe to process" verdict, the exact wrong default for a denylist. Empty string still returns false (legitimate "no path to check" signal).
+
+- **`_headroomAvailable` distinguishes ENOENT from other errors.** Previously all probe failures were silently swallowed → user couldn't tell why headroom wasn't firing. ENOENT (not installed) stays silent; permission errors, non-zero exits from `headroom --version`, spawn exceptions now write a one-line stderr hint.
+
+- **`_runHeadroom` returns structured failure shape.** Replaces the prior 4-mode-collapse-to-null with `{ok, reason}` where `reason` names the specific failure (timeout / non-zero exit + stderr tail / empty output / spawn exception). `_compressText` writes a per-mode stderr line before falling back to regex.
+
+- **Backup readback failure includes byte-mismatch detail.** Previously `"backup readback failed — aborting"` told the user nothing actionable. Now distinguishes (a) read error (filesystem failure: code + message) from (b) bytes-differ-on-disk (in-memory vs on-disk byte counts, hint at disk/encoding/antivirus interference).
+
+## [0.82.0] - 2026-06-09
+
+**Validation-pass cleanup: error-handling discipline + CLAUDE.md hygiene.** Patch release responding to an independent code-review + silent-failure-hunter pass over the H1 trajectory diff. No new features. Six findings landed: a systemic CLAUDE.md "Documentation discipline" violation (banned version markers in nine new file headers), three silent error-catches that disabled the structural-drift feature on config typos / validator crashes, and one missing smoke fixture that left K77's drift-revert claim unverified. Closes the loop the H1 calibration window depends on.
+
+Smoke: 825 passed, 0 failed (K77 expanded to 6 fixtures). Locking: 3/3.
+
+### Changed
+
+- **Version markers stripped from 9 added file headers** (4 fix templates, `bin/modules/static-compress.cjs`, `bin/modules/config.cjs` × 2 blocks, `bin/modules/state.cjs::recoverPartialImpl`, `docs/static-compress-recipe.md`). CLAUDE.md "Documentation discipline" + `feedback_no_version_refs_in_code` user memory ban devt-internal version refs from code/agents/workflows/skill bodies. Version provenance belongs in CHANGELOG + git history.
+
+### Fixed
+
+- **`recoverPartialImpl` config load surfaces non-ENOENT failures to stderr.** Previously a malformed `.devt/config.json::validator.structural_mode` (typo, JSON syntax error, forbidden-key rejection from the prototype-pollution guard) silently defaulted the feature to `'off'` with no signal — the calibration window the H1 plan was built around would silently collect no data. Now stderr-warns on every non-missing-file error so users can see the actual cause.
+
+- **`recoverPartialImpl` structural-validator crash surfaces to stderr + marks return.** Previously `try { extractHeadings(...) } catch { /* best-effort */ }` swallowed all validator errors and fell through to "substantive" — orchestrator told "no drift" when drift detection was actually broken. Now writes a stderr line per failure AND attaches `structural_check: "errored"` to the substantive return so the orchestrator can distinguish "no drift detected" from "drift detection unavailable".
+
+- **`static-compress.cjs::_resolveConfig()` surfaces non-ENOENT config errors to stderr.** Same footgun at a more visible surface — user runs `static-compress`, sees "feature disabled" message, edits config with a typo, sees the exact same message. Now the typo surfaces.
+
+- **`checkAgentOutput` structural-drift catch flips `result.ok = false`.** Previously the catch block populated `structural_drift.errors[]` with the validator error but left `result.ok = true` — gate reports clean when the validator crashed. Now the gate correctly reports failure on validator crash with the failure cause in `reason`.
+
+- **`recoverPartialImpl` malformed-line counter for `dispatch-warnings.jsonl`.** Three separate `catch { /* malformed line */ }` blocks silently skipped records — when a hook race condition or partial write produced an unparseable line, `recoverPartialImpl` could miss the `low_output:true` signal and route to `'investigate'` instead of `'SendMessage-resume'` (the wrong recovery path). Now counts skipped lines and surfaces them via the optional `malformed_jsonl_lines: N` field + an explanatory clause in the `investigate` reason.
+
+- **`dispatch.cjs::parseIoContracts` throws on malformed `expected_sections`.** Previously a syntactically-broken inline list (e.g., `expected_sections: [Task Files Modified]` — missing comma) silently parsed to null → structural-drift check skipped for that agent without any signal. Now throws an explicit error with agent name + key so the calibration-data poisoning surfaces at load time.
+
+### Added
+
+- **K77 Fixture F — structural drift triggers automatic revert.** Closes a verification gap where K77's comment claimed the drift-detected-→-backup-deleted path was tested but no prior fixture exercised it. Fixture F injects a faked `headroom` binary on PATH that drops a section heading. Assertions: (a) input file byte-equal to original, (b) backup file absent, (c) reason mentions `structural elements`. Confirms the structural validator catches drift before the input is touched.
+
+## [0.81.0] - 2026-06-09
+
+**E3: opt-in static-file prose compressor (telemetry-gated, default off).** Fourth and final release in the H1 trajectory. The v0.80.0 envelope audit closed the telemetry gate — guardrails + governing rules dominate dispatch cost at 87.9% of envelope bytes — so the planned static-file compression infrastructure lands. New `static-compress` CLI subcommand compresses prose in markdown files while leaving fenced code blocks, inline code, URLs, paths, identifiers, function calls, CONST_CASE tokens, and version numbers byte-equal. Backup file (`<path>.original.md`) lands first with readback verification; structural-drift validator runs post-compression; any drift detected → backup deleted, input untouched. `headroom` probed on `PATH` for neural extractive compression; deterministic regex fallback (caveman-shrink port) when not available. Sensitive-path denylist refuses credentials before any compression. Documentation in `docs/static-compress-recipe.md`.
+
+Smoke: 825 passed, 0 failed (+1 K77). Locking: 3/3.
+
+### Added
+
+- **E3-1 — `bin/modules/prose-shrink.cjs`** (zero-dep, MIT-attributed port of caveman-shrink `src/mcp-servers/caveman-shrink/compress.js`). Pure-Node regex prose compressor with sentinel-protected segments. Eight protected pattern classes: fenced code, inline code, URLs, paths (leading `./`, `../`, `/`, drive-letter, or `/`-bearing tokens), CONST_CASE identifiers, dotted.method paths, function calls, version numbers. Iterative sentinel restoration handles nested-pattern overlap (e.g., `config.SETTING_KEY` where SETTING_KEY first gets CONST_CASE-protected, then `config.<sentinel>` gets dotted-method-matched — sentinel restore loops until stable). Whitespace classes intentionally exclude newlines so line structure (heading boundaries) survives compression.
+
+- **E3-2 — `bin/modules/static-compress.cjs`** (orchestrator). Probes `headroom --version` on PATH; shells out to `headroom compress -` for neural extractive compression (~40% reduction, 7.9/10 fidelity per chopratejas/kompress-base model card) when available; falls back to prose-shrink.cjs (~25-35% reduction, fully deterministic) when not. Five safety layers before any input file is touched: sensitive-path denylist refusal (same `is_sensitive_path` port `graphify.cjs` uses), file size cap (default 500 KB), empty-file refusal, identical-output refusal, backup-readback verification, structural-drift validation post-compression. Atomic writes via `io.cjs::atomicWriteFileSync`. Compress + restore actions log to `.devt/state/static-compress.jsonl`.
+
+- **E3-3 — `static-compress [path]` + `--restore [path]` CLI subcommands** in `bin/devt-tools.cjs`. Returns JSON; exit 0 on success, 1 on refusal/failure, 2 on usage error.
+
+- **E3-4 — `DEFAULTS.static_compress: { mode: 'off', size_cap_bytes: 500000 }`** in `bin/modules/config.cjs`. `mode: 'off'` (default) means the CLI returns a clear "feature disabled" message — explicit opt-in required per project via `.devt/config.json`. `mode: 'on'` activates the compressor. No surprises path — devt never modifies user files without permission.
+
+- **K77 smoke gate** — static-compress 5-fixture round-trip: mode-off refused with feature-disabled message, mode-on compresses while preserving inline code + URL + path bytes + writing `.original.md` backup, `--restore` returns byte-identical original (compared via `wc -c`), sensitive filename refused with exit 1, empty file refused with "empty" reason.
+
+- **`docs/static-compress-recipe.md`** — user-facing recipe covering the opt-in protocol, five safety layers, recommended targets (guardrails files dominate envelope), reversibility flow, and telemetry shape.
+
+## [0.80.0] - 2026-06-08
+
+**Default flip: `validator.structural_mode: 'off' → 'warn'`. C deferred after measurement.** Third release in the H1 trajectory. Closes the v0.78.0 + v0.79.0 calibration window — the structural-drift validator + targeted-fix loop ship default-active in advisory mode. Drift detected → `[STRUCTURAL_DRIFT_DETECTED]` echo fires with `mode=warn`; orchestrators can SendMessage-resume the rendered fix template for the affected agent, but the gate doesn't block workflows. `'warn' → 'block'` flip stays deferred until field data confirms zero false positives.
+
+**C decision: skip.** The plan's measurement-gated MCP description shrinker was specced to target envelope description prose. Architecture audit of a real dispatch envelope (programmer:dev, 31,517 bytes) shows the compressible-prose slice is <2% of envelope cost — `guardrails_inline` dominates at 86.6% (27,291 bytes), `governing_rules` is 1.3%, MCP description prose is the noise floor. C-as-specified would optimize an immaterial slice. Defer C; track guardrails as the real future compression candidate, which requires a caching-layer architecture (not a simple shrinker).
+
+Smoke: 824 passed, 0 failed (no new gates). Locking: 3/3.
+
+### Changed
+
+- **`validator.structural_mode` default flipped from `'off'` to `'warn'`.** Existing `checkAgentOutput` + `recoverPartialImpl` infrastructure now active in advisory mode for the 4 sidecar-bearing agents (programmer, tester, code-reviewer, verifier). Orchestrators see `[STRUCTURAL_DRIFT_DETECTED]` when an agent drops a section declared in `agents/io-contracts.yaml::outputs.expected_sections`. The fix flow remains SendMessage-resume against `templates/dispatch/envelopes/<agent>-fix.tmpl.md` — saves ~5–15K tokens per drift incident vs. fresh re-dispatch. Users who hit false positives can opt back to `'off'` via project `.devt/config.json::validator.structural_mode`.
+
+- **Config comment updated** to reflect the flip + the deferral rationale for `'block'`. Same pattern dispatch_hygiene_mode used (warn precedes block-by-default after field cycles).
+
+### Deferred
+
+- **C — MCP description shrinker.** Measurement-by-architecture (envelope byte-slice audit) shows the targeted prose surface is <2% of dispatch cost. The wrong slice for compression effort. Re-evaluate as a guardrails-targeted caching layer in a future release — different architecture (cache invalidation, content stability, not a one-shot shrinker), distinct deliverable.
+
+- **`'warn' → 'block'` flip.** Stays deferred. Will land once user-side field data confirms zero false positives across representative workflow runs. Same calibration cadence used for `dispatch_hygiene_mode`'s warn-then-block ramp.
+
+## [0.79.0] - 2026-06-08
+
+**B-Wire: targeted-fix recovery loop + E2 byte-stability + sensitive-path borrow.** Second release in the H1 trajectory. Closes the structural-drift loop opened by v0.78.0 — when a sub-agent writes a substantive artifact but drops a section declared in `agents/io-contracts.yaml::outputs.expected_sections`, the orchestrator now SendMessage-resumes the same agent ID with a precise fix prompt rather than fresh re-dispatch (saves ~5–15K tokens per drift incident). Default `validator.structural_mode` stays `'off'` for one calibration cycle — flip to `'warn'` deferred to v0.80.0 once user-side field data confirms zero false positives. Adds E2 byte-stability assertion to K71 (CacheAligner concept borrow from headroom). Adds graphify CLI sensitive-path denylist (caveman is_sensitive_path port) — refuses `.env`/`.ssh`/credential-shaped paths from flowing into MCP queries.
+
+Smoke: 824 passed, 0 failed (+1 K71b idempotence + 1 K76 denylist). Locking: 3/3.
+
+### Added
+
+- **B3 — `outputs.expected_sections` + parser support for 4 sidecar-bearing agents.** Added the field to `agents/io-contracts.yaml` for programmer (`[Task, Files Modified, Key Decisions, Quality Gate Results, Provenance]`), code-reviewer (`[Findings]` — the load-bearing section downstream consumers parse, kept minimal given BLOCKED vs happy-path heading variance), verifier (`[Task, Acceptance Criteria, Quality Gates, Summary]`), tester (`[Coverage, Test Files, Quality Gate Results, Provenance]`). Extended `bin/modules/dispatch.cjs::parseIoContracts` to surface the new field. Sections derived from each agent's body declarations — represents the minimum common set across all valid output paths. Sections beyond this list are permitted (superset semantics).
+
+- **B4 — `recoverPartialImpl` third `suggested_action: 'targeted-fix'` branch.** Extended `bin/modules/state.cjs::recoverPartialImpl` to detect structural drift when validator mode is non-`off` AND the agent's contract declares `expected_sections`. Returns `{recovery_needed: true, suggested_action: 'targeted-fix', mode: 'warn'|'block', drift: {missing_sections, expected_sections}, reason}`. Falls back gracefully if validator config or structural-validator module is unavailable.
+
+- **B5 — 4 fix-prompt envelope templates.** New files in `templates/dispatch/envelopes/`: `programmer-fix.tmpl.md`, `code-reviewer-fix.tmpl.md`, `verifier-fix.tmpl.md`, `tester-fix.tmpl.md`. Body ports caveman (MIT) `compress.py::build_fix_prompt` adapted to devt — strict "do NOT redo, do NOT rewrite, ONLY add missing sections" instructions with `{drift_errors}` placeholder the orchestrator substitutes inline before SendMessage-resume. NOT loaded by `dispatch render-filled` (no BEGIN dispatch markers reference them) — they're orchestrator-side guidance templates.
+
+- **B6 — `[STRUCTURAL_DRIFT_DETECTED]` echo wired into 2 workflows.** Extended the existing `[PARTIAL_IMPL_RECOVERY]` post-dispatch bash block in `workflows/dev-workflow.md` and `workflows/quick-implement.md` to differentiate the echo prefix when `recoverPartialImpl` returns `suggested_action=targeted-fix`. Echo carries `mode`, `missing_sections`, and `reason`. Workflow prose guides orchestrators to read the relevant `<agent>-fix.tmpl.md`, substitute `{drift_errors}` with the missing-sections list, and SendMessage-resume — NOT fresh `Task()` dispatch. `code-review.md` deferred because it does not currently call `recover-partial-impl programmer`; will join when code-reviewer-specific drift detection lands in a later release.
+
+- **E2 — K71b idempotence smoke gate.** Extended K71 with a second `dispatch compile --check` call asserting byte-identical output across consecutive runs. Catches mtime/timestamp/random-id leaks into the substitution table that would silently break prompt-cache hit rates. Audit confirmed `buildSubstitutionTable` is a pure function of (config, state file content, governing-rules + guardrails + rubrics + graph-impact file content) — no non-deterministic inputs leak today. K71b is a forward-guard. Concept borrowed from headroom CacheAligner — concept only, zero code dependency.
+
+- **`bin/modules/sensitive-path.cjs` (zero-dep, MIT-attributed port of caveman `compress.py::is_sensitive_path`).** Three-check denylist: basename regex (`.env*`, `.netrc`, `credentials*`, `secret(s)*`, `password(s)*`, `id_rsa/dsa/ecdsa/ed25519*`, `authorized_keys`, `known_hosts`, `*.pem/key/p12/pfx/crt/cer/jks/keystore/asc/gpg`), sensitive path component (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`), token-normalized basename (`secret`, `credential`, `password`, `apikey`, `accesskey`, `token`, `privatekey` — `[_\-\s.]` stripped before substring match so `api-key` and `api_key` both catch).
+
+- **Graphify CLI sensitive-path filter at 4 file-accepting subcommands.** `lane-suggestions`, `check-large-files`, `check-symbol-godnodes`, `symbols-in-files` now refuse sensitive-path inputs with exit 2 + clear stderr message. Closes the disclosure path where an accidental `.env` or `~/.ssh/id_rsa` argument would flow into graphify MCP queries.
+
+- **K76 smoke gate** — graphify sensitive-path denylist round-trip across 4 fixtures: `credentials.json` refused (exit 2), `.ssh/id_rsa` refused (exit 2), `my-api-key.env` refused (exit 2), clean path (`src/auth.py docs/README.md`) accepted (exit 0).
+
+### Changed
+
+- **`bin/modules/dispatch.cjs::parseIoContracts`** now surfaces `outputs.expected_sections` as a list (or `null` when absent). Backward-compatible — agents without the field see no behavior change.
+
+- **`bin/modules/state.cjs::recoverPartialImpl`** signature shape extended (new optional `drift` and `mode` return fields when `suggested_action=targeted-fix`). The two existing branches (`SendMessage-resume`, `investigate`) are unchanged.
+
+## [0.78.0] - 2026-06-08
+
+**Structural-drift validator infrastructure + headroom companion mention.** First release in the H1 trajectory (validator → wiring → measurement-gated extensions). v0.78.0 lands the validator module + opt-in CLI flag + smoke gate K74 with `validator.structural_mode` defaulting to `'off'` for one calibration window. No behavioral change to existing workflows. README gains a "compatible companion" mention for headroom proxy as an optional input-side compression layer (devt does not bundle, does not require).
+
+Smoke: 822 passed, 0 failed (+1 from K74). Locking: 3/3.
+
+### Added
+
+- **B1 — `bin/modules/structural-validator.cjs`.** Zero-dep module porting caveman (MIT, juliusbrussee/caveman, `skills/caveman-compress/scripts/validate.py`) extractors: `extractHeadings`, `extractCodeBlocks` (line-based, nested-fence-aware per CommonMark), `extractUrls`, `extractPaths`, `extractInlineCodes`, `countBullets`. Public `validate(orig, comp, {mode})` returns `{ok, errors, warnings, mode}`. Adds devt-specific `mode: 'superset'` (default) — final artifact must contain all baseline structures, may add more — for stub-first protocol; caveman's `mode: 'equality'` stays available.
+
+- **B2 — `state check-agent-output --structural --baseline=<path>` flag.** Optional structural-drift check against a baseline snapshot (typically the stub-first sentinel the orchestrator captured before final write). Returns existing `checkAgentOutput` fields plus `structural_drift: {ok, errors, warnings, mode}`. Backward-compatible: callers without the flag see identical behavior. Missing baseline file is a hard failure with a specific error message. Supports optional `--mode=superset|equality` flag (defaults to `superset`).
+
+- **`validator.structural_mode` config default in `bin/modules/config.cjs::DEFAULTS`.** New `'off' | 'warn' | 'block'` triad matching `dispatch_hygiene_mode` and `claim_check_mode` patterns. Default `'off'` for one calibration window; future releases flip to `'warn'` then `'block'` once replay against `.devt/state/.archive/` records confirms zero false positives.
+
+- **K74 smoke gate** — structural-drift validator round-trip across 4 fixtures: superset stub→complete (ok), superset stub→dropped-section (fail with specific "Section dropped" error), equality mangled-code-block (fail), equality identical-text (ok).
+
+- **README "Optional: input-side compression via headroom proxy" section.** Names [headroom](https://github.com/chopratejas/headroom) as a compatible companion for users who want input-side compression on top of devt. Honest trade-off: ~50–90% input-token savings, adds ~500 MB Python+Rust toolchain, beta version churn. devt does not bundle and does not require headroom — they're orthogonal layers.
+
 ## [0.77.0] - 2026-06-08
 
 **v0.76.0 calibration response + Greenfield-LLM top-3 ergonomics.** Greenfield's calibrated PR #389 review surfaced one own-bug on v0.76.0 (the `<graph_impact>` block shipped as a Read prompt, not inlined content) plus 3 high-frequency / low-complexity asks ranked by field experience. v0.77.0 closes all 5 — A1 inlines graph-impact content into investigative-agent prompts, A2 fixes the doc-promotion communication gap, A3 ships the calibration-mode opt-in flag, B1 splits lane-suggestion's `community: null` mega-bucket by file archetype, B2 weights central-symbol picks by diff-recency. New smoke gates K72 (B1 archetype matrix) + K73 (A1 inline + absent matrix).

@@ -964,14 +964,24 @@ fi
 PARTIAL_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state recover-partial-impl programmer 2>/dev/null || echo '{}')
 if [ "$(echo "$PARTIAL_CHECK" | jq -r '.recovery_needed // false')" = "true" ]; then
   SUGGESTED=$(echo "$PARTIAL_CHECK" | jq -r '.suggested_action // ""')
-  echo "[PARTIAL_IMPL_RECOVERY] suggested_action=${SUGGESTED}"
-  echo "[PARTIAL_IMPL_RECOVERY] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+  if [ "$SUGGESTED" = "targeted-fix" ]; then
+    MODE=$(echo "$PARTIAL_CHECK" | jq -r '.mode // ""')
+    MISSING=$(echo "$PARTIAL_CHECK" | jq -r '.drift.missing_sections // [] | join(", ")')
+    echo "[STRUCTURAL_DRIFT_DETECTED] mode=${MODE}"
+    echo "[STRUCTURAL_DRIFT_DETECTED] missing_sections=${MISSING}"
+    echo "[STRUCTURAL_DRIFT_DETECTED] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+  else
+    echo "[PARTIAL_IMPL_RECOVERY] suggested_action=${SUGGESTED}"
+    echo "[PARTIAL_IMPL_RECOVERY] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+  fi
 fi
 ```
 
 If the claim-check BLOCKED: programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume the same programmer with `<continue_from_section>` if a budget wall is suspected (often paired with `near_cliff` or `low_output` or `mid_task_language` records in `.devt/state/dispatch-warnings.jsonl`).
 
 If `[PARTIAL_IMPL_RECOVERY]` surfaced with `suggested_action=SendMessage-resume`: the programmer was rate-limited mid-section (stub-only output + `low_output:true` signal). SendMessage the agent ID from the most recent programmer dispatch rather than re-dispatching from scratch — the stub-first sentinel + the orchestrator's section progress are recoverable context. If `suggested_action=investigate`: stub-only output without a rate-limit signal — investigate the dispatch transcript before re-dispatching.
+
+If `[STRUCTURAL_DRIFT_DETECTED]` surfaced: programmer wrote a substantive impl-summary.md but dropped one or more sections that `agents/io-contracts.yaml::programmer.outputs.expected_sections` declares as required. Read `templates/dispatch/envelopes/programmer-fix.tmpl.md`, substitute `{drift_errors}` with the `missing_sections` list (one per line), and SendMessage-resume the existing programmer agent ID with the rendered fix prompt — NOT a fresh `Task()` dispatch. SendMessage-resume preserves the programmer's prior context (recent file edits, decisions made, gates run) so the fix can populate the dropped sections from real source material rather than inventing content. On `mode=warn`, the fix is advisory — proceed past the drift if the next gate requires it. On `mode=block`, the fix is mandatory before advancing to the test phase.
 
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
 

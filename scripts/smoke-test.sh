@@ -10353,11 +10353,22 @@ K46_S1=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/d
 cat > "$K46_TMP/.devt/state/impl-summary.md" <<EOF_K46_S2
 # Implementation Summary
 
+## Task
+Add rate-limit middleware to the auth path with redis-backed token bucket and fail-open semantics on backend errors.
+
 ## Files Modified
 - src/auth.py: added rate-limit middleware with redis backend
 - tests/test_auth.py: coverage for limit / refill / fail-open / overflow
 
-Implementation complete; tests pass.
+## Key Decisions
+Fail-open on redis errors (chose availability over strict enforcement); token bucket sized at 100 per minute per user.
+
+## Quality Gate Results
+All gates green: lint, typecheck, full test suite (12/12).
+
+## Provenance
+- Workflow: dev
+- Skills loaded: devt:memory-pre-flight, devt:codebase-scan
 EOF_K46_S2
 K46_S2=$(cd "$K46_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
 cat > "$K46_TMP/.devt/state/impl-summary.md" <<EOF_K46_S3
@@ -11051,6 +11062,20 @@ else
   fail "K71: $K71_DRIFT dispatch region(s) drifted — run \`node bin/devt-tools.cjs dispatch compile --write\`. Drifted: $K71_FILES"
 fi
 
+# K71b — render idempotence. `dispatch compile --check` must be a pure
+# function of (templates, io-contracts.yaml, workflow source files): two
+# consecutive runs must produce byte-identical output. Catches mtime/
+# timestamp/random-id leaks into the substitution table that would
+# silently break prompt-cache hit rates. Borrowed from headroom's
+# CacheAligner concept (byte-stable prefixes → KV cache hits). Concept
+# only — no headroom code dependency.
+K71B_OUT2=$(node "$CLI" dispatch compile --check 2>&1)
+if [ "$K71_OUT" = "$K71B_OUT2" ]; then
+  pass "K71b: dispatch compile --check is idempotent (two consecutive renders byte-identical)"
+else
+  fail "K71b: dispatch render is NOT byte-stable across consecutive calls — substitution table likely leaks mtime/timestamp/random into output (breaks KV cache hits)"
+fi
+
 # K72 (v0.77.0 B1): lane-suggestions archetype classifier sub-classifies the
 # ungrouped bucket by file-extension when files have no graph community.
 # Greenfield 2026-06-07 calibration: 24 of 42 files (57%) landed in one
@@ -11099,6 +11124,165 @@ if [ "$K73_ABSENT" -ge 1 ] && [ "$K73_PRESENT" -ge 1 ]; then
   pass "K73: dispatch render-filled inlines graph-impact.md content (absent → notice, present → verbatim)"
 else
   fail "K73: graph_impact inlining broken (absent_notice=$K73_ABSENT, present_marker=$K73_PRESENT)"
+fi
+
+# K74: structural-drift validator (caveman validate.py port). checkAgentOutput's
+# --structural --baseline=<path> flag compares the final artifact against the
+# stub-first sentinel snapshot. Closes the gap stub/word-count detection misses:
+# section deletion, code-fence mangling, lost URLs/inline-codes between baseline
+# and final write. 4 fixtures: superset stub→complete ok, superset stub→dropped-
+# section fail, equality mangled-code-block fail, equality identical ok.
+K74_TMP=$(mktemp -d)
+mkdir -p "$K74_TMP/.devt/state"
+# Fixture 1: superset stub → complete (sections added, none dropped) → ok
+printf "## Status\n\n(stub)\n\n## Findings\n\n(stub)\n" > "$K74_TMP/.devt/state/k74-stub.md"
+printf "## Status\n\nDone with the work as planned across the full implementation scope which contains a sufficient prose count for the substance threshold to clear without flagging the artifact as a stub during the check phase.\n\n## Findings\n\n- bug A discovered during the deep review pass against the integration suite\n- bug B reproduced in the smoke harness with the expected sentinel markers\n\n## Recommendations\n\nFix bug A first then schedule bug B for the next release window.\n" > "$K74_TMP/.devt/state/k74-complete.md"
+K74_T1=$(cd "$K74_TMP" && node "$CLI" state check-agent-output .devt/state/k74-complete.md --structural --baseline=.devt/state/k74-stub.md 2>/dev/null | jq -r '.structural_drift.ok' 2>/dev/null)
+# Fixture 2: superset stub → dropped section (Status missing) → fail
+printf "## Findings\n\n- only bug A here, the Status section dropped during the final write to test detection of section deletion against the baseline snapshot with enough words to clear stub.\n" > "$K74_TMP/.devt/state/k74-dropped.md"
+K74_T2=$(cd "$K74_TMP" && node "$CLI" state check-agent-output .devt/state/k74-dropped.md --structural --baseline=.devt/state/k74-stub.md 2>/dev/null | jq -r '.structural_drift.errors[0]' 2>/dev/null)
+# Fixture 3: equality mangled code block → fail
+printf "## A\n\n\`\`\`js\nconst x = 1;\n\`\`\`\n\nbody text here with enough words to clear the substance threshold for the smoke gate fixture without flagging.\n" > "$K74_TMP/.devt/state/k74-orig.md"
+printf "## A\n\n\`\`\`js\nconst x = 2;\n\`\`\`\n\nbody text here with enough words to clear the substance threshold for the smoke gate fixture without flagging.\n" > "$K74_TMP/.devt/state/k74-mangled.md"
+K74_T3=$(cd "$K74_TMP" && node "$CLI" state check-agent-output .devt/state/k74-mangled.md --structural --baseline=.devt/state/k74-orig.md --mode=equality 2>/dev/null | jq -r '.structural_drift.ok' 2>/dev/null)
+# Fixture 4: equality identical → ok
+cp "$K74_TMP/.devt/state/k74-orig.md" "$K74_TMP/.devt/state/k74-identical.md"
+K74_T4=$(cd "$K74_TMP" && node "$CLI" state check-agent-output .devt/state/k74-identical.md --structural --baseline=.devt/state/k74-orig.md --mode=equality 2>/dev/null | jq -r '.structural_drift.ok' 2>/dev/null)
+rm -rf "$K74_TMP"
+if [ "$K74_T1" = "true" ] && [ "$K74_T2" = "Section dropped: \"Status\" (level 2)" ] && [ "$K74_T3" = "false" ] && [ "$K74_T4" = "true" ]; then
+  pass "K74: structural-drift validator (superset stub→complete ok, stub→dropped fail, equality mangled fail, equality identical ok)"
+else
+  fail "K74: structural validator mismatch — T1=$K74_T1 (want true), T2='$K74_T2' (want section-dropped), T3=$K74_T3 (want false), T4=$K74_T4 (want true)"
+fi
+
+# K76: graphify sensitive-path denylist (caveman is_sensitive_path port).
+# Refuses CLI file args matching credential/key/secret patterns at the 4
+# file-accepting subcommands (lane-suggestions, check-large-files,
+# check-symbol-godnodes, symbols-in-files). Closes the disclosure path
+# where a .env or ~/.ssh/id_rsa accidentally passed to graphify would
+# flow into MCP queries. Round-trip: 3 sensitive-path fixtures must
+# return exit 2 + clean path returns exit 0.
+K76_TMP=$(mktemp -d)
+mkdir -p "$K76_TMP/.devt" "$K76_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K76_TMP/.devt/config.json"
+echo '{"directed":true,"multigraph":false,"graph":{"built_at_commit":"x"},"nodes":[],"links":[]}' > "$K76_TMP/graphify-out/graph.json"
+# Fixture 1: credentials.json → refuse. Wrapped in `if` so `set -e` doesn't
+# trip on the expected exit 2 from the denylist.
+if (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py credentials.json >/dev/null 2>&1); then K76_T1=0; else K76_T1=$?; fi
+if (cd "$K76_TMP" && node "$CLI" graphify symbols-in-files /tmp/fake/.ssh/id_rsa >/dev/null 2>&1); then K76_T2=0; else K76_T2=$?; fi
+if (cd "$K76_TMP" && node "$CLI" graphify check-large-files my-api-key.env >/dev/null 2>&1); then K76_T3=0; else K76_T3=$?; fi
+if (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py docs/README.md >/dev/null 2>&1); then K76_T4=0; else K76_T4=$?; fi
+rm -rf "$K76_TMP"
+if [ "$K76_T1" = "2" ] && [ "$K76_T2" = "2" ] && [ "$K76_T3" = "2" ] && [ "$K76_T4" = "0" ]; then
+  pass "K76: graphify sensitive-path denylist (credentials/ssh/secret-token refused, clean path ok)"
+else
+  fail "K76: graphify denylist mismatch — credentials=$K76_T1 (want 2), ssh=$K76_T2 (want 2), secret=$K76_T3 (want 2), clean=$K76_T4 (want 0)"
+fi
+
+# K77: static-compress round-trip (caveman-shrink port). Compresses prose
+# while preserving code blocks, URLs, paths, identifiers byte-equal;
+# validates with structural-drift validator; backs up to .original.md;
+# --restore returns byte-identical original. Mode 'off' default refuses;
+# sensitive filename refused; empty file refused; structural drift triggers
+# automatic revert (no compressed-with-drift file lands).
+K77_TMP=$(mktemp -d)
+mkdir -p "$K77_TMP/.devt/state"
+cat > "$K77_TMP/sample.md" <<'EOF_K77'
+# Test File
+
+Please just check the docs at https://example.com/foo for the API.
+Really important that you preserve the `inline_code` and /path/to/file.txt references.
+
+## Section A
+Just basic content with some hedging maybe.
+EOF_K77
+ORIG_BYTES=$(wc -c < "$K77_TMP/sample.md" | tr -d ' ')
+# Fixture A: mode='off' default → refused with feature-disabled message.
+# Node intentionally exits 1 on refusal; `|| true` swallows it so set -o
+# pipefail doesn't crash the smoke script.
+K77_A=$(cd "$K77_TMP" && node "$CLI" static-compress sample.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "static_compress.mode='off'" || true)
+# Fixture B: mode='on' → compresses, writes backup, code/URL/path preserved
+echo '{"static_compress":{"mode":"on"}}' > "$K77_TMP/.devt/config.json"
+K77_B_JSON=$(cd "$K77_TMP" && node "$CLI" static-compress sample.md 2>/dev/null)
+K77_B_OK=$(echo "$K77_B_JSON" | jq -r '.ok' 2>/dev/null)
+K77_B_HAS_URL=$(grep -c "https://example.com/foo" "$K77_TMP/sample.md" 2>/dev/null)
+K77_B_HAS_PATH=$(grep -c "/path/to/file.txt" "$K77_TMP/sample.md" 2>/dev/null)
+K77_B_HAS_CODE=$(grep -c '`inline_code`' "$K77_TMP/sample.md" 2>/dev/null)
+K77_B_HAS_BACKUP=$(test -f "$K77_TMP/sample.original.md" && echo "yes" || echo "no")
+# Fixture C: --restore returns byte-identical original
+(cd "$K77_TMP" && node "$CLI" static-compress --restore sample.md >/dev/null 2>&1) || true
+RESTORED_BYTES=$(wc -c < "$K77_TMP/sample.md" | tr -d ' ')
+# Fixture D: sensitive filename refused
+cp "$K77_TMP/sample.md" "$K77_TMP/credentials.md"
+if (cd "$K77_TMP" && node "$CLI" static-compress credentials.md >/dev/null 2>&1); then K77_D=0; else K77_D=$?; fi
+# Fixture E: empty file refused
+: > "$K77_TMP/empty.md"
+K77_E_REASON=$(cd "$K77_TMP" && node "$CLI" static-compress empty.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "empty" || true)
+# Fixture F: structural drift triggers automatic revert. Inject a faked
+# `headroom` binary on PATH that drops the `## Drift Test` heading from
+# its output. Static-compress's structural validator (superset mode) must
+# detect the dropped section, delete the backup, and leave the input file
+# untouched. Closes the gap where K77's comment promised this behavior
+# but no prior fixture exercised it.
+K77_FAKE_BIN="$K77_TMP/fake-bin"
+mkdir -p "$K77_FAKE_BIN"
+cat > "$K77_FAKE_BIN/headroom" <<'EOF_K77F'
+#!/bin/bash
+if [ "$1" = "--version" ]; then echo "fake 0.0.1"; exit 0; fi
+if [ "$1" = "compress" ] && [ "$2" = "-" ]; then
+  # Drop the first ## heading line — simulates a compressor that mangles structure.
+  sed '/^## Drift Test$/d'
+  exit 0
+fi
+exit 1
+EOF_K77F
+chmod +x "$K77_FAKE_BIN/headroom"
+# Reset to mode='on' and re-create the test file fresh (Fixture C restored it).
+cat > "$K77_TMP/drift.md" <<'EOF_K77F2'
+# Drift Test File
+
+This file contains a section the faked compressor will deliberately drop, so the
+structural-drift validator must catch the change and revert before the input file is touched.
+The validator uses superset semantics — every original section must be present in compressed.
+
+## Drift Test
+Real content here that should land in the compressed output if all goes well.
+Without this section, the structural validator must refuse and revert.
+EOF_K77F2
+DRIFT_ORIG_BYTES=$(wc -c < "$K77_TMP/drift.md" | tr -d ' ')
+# Run static-compress under PATH=fake-bin:$PATH so it picks up faked headroom.
+K77_F_REASON=$(cd "$K77_TMP" && PATH="$K77_FAKE_BIN:$PATH" node "$CLI" static-compress drift.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "structural elements" || true)
+DRIFT_FINAL_BYTES=$(wc -c < "$K77_TMP/drift.md" | tr -d ' ')
+K77_F_BACKUP_ABSENT=$(test -f "$K77_TMP/drift.original.md" && echo "no" || echo "yes")
+rm -rf "$K77_TMP"
+if [ "$K77_A" = "1" ] && [ "$K77_B_OK" = "true" ] && [ "$K77_B_HAS_URL" -ge "1" ] && [ "$K77_B_HAS_PATH" -ge "1" ] && [ "$K77_B_HAS_CODE" -ge "1" ] && [ "$K77_B_HAS_BACKUP" = "yes" ] && [ "$RESTORED_BYTES" = "$ORIG_BYTES" ] && [ "$K77_D" = "1" ] && [ "$K77_E_REASON" = "1" ] && [ "$K77_F_REASON" = "1" ] && [ "$DRIFT_FINAL_BYTES" = "$DRIFT_ORIG_BYTES" ] && [ "$K77_F_BACKUP_ABSENT" = "yes" ]; then
+  pass "K77: static-compress 6-fixture round-trip (off-refused, compress preserves bytes + backup, restore byte-equal, sensitive refused, empty refused, drift-detected reverts cleanly)"
+else
+  fail "K77: static-compress mismatch — A=$K77_A B_ok=$K77_B_OK B_url=$K77_B_HAS_URL B_path=$K77_B_HAS_PATH B_code=$K77_B_HAS_CODE B_backup=$K77_B_HAS_BACKUP restored=$RESTORED_BYTES/orig=$ORIG_BYTES D=$K77_D E=$K77_E_REASON F_reason=$K77_F_REASON F_bytes=$DRIFT_FINAL_BYTES/orig=$DRIFT_ORIG_BYTES F_backup_absent=$K77_F_BACKUP_ABSENT"
+fi
+
+# K78: convention-enforcement — banned devt-internal version markers
+# (vX.Y.Z literals) must not appear in code surfaces. Provenance belongs
+# in CHANGELOG and git history. Scope: bin/modules/, hooks/, agents/,
+# workflows/, templates/, guardrails/. Exempt: update.cjs:185 (the
+# CHANGELOG-header parser regex), skills/ (Option A/B template text used
+# for user-presentation prescriptions).
+K78_HITS=$(grep -rEn '\bv[0-9]+\.[0-9]+\.[0-9]+\b' \
+  "$ROOT/bin/modules/" \
+  "$ROOT/hooks/" \
+  "$ROOT/agents/" \
+  "$ROOT/workflows/" \
+  "$ROOT/templates/" \
+  "$ROOT/guardrails/" \
+  2>/dev/null \
+  | grep -v 'update.cjs:.*Match version headers' \
+  | grep -v '/templates/[^/]*/documentation\.md:' \
+  || true)
+if [ -z "$K78_HITS" ]; then
+  pass "K78: no banned vX.Y.Z markers in code surfaces (CHANGELOG-parser regex exempt)"
+else
+  K78_COUNT=$(echo "$K78_HITS" | wc -l | tr -d ' ')
+  fail "K78: $K78_COUNT version-marker violation(s) — must move to CHANGELOG. Hits:\n$K78_HITS"
 fi
 
 echo

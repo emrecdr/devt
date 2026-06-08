@@ -910,6 +910,17 @@ For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](d
 **MCP server warnings (`Missing environment variables: CLAUDE_PLUGIN_ROOT`, `unknown command 'mcp'`):**
 - Already fixed in current versions. Update via `/devt:update`.
 
+### Optional: input-side compression via headroom proxy
+
+devt focuses on output discipline and orchestration. If you also want **input-side** compression — tool outputs, RAG results, files, conversation history all compressed before they reach Claude — [headroom](https://github.com/chopratejas/headroom) is a compatible companion. It runs as a local proxy in front of Claude Code:
+
+```bash
+pip install "headroom-ai[proxy]"
+headroom wrap claude     # devt + Claude Code operate normally through the proxy
+```
+
+Trade-off honestly: ~50–90% input-token savings on real workloads, adds a ~500 MB Python + Rust toolchain, and headroom itself is beta (0.24.x). devt **does not bundle and does not require** headroom — they're orthogonal layers. If you don't want the extra dependency, devt works fine standalone.
+
 ### Where to read more
 
 - **`CLAUDE.md`** — orchestrator-facing contract sheet (architecture, conventions, critical rules)

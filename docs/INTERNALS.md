@@ -150,6 +150,45 @@ Input validation:
 
 Wired into `init.cjs` to sanitize task descriptions entering the system.
 
+### `structural-validator.cjs`
+
+Markdown-structure extractors ported from caveman (MIT, `skills/caveman-compress/scripts/validate.py`). Public surface:
+
+- `extractHeadings(text)` → `[{level, title}]`
+- `extractCodeBlocks(text)` → `[string]` (line-based, nested-fence-aware per CommonMark)
+- `extractUrls(text)` → `Set<string>`
+- `extractPaths(text)` → `Set<string>`
+- `extractInlineCodes(text)` → `Map<code, count>`
+- `countBullets(text)` → `number`
+- `validate(orig, comp, {mode}) → {ok, errors, warnings, mode}` — `mode: 'superset'` (default; comp must contain all orig structures, may add) or `mode: 'equality'` (strict)
+
+Used by `state.cjs::checkAgentOutput --structural --baseline=<path>` to detect dropped sections / mangled code fences / lost URLs between a stub-first sentinel snapshot and the agent's final write, and by `state.cjs::recoverPartialImpl` to compare an artifact against `outputs.expected_sections` from `agents/io-contracts.yaml`.
+
+### `sensitive-path.cjs`
+
+Credential-path denylist port from caveman (MIT, `compress.py::is_sensitive_path`) with one devt-specific divergence: substring-token check is skipped when the file extension is a known programming-language source (`.py/.js/.ts/.go/.rs/...`) to avoid false-positives on legitimate code modules like `auth/token.py`. Three checks (any match → sensitive): basename regex (`.env*`, `.netrc`, credentials/secrets/passwords/keys), sensitive path component (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`), token-normalized basename. Non-string input throws `TypeError` — silent-false would hide programming errors as a "safe to process" verdict.
+
+Wired into `graphify.cjs` CLI inputs at four file-accepting subcommands (`lane-suggestions`, `check-large-files`, `check-symbol-godnodes`, `symbols-in-files`) and used as the first-pass refusal gate in `static-compress.cjs`.
+
+### `prose-shrink.cjs`
+
+Regex prose compressor ported from caveman-shrink (MIT, `src/mcp-servers/caveman-shrink/compress.js`). Deterministic, zero-dep, sentinel-protected. Public surface:
+
+- `compress(text, opts?) → {compressed, before, after}`
+- `withProtectedSegments(text, transform)` — sentinel-wraps protected regions before transform, restores after with iterative unrolling for nested-pattern overlap
+
+Eight protected pattern classes: fenced code, inline code, URLs, paths, CONST_CASE tokens, dotted.method paths, function calls, version numbers. Sentinel restoration loops until stable (8-pass cap); throws on non-convergence rather than silently emitting `ZZZPROTZZZ`-leaked output. Whitespace classes exclude newlines so line structure (heading boundaries) survives compression.
+
+Used as the regex-fallback compression engine in `static-compress.cjs`.
+
+### `static-compress.cjs`
+
+Opt-in CLI compressor for project markdown files (`.devt/rules/*.md`, `guardrails/*.md`, skill bodies). Probes for `headroom` CLI on PATH for neural extractive compression; falls back to `prose-shrink.cjs` (regex) when headroom is absent. Either engine runs through `structural-validator.cjs` post-compression — drift detected → backup file deleted, input file left untouched. Five safety layers before any input is touched: sensitive-path denylist refusal, size cap (default 500 KB), empty-file refusal, identical-output refusal, backup-readback verification (with byte-mismatch detail when readback fails).
+
+Reversible via `<path>.original.md` backup sibling: `node bin/devt-tools.cjs static-compress --restore <path>` swaps it back atomically.
+
+Gated by `config.static_compress.mode` (`'off'` default; CLI returns `{ok: true, skipped: true}` when off, exit 0). Compress + restore actions log to `.devt/state/static-compress.jsonl` (RESET_EXEMPT). Full user-facing recipe in `docs/static-compress-recipe.md`.
+
 ---
 
 ## Universal Conventions
@@ -450,6 +489,19 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 | `test-graphify.cjs` | Drives the graphify CLI surface against a fixture `graph.json` | **CI** (via smoke-test) |
 
 **Adding a new script.** If it's a CI gate, wire it into `scripts/smoke-test.sh` so it runs on every push. If it's a quality-gate helper for projects, expose it as a `node bin/devt-tools.cjs <verb>` subcommand instead — projects should not shell out to `scripts/` directly (those are devt-internal tooling).
+
+### Notable smoke gates
+
+`scripts/smoke-test.sh` houses ~826 individual assertions; the K-prefixed gates are the named, high-leverage ones referenced elsewhere in this codebase. Recent additions:
+
+| Gate | What it asserts |
+|---|---|
+| **K71** — dispatch envelope drift | `dispatch compile --check` reports zero drift between rendered envelopes in `workflows/*.md` and their source `.tmpl.md` + `io-contracts.yaml` declaration. |
+| **K71b** — dispatch render idempotence | Two consecutive `dispatch compile --check` calls produce byte-identical output. Catches mtime/timestamp/random-id leaks into the substitution table that would silently break prompt-cache hit rates (CacheAligner concept, borrowed from headroom). |
+| **K74** — structural-drift validator | Four-fixture round-trip across `state check-agent-output --structural --baseline=<path>` — superset stub→complete passes, superset stub→dropped-section fails with specific "Section dropped" error, equality mode mangled code-block fails, equality identical passes. |
+| **K76** — graphify sensitive-path denylist | Four fixtures across `lane-suggestions` / `check-large-files` / `symbols-in-files` — credential/key/secret paths refused with exit 2 + stderr message; clean paths flow through. |
+| **K77** — static-compress round-trip | Six fixtures: mode-off skip, mode-on compress preserves code/URL/path + writes backup, `--restore` returns byte-equal original, sensitive filename refused, empty file refused, structural drift triggers backup-delete + input-untouched revert (via faked `headroom` binary injected on `PATH`). |
+| **K78** — banned version markers | Scans `bin/modules/`, `hooks/`, `agents/`, `workflows/`, `templates/`, `guardrails/` for `\bv\d+\.\d+\.\d+\b` literals. Provenance belongs in CHANGELOG and git history, not code comments. Exempts the `update.cjs` CHANGELOG-parser regex and `templates/*/documentation.md` JSDoc examples (`@deprecated since v2.0.0`-style template content). |
 
 ---
 

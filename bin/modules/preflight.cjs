@@ -274,9 +274,9 @@ function extractDiffSymbols(opts = {}) {
   }
 
   // Default: merge two ranges to cover both PR-review (committed diff vs.
-  // primary branch) and in-progress work (uncommitted working tree). The PR
-  // case was missed in v0.52.0 — field-validated against greenfield-api on a
-  // feature/ branch where `git diff HEAD` returns 0 files.
+  // primary branch) and in-progress work (uncommitted working tree). On a
+  // feature branch with no uncommitted edits, `git diff HEAD` returns 0
+  // files — the merged range catches those.
   const ranges = ["HEAD"];
   try {
     const { getMergedConfig } = require("./config.cjs");
@@ -363,13 +363,11 @@ function extractSymbolsFromPlan(planPath) {
   return { symbols: [...pascalSymbols, ...snakeSymbols], paths };
 }
 
-// H4-v2 (greenfield calibration #11): unified symbol filter applied
-// consistently to ALL three extraction channels (plan, diff, text). The
-// original H4 fix only filtered textSymbols, leaking pytest test classes
-// from plan-derived and diff-derived channels. Greenfield post-v0.68.2:
-// 5 TestGet*/TestAdd*/TestRemove* classes still present in topic.symbols
-// because they came via planDerivedSymbols (extractSymbolsFromPlan reads
-// "Files to change" sections that mention test files).
+// Unified symbol filter applied consistently to all three extraction
+// channels (plan, diff, text). Plan-derived and diff-derived channels
+// can drag pytest test classes via extractSymbolsFromPlan reading "Files
+// to change" sections that mention test files, so filtering only the
+// text channel leaks Test* identifiers through the other two.
 //
 // Filter rules — same across all channels:
 //   - length ≥ 3 (avoid 1-2 char acronyms)

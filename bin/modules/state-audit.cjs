@@ -138,11 +138,11 @@ function cleanupStateFiles(opts = {}) {
   // H1 (greenfield calibration #9): when invoked from init.cjs's auto-sweep,
   // preserve recent ad-hoc files (likely current-session work in progress)
   // and only archive accumulated cruft. Two opt-in gates:
-  //   - adHocStaleDays: calendar-age gate (legacy v0.68.1)
-  //   - adHocCutoffMtime: explicit ISO timestamp gate (H1-v2 — greenfield
-  //     calibration #10). init.cjs reads workflow.yaml::created_at BEFORE
-  //     the strip+restamp and passes it as the cutoff. Anything ad-hoc
-  //     older than the PRIOR workflow's start is fair game for archive.
+  //   - adHocStaleDays: calendar-age gate
+  //   - adHocCutoffMtime: explicit ISO timestamp gate. init.cjs reads
+  //     workflow.yaml::created_at BEFORE the strip+restamp and passes it
+  //     as the cutoff. Anything ad-hoc older than the PRIOR workflow's
+  //     start is fair game for archive.
   //     Strictly better than calendar age — catches multi-PR-per-day
   //     residue (greenfield's 16 leftover files from yesterday's session).
   // adHocCutoffMtime takes precedence when both are set.

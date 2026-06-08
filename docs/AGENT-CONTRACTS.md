@@ -155,9 +155,29 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Rule.** The PARTIAL contract (§ below) triggers at section boundaries. When a rate-limit interrupts the agent MID-section, no PARTIAL emits and the primary artifact stays at its stub-first sentinel. The agent provably cannot detect rate-limits from inside (the API just stops responding) — only the orchestrator has the signals: `dispatch-warnings.jsonl::task_output_bytes` carries the `low_output:true` flag, and on-disk primary substance reveals stub vs. substantive state.
 
-**Mechanism.** `state recover-partial-impl <agent>` reads both signals and returns a JSON decision: `recovery_needed=true + suggested_action=SendMessage-resume` when stub+low_output pattern matches (the rate-limit shape); `recovery_needed=true + suggested_action=investigate` when stub but no low_output (abnormal stop, not rate-limit); `recovery_needed=false + primary_state=substantive | missing` for cleaner outcomes; `recovery_needed=false + sidecar_status=<terminal>` short-circuit when sidecar declares terminal status.
+**Mechanism.** `state recover-partial-impl <agent>` reads both signals and returns a JSON decision: `recovery_needed=true + suggested_action=SendMessage-resume` when stub+low_output pattern matches (the rate-limit shape); `recovery_needed=true + suggested_action=investigate` when stub but no low_output (abnormal stop, not rate-limit); `recovery_needed=true + suggested_action=targeted-fix` when the artifact is substantive but missing one or more sections declared in `outputs.expected_sections` (see § structural-drift recovery below); `recovery_needed=false + primary_state=substantive | missing` for cleaner outcomes; `recovery_needed=false + sidecar_status=<terminal>` short-circuit when sidecar declares terminal status.
 
-**Wiring.** `dev-workflow.md` + `quick-implement.md` call the CLI immediately after their programmer claim-check and surface the suggestion via `[PARTIAL_IMPL_RECOVERY]` echo. The orchestrator routes on `suggested_action` before dispatching the tester or proceeding past the implement phase. `debug.md` does NOT wire this — debugger has no PARTIAL contract (`io-contracts.yaml::debugger.outputs.sidecar: null`).
+**Wiring.** `dev-workflow.md` + `quick-implement.md` call the CLI immediately after their programmer claim-check and surface the suggestion via `[PARTIAL_IMPL_RECOVERY]` echo (or `[STRUCTURAL_DRIFT_DETECTED]` for the targeted-fix branch). The orchestrator routes on `suggested_action` before dispatching the tester or proceeding past the implement phase. `debug.md` does NOT wire this — debugger has no PARTIAL contract (`io-contracts.yaml::debugger.outputs.sidecar: null`).
+
+### Structural-drift recovery — `outputs.expected_sections` + targeted-fix
+
+**Rule.** Sidecar-bearing agents (programmer, tester, code-reviewer, verifier) declare a minimum list of section headings in `agents/io-contracts.yaml::outputs.expected_sections`. When the artifact is substantive (not a stub) but missing any declared section, `recoverPartialImpl` returns `suggested_action=targeted-fix` so the orchestrator SendMessage-resumes the same agent ID with a precise fix prompt rather than re-dispatching from scratch.
+
+**Gate.** Drift detection is governed by `config.validator.structural_mode` — `'off'` skips the check entirely, `'warn'` returns `mode:warn` (advisory routing), `'block'` returns `mode:block` (mandatory routing). Same triad shape as `dispatch_hygiene_mode` / `claim_check_mode`. Default `'warn'`.
+
+**Mechanism.** The structural-drift check uses `bin/modules/structural-validator.cjs` (ported from caveman MIT) to extract headings from the artifact's content and compare against the declared `expected_sections`. Missing sections fail the check; surplus sections are permitted (superset semantics). Config-load errors (other than ENOENT) surface to stderr — the calibration window relies on the check being observable, not silently disabled.
+
+**Wiring.** `dev-workflow.md` + `quick-implement.md` route `targeted-fix` to a SendMessage-resume call using `templates/dispatch/envelopes/<agent>-fix.tmpl.md` — these fix templates carry strict "do NOT redo, do NOT rewrite, ONLY add missing sections" instructions with `{drift_errors}` placeholder substituted inline before the SendMessage. Reuses the existing agent context — saves ~5–15K tokens per drift incident vs. fresh re-dispatch.
+
+**CLI form.** `node bin/devt-tools.cjs state check-agent-output <path> --structural --baseline=<sentinel-snapshot-path> [--mode=superset|equality]` extends the existing stub-check with structural-drift detection against an explicit baseline file. `validator.structural_mode != 'off'` is required for this form to do work; calibration cycle confirmed zero false positives with `'warn'` default.
+
+### Sensitive-path denylist (graphify CLI + static-compress)
+
+**Rule.** Credential-shaped file paths must never flow into graphify MCP queries or static-file compression. The denylist is the `bin/modules/sensitive-path.cjs::isSensitivePath` port from caveman MIT and runs at four graphify CLI entry points (`lane-suggestions`, `check-large-files`, `check-symbol-godnodes`, `symbols-in-files`) plus `static-compress` first-pass refusal.
+
+**Patterns.** Three checks (any match → sensitive): (1) basename regex (`.env*`, `.netrc`, `credentials*`, `secret(s)*`, `password(s)*`, `id_rsa/dsa/ecdsa/ed25519*`, `authorized_keys`, `known_hosts`, `*.pem/key/p12/pfx/crt/cer/jks/keystore/asc/gpg`); (2) path component in `{.ssh, .aws, .gnupg, .kube, .docker}`; (3) token-normalized basename containing `{secret, credential, password, apikey, accesskey, token, privatekey}` — but only when the file extension is NOT a known programming-language source (`.py/.js/.ts/.go/.rs/.java/.cpp/.cs/.swift/...`), avoiding false-positives on legitimate code modules like `auth/token.py`.
+
+**Refusal.** Graphify CLI exits 2 with a stderr message naming the blocked path. Static-compress refuses before backup-write with a clear reason. Non-string inputs to `isSensitivePath` throw `TypeError` (programming error, not "safe to process").
 
 ### Status enum + PARTIAL semantics (Q8 contract)
 

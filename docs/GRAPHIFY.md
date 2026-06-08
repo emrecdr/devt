@@ -255,10 +255,21 @@ Groups expose an `archetype` field when the bucket comes from the classifier (co
 
 ---
 
+## Sensitive-Path Denylist (CLI inputs)
+
+Four file-accepting graphify subcommands — `lane-suggestions`, `check-large-files`, `check-symbol-godnodes`, `symbols-in-files` — filter their CLI args through `bin/modules/sensitive-path.cjs::isSensitivePath` before any graph query runs. Credential / key / secret-shaped paths refuse with exit 2 + a stderr message naming the blocked path; clean paths flow through unchanged.
+
+Three checks (any match → sensitive): basename regex (`.env*`, `.netrc`, `credentials*`, `secrets?*`, `passwords?*`, `id_rsa/dsa/ecdsa/ed25519*`, `authorized_keys`, `known_hosts`, `*.pem/key/p12/pfx/crt/cer/jks/keystore/asc/gpg`), sensitive path component (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`), token-normalized basename containing `{secret, credential, password, apikey, accesskey, token, privatekey}`. The token check is suppressed when the file extension is a known programming-language source (`.py/.js/.ts/.go/.rs/...`) to avoid false-positives on legitimate code modules like `auth/token.py` or `secrets/loader.go`.
+
+Closes the disclosure path where an accidentally-passed `.env` or `~/.ssh/id_rsa` would flow into graphify MCP queries. Smoke gate K76 enforces the round-trip. Source pattern ported from caveman (MIT, `compress.py::is_sensitive_path`).
+
+---
+
 ## Cross-references
 
-- `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP; scope_hint contract
+- `docs/AGENT-CONTRACTS.md` — Orchestrator owns MCP; scope_hint contract; sensitive-path denylist (full pattern reference)
 - `docs/MEMORY.md` — Pre-Flight Brief JSON sidecar (`blast.direct_dependents_count`, `graph_stats.trust`, `topic.symbols`)
 - `docs/HOOKS.md` — `graph_loader` deny source (graph.json size cap); `task_truncation_log_all` opt-in
+- `docs/INTERNALS.md` — `sensitive-path.cjs` module surface
 - `skills/graphify-helpers/SKILL.md` — agent-side Graphify-first protocol + 4 fallback triggers
 - `skills/codebase-scan/SKILL.md` — scan skill with Graphify-first routing

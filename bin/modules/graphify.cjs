@@ -1164,10 +1164,10 @@ function laneSuggestions(diffFiles, options) {
   // (57%) landed there for a PR with mixed code/hurl/docs/config — manual
   // reshape was required every multi-file review.
   //
-  // B1 (v0.77.0) — sub-classify the ungrouped bucket by file-extension
-  // archetype so prose-only / test-only / config-only files cluster
-  // coherently. Classifier runs ONLY on files without a community label;
-  // covered files stay routed by their graph community. Archetypes:
+  // Sub-classify the ungrouped bucket by file-extension archetype so
+  // prose-only / test-only / config-only files cluster coherently.
+  // Classifier runs ONLY on files without a community label; covered
+  // files stay routed by their graph community. Archetypes:
   //   docs    — .md, .rst, .txt, .adoc, .mdx
   //   tests   — .hurl, paths containing /tests/ or _test or .test or .spec
   //   config  — .toml, .lock, .yaml, .yml, .json (not in src/), .ini, .env,
@@ -1542,6 +1542,28 @@ function graphStats() {
 function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 
+  // Sensitive-path denylist. Refuses CLI file args matching credential / key /
+  // secret patterns (caveman is_sensitive_path port, see sensitive-path.cjs).
+  // Returns the input array if clean; writes a stderr error and returns null
+  // if any input is sensitive — callers then `return 2` (usage-error exit).
+  // Scoped to the 4 file-accepting subcommands: passing .env or ~/.ssh/id_rsa
+  // would otherwise feed the path into graphify queries, which is a disclosure
+  // path the orchestrator rarely intends.
+  const filterSensitive = (files) => {
+    const { isSensitivePath } = require("./sensitive-path.cjs");
+    const blocked = files.filter(isSensitivePath);
+    if (blocked.length > 0) {
+      process.stderr.write(
+        `graphify: refused ${blocked.length} sensitive path(s) — ` +
+        JSON.stringify(blocked) +
+        " (matches credential/key/secret pattern). " +
+        "Rename if false-positive, or remove from input list.\n",
+      );
+      return null;
+    }
+    return files;
+  };
+
   switch (subcommand) {
     case "status":
       json(status());
@@ -1646,30 +1668,38 @@ function run(subcommand, args) {
     case "check-large-files": {
       const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
       const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
-      const files = args.filter(a => !a.startsWith("--"));
+      let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify check-large-files <file>... [--edge-threshold=50]\n"); return 2; }
+      files = filterSensitive(files);
+      if (files === null) return 2;
       json(checkLargeFilesGodNodes(files, threshold));
       return 0;
     }
     case "check-symbol-godnodes": {
       const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
       const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
-      const files = args.filter(a => !a.startsWith("--"));
+      let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify check-symbol-godnodes <file>... [--edge-threshold=50]\n"); return 2; }
+      files = filterSensitive(files);
+      if (files === null) return 2;
       json(checkSymbolLevelGodNodes(files, threshold));
       return 0;
     }
     case "symbols-in-files": {
       const limitArg = args.find(a => a.startsWith("--limit="));
       const limit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 10) : 10;
-      const files = args.filter(a => !a.startsWith("--"));
+      let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify symbols-in-files <file>... [--limit=10]\n"); return 2; }
+      files = filterSensitive(files);
+      if (files === null) return 2;
       json(symbolsInFiles(files, limit));
       return 0;
     }
     case "lane-suggestions": {
-      const files = args.filter(a => !a.startsWith("--"));
+      let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>... [--target-lanes=N]\n"); return 2; }
+      files = filterSensitive(files);
+      if (files === null) return 2;
       const tlArg = args.find(a => a.startsWith("--target-lanes="));
       const opts = {};
       if (tlArg) {

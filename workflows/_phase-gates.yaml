@@ -1,18 +1,18 @@
-# v0.73 Phase B — phase-gate registry (greenfield cal #18 first-assessment #1).
+# Phase-gate registry.
 #
 # Single source of truth for which gates must pass before entering a given
 # phase under a given workflow_type. The `state advance-phase <phase>` CLI
 # reads this file, looks up the gates for the target phase under the current
 # workflow.yaml::workflow_type, runs each gate in declared order via the
 # existing assert-* functions, and refuses to advance on any failure (mode:
-# block default per config.claim_check_mode, mirrors v0.69.5 dispatch_hygiene
+# block default per config.claim_check_mode, mirroring the dispatch-hygiene
 # pattern).
 #
 # Why phase-gates instead of transition-gates: simpler. Each phase has gates
 # that must pass to ENTER. The previous phase doesn't matter — the gates
-# verify the work-state needed to BE in the target phase. This matches the
-# existing v0.72 architecture where finalize-time gates check work-product
-# regardless of which transition led there.
+# verify the work-state needed to BE in the target phase, matching the
+# architecture where finalize-time gates check work-product regardless of
+# which transition led there.
 #
 # Scope (v0.73 initial): the FINAL-DEACTIVATION phase per workflow_type (the
 # `complete` / `debug` deactivation step). Workflow .md files invoke

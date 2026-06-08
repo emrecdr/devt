@@ -195,9 +195,9 @@ function loadEntries(opts) {
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;
     if (toolMatcher && !toolMatcher(e.tool)) return false;
-    // Workflow-context filters. Trace records pre-v0.39.0 (and any emitted
-    // outside an active workflow) lack these fields → excluded when the
-    // corresponding filter is set. Bare aggregate (no filters) still includes them.
+    // Workflow-context filters. Trace records emitted outside an active
+    // workflow lack these fields → excluded when the corresponding filter
+    // is set. Bare aggregate (no filters) still includes them.
     if (acceptedWorkflowIds && !acceptedWorkflowIds.has(e.workflow_id)) return false;
     if (opts.workflow_type && e.workflow_type !== opts.workflow_type) return false;
     if (opts.phase && e.phase !== opts.phase) return false;
