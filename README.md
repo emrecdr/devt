@@ -29,7 +29,7 @@
 
 A Claude Code plugin that orchestrates a coordinated **multi-agent** development workflow: **implement → test → review → document → learn**. Instead of relying on a single monolithic prompt, devt decomposes work across specialized agents — a programmer writes code, a tester verifies it, a code-reviewer audits it, a docs-writer updates documentation, and a retro agent extracts lessons for future sessions. Each agent is focused, stateless, and replaceable.
 
-The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, or anything else. Project-specific coding standards, testing patterns, quality gates, and architecture rules live in your repository under `.devt/rules/`, not baked into the plugin.
+The plugin is **language-agnostic** — Python, Go, TypeScript, Vue, Rust, or anything else. Project-specific coding standards, testing patterns, quality gates, and architecture rules live in your repository under `.devt/rules/`, not baked into the plugin.
 
 **What you get out of the box:**
 
