@@ -6478,10 +6478,14 @@ fi
 # F7: graphify_scan_prep + assert-graphify-decision present in research-task + debug workflows
 F7_OK=0
 for wf in workflows/research-task.md workflows/debug.md; do
+  # v0.77.0: graph-impact reference can be either the legacy Read prompt
+  # ("graph-impact.md if it exists") OR the new inlined placeholder
+  # ("graph_impact_content") OR a bare ".devt/state/graph-impact.md" mention.
+  # All three count as "workflow references graph-impact" for coverage.
   if /usr/bin/grep -q "graphify_scan_prep: ACTIVE" "$ROOT/$wf" \
      && /usr/bin/grep -q "graphify_scan_prep: SKIP" "$ROOT/$wf" \
      && /usr/bin/grep -q "state assert-graphify-decision" "$ROOT/$wf" \
-     && /usr/bin/grep -q "graph-impact.md if it exists" "$ROOT/$wf"; then
+     && /usr/bin/grep -qE "graph-impact.md if it exists|graph_impact_content|\.devt/state/graph-impact.md" "$ROOT/$wf"; then
     F7_OK=$((F7_OK + 1))
   fi
 done
@@ -9019,8 +9023,8 @@ K32_C3=$(cd "$K32_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggesti
 K32_C3_MODE=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.mode||'err');}catch(e){console.log('err');}})")
 K32_C3_GROUPS=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.groups||[]).length);}catch(e){console.log(-1);}})")
 K32_C3_COVERED=$(echo "$K32_C3" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.covered_count===2 && j.uncovered_count===2 ? '1':'0');}catch(e){console.log('0');}})")
-if [ "$K32_C1" = "11" ] && [ "$K32_C2" = "1" ] && [ "$K32_C3_MODE" = "partial" ] && [ "$K32_C3_GROUPS" = "3" ] && [ "$K32_C3_COVERED" = "1" ]; then
-  pass "K32: lane-suggestions community + fallback + partial modes (community=2 groups, fallback=mode-only, partial=3 groups covered:2/uncovered:2)"
+if [ "$K32_C1" = "11" ] && [ "$K32_C2" = "1" ] && [ "$K32_C3_MODE" = "partial" ] && [ "$K32_C3_GROUPS" = "4" ] && [ "$K32_C3_COVERED" = "1" ]; then
+  pass "K32: lane-suggestions community + fallback + partial modes (community=2 groups, fallback=mode-only, partial=4 groups: 2 covered + tests + sql-ungrouped)"
 else
   fail "K32: matrix broken. c1=${K32_C1} c2=${K32_C2} c3_mode=${K32_C3_MODE} c3_groups=${K32_C3_GROUPS} c3_counts=${K32_C3_COVERED}"
 fi
@@ -11045,6 +11049,56 @@ if [ "$K71_DRIFT" = "0" ]; then
 else
   K71_FILES=$(echo "$K71_OUT" | jq -r '.drift[] | "\(.file):\(.agent):\(.workflow_id)"' 2>/dev/null | tr '\n' ' ')
   fail "K71: $K71_DRIFT dispatch region(s) drifted — run \`node bin/devt-tools.cjs dispatch compile --write\`. Drifted: $K71_FILES"
+fi
+
+# K72 (v0.77.0 B1): lane-suggestions archetype classifier sub-classifies the
+# ungrouped bucket by file-extension when files have no graph community.
+# Greenfield 2026-06-07 calibration: 24 of 42 files (57%) landed in one
+# "ungrouped" mega-bucket; archetype classifier splits them into docs/tests/
+# config/ungrouped so the orchestrator gets coherent fallback lanes.
+# Mixed-input fixture: 1 covered file + 1 .md + 1 test path + 1 sql.
+K72_TMP=$(mktemp -d)
+mkdir -p "$K72_TMP/.devt" "$K72_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K72_TMP/.devt/config.json"
+node -e "
+const fs = require('fs');
+const g = {
+  directed: true, multigraph: false, graph: {built_at_commit: 'deadbeef'},
+  nodes: [{id: 'a1', label: 'AuthHelper', source_file: 'src/auth.py', community: 1}],
+  links: []
+};
+fs.writeFileSync('$K72_TMP/graphify-out/graph.json', JSON.stringify(g));
+"
+K72_OUT=$(cd "$K72_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify lane-suggestions \
+  src/auth.py docs/README.md tests/test_auth.py migrations/001.sql 2>/dev/null)
+K72_ARCH=$(echo "$K72_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const archs=(j.groups||[]).map(g=>g.archetype).filter(Boolean).sort().join(',');console.log(archs);}catch(e){console.log('err');}})")
+if [ "$K72_ARCH" = "docs,tests" ]; then
+  pass "K72: lane-suggestions archetype classifier splits ungrouped by extension (docs + tests)"
+else
+  fail "K72: archetype classifier mismatch — expected 'docs,tests', got '$K72_ARCH'"
+fi
+rm -rf "$K72_TMP"
+
+# K73 (v0.77.0 A1): dispatch render-filled inlines graph-impact.md content
+# via the {graph_impact_content} placeholder. v0.76.0 shipped a Read-prompt
+# wrapped in <graph_impact>; greenfield calibration 2026-06-07 confirmed the
+# data reached sub-agents only via Read, not via inlining. loadGraphImpact()
+# + dispatch substitution closes the gap. Test verifies present + absent
+# branches.
+K73_TMP=$(mktemp -d)
+cd "$K73_TMP"
+node "$CLI" init workflow "K73 inlining test" >/dev/null 2>&1
+# absent: rendered envelope shows the (no graph-impact.md available — ...) notice
+K73_ABSENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "no graph-impact.md available")
+# present: write graph-impact.md and confirm content inlines verbatim
+echo "## SENTINEL_K73_MARKER" > .devt/state/graph-impact.md
+K73_PRESENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "SENTINEL_K73_MARKER")
+cd "$ROOT"
+rm -rf "$K73_TMP"
+if [ "$K73_ABSENT" -ge 1 ] && [ "$K73_PRESENT" -ge 1 ]; then
+  pass "K73: dispatch render-filled inlines graph-impact.md content (absent → notice, present → verbatim)"
+else
+  fail "K73: graph_impact inlining broken (absent_notice=$K73_ABSENT, present_marker=$K73_PRESENT)"
 fi
 
 echo

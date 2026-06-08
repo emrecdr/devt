@@ -127,6 +127,57 @@ function loadInlineGuardrails(pluginRoot) {
   return { content: result, bytes: totalBytes, warnings };
 }
 
+// loadGraphImpact (v0.77.0) — pulls .devt/state/graph-impact.md content for
+// inline injection into investigative-agent dispatch envelopes (programmer,
+// code-reviewer, debugger). v0.76.0 shipped a Read-prompt-wrapped tag that
+// required sub-agents to make a Read tool call; greenfield calibration
+// 2026-06-07 confirmed the data reached them via Read but never via inlining.
+// This helper closes that gap.
+//
+// Returns { content, bytes, status } where:
+//   status = "present"  — file exists, content inlined (possibly truncated)
+//   status = "skipped"  — file absent, graphify-skip-reason.txt explanation
+//                         inlined when available
+//   status = "absent"   — neither file present (no graphify configured / never run)
+//
+// Caps total content at 32 KB. When the file exceeds the cap, content carries
+// the first 32 KB plus a truncation notice. Sub-agents reading the file
+// directly via Bash/Read see the full version; inlined version is the
+// high-signal head.
+const GRAPH_IMPACT_CAP = 32 * 1024;
+function loadGraphImpact(projectRoot) {
+  if (!projectRoot) return { content: "", bytes: 0, status: "absent" };
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const impactPath = path.join(projectRoot, ".devt", "state", "graph-impact.md");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const skipPath = path.join(projectRoot, ".devt", "state", "graphify-skip-reason.txt");
+  if (fs.existsSync(impactPath)) {
+    const buf = fs.readFileSync(impactPath);
+    if (buf.length <= GRAPH_IMPACT_CAP) {
+      return { content: buf.toString("utf8"), bytes: buf.length, status: "present" };
+    }
+    const truncated = buf.subarray(0, GRAPH_IMPACT_CAP).toString("utf8");
+    const notice = `\n\n[truncated at ${GRAPH_IMPACT_CAP} bytes — full file at .devt/state/graph-impact.md (${buf.length} bytes)]`;
+    return { content: truncated + notice, bytes: buf.length, status: "present" };
+  }
+  if (fs.existsSync(skipPath)) {
+    let buf;
+    try { buf = fs.readFileSync(skipPath); }
+    catch { buf = Buffer.from(""); }
+    const reason = buf.toString("utf8").trim() || "(graphify skipped — no reason recorded)";
+    return {
+      content: `(no graph-impact.md available — graphify skip reason: ${reason})`,
+      bytes: buf.length,
+      status: "skipped",
+    };
+  }
+  return {
+    content: "(no graph-impact.md available — graphify did not run for this workflow; investigate with grep)",
+    bytes: 0,
+    status: "absent",
+  };
+}
+
 /**
  * Project-shipped governing rules inlined into the init payload.
  *
@@ -601,4 +652,4 @@ function run(subcommand, args, pluginRoot) {
   }
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact };

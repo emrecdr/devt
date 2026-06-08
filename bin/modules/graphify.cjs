@@ -1159,14 +1159,48 @@ function laneSuggestions(diffFiles, options) {
     fileToCommunity.set(bn, bestC);
   }
   // Group input files (preserve original path strings, not basenames).
-  // Files without a community attribute land in the "ungrouped" bucket so
-  // the orchestrator can route them to a single lane (better than collapsing
-  // everything to path-prefix partition when only some files are uncovered).
+  // Files without a community attribute previously collapsed into a single
+  // "ungrouped" bucket; greenfield 2026-06-07 calibration: 24 of 42 files
+  // (57%) landed there for a PR with mixed code/hurl/docs/config — manual
+  // reshape was required every multi-file review.
+  //
+  // B1 (v0.77.0) — sub-classify the ungrouped bucket by file-extension
+  // archetype so prose-only / test-only / config-only files cluster
+  // coherently. Classifier runs ONLY on files without a community label;
+  // covered files stay routed by their graph community. Archetypes:
+  //   docs    — .md, .rst, .txt, .adoc, .mdx
+  //   tests   — .hurl, paths containing /tests/ or _test or .test or .spec
+  //   config  — .toml, .lock, .yaml, .yml, .json (not in src/), .ini, .env,
+  //             VERSION, Makefile, Dockerfile, .gitignore, requirements.txt
+  //   other   — falls back to legacy single "ungrouped" bucket
+  const _archetype = (f) => {
+    const p = f.toLowerCase();
+    const bn = path.basename(p);
+    if (/\.(md|rst|txt|adoc|mdx)$/.test(p)) return "docs";
+    if (/\.hurl$/.test(p) || /\/tests?\//.test(p) || /\/__tests?__\//.test(p) ||
+        /(^|[._-])(test|spec)([._-]|$)/.test(bn)) return "tests";
+    if (/\.(toml|lock|yaml|yml|ini|env|cfg|conf)$/.test(p) ||
+        bn === "version" || bn === "makefile" || bn === "dockerfile" ||
+        bn === ".gitignore" || bn === "requirements.txt" || bn === "go.mod" ||
+        bn === "cargo.toml" || bn === "package-lock.json" || bn === "pnpm-lock.yaml") return "config";
+    return "other";
+  };
+
   const groupsByCommunity = new Map();
   for (const f of diffFiles) {
     const c = fileToCommunity.get(path.basename(f));
-    const key = c === null || c === undefined ? "ungrouped" : String(c);
-    if (!groupsByCommunity.has(key)) groupsByCommunity.set(key, { community: c, files: [] });
+    let key;
+    if (c === null || c === undefined) {
+      const arch = _archetype(f);
+      key = arch === "other" ? "ungrouped" : `archetype:${arch}`;
+    } else {
+      key = String(c);
+    }
+    if (!groupsByCommunity.has(key)) {
+      const meta = { community: c, files: [] };
+      if (key.startsWith("archetype:")) meta.archetype = key.slice("archetype:".length);
+      groupsByCommunity.set(key, meta);
+    }
     groupsByCommunity.get(key).files.push(f);
   }
   let groups = Array.from(groupsByCommunity.values())

@@ -15,7 +15,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
       <generative_debt_checklist>{inline_guardrails["generative-debt-checklist.md"]}</generative_debt_checklist>
     </guardrails_inline>
-    <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed blast radius + caller set for the changed symbols. Use as the high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. When absent, .devt/state/graphify-skip-reason.txt explains why. Your tool surface does not include `mcp__*graphify*`, so consume the data already present rather than issuing graph queries.</graph_impact>
+    <graph_impact>
+{graph_impact_content}
+</graph_impact>
+    <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>

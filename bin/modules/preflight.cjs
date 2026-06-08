@@ -1457,8 +1457,17 @@ function pickCentralSymbol(symbols, taskText) {
     : symbols;
   if (candidates === null) return null;
 
+  // M3 (greenfield 2026-06-07 calibration): diff-recency weighting. M2
+  // de-ranked god nodes but the surviving candidates were token-overlap-noisy
+  // — DebounceService got picked over _check_calendar_feature_gate for a
+  // license-gate PR because token overlap matched debounce.py test files in
+  // the topic.symbols list. Solution: count how many times each candidate
+  // appears in the working-tree git diff and add a weight to its score.
+  // Symbols that ARE the diff's primary subject (mentioned many times) win
+  // even when their tokens don't match the task description vocabulary.
+  const diffCounts = _diffSymbolCounts(candidates);
+
   const task = (taskText || "").toLowerCase();
-  if (!task) return candidates[0];
   const tokenize = (sym) => sym
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_.]/g, " ")
@@ -1468,12 +1477,51 @@ function pickCentralSymbol(symbols, taskText) {
   let best = { sym: candidates[0], score: 0, idx: -1 };
   candidates.forEach((sym, i) => {
     const tokens = tokenize(sym);
-    if (tokens.length === 0) return;
-    const hits = tokens.filter(t => task.includes(t)).length;
-    const score = hits / tokens.length;
-    if (score > best.score) best = { sym, score, idx: i };
+    let tokenScore = 0;
+    if (task && tokens.length > 0) {
+      const hits = tokens.filter(t => task.includes(t)).length;
+      tokenScore = hits / tokens.length;
+    }
+    // Diff weight: each mention adds 0.2, capped at 2.0 (= 10 mentions). A
+    // single mention barely nudges; a symbol mentioned 5+ times dominates
+    // any token-overlap noise from unrelated test/debounce files.
+    const diffCount = diffCounts.get(sym) || 0;
+    const diffWeight = Math.min(diffCount * 0.2, 2.0);
+    const finalScore = tokenScore + diffWeight;
+    if (finalScore > best.score) best = { sym, score: finalScore, idx: i };
   });
   return best.score > 0 ? best.sym : candidates[0];
+}
+
+// _diffSymbolCounts (M3 helper) — counts occurrences of each candidate
+// symbol in the working-tree + staged git diff. Returns Map<symbol, count>;
+// empty Map when git is unavailable, not in a repo, or diff is empty.
+// Bounded to ~256 KB of diff output to keep runtime predictable on large
+// PRs. Uses word-boundary matching to avoid counting `Foo` inside `FooBar`.
+function _diffSymbolCounts(candidates) {
+  const counts = new Map();
+  if (!Array.isArray(candidates) || candidates.length === 0) return counts;
+  try {
+    const { execSync } = require("child_process");
+    // Combine working-tree + staged diffs (HEAD). On a clean checkout this
+    // returns empty; in mid-PR state it shows the in-flight changes.
+    const diff = execSync("git diff HEAD --unified=0 2>/dev/null", {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024,
+      timeout: 2000,
+    });
+    if (!diff || typeof diff !== "string") return counts;
+    for (const sym of candidates) {
+      if (typeof sym !== "string" || sym.length < 3) continue;
+      // Escape regex special chars; symbols are typically identifiers so
+      // unlikely to contain them, but defensive.
+      const escaped = sym.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\b${escaped}\\b`, "g");
+      const matches = diff.match(re);
+      if (matches && matches.length > 0) counts.set(sym, matches.length);
+    }
+  } catch { /* git unavailable / not a repo / diff failed — keep counts empty */ }
+  return counts;
 }
 
 function run(subcommand, args) {

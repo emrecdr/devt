@@ -58,6 +58,7 @@ node -e "
   // Resolve threshold: config override beats default. Walk up to find .devt/.
   let threshold = 40000;
   let stateDir = null;
+  let logAll = false;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -73,6 +74,12 @@ node -e "
             const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
             const v = cfg && cfg.telemetry && cfg.telemetry.task_truncation_warn_bytes;
             if (Number.isFinite(v) && v > 0) threshold = v;
+            // task_truncation_log_all: v0.77.0 calibration-mode opt-in.
+            // When true, every dispatch return logs to dispatch-warnings.jsonl
+            // even when no cliff signal fires — restores the pre-v0.76.0
+            // emit-on-every-return behavior for telemetry analysis cycles.
+            const la = cfg && cfg.telemetry && cfg.telemetry.task_truncation_log_all;
+            if (la === true) logAll = true;
           } catch { /* malformed config — keep default */ }
         }
         break;
@@ -119,7 +126,12 @@ node -e "
   // Quiet-by-default: write a forensic record + emit advisory ONLY when a
   // cliff signal fires. Greenfield field data (June 2026) showed 93% of
   // emit-every-return records carried no actionable signal.
-  if (!nearCliff && !lowOutput && !midTaskLanguage) process.exit(0);
+  //
+  // Calibration-mode override: when telemetry.task_truncation_log_all=true,
+  // skip this short-circuit so every dispatch logs a record (no advisory
+  // emit on the no-signal path — that part stays signal-gated below).
+  const cliffFired = nearCliff || lowOutput || midTaskLanguage;
+  if (!cliffFired && !logAll) process.exit(0);
 
   // Forensic append — best-effort, never fails the hook.
   if (stateDir) {
@@ -143,6 +155,10 @@ node -e "
       fs.appendFileSync(path.join(stateDir, 'dispatch-warnings.jsonl'), record + '\n');
     } catch { /* forensic write failure must NEVER affect the hook */ }
   }
+
+  // Advisory only fires on cliff signals — calibration-mode log-all writes
+  // forensic records but does NOT add orchestrator-visible advisory noise.
+  if (!cliffFired) process.exit(0);
 
   // Compose advisory based on which cliff triggered. The two cliffs are mutually
   // exclusive by definition (output can't be both > 40KB and < 500 bytes).

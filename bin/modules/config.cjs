@@ -48,6 +48,28 @@ const DEFAULTS = {
   // dispatch_hygiene_mode — block-default makes the audit-trail review
   // involuntary rather than perceived-urgency optional.
   claim_check_mode: "block",
+  // Telemetry — calibration-mode opt-ins for hooks that emit forensic records.
+  // Each flag defaults to the cost-minimizing behavior; override in
+  // .devt/config.json::telemetry.<flag> when a calibration cycle needs richer
+  // data than the default emits.
+  telemetry: {
+    // task_truncation_warn_bytes: hook-side threshold for near_cliff detection.
+    // The task-truncation-detector hook (hooks/task-truncation-detector.sh)
+    // emits an advisory + jsonl record when a sub-agent return exceeds this
+    // byte count. 40 KB is the placeholder default until field histograms
+    // tighten it; override per-project when telemetry shows the cliff
+    // somewhere else. Hook reads this value directly from .devt/config.json
+    // (not via getMergedConfig) since it runs outside the Node.js context.
+    task_truncation_warn_bytes: 40000,
+    // task_truncation_log_all: when true, the task-truncation-detector logs
+    // EVERY sub-agent return to dispatch-warnings.jsonl regardless of cliff
+    // signals — calibration-cycle mode. Default false (quiet-by-default per
+    // greenfield 2026-06 calibration: 178 of 192 records carried no
+    // actionable signal). Enable in .devt/config.json::telemetry when
+    // computing return-size histograms, latency baselines, or other
+    // analyses that need full coverage.
+    task_truncation_log_all: false,
+  },
   // Memory layer — permanent ADR/Concept/Flow/Rejected docs at .devt/memory/.
   // preflight_mode: "off" (Phase 1-2) | "warn" | "block".
   // off — hook is a no-op (escape hatch for projects that opt out entirely)

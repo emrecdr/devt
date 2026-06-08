@@ -150,6 +150,72 @@ if [[ -n "$UPDATE_MSG" ]]; then
 ${UPDATE_MSG}"
 fi
 
+# ─── What's-New Surfacing (v0.77.0) ───
+# Greenfield calibration 2026-06-07: doc-promotion failed because Greenfield-LLM
+# only loads project's CLAUDE.md, not devt's. New features in CHANGELOG.md or
+# devt's CLAUDE.md never registered. Per-machine version stamp under
+# ~/.cache/devt/whats-new-seen — when the cached version differs from the
+# installed VERSION, surface the CHANGELOG headline paragraph for this
+# version once, then update the stamp so subsequent sessions stay silent.
+CURRENT_VERSION=""
+[[ -f "$PLUGIN_ROOT/VERSION" ]] && CURRENT_VERSION=$(tr -d '\n' < "$PLUGIN_ROOT/VERSION" 2>/dev/null)
+WHATS_NEW_CACHE="${HOME}/.cache/devt"
+WHATS_NEW_STAMP="${WHATS_NEW_CACHE}/whats-new-seen"
+SEEN_VERSION=""
+[[ -f "$WHATS_NEW_STAMP" ]] && SEEN_VERSION=$(tr -d '\n' < "$WHATS_NEW_STAMP" 2>/dev/null)
+
+WHATS_NEW_MSG=""
+if [[ -n "$CURRENT_VERSION" && "$CURRENT_VERSION" != "$SEEN_VERSION" ]]; then
+  # Extract the headline paragraph of the [X.Y.Z] section in CHANGELOG.md.
+  # Cap at 800 chars. When the version section is missing, fail silently.
+  WHATS_NEW_MSG=$(node -e "
+    (function() {
+      const fs = require('fs');
+      const path = require('path');
+      try {
+        const cl = fs.readFileSync(path.join(process.argv[1], 'CHANGELOG.md'), 'utf8');
+        const v = process.argv[2];
+        const lines = cl.split('\n');
+        const startMarker = '## [' + v + ']';
+        let i = lines.findIndex(l => l.startsWith(startMarker));
+        if (i < 0) return;
+        const header = lines[i].trim();
+        i++;
+        while (i < lines.length && lines[i].trim() === '') i++;
+        const headline = [];
+        let bytes = 0;
+        const CAP = 800;
+        while (i < lines.length && bytes < CAP) {
+          const line = lines[i];
+          if (line.startsWith('## [') || line.startsWith('### ')) break;
+          if (line.trim() === '' && headline.length > 0 && headline[headline.length - 1] === '') break;
+          headline.push(line);
+          bytes += line.length + 1;
+          i++;
+        }
+        const para = headline.join('\n').trim();
+        if (!para) return;
+        const out = header + '\n\n' + para;
+        const truncated = out.length > CAP
+          ? out.slice(0, CAP).trim() + '\n\n  ... see CHANGELOG.md for the full notes.'
+          : out;
+        process.stdout.write(truncated);
+      } catch {}
+    })();
+  " "$PLUGIN_ROOT" "$CURRENT_VERSION" 2>/dev/null || true)
+
+  if [[ -n "$WHATS_NEW_MSG" ]]; then
+    mkdir -p "$WHATS_NEW_CACHE" 2>/dev/null || true
+    echo "$CURRENT_VERSION" > "$WHATS_NEW_STAMP" 2>/dev/null || true
+    CONTEXT="${CONTEXT}
+
+What's new in devt v${CURRENT_VERSION}:
+${WHATS_NEW_MSG}
+
+(this announcement appears once per upgrade; cached at ${WHATS_NEW_STAMP})"
+  fi
+fi
+
 # ─── Memory-Candidate Surfacing (B-III.1.a) ───
 # When _suggestions.md has accumulated >= candidates_surface_threshold proposals
 # AND cooldown has elapsed AND no active workflow, surface a one-liner hint and

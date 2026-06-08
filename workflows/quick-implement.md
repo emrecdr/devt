@@ -249,7 +249,10 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
-    <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed blast radius + caller set for the central symbol(s) of this task. When absent, .devt/state/graphify-skip-reason.txt explains why and grep-based investigation is the fallback. This file is orchestrator-mediated MCP output; your tool surface does not include `mcp__*graphify*`, so consume the data already present rather than issuing graph queries.</graph_impact>
+    <graph_impact>
+{graph_impact_content}
+</graph_impact>
+    <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries. When the inlined content is a "(no graph-impact.md available — ...)" notice, fall back to grep-based investigation.</graph_impact_note>
 <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md (if exists)</scan_results>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
@@ -416,7 +419,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
-    <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed blast radius + caller set for the changed symbols. Use as the high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. When absent, .devt/state/graphify-skip-reason.txt explains why. Your tool surface does not include `mcp__*graphify*`, so consume the data already present rather than issuing graph queries.</graph_impact>
+    <graph_impact>
+{graph_impact_content}
+</graph_impact>
+    <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map for changed symbols. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <learning_context>{learning_context from context_init — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>

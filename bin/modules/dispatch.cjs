@@ -290,6 +290,7 @@ function applySubstitutions(template, subs) {
     memory_signal_json: () => JSON.stringify(subs.memory_signal_json || {}),
     god_node_warnings_json: () => JSON.stringify(subs.god_node_warnings_json || {}),
     graphify_status_json: () => JSON.stringify(subs.graphify_status_json || {}),
+    graph_impact_content: () => subs.graph_impact_content || "",
     task_description: () => subs.task || "",
     bug_description: () => subs.task || "",
     review_scope_description: () => subs.task || "",
@@ -311,7 +312,7 @@ function applySubstitutions(template, subs) {
 function buildSubstitutionTable() {
   const { findProjectRoot } = require("./config.cjs");
   const { getMergedConfig } = require("./config.cjs");
-  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics } = require("./init.cjs");
+  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact } = require("./init.cjs");
   const { getModels } = require("./model-profiles.cjs");
   const state = require("./state.cjs");
 
@@ -328,6 +329,7 @@ function buildSubstitutionTable() {
   const gr = loadGoverningRules(projectRoot);
   const ig = loadInlineGuardrails(PLUGIN_ROOT);
   const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
+  const gi = loadGraphImpact(projectRoot);
 
   let s = {};
   try { s = state.readState() || {}; } catch { s = {}; }
@@ -336,6 +338,8 @@ function buildSubstitutionTable() {
     governing_rules: { content: gr.content || {}, rules_hash: gr.rules_hash || "" },
     inline_guardrails: ig.content || {},
     inline_rubrics: ir.content || {},
+    graph_impact_content: gi.content || "",
+    graph_impact_status: gi.status || "absent",
     rubrics: config.rubrics || {},
     models: models || {},
     scope_trust_json: s.scope_trust_json,

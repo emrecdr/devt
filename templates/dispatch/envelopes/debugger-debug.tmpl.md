@@ -3,7 +3,10 @@ Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
 <scope_hint>{scope_hint_json}</scope_hint>
 <scope_trust>{scope_trust_json}</scope_trust>
-<graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed caller set + blast radius for the bug's central symbol. When absent, .devt/state/graphify-skip-reason.txt explains why.</graph_impact>
+<graph_impact>
+{graph_impact_content}
+</graph_impact>
+<graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — pre-computed caller set + blast radius for the bug's central symbol. When the inlined content is a "(no graph-impact.md available — ...)" notice, fall back to following the stack trace from the symptom.</graph_impact_note>
 <symptoms>Read .devt/state/debug-context.md</symptoms>
 <agent_skills>{injected from .devt/config.json if available}</agent_skills>
 </context>

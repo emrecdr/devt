@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.77.0] - 2026-06-08
+
+**v0.76.0 calibration response + Greenfield-LLM top-3 ergonomics.** Greenfield's calibrated PR #389 review surfaced one own-bug on v0.76.0 (the `<graph_impact>` block shipped as a Read prompt, not inlined content) plus 3 high-frequency / low-complexity asks ranked by field experience. v0.77.0 closes all 5 — A1 inlines graph-impact content into investigative-agent prompts, A2 fixes the doc-promotion communication gap, A3 ships the calibration-mode opt-in flag, B1 splits lane-suggestion's `community: null` mega-bucket by file archetype, B2 weights central-symbol picks by diff-recency. New smoke gates K72 (B1 archetype matrix) + K73 (A1 inline + absent matrix).
+
+Smoke: 821 passed, 0 failed (+2 from K72 + K73). Locking: 3/3.
+
+### Added
+
+- **A1 — `loadGraphImpact()` helper + `{graph_impact_content}` placeholder.** New helper in `bin/modules/init.cjs` reads `.devt/state/graph-impact.md` (capped at 32 KB) and exposes content via `dispatch.cjs` substitution. Investigative-agent envelopes (programmer, programmer-quick_implement, code-reviewer, code-reviewer-quick_implement, code-reviewer-code_review, debugger-debug) now inline the actual file content instead of shipping a Read prompt. Three states: `present` (content inlined, truncation notice when over cap), `skipped` (graphify-skip-reason.txt content inlined), `absent` (graceful fallback line). Closes Greenfield-LLM's calibration finding that v0.76.0 C1a "delivered data reached the agent" but NOT "data inlined to save a Read call."
+
+- **A2 — SessionStart what's-new surfacing.** `hooks/session-start.sh` now reads `VERSION` and compares to `~/.cache/devt/whats-new-seen`. On version mismatch, extracts the CHANGELOG headline paragraph for the current version (capped at 800 chars) and appends it to the SessionStart context. Stamp file updated so the announcement appears once per upgrade per machine. Closes the doc-promotion communication gap — Greenfield-LLM had zero awareness of v0.76.0 features because they only see project CLAUDE.md, never devt's. Mechanism is announcement-only; future releases inherit the channel for free.
+
+- **A3 — `telemetry.task_truncation_log_all` config flag.** New `DEFAULTS.telemetry.task_truncation_log_all: false` in `bin/modules/config.cjs`; `hooks/task-truncation-detector.sh` reads it from `.devt/config.json::telemetry`. When true, every dispatch return logs a forensic record (calibration-mode coverage). When false (default), only cliff signals (`near_cliff`/`low_output`/`mid_task_language`) emit. Advisory output stays cliff-only regardless of the flag — log-all mode adds no orchestrator-visible noise. Greenfield-LLM-endorsed pattern: quiet-by-default + opt-in for calibration cycles.
+
+- **B1 — Lane-suggestions archetype classifier.** New `_archetype(f)` helper in `bin/modules/graphify.cjs::laneSuggestions` sub-classifies the ungrouped bucket (files without graph community labels) into 4 archetypes: `docs` (.md/.rst/.txt/.adoc/.mdx), `tests` (.hurl + paths containing /tests/ or _test or .spec), `config` (.toml/.lock/.yaml/.yml/.ini/.env/.cfg + VERSION/Makefile/Dockerfile/Cargo.toml/go.mod/package-lock.json/pnpm-lock.yaml), `other` (residual ungrouped). Groups expose `archetype` field when the bucket comes from the classifier. Closes Greenfield-LLM's #1 ask (every multi-file review hit this — 24 of 42 files in their fixture went to one community: null mega-bucket).
+
+- **B2 — Diff-recency weighting in `pickCentralSymbol` (M3 calibration).** New `_diffSymbolCounts()` helper runs `git diff HEAD --unified=0` (best-effort, 2s timeout, 256 KB cap) and counts word-bounded occurrences of each candidate symbol. The scoring then becomes `final = token_overlap_score + min(diffCount × 0.2, 2.0)` — a symbol mentioned 5+ times in the diff dominates token-overlap noise from unrelated test/debounce files. Builds on v0.76.0 C4 (god-node de-ranking); Greenfield-LLM's exact field example: `DebounceService` was picked over `_check_calendar_feature_gate` for a license-gate PR even though `_check_calendar_feature_gate` appeared 11 times in the task description AND many times in the diff. After M3, the diff-mentioned symbol wins regardless of token overlap.
+
+- **K72 smoke gate** — lane-suggestions archetype classifier round-trip. Fixture: 1 covered file (community 1) + 1 .md + 1 tests/* path + 1 .sql. Asserts `groups[].archetype` contains exactly `["docs", "tests"]` for the uncovered files.
+
+- **K73 smoke gate** — `dispatch render-filled` inlining round-trip. Two states: absent (envelope contains the "(no graph-impact.md available — ...)" notice) and present (envelope contains a sentinel marker from the actual file). Locks in A1 against the v0.76.0-style regression where the placeholder is shipped without substitution.
+
+### Changed
+
+- **K32 expectation: 3 → 4 groups for partial-coverage fixture.** B1 archetype split causes the 4-file mixed-input case (auth.py + billing.py + test_auth.py + 001.sql) to produce 4 groups (auth community + billing community + archetype:tests + ungrouped) instead of 3. Test message updated to reflect the new shape.
+
+- **F7 graph-impact reference pattern broadened.** v0.76.0 shipped the exact phrase `"graph-impact.md if it exists"` in workflow dispatch prose. After A1's envelope rewrite, debugger-debug's reference now goes through the inlined `{graph_impact_content}` placeholder. F7 now accepts any of three patterns: the legacy Read prompt, the new inlining placeholder, or a bare `.devt/state/graph-impact.md` mention.
+
 ## [0.76.0] - 2026-06-06
 
 **Agent context fidelity + post-workflow ergonomics pass.** Greenfield filesystem audit + Greenfield-LLM calibration-mode report converged on 5 specific gaps where field evidence + file evidence both signaled real cost. v0.76.0 closes them as a single coherent commit. Anchors: 11 raw_dispatch records (9 template-side, 2 orchestrator-side), 178 task_output_bytes records (93% noise), god-node central-symbol pick (FastAPI's `Depends` over `check_calendar_license`), nonsensical `scope_hint` (god-node depth-1 neighbors unrelated to the actual task), `assert-council-not-recent` placeholder bug, missing `/devt:docs` slash command.
