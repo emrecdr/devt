@@ -140,7 +140,19 @@ function loadPriorSidecars(projectRoot, consumerAgent) {
     try { raw = fs.readFileSync(filepath, "utf8").trim(); }
     catch { continue; }
     if (!raw) continue;
-    const block = `<${producer}_sidecar>\n${raw}\n</${producer}_sidecar>`;
+    // Validate + canonicalize. JSON_SIDECAR_SCHEMAS asserts sidecars are
+    // always-objects with a fixed status/verdict/agent enum triple. A
+    // malformed file (mid-write, manual edit, schema drift) would otherwise
+    // inject raw garbage into the consuming agent's dispatch envelope.
+    // Re-serializing through JSON.stringify also guarantees byte-stable
+    // representation across whitespace variations — K71 idempotence holds
+    // even if a user edited the sidecar with extra newlines.
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { continue; }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    const canonical = JSON.stringify(parsed);
+    const block = `<${producer}_sidecar>\n${canonical}\n</${producer}_sidecar>`;
     if (totalBytes + block.length > PRIOR_SIDECAR_CAP) {
       // Cap breached — emit what we have plus a notice. Realistic
       // payloads never hit this; cap exists for defense against an

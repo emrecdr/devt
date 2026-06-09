@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.86.1] - 2026-06-09
+
+**Validation-pass patches against the v0.86.0 Sidecar-Driven Handoff + v0.85.0 Compression Adoption Loop releases.** Probed each release for edge cases after they shipped. Four real findings fixed; one cosmetic finding (blank line when `{prior_outputs}` resolves empty) deliberately deferred — the fix complexity exceeded the 5-bytes-per-dispatch cost.
+
+Smoke: 830 passed, 0 failed (K77 fixture updated to match new two-stage headroom probe). Locking: 3/3.
+
+### Fixed
+
+- **`loadPriorSidecars` now validates JSON before injecting** (`bin/modules/init.cjs`). The v0.86.0 implementation treated sidecar content as opaque string injection — a malformed `impl-summary.json` (mid-write, manual edit, schema drift) would pipe raw garbage like `NOT VALID JSON {` into the consuming agent's dispatch envelope. The fix validates via `JSON.parse` AND re-serializes through `JSON.stringify` to guarantee canonical byte-stable representation (K71 idempotence holds even if a user edits the sidecar with extra whitespace). Also asserts the parsed value is an object (not a scalar like `"42"` which is valid JSON but breaks the schema contract). Invalid sidecars are silently skipped — consistent with existing error handling.
+
+- **`compressAll` now distinguishes "already compressed" from "compressor refused"** (`bin/modules/static-compress.cjs`). The v0.85.0 implementation lumped safety refusals (identical-output, empty-input) into `skipped_already_done`, which falsely implied a `.original.md` backup existed. The two states are disjoint and informational: `skipped_already_done` means "backup file present from a prior run, leaving alone" (idempotent re-run guard); `skipped_no_change` means "compressor considered the file but produced identical output — calling --restore would do nothing because no backup was ever written". The aggregate result now surfaces both as separate arrays.
+
+- **Two-stage headroom binary probe** (`bin/modules/static-compress.cjs::_headroomAvailable`). The v0.81.0 probe ran `headroom --version` only — but some users install the `headroom-ai[proxy]` variant which responds to `--version` but rejects the `compress` subcommand. Result: silent fallback to regex with noisy stderr per file. New behavior: stage 1 confirms binary presence via `--version`; stage 2 confirms subcommand support via `compress --help`. Click's "No such command" exit (status 2) is detected cleanly. Probe result is cached for the lifetime of the Node process — `--all` runs emit the probe-failure message at most once, not N times. Cache does not survive across CLI invocations (each `node devt-tools.cjs` is a new process), acceptable since probes are sub-100ms.
+
+- **Honest compression-ratio claims in README + recipe doc.** v0.81.0 README and docs claimed "~40% reduction" (neural) and "~25-35% reduction" (regex), drawn from caveman's marketing copy. Real-world measurement: 4% on `guardrails/golden-rules.md` (tight technical documentation). The headroom MCP achieved 10.7% avg compression in this session's 12 API requests (per `mcp__headroom__headroom_stats`). Updated claim: "compression depends heavily on prose density — conversational text compresses 25-35% (the regex compressor's design target); tight technical specifications compress 4-15%". The original claims weren't wrong for the content they targeted; they just didn't generalize.
+
+### Changed
+
+- **K77 fixture F (drift-detected revert) updated.** The fake `headroom` binary that simulates a drift-causing compressor now responds to `compress --help` with exit 0, mirroring real click-CLI behavior. Required so the new two-stage probe passes the fake binary through to the drift-simulation path rather than rejecting it as a bad variant at stage 2.
+
 ## [0.86.0] - 2026-06-09
 
 **Sidecar-Driven Handoff — eliminate Read tool round-trips on structured agent-to-agent context.** Today, when the verifier dispatches in a `dev` flow, it has no in-context knowledge of what the programmer or tester decided — it pays 1-2 Read tool calls turn-1 just to fetch `impl-summary.md` + `test-summary.md`. The structured handoff data already lives at `.devt/state/<agent>-summary.json` (the JSON sidecars produced for the claim-check + status-routing pipeline) and is tiny (~80 bytes per sidecar — `{status, verdict, agent}` enum triple). This release inlines those sidecars into the consuming agent's dispatch envelope so the structured contract data is in the cached prefix, not behind a Read.

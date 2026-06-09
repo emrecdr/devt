@@ -11243,6 +11243,11 @@ mkdir -p "$K77_FAKE_BIN"
 cat > "$K77_FAKE_BIN/headroom" <<'EOF_K77F'
 #!/bin/bash
 if [ "$1" = "--version" ]; then echo "fake 0.0.1"; exit 0; fi
+# Two-stage probe support (v0.86.1) — static-compress.cjs probes for the
+# compress subcommand via `compress --help` to filter out the
+# headroom-ai[proxy] variant. Mirror real click-CLI behavior: --help on a
+# known subcommand returns 0 with a usage string.
+if [ "$1" = "compress" ] && [ "$2" = "--help" ]; then echo "Usage: compress [OPTIONS] FILE"; exit 0; fi
 if [ "$1" = "compress" ] && [ "$2" = "-" ]; then
   # Drop the first ## heading line — simulates a compressor that mangles structure.
   sed '/^## Drift Test$/d'

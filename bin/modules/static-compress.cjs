@@ -81,7 +81,22 @@ function _backupPath(filepath) {
 // Probe `headroom` on PATH. ENOENT (not installed) is the silent expected
 // case; every other failure mode is surfaced so users debugging "why isn't
 // headroom firing?" get a signal.
+//
+// Two-stage probe (field finding 2026-06-09): some users have a `headroom`
+// binary on PATH that responds to `--version` but does NOT support the
+// `compress` subcommand — typically the `headroom-ai[proxy]` variant which
+// targets `headroom wrap claude` use cases, not stdin compression. Without
+// the second probe, _runHeadroom would shell out per file, fail with a
+// noisy stderr per file, then fall back to regex. The two-stage probe
+// detects the bad variant once and falls back silently.
+//
+// Result is cached for the lifetime of this Node process so an --all run
+// over N files emits the probe-failure message at most once. Cache does
+// not survive across CLI invocations (each `node devt-tools.cjs` is a new
+// process), which is acceptable — probes are <100ms.
+let _headroomProbeCache = null;
 function _headroomAvailable() {
+  if (_headroomProbeCache !== null) return _headroomProbeCache;
   let r;
   try {
     r = spawnSync("headroom", ["--version"], { stdio: "pipe", timeout: 2000 });
@@ -89,19 +104,36 @@ function _headroomAvailable() {
     if (e.code !== "ENOENT") {
       process.stderr.write(`[static-compress] headroom probe threw: ${e.code || e.message}\n`);
     }
-    return false;
+    return (_headroomProbeCache = false);
   }
   if (r.error) {
     if (r.error.code !== "ENOENT") {
       process.stderr.write(`[static-compress] headroom probe failed: ${r.error.code || r.error.message}\n`);
     }
-    return false;
+    return (_headroomProbeCache = false);
   }
   if (r.status !== 0) {
     process.stderr.write(`[static-compress] headroom --version exited ${r.status} — treating as unavailable\n`);
-    return false;
+    return (_headroomProbeCache = false);
   }
-  return true;
+  // Stage 2 — verify the `compress` subcommand exists. Click's "No such
+  // command" error returns exit 2; we treat any non-zero as missing-subcommand.
+  let s;
+  try {
+    s = spawnSync("headroom", ["compress", "--help"], { stdio: "pipe", timeout: 2000 });
+  } catch (e) {
+    process.stderr.write(`[static-compress] headroom compress probe threw: ${e.code || e.message}\n`);
+    return (_headroomProbeCache = false);
+  }
+  if (s.error || s.status !== 0) {
+    process.stderr.write(
+      "[static-compress] headroom binary on PATH but `compress` subcommand is not supported " +
+      "(likely headroom-ai[proxy] variant). Install the stdin-compress variant " +
+      "via `pipx install headroom-ai` (without the [proxy] extra), or accept regex fallback.\n",
+    );
+    return (_headroomProbeCache = false);
+  }
+  return (_headroomProbeCache = true);
 }
 
 // Run headroom in compress-stdin mode. Returns { ok, compressed, reason }
@@ -292,8 +324,17 @@ function restoreFile(filepath) {
 // user's runtime opt-in.
 //
 // Returns: { ok, total_files, compressed, skipped_already_done,
-//            refused_sensitive, errors, total_bytes_before, total_bytes_after,
+//            skipped_no_change, refused_sensitive, errors,
+//            total_bytes_before, total_bytes_after,
 //            engine_breakdown: { headroom: N, regex: N } }
+//
+// Skipped categories — disjoint, both informational:
+//   skipped_already_done — a .original.md backup exists; the file was
+//     compressed in a prior run, so we leave it alone (idempotent).
+//   skipped_no_change — the compressor considered the file but produced
+//     identical output (tight prose with no removable filler) or refused
+//     for empty-input. NOT the same as "already done" — calling --restore
+//     would not undo anything because no backup was ever written.
 function compressAll() {
   const cfg = _resolveConfig();
   if (cfg.mode === "off") {
@@ -328,6 +369,7 @@ function compressAll() {
     total_files: candidates.length,
     compressed: [],
     skipped_already_done: [],
+    skipped_no_change: [],
     refused_sensitive: [],
     errors: [],
     total_bytes_before: 0,
@@ -351,9 +393,9 @@ function compressAll() {
       result.refused_sensitive.push(rel);
     } else if (r.reason && (r.reason.includes("identical output") || r.reason.includes("empty"))) {
       // Safety refusals (identical-output, empty-input) are no-ops, not
-      // errors. Surface separately so the caller knows the file was
-      // considered but nothing changed.
-      result.skipped_already_done.push(rel);
+      // errors. Distinct from skipped_already_done so the caller can tell
+      // "compressor refused" from "already compressed in prior run".
+      result.skipped_no_change.push(rel);
     } else {
       result.errors.push({ path: rel, reason: r.reason });
     }

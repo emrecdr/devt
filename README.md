@@ -920,9 +920,22 @@ For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](d
 devt focuses on output discipline and orchestration. If you also want **input-side** compression — tool outputs, RAG results, files, conversation history all compressed before they reach Claude — [headroom](https://github.com/chopratejas/headroom) is a compatible companion. It runs as a local proxy in front of Claude Code:
 
 ```bash
-pip install "headroom-ai[proxy]"
+# Recommended — pipx isolates the CLI in its own venv and puts the binary on PATH
+brew install pipx && pipx ensurepath
+pipx install "headroom-ai[proxy]"
+
+# Fast alternative — uv tool install (Rust-based, ~10x faster resolves)
+brew install uv
+uv tool install "headroom-ai[proxy]"
+
+# Plain pip — note: stock macOS ships `pip3`, not `pip`. Use the module form to
+# guarantee the install lands in the same interpreter you're invoking.
+python3 -m pip install "headroom-ai[proxy]"
+
 headroom wrap claude     # devt + Claude Code operate normally through the proxy
 ```
+
+devt's built-in `static-compress` probes for `headroom` on `PATH`, so any of the above also unlocks the neural-engine path for project-markdown compression (see next subsection). Verify with `which headroom && headroom --version` before retrying static-compress.
 
 Trade-off honestly: ~50–90% input-token savings on real workloads, adds a ~500 MB Python + Rust toolchain, and headroom itself is beta. devt **does not bundle and does not require** headroom — they're orthogonal layers. If you don't want the extra dependency, devt works fine standalone.
 
@@ -937,7 +950,7 @@ node bin/devt-tools.cjs static-compress .devt/rules/coding-standards.md
 node bin/devt-tools.cjs static-compress --restore .devt/rules/coding-standards.md
 ```
 
-The compressor probes for the `headroom` CLI on `PATH` and shells out for neural extractive compression when available (~40% reduction); falls back to a zero-dependency regex compressor when not (~25–35% reduction). Either path runs through the structural-drift validator post-compression — any drift → backup deleted, input file untouched. Five safety layers before the input is touched (sensitive-path denylist, size cap, empty-file refusal, identical-output refusal, backup-readback verification). Fully reversible via the `<path>.original.md` backup sibling.
+The compressor probes for the `headroom` CLI on `PATH` (two-stage probe: `--version` for presence + `compress --help` for subcommand support, since the `headroom-ai[proxy]` variant lacks the stdin-compress path) and shells out for neural extractive compression when available; falls back to a zero-dependency regex compressor when not. **Real-world compression depends heavily on prose density**: conversational, repetitive, or filler-heavy markdown compresses 25–35% (the regex compressor's design target); tightly written technical specifications compress 4–15% (measured ~4% on `guardrails/golden-rules.md`). Either path runs through the structural-drift validator post-compression — any drift → backup deleted, input file untouched. Five safety layers before the input is touched (sensitive-path denylist, size cap, empty-file refusal, identical-output refusal, backup-readback verification). Fully reversible via the `<path>.original.md` backup sibling.
 
 Recipe + full safety semantics: [`docs/static-compress-recipe.md`](docs/static-compress-recipe.md). Smoke gate **K77** covers the round-trip including a drift-triggered revert via a faked `headroom` binary injected on `PATH`.
 
