@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.85.0] - 2026-06-09
+
+**Compression Adoption Loop — close the 30-day-zero-adoption gap.** Greenfield's H1 audit revealed that static-compress (shipped v0.81.0, polished v0.83.0) had been live for 30+ days with zero invocations. After deep validation, the gap turned out to be friction, not algorithm quality: defaults conservative, manual per-file, no measurement, no init-time surface. This release ships a coherent closed-loop bundle that addresses each friction point individually while preserving every existing safety layer.
+
+The loop: `/devt:init` offers compression at the explicit-consent moment → `static-compress --all` runs the bulk compress once → `/devt:health` aggregates savings from the JSONL log → `token-report` cross-references compression activity against cache-hit windows. Each component reuses existing devt infrastructure (consent UI mirrors `prompt_graphify_first_build`; bulk walker reuses `compressFile`; metric aggregation reuses Claude Code's existing `cache_read_input_tokens` field; safety layers untouched). Zero new dependencies, no LLM routing, no auth concept.
+
+Smoke: 829 passed, 0 failed (+1 K81, +1 J2 fix). Locking: 3/3.
+
+### Added
+
+- **`static-compress --all` bulk-compress mode.** Walks PROJECT-OWNED static-load surfaces (`.devt/rules/**/*.md` + project-local `guardrails/**/*.md`) and compresses each file once. **Plugin's own `guardrails/` is deliberately excluded** — that's devt's source code, not user content; modifying it would (a) be overwritten on next `devt update`, (b) violate the plugin/source boundary, (c) be the plugin maintainer's release-time concern, not the user's runtime opt-in. Idempotent: files with an existing `<name>.original.md` backup are skipped. Safety refusals (identical-output, empty-input) categorize as `skipped_already_done`, not errors. Per-file errors don't abort the run. Returns aggregate `{total_files, compressed[], skipped_already_done[], refused_sensitive[], errors[], total_bytes_saved, median_ratio, engine_breakdown}`.
+
+- **`prompt_static_compress_setup` step in `workflows/project-init.md`.** New step placed between `prompt_graphify_first_build` and `prompt_claude_mem_setup`, mirroring the graphify-first-build consent pattern. Detection: `.devt/rules/` exists + `static_compress.mode=off` (default) + no existing `.original.md` backups. AskUserQuestion offers "Compress now" / "Skip". On "Yes": flips `static_compress.mode` to `on` permanently AND runs `static-compress --all` once. Explicit consent — devt never silently modifies user files even during init.
+
+- **`/devt:health` compression savings block.** Extends the v0.84.0 `compression` block with a new `savings` sub-object reading `.devt/state/static-compress.jsonl` (RESET_EXEMPT per `docs/STATE-RULES.md`): `files_compressed`, `total_bytes_saved`, `median_ratio`, `last_run_at`. Drives the adoption-feedback loop: users see what compression has actually saved before deciding whether to leave it on. Best-effort; missing log silently degrades to no `savings` field.
+
+- **`token-report` static-compress activity cross-reference.** New top-level `static_compress_activity` field surfaces compression events in the same time window as the report's sessions (`window_start` = earliest session `first_turn_at`, `window_end` = latest session `last_turn_at`). Reports `events_in_window`, `bytes_saved_in_window`, `last_event_ts`. Cache-read tokens are already parsed + aggregated at the file level — this enrichment lets users correlate compression activity with the `cache_hit_rate` they observe.
+
+- **K81 smoke gate — bulk-compress + adoption-loop integration.** 4-fixture round-trip: walker scans only project-local paths (plugin's `guardrails/` mtimes byte-equal before/after), idempotent re-run skips via backup-existence, `/devt:health` aggregates savings into `compression.savings`, `workflows/project-init.md` carries the new `prompt_static_compress_setup` step (regression guard). Closes the contract between init-time consent → bulk run → health-time ROI surface.
+
+### Changed
+
+- **`compression.engine` literal fixed from `prose-shrink` → `regex`.** v0.84.0 shipped the compression block reporting `engine: "prose-shrink"` when headroom was absent, but the actual engine literal in `_compressWithFallback` is `"regex"`. Drift detected during v0.85.0 bulk-compress integration (the `engine_breakdown` aggregator received `regex` keys, not `prose-shrink`). Fixed.
+
+- **J2 smoke gate now distinguishes "release missing on GitHub" from "tag not yet pushed".** Previously the gate failed on any local tag without a corresponding GitHub release. That includes the transient window between `git tag vX.Y.Z` (local) and `git push origin vX.Y.Z` (which fires the release workflow). The gate now snapshots remote tags via `git ls-remote --tags origin` once at gate start and exempts local-only tags. Failure mode the gate was designed to catch — bulk-push silent-skip — is unchanged: tags that exist on remote but have no release still fail. New surface lists the exempted local-only tags so the user knows they're queued.
+
 ## [0.84.0] - 2026-06-09
 
 **Greenfield field-audit response — 4 validated low-friction wins + claude-mem detection bug fix.** Greenfield ran two audits (graphify integration + H1 trajectory validation) and surfaced 9 candidate findings. After per-finding validation against the actual codebase, 5 were stood down (already-solved / falsified / speculative / requires per-agent prompt convention rather than system change) and 4 shipped. The synthetic-fixture pattern (K79) is the one that matters most strategically: greenfield's 30-day window with zero structural-drift fires meant field data could not validate the recovery loop. K79 replaces field data with a deterministic CI fixture, giving us a falsifiable signal for the future warn → block default flip. A late-cycle user report surfaced a longstanding claude-mem detection bug — `/devt:init` was reporting "not installed" for users who DO have claude-mem installed as a Claude Code plugin. Fix folded into this release; K80 freezes the contract.

@@ -331,6 +331,49 @@ graphify update . 2>&1 | tail -10 || echo "(graphify update failed — non-fatal
 Best-effort: failures NEVER fail init. Report which path was taken.
 </step>
 
+<step name="prompt_static_compress_setup" gate="user offered static-compress + informed of outcome">
+
+Offer to compress the project's static-load files (`.devt/rules/**/*.md`) NOW so they're smaller in every subsequent code-touching dispatch envelope. These files are inlined into every workflow's `<governing_rules>` block (via `loadGoverningRules` in `bin/modules/init.cjs`) — compressing the prose layer once during init means every subsequent dispatch reads the smaller version, with cumulative token savings across the project's lifetime. Compression is byte-equal for code blocks, URLs, paths, identifiers, and version numbers (sentinel-protected); only prose is touched. The structural-drift validator catches any compression that loses required structures, and `<path>.original.md` backups make every compression reversible. Skipped unless explicitly opted in.
+
+```bash
+RULES_DIR=".devt/rules"
+RULES_EXIST=$([ -d "$RULES_DIR" ] && [ -n "$(ls -A "$RULES_DIR"/*.md 2>/dev/null)" ] && echo yes || echo no)
+SC_MODE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get static_compress.mode 2>/dev/null | jq -r '.value // "off"')
+ALREADY_COMPRESSED=$([ -n "$(ls "$RULES_DIR"/*.original.md 2>/dev/null)" ] && echo yes || echo no)
+echo "rules_exist=$RULES_EXIST sc_mode=$SC_MODE already_compressed=$ALREADY_COMPRESSED"
+```
+
+If any of (`rules_exist=no`, `sc_mode != off`, `already_compressed=yes`): skip this step. The user has either no rules to compress, already enabled the feature, or already compressed at least one rule file.
+
+Otherwise AskUserQuestion:
+
+```yaml
+question: "Compress .devt/rules/ now? These files inline into every code-touching dispatch envelope; compressing prose once cuts ~25-35% of their size on every future dispatch (more with the optional `headroom` neural engine). Reversible via `static-compress --restore <path>`; safety net catches structural drift and reverts automatically."
+header: "Static Compress"
+multiSelect: false
+options:
+  - label: "Yes, compress .devt/rules/ now"
+    description: "Flips static_compress.mode to 'on' permanently + runs `static-compress --all` once. Future re-runs after rule edits: `node bin/devt-tools.cjs static-compress --all`."
+  - label: "Skip — I'll enable later"
+    description: "Default stays mode='off'. Recipe at docs/static-compress-recipe.md if you want to enable later. Re-run /devt:init to re-offer."
+```
+
+On "Yes":
+
+```bash
+# Flip config permanently (user explicitly opted in)
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config set static_compress.mode=on >/dev/null 2>&1 || true
+# Run bulk compress; report aggregate savings
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" static-compress --all 2>&1 | jq '{ok, total_files, compressed: (.compressed | length), skipped: (.skipped_already_done | length), errors: (.errors | length), total_bytes_saved, median_ratio, engine_breakdown}' || echo "(static-compress --all reported errors — files still safe via backup-readback + structural validator)"
+```
+
+Emit a single confirmation line so the user knows the integration is live:
+
+> ✓ Static-compress enabled. Future `/devt:health` runs report savings in the `compression.savings` block. Re-compress after rule edits via `node bin/devt-tools.cjs static-compress --all`.
+
+This step is best-effort and informational: failures NEVER fail init. Report which case was taken.
+</step>
+
 <step name="prompt_claude_mem_setup" gate="claude-mem presence detected and user informed">
 
 Detect whether claude-mem (cross-session memory plugin) is available and surface install guidance if not. claude-mem is an OPTIONAL but high-leverage integration — when present, devt workflows query its MCP search tool (`mcp__plugin_claude-mem_mcp-search__search`) to harvest ⚖️ (decision) and 🔵 (discovery) observations from PRIOR sessions into the curator's candidate pool. Without claude-mem, harvest falls back to scratchpad-only sources and the curator sees a strictly smaller candidate set every retro.

@@ -131,9 +131,43 @@ function runChecks(pluginRoot) {
     compression = {
       static_compress_mode: mode,
       headroom_available: headroom,
-      engine: mode === "off" ? null : (headroom ? "headroom" : "prose-shrink"),
+      engine: mode === "off" ? null : (headroom ? "headroom" : "regex"),
       recipe: "docs/static-compress-recipe.md",
     };
+    // Aggregate savings from .devt/state/static-compress.jsonl. Read-only —
+    // the file persists across resets (RESET_EXEMPT per docs/STATE-RULES.md)
+    // so it captures historical compression activity, not just current
+    // workflow. Drives the adoption-feedback loop: users see what
+    // compression has actually saved before deciding whether to keep it on.
+    try {
+      const logPath = path.join(devtDir, "state", "static-compress.jsonl");
+      if (fs.existsSync(logPath)) {
+        const lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+        const compressEvents = [];
+        for (const line of lines) {
+          try {
+            const rec = JSON.parse(line);
+            if (rec.action === "compress" && rec.ok === true && typeof rec.before_bytes === "number" && typeof rec.after_bytes === "number") {
+              compressEvents.push(rec);
+            }
+          } catch { /* skip malformed line */ }
+        }
+        if (compressEvents.length > 0) {
+          const totalSaved = compressEvents.reduce((acc, r) => acc + (r.before_bytes - r.after_bytes), 0);
+          const ratios = compressEvents.map((r) => r.ratio).filter((n) => typeof n === "number").sort((a, b) => a - b);
+          const mid = Math.floor(ratios.length / 2);
+          const medianRatio = ratios.length === 0
+            ? null
+            : (ratios.length % 2 === 0 ? (ratios[mid - 1] + ratios[mid]) / 2 : ratios[mid]);
+          compression.savings = {
+            files_compressed: compressEvents.length,
+            total_bytes_saved: totalSaved,
+            median_ratio: medianRatio === null ? null : Number(medianRatio.toFixed(4)),
+            last_run_at: compressEvents[compressEvents.length - 1].ts || null,
+          };
+        }
+      }
+    } catch { /* swallow — savings info is purely informational */ }
   } catch { /* swallow — compression info is best-effort */ }
 
   function buildResult(status) {

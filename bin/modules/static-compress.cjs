@@ -277,15 +277,116 @@ function restoreFile(filepath) {
   return result;
 }
 
+// Bulk-compress entry point — walks PROJECT-OWNED static-load surfaces
+// and compresses each file once. Idempotent: files with an existing
+// <name>.original.md backup are skipped (already compressed). Per-file
+// errors don't abort the run; they're collected and surfaced in the
+// aggregate result so the caller sees both wins and losses.
+//
+// Surface boundary: only the PROJECT's .devt/rules/ + a PROJECT-LOCAL
+// guardrails/ directory if one exists. The PLUGIN's own guardrails/ is
+// source code shipped with devt — modifying it would (a) re-install
+// pristine on next `devt update`, (b) overwrite the user's compression,
+// (c) violate the plugin/source boundary. Plugin-side guardrails
+// compression is the plugin maintainer's release-time concern, not the
+// user's runtime opt-in.
+//
+// Returns: { ok, total_files, compressed, skipped_already_done,
+//            refused_sensitive, errors, total_bytes_before, total_bytes_after,
+//            engine_breakdown: { headroom: N, regex: N } }
+function compressAll() {
+  const cfg = _resolveConfig();
+  if (cfg.mode === "off") {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "static_compress.mode='off' — set to 'on' in .devt/config.json to enable",
+    };
+  }
+  const root = _findProjectRoot();
+  // Project-owned surfaces ONLY. Plugin's own guardrails/ is deliberately
+  // excluded — see boundary commentary above.
+  const surfaces = [
+    path.join(root, ".devt", "rules"),
+    path.join(root, "guardrails"),
+  ];
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return [];
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...walk(full));
+      else if (entry.isFile() && entry.name.endsWith(".md") && !entry.name.endsWith(".original.md")) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+  const candidates = surfaces.flatMap(walk);
+  const result = {
+    ok: true,
+    total_files: candidates.length,
+    compressed: [],
+    skipped_already_done: [],
+    refused_sensitive: [],
+    errors: [],
+    total_bytes_before: 0,
+    total_bytes_after: 0,
+    engine_breakdown: { headroom: 0, regex: 0 },
+  };
+  for (const abs of candidates) {
+    const rel = path.relative(root, abs);
+    // Idempotent skip — backup-existence is the "already compressed" signal.
+    if (fs.existsSync(_backupPath(abs))) {
+      result.skipped_already_done.push(rel);
+      continue;
+    }
+    const r = compressFile(rel);
+    if (r.ok) {
+      result.compressed.push({ path: rel, engine: r.engine, ratio: r.ratio });
+      result.total_bytes_before += r.before_bytes;
+      result.total_bytes_after += r.after_bytes;
+      result.engine_breakdown[r.engine] = (result.engine_breakdown[r.engine] || 0) + 1;
+    } else if (r.reason && r.reason.includes("sensitive")) {
+      result.refused_sensitive.push(rel);
+    } else if (r.reason && (r.reason.includes("identical output") || r.reason.includes("empty"))) {
+      // Safety refusals (identical-output, empty-input) are no-ops, not
+      // errors. Surface separately so the caller knows the file was
+      // considered but nothing changed.
+      result.skipped_already_done.push(rel);
+    } else {
+      result.errors.push({ path: rel, reason: r.reason });
+    }
+  }
+  result.total_bytes_saved = result.total_bytes_before - result.total_bytes_after;
+  result.median_ratio = result.compressed.length === 0
+    ? null
+    : (() => {
+        const ratios = result.compressed.map((c) => c.ratio).sort((a, b) => a - b);
+        const mid = Math.floor(ratios.length / 2);
+        return ratios.length % 2 === 0
+          ? Number(((ratios[mid - 1] + ratios[mid]) / 2).toFixed(4))
+          : Number(ratios[mid].toFixed(4));
+      })();
+  return result;
+}
+
 function run(_subcommand, args) {
   const restore = args.includes("--restore");
+  const bulk = args.includes("--all");
+  if (bulk) {
+    const result = compressAll();
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    return result.ok ? 0 : 1;
+  }
   const positional = args.filter((a) => !a.startsWith("--"));
   const filepath = positional[0];
   if (!filepath) {
     process.stderr.write(
       "Usage:\n" +
-      "  node bin/devt-tools.cjs static-compress <path>            — compress\n" +
-      "  node bin/devt-tools.cjs static-compress --restore <path>  — restore\n",
+      "  node bin/devt-tools.cjs static-compress <path>            — compress one file\n" +
+      "  node bin/devt-tools.cjs static-compress --all             — compress .devt/rules/ + guardrails/\n" +
+      "  node bin/devt-tools.cjs static-compress --restore <path>  — restore one file\n",
     );
     return 2;
   }
@@ -296,4 +397,4 @@ function run(_subcommand, args) {
   return result.ok ? 0 : 1;
 }
 
-module.exports = { run, compressFile, restoreFile, headroomAvailable: _headroomAvailable };
+module.exports = { run, compressFile, restoreFile, compressAll, headroomAvailable: _headroomAvailable };

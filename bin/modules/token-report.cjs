@@ -288,6 +288,46 @@ function buildReport(opts) {
     ? agg.cache_read_tokens / (agg.cache_read_tokens + aggTotalInputCosted)
     : 0;
 
+  // Cross-reference static-compress activity in the same time window as
+  // the report's sessions. Surfaces alongside cache metrics so users can
+  // see whether compression is contributing to the cache hit rate they
+  // observe. Read-only — never modifies anything. Best-effort: missing
+  // log / malformed lines silently degrade to null.
+  let staticCompressActivity = null;
+  try {
+    const logPath = path.join(projectPath, ".devt", "state", "static-compress.jsonl");
+    if (fs.existsSync(logPath)) {
+      // Determine the report window from the sessions we actually loaded.
+      // If no session timestamps, use opts.since as floor and "now" as ceiling.
+      let windowStart = null, windowEnd = null;
+      for (const s of sessions) {
+        if (s.first_turn_at && (!windowStart || s.first_turn_at < windowStart)) windowStart = s.first_turn_at;
+        if (s.last_turn_at && (!windowEnd || s.last_turn_at > windowEnd)) windowEnd = s.last_turn_at;
+      }
+      const lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+      const events = [];
+      for (const line of lines) {
+        try {
+          const rec = JSON.parse(line);
+          if (rec.action !== "compress" || rec.ok !== true || typeof rec.before_bytes !== "number") continue;
+          if (windowStart && rec.ts && rec.ts < windowStart) continue;
+          if (windowEnd && rec.ts && rec.ts > windowEnd) continue;
+          events.push(rec);
+        } catch { /* skip malformed */ }
+      }
+      if (events.length > 0) {
+        const bytesSaved = events.reduce((acc, r) => acc + (r.before_bytes - r.after_bytes), 0);
+        staticCompressActivity = {
+          events_in_window: events.length,
+          bytes_saved_in_window: bytesSaved,
+          window_start: windowStart,
+          window_end: windowEnd,
+          last_event_ts: events[events.length - 1].ts || null,
+        };
+      }
+    }
+  } catch { /* swallow — cross-reference is informational only */ }
+
   const result = {
     project: projectPath,
     session_dir: sessionDir,
@@ -299,6 +339,7 @@ function buildReport(opts) {
       total_with_output: aggTotalInputCosted + agg.output_tokens,
       cache_hit_rate: Number(aggCacheHit.toFixed(4)),
     },
+    static_compress_activity: staticCompressActivity,
     sessions,
     plan_targets: {
       note: "Targets are illustrative; actual baseline measurement requires captured reference sessions.",

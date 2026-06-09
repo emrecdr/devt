@@ -9191,14 +9191,28 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   CURRENT_VER=$(tr -d '[:space:]' < "$ROOT/VERSION")
   CURRENT_MINOR=$(echo "$CURRENT_VER" | awk -F. '{print $1"."$2}')
   LOCAL_TAGS=$(git -C "$ROOT" tag --list "v${CURRENT_MINOR}.*" | sort -V)
+  # Snapshot remote tags once — distinguishes "release missing on GitHub"
+  # (real drift, gate's purpose) from "tag not yet pushed" (transient
+  # local-only state during the commit-then-push cadence). The gate has
+  # no claim on local-only tags — they haven't been asserted as shipped.
+  REMOTE_TAGS=$(git -C "$ROOT" ls-remote --tags origin 2>/dev/null | awk -F'refs/tags/' '{print $2}' | sort -u)
   J2_MISSING=""
+  J2_LOCAL_ONLY=""
   for tag in $LOCAL_TAGS; do
+    if ! echo "$REMOTE_TAGS" | grep -qx "$tag"; then
+      J2_LOCAL_ONLY="$J2_LOCAL_ONLY $tag"
+      continue
+    fi
     if ! gh release view "$tag" --json tagName >/dev/null 2>&1; then
       J2_MISSING="$J2_MISSING $tag"
     fi
   done
   if [ -z "$J2_MISSING" ]; then
-    pass "J2: every local tag in v${CURRENT_MINOR}.* series has a corresponding GitHub release"
+    if [ -n "$J2_LOCAL_ONLY" ]; then
+      pass "J2: every pushed v${CURRENT_MINOR}.* tag has a GitHub release (local-only tags exempt:${J2_LOCAL_ONLY})"
+    else
+      pass "J2: every local tag in v${CURRENT_MINOR}.* series has a corresponding GitHub release"
+    fi
   else
     fail "J2: missing GitHub release(s) for:${J2_MISSING} — run: bash scripts/release.sh <version> or gh workflow run release.yml -f tag=<tag>"
   fi
@@ -11374,6 +11388,68 @@ if [ "$K80_T1" = "yes" ] && [ "$K80_T2" = "no" ] && [ "$K80_T3" = "no" ] && [ "$
   pass "K80: claude-mem detection via plugin registry (installed→yes, absent→no, missing/empty→no, fork→yes, project-init.md uses fixed check)"
 else
   fail "K80: detection mismatch — T1=$K80_T1 (want yes), T2=$K80_T2 (want no), T3=$K80_T3 (want no), T4=$K80_T4 (want no), T5=$K80_T5 (want yes), project-init-fix=$K80_PROJECT_INIT_HAS_FIX (want ≥1), project-init-old=$K80_PROJECT_INIT_HAS_OLD (want 0)"
+fi
+
+# K81: static-compress --all bulk mode + adoption loop wiring.
+# Validates: walker scans only project-local paths (NOT plugin's own
+# guardrails/), idempotent re-runs skip via backup-existence, safety
+# refusals (identical-output) categorize as skipped not errored,
+# project-init.md has the prompt_static_compress_setup step, and
+# health.cjs aggregates savings from static-compress.jsonl into the
+# compression.savings block. Closes the adoption-loop contract between
+# init-time consent → --all bulk run → health-time ROI surface.
+K81_TMP=$(mktemp -d)
+mkdir -p "$K81_TMP/.devt/rules"
+echo '{"static_compress":{"mode":"on"}}' > "$K81_TMP/.devt/config.json"
+cat > "$K81_TMP/.devt/rules/rule-a.md" <<'EOF_K81'
+# Rule A
+
+Verbose prose with multiple sentences. URL https://example.com/foo and path /var/log/test.log. Inline `code_var` and CONST_CASE_THING. We need enough prose volume for the regex compressor to find something to drop without destabilizing structure.
+
+## Section
+
+More prose. The compressor preserves the structural elements (headings, code, URLs, paths, identifiers) byte-equal while shrinking the connective prose.
+EOF_K81
+cat > "$K81_TMP/.devt/rules/rule-b.md" <<'EOF_K81'
+# Rule B
+
+A second rule file. Has `func_call()` and version 1.2.3 to test preservation. Plus URL https://docs.example.com.
+
+## Details
+
+Body content here. Enough volume for compressor.
+EOF_K81
+# Snapshot plugin guardrails mtimes BEFORE the run — they must be untouched.
+K81_PLUGIN_GUARDRAILS_BEFORE=$(find "$ROOT/guardrails" -name '*.md' -exec stat -f '%m %N' {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+K81_RUN1=$(cd "$K81_TMP" && node "$CLI" static-compress --all 2>/dev/null)
+K81_R1_OK=$(echo "$K81_RUN1" | jq -r '.ok // false')
+K81_R1_TOTAL=$(echo "$K81_RUN1" | jq -r '.total_files // 0')
+K81_R1_COMPRESSED=$(echo "$K81_RUN1" | jq -r '.compressed | length')
+K81_R1_ERRORS=$(echo "$K81_RUN1" | jq -r '.errors | length')
+# Plugin guardrails must not have been touched.
+K81_PLUGIN_GUARDRAILS_AFTER=$(find "$ROOT/guardrails" -name '*.md' -exec stat -f '%m %N' {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+K81_PLUGIN_UNCHANGED=$([ "$K81_PLUGIN_GUARDRAILS_BEFORE" = "$K81_PLUGIN_GUARDRAILS_AFTER" ] && echo yes || echo no)
+# Idempotent re-run — second invocation must skip everything compressed.
+K81_RUN2=$(cd "$K81_TMP" && node "$CLI" static-compress --all 2>/dev/null)
+K81_R2_COMPRESSED=$(echo "$K81_RUN2" | jq -r '.compressed | length')
+K81_R2_SKIPPED=$(echo "$K81_RUN2" | jq -r '.skipped_already_done | length')
+# Health savings block must aggregate the compress events.
+K81_HEALTH_SAVINGS=$(cd "$K81_TMP" && node "$CLI" health 2>/dev/null | jq -r '.compression.savings.files_compressed // 0')
+# Workflow step must exist (regression guard).
+K81_WORKFLOW_HAS_STEP=$(grep -c 'name="prompt_static_compress_setup"' "$ROOT/workflows/project-init.md" 2>/dev/null || true)
+rm -rf "$K81_TMP"
+if [ "$K81_R1_OK" = "true" ] \
+   && [ "$K81_R1_TOTAL" = "2" ] \
+   && [ "$K81_R1_COMPRESSED" -ge "1" ] \
+   && [ "$K81_R1_ERRORS" = "0" ] \
+   && [ "$K81_PLUGIN_UNCHANGED" = "yes" ] \
+   && [ "$K81_R2_COMPRESSED" = "0" ] \
+   && [ "$K81_R2_SKIPPED" -ge "1" ] \
+   && [ "$K81_HEALTH_SAVINGS" -ge "1" ] \
+   && [ "$K81_WORKFLOW_HAS_STEP" -ge "1" ]; then
+  pass "K81: static-compress --all bulk + adoption loop (plugin guardrails untouched, idempotent re-run, health surfaces savings, init step present)"
+else
+  fail "K81: bulk-compress mismatch — r1_ok=$K81_R1_OK r1_total=$K81_R1_TOTAL r1_compressed=$K81_R1_COMPRESSED r1_errors=$K81_R1_ERRORS plugin_unchanged=$K81_PLUGIN_UNCHANGED r2_compressed=$K81_R2_COMPRESSED r2_skipped=$K81_R2_SKIPPED health_savings=$K81_HEALTH_SAVINGS workflow_step=$K81_WORKFLOW_HAS_STEP"
 fi
 
 echo
