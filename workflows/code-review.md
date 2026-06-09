@@ -559,6 +559,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 {graph_impact_content}
 </graph_impact>
     <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map for changed symbols. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
+    {prior_outputs}
+    {provenance_protocol}
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
     <!-- Inline rubric body from init payload — reviewer self-checks against
          the same axes the verifier will grade, reducing verifier-revision
@@ -684,6 +686,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
     {prior_outputs}
+    {provenance_protocol}
     <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

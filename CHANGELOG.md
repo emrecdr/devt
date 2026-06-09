@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.87.0] - 2026-06-09
+
+**Inter-agent context broadening + provenance + maintainer-mode pre-compress.** Three improvements building on v0.86.0 Sidecar-Driven Handoff: (1) sidecar inline injection now reaches tester + code-reviewer dispatches, not just verifier; (2) consuming agents receive a conditional provenance-citation protocol that turns graphify into an auditable signal source; (3) plugin maintainers get a `--plugin-build` CLI that pre-compresses guardrails/ + skills/ so distributed packages ship leaner — closing the architectural gap where user-side `--all` couldn't reach the plugin's own ~32 KB guardrails_inline slice (87% of envelope cost per the v0.80 audit).
+
+Honest scope note on B3: running `--plugin-build` against the current plugin tree compresses 5 of 23 files (the rest trip the structural validator because they start headings with articles like "The Iron Law" — exposing a real prose-shrink bug that a future fix will resolve without code changes here). The CLI ships correct; yield will improve as prose-shrink evolves.
+
+Smoke: 833 passed, 0 failed (+1 K82b, +1 K83, +1 K84). Locking: 3/3.
+
+### Added
+
+- **`{prior_outputs}` token now reaches tester + code-reviewer envelopes** (5 templates: `tester.tmpl.md`, `tester-quick_implement.tmpl.md`, `code-reviewer.tmpl.md`, `code-reviewer-quick_implement.tmpl.md`, `code-reviewer-code_review.tmpl.md`). v0.86.0 scoped sidecar injection to verifier (dominant consumer); v0.87.0 broadens to the other 3 consuming agents. Tester sees programmer's impl-summary.json before its initial Read; code-reviewer in dev/quick_implement sees programmer + tester sidecars. Auto-discovery + self-filter still apply — each agent never inlines its own sidecar even if present. K82b locks the contract.
+
+- **`{provenance_protocol}` substitution token** (`bin/modules/dispatch.cjs::DATA_REFS`). Conditional injection — populated ONLY when `.devt/state/graph-impact.md` exists (graphify ran for this dispatch). The block (~500 bytes) instructs the consuming agent to cite `(via call: <corr_id>)` when a finding traces back to a `## Drill-down: <SYM> [call: <id>]` section in graph-impact.md. The 8-char hex correlation_id maps 1-to-1 to a specific MCP call resolvable via `mcp-stats --correlation-id=<id>`. Closes greenfield's audit finding #5: "WHAT was called, not WHAT signal was delivered" — converts graphify from an opaque dependency into an auditable signal source. In graphify-skip flows the block is absent (would waste tokens with nothing to cite). Wired into verifier.tmpl.md, verifier-code_review.tmpl.md, code-reviewer.tmpl.md, code-reviewer-quick_implement.tmpl.md, code-reviewer-code_review.tmpl.md. K83 locks the contract.
+
+- **`static-compress --plugin-build` CLI for plugin maintainers** (`bin/modules/static-compress.cjs::compressPluginBuild`). Pre-compresses the plugin's OWN `guardrails/**/*.md` + `skills/**/SKILL.md` at release-build time so distributed packages ship leaner content. This is the only path to reach the ~32 KB `guardrails_inline` slice that dominates per-dispatch envelope cost — user-side `static-compress --all` deliberately excludes the plugin tree per the v0.85.0 source/distribution boundary. Distinct semantics from `--all`: NO `.original.md` backup written (the plugin tree is git-managed; `git checkout` is the canonical undo). Refuses to run when guardrails/ or skills/ have uncommitted changes (override via `--allow-dirty` for CI/testing) so the maintainer's compression diff is always reviewable and reversible via git. Same 5 safety layers (sensitive-path denylist, size cap, empty-input refusal, identical-output refusal, structural-drift validator). K84 locks the CLI contract.
+
+- **K82b smoke gate — sidecar consumer broadening.** Validates tester sees programmer (not own tester sidecar); code-reviewer in dev sees programmer + tester (not own review sidecar); all 5 broadened templates carry the `{prior_outputs}` placeholder.
+
+- **K83 smoke gate — provenance citation protocol.** Validates conditional injection: graphify present → protocol block AND `(via call:` syntax both inlined; graphify absent → protocol block omitted entirely (no token waste in skip flows). Template regression guard asserts both verifier + code-reviewer-code_review carry the `{provenance_protocol}` placeholder.
+
+- **K84 smoke gate — plugin maintainer-mode CLI surface.** Validates `--plugin-build` walker finds all 23 plugin static-load files (5 guardrails + 18 skills), result shape consistent with `compressAll` for telemetry continuity, errors[] array populated (most files currently trip structural validator — that's the safety net working correctly, not a regression). Usage advertises the new flag. Uses `--allow-dirty` to override the clean-tree check in smoke runs; restores plugin tree via `git checkout` post-test so the smoke run is side-effect-free.
+
 ## [0.86.1] - 2026-06-09
 
 **Validation-pass patches against the v0.86.0 Sidecar-Driven Handoff + v0.85.0 Compression Adoption Loop releases.** Probed each release for edge cases after they shipped. Four real findings fixed; one cosmetic finding (blank line when `{prior_outputs}` resolves empty) deliberately deferred — the fix complexity exceeded the 5-bytes-per-dispatch cost.

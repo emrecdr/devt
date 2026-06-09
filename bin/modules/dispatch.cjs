@@ -303,6 +303,7 @@ function applySubstitutions(template, subs) {
     graphify_status_json: () => JSON.stringify(subs.graphify_status_json || {}),
     graph_impact_content: () => subs.graph_impact_content || "",
     prior_outputs: () => subs.prior_outputs || "",
+    provenance_protocol: () => subs.provenance_protocol || "",
     task_description: () => subs.task || "",
     bug_description: () => subs.task || "",
     review_scope_description: () => subs.task || "",
@@ -351,6 +352,27 @@ function buildSubstitutionTable(agent) {
   let s = {};
   try { s = state.readState() || {}; } catch { s = {}; }
 
+  // Provenance citation protocol — instructs the consuming agent to cite
+  // `[via call: <id>]` when a finding/recommendation was sourced from a
+  // graph-impact.md drill-down section (each carries an 8-char hex
+  // correlation_id from the MCP _meta envelope). Conditional: only inject
+  // when graph-impact.md is actually present. In graphify-skip flows the
+  // protocol would have nothing to cite and would just waste tokens.
+  // Closes greenfield's audit finding #5 "WHAT was called, not WHAT
+  // signal was delivered" — converts graphify from an opaque dependency
+  // into an auditable signal source (mcp-stats --correlation-id=<id>
+  // resolves citations back to the specific MCP call).
+  const provenanceProtocol = (gi.status === "present")
+    ? `<provenance_protocol>When a finding, risk, or recommendation traces back to a `+
+      `\`## Drill-down: <SYM> [call: <corr_id>]\` section in graph-impact.md, append `+
+      `\`(via call: <corr_id>)\` to that finding. The 8-char hex correlation_id maps `+
+      `1-to-1 to a specific MCP call — \`node bin/devt-tools.cjs mcp-stats `+
+      `--correlation-id=<id>\` resolves the call back to its args + response, so `+
+      `downstream auditors can verify the graph-derived signal. Skip the citation `+
+      `when no drill-down is the source (grep-derived, code-derived, doc-derived).`+
+      `</provenance_protocol>`
+    : "";
+
   return {
     governing_rules: { content: gr.content || {}, rules_hash: gr.rules_hash || "" },
     inline_guardrails: ig.content || {},
@@ -359,6 +381,7 @@ function buildSubstitutionTable(agent) {
     graph_impact_status: gi.status || "absent",
     prior_outputs: ps.content || "",
     prior_outputs_count: ps.count || 0,
+    provenance_protocol: provenanceProtocol,
     rubrics: config.rubrics || {},
     models: models || {},
     scope_trust_json: s.scope_trust_json,

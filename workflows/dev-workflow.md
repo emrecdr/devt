@@ -1059,6 +1059,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
     <graphify_status>{graphify_status_json}</graphify_status>
+    {prior_outputs}
     <impl_summary_sidecar>Read .devt/state/impl-summary.json — files_changed (authoritative file list), concerns[] (per-file context), next_agent_hints.focus_areas (test priorities), next_agent_hints.skip_areas (don't-test set). Compute coverage_complete by comparing your coverage_files to files_changed; false → re-dispatch with gap as review_feedback.</impl_summary_sidecar>
     <impl_summary>Read .devt/state/impl-summary.md ONLY when a concerns[] entry references prose context not captured by structured fields, OR when next_agent_hints.focus_areas is empty AND files_changed is non-empty (degraded sidecar — fall back to narrative).</impl_summary>
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify). Use the "Test Scenarios" section as required coverage targets.</spec>
@@ -1180,6 +1181,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 {graph_impact_content}
 </graph_impact>
     <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
+    {prior_outputs}
+    {provenance_protocol}
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
@@ -1330,6 +1333,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
     {prior_outputs}
+    {provenance_protocol}
     <files_to_read>.devt/state/impl-summary.md, .devt/state/test-summary.md, .devt/state/review.md</files_to_read>
     <baseline>Read .devt/state/baseline-gates.md (if exists). Compare current quality gate results against this baseline — tests that PASSED in baseline but FAIL now are regressions. Pre-existing failures are NOT regressions.</baseline>
     <plan>Read .devt/state/plan.md (if exists)</plan>

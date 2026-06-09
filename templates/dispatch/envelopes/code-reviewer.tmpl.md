@@ -19,6 +19,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 {graph_impact_content}
 </graph_impact>
     <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map: code in affected_communities deserves deeper inspection than code outside the radius. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
+    {prior_outputs}
+    {provenance_protocol}
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>

@@ -21,6 +21,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
     {prior_outputs}
+    {provenance_protocol}
     <files_to_read>.devt/state/impl-summary.md, .devt/state/test-summary.md, .devt/state/review.md</files_to_read>
     <baseline>Read .devt/state/baseline-gates.md (if exists). Compare current quality gate results against this baseline — tests that PASSED in baseline but FAIL now are regressions. Pre-existing failures are NOT regressions.</baseline>
     <plan>Read .devt/state/plan.md (if exists)</plan>

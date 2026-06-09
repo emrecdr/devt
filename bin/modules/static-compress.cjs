@@ -295,6 +295,184 @@ function compressFile(filepath) {
   return result;
 }
 
+// Plugin maintainer-mode pre-compress — runs against the PLUGIN's own
+// guardrails/ + skills/ at release-build time so distributed packages
+// ship pre-compressed prose. Different semantics from compressFile:
+//
+//   • NO .original.md backup written — the plugin tree is git-managed,
+//     and `git checkout <file>` is the canonical undo. Backups would
+//     clutter the npm publish artifact + the plugin source tree.
+//   • Accepts absolute paths inside the plugin tree (compressFile
+//     resolves relative paths via _findProjectRoot, which would land
+//     in the USER's project — wrong for maintainer mode).
+//   • All other safety layers identical: sensitive-path denylist, size
+//     cap, empty-input refusal, identical-output refusal, structural-
+//     drift validator (superset mode).
+//
+// Returns the same shape as compressFile for telemetry consistency,
+// minus the backup_path field.
+function _compressPluginFile(absPath) {
+  const cfg = _resolveConfig();
+  // sensitivity check — refuse credential-shaped paths
+  const { isSensitivePath } = require("./sensitive-path.cjs");
+  if (isSensitivePath(absPath)) {
+    return { ok: false, path: absPath, reason: "refused: filename matches credential/key/secret pattern" };
+  }
+  const sizeCap = cfg.size_cap_bytes || MAX_FILE_SIZE_DEFAULT;
+  let stat;
+  try { stat = fs.statSync(absPath); }
+  catch (e) { return { ok: false, path: absPath, reason: `stat failed: ${e.code || e.message}` }; }
+  if (stat.size > sizeCap) {
+    return { ok: false, path: absPath, reason: `file too large: ${stat.size} bytes (cap: ${sizeCap})` };
+  }
+  const original = fs.readFileSync(absPath, "utf8");
+  if (!original.trim()) {
+    return { ok: false, path: absPath, reason: "file empty or whitespace-only" };
+  }
+  const { compressed, engine } = _compressText(original);
+  if (!compressed || !compressed.trim()) {
+    return { ok: false, path: absPath, reason: `compression returned empty output (engine=${engine})` };
+  }
+  if (compressed.trim() === original.trim()) {
+    return { ok: false, path: absPath, reason: `compression produced identical output (engine=${engine})` };
+  }
+  const { validate } = require("./structural-validator.cjs");
+  const drift = validate(original, compressed, { mode: "superset" });
+  if (!drift.ok) {
+    return {
+      ok: false,
+      path: absPath,
+      reason: `compression dropped structural elements (engine=${engine}): ${drift.errors.join("; ")}`,
+    };
+  }
+  atomicWriteFileSync(absPath, compressed);
+  return {
+    ok: true,
+    path: absPath,
+    engine,
+    before_bytes: original.length,
+    after_bytes: compressed.length,
+    ratio: 1 - compressed.length / original.length,
+    warnings: drift.warnings,
+  };
+}
+
+// compressPluginBuild — walks the PLUGIN's own static-load surfaces and
+// pre-compresses prose so distributed packages ship leaner content. This
+// is the ONLY way to reach the ~32 KB guardrails_inline slice that
+// dominates per-dispatch envelope cost — user-side static-compress --all
+// deliberately excludes the plugin tree per the source/distribution
+// boundary, so users have no way to compress guardrails themselves.
+//
+// Intended caller: the plugin MAINTAINER (you), as part of a release-build
+// step BEFORE `git tag vX.Y.Z`. The compressed files get committed to git
+// — users pulling the new version inherit the savings automatically.
+//
+// Surfaces walked:
+//   • guardrails/**/*.md — the dominant slice (~32 KB inlined per dispatch)
+//   • skills/**/SKILL.md — skill bodies injected into agents that load skills
+//
+// Surfaces NOT walked:
+//   • templates/dispatch/envelopes/**/*.tmpl.md — these are substitution
+//     templates, not prose. Compressing them would silently corrupt the
+//     {placeholder} tokens because prose-shrink doesn't know they're code.
+//   • workflows/**/*.md — same problem (these contain {placeholder} tokens
+//     that get substituted at render time).
+//   • commands/**/*.md, agents/**/*.md — same.
+//   • CHANGELOG.md, README.md, docs/**/*.md — user-facing reference, not
+//     loaded into agent context, no payoff from compression.
+//
+// Refuses to run when the plugin tree is not clean (uncommitted changes
+// in target surfaces) — the maintainer must commit any in-progress work
+// before pre-compression so the diff is reviewable and reversible via
+// `git checkout`.
+function compressPluginBuild(opts) {
+  opts = opts || {};
+  const pluginRoot = path.resolve(__dirname, "..", "..");
+  const surfaces = [
+    path.join(pluginRoot, "guardrails"),
+    path.join(pluginRoot, "skills"),
+  ];
+  // Walk pre-flight — refuses to run if maintainer has uncommitted changes
+  // to target surfaces. Maintainer should commit, run pre-compress, review
+  // diff, commit pre-compress as a release-prep commit. Override via
+  // opts.allowDirty for CI/testing.
+  if (!opts.allowDirty) {
+    try {
+      const { execSync } = require("child_process");
+      const dirty = execSync(
+        `git -C "${pluginRoot}" status --porcelain -- guardrails skills 2>/dev/null`,
+        { encoding: "utf8" },
+      ).trim();
+      if (dirty) {
+        return {
+          ok: false,
+          reason:
+            "plugin tree has uncommitted changes in guardrails/ or skills/. " +
+            "Commit your work first so pre-compress runs against a clean baseline. " +
+            "Override via --allow-dirty for CI/testing.",
+          dirty_paths: dirty.split("\n").map((l) => l.slice(3)),
+        };
+      }
+    } catch (e) {
+      // git not available or not a git repo — surface but don't block
+      process.stderr.write(`[plugin-build] git status check skipped: ${e.message}\n`);
+    }
+  }
+  function walk(dir, predicate) {
+    if (!fs.existsSync(dir)) return [];
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...walk(full, predicate));
+      else if (entry.isFile() && predicate(entry.name, full)) out.push(full);
+    }
+    return out;
+  }
+  const guardrailsFiles = walk(surfaces[0], (name) => name.endsWith(".md"));
+  const skillFiles = walk(surfaces[1], (name) => name === "SKILL.md");
+  const candidates = [...guardrailsFiles, ...skillFiles];
+  const result = {
+    ok: true,
+    plugin_root: pluginRoot,
+    total_files: candidates.length,
+    compressed: [],
+    skipped_no_change: [],
+    refused_sensitive: [],
+    errors: [],
+    total_bytes_before: 0,
+    total_bytes_after: 0,
+    engine_breakdown: { headroom: 0, regex: 0 },
+  };
+  for (const abs of candidates) {
+    const rel = path.relative(pluginRoot, abs);
+    const r = _compressPluginFile(abs);
+    if (r.ok) {
+      result.compressed.push({ path: rel, engine: r.engine, ratio: r.ratio });
+      result.total_bytes_before += r.before_bytes;
+      result.total_bytes_after += r.after_bytes;
+      result.engine_breakdown[r.engine] = (result.engine_breakdown[r.engine] || 0) + 1;
+    } else if (r.reason && r.reason.includes("sensitive")) {
+      result.refused_sensitive.push(rel);
+    } else if (r.reason && (r.reason.includes("identical output") || r.reason.includes("empty"))) {
+      result.skipped_no_change.push(rel);
+    } else {
+      result.errors.push({ path: rel, reason: r.reason });
+    }
+  }
+  result.total_bytes_saved = result.total_bytes_before - result.total_bytes_after;
+  result.median_ratio = result.compressed.length === 0
+    ? null
+    : (() => {
+        const ratios = result.compressed.map((c) => c.ratio).sort((a, b) => a - b);
+        const mid = Math.floor(ratios.length / 2);
+        return ratios.length % 2 === 0
+          ? Number(((ratios[mid - 1] + ratios[mid]) / 2).toFixed(4))
+          : Number(ratios[mid].toFixed(4));
+      })();
+  return result;
+}
+
 function restoreFile(filepath) {
   const abs = path.isAbsolute(filepath) ? filepath : path.join(_findProjectRoot(), filepath);
   const backup = _backupPath(abs);
@@ -416,6 +594,13 @@ function compressAll() {
 function run(_subcommand, args) {
   const restore = args.includes("--restore");
   const bulk = args.includes("--all");
+  const pluginBuild = args.includes("--plugin-build");
+  const allowDirty = args.includes("--allow-dirty");
+  if (pluginBuild) {
+    const result = compressPluginBuild({ allowDirty });
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    return result.ok ? 0 : 1;
+  }
   if (bulk) {
     const result = compressAll();
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -426,9 +611,11 @@ function run(_subcommand, args) {
   if (!filepath) {
     process.stderr.write(
       "Usage:\n" +
-      "  node bin/devt-tools.cjs static-compress <path>            — compress one file\n" +
-      "  node bin/devt-tools.cjs static-compress --all             — compress .devt/rules/ + guardrails/\n" +
-      "  node bin/devt-tools.cjs static-compress --restore <path>  — restore one file\n",
+      "  node bin/devt-tools.cjs static-compress <path>                — compress one file\n" +
+      "  node bin/devt-tools.cjs static-compress --all                 — compress .devt/rules/ + guardrails/\n" +
+      "  node bin/devt-tools.cjs static-compress --restore <path>      — restore one file\n" +
+      "  node bin/devt-tools.cjs static-compress --plugin-build        — MAINTAINER: pre-compress plugin guardrails/ + skills/\n" +
+      "  node bin/devt-tools.cjs static-compress --plugin-build --allow-dirty  — override the clean-tree check\n",
     );
     return 2;
   }
@@ -439,4 +626,4 @@ function run(_subcommand, args) {
   return result.ok ? 0 : 1;
 }
 
-module.exports = { run, compressFile, restoreFile, compressAll, headroomAvailable: _headroomAvailable };
+module.exports = { run, compressFile, restoreFile, compressAll, compressPluginBuild, headroomAvailable: _headroomAvailable };

@@ -17,6 +17,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
     {prior_outputs}
+    {provenance_protocol}
     <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>

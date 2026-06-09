@@ -10,6 +10,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    {prior_outputs}
+    {provenance_protocol}
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <graph_impact>
 {graph_impact_content}
