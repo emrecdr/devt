@@ -336,7 +336,17 @@ Best-effort: failures NEVER fail init. Report which path was taken.
 Detect whether claude-mem (cross-session memory plugin) is available and surface install guidance if not. claude-mem is an OPTIONAL but high-leverage integration — when present, devt workflows query its MCP search tool (`mcp__plugin_claude-mem_mcp-search__search`) to harvest ⚖️ (decision) and 🔵 (discovery) observations from PRIOR sessions into the curator's candidate pool. Without claude-mem, harvest falls back to scratchpad-only sources and the curator sees a strictly smaller candidate set every retro.
 
 ```bash
-CLAUDE_MEM_AVAILABLE=$(command -v claude-mem >/dev/null 2>&1 && echo yes || echo no)
+# claude-mem v13+ self-registers as a Claude Code plugin under
+# ~/.claude/plugins/ — there is no CLI binary on PATH. The canonical
+# detection source is ~/.claude/plugins/installed_plugins.json::plugins
+# which lists every installed plugin keyed as `<name>@<marketplace>`.
+# Match any key starting with `claude-mem@` to handle marketplace forks.
+CLAUDE_MEM_REGISTRY="$HOME/.claude/plugins/installed_plugins.json"
+if [ -f "$CLAUDE_MEM_REGISTRY" ] && jq -e '.plugins | keys | any(startswith("claude-mem@"))' "$CLAUDE_MEM_REGISTRY" >/dev/null 2>&1; then
+  CLAUDE_MEM_AVAILABLE=yes
+else
+  CLAUDE_MEM_AVAILABLE=no
+fi
 echo "claude_mem_available=$CLAUDE_MEM_AVAILABLE"
 ```
 
@@ -360,7 +370,7 @@ On "Show me the install command", emit verbatim:
 > /plugin marketplace add anthropics/claude-code-plugins
 > /plugin install claude-mem
 > ```
-> Restart Claude Code after install. Verify with `command -v claude-mem` and re-run `/devt:init` to re-detect.
+> Restart Claude Code after install. Verify with `jq '.plugins | keys[] | select(startswith("claude-mem@"))' ~/.claude/plugins/installed_plugins.json` and re-run `/devt:init` to re-detect.
 
 **Case B — `claude_mem_available=yes`**: emit a confirmation line so the user knows the integration is live:
 

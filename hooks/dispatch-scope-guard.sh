@@ -16,7 +16,7 @@
 #
 # Config keys (read from .devt/config.json::dispatch.*):
 #   max_prompt_bytes  (default 24576)
-#   max_files_hint    (default 8)
+#   max_files_hint    (default 12)
 #
 [[ $- == *i* ]] && return
 set -euo pipefail
@@ -48,7 +48,7 @@ node -e "
 
   // Config — local file read with defaults on any failure.
   let maxBytes = 24576;
-  let maxFiles = 8;
+  let maxFiles = 12;
   try {
     const fs = require('fs');
     const path = require('path');

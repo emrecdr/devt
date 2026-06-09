@@ -296,4 +296,4 @@ function run(_subcommand, args) {
   return result.ok ? 0 : 1;
 }
 
-module.exports = { run, compressFile, restoreFile };
+module.exports = { run, compressFile, restoreFile, headroomAvailable: _headroomAvailable };

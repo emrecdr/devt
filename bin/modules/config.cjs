@@ -246,7 +246,7 @@ const DEFAULTS = {
   // lower when the warnings should fire earlier as a discipline signal.
   dispatch: {
     max_prompt_bytes: 24576,
-    max_files_hint: 8,
+    max_files_hint: 12,
   },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug

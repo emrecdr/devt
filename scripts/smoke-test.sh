@@ -4706,10 +4706,10 @@ else
   fail "project-init.md success_criteria doesn't require index.db — init can succeed with broken memory layer"
 fi
 # claude-mem detection step
-if grep -q 'name="prompt_claude_mem_setup"' "$ROOT/workflows/project-init.md" && grep -q "command -v claude-mem" "$ROOT/workflows/project-init.md"; then
-  pass "project-init.md detects claude-mem availability and surfaces install hint when absent"
+if grep -q 'name="prompt_claude_mem_setup"' "$ROOT/workflows/project-init.md" && grep -q 'CLAUDE_MEM_REGISTRY=' "$ROOT/workflows/project-init.md"; then
+  pass "project-init.md detects claude-mem availability via plugin registry and surfaces install hint when absent"
 else
-  fail "project-init.md missing prompt_claude_mem_setup step"
+  fail "project-init.md missing prompt_claude_mem_setup step (or detection still uses removed command -v check)"
 fi
 
 echo
@@ -11283,6 +11283,97 @@ if [ -z "$K78_HITS" ]; then
 else
   K78_COUNT=$(echo "$K78_HITS" | wc -l | tr -d ' ')
   fail "K78: $K78_COUNT version-marker violation(s) — must move to CHANGELOG. Hits:\n$K78_HITS"
+fi
+
+# K79: end-to-end synthetic drift recovery — closes the gap between K74
+# (detector only) and the production recovery loop. Validates that a
+# substantive artifact missing one or more expected_sections triggers the
+# targeted-fix branch with the right drift list AND that the fix-envelope
+# template exists with the {drift_errors} placeholder ready to substitute.
+# Greenfield 2026-06-09: zero structural-drift fires in 30+ days of
+# production runs — synthetic fixture is the only way to validate the
+# recovery path without inventing field data that doesn't exist.
+K79_TMP=$(mktemp -d)
+mkdir -p "$K79_TMP/.devt/state"
+echo '{"validator":{"structural_mode":"warn"}}' > "$K79_TMP/.devt/config.json"
+# Substantive impl-summary.md missing 2 of 5 expected_sections
+# (Key Decisions + Provenance) — exercises the structural-drift branch
+# rather than the stub / rate-limit / investigate branches.
+cat > "$K79_TMP/.devt/state/impl-summary.md" <<'EOF_K79'
+## Task
+
+Implemented K79 synthetic drift recovery fixture. The fixture writes substantive impl-summary.md missing two of five expected_sections so structural validator returns targeted-fix instead of investigate. Word count clears 50-word substance threshold.
+
+## Files Modified
+
+- scripts/smoke-test.sh — added K79 block exercising recover-partial-impl
+
+## Quality Gate Results
+
+Smoke: retained after K79 added. Locking: 3/3 retained. K74 unchanged.
+EOF_K79
+K79_OUT=$(cd "$K79_TMP" && node "$CLI" state recover-partial-impl programmer 2>/dev/null)
+K79_ACTION=$(echo "$K79_OUT" | jq -r '.suggested_action // ""' 2>/dev/null)
+K79_MISSING=$(echo "$K79_OUT" | jq -r '.drift.missing_sections | length' 2>/dev/null)
+K79_TMPL_PATH="$ROOT/templates/dispatch/envelopes/programmer-fix.tmpl.md"
+if [ -f "$K79_TMPL_PATH" ]; then
+  K79_TMPL_HAS_PLACEHOLDER=$(grep -c "{drift_errors}" "$K79_TMPL_PATH")
+else
+  K79_TMPL_HAS_PLACEHOLDER=0
+fi
+rm -rf "$K79_TMP"
+if [ "$K79_ACTION" = "targeted-fix" ] && [ "$K79_MISSING" = "2" ] && [ "$K79_TMPL_HAS_PLACEHOLDER" -ge "1" ]; then
+  pass "K79: E2E synthetic drift recovery (detector fires → targeted-fix, 2 missing sections, fix template carries {drift_errors} placeholder)"
+else
+  fail "K79: drift recovery mismatch — action='$K79_ACTION' (want targeted-fix), missing=$K79_MISSING (want 2), tmpl_placeholder=$K79_TMPL_HAS_PLACEHOLDER (want ≥1)"
+fi
+
+# K80: claude-mem detection uses the plugin registry, not `command -v`.
+# Bug: claude-mem v13+ is distributed as a Claude Code plugin (no CLI
+# binary on PATH), so the prior `command -v claude-mem` check reported
+# "not installed" for actually-installed users. The fix reads
+# ~/.claude/plugins/installed_plugins.json::plugins and matches any key
+# prefixed `claude-mem@<marketplace>`. K80 freezes the contract: detection
+# returns yes when registry contains the key, no when registry is missing
+# / empty / contains unrelated plugins.
+K80_TMP=$(mktemp -d)
+# Helper — runs the detection bash against an arbitrary registry path.
+k80_detect() {
+  local registry="$1"
+  if [ -f "$registry" ] && jq -e '.plugins | keys | any(startswith("claude-mem@"))' "$registry" >/dev/null 2>&1; then
+    echo yes
+  else
+    echo no
+  fi
+}
+# Fixture 1: registry with claude-mem@thedotmack → yes
+cat > "$K80_TMP/installed-yes.json" <<'EOF_K80'
+{"plugins":{"claude-mem@thedotmack":{"installed_at":"2026-01-01T00:00:00Z"},"other-plugin@official":{}},"version":1}
+EOF_K80
+K80_T1=$(k80_detect "$K80_TMP/installed-yes.json")
+# Fixture 2: registry without claude-mem → no
+cat > "$K80_TMP/installed-no.json" <<'EOF_K80'
+{"plugins":{"other-plugin@official":{},"unrelated@source":{}},"version":1}
+EOF_K80
+K80_T2=$(k80_detect "$K80_TMP/installed-no.json")
+# Fixture 3: registry file missing → no (graceful default)
+K80_T3=$(k80_detect "$K80_TMP/does-not-exist.json")
+# Fixture 4: empty registry object → no (graceful)
+echo '{}' > "$K80_TMP/installed-empty.json"
+K80_T4=$(k80_detect "$K80_TMP/installed-empty.json")
+# Fixture 5: marketplace fork — claude-mem@some-fork still matches
+cat > "$K80_TMP/installed-fork.json" <<'EOF_K80'
+{"plugins":{"claude-mem@some-fork":{}},"version":1}
+EOF_K80
+K80_T5=$(k80_detect "$K80_TMP/installed-fork.json")
+# Fixture 6: project-init.md still uses the registry-based check (regression guard)
+K80_PROJECT_INIT_HAS_FIX=$(grep -c 'CLAUDE_MEM_REGISTRY=' "$ROOT/workflows/project-init.md" 2>/dev/null || true)
+K80_PROJECT_INIT_HAS_OLD=$(grep -c 'command -v claude-mem >/dev/null' "$ROOT/workflows/project-init.md" 2>/dev/null || true)
+rm -rf "$K80_TMP"
+if [ "$K80_T1" = "yes" ] && [ "$K80_T2" = "no" ] && [ "$K80_T3" = "no" ] && [ "$K80_T4" = "no" ] && [ "$K80_T5" = "yes" ] && [ "$K80_PROJECT_INIT_HAS_FIX" -ge "1" ] && [ "$K80_PROJECT_INIT_HAS_OLD" = "0" ]; then
+  pass "K80: claude-mem detection via plugin registry (installed→yes, absent→no, missing/empty→no, fork→yes, project-init.md uses fixed check)"
+else
+  fail "K80: detection mismatch — T1=$K80_T1 (want yes), T2=$K80_T2 (want no), T3=$K80_T3 (want no), T4=$K80_T4 (want no), T5=$K80_T5 (want yes), project-init-fix=$K80_PROJECT_INIT_HAS_FIX (want ≥1), project-init-old=$K80_PROJECT_INIT_HAS_OLD (want 0)"
 fi
 
 echo

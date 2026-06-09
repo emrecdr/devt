@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.84.0] - 2026-06-09
+
+**Greenfield field-audit response — 4 validated low-friction wins + claude-mem detection bug fix.** Greenfield ran two audits (graphify integration + H1 trajectory validation) and surfaced 9 candidate findings. After per-finding validation against the actual codebase, 5 were stood down (already-solved / falsified / speculative / requires per-agent prompt convention rather than system change) and 4 shipped. The synthetic-fixture pattern (K79) is the one that matters most strategically: greenfield's 30-day window with zero structural-drift fires meant field data could not validate the recovery loop. K79 replaces field data with a deterministic CI fixture, giving us a falsifiable signal for the future warn → block default flip. A late-cycle user report surfaced a longstanding claude-mem detection bug — `/devt:init` was reporting "not installed" for users who DO have claude-mem installed as a Claude Code plugin. Fix folded into this release; K80 freezes the contract.
+
+Smoke: 828 passed, 0 failed (+1 K79, +1 K80). Locking: 3/3.
+
+### Changed
+
+- **`dispatch.max_files_hint` default 8 → 12.** Greenfield evidence: parallel-lane code review on real PRs naturally references 9–12 paths per lane brief (target module + 4–5 cross-cutting refs to CLAUDE.md, ADR docs, sibling MODULE.md files). Cap=8 fired advisory warnings on every parallel-lane dispatch without the safety floor being relevant — the hook is advisory-only, dispatches always proceeded. Raising the default to the empirical natural shape removes noise without losing the warning mechanism for genuinely anomalous payloads (50+ paths still warns). Two-place update: `bin/modules/config.cjs::DEFAULTS.dispatch.max_files_hint` + the `hooks/dispatch-scope-guard.sh` fallback default that the hook uses when `.devt/config.json` is missing or malformed.
+
+- **`graph-impact.md` truncation notice — top banner when drop count > 5.** Previously the dropped-symbols section was appended after F17 god-node + symbol-godnode + hyperedge-completeness + ambiguous-bindings + fallback-god-nodes sections. Greenfield 2026-06-09 audit: 42 of 74 symbols dropped on a 132-file PR, the notice landed at line 200+ of a multi-section file and reviewers missed it. New behavior: when `DROPPED_COUNT > 5`, a one-line `> **Subject symbols truncated**: N of M …` banner is prepended to the file so the gap is visible before any scrolling. Full list at bottom is unchanged. Threshold matches the heuristic where reviewer cost of scanning ≤5 dropped symbols is trivial and a top banner would be noise.
+
+### Fixed
+
+- **`/devt:init` claude-mem detection — registry-based instead of `command -v`.** The prior detection ran `command -v claude-mem >/dev/null` and reported "not installed" when the binary wasn't on PATH. But claude-mem v13+ is distributed exclusively as a Claude Code plugin (`/plugin install claude-mem@thedotmack`), not a shell binary — it self-registers under `~/.claude/plugins/` and exposes its MCP server (`mcp__plugin_claude-mem_mcp-search__*`) at workflow time. Users with a working claude-mem plugin installation were being prompted to install it again. New detection reads `~/.claude/plugins/installed_plugins.json::plugins` and matches any key starting with `claude-mem@` (handles marketplace forks). Falls through to `no` when the registry file is missing or malformed. Hint text on the install path now points to the registry-keys jq command for verification instead of `command -v`.
+
+### Added
+
+- **K79 smoke gate — end-to-end synthetic drift recovery.** Closes the gap between K74 (detector-only) and the production recovery loop. Writes a substantive-but-incomplete `impl-summary.md` (5 expected sections, 2 dropped) to a temp dir, sets `validator.structural_mode='warn'`, runs `state recover-partial-impl programmer`, asserts the return shape: `suggested_action='targeted-fix'` AND `drift.missing_sections.length === 2` AND the fix-envelope template carries the `{drift_errors}` placeholder. No real sub-agent dispatch — the decision path is deterministic given the same filesystem inputs, so testing the decision is enough. ~100ms, zero token cost. Greenfield-evidenced rationale: 30+ days of field runs produced zero structural-drift fires, so synthetic is the only path to validate the recovery loop without inventing field data.
+
+- **K80 smoke gate — claude-mem plugin-registry detection.** 6-fixture round-trip: registry with `claude-mem@thedotmack` → yes; registry without claude-mem → no; missing file → no (graceful default); empty registry object → no; marketplace fork (`claude-mem@some-fork`) → yes; regression guard asserts `workflows/project-init.md` uses the new `CLAUDE_MEM_REGISTRY=` path AND no longer contains the removed `command -v claude-mem >/dev/null` line. Closes the detection-bug regression risk.
+
+- **`/devt:health` compression block.** New top-level field `compression: { static_compress_mode, headroom_available, engine, recipe }` reports the static-compress configuration state, whether the `headroom` binary is on PATH, which engine would run if compression were enabled (`headroom` / `prose-shrink` / `null` when off), and the canonical recipe doc path. Greenfield 2026-06-09 audit: the v0.81.0 static-compress feature was invisible during normal `/devt:health` runs — adoption gap, not a correctness gap. Surfaced as a data field (mirrors the existing `update` and `version` fields) rather than info-level issues so it doesn't clutter `issues[]` for every health invocation. `bin/modules/static-compress.cjs` exports the previously-internal `_headroomAvailable` probe as `headroomAvailable` for the health module to consume.
+
+### Stood down (validated as non-issues or already-solved)
+
+- **#1 blast_radius response-cap automation.** `workflows/code-review.md` NEW-5 already documents the `--max-bytes` CLI fallback; greenfield's manual 153KB → 2.6KB compress WAS the documented fallback path. Gap is discoverability, not capability.
+- **#2 Bitbucket parity (`bb_pr_impact` tier).** Real, but high-effort. `symbol_anchored` tier already serves greenfield (their only field site) — the marginal gain doesn't justify a new workflow path right now.
+- **#4 `check-imported-godnodes` CLI.** Speculative — F17 fallback fires correctly when caller-modifying PRs touch zero god-node definition sites; no field evidence that the C7-1 preflight fallback is insufficient.
+- **#5 Per-finding provenance ledger.** Infrastructure already exists — `correlation_id` is embedded in `## Drill-down: <SYM> [call: <id>]` section headers across 4 workflows, and `mcp-stats --correlation-id=<id>` queries them. Gap is sub-agent prompt convention (agents don't cite IDs in findings), not a system change. Defer until the prompt-strength change is itself validated against quality drift.
+- **#8 `/devt:tokens` CLI.** Falsified — `node bin/devt-tools.cjs token-report` exists and provides the per-session aggregation needed. The H1 plan referenced the wrong name; the implementation is fine.
+
 ## [0.83.2] - 2026-06-09
 
 **README doc completeness — surface the static-compress feature + the two opt-in config knobs.** The v0.81.0 `static-compress` CLI and the `validator.structural_mode` / `static_compress.mode` config knobs landed but never appeared in the README's main feature list or configuration reference table. README is the primary entry point for users asking "how does devt save tokens?" — without these mentions the feature is effectively invisible. This patch closes the gap.

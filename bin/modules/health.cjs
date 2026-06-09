@@ -111,8 +111,33 @@ function runChecks(pluginRoot) {
     // No cache, or cache stale relative to local VERSION — update check hasn't run since the bump
   }
 
+  // Static-compress surface — surfaces config mode + headroom engine
+  // availability so users can see at a glance whether the opt-in
+  // compression path is configured and which engine would run. Greenfield
+  // 2026-06-09: shipped feature was invisible during normal health checks
+  // → adoption gap. The recipe path is the canonical entry point for
+  // operators who want to flip the mode.
+  let compression = null;
+  try {
+    let mode = "off";
+    try {
+      const cfgRaw = fs.readFileSync(path.join(devtDir, "config.json"), "utf8");
+      const cfgParse = safeJsonParse(cfgRaw, "config.json");
+      if (cfgParse.ok && cfgParse.value?.static_compress?.mode) {
+        mode = cfgParse.value.static_compress.mode;
+      }
+    } catch { /* defaults stay */ }
+    const headroom = require("./static-compress.cjs").headroomAvailable();
+    compression = {
+      static_compress_mode: mode,
+      headroom_available: headroom,
+      engine: mode === "off" ? null : (headroom ? "headroom" : "prose-shrink"),
+      recipe: "docs/static-compress-recipe.md",
+    };
+  } catch { /* swallow — compression info is best-effort */ }
+
   function buildResult(status) {
-    return { status, version, update, issues, project_root: projectRoot, repairable_count: issues.filter((i) => i.repairable).length };
+    return { status, version, update, compression, issues, project_root: projectRoot, repairable_count: issues.filter((i) => i.repairable).length };
   }
 
   // E001: .devt/ directory

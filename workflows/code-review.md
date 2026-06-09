@@ -270,6 +270,19 @@ if [ -n "$DIFF_FILES" ]; then
   if [ -s ".devt/state/topic-symbols-dropped.json" ]; then
     DROPPED_COUNT=$(jq 'length' .devt/state/topic-symbols-dropped.json 2>/dev/null || echo 0)
     if [ "$DROPPED_COUNT" != "0" ] && [ "$DROPPED_COUNT" != "" ]; then
+      # Greenfield audit 2026-06-09: a 42-of-74 truncation notice landed
+      # at line 200+ in a multi-section file and reviewers missed it.
+      # When the drop count is non-trivial, prepend a short banner so the
+      # gap is visible before scrolling. Full list still appears at bottom.
+      if [ "$DROPPED_COUNT" -gt 5 ]; then
+        TRUNC_BANNER=$(mktemp)
+        {
+          echo "> **Subject symbols truncated**: ${DROPPED_COUNT} of ${TOPIC_SYMBOLS_RAW_COUNT:-?} extracted topic symbols were dropped by the MCP blast_radius 32-symbol cap. Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration."
+          echo ""
+          cat .devt/state/graph-impact.md
+        } > "$TRUNC_BANNER"
+        mv "$TRUNC_BANNER" .devt/state/graph-impact.md
+      fi
       {
         echo ""
         echo "## Subject symbols dropped (truncation notice — C7-2)"
