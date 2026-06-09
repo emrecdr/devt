@@ -413,6 +413,8 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
   "graphify": { "enabled": true, "command": "graphify" },
   "arch_scanner": { "command": "make arch-scan", "report_dir": "docs/reports" },
   "scope_mode": "surgical",
+  "validator": { "structural_mode": "warn" },
+  "static_compress": { "mode": "off", "size_cap_bytes": 500000 },
   "workflow": {
     "docs": true, "retro": true, "verification": true,
     "autoskill": true, "regression_baseline": true
@@ -442,7 +444,10 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 | `claim_check_mode` | `block` / `warn` / `off` — controls Layer-2 enforcement (`state assert-claim-checks-resolved`). Mirrors `dispatch_hygiene_mode` pattern. Layer-1 (`state assert-artifact-present`) prints `[BLOCKED]` inline; Layer-2 reads `.devt/state/claim-check-failures.jsonl` at finalize phases (via `state advance-phase`). `block` (default) fails the finalize gate on unresolved failures. `warn` surfaces a summary but allows phase advance. `off` auto-passes. Resolution semantic: successful re-runs of Layer-1 after a failure overwrite the failure record. | `block` |
 | `graphify.blast_magnification_threshold` | When graphify's BFS-derived `direct_dependents_count` is ≥ N× the literal `caller_count_grep` (run via `git grep -F "<sym>("`), `preflight-brief.json::blast.magnification_advisory` flags potential interface-edge over-counting. Set to `null` to disable the Q2 cross-check entirely. | `3` |
 | `telemetry.task_truncation_warn_bytes` | Hook-side threshold for `near_cliff` detection in `hooks/task-truncation-detector.sh`. The hook emits an advisory + `.devt/state/dispatch-warnings.jsonl` record when a sub-agent return exceeds this byte count. Override per-project when telemetry shows the cliff sits somewhere else than the 40 KB default. | `40000` |
-| `telemetry.task_truncation_log_all` | When `true`, `hooks/task-truncation-detector.sh` writes a forensic record to `.devt/state/dispatch-warnings.jsonl` for **every** sub-agent return — calibration-cycle mode. When `false` (default, post-v0.76.0 greenfield calibration), only cliff signals (`near_cliff` / `low_output` / `mid_task_language`) emit. Orchestrator-visible advisory stays cliff-only regardless of this flag; log-all mode adds no advisory noise. Enable for return-size histograms, latency baselines, or other coverage-dependent analyses. | `false` |
+| `telemetry.task_truncation_log_all` | When `true`, `hooks/task-truncation-detector.sh` writes a forensic record to `.devt/state/dispatch-warnings.jsonl` for **every** sub-agent return — calibration-cycle mode. When `false` (default), only cliff signals (`near_cliff` / `low_output` / `mid_task_language`) emit. Orchestrator-visible advisory stays cliff-only regardless of this flag; log-all mode adds no advisory noise. Enable for return-size histograms, latency baselines, or other coverage-dependent analyses. | `false` |
+| `validator.structural_mode` | `block` / `warn` / `off` — controls structural-drift detection in `state recover-partial-impl` and `state check-agent-output --structural`. When non-`off`, the validator compares the agent's final artifact against `agents/io-contracts.yaml::outputs.expected_sections` (and against an explicit baseline file when the CLI flag is passed). Drift detected → `[STRUCTURAL_DRIFT_DETECTED]` echo + `suggested_action=targeted-fix` in `recoverPartialImpl` so orchestrators SendMessage-resume the same agent ID with a fix prompt rather than fresh re-dispatch (saves ~5–15K tokens per drift incident). `warn` is advisory routing; `block` is mandatory. Same triad as `dispatch_hygiene_mode`. | `warn` |
+| `static_compress.mode` | `on` / `off` — opt-in static-file prose compressor (`node bin/devt-tools.cjs static-compress <path>`). `off` (default) means the CLI exits 0 with `{ok:true, skipped:true}` — configuration-as-designed, not failure. Set to `on` per project when you want to compress `.devt/rules/*.md`, `guardrails/*.md`, or skill bodies. Reversible via `--restore <path>`. See [Optional: static-file compression (built-in)](#optional-static-file-compression-built-in) above. | `off` |
+| `static_compress.size_cap_bytes` | Hard refuse files larger than this. 500 KB covers `.devt/rules/`, `guardrails/`, skill bodies without raising concerns. Override if you need to compress an unusually large file. | `500000` |
 | `workflow.docs` / `.retro` / `.verification` / `.autoskill` / `.regression_baseline` | Toggle pipeline steps | all `true` |
 
 ### `scope_mode` — surgical (default) vs boy-scout
@@ -919,7 +924,22 @@ pip install "headroom-ai[proxy]"
 headroom wrap claude     # devt + Claude Code operate normally through the proxy
 ```
 
-Trade-off honestly: ~50–90% input-token savings on real workloads, adds a ~500 MB Python + Rust toolchain, and headroom itself is beta (0.24.x). devt **does not bundle and does not require** headroom — they're orthogonal layers. If you don't want the extra dependency, devt works fine standalone.
+Trade-off honestly: ~50–90% input-token savings on real workloads, adds a ~500 MB Python + Rust toolchain, and headroom itself is beta. devt **does not bundle and does not require** headroom — they're orthogonal layers. If you don't want the extra dependency, devt works fine standalone.
+
+### Optional: static-file compression (built-in)
+
+devt ships `static-compress` for opt-in compression of project markdown files that load into every code-touching agent dispatch — `.devt/rules/*.md`, `guardrails/*.md`, skill bodies. An envelope audit showed `guardrails_inline` dominating dispatch envelope cost at ~87%, so compressing that prose layer (while leaving fenced code, inline code, URLs, paths, identifiers, and version numbers byte-equal) gives a meaningful per-dispatch token saving.
+
+```bash
+# Opt in per-project — defaults to off
+echo '{"static_compress":{"mode":"on"}}' >> .devt/config.json
+node bin/devt-tools.cjs static-compress .devt/rules/coding-standards.md
+node bin/devt-tools.cjs static-compress --restore .devt/rules/coding-standards.md
+```
+
+The compressor probes for the `headroom` CLI on `PATH` and shells out for neural extractive compression when available (~40% reduction); falls back to a zero-dependency regex compressor when not (~25–35% reduction). Either path runs through the structural-drift validator post-compression — any drift → backup deleted, input file untouched. Five safety layers before the input is touched (sensitive-path denylist, size cap, empty-file refusal, identical-output refusal, backup-readback verification). Fully reversible via the `<path>.original.md` backup sibling.
+
+Recipe + full safety semantics: [`docs/static-compress-recipe.md`](docs/static-compress-recipe.md). Smoke gate **K77** covers the round-trip including a drift-triggered revert via a faked `headroom` binary injected on `PATH`.
 
 ### Where to read more
 

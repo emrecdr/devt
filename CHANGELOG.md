@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.83.2] - 2026-06-09
+
+**README doc completeness — surface the static-compress feature + the two opt-in config knobs.** The v0.81.0 `static-compress` CLI and the `validator.structural_mode` / `static_compress.mode` config knobs landed but never appeared in the README's main feature list or configuration reference table. README is the primary entry point for users asking "how does devt save tokens?" — without these mentions the feature is effectively invisible. This patch closes the gap.
+
+Smoke: 826 passed, 0 failed (no functional change). Locking: 3/3.
+
+### Added
+
+- **README "Optional: static-file compression (built-in)" section.** New subsection placed alongside the existing "Optional: input-side compression via headroom proxy" section. Names the static-compress CLI, the headroom probe + regex fallback architecture, the 5 safety layers, the `<path>.original.md` reversibility, and links to `docs/static-compress-recipe.md` + smoke gate K77.
+
+- **README configuration-reference table** gained two new rows: `validator.structural_mode` (default `'warn'`) — controls structural-drift detection in `state recover-partial-impl` and `state check-agent-output --structural`; and `static_compress.mode` / `static_compress.size_cap_bytes` — opt-in static-file compressor. Both rows describe the trade-off + the same triad pattern (`block` / `warn` / `off`) used by `dispatch_hygiene_mode` and `claim_check_mode`.
+
+- **README configuration-reference JSON example** gained the `validator` and `static_compress` blocks so the schema preview matches the table below.
+
 ## [0.83.1] - 2026-06-09
 
 **CI fix for K78 description tripping the pre-existing doc-discipline gate.** The K78 description in `docs/INTERNALS.md` contained `@deprecated since v2.0.0` as a literal example of the JSDoc syntax K78 exempts from `templates/*/documentation.md`. The pre-existing doc-discipline smoke gate scans `docs/*.md` for `\bsince v[0-9]` markers and (correctly) flagged the example as a violation — provenance examples don't get a pass. Rephrased the K78 row to describe the JSDoc exemption by category, not by literal example, and added a cross-reference to the broader doc-discipline gate so future readers see both surfaces.
