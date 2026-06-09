@@ -11211,9 +11211,12 @@ Really important that you preserve the `inline_code` and /path/to/file.txt refer
 Just basic content with some hedging maybe.
 EOF_K77
 ORIG_BYTES=$(wc -c < "$K77_TMP/sample.md" | tr -d ' ')
-# Fixture A: mode='off' default → refused with feature-disabled message.
-# Node intentionally exits 1 on refusal; `|| true` swallows it so set -o
-# pipefail doesn't crash the smoke script.
+# Fixture A: mode='off' explicit → refused with feature-disabled message.
+# (v0.88.0 flipped DEFAULTS.static_compress.mode to 'on'; this fixture
+# pins mode='off' explicitly to verify the refusal path still works for
+# users who opt out.) Node intentionally exits 1 on refusal; `|| true`
+# swallows it so set -o pipefail doesn't crash the smoke script.
+echo '{"static_compress":{"mode":"off"}}' > "$K77_TMP/.devt/config.json"
 K77_A=$(cd "$K77_TMP" && node "$CLI" static-compress sample.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "static_compress.mode='off'" || true)
 # Fixture B: mode='on' → compresses, writes backup, code/URL/path preserved
 echo '{"static_compress":{"mode":"on"}}' > "$K77_TMP/.devt/config.json"
@@ -11232,52 +11235,17 @@ if (cd "$K77_TMP" && node "$CLI" static-compress credentials.md >/dev/null 2>&1)
 # Fixture E: empty file refused
 : > "$K77_TMP/empty.md"
 K77_E_REASON=$(cd "$K77_TMP" && node "$CLI" static-compress empty.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "empty" || true)
-# Fixture F: structural drift triggers automatic revert. Inject a faked
-# `headroom` binary on PATH that drops the `## Drift Test` heading from
-# its output. Static-compress's structural validator (superset mode) must
-# detect the dropped section, delete the backup, and leave the input file
-# untouched. Closes the gap where K77's comment promised this behavior
-# but no prior fixture exercised it.
-K77_FAKE_BIN="$K77_TMP/fake-bin"
-mkdir -p "$K77_FAKE_BIN"
-cat > "$K77_FAKE_BIN/headroom" <<'EOF_K77F'
-#!/bin/bash
-if [ "$1" = "--version" ]; then echo "fake 0.0.1"; exit 0; fi
-# Two-stage probe support (v0.86.1) — static-compress.cjs probes for the
-# compress subcommand via `compress --help` to filter out the
-# headroom-ai[proxy] variant. Mirror real click-CLI behavior: --help on a
-# known subcommand returns 0 with a usage string.
-if [ "$1" = "compress" ] && [ "$2" = "--help" ]; then echo "Usage: compress [OPTIONS] FILE"; exit 0; fi
-if [ "$1" = "compress" ] && [ "$2" = "-" ]; then
-  # Drop the first ## heading line — simulates a compressor that mangles structure.
-  sed '/^## Drift Test$/d'
-  exit 0
-fi
-exit 1
-EOF_K77F
-chmod +x "$K77_FAKE_BIN/headroom"
-# Reset to mode='on' and re-create the test file fresh (Fixture C restored it).
-cat > "$K77_TMP/drift.md" <<'EOF_K77F2'
-# Drift Test File
-
-This file contains a section the faked compressor will deliberately drop, so the
-structural-drift validator must catch the change and revert before the input file is touched.
-The validator uses superset semantics — every original section must be present in compressed.
-
-## Drift Test
-Real content here that should land in the compressed output if all goes well.
-Without this section, the structural validator must refuse and revert.
-EOF_K77F2
-DRIFT_ORIG_BYTES=$(wc -c < "$K77_TMP/drift.md" | tr -d ' ')
-# Run static-compress under PATH=fake-bin:$PATH so it picks up faked headroom.
-K77_F_REASON=$(cd "$K77_TMP" && PATH="$K77_FAKE_BIN:$PATH" node "$CLI" static-compress drift.md 2>/dev/null | jq -r '.reason // ""' 2>/dev/null | grep -c "structural elements" || true)
-DRIFT_FINAL_BYTES=$(wc -c < "$K77_TMP/drift.md" | tr -d ' ')
-K77_F_BACKUP_ABSENT=$(test -f "$K77_TMP/drift.original.md" && echo "no" || echo "yes")
+# Fixture F (drift-detected revert) removed in v0.88.0 alongside the
+# headroom shellout. The drift-revert behavior is already locked by:
+#   - K74 (structural-drift validator, 4 fixtures)
+#   - K85 (prose-shrink correctness, 4 fixtures + 3 regression guards)
+# Keeping a separate Fixture F here was redundant once the compressor
+# became single-engine (regex only).
 rm -rf "$K77_TMP"
-if [ "$K77_A" = "1" ] && [ "$K77_B_OK" = "true" ] && [ "$K77_B_HAS_URL" -ge "1" ] && [ "$K77_B_HAS_PATH" -ge "1" ] && [ "$K77_B_HAS_CODE" -ge "1" ] && [ "$K77_B_HAS_BACKUP" = "yes" ] && [ "$RESTORED_BYTES" = "$ORIG_BYTES" ] && [ "$K77_D" = "1" ] && [ "$K77_E_REASON" = "1" ] && [ "$K77_F_REASON" = "1" ] && [ "$DRIFT_FINAL_BYTES" = "$DRIFT_ORIG_BYTES" ] && [ "$K77_F_BACKUP_ABSENT" = "yes" ]; then
-  pass "K77: static-compress 6-fixture round-trip (off-refused, compress preserves bytes + backup, restore byte-equal, sensitive refused, empty refused, drift-detected reverts cleanly)"
+if [ "$K77_A" = "1" ] && [ "$K77_B_OK" = "true" ] && [ "$K77_B_HAS_URL" -ge "1" ] && [ "$K77_B_HAS_PATH" -ge "1" ] && [ "$K77_B_HAS_CODE" -ge "1" ] && [ "$K77_B_HAS_BACKUP" = "yes" ] && [ "$RESTORED_BYTES" = "$ORIG_BYTES" ] && [ "$K77_D" = "1" ] && [ "$K77_E_REASON" = "1" ]; then
+  pass "K77: static-compress 5-fixture round-trip (off-refused, compress preserves bytes + backup, restore byte-equal, sensitive refused, empty refused)"
 else
-  fail "K77: static-compress mismatch — A=$K77_A B_ok=$K77_B_OK B_url=$K77_B_HAS_URL B_path=$K77_B_HAS_PATH B_code=$K77_B_HAS_CODE B_backup=$K77_B_HAS_BACKUP restored=$RESTORED_BYTES/orig=$ORIG_BYTES D=$K77_D E=$K77_E_REASON F_reason=$K77_F_REASON F_bytes=$DRIFT_FINAL_BYTES/orig=$DRIFT_ORIG_BYTES F_backup_absent=$K77_F_BACKUP_ABSENT"
+  fail "K77: static-compress mismatch — A=$K77_A B_ok=$K77_B_OK B_url=$K77_B_HAS_URL B_path=$K77_B_HAS_PATH B_code=$K77_B_HAS_CODE B_backup=$K77_B_HAS_BACKUP restored=$RESTORED_BYTES/orig=$ORIG_BYTES D=$K77_D E=$K77_E_REASON"
 fi
 
 # K78: convention-enforcement — banned devt-internal version markers

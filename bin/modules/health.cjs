@@ -111,15 +111,13 @@ function runChecks(pluginRoot) {
     // No cache, or cache stale relative to local VERSION — update check hasn't run since the bump
   }
 
-  // Static-compress surface — surfaces config mode + headroom engine
-  // availability so users can see at a glance whether the opt-in
-  // compression path is configured and which engine would run. Greenfield
-  // 2026-06-09: shipped feature was invisible during normal health checks
-  // → adoption gap. The recipe path is the canonical entry point for
-  // operators who want to flip the mode.
+  // Static-compress surface — surfaces config mode + cumulative savings
+  // so users can see at a glance whether the compression path is active
+  // and what it has saved. The recipe path is the canonical entry point
+  // for operators who want to flip the mode or check the architecture.
   let compression = null;
   try {
-    let mode = "off";
+    let mode = "on";
     try {
       const cfgRaw = fs.readFileSync(path.join(devtDir, "config.json"), "utf8");
       const cfgParse = safeJsonParse(cfgRaw, "config.json");
@@ -127,11 +125,8 @@ function runChecks(pluginRoot) {
         mode = cfgParse.value.static_compress.mode;
       }
     } catch { /* defaults stay */ }
-    const headroom = require("./static-compress.cjs").headroomAvailable();
     compression = {
       static_compress_mode: mode,
-      headroom_available: headroom,
-      engine: mode === "off" ? null : (headroom ? "headroom" : "regex"),
       recipe: "docs/static-compress-recipe.md",
     };
     // Aggregate savings from .devt/state/static-compress.jsonl. Read-only —

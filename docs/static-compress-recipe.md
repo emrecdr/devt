@@ -30,16 +30,15 @@ The feature shipped after a telemetry gate confirmed the static-load slice was >
 }
 ```
 
-`mode: 'off'` (default) means the CLI exits with a clear "feature disabled" message. Explicit opt-in is required — devt never modifies your files without permission.
+`mode: 'on'` (default) — the init-time prompt asks at setup, and existing projects inherit `on` after upgrade. Flip to `'off'` in `.devt/config.json` to disable.
 
 ## Compression path
 
 1. **Sensitive-path denylist** runs first (same `is_sensitive_path` port `graphify.cjs` uses). Anything matching `.env`, `.netrc`, `credentials*`, `secrets*`, `id_rsa*`, `*.pem/key/p12/...`, `.ssh/`, `.aws/`, `.gnupg/`, `.kube/`, `.docker/`, or a token-normalized credential basename is refused before any compression.
-2. **`headroom` probe (two-stage)** — `headroom --version` confirms presence; then `headroom compress --help` confirms the `compress` subcommand is supported. The two-stage probe filters out the `headroom-ai[proxy]` variant, which is on PATH but rejects `compress -`. When both succeed, file content is piped through `headroom compress -`. Result is cached for the lifetime of the Node process so `--all` runs don't repeat the probe per file.
-3. **Regex fallback** — `prose-shrink.cjs` (caveman-shrink port) runs with sentinel-protected segments. Fully deterministic, zero dependencies. **Compression ratio depends heavily on prose density**: conversational text with filler (articles, hedges, pleasantries) compresses 25–35% (caveman's design target); tightly written technical specs with minimal filler compress 4–15% (measured ~4% on `guardrails/golden-rules.md`). The compressor refuses files that would produce identical output, surfacing them in the `--all` aggregate's `skipped_no_change` list — distinct from `skipped_already_done` (which indicates a prior run already created a `.original.md` backup).
-4. **Backup readback verify** — the original is written to `<path>.original.md` and immediately read back to confirm bytes match before the input file is touched.
-5. **Structural-drift validate** — the compressed output runs through the same `structural-validator.cjs` extractors used by `state check-agent-output --structural`. If any structural element (heading, code block, URL, identifier, version number) is missing or mangled, the backup is deleted and the input is left untouched.
-6. **Atomic write** — only after the validator passes does the compressed content replace the input via `atomicWriteFileSync`.
+2. **`prose-shrink.cjs` compressor** (caveman-shrink port) runs with sentinel-protected segments — fully deterministic, zero dependencies. **Compression ratio depends heavily on prose density**: conversational text with filler (articles, hedges, pleasantries) compresses 25–35% (caveman's design target); tightly written technical specs with minimal filler compress 4–15% (measured ~4% on `guardrails/golden-rules.md`). The compressor refuses files that would produce identical output, surfacing them in the `--all` aggregate's `skipped_no_change` list — distinct from `skipped_already_done` (which indicates a prior run already created a `.original.md` backup).
+3. **Backup readback verify** — the original is written to `<path>.original.md` and immediately read back to confirm bytes match before the input file is touched.
+4. **Structural-drift validate** — the compressed output runs through the same `structural-validator.cjs` extractors used by `state check-agent-output --structural`. If any structural element (heading, code block, URL, identifier, version number) is missing or mangled, the backup is deleted and the input is left untouched.
+5. **Atomic write** — only after the validator passes does the compressed content replace the input via `atomicWriteFileSync`.
 
 ## What it does NOT do
 
@@ -65,7 +64,7 @@ Every compress / restore action appends one JSON line to `.devt/state/static-com
   "action": "compress",
   "ts": "2026-06-08T22:00:00.000Z",
   "path": "path/relative/to/project",
-  "engine": "regex" | "headroom",
+  "engine": "regex",
   "before_bytes": 27291,
   "after_bytes": 19023,
   "ratio": 0.303,

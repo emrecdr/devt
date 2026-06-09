@@ -183,11 +183,11 @@ Used as the regex-fallback compression engine in `static-compress.cjs`.
 
 ### `static-compress.cjs`
 
-Opt-in CLI compressor for project markdown files (`.devt/rules/*.md`, `guardrails/*.md`, skill bodies). Probes for `headroom` CLI on PATH for neural extractive compression; falls back to `prose-shrink.cjs` (regex) when headroom is absent. Either engine runs through `structural-validator.cjs` post-compression — drift detected → backup file deleted, input file left untouched. Five safety layers before any input is touched: sensitive-path denylist refusal, size cap (default 500 KB), empty-file refusal, identical-output refusal, backup-readback verification (with byte-mismatch detail when readback fails).
+CLI compressor for project markdown files (`.devt/rules/*.md`, project-local `guardrails/*.md`). Single engine — `prose-shrink.cjs` (zero-dep caveman-shrink regex port). Output runs through `structural-validator.cjs` post-compression — drift detected → backup file deleted, input file left untouched. Five safety layers before any input is touched: sensitive-path denylist refusal, size cap (default 500 KB), empty-file refusal, identical-output refusal, backup-readback verification (with byte-mismatch detail when readback fails).
 
-Reversible via `<path>.original.md` backup sibling: `node bin/devt-tools.cjs static-compress --restore <path>` swaps it back atomically.
+Reversible via `<path>.original.md` backup sibling: `node bin/devt-tools.cjs static-compress --restore <path>` swaps it back atomically. Bulk run via `--all` walks project-owned surfaces; plugin maintainer pre-compress via `--plugin-build` ships pre-compressed guardrails with the next plugin release.
 
-Gated by `config.static_compress.mode` (`'off'` default; CLI returns `{ok: true, skipped: true}` when off, exit 0). Compress + restore actions log to `.devt/state/static-compress.jsonl` (RESET_EXEMPT). Full user-facing recipe in `docs/static-compress-recipe.md`.
+Gated by `config.static_compress.mode` (`'on'` default; CLI returns `{ok: true, skipped: true}` when off, exit 0). Compress + restore actions log to `.devt/state/static-compress.jsonl` (RESET_EXEMPT). Full user-facing recipe in `docs/static-compress-recipe.md`.
 
 ---
 
@@ -497,10 +497,10 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 | Gate | What it asserts |
 |---|---|
 | **K71** — dispatch envelope drift | `dispatch compile --check` reports zero drift between rendered envelopes in `workflows/*.md` and their source `.tmpl.md` + `io-contracts.yaml` declaration. |
-| **K71b** — dispatch render idempotence | Two consecutive `dispatch compile --check` calls produce byte-identical output. Catches mtime/timestamp/random-id leaks into the substitution table that would silently break prompt-cache hit rates (CacheAligner concept, borrowed from headroom). |
+| **K71b** — dispatch render idempotence | Two consecutive `dispatch compile --check` calls produce byte-identical output. Catches mtime/timestamp/random-id leaks into the substitution table that would silently break prompt-cache hit rates. |
 | **K74** — structural-drift validator | Four-fixture round-trip across `state check-agent-output --structural --baseline=<path>` — superset stub→complete passes, superset stub→dropped-section fails with specific "Section dropped" error, equality mode mangled code-block fails, equality identical passes. |
 | **K76** — graphify sensitive-path denylist | Four fixtures across `lane-suggestions` / `check-large-files` / `symbols-in-files` — credential/key/secret paths refused with exit 2 + stderr message; clean paths flow through. |
-| **K77** — static-compress round-trip | Six fixtures: mode-off skip, mode-on compress preserves code/URL/path + writes backup, `--restore` returns byte-equal original, sensitive filename refused, empty file refused, structural drift triggers backup-delete + input-untouched revert (via faked `headroom` binary injected on `PATH`). |
+| **K77** — static-compress round-trip | Five fixtures: mode-off skip, mode-on compress preserves code/URL/path + writes backup, `--restore` returns byte-equal original, sensitive filename refused, empty file refused. Drift-revert behavior is locked separately by K74 (structural-drift validator) + K85 (prose-shrink correctness) since the compressor is single-engine. |
 | **K78** — banned version markers | Scans `bin/modules/`, `hooks/`, `agents/`, `workflows/`, `templates/`, `guardrails/` for v-prefixed semver literals. Provenance belongs in CHANGELOG and git history, not code comments. Exempts the `update.cjs` CHANGELOG-parser regex and `templates/*/documentation.md` files (the latter contain JSDoc deprecation-style template snippets that legitimately demonstrate semver syntax to the user). Pairs with the broader doc-discipline gate that scans `agents/`, `workflows/`, `skills/`, `docs/` for the same class of markers. |
 
 ---

@@ -82,13 +82,14 @@ const DEFAULTS = {
   //     covers .devt/rules/, guardrails/, skills/SKILL.md without raising
   //     concerns; oversized inputs are usually wrong-target mistakes.
   //
-  // Probes for `headroom` on PATH and shells out for neural extractive
-  // compression when available; falls back to deterministic regex
-  // (prose-shrink.cjs, caveman-shrink port) when not. Either path runs
-  // through the structural-drift validator before the compressed file
-  // lands — drift detected → backup deleted, no change made.
+  // Static-file prose compressor (prose-shrink.cjs, caveman-shrink port).
+  // Runs through the structural-drift validator before the compressed
+  // file lands — drift detected → backup deleted, no change made. Default
+  // flipped to 'on' once K85 regression guards + 100%-yield validation
+  // on the plugin tree earned the trust. Init-time prompt still asks at
+  // setup; flip to 'off' here to disable entirely.
   static_compress: {
-    mode: "off",
+    mode: "on",
     size_cap_bytes: 500000,
   },
   // Telemetry — calibration-mode opt-ins for hooks that emit forensic records.

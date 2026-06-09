@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.88.0] - 2026-06-09
+
+**Headroom removal + default-on flip.** Two orthogonal cleanups in one release:
+- **Headroom integration was dead code.** No current `headroom-ai` release ships the `compress` stdin CLI subcommand devt's shellout was written against — the project pivoted to a proxy/MCP architecture. The two-stage probe (v0.86.1) was correctly falling back to regex on every dispatch but added complexity for zero benefit. Stripped from code, README, and docs.
+- **`static_compress.mode` default flipped `off` → `on`.** v0.87.1's K85 regression guards + 100% yield on the plugin tree earned the trust. The init-time prompt remains for users who want to opt out at setup. The conservative default outlived its purpose.
+
+Smoke: 834 passed, 0 failed. Locking: 3/3.
+
+### Removed
+
+- **`_runHeadroom()` + `_headroomAvailable()` + two-stage probe** in `bin/modules/static-compress.cjs`. No current installable headroom variant satisfies the probe; the shellout never fired in practice and added a `spawnSync` dependency + stderr noise on the failure path.
+- **`headroomAvailable` export** in `bin/modules/static-compress.cjs` and the corresponding consumer in `bin/modules/health.cjs`. The `compression` block in `/devt:health` output no longer exposes `headroom_available` or `engine` fields — there's only one engine now (`prose-shrink` regex), so reporting it is noise.
+- **K77 Fixture F (drift-detected revert via faked headroom binary)** in `scripts/smoke-test.sh`. The drift-revert behavior is already locked by K74 (structural-drift validator, 4 fixtures) + K85 (prose-shrink correctness, 4 fixtures + 3 regression guards). K77 is now a 5-fixture round-trip — drift case is covered elsewhere.
+- **Headroom mentions from README, `docs/static-compress-recipe.md`, `docs/INTERNALS.md`**. The `headroom proxy` companion section is gone — users who want input-side compression at the session-wrap layer can find headroom independently; devt no longer signposts it because it didn't integrate cleanly.
+
+### Changed
+
+- **`DEFAULTS.static_compress.mode` flipped `'off'` → `'on'`** in `bin/modules/config.cjs`. Projects that don't have a local `.devt/config.json` override inherit the new default. Existing projects with explicit `mode: 'off'` are unchanged. The init-time prompt in `workflows/project-init.md` still asks at setup so users have an explicit consent moment.
+- **K77 fixture A now sets `mode='off'` explicitly** instead of relying on the (now-flipped) raw default. Same test intent (verify the disabled-feature refusal path); explicit pin keeps the test independent of the DEFAULTS value.
+- **`engine_breakdown` schema simplified** in `compressAll()` and `compressPluginBuild()` results. Was `{ headroom: 0, regex: 0 }`; now just `{ regex: 0 }`.
+- **Compression-ratio claims in README + recipe doc honest**. Removed "~40% neural extractive" copy that was always aspirational for current headroom users. Kept the calibrated range ("4–15% on technical specifications, 25–35% on conversational prose").
+
 ## [0.87.1] - 2026-06-09
 
 **prose-shrink correctness sweep — plugin-build yield 22% → 100%.** v0.87.0 shipped `static-compress --plugin-build` honestly: 5 of 23 plugin files compressed cleanly, 18 were correctly refused by the structural validator. Each refusal was a real prose-shrink bug masquerading as compressor caution. This release fixes all three root causes; running `--plugin-build` against the plugin tree now compresses all 23 files (with no structural drift) for a 4% total byte reduction on plugin static-load content. The fixes also benefit user-side `static-compress --all` runs because the same bugs were silently degrading compression yield in `.devt/rules/` content too.

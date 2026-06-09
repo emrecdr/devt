@@ -1,33 +1,28 @@
 "use strict";
 
-// Opt-in static-file prose compressor.
+// Static-file prose compressor.
 //
-// Compresses prose in user-supplied markdown files using prose-shrink
-// (caveman-shrink port) with sentinel-protected code blocks, URLs, paths,
-// and identifiers. Probes for `headroom` CLI on PATH and shells out for
-// neural extractive compression (~40% reduction) when available; falls
-// back to deterministic regex (~25-35% reduction) when not. Either way,
-// the result is validated against the original via the structural-drift
-// validator (caveman validate.py port) before the compressed file lands.
-// Sensitive-path inputs (credentials, keys, .ssh, .aws) are refused with
-// the same denylist graphify.cjs uses.
+// Compresses prose in markdown files using prose-shrink (caveman-shrink
+// port) with sentinel-protected code blocks, URLs, paths, identifiers,
+// and heading lines. Compression ratio depends on prose density:
+// conversational text compresses 25-35%, tight technical specifications
+// compress 4-15%. Result is validated against the original via the
+// structural-drift validator (caveman validate.py port) before the
+// compressed file lands. Sensitive-path inputs (credentials, keys,
+// .ssh, .aws) are refused with the same denylist graphify.cjs uses.
 //
 // Reversibility: writes <path>.original.md backup with backup-readback
-// verification (caveman compress.py pattern). --restore reads the
-// backup, swaps it back, removes the .original.md sibling. Same idiom
-// caveman uses — no ad-hoc invention.
+// verification. --restore reads the backup, swaps it back, removes the
+// .original.md sibling.
 //
 // CLI:
-//   node bin/devt-tools.cjs static-compress <path>            — compress
-//   node bin/devt-tools.cjs static-compress --restore <path>  — restore
-//
-// Gated on DEFAULTS.static_compress.mode ('off' by default). 'off' means
-// the CLI errors with a clear "feature disabled" message — explicit
-// opt-in required in .devt/config.json.
+//   node bin/devt-tools.cjs static-compress <path>                — compress one file
+//   node bin/devt-tools.cjs static-compress --all                 — compress .devt/rules/ + project guardrails/
+//   node bin/devt-tools.cjs static-compress --restore <path>      — restore one file
+//   node bin/devt-tools.cjs static-compress --plugin-build        — MAINTAINER: pre-compress plugin guardrails/ + skills/
 
 const fs = require("fs");
 const path = require("path");
-const { spawnSync } = require("child_process");
 const { atomicWriteFileSync } = require("./io.cjs");
 
 const MAX_FILE_SIZE_DEFAULT = 500000;
@@ -78,106 +73,7 @@ function _backupPath(filepath) {
   return path.join(dir, base + ".original.md");
 }
 
-// Probe `headroom` on PATH. ENOENT (not installed) is the silent expected
-// case; every other failure mode is surfaced so users debugging "why isn't
-// headroom firing?" get a signal.
-//
-// Two-stage probe (field finding 2026-06-09): some users have a `headroom`
-// binary on PATH that responds to `--version` but does NOT support the
-// `compress` subcommand — typically the `headroom-ai[proxy]` variant which
-// targets `headroom wrap claude` use cases, not stdin compression. Without
-// the second probe, _runHeadroom would shell out per file, fail with a
-// noisy stderr per file, then fall back to regex. The two-stage probe
-// detects the bad variant once and falls back silently.
-//
-// Result is cached for the lifetime of this Node process so an --all run
-// over N files emits the probe-failure message at most once. Cache does
-// not survive across CLI invocations (each `node devt-tools.cjs` is a new
-// process), which is acceptable — probes are <100ms.
-let _headroomProbeCache = null;
-function _headroomAvailable() {
-  if (_headroomProbeCache !== null) return _headroomProbeCache;
-  let r;
-  try {
-    r = spawnSync("headroom", ["--version"], { stdio: "pipe", timeout: 2000 });
-  } catch (e) {
-    if (e.code !== "ENOENT") {
-      process.stderr.write(`[static-compress] headroom probe threw: ${e.code || e.message}\n`);
-    }
-    return (_headroomProbeCache = false);
-  }
-  if (r.error) {
-    if (r.error.code !== "ENOENT") {
-      process.stderr.write(`[static-compress] headroom probe failed: ${r.error.code || r.error.message}\n`);
-    }
-    return (_headroomProbeCache = false);
-  }
-  if (r.status !== 0) {
-    process.stderr.write(`[static-compress] headroom --version exited ${r.status} — treating as unavailable\n`);
-    return (_headroomProbeCache = false);
-  }
-  // Stage 2 — verify the `compress` subcommand exists. Click's "No such
-  // command" error returns exit 2; we treat any non-zero as missing-subcommand.
-  let s;
-  try {
-    s = spawnSync("headroom", ["compress", "--help"], { stdio: "pipe", timeout: 2000 });
-  } catch (e) {
-    process.stderr.write(`[static-compress] headroom compress probe threw: ${e.code || e.message}\n`);
-    return (_headroomProbeCache = false);
-  }
-  if (s.error || s.status !== 0) {
-    process.stderr.write(
-      "[static-compress] headroom binary on PATH but `compress` subcommand is not supported " +
-      "(likely headroom-ai[proxy] variant). Install the stdin-compress variant " +
-      "via `pipx install headroom-ai` (without the [proxy] extra), or accept regex fallback.\n",
-    );
-    return (_headroomProbeCache = false);
-  }
-  return (_headroomProbeCache = true);
-}
-
-// Run headroom in compress-stdin mode. Returns { ok, compressed, reason }
-// where reason names the specific failure mode when ok=false (timeout,
-// exit_code, empty_output, exception). Callers translate to a stderr line
-// before falling back to regex — users debugging compression behavior need
-// to see which mode hit.
-function _runHeadroom(text) {
-  let r;
-  try {
-    r = spawnSync("headroom", ["compress", "-"], {
-      input: text,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 30000,
-      maxBuffer: 5_000_000,
-    });
-  } catch (e) {
-    return { ok: false, reason: `exception: ${e.code || e.message}` };
-  }
-  if (r.error) {
-    return { ok: false, reason: `spawn error: ${r.error.code || r.error.message}` };
-  }
-  if (r.signal === "SIGTERM") {
-    return { ok: false, reason: "timeout (30s)" };
-  }
-  if (r.status !== 0) {
-    const stderrTail = (r.stderr ? r.stderr.toString("utf8") : "").slice(-200).trim();
-    return { ok: false, reason: `non-zero exit ${r.status}${stderrTail ? `: ${stderrTail}` : ""}` };
-  }
-  const out = r.stdout ? r.stdout.toString("utf8") : "";
-  if (!out || !out.trim()) {
-    return { ok: false, reason: "empty output" };
-  }
-  return { ok: true, compressed: out };
-}
-
 function _compressText(text) {
-  if (_headroomAvailable()) {
-    const r = _runHeadroom(text);
-    if (r.ok) return { compressed: r.compressed, engine: "headroom" };
-    process.stderr.write(
-      `[static-compress] headroom available but compression failed (${r.reason}) — falling back to regex.\n`,
-    );
-  }
   const { compress } = require("./prose-shrink.cjs");
   const r = compress(text);
   return { compressed: r.compressed, engine: "regex" };
@@ -202,7 +98,7 @@ function compressFile(filepath) {
     return { ok: false, path: filepath, reason: `file does not exist: ${filepath}` };
   }
   // Sensitive-path denylist — credentials/keys/secrets never get shipped
-  // through any compressor (regex or headroom). Same gate graphify uses.
+  // through the compressor. Same gate graphify uses.
   const { isSensitivePath } = require("./sensitive-path.cjs");
   if (isSensitivePath(filepath)) {
     return {
@@ -210,9 +106,7 @@ function compressFile(filepath) {
       path: filepath,
       reason:
         "refused: filename matches credential/key/secret pattern. " +
-        "Compression sends file contents to an LLM (when headroom routes " +
-        "through Anthropic) or processes them in-memory (regex). Rename " +
-        "if false-positive.",
+        "Rename if false-positive.",
     };
   }
   const sizeCap = cfg.size_cap_bytes || MAX_FILE_SIZE_DEFAULT;
@@ -442,7 +336,7 @@ function compressPluginBuild(opts) {
     errors: [],
     total_bytes_before: 0,
     total_bytes_after: 0,
-    engine_breakdown: { headroom: 0, regex: 0 },
+    engine_breakdown: { regex: 0 },
   };
   for (const abs of candidates) {
     const rel = path.relative(pluginRoot, abs);
@@ -504,7 +398,7 @@ function restoreFile(filepath) {
 // Returns: { ok, total_files, compressed, skipped_already_done,
 //            skipped_no_change, refused_sensitive, errors,
 //            total_bytes_before, total_bytes_after,
-//            engine_breakdown: { headroom: N, regex: N } }
+//            engine_breakdown: { regex: N } }
 //
 // Skipped categories — disjoint, both informational:
 //   skipped_already_done — a .original.md backup exists; the file was
@@ -552,7 +446,7 @@ function compressAll() {
     errors: [],
     total_bytes_before: 0,
     total_bytes_after: 0,
-    engine_breakdown: { headroom: 0, regex: 0 },
+    engine_breakdown: { regex: 0 },
   };
   for (const abs of candidates) {
     const rel = path.relative(root, abs);
@@ -626,4 +520,4 @@ function run(_subcommand, args) {
   return result.ok ? 0 : 1;
 }
 
-module.exports = { run, compressFile, restoreFile, compressAll, compressPluginBuild, headroomAvailable: _headroomAvailable };
+module.exports = { run, compressFile, restoreFile, compressAll, compressPluginBuild };
