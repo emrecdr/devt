@@ -11614,6 +11614,71 @@ else
   fail "K84: plugin-build mismatch — ok=$K84_OK plugin_root=$K84_HAS_PLUGIN_ROOT breakdown=$K84_HAS_BREAKDOWN candidates=$K84_HAS_GUARDRAILS_CANDIDATE (total=$K84_TOTAL) errors_field=$K84_HAS_ERRORS_FIELD usage=$K84_USAGE_HAS_FLAG"
 fi
 
+# K85: prose-shrink correctness — locks 3 root-cause fixes that lifted
+# plugin-build yield from 5/23 to 23/23 (22% → 100%):
+#   (1) ARTICLES /i removed — heading "## The Iron Law" no longer mangled
+#       (under /i, the lookahead [a-z] matched uppercase too, stripping
+#       "The " from headings).
+#   (2) Heading-line whole-line protection in PROTECTED_PATTERNS — keeps
+#       in-heading lowercase articles like "## Step 1: keep the scope"
+#       byte-equal (article stripping mid-heading was changing titles).
+#   (3) Whitespace-collapse anchored to non-whitespace — preserves leading
+#       indentation on list continuation lines AND indented code fences
+#       within list items (3-space CommonMark loose-list pattern).
+# Also asserts ARTICLES still compresses lowercase prose (no regression
+# on the intended compression target) AND article stripping correctly
+# avoids title-cased sentence starts.
+K85_TMP=$(mktemp -d)
+cat > "$K85_TMP/case1.md" <<'EOF_K85'
+## The Iron Law
+## The Process
+EOF_K85
+cat > "$K85_TMP/case2.md" <<'EOF_K85'
+## Step 1: keep the scope fresh
+## Why this is not the default path
+EOF_K85
+cat > "$K85_TMP/case3.md" <<'EOF_K85'
+1. First item with continuation:
+
+   ```bash
+   indented_code_block
+   ```
+
+   More continuation prose.
+EOF_K85
+cat > "$K85_TMP/case4.md" <<'EOF_K85'
+see the cat. we have an example. check the docs.
+EOF_K85
+K85_PROBE="const { compress } = require('$ROOT/bin/modules/prose-shrink.cjs'); const fs = require('fs');"
+# Fixture 1: heading articles preserved
+K85_C1=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case1.md','utf8')); process.stdout.write(r.compressed.includes('## The Iron Law') && r.compressed.includes('## The Process') ? 'pass' : 'fail');")
+# Fixture 2: in-heading lowercase articles preserved (heading protection)
+K85_C2=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case2.md','utf8')); process.stdout.write(r.compressed.includes('## Step 1: keep the scope fresh') && r.compressed.includes('## Why this is not the default path') ? 'pass' : 'fail');")
+# Fixture 3: 3-space indented code fences preserved (interior-only collapse)
+K85_C3=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case3.md','utf8')); process.stdout.write(r.compressed.includes('   \`\`\`bash') && r.compressed.includes('   indented_code_block') ? 'pass' : 'fail');")
+# Fixture 4: lowercase article compression STILL works (no regression)
+K85_C4=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case4.md','utf8')); const c = r.compressed; process.stdout.write(!c.includes(' the cat') && !c.includes(' an example') ? 'pass' : 'fail');")
+# Regression guards (literal-string greps — substring presence, not full
+# regex match, to avoid escaping pitfalls).
+# 1. ARTICLES regex no longer ends with /gi
+K85_NO_I_FLAG=$(grep -cF 'const ARTICLES = /\b(?:a|an|the)[ \t]+(?=[a-z])/g' "$ROOT/bin/modules/prose-shrink.cjs" 2>/dev/null || true)
+# 2. Heading line pattern present in PROTECTED_PATTERNS
+K85_HAS_HEADING_PATTERN=$(grep -cF '/^#{1,6}[ \t]+.*$/gm' "$ROOT/bin/modules/prose-shrink.cjs" 2>/dev/null || true)
+# 3. Whitespace collapse uses \S anchor
+K85_HAS_SAFE_COLLAPSE=$(grep -cF '(\S)[ \t]{2,}' "$ROOT/bin/modules/prose-shrink.cjs" 2>/dev/null || true)
+rm -rf "$K85_TMP"
+if [ "$K85_C1" = "pass" ] \
+   && [ "$K85_C2" = "pass" ] \
+   && [ "$K85_C3" = "pass" ] \
+   && [ "$K85_C4" = "pass" ] \
+   && [ "$K85_NO_I_FLAG" -ge "1" ] \
+   && [ "$K85_HAS_HEADING_PATTERN" -ge "1" ] \
+   && [ "$K85_HAS_SAFE_COLLAPSE" -ge "1" ]; then
+  pass "K85: prose-shrink correctness (heading articles preserved, in-heading lowercase preserved, indented code fences preserved, lowercase prose still compressed, 3 regression guards)"
+else
+  fail "K85: prose-shrink correctness mismatch — heading=$K85_C1 in_heading=$K85_C2 indented_fence=$K85_C3 lowercase=$K85_C4 no_i_flag=$K85_NO_I_FLAG heading_pattern=$K85_HAS_HEADING_PATTERN safe_collapse=$K85_HAS_SAFE_COLLAPSE"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

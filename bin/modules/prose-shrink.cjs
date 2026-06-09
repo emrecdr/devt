@@ -27,12 +27,26 @@ const FILLERS = /\b(?:just|really|basically|actually|simply|quite|very|essential
 const PLEASANTRIES = /\b(?:please|kindly|thank you|thanks|sure|certainly|of course|happy to|i'?d be happy)\b[,.]?[ \t]*/gi;
 const HEDGES = /\b(?:perhaps|maybe|might|could potentially|would like to|i think|in my opinion|it seems|it appears)\b[ \t]*/gi;
 const LEADERS = /^(?:i'?ll|i will|i can|i'?d|you can|we will|we can|let me|let'?s)[ \t]+/gim;
-const ARTICLES = /\b(?:a|an|the)[ \t]+(?=[a-z])/gi;
+// ARTICLES — lowercase only, NO /i flag. Under /i, the lookahead `[a-z]`
+// matches uppercase too, which strips articles from headings like
+// `## The Iron Law` → `## Iron Law` (mangles heading title, fails
+// structural validator). Limiting to lowercase articles preserves all
+// title-cased / sentence-start cases at a marginal compression cost.
+const ARTICLES = /\b(?:a|an|the)[ \t]+(?=[a-z])/g;
 
 // Protected patterns walked in order — first match wins. Path pattern is
 // generous (anything containing / or \ surrounded by word chars / dots / dashes)
 // and runs BEFORE the identifier pattern so dotted file paths stay intact.
+//
+// Heading lines (^#{1,6} ...) protected as whole-line atoms — runs FIRST
+// so the structural validator's heading-title extraction sees byte-equal
+// titles before/after. Without this, any in-heading article ("Step 1: keep
+// the scope_trust fresh") would mangle to "Step 1: keep scope_trust fresh"
+// and fail superset validation. Markdown allows 1-6 hashes; the [ \t]+
+// requirement prevents accidental matches on header-comment-style lines
+// in fenced bodies that aren't actually headings.
 const PROTECTED_PATTERNS = [
+  /^#{1,6}[ \t]+.*$/gm,
   /```[\s\S]*?```/g,
   /`[^`\n]+`/g,
   /\bhttps?:\/\/\S+/gi,
@@ -93,7 +107,13 @@ function compressProse(text) {
   s = s.replace(HEDGES, "");
   s = s.replace(FILLERS, "");
   s = s.replace(ARTICLES, "");
-  s = s.replace(/[ \t]{2,}/g, " ");
+  // Collapse INTERIOR multi-space runs only — preserve leading line
+  // indentation. The unanchored form `[ \t]{2,}` would mangle markdown
+  // list continuation lines indented with 3+ spaces (CommonMark loose-
+  // list pattern), including the indented code fences they contain.
+  // Requiring a non-whitespace char before the run keeps the substitution
+  // mid-line where the redundancy actually lives.
+  s = s.replace(/(\S)[ \t]{2,}/g, "$1 ");
   s = s.replace(/\s+([,.;:!?])/g, "$1");
   s = s.replace(/\n{3,}/g, "\n\n");
   return s.trim();

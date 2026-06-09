@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.87.1] - 2026-06-09
+
+**prose-shrink correctness sweep — plugin-build yield 22% → 100%.** v0.87.0 shipped `static-compress --plugin-build` honestly: 5 of 23 plugin files compressed cleanly, 18 were correctly refused by the structural validator. Each refusal was a real prose-shrink bug masquerading as compressor caution. This release fixes all three root causes; running `--plugin-build` against the plugin tree now compresses all 23 files (with no structural drift) for a 4% total byte reduction on plugin static-load content. The fixes also benefit user-side `static-compress --all` runs because the same bugs were silently degrading compression yield in `.devt/rules/` content too.
+
+Smoke: 834 passed, 0 failed (+1 K85). Locking: 3/3.
+
+### Fixed
+
+- **`ARTICLES` regex no longer matches uppercase letters in lookahead.** The pattern `/\b(?:a|an|the)[ \t]+(?=[a-z])/gi` had a subtle bug: under the `/i` flag, the character class `[a-z]` in the lookahead matched both lowercase AND uppercase letters. This caused the regex to strip "The " from headings like `## The Iron Law` → `## Iron Law`, mangling the title. Fix: drop the `/i` flag so `[a-z]` matches only true lowercase. Tradeoff: sentence-start "The cat" is no longer compressed — a marginal compression loss against the gain of never mangling headings, proper nouns, or sentence-initial articles.
+
+- **Markdown heading lines now sentinel-protected as whole-line atoms.** Even with the ARTICLES fix above, in-heading lowercase articles (`## Step 1: keep the scope fresh` → `## Step 1: keep scope fresh`) were still being stripped, changing heading titles. Fix: added `/^#{1,6}[ \t]+.*$/gm` as the FIRST entry in `PROTECTED_PATTERNS` so the entire heading line gets sentinel-replaced before any compression step runs against the body. Headings emerge byte-equal regardless of which articles or filler words their titles contain.
+
+- **Interior whitespace collapse no longer eats leading indentation.** `s.replace(/[ \t]{2,}/g, " ")` was collapsing ALL multi-space runs, including the 3-space leading indent CommonMark uses for loose-list continuation content and indented code fences inside list items. Result: 3-space-indented `   ```bash` fences became 1-space-indented ` ```bash`, which the structural validator's line-based extractor compared as a different block from the original. Fix: anchor the pattern to require a non-whitespace character before the run (`/(\S)[ \t]{2,}/g`). Interior redundancy (where it actually lives) still collapses; leading line indentation is preserved.
+
+### Added
+
+- **K85 smoke gate — prose-shrink correctness.** 4 behavioral fixtures + 3 regression-guard greps:
+  - Fixture 1: `## The Iron Law` heading title preserved byte-equal
+  - Fixture 2: `## Step 1: keep the scope fresh` heading title preserved (in-heading lowercase article)
+  - Fixture 3: 3-space-indented `   ```bash ... ```` fence preserved byte-equal
+  - Fixture 4: lowercase prose `the cat / an example` STILL compressed (no regression on the intended target)
+  - Regression guards: ARTICLES regex literal-string absence of `/gi` flag; PROTECTED_PATTERNS entry presence; whitespace-collapse `\S` anchor presence.
+
 ## [0.87.0] - 2026-06-09
 
 **Inter-agent context broadening + provenance + maintainer-mode pre-compress.** Three improvements building on v0.86.0 Sidecar-Driven Handoff: (1) sidecar inline injection now reaches tester + code-reviewer dispatches, not just verifier; (2) consuming agents receive a conditional provenance-citation protocol that turns graphify into an auditable signal source; (3) plugin maintainers get a `--plugin-build` CLI that pre-compresses guardrails/ + skills/ so distributed packages ship leaner — closing the architectural gap where user-side `--all` couldn't reach the plugin's own ~32 KB guardrails_inline slice (87% of envelope cost per the v0.80 audit).
