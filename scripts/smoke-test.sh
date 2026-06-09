@@ -11452,6 +11452,46 @@ else
   fail "K81: bulk-compress mismatch — r1_ok=$K81_R1_OK r1_total=$K81_R1_TOTAL r1_compressed=$K81_R1_COMPRESSED r1_errors=$K81_R1_ERRORS plugin_unchanged=$K81_PLUGIN_UNCHANGED r2_compressed=$K81_R2_COMPRESSED r2_skipped=$K81_R2_SKIPPED health_savings=$K81_HEALTH_SAVINGS workflow_step=$K81_WORKFLOW_HAS_STEP"
 fi
 
+# K82: prior-output sidecar inline injection.
+# Validates the Sidecar-Driven Handoff contract: when prior agents'
+# JSON sidecars exist in .devt/state/, the rendered verifier envelope
+# carries them in a <prior_outputs> block (eliminates Read tool round-
+# trips for structured handoff data on every consuming dispatch). When
+# sidecars are absent, the block degrades to empty (graceful — no error).
+# Verifier excludes its own sidecar (verification.json) so a stale prior-
+# phase verdict never re-injects.
+K82_TMP=$(mktemp -d)
+mkdir -p "$K82_TMP/.devt/state"
+echo '{}' > "$K82_TMP/.devt/config.json"
+echo '{"workflow_id":"dev","active":true,"workflow_type":"dev","phase":"verify","task":"k82 fixture"}' > "$K82_TMP/.devt/state/workflow.yaml"
+echo '{"status":"DONE","verdict":"PASS","agent":"programmer"}' > "$K82_TMP/.devt/state/impl-summary.json"
+echo '{"status":"DONE","verdict":"PASS","agent":"tester"}' > "$K82_TMP/.devt/state/test-summary.json"
+echo '{"status":"VERIFIED","verdict":"satisfied","agent":"verifier"}' > "$K82_TMP/.devt/state/verification.json"
+# Render with sidecars present — verifier should see programmer + tester
+# (review.json absent, verification.json filtered as own-sidecar).
+K82_OUT_WITH=$(cd "$K82_TMP" && node "$CLI" dispatch render-filled verifier:dev 2>/dev/null)
+K82_HAS_PROGRAMMER=$(echo "$K82_OUT_WITH" | grep -c '<programmer_sidecar>' || true)
+K82_HAS_TESTER=$(echo "$K82_OUT_WITH" | grep -c '<tester_sidecar>' || true)
+K82_HAS_OWN=$(echo "$K82_OUT_WITH" | grep -c '<verifier_sidecar>' || true)
+K82_HAS_NOTE=$(echo "$K82_OUT_WITH" | grep -c '<prior_outputs_note>' || true)
+# Render without sidecars — block must degrade gracefully (no <prior_outputs>).
+rm -f "$K82_TMP/.devt/state/impl-summary.json" "$K82_TMP/.devt/state/test-summary.json" "$K82_TMP/.devt/state/verification.json"
+K82_OUT_EMPTY=$(cd "$K82_TMP" && node "$CLI" dispatch render-filled verifier:dev 2>/dev/null)
+K82_EMPTY_NO_BLOCK=$(echo "$K82_OUT_EMPTY" | grep -c '<prior_outputs>' || true)
+# Confirm template carries the placeholder (regression guard).
+K82_TMPL_HAS_TOKEN=$(grep -c '{prior_outputs}' "$ROOT/templates/dispatch/envelopes/verifier.tmpl.md" 2>/dev/null || true)
+rm -rf "$K82_TMP"
+if [ "$K82_HAS_PROGRAMMER" -ge "1" ] \
+   && [ "$K82_HAS_TESTER" -ge "1" ] \
+   && [ "$K82_HAS_OWN" = "0" ] \
+   && [ "$K82_HAS_NOTE" -ge "1" ] \
+   && [ "$K82_EMPTY_NO_BLOCK" = "0" ] \
+   && [ "$K82_TMPL_HAS_TOKEN" -ge "1" ]; then
+  pass "K82: prior-output sidecar injection (present→inlined, own sidecar filtered, absent→degraded, template has token)"
+else
+  fail "K82: sidecar injection mismatch — programmer=$K82_HAS_PROGRAMMER tester=$K82_HAS_TESTER own_filtered=$K82_HAS_OWN note=$K82_HAS_NOTE empty_no_block=$K82_EMPTY_NO_BLOCK tmpl_has_token=$K82_TMPL_HAS_TOKEN"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

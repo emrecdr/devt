@@ -302,6 +302,7 @@ function applySubstitutions(template, subs) {
     god_node_warnings_json: () => JSON.stringify(subs.god_node_warnings_json || {}),
     graphify_status_json: () => JSON.stringify(subs.graphify_status_json || {}),
     graph_impact_content: () => subs.graph_impact_content || "",
+    prior_outputs: () => subs.prior_outputs || "",
     task_description: () => subs.task || "",
     bug_description: () => subs.task || "",
     review_scope_description: () => subs.task || "",
@@ -320,10 +321,10 @@ function applySubstitutions(template, subs) {
   return out;
 }
 
-function buildSubstitutionTable() {
+function buildSubstitutionTable(agent) {
   const { findProjectRoot } = require("./config.cjs");
   const { getMergedConfig } = require("./config.cjs");
-  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact } = require("./init.cjs");
+  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars } = require("./init.cjs");
   const { getModels } = require("./model-profiles.cjs");
   const state = require("./state.cjs");
 
@@ -341,6 +342,11 @@ function buildSubstitutionTable() {
   const ig = loadInlineGuardrails(PLUGIN_ROOT);
   const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
   const gi = loadGraphImpact(projectRoot);
+  // Prior-output sidecar injection — auto-discovers .devt/state/*.json
+  // produced by upstream agents. Skips the consumer's own sidecar so
+  // verifier never sees stale verification.json from a prior phase.
+  // Degrades to empty string when no agent passed or no sidecars exist.
+  const ps = agent ? loadPriorSidecars(projectRoot, agent) : { content: "", count: 0 };
 
   let s = {};
   try { s = state.readState() || {}; } catch { s = {}; }
@@ -351,6 +357,8 @@ function buildSubstitutionTable() {
     inline_rubrics: ir.content || {},
     graph_impact_content: gi.content || "",
     graph_impact_status: gi.status || "absent",
+    prior_outputs: ps.content || "",
+    prior_outputs_count: ps.count || 0,
     rubrics: config.rubrics || {},
     models: models || {},
     scope_trust_json: s.scope_trust_json,
@@ -372,7 +380,7 @@ function cmdRenderFilled(target) {
     workflowId = resolveAutoWorkflowId();
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
-  const subs = buildSubstitutionTable();
+  const subs = buildSubstitutionTable(agent);
   return applySubstitutions(template, subs);
 }
 

@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.86.0] - 2026-06-09
+
+**Sidecar-Driven Handoff — eliminate Read tool round-trips on structured agent-to-agent context.** Today, when the verifier dispatches in a `dev` flow, it has no in-context knowledge of what the programmer or tester decided — it pays 1-2 Read tool calls turn-1 just to fetch `impl-summary.md` + `test-summary.md`. The structured handoff data already lives at `.devt/state/<agent>-summary.json` (the JSON sidecars produced for the claim-check + status-routing pipeline) and is tiny (~80 bytes per sidecar — `{status, verdict, agent}` enum triple). This release inlines those sidecars into the consuming agent's dispatch envelope so the structured contract data is in the cached prefix, not behind a Read.
+
+Architectural alignment: this is the "Opportunity 1" from the inter-agent communication deep-dive — the inline-injection pattern devt already uses for `graph_impact_content` (32 KB cap), `guardrails_inline` (64 KB cap), `governing_rules` (96 KB cap). Sidecars are 3 orders of magnitude smaller than any of those caps; even a 4-agent chain stays under 1 KB total. Zero new dependencies. Zero changes to file-based state (sidecars stay on disk — `/devt:pause` + audit + claim-check + recover-partial-impl all keep working identically). Workflow-agnostic: whatever sidecars happen to exist at dispatch time, the consuming agent receives them. Auto-discovery instead of per-agent declaration keeps the contract surface small.
+
+Smoke: 830 passed, 0 failed (+1 K82). Locking: 3/3.
+
+### Added
+
+- **`loadPriorSidecars(projectRoot, consumerAgent)` in `bin/modules/init.cjs`.** Mirrors `loadGraphImpact` exactly. Walks the canonical `JSON_SIDECAR_SCHEMAS` mapping (`impl-summary.json` → programmer, `test-summary.json` → tester, `verification.json` → verifier, `review.json` → code-reviewer), reads any that exist in `.devt/state/`, returns concatenated `<prior_outputs>` block with each sidecar wrapped in `<<producer>_sidecar>…</<producer>_sidecar>`. Skips the consumer's own sidecar so verifier never sees a stale verification.json from a prior phase. Defensive 8 KB cap on total block size — realistic payloads land well under 1 KB; cap exists for an ill-formed sidecar that ballooned somehow.
+
+- **`{prior_outputs}` substitution token in `bin/modules/dispatch.cjs`.** Added to `DATA_REFS` alongside `graph_impact_content`. `buildSubstitutionTable(agent)` now takes the consuming agent's name and resolves `prior_outputs` via `loadPriorSidecars(projectRoot, agent)`. Backwards-compatible: when `agent` is undefined (legacy callers) the token resolves to empty string. `cmdRenderFilled` already knows the agent, so it threads it through automatically.
+
+- **`{prior_outputs}` placeholder in verifier templates** — added to both `templates/dispatch/envelopes/verifier.tmpl.md` (dev workflow) and `templates/dispatch/envelopes/verifier-code_review.tmpl.md` (code-review workflow). Placed just before `<files_to_read>` so the structured handoff is read first, then full markdown bodies are available for verbatim citation. Workflow envelopes synced via `dispatch compile --write`. The `tester` and `code-reviewer` agents COULD also consume sidecars but are deferred to a future release — verifier is the dominant consumer (reads 3 sidecars in dev flow) and validating the pattern there before broadening minimizes scope risk.
+
+- **K82 smoke gate — sidecar inline injection round-trip.** 4-assertion fixture: with `impl-summary.json` + `test-summary.json` + `verification.json` present, rendered envelope carries `<programmer_sidecar>` + `<tester_sidecar>` blocks AND `<prior_outputs_note>` but EXCLUDES `<verifier_sidecar>` (own-sidecar filtering). Without any sidecars present, the rendered envelope has no `<prior_outputs>` block at all (graceful degrade). Template regression guard asserts `{prior_outputs}` token is present in `verifier.tmpl.md`.
+
 ## [0.85.0] - 2026-06-09
 
 **Compression Adoption Loop — close the 30-day-zero-adoption gap.** Greenfield's H1 audit revealed that static-compress (shipped v0.81.0, polished v0.83.0) had been live for 30+ days with zero invocations. After deep validation, the gap turned out to be friction, not algorithm quality: defaults conservative, manual per-file, no measurement, no init-time surface. This release ships a coherent closed-loop bundle that addresses each friction point individually while preserving every existing safety layer.

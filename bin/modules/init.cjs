@@ -104,6 +104,60 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   return { content: result, bytes: totalBytes, warnings };
 }
 
+// loadPriorSidecars — inlines the structured JSON sidecars of upstream
+// agents into the consuming agent's dispatch envelope. Saves the
+// consuming agent the Read-tool round-trip on every .devt/state/*.json
+// it would otherwise fetch turn-1.
+//
+// Each sidecar is ~80 bytes ({status, verdict, agent} enum triple), so
+// the entire <prior_outputs> block stays <1 KB in practice — even with
+// all 4 known sidecars present. The 8 KB cap is defensive only.
+//
+// Auto-discovery semantics: looks for every sidecar declared in
+// JSON_SIDECAR_SCHEMAS that EXISTS at dispatch time AND is not produced
+// by the consuming agent itself (verifier shouldn't see its own prior
+// verification.json from a stale phase). Workflow-agnostic — whatever
+// sidecars happen to be on disk, that's what the consumer receives.
+const PRIOR_SIDECAR_CAP = 8 * 1024;
+const PRIOR_SIDECAR_PRODUCERS = {
+  "impl-summary.json": "programmer",
+  "test-summary.json": "tester",
+  "verification.json": "verifier",
+  "review.json": "code-reviewer",
+};
+function loadPriorSidecars(projectRoot, consumerAgent) {
+  if (!projectRoot || !consumerAgent) return { content: "", bytes: 0, count: 0 };
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const stateDir = path.join(projectRoot, ".devt", "state");
+  const blocks = [];
+  let totalBytes = 0;
+  for (const [filename, producer] of Object.entries(PRIOR_SIDECAR_PRODUCERS)) {
+    if (producer === consumerAgent) continue;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const filepath = path.join(stateDir, filename);
+    if (!fs.existsSync(filepath)) continue;
+    let raw;
+    try { raw = fs.readFileSync(filepath, "utf8").trim(); }
+    catch { continue; }
+    if (!raw) continue;
+    const block = `<${producer}_sidecar>\n${raw}\n</${producer}_sidecar>`;
+    if (totalBytes + block.length > PRIOR_SIDECAR_CAP) {
+      // Cap breached — emit what we have plus a notice. Realistic
+      // payloads never hit this; cap exists for defense against an
+      // ill-formed sidecar that ballooned somehow.
+      blocks.push(`<truncation_notice>prior_outputs truncated at ${PRIOR_SIDECAR_CAP} bytes — full sidecars at .devt/state/*.json</truncation_notice>`);
+      break;
+    }
+    blocks.push(block);
+    totalBytes += block.length;
+  }
+  if (blocks.length === 0) return { content: "", bytes: 0, count: 0 };
+  const content =
+    `<prior_outputs>\n${blocks.join("\n")}\n</prior_outputs>\n` +
+    `<prior_outputs_note>Sidecars above are the structured handoff from prior phase(s). Full markdown bodies remain at .devt/state/&lt;agent&gt;-summary.md or review.md — Read those only when you need verbatim content (e.g., to cite a specific decision text in your verdict).</prior_outputs_note>`;
+  return { content, bytes: Buffer.byteLength(content), count: blocks.length };
+}
+
 function loadInlineGuardrails(pluginRoot) {
   if (!pluginRoot) return { content: null, bytes: 0, warnings: [] };
   const result = {};
@@ -650,4 +704,4 @@ function run(subcommand, args, pluginRoot) {
   }
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars };
