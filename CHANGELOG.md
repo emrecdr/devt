@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.88.1] - 2026-06-10
+
+**CI fix — K81 mtime probe now cross-platform.** v0.88.0's K81 used `stat -f '%m %N'` (macOS/BSD syntax) to snapshot plugin guardrails mtimes for the unchanged-check. On Linux CI runners, `stat -f` is a different flag (filesystem info, not format), so the snapshots diverged spuriously between before/after even though the files were genuinely untouched. Replaced with `sha256sum`-based content hashing — works identically on both platforms AND is semantically stronger: detects actual file content changes, not just mtime touches.
+
+Smoke: 834 passed, 0 failed.
+
+### Fixed
+
+- **K81 plugin-unchanged check uses cross-platform content hashing.** `find -exec stat -f '%m %N'` → `find -exec sha256sum`. The macOS BSD stat syntax was failing on Linux runners; sha256sum is universally available and the content-based comparison is a stronger guarantee than mtime equality.
+
 ## [0.88.0] - 2026-06-09
 
 **Headroom removal + default-on flip.** Two orthogonal cleanups in one release:

@@ -11393,14 +11393,14 @@ A second rule file. Has `func_call()` and version 1.2.3 to test preservation. Pl
 Body content here. Enough volume for compressor.
 EOF_K81
 # Snapshot plugin guardrails mtimes BEFORE the run — they must be untouched.
-K81_PLUGIN_GUARDRAILS_BEFORE=$(find "$ROOT/guardrails" -name '*.md' -exec stat -f '%m %N' {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+K81_PLUGIN_GUARDRAILS_BEFORE=$(find "$ROOT/guardrails" -name '*.md' -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
 K81_RUN1=$(cd "$K81_TMP" && node "$CLI" static-compress --all 2>/dev/null)
 K81_R1_OK=$(echo "$K81_RUN1" | jq -r '.ok // false')
 K81_R1_TOTAL=$(echo "$K81_RUN1" | jq -r '.total_files // 0')
 K81_R1_COMPRESSED=$(echo "$K81_RUN1" | jq -r '.compressed | length')
 K81_R1_ERRORS=$(echo "$K81_RUN1" | jq -r '.errors | length')
 # Plugin guardrails must not have been touched.
-K81_PLUGIN_GUARDRAILS_AFTER=$(find "$ROOT/guardrails" -name '*.md' -exec stat -f '%m %N' {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+K81_PLUGIN_GUARDRAILS_AFTER=$(find "$ROOT/guardrails" -name '*.md' -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
 K81_PLUGIN_UNCHANGED=$([ "$K81_PLUGIN_GUARDRAILS_BEFORE" = "$K81_PLUGIN_GUARDRAILS_AFTER" ] && echo yes || echo no)
 # Idempotent re-run — second invocation must skip everything compressed.
 K81_RUN2=$(cd "$K81_TMP" && node "$CLI" static-compress --all 2>/dev/null)
