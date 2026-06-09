@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.88.2] - 2026-06-10
+
+**prose-shrink fix surfaced by greenfield rollout — inline triple-backticks no longer break real fence protection.** Running `static-compress --all` against greenfield's `.devt/rules/quality-gates.md` revealed a previously-uncaught prose-shrink bug. The file used a blockquote-style inline example like ``` ``` ```bash parallel ``` ``` ``` followed by a real ` ```bash parallel ` fenced block. The earlier unanchored fence-protection regex `/```[\s\S]*?```/g` paired the inline closing backticks with the real fence's opening, leaving the actual code block UNPROTECTED. Downstream `\s+([,.;:!?])` then collapsed `ruff check .` → `ruff check.` inside what should have been protected code, and the structural validator (correctly) refused the compression. Fix: anchor fence-opening AND fence-closing to start-of-line (CommonMark fence rule).
+
+Smoke: 834 passed, 0 failed (K85 extended to 5 fixtures with the inline-backtick regression guard).
+
+### Fixed
+
+- **Fenced code blocks protected by line-anchored regex.** `PROTECTED_PATTERNS[1]` changed from `/```[\s\S]*?```/g` to `/^ {0,3}```[^`\n]*\n[\s\S]*?^ {0,3}```[ \t]*$/gm`. The new pattern enforces the CommonMark rule that fence-open and fence-close must each appear at column 0-3 of a line. Inline triple-backticks in prose (e.g. blockquote examples documenting fence syntax) no longer pair with real fence openings, eliminating the leak that left real code blocks open to prose-level transforms.
+
+### Added
+
+- **K85 Fixture 5 — inline-fence regression guard.** Compresses the exact pattern that surfaced the bug in greenfield (blockquote with inline ` ``` ```bash parallel ``` ``` ` followed by a real fenced block). Asserts `ruff check .` survives byte-equal inside the real block. Prevents regression on this CommonMark interpretation.
+
 ## [0.88.1] - 2026-06-10
 
 **CI fix — K81 mtime probe now cross-platform.** v0.88.0's K81 used `stat -f '%m %N'` (macOS/BSD syntax) to snapshot plugin guardrails mtimes for the unchanged-check. On Linux CI runners, `stat -f` is a different flag (filesystem info, not format), so the snapshots diverged spuriously between before/after even though the files were genuinely untouched. Replaced with `sha256sum`-based content hashing — works identically on both platforms AND is semantically stronger: detects actual file content changes, not just mtime touches.

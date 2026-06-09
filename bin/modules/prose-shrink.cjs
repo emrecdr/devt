@@ -47,7 +47,15 @@ const ARTICLES = /\b(?:a|an|the)[ \t]+(?=[a-z])/g;
 // in fenced bodies that aren't actually headings.
 const PROTECTED_PATTERNS = [
   /^#{1,6}[ \t]+.*$/gm,
-  /```[\s\S]*?```/g,
+  // Fenced code blocks — CommonMark rule: opening + closing fence must
+  // each be at column 0-3 of their line. The earlier unanchored pattern
+  // /```[\s\S]*?```/g incorrectly paired INLINE triple-backticks in prose
+  // (e.g. blockquote example "tagged ``` ```bash parallel ``` are run")
+  // with the next real fence opening, leaving the actual code block
+  // unprotected. Then downstream `\s+([,.;:!?])` would collapse
+  // `ruff check .` → `ruff check.` inside the unprotected block. Line-
+  // anchored matching (^/$ with /gm) restores CommonMark semantics.
+  /^ {0,3}```[^`\n]*\n[\s\S]*?^ {0,3}```[ \t]*$/gm,
   /`[^`\n]+`/g,
   /\bhttps?:\/\/\S+/gi,
   /(?:\.\/|\.\.\/|\/|[A-Za-z]:\\)[\w./\\-]+/g,

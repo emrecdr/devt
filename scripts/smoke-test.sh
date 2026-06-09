@@ -11617,6 +11617,25 @@ EOF_K85
 cat > "$K85_TMP/case4.md" <<'EOF_K85'
 see the cat. we have an example. check the docs.
 EOF_K85
+# Fixture 5 (v0.88.2): inline triple-backticks in prose must NOT pair
+# with a real code fence's opening. Greenfield greenfield-api's
+# quality-gates.md had this exact pattern: blockquote example
+# `tagged ``` ```bash parallel ``` are run` followed by a real
+# `bash parallel` fence. The earlier unanchored regex paired the
+# inline closing with the real fence opening, leaving the real block
+# UNPROTECTED — then `\s+([,.;:!?])` collapsed `ruff check .` →
+# `ruff check.` inside what should have been protected code.
+cat > "$K85_TMP/case5.md" <<'EOF_K85'
+> About `parallel`: gates tagged ``` ```bash parallel ``` are run concurrently.
+
+## Gate
+
+```bash parallel
+uv run ruff check .
+```
+
+End.
+EOF_K85
 K85_PROBE="const { compress } = require('$ROOT/bin/modules/prose-shrink.cjs'); const fs = require('fs');"
 # Fixture 1: heading articles preserved
 K85_C1=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case1.md','utf8')); process.stdout.write(r.compressed.includes('## The Iron Law') && r.compressed.includes('## The Process') ? 'pass' : 'fail');")
@@ -11626,6 +11645,9 @@ K85_C2=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case2.
 K85_C3=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case3.md','utf8')); process.stdout.write(r.compressed.includes('   \`\`\`bash') && r.compressed.includes('   indented_code_block') ? 'pass' : 'fail');")
 # Fixture 4: lowercase article compression STILL works (no regression)
 K85_C4=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case4.md','utf8')); const c = r.compressed; process.stdout.write(!c.includes(' the cat') && !c.includes(' an example') ? 'pass' : 'fail');")
+# Fixture 5: inline triple-backticks in prose don't break real fence
+# protection — `ruff check .` must survive byte-equal inside the block.
+K85_C5=$(node -e "$K85_PROBE const r = compress(fs.readFileSync('$K85_TMP/case5.md','utf8')); const c = r.compressed; process.stdout.write(c.includes('ruff check .') && !c.includes('ruff check.') ? 'pass' : 'fail');")
 # Regression guards (literal-string greps — substring presence, not full
 # regex match, to avoid escaping pitfalls).
 # 1. ARTICLES regex no longer ends with /gi
@@ -11639,12 +11661,13 @@ if [ "$K85_C1" = "pass" ] \
    && [ "$K85_C2" = "pass" ] \
    && [ "$K85_C3" = "pass" ] \
    && [ "$K85_C4" = "pass" ] \
+   && [ "$K85_C5" = "pass" ] \
    && [ "$K85_NO_I_FLAG" -ge "1" ] \
    && [ "$K85_HAS_HEADING_PATTERN" -ge "1" ] \
    && [ "$K85_HAS_SAFE_COLLAPSE" -ge "1" ]; then
-  pass "K85: prose-shrink correctness (heading articles preserved, in-heading lowercase preserved, indented code fences preserved, lowercase prose still compressed, 3 regression guards)"
+  pass "K85: prose-shrink correctness (heading articles preserved, in-heading lowercase preserved, indented code fences preserved, lowercase prose still compressed, inline triple-backticks don't break real fence protection, 3 regression guards)"
 else
-  fail "K85: prose-shrink correctness mismatch — heading=$K85_C1 in_heading=$K85_C2 indented_fence=$K85_C3 lowercase=$K85_C4 no_i_flag=$K85_NO_I_FLAG heading_pattern=$K85_HAS_HEADING_PATTERN safe_collapse=$K85_HAS_SAFE_COLLAPSE"
+  fail "K85: prose-shrink correctness mismatch — heading=$K85_C1 in_heading=$K85_C2 indented_fence=$K85_C3 lowercase=$K85_C4 inline_fences=$K85_C5 no_i_flag=$K85_NO_I_FLAG heading_pattern=$K85_HAS_HEADING_PATTERN safe_collapse=$K85_HAS_SAFE_COLLAPSE"
 fi
 
 echo
