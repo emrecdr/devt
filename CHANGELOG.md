@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.83.1] - 2026-06-09
+
+**CI fix for K78 description tripping the pre-existing doc-discipline gate.** The K78 description in `docs/INTERNALS.md` contained `@deprecated since v2.0.0` as a literal example of the JSDoc syntax K78 exempts from `templates/*/documentation.md`. The pre-existing doc-discipline smoke gate scans `docs/*.md` for `\bsince v[0-9]` markers and (correctly) flagged the example as a violation — provenance examples don't get a pass. Rephrased the K78 row to describe the JSDoc exemption by category, not by literal example, and added a cross-reference to the broader doc-discipline gate so future readers see both surfaces.
+
+The local smoke test passed pre-push because the gate uses `git grep` (tracked files only), and the K78 description was uncommitted at smoke time. CI ran against the fresh-clone tracked content and caught the violation.
+
+Smoke: 826 passed, 0 failed (both K78 and the doc-discipline gate clean). Locking: 3/3.
+
+### Fixed
+
+- **`docs/INTERNALS.md` K78 row** — replaced `\bv\d+\.\d+\.\d+\b` literal regex example with the phrase "v-prefixed semver literals" and removed the `@deprecated since v2.0.0` example. Cross-referenced the pair (K78 + doc-discipline gate) so future maintainers know both gates have complementary scope.
+
 ## [0.83.0] - 2026-06-09
 
 **Strict version-marker sweep + K78 enforcement gate + 5 polish items.** Cleans up the pre-existing devt-internal version markers scattered across `bin/modules/`, `hooks/`, and `workflows/_phase-gates.yaml` that predated the rule's enforcement. K78 smoke gate scans `bin/modules/`, `hooks/`, `agents/`, `workflows/`, `templates/`, `guardrails/` for `vX.Y.Z` markers and refuses any. Skills and `templates/*/documentation.md` are exempt — they use version markers as legitimate template/example content (Option A/B prescription, `@deprecated`/`@beta` JSDoc patterns). The 5 polish items address silent-failure findings deferred from the v0.82.0 validation: prose-shrink sentinel non-convergence now throws, `isSensitivePath` throws on non-string inputs, `static-compress mode='off'` returns ok:true with skipped:true (config-as-designed not a failure), headroom failure modes differentiate, backup readback error surfaces the actual byte mismatch.
