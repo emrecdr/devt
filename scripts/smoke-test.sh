@@ -9070,8 +9070,11 @@ for (let i = 0; i < 2; i++) { g.nodes.push({id: 'c'+i, label: 'C'+i, source_file
 fs.writeFileSync('$K30_TMP/graphify-out/graph.json', JSON.stringify(g));
 "
 K30_OUT=$(cd "$K30_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify symbols-in-files src/auth.py src/util.py --limit=2 2>/dev/null)
-K30_COUNT=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log(Array.isArray(a)?a.length:-1);}catch(e){console.log(-1);}})")
-K30_TOP=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const a=JSON.parse(s);console.log((a[0]&&a[0].symbol)||'');}catch(e){console.log('');}})")
+# v0.90.0 G2: return shape changed from bare array → envelope
+# { symbols, reason, graph_lag_commits, total_matches }. Read .symbols
+# instead of the top-level array.
+K30_COUNT=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const a=o&&Array.isArray(o.symbols)?o.symbols:null;console.log(a?a.length:-1);}catch(e){console.log(-1);}})")
+K30_TOP=$(echo "$K30_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log((o&&o.symbols&&o.symbols[0]&&o.symbols[0].symbol)||'');}catch(e){console.log('');}})")
 if [ "$K30_COUNT" = "2" ] && [ "$K30_TOP" = "HighDegreeSymbol" ]; then
   pass "K30: symbols-in-files returns top-N by degree filtered to diff files (count=2, top=HighDegreeSymbol)"
 else
@@ -11687,6 +11690,13 @@ K86_TOTAL=$(echo "$K86_OUT" | jq -r '.total_bytes' 2>/dev/null)
 K86_PCT_SUM=$(echo "$K86_OUT" | jq -r '(.summary.static_pct + .summary.dynamic_pct + .summary.wrapper_pct)' 2>/dev/null)
 K86_AGENT=$(echo "$K86_OUT" | jq -r '.agent' 2>/dev/null)
 K86_HAS_GOV_RULES=$(echo "$K86_OUT" | jq -r '[.blocks[] | select(.tag == "governing_rules" and .kind == "static")] | length > 0' 2>/dev/null)
+# wrapper_bytes MUST be non-negative (greenfield audit B1 fix): nested tags
+# like <review_checklist> inside <governing_rules> were being double-counted
+# in the prior implementation, producing negative wrapper_bytes. New logic
+# attributes inner-tag bytes only to their outermost ancestor.
+K86_WRAPPER_NONNEG=$(echo "$K86_OUT" | jq -r '.summary.wrapper_bytes >= 0' 2>/dev/null)
+# Every block exposes a nested_in field (null when the tag is outermost).
+K86_BLOCKS_HAVE_NESTED_IN=$(echo "$K86_OUT" | jq -r '[.blocks[] | has("nested_in")] | all' 2>/dev/null)
 # Export guard — cmdDecompose available externally
 K86_EXPORT_OK=$(node -e "console.log(typeof require('$ROOT/bin/modules/dispatch.cjs').cmdDecompose === 'function')")
 rm -rf "$K86_TMP"
@@ -11698,10 +11708,171 @@ if [ "$K86_HAS_SUMMARY" = "true" ] \
    && [ "$PCT_OK" = "1" ] \
    && [ "$K86_AGENT" = "verifier" ] \
    && [ "$K86_HAS_GOV_RULES" = "true" ] \
+   && [ "$K86_WRAPPER_NONNEG" = "true" ] \
+   && [ "$K86_BLOCKS_HAVE_NESTED_IN" = "true" ] \
    && [ "$K86_EXPORT_OK" = "true" ]; then
-  pass "K86: dispatch decompose CLI surface (JSON shape, pct sums to 1, governing_rules classified static, cmdDecompose exported)"
+  pass "K86: dispatch decompose CLI surface (JSON shape, pct sums to 1, governing_rules classified static, wrapper non-negative, nested_in field present, cmdDecompose exported)"
 else
-  fail "K86: decompose mismatch — summary=$K86_HAS_SUMMARY blocks=$K86_HAS_BLOCKS total=$K86_TOTAL pct_sum=$K86_PCT_SUM agent=$K86_AGENT has_gov_rules=$K86_HAS_GOV_RULES export=$K86_EXPORT_OK"
+  fail "K86: decompose mismatch — summary=$K86_HAS_SUMMARY blocks=$K86_HAS_BLOCKS total=$K86_TOTAL pct_sum=$K86_PCT_SUM agent=$K86_AGENT has_gov_rules=$K86_HAS_GOV_RULES wrapper_nonneg=$K86_WRAPPER_NONNEG nested_in=$K86_BLOCKS_HAVE_NESTED_IN export=$K86_EXPORT_OK"
+fi
+
+# K87: static-compress always persists log entry (greenfield audit B2).
+# Prior implementation only called _logEntry on the success return path
+# — refusal paths (mode=off, backup exists, sensitive path, drift,
+# empty input, identical output, etc.) left no audit trail. Greenfield
+# 2026-06-10: 14 files compressed but .devt/state/static-compress.jsonl
+# was absent because subsequent re-runs all took refusal paths.
+# Fix: route every return through _logAndReturn which calls _logEntry
+# exactly once per invocation. K87 verifies 3 distinct return paths
+# (mode=off refusal, compress success, backup-exists refusal) all log.
+K87_TMP=$(mktemp -d)
+mkdir -p "$K87_TMP/.devt/rules"
+# Fixture 1: mode='off' refusal
+echo '{"static_compress":{"mode":"off"}}' > "$K87_TMP/.devt/config.json"
+echo '# Sample' > "$K87_TMP/.devt/rules/x.md"
+(cd "$K87_TMP" && node "$CLI" static-compress .devt/rules/x.md >/dev/null 2>&1) || true
+# Fixture 2: compress success
+echo '{"static_compress":{"mode":"on"}}' > "$K87_TMP/.devt/config.json"
+cat > "$K87_TMP/.devt/rules/y.md" <<'EOF_K87'
+# Compress Test
+This is a realistic markdown body. Articles and filler words should be removed. The compressor needs enough text to find tokens it can drop without affecting structure.
+## Section
+More body text. Includes URL https://example.com and `inline_code` and CONST_VALUE.
+EOF_K87
+(cd "$K87_TMP" && node "$CLI" static-compress .devt/rules/y.md >/dev/null 2>&1) || true
+# Fixture 3: backup-exists refusal
+(cd "$K87_TMP" && node "$CLI" static-compress .devt/rules/y.md >/dev/null 2>&1) || true
+K87_LOG_LINES=$(wc -l < "$K87_TMP/.devt/state/static-compress.jsonl" 2>/dev/null | tr -d ' ' || echo 0)
+K87_HAS_REFUSAL=$(grep -c '"reason"' "$K87_TMP/.devt/state/static-compress.jsonl" 2>/dev/null || true)
+rm -rf "$K87_TMP"
+if [ "$K87_LOG_LINES" = "3" ] && [ "$K87_HAS_REFUSAL" -ge "2" ]; then
+  pass "K87: static-compress audit trail (3 distinct return paths all logged: mode=off refusal, success, backup-exists refusal)"
+else
+  fail "K87: log persistence mismatch — log_lines=$K87_LOG_LINES (want 3) reason_count=$K87_HAS_REFUSAL (want ≥2)"
+fi
+
+# K88: workflow_id stability across re-init within active workflow
+# (greenfield audit B4). Prior init.cjs unconditionally stripped
+# created_at + workflow_id from workflow.yaml on every init * call,
+# forcing updateState to re-stamp both → workflow_id rotated on every
+# devt command. Greenfield observed 42 IDs in one conceptual workflow's
+# history. Fix: when prior workflow.yaml has active=true, preserve
+# stamps. When active=false (or absent), strip as before.
+# K88 verifies both branches.
+K88_TMP=$(mktemp -d)
+mkdir -p "$K88_TMP/.devt/state"
+echo '{}' > "$K88_TMP/.devt/config.json"
+# Branch A: active=true + same workflow_type → workflow_id preserved
+cat > "$K88_TMP/.devt/state/workflow.yaml" <<'EOF_K88'
+active: true
+workflow_id: k88-preserved-uuid
+created_at: "2026-06-01T00:00:00Z"
+workflow_type: dev
+task: "k88 fixture"
+EOF_K88
+(cd "$K88_TMP" && node "$CLI" init workflow "k88 re-init" >/dev/null 2>&1) || true
+K88_PRESERVED_ID=$(grep "^workflow_id:" "$K88_TMP/.devt/state/workflow.yaml" | head -1 | awk '{print $2}')
+# Branch B: active=false → workflow_id rotated (new UUID)
+cat > "$K88_TMP/.devt/state/workflow.yaml" <<'EOF_K88'
+active: false
+workflow_id: k88-old-closed-uuid
+created_at: "2026-06-01T00:00:00Z"
+workflow_type: dev
+task: "k88 closed fixture"
+EOF_K88
+(cd "$K88_TMP" && node "$CLI" init workflow "k88 fresh workflow" >/dev/null 2>&1) || true
+K88_ROTATED_ID=$(grep "^workflow_id:" "$K88_TMP/.devt/state/workflow.yaml" | head -1 | awk '{print $2}')
+rm -rf "$K88_TMP"
+if [ "$K88_PRESERVED_ID" = "k88-preserved-uuid" ] && [ "$K88_ROTATED_ID" != "k88-old-closed-uuid" ] && [ "$K88_ROTATED_ID" != "k88-preserved-uuid" ] && [ -n "$K88_ROTATED_ID" ]; then
+  pass "K88: workflow_id stability (active=true preserves prior ID, active=false rotates to fresh UUID)"
+else
+  fail "K88: workflow_id rotation mismatch — preserved_id='$K88_PRESERVED_ID' (want 'k88-preserved-uuid'), rotated_id='$K88_ROTATED_ID' (want fresh UUID)"
+fi
+
+# K89: graphify symbols-in-files envelope shape (greenfield audit G2).
+# Prior implementation returned a bare array []. Greenfield could not
+# distinguish "graph stale, re-index needed" from "no symbols in diff"
+# from "input was empty". New shape returns
+# { symbols, reason, graph_lag_commits, total_matches } so orchestrators
+# have actionable signal. K89 verifies (a) no-input path returns envelope
+# with reason "no input files"; (b) workflows/code-review.md consumer was
+# updated to '.symbols[]?.symbol' (not bare '.[].symbol').
+K89_NO_INPUT_REASON=$(node -e "const m = require('$ROOT/bin/modules/graphify.cjs'); const r = m.symbolsInFiles([]); process.stdout.write(r.reason || '');" 2>/dev/null || true)
+K89_HAS_ENVELOPE=$(node -e "const m = require('$ROOT/bin/modules/graphify.cjs'); const r = m.symbolsInFiles([]); process.stdout.write(typeof r === 'object' && 'symbols' in r && 'reason' in r && 'graph_lag_commits' in r && 'total_matches' in r ? 'true' : 'false');" 2>/dev/null || true)
+K89_CONSUMER_UPDATED=$(grep -cF 'symbols[]?.symbol' "$ROOT/workflows/code-review.md" 2>/dev/null || true)
+if [ "$K89_NO_INPUT_REASON" = "no input files" ] && [ "$K89_HAS_ENVELOPE" = "true" ] && [ "$K89_CONSUMER_UPDATED" -ge "1" ]; then
+  pass "K89: symbols-in-files envelope shape (reason/graph_lag_commits/total_matches keys present; consumer in code-review.md updated to .symbols[])"
+else
+  fail "K89: envelope mismatch — no_input_reason='$K89_NO_INPUT_REASON' envelope=$K89_HAS_ENVELOPE consumer_updated=$K89_CONSUMER_UPDATED"
+fi
+
+# K90: lane-suggestions skew detection (greenfield audit G6).
+# When the largest community group dominates the covered scope (>40%),
+# the partition is too skewed to parallelize meaningfully — one lane
+# would do most of the work. Greenfield observed a 230-file giant + 3
+# noise buckets in code-review-parallel and had to discard the result.
+# Fix: laneSuggestions returns mode=fallback (instead of mode=partial)
+# when skew_ratio > 0.40. K90 builds a synthetic 102/5/3 fixture →
+# 93% skew → expects fallback with skew_ratio populated.
+K90_NODE_PROBE="
+const path = require('path');
+const fs = require('fs');
+const tmp = require('os').tmpdir() + '/k90-fix-' + process.pid;
+fs.rmSync(tmp, { recursive: true, force: true });
+fs.mkdirSync(path.join(tmp, 'graphify-out'), { recursive: true });
+fs.mkdirSync(path.join(tmp, '.devt/state'), { recursive: true });
+fs.writeFileSync(path.join(tmp, '.devt/config.json'), '{\"graphify\":{\"enabled\":true}}');
+const nodes = [];
+const links = [];
+const files = [];
+for (let i = 0; i < 100; i++) { nodes.push({id:'a'+i,label:'A'+i,source_file:'src/big/x'+i+'.py',community:1}); files.push('src/big/x'+i+'.py'); }
+for (let i = 0; i < 5; i++) { nodes.push({id:'b'+i,label:'B'+i,source_file:'src/mid/y'+i+'.py',community:2}); files.push('src/mid/y'+i+'.py'); }
+for (let i = 0; i < 3; i++) { nodes.push({id:'c'+i,label:'C'+i,source_file:'src/sm/z'+i+'.py',community:3}); files.push('src/sm/z'+i+'.py'); }
+files.push('docs/readme.md','test/uncov.py');
+fs.writeFileSync(path.join(tmp, 'graphify-out/graph.json'), JSON.stringify({directed:true, multigraph:false, graph:{}, nodes, links}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.laneSuggestions(files, { targetLanes: 3 });
+process.stdout.write(JSON.stringify({mode: r.mode, has_skew_ratio: typeof r.skew_ratio === 'number', skew_above_threshold: (r.skew_ratio || 0) > 0.40}));
+fs.rmSync(tmp, { recursive: true, force: true });
+"
+K90_OUT=$(node -e "$K90_NODE_PROBE" 2>/dev/null || echo '{}')
+K90_MODE=$(echo "$K90_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).mode||'')}catch(e){console.log('')}})")
+K90_HAS_SKEW=$(echo "$K90_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).has_skew_ratio===true)}catch(e){console.log('false')}})")
+K90_ABOVE=$(echo "$K90_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).skew_above_threshold===true)}catch(e){console.log('false')}})")
+if [ "$K90_MODE" = "fallback" ] && [ "$K90_HAS_SKEW" = "true" ] && [ "$K90_ABOVE" = "true" ]; then
+  pass "K90: lane-suggestions skew detection (102/5/3 fixture → mode=fallback with skew_ratio above 40% threshold)"
+else
+  fail "K90: skew detection mismatch — mode='$K90_MODE' has_skew=$K90_HAS_SKEW above_threshold=$K90_ABOVE"
+fi
+
+# K91: graphify --allow=<pattern> whitelist for sensitive-path filter
+# (greenfield audit G7). Greenfield reported false-positive class:
+# `.env.example` / `.env.sample` are committed templates that match the
+# sensitive denylist but contain no real credentials. Fix: --allow=<substring>
+# CLI flag bypasses the denylist for known-safe paths. K91 verifies:
+# (a) without --allow, .env.example is refused (exit 2);
+# (b) with --allow=.env.example, the call succeeds.
+K91_TMP=$(mktemp -d)
+mkdir -p "$K91_TMP/.devt/state" "$K91_TMP/graphify-out" "$K91_TMP/configs"
+echo '{"graphify":{"enabled":true}}' > "$K91_TMP/.devt/config.json"
+printf '{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"x","label":"X","source_file":"configs/.env.example"}],"links":[]}' > "$K91_TMP/graphify-out/graph.json"
+touch "$K91_TMP/configs/.env.example"
+# Without --allow: refused (exit 2). Run in a subshell + `|| true` so set -e
+# doesn't kill the smoke when the expected refusal returns non-zero.
+if (cd "$K91_TMP" && node "$CLI" graphify symbols-in-files configs/.env.example >/dev/null 2>&1); then
+  K91_REFUSED_EXIT=0
+else
+  K91_REFUSED_EXIT=$?
+fi
+# With --allow: succeeds
+K91_ALLOWED_OUT=$(cd "$K91_TMP" && node "$CLI" graphify symbols-in-files configs/.env.example --allow=.env.example 2>/dev/null)
+K91_ALLOWED_REASON=$(echo "$K91_ALLOWED_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).reason||'')}catch(e){console.log('')}})")
+rm -rf "$K91_TMP"
+if [ "$K91_REFUSED_EXIT" = "2" ] && [ "$K91_ALLOWED_REASON" = "ok" ]; then
+  pass "K91: sensitive-path --allow whitelist (.env.example refused without flag, allowed with --allow=.env.example)"
+else
+  fail "K91: --allow mismatch — refused_exit=$K91_REFUSED_EXIT (want 2), allowed_reason='$K91_ALLOWED_REASON' (want 'ok')"
 fi
 
 echo

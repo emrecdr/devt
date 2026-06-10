@@ -575,12 +575,16 @@ function initWorkflow(task, pluginRoot, initVerb) {
     });
   } catch { /* non-fatal */ }
 
-  // Reset workflow.yaml unconditionally on every init * call so stale prior-session
-  // values (workflow_id, workflow_type, created_at from a different workflow) never
-  // bleed into the new session. Strip created_at + workflow_id first so updateState
-  // treats this as a fresh activation and re-stamps both fields unconditionally —
-  // the transition branch only fires on workflow_type change, but the !created_at
-  // branch fires whenever the field is absent, covering same-type re-activations too.
+  // Reset workflow.yaml on every init * call so stale prior-session values
+  // (workflow_id, workflow_type, created_at from a closed workflow) never
+  // bleed into a new session. PRESERVATION RULE (greenfield audit B4
+  // 2026-06-10): when the existing workflow.yaml has `active: true`, the
+  // workflow is still in-flight — preserve created_at + workflow_id so
+  // mcp-stats / dispatch-warnings / gate-trace correlation across phase
+  // advances remains intact. Stripping on every init was rotating IDs
+  // dozens of times within a single conceptual workflow (greenfield
+  // observed 42 IDs in one workflow_id_history). Only strip when the
+  // prior workflow is closed (active: false or absent).
   const workflowTypeForVerb = WORKFLOW_TYPE_BY_INIT_VERB[initVerb] || null;
   if (workflowTypeForVerb) {
     try {
@@ -588,16 +592,28 @@ function initWorkflow(task, pluginRoot, initVerb) {
       const wfPath = path.join(projectRoot, ".devt", "state", "workflow.yaml");
       if (fs.existsSync(wfPath)) {
         let yaml = fs.readFileSync(wfPath, "utf8");
-        yaml = yaml
-          .replace(/^created_at:.*\n?/gm, "")
-          .replace(/^workflow_id:.*\n?/gm, "")
-          // H7 (greenfield calibration #9): lanes[] are workflow-scoped to
-          // code_review_parallel — they describe THIS PR's partition, not a
-          // persistent registry. Greenfield's PR #376 review saw PR #374's
-          // lanes still in workflow.yaml because the old parser preserved the
-          // block. Strip both the bare-key marker (rare empty form) AND the
-          // nested block ("lanes:\n  - id:..." with continuation lines).
-          .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
+        const activeMatch = yaml.match(/^active:\s*(true|false)\s*$/m);
+        const priorIsActive = activeMatch && activeMatch[1] === "true";
+        if (priorIsActive) {
+          // Active workflow — preserve created_at + workflow_id for
+          // cross-phase correlation. Only strip lanes (workflow-scoped
+          // partition state that doesn't survive re-init even within an
+          // active workflow, per H7).
+          yaml = yaml.replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
+        } else {
+          // Closed (active: false) or missing active marker — strip stamps
+          // and lanes so updateState treats this as a fresh activation.
+          yaml = yaml
+            .replace(/^created_at:.*\n?/gm, "")
+            .replace(/^workflow_id:.*\n?/gm, "")
+            // H7 (greenfield calibration #9): lanes[] are workflow-scoped to
+            // code_review_parallel — they describe THIS PR's partition, not a
+            // persistent registry. Greenfield's PR #376 review saw PR #374's
+            // lanes still in workflow.yaml because the old parser preserved the
+            // block. Strip both the bare-key marker (rare empty form) AND the
+            // nested block ("lanes:\n  - id:..." with continuation lines).
+            .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
+        }
         fs.writeFileSync(wfPath, yaml);
       }
     } catch {

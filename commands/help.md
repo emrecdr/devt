@@ -174,6 +174,13 @@ Post-mortem on failed/stuck workflows — analyzes artifacts, state, git history
 
 Use when: A workflow failed and you want to understand why.
 
+### /devt:tokens
+Aggregate Claude Code session token usage for the project: input/output, cache_creation, cache_read, and per-session cache hit rate.
+
+Use when: You want to know "where are my tokens actually going across recent sessions" before deciding whether to optimize.
+
+CLI wrapper: `node bin/devt-tools.cjs dispatch decompose <agent>:<workflow_id|auto>` — decomposes a rendered dispatch envelope into static vs dynamic blocks (e.g. `governing_rules`, `prior_outputs`, `task`, `graph_impact`) so you can see which block dominates per-dispatch cache cost. Pairs with `/devt:tokens` for "which dispatch is expensive AND why."
+
 ### /devt:health [--repair]
 Diagnose plugin health — 19 checks covering config, state, rules, hooks, agents, versions. --repair auto-fixes safe issues.
 

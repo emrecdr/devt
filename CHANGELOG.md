@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.90.0] - 2026-06-10
+
+**Greenfield audit response — 7 operational fixes across 4 subsystems.** Greenfield's calibration report on the v0.84.0 → v0.89.0 trajectory surfaced 11 candidate items. After per-item root-cause validation (reproduced each on greenfield's filesystem, read the relevant module, confirmed the cause), 7 ship here. The validation-first discipline paid off: G5 (mcp-stats --workflow-id history walk) turned out to be already-implemented and working correctly — what greenfield reported as a bug was a documentation gap (historical-id queries stay strict by design; current-id queries walk the chain). 4 items deferred to v0.91.0+ (content-aware dispatch hygiene, state-update JSON auto-detect, per-agent inlining, MCP description trimming) because they need more design work or behavioral validation.
+
+Smoke: 840 passed, 0 failed (+5 K87–K91). Locking: 3/3.
+
+### Fixed
+
+- **B1: `dispatch decompose` no longer returns negative wrapper_bytes.** Greenfield reported `wrapper_bytes = -3,225` for their code-reviewer envelope. Root cause: tags nested inside other tags (e.g. `<review_checklist>` inside `<governing_rules>`) were summed both as the parent's bytes AND as the child's, double-counting and producing negative residuals. Fix: walk the tag ranges and identify each tag's outermost ancestor (`nested_in` field). Only outermost-tag bytes count toward `static_bytes`/`dynamic_bytes` totals; nested tags appear in `blocks[]` with `nested_in: <parent_tag>` for visibility but don't contribute to summary sums. Verified on greenfield: code-reviewer envelope wrapper_bytes -3,225 → +1,051 (positive, ~1.3% — XML markup overhead). K86 extended with non-negative + `nested_in` field assertions.
+
+- **B2: `static-compress.jsonl` now persists log entries for ALL return paths, not just success.** Greenfield reported the log file was absent on their filesystem despite 14 files being compressed. Root cause: `_logEntry` was only called on the success branch of `compressFile` / `restoreFile`. Refusal returns (mode=off, sensitive path, backup exists, drift, empty, identical-output, etc.) never persisted. So a typical "compressed once, re-ran and got backup-exists refusals" workflow left no audit trail. Fix: introduce `_logAndReturn` helper used by every return statement; refusal entries carry `reason` for forensic clarity. K87 verifies 3 distinct return paths (mode=off refusal, success, backup-exists refusal) all log.
+
+- **B4: `workflow_id` no longer rotates on every `init *` call within an active workflow.** Greenfield observed 42 IDs in `workflow_id_history` for one conceptual workflow — `mcp-stats --workflow-id=<current>` returns the right answer (G5 walks the chain) but downstream correlation analysis is noisy and confusing. Root cause: `init.cjs` unconditionally stripped `created_at` + `workflow_id` from `workflow.yaml` on every devt command, forcing `updateState` to treat each as a fresh activation and re-stamp. Fix: read the existing `workflow.yaml::active` flag before stripping. When `active=true`, preserve `workflow_id` + `created_at` (only lanes get stripped — they're workflow-scoped per H7). When `active=false` (or absent), strip as before so closed workflows get fresh stamps on next activation. K88 verifies both branches.
+
+- **G2: `graphify symbols-in-files` returns an envelope, not a bare array.** Greenfield reported the bare `[]` return silently collapsed three distinct states ("no input files", "graph not loaded", "no nodes match"). New shape: `{symbols, reason, graph_lag_commits, total_matches}`. `reason` explains WHY symbols is empty; `graph_lag_commits` lets the orchestrator decide whether to re-index before trusting an empty answer; `total_matches` preserves the "limit truncated to N of M" signal. Breaking change for the one workflow consumer (`workflows/code-review.md:200` updated from `jq '.[].symbol'` to `jq '.symbols[]?.symbol'`). K30 fixture updated; K89 added.
+
+- **G6: `graphify lane-suggestions` returns `mode=fallback` when partition is too skewed.** Greenfield observed a 230-file giant + 3 noise buckets passing through as `mode=partial`, forcing the orchestrator to discard the result. Fix: when the largest community group exceeds 40% of covered scope (`skew_ratio > 0.40`), downgrade `mode=partial` → `mode=fallback` with `reason` explaining the skew. Saves orchestrators a wasted dispatch decision. K90 verifies a synthetic 102/5/3 fixture (93% skew) → `mode=fallback`.
+
+- **G7: `graphify --allow=<substring>` whitelist for sensitive-path filter.** Greenfield reported the sensitive-path denylist phantom-rejects `.env.example` / `.env.sample` (committed templates with no real credentials). Fix: new `--allow=<substring>` CLI flag (repeatable) bypasses the denylist when any pattern matches the path. Refusal stderr now hints at the flag. Plain substring match — kept deliberately simple so users can copy from the refusal output. K91 verifies `.env.example` is refused without the flag and allowed with `--allow=.env.example`.
+
+- **D1: `dispatch decompose` now surfaces in `/devt:help`.** Greenfield's first reaction to v0.89.0 was "I didn't discover the tool from any doc read this session." The CLI shipped + documented in README + INTERNALS, but the workflow contract was the discovery path most operators used. Help text now includes the decompose CLI in the Diagnostics section, paired with `/devt:tokens`.
+
+### Stood down (validated as already-working or out of scope)
+
+- **G5: `mcp-stats --workflow-id` history walk.** Greenfield reported `--workflow-id=<current>` returns 0 calls. Verified on greenfield's filesystem: with the CURRENT workflow_id, mcp-stats returned 61 calls (history walk fired). With a HISTORICAL workflow_id, strict 1-hop is the documented + intentional behavior (lets operators debug specific rotations). The code at `bin/modules/mcp-stats.cjs:163-194` already implements exactly this contract. Greenfield's "bug" was a documentation/expectation gap — `--workflow-id` does what its help text says, just not what greenfield expected.
+
+### Deferred to v0.91.0+
+
+| Item | Source | Why deferred |
+|---|---|---|
+| Content-aware dispatch hygiene gate (inspect Task() prompt for canonical envelope blocks) | greenfield I1 + 1 | Needs design — the gate is currently pattern-based; content awareness requires reading the dispatched prompt body which has different access semantics |
+| `state update key={json}` auto-detect JSON-shaped values | greenfield 4 | Backward-compatibility risk — existing callers pass `key=string-value` expecting string semantics; auto-detect could surprise |
+| Per-agent selective inlining of `governing_rules` | research backlog | Needs per-agent behavioral validation; v0.90.0 ships the CLI (B1 fix) that makes this measurable |
+| MCP description trimming | research backlog | Smallest leverage (~9 KB amortized); deferred until other levers exhausted |
+
 ## [0.89.0] - 2026-06-10
 
 **Measurement-pivot release: `dispatch decompose` CLI + honest doc-update.** Real-workflow measurement in greenfield-api showed static-compress saves only 0.06–0.19% per rendered dispatch envelope (vs the 4–15% disk-level savings README implied). Deep research (5-source adversarial verification) confirmed: at 88%+ prompt-cache hit rate, in-place compression of cached system content can NET NEGATIVE due to Anthropic's cache hierarchy (any edit invalidates downstream cache at 1.25× write vs 0.1× read). The empirically validated highest-leverage lever for devt is per-agent selective inlining of `governing_rules` (83.5% of verifier:dev envelope is one block, mostly `CLAUDE.md`). Per-agent surgical change is risky without behavioral validation, so v0.89.0 ships the measurement tool first; the inlining work follows as v0.90.0 with proper per-agent validation.

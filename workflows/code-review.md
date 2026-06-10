@@ -197,7 +197,7 @@ elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "d
   DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
   DIFF_SYMBOLS_JSON='[]'
   if [ -n "$DIFF_FILES" ]; then
-    DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=10 2>/dev/null | jq -c '[.[].symbol]' 2>/dev/null || echo '[]')
+    DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=10 2>/dev/null | jq -c '[.symbols[]?.symbol]' 2>/dev/null || echo '[]')
   fi
   DIFF_SYMBOL_COUNT=$(echo "$DIFF_SYMBOLS_JSON" | jq 'length')
   if [ "$DIFF_SYMBOL_COUNT" -gt 0 ]; then

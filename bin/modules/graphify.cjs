@@ -1247,6 +1247,27 @@ function laneSuggestions(diffFiles, options) {
   }
 
   if (uncoveredCount > 0) {
+    // Skew check (greenfield audit G6 2026-06-10): if the largest group
+    // dominates the covered scope (>40%), the partition is too skewed to
+    // drive parallelism — one lane would do most of the work while others
+    // sit nearly idle. Downgrade to mode=fallback with a reason so the
+    // orchestrator falls back to path-based partitioning instead of
+    // accepting the bad partition. Threshold 0.40 chosen by greenfield's
+    // observed pathology (230-file giant + 3 noise buckets ≈ 95% skew on
+    // a 5-lane request).
+    const SKEW_THRESHOLD = 0.40;
+    const totalCovered = groups.reduce((s, g) => s + g.files.length, 0);
+    const maxGroup = groups.reduce((m, g) => Math.max(m, g.files.length), 0);
+    const skewRatio = totalCovered > 0 ? maxGroup / totalCovered : 0;
+    if (skewRatio > SKEW_THRESHOLD) {
+      return {
+        mode: "fallback",
+        groups: [],
+        reason: `partial-coverage partition too skewed (largest group ${maxGroup}/${totalCovered}=${(skewRatio * 100).toFixed(0)}% of covered scope, > ${(SKEW_THRESHOLD * 100).toFixed(0)}% threshold); orchestrator should use path-based fallback`,
+        skew_ratio: Number(skewRatio.toFixed(4)),
+        coverage_ratio: Number(coverageRatio.toFixed(4)),
+      };
+    }
     const result = {
       mode: "partial",
       groups,
@@ -1298,13 +1319,31 @@ function _avgPrefixSimilarity(filesA, filesB) {
 // returns keyword matches that don't reflect the call graph. blast_radius
 // with diff-derived symbols produces actual structural impact.
 //
-// Returns [{symbol, source_file, edge_count}] sorted desc by edge_count, with
+// Returns envelope: { symbols: [{symbol, source_file, edge_count}], reason,
+// graph_lag_commits, total_matches }. Symbols sorted desc by edge_count, with
 // file/concept/json-key nodes filtered out. Defaults to limit=10 (matches
-// blast_radius's typical comfortable input size).
+// blast_radius's typical comfortable input size). Greenfield audit G2
+// 2026-06-10: prior shape was bare array which silently collapsed three
+// distinct states ([] for "no input", "graph not loaded", "no matching
+// nodes") into the same caller observation. Envelope shape disambiguates:
+// reason explains WHY symbols is empty when it is, graph_lag_commits lets
+// the orchestrator decide whether to re-index before trusting the answer,
+// and total_matches preserves the "limit truncated" signal.
 function symbolsInFiles(diffFiles, limit = 10) {
-  if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
+  if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
+    return { symbols: [], reason: "no input files", graph_lag_commits: null, total_matches: 0 };
+  }
   const loaded = loadGraph();
-  if (!loaded.ok) return [];
+  if (!loaded.ok) {
+    return { symbols: [], reason: "graph not loaded", graph_lag_commits: null, total_matches: 0 };
+  }
+  // Cheap freshness probe — read built_at_commit + HEAD without re-parsing
+  // the graph. freshness() itself caches the result.
+  let lagCommits = null;
+  try {
+    const f = freshness();
+    lagCommits = (f && typeof f.lag_commits === "number") ? f.lag_commits : null;
+  } catch { /* leave null */ }
   const { nodeMap, inc, out } = loaded.cache.adj;
   const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
   const results = [];
@@ -1322,7 +1361,15 @@ function symbolsInFiles(diffFiles, limit = 10) {
     });
   }
   results.sort((a, b) => b.edge_count - a.edge_count);
-  return results.slice(0, Math.max(1, Math.min(limit, 200)));
+  const totalMatches = results.length;
+  const cap = Math.max(1, Math.min(limit, 200));
+  const symbols = results.slice(0, cap);
+  const reason = totalMatches === 0
+    ? (lagCommits !== null && lagCommits > 30
+        ? `no nodes in graph for these files (graph_lag_commits=${lagCommits} — likely stale; consider 'graphify update .')`
+        : "no nodes in graph for these files")
+    : (totalMatches > cap ? `truncated to limit=${cap} of ${totalMatches} total matches` : "ok");
+  return { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches };
 }
 
 // Symbol-level companion to `checkLargeFilesGodNodes`. The file-level check
@@ -1549,15 +1596,35 @@ function run(subcommand, args) {
   // Scoped to the 4 file-accepting subcommands: passing .env or ~/.ssh/id_rsa
   // would otherwise feed the path into graphify queries, which is a disclosure
   // path the orchestrator rarely intends.
+  // Parse --allow=<pattern> args (repeatable) — greenfield audit G7
+  // 2026-06-10. Whitelist substring patterns let known-safe paths bypass
+  // the sensitive-path denylist. Field-evidenced use case:
+  // `.env.example`, `.env.sample` (committed templates, never real
+  // credentials) and similar phantom-deletion noise during graphify
+  // update. Pattern match is plain substring on the filepath — kept
+  // simple deliberately so users can read the resulting refusal stderr
+  // and add a precise --allow=<token> from it.
+  const allowPatterns = args
+    .filter(a => a.startsWith("--allow="))
+    .map(a => a.slice("--allow=".length))
+    .filter(Boolean);
   const filterSensitive = (files) => {
     const { isSensitivePath } = require("./sensitive-path.cjs");
-    const blocked = files.filter(isSensitivePath);
+    const blocked = files.filter((f) => {
+      if (!isSensitivePath(f)) return false;
+      // Apply --allow whitelist: if any pattern matches the path, exempt it.
+      for (const pat of allowPatterns) if (f.includes(pat)) return false;
+      return true;
+    });
     if (blocked.length > 0) {
+      const allowHint = allowPatterns.length > 0
+        ? ` (current --allow patterns: ${JSON.stringify(allowPatterns)})`
+        : " — bypass with --allow=<substring> for known-safe paths (e.g. --allow=.env.example)";
       process.stderr.write(
         `graphify: refused ${blocked.length} sensitive path(s) — ` +
         JSON.stringify(blocked) +
         " (matches credential/key/secret pattern). " +
-        "Rename if false-positive, or remove from input list.\n",
+        "Rename if false-positive, or remove from input list" + allowHint + ".\n",
       );
       return null;
     }

@@ -67,6 +67,18 @@ function _logEntry(entry) {
   }
 }
 
+// Wrap-and-log helper — used by compressFile/restoreFile to guarantee EVERY
+// return path persists an entry in .devt/state/static-compress.jsonl,
+// not just the success path. Prior implementation only called _logEntry
+// inline on success; refusal returns (mode=off, sensitive path, backup
+// exists, drift, etc.) left no audit trail. Greenfield 2026-06-10 surfaced
+// this: 14 files compressed but no log entries — the success calls had
+// logged but the subsequent refusals on re-runs didn't.
+function _logAndReturn(action, result) {
+  _logEntry({ action, ts: new Date().toISOString(), ...result });
+  return result;
+}
+
 function _backupPath(filepath) {
   const dir = path.dirname(filepath);
   const base = path.basename(filepath, ".md");
@@ -84,60 +96,60 @@ function compressFile(filepath) {
   if (cfg.mode === "off") {
     // Disabled-by-config is the configured-as-designed state, not a failure
     // — return ok:true + skipped:true so `set -e` callers don't trip.
-    return {
+    return _logAndReturn("compress", {
       ok: true,
       path: filepath,
       skipped: true,
       reason:
         "static_compress.mode='off' — feature disabled by default. Set " +
         "static_compress.mode='on' in .devt/config.json to enable.",
-    };
+    });
   }
   const abs = path.isAbsolute(filepath) ? filepath : path.join(_findProjectRoot(), filepath);
   if (!fs.existsSync(abs)) {
-    return { ok: false, path: filepath, reason: `file does not exist: ${filepath}` };
+    return _logAndReturn("compress", { ok: false, path: filepath, reason: `file does not exist: ${filepath}` });
   }
   // Sensitive-path denylist — credentials/keys/secrets never get shipped
   // through the compressor. Same gate graphify uses.
   const { isSensitivePath } = require("./sensitive-path.cjs");
   if (isSensitivePath(filepath)) {
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason:
         "refused: filename matches credential/key/secret pattern. " +
         "Rename if false-positive.",
-    };
+    });
   }
   const sizeCap = cfg.size_cap_bytes || MAX_FILE_SIZE_DEFAULT;
   const stat = fs.statSync(abs);
   if (stat.size > sizeCap) {
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason: `file too large: ${stat.size} bytes (cap: ${sizeCap}). Override via static_compress.size_cap_bytes.`,
-    };
+    });
   }
   const original = fs.readFileSync(abs, "utf8");
   if (!original.trim()) {
-    return { ok: false, path: filepath, reason: "file empty or whitespace-only — nothing to compress." };
+    return _logAndReturn("compress", { ok: false, path: filepath, reason: "file empty or whitespace-only — nothing to compress." });
   }
   const backup = _backupPath(abs);
   if (fs.existsSync(backup)) {
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason:
         `backup already exists: ${path.relative(_findProjectRoot(), backup)}. ` +
         "Remove or rename the backup before re-running.",
-    };
+    });
   }
   const { compressed, engine } = _compressText(original);
   if (!compressed || !compressed.trim()) {
-    return { ok: false, path: filepath, reason: `compression returned empty output (engine=${engine})` };
+    return _logAndReturn("compress", { ok: false, path: filepath, reason: `compression returned empty output (engine=${engine})` });
   }
   if (compressed.trim() === original.trim()) {
-    return { ok: false, path: filepath, reason: `compression produced identical output (engine=${engine}) — nothing to do` };
+    return _logAndReturn("compress", { ok: false, path: filepath, reason: `compression produced identical output (engine=${engine}) — nothing to do` });
   }
   // Backup + readback-verify before touching the input.
   atomicWriteFileSync(backup, original);
@@ -154,11 +166,11 @@ function compressFile(filepath) {
   }
   if (readback !== original) {
     try { fs.unlinkSync(backup); } catch { /* best-effort */ }
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason: `backup readback failed: in-memory original (${original.length} bytes) differs from on-disk backup (${readback.length} bytes) — disk/encoding/antivirus may be interfering. Aborting before touching input.`,
-    };
+    });
   }
   // Structural validation — must pass `superset` mode (compressed contains
   // all structural elements of the original).
@@ -166,16 +178,16 @@ function compressFile(filepath) {
   const drift = validate(original, compressed, { mode: "superset" });
   if (!drift.ok) {
     try { fs.unlinkSync(backup); } catch { /* best-effort */ }
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason:
         `compression dropped structural elements (engine=${engine}): ` +
         drift.errors.join("; "),
-    };
+    });
   }
   atomicWriteFileSync(abs, compressed);
-  const result = {
+  return _logAndReturn("compress", {
     ok: true,
     path: filepath,
     engine,
@@ -184,9 +196,7 @@ function compressFile(filepath) {
     ratio: 1 - compressed.length / original.length,
     backup_path: path.relative(_findProjectRoot(), backup),
     warnings: drift.warnings,
-  };
-  _logEntry({ action: "compress", ts: new Date().toISOString(), ...result });
-  return result;
+  });
 }
 
 // Plugin maintainer-mode pre-compress — runs against the PLUGIN's own
@@ -371,14 +381,12 @@ function restoreFile(filepath) {
   const abs = path.isAbsolute(filepath) ? filepath : path.join(_findProjectRoot(), filepath);
   const backup = _backupPath(abs);
   if (!fs.existsSync(backup)) {
-    return { ok: false, path: filepath, reason: `no backup found at ${path.relative(_findProjectRoot(), backup)}` };
+    return _logAndReturn("restore", { ok: false, path: filepath, reason: `no backup found at ${path.relative(_findProjectRoot(), backup)}` });
   }
   const orig = fs.readFileSync(backup, "utf8");
   atomicWriteFileSync(abs, orig);
   try { fs.unlinkSync(backup); } catch { /* best-effort */ }
-  const result = { ok: true, path: filepath, restored_bytes: orig.length };
-  _logEntry({ action: "restore", ts: new Date().toISOString(), ...result });
-  return result;
+  return _logAndReturn("restore", { ok: true, path: filepath, restored_bytes: orig.length });
 }
 
 // Bulk-compress entry point — walks PROJECT-OWNED static-load surfaces

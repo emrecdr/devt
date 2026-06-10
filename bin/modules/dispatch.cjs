@@ -448,43 +448,91 @@ function cmdDecompose(target) {
   const text = cmdRenderFilled(target);
   const totalBytes = Buffer.byteLength(text, "utf8");
 
-  function measureTag(name) {
-    // Match outermost <tag>...</tag> or <tag attr="...">...</tag>; non-greedy
-    // content. NOT line-anchored — the envelope is a single rendered string
-    // with embedded XML, not Markdown.
+  // Locate every tag in the rendered text and record its [start, end]
+  // byte range. Nested tags (e.g. <review_checklist> inside <governing_rules>)
+  // produce overlapping ranges — the prior implementation summed their
+  // bytes naively, producing negative wrapper_bytes when nesting was deep.
+  // Fix (greenfield audit 2026-06-10): dedupe by NESTING. A tag's bytes
+  // are counted toward the outermost containing tag; inner tags appear
+  // in blocks[] for visibility (nested_in field) but their bytes are
+  // attributed only to the outermost ancestor in the summary totals.
+  function findTagRanges(name, kind) {
     const escapedName = name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
     const re = new RegExp("<" + escapedName + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + escapedName + ">", "g");
-    let totalBytesInTag = 0;
-    let count = 0;
+    const ranges = [];
     let m;
     while ((m = re.exec(text)) !== null) {
-      totalBytesInTag += Buffer.byteLength(m[0], "utf8");
-      count += 1;
+      ranges.push({
+        tag: name, kind,
+        start: m.index,
+        end: m.index + m[0].length,
+        bytes: Buffer.byteLength(m[0], "utf8"),
+      });
     }
-    return { total: totalBytesInTag, count };
+    return ranges;
   }
 
-  const blocks = [];
+  const allRanges = [];
+  for (const t of STATIC_TAGS) allRanges.push(...findTagRanges(t, "static"));
+  for (const t of DYNAMIC_TAGS) allRanges.push(...findTagRanges(t, "dynamic"));
+
+  // Identify the outermost ancestor for each range (or null if it's itself outermost).
+  // Outermost = no other range fully contains it. Counted-toward-summary set
+  // is the outermost ranges only; inner ranges keep their bytes for visibility
+  // but `nested_in` flags them as not counted in the summary totals.
+  for (const r of allRanges) {
+    r.nested_in = null;
+    for (const other of allRanges) {
+      if (other === r) continue;
+      if (other.start <= r.start && other.end >= r.end && (other.start < r.start || other.end > r.end)) {
+        // `other` strictly contains `r`. Pick the smallest such container
+        // (deepest direct parent) when there are multiple — that's the
+        // most informative nested_in label for the reader.
+        if (!r.nested_in || (other.end - other.start) < (r._containerSpan || Infinity)) {
+          r.nested_in = other.tag;
+          r._containerSpan = other.end - other.start;
+        }
+      }
+    }
+    delete r._containerSpan;
+  }
+
+  const blocks = allRanges.map((r) => ({
+    tag: r.tag,
+    kind: r.kind,
+    bytes: r.bytes,
+    count: 1,
+    nested_in: r.nested_in,
+  }));
+
+  // Aggregate per-tag counts (some tags may appear multiple times) and merge.
+  const byTag = new Map();
+  for (const b of blocks) {
+    const key = b.tag + "|" + (b.nested_in || "");
+    if (byTag.has(key)) {
+      const ex = byTag.get(key);
+      ex.bytes += b.bytes;
+      ex.count += 1;
+    } else {
+      byTag.set(key, { ...b });
+    }
+  }
+  const mergedBlocks = Array.from(byTag.values());
+
+  // Sum only OUTERMOST ranges toward static/dynamic totals — nested ranges
+  // already had their bytes counted by their ancestor.
   let staticBytes = 0;
   let dynamicBytes = 0;
-  for (const t of STATIC_TAGS) {
-    const r = measureTag(t);
-    if (r.count > 0) {
-      blocks.push({ tag: t, kind: "static", bytes: r.total, count: r.count });
-      staticBytes += r.total;
-    }
+  for (const b of mergedBlocks) {
+    if (b.nested_in) continue;
+    if (b.kind === "static") staticBytes += b.bytes;
+    else if (b.kind === "dynamic") dynamicBytes += b.bytes;
   }
-  for (const t of DYNAMIC_TAGS) {
-    const r = measureTag(t);
-    if (r.count > 0) {
-      blocks.push({ tag: t, kind: "dynamic", bytes: r.total, count: r.count });
-      dynamicBytes += r.total;
-    }
-  }
-  blocks.sort((a, b) => b.bytes - a.bytes);
+  mergedBlocks.sort((a, b) => b.bytes - a.bytes);
+  const blocksOut = mergedBlocks;
   const wrapperBytes = totalBytes - staticBytes - dynamicBytes;
   const round = (n) => Math.round(n * 1000) / 1000;
-  for (const b of blocks) b.pct = round(b.bytes / totalBytes);
+  for (const b of blocksOut) b.pct = round(b.bytes / totalBytes);
   return {
     agent,
     workflow_id: workflowId,
@@ -497,7 +545,7 @@ function cmdDecompose(target) {
       wrapper_bytes: wrapperBytes,
       wrapper_pct: round(wrapperBytes / totalBytes),
     },
-    blocks,
+    blocks: blocksOut,
   };
 }
 
