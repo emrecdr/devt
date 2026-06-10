@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.91.0] - 2026-06-10
+
+**Content-aware dispatch hygiene gate — closes the v0.90.0-audit I1 false-positive class.** Greenfield reported that the `dispatch_hygiene_mode: block` gate flagged hand-injected envelopes identically to truly raw dispatches: a code-reviewer prompt that carries `<context>` + `<original_review>` + `<mode>synthesis_revision</mode>` (iter-2 revision pattern) was treated the same as a bare-prose "You are reviewing Lane A" prompt. The hand-injected case is the workflow's legitimate ergonomic — orchestrator hand-rolls a richer envelope than the canonical scope_*/memory_signal trio. Gate now recognizes content-aware signals.
+
+Field telemetry (greenfield's `.devt/state/dispatch-warnings.jsonl`): of 24 raw_dispatch records, 3 were the hand-injected-envelope false-positive class. Of the 21 remaining, all are legitimate raw dispatches (Lane reviewers with no envelope structure) that the gate correctly continues to catch.
+
+Smoke: 843 passed, 0 failed (+1 K92). Locking: 3/3.
+
+### Fixed
+
+- **`hooks/dispatch-hygiene-guard.sh` now recognizes 7 additional envelope signals.** Prior implementation gated on `<scope_trust>` OR `<scope_hint>` OR `<memory_signal>` (the canonical workflow-managed trio). Expanded set: `<context>`, `<graph_impact>`, `<original_review>`, `<lane_scope>`, `<god_node_warnings>`, `<prior_outputs>`, `<provenance_protocol>`. ANY one of these (in addition to the canonical three) is now sufficient signal that the orchestrator hand-injected an envelope — content-aware detection. Truly bare-prose dispatches (no XML envelope structure at all) STILL deny when `dispatch_hygiene_mode=block`. The `ENVELOPE_NOT_REQUIRED` set (docs-writer, retro, curator, devt-coordinator) is unchanged. K92 locks the contract with 3 fixtures: hand-injected `<context>` passes, docs-writer with no envelope passes (different exemption path), bare-prose denies.
+
+### Backlog persisted (v0.92.0+)
+
+Per `.devt/state/v091-backlog.md` (RESET_EXEMPT), remaining items ranked by next-cycle value:
+1. Smoke gate audit + `node bin/devt-tools.cjs smoke list` introspection
+2. `recover-partial-impl` extension for verifier + tester (currently programmer-only)
+3. `DEVT_VALIDATE_ENFORCE=1` TODO at state.cjs:377 — shadow-mode validation has been running long enough to evaluate enforcement
+4. `state update-json` new subcommand for operator ergonomics
+
 ## [0.90.2] - 2026-06-10
 
 **Deep-validation patches — DV1 + DV2 fixes for incomplete v0.90.0 claims.** A deeper validation pass against the v0.90.0 trajectory surfaced two cases where CHANGELOG language exceeded actual code coverage. Both fixes ship as a patch since they restore the contract the CHANGELOG promised rather than introducing new behavior.

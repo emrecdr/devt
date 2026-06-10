@@ -11926,6 +11926,35 @@ else
   fail "K91b: --allow attack surface — path-substring pattern bypassed sensitive-path filter (exit=$K91B_ATTACK_EXIT, want 2)"
 fi
 
+# K92: dispatch-hygiene-guard is content-aware (v0.91.0).
+# Prior gate flagged ALL Task() calls to devt:* agents that lacked the
+# canonical <scope_trust>/<scope_hint>/<memory_signal> trio — even when
+# the orchestrator hand-injected a richer envelope shape (e.g. <context>
+# + <original_review> for iter-2 verifier revisions). Greenfield I1
+# reported the false-positive class blocked legitimate workflow teardown.
+# Fix: expanded signal set to include any of <context>, <graph_impact>,
+# <original_review>, <lane_scope>, <god_node_warnings>, <prior_outputs>,
+# <provenance_protocol>. K92 verifies:
+# (a) hand-injected <context> envelope passes (no deny)
+# (b) docs-writer with no envelope passes (ENVELOPE_NOT_REQUIRED)
+# (c) bare prose with no envelope STILL denies (real failure mode caught)
+K92_PROBE_HAND_INJECTED='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<context> <workflow_type>code_review_parallel</workflow_type> <mode>synthesis_revision</mode> <original_review>.devt/state/review.md</original_review> </context> Do the work."}}'
+K92_PROBE_DOCS_WRITER='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:docs-writer","prompt":"You are the docs-writer for Batch A. Update changelog."}}'
+K92_PROBE_BARE='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"You are reviewing Lane A. Just do it."}}'
+K92_HAND_RESULT=$(echo "$K92_PROBE_HAND_INJECTED" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_DOCS_RESULT=$(echo "$K92_PROBE_DOCS_WRITER" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_BARE_RESULT=$(echo "$K92_PROBE_BARE" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+# Hand-injected and docs-writer should produce NO deny output (empty stdout).
+K92_HAND_PASS=$([ -z "$K92_HAND_RESULT" ] && echo yes || echo no)
+K92_DOCS_PASS=$([ -z "$K92_DOCS_RESULT" ] && echo yes || echo no)
+# Bare prose should produce a deny decision.
+K92_BARE_DENIES=$(echo "$K92_BARE_RESULT" | grep -c '"decision":"deny"' || true)
+if [ "$K92_HAND_PASS" = "yes" ] && [ "$K92_DOCS_PASS" = "yes" ] && [ "$K92_BARE_DENIES" -ge "1" ]; then
+  pass "K92: dispatch-hygiene content-aware (hand-injected <context> envelope passes, ENVELOPE_NOT_REQUIRED docs-writer passes, bare prose still denies)"
+else
+  fail "K92: hygiene gate mismatch — hand_injected_pass=$K92_HAND_PASS docs_writer_pass=$K92_DOCS_PASS bare_denies=$K92_BARE_DENIES"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

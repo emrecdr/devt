@@ -55,11 +55,31 @@ node -e "
 
   // Workflow-dispatched prompts always carry at least one of these blocks.
   // Raw orchestrator-rolled prompts carry none. The check is intentionally
-  // forgiving: ANY of the three counts as 'workflow-managed'.
+  // forgiving: ANY of the signals counts as workflow-managed.
+  //
+  // Content-aware expansion (greenfield audit, post-v0.90 trajectory):
+  // legitimate hand-injected envelopes (iter-2 revision dispatches,
+  // custom lane fan-out with structured context blocks) were being flagged
+  // as raw_dispatch because they use richer structures than the canonical
+  // scope_*/memory_signal trio. Expanded the signal set to include any
+  // of: context, graph_impact, original_review, lane_scope,
+  // god_node_warnings, prior_outputs, provenance_protocol. ANY one of
+  // these (in addition to the original canonical three) indicates an
+  // envelope-managed dispatch — content-aware detection that closes the
+  // hand-injected-envelope false-positive class.
   const hasScope = /<scope_trust>/.test(prompt);
   const hasHint = /<scope_hint>/.test(prompt);
   const hasMemSig = /<memory_signal>/.test(prompt);
-  if (hasScope || hasHint || hasMemSig) process.exit(0);
+  const hasContext = /<context>/.test(prompt);
+  const hasGraphImpact = /<graph_impact>/.test(prompt);
+  const hasOriginalReview = /<original_review>/.test(prompt);
+  const hasLaneScope = /<lane_scope>/.test(prompt);
+  const hasGodNode = /<god_node_warnings>/.test(prompt);
+  const hasPriorOutputs = /<prior_outputs>/.test(prompt);
+  const hasProvenance = /<provenance_protocol>/.test(prompt);
+  if (hasScope || hasHint || hasMemSig || hasContext || hasGraphImpact ||
+      hasOriginalReview || hasLaneScope || hasGodNode || hasPriorOutputs ||
+      hasProvenance) process.exit(0);
 
   // Envelope-not-required agents — per agents/io-contracts.yaml, these agents
   // declare graphify_inputs: [] AND don't consume memory_signal/scope blocks.
