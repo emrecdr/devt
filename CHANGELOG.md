@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.88.3] - 2026-06-10
+
+**README doc-parity with v0.88.0 default flip.** v0.88.0 flipped `DEFAULTS.static_compress.mode` from `'off'` to `'on'` in code, but README still documented the old default in 3 places (JSON config example line 417, config table row line 449, broken anchor link to the renamed section heading). Reader-facing docs now match the shipped behavior.
+
+Smoke: 834 passed, 0 failed (no test change — doc fix only).
+
+### Fixed
+
+- **README JSON example** at line 417 now shows `"mode": "on"` to match v0.88.0's flipped default.
+- **Config reference table row** for `static_compress.mode` rewritten: removed "opt-in" framing, updated `Default` column to `on`, inverted the explanation to describe the opt-out path instead of the opt-in path, fixed the section anchor from `#optional-static-file-compression-built-in` to `#static-file-compression-built-in` (the heading lost its "Optional:" prefix in v0.88.0).
+
 ## [0.88.2] - 2026-06-10
 
 **prose-shrink fix surfaced by greenfield rollout — inline triple-backticks no longer break real fence protection.** Running `static-compress --all` against greenfield's `.devt/rules/quality-gates.md` revealed a previously-uncaught prose-shrink bug. The file used a blockquote-style inline example like ``` ``` ```bash parallel ``` ``` ``` followed by a real ` ```bash parallel ` fenced block. The earlier unanchored fence-protection regex `/```[\s\S]*?```/g` paired the inline closing backticks with the real fence's opening, leaving the actual code block UNPROTECTED. Downstream `\s+([,.;:!?])` then collapsed `ruff check .` → `ruff check.` inside what should have been protected code, and the structural validator (correctly) refused the compression. Fix: anchor fence-opening AND fence-closing to start-of-line (CommonMark fence rule).
