@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.90.1] - 2026-06-10
+
+**Post-v0.90.0 code-review fix — `--allow` whitelist hardened to basename match.** A code-review pass surfaced an over-permissive match in the v0.90.0 G7 `--allow` flag: prior implementation matched the pattern as substring anywhere in the path, so `--allow=.ssh/` would have bypassed `nested/.ssh/id_rsa` (because `.ssh/` appears as substring). Every documented field-evidenced use case (`.env.example`, `.env.sample`, similar template basenames) is a filename pattern — not a path component. Fix: switch to basename-equality OR basename-prefix match. Closes the path-traversal-via-substring bypass surface without affecting any legitimate use case.
+
+Smoke: 841 passed, 0 failed (+1 K91b). Locking: 3/3.
+
+### Fixed
+
+- **`graphify --allow=<pattern>` now matches against `path.basename(f)` only**, not the full path string. `--allow=.env.example` correctly bypasses `configs/.env.example` (basename equals). `--allow=.ssh/` no longer bypasses `nested/.ssh/id_rsa` (basename is `id_rsa`, doesn't start with `.ssh/`). Match is equality OR prefix on the basename — covers documented use cases (`.env.example` exact, `.env-` prefix family) without widening the bypass surface. K91b regression guard added.
+
 ## [0.90.0] - 2026-06-10
 
 **Greenfield audit response — 7 operational fixes across 4 subsystems.** Greenfield's calibration report on the v0.84.0 → v0.89.0 trajectory surfaced 11 candidate items. After per-item root-cause validation (reproduced each on greenfield's filesystem, read the relevant module, confirmed the cause), 7 ship here. The validation-first discipline paid off: G5 (mcp-stats --workflow-id history walk) turned out to be already-implemented and working correctly — what greenfield reported as a bug was a documentation gap (historical-id queries stay strict by design; current-id queries walk the chain). 4 items deferred to v0.91.0+ (content-aware dispatch hygiene, state-update JSON auto-detect, per-agent inlining, MCP description trimming) because they need more design work or behavioral validation.

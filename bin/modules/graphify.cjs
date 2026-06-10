@@ -1596,14 +1596,19 @@ function run(subcommand, args) {
   // Scoped to the 4 file-accepting subcommands: passing .env or ~/.ssh/id_rsa
   // would otherwise feed the path into graphify queries, which is a disclosure
   // path the orchestrator rarely intends.
-  // Parse --allow=<pattern> args (repeatable) — greenfield audit G7
-  // 2026-06-10. Whitelist substring patterns let known-safe paths bypass
-  // the sensitive-path denylist. Field-evidenced use case:
+  // Parse --allow=<basename> args (repeatable) — greenfield audit G7.
+  // Whitelist basename patterns let known-safe files bypass the
+  // sensitive-path denylist. Field-evidenced use case:
   // `.env.example`, `.env.sample` (committed templates, never real
-  // credentials) and similar phantom-deletion noise during graphify
-  // update. Pattern match is plain substring on the filepath — kept
-  // simple deliberately so users can read the resulting refusal stderr
-  // and add a precise --allow=<token> from it.
+  // credentials).
+  //
+  // Match is filename-equality OR filename-prefix on path.basename(f),
+  // NOT substring on the full path. Substring matching on full path
+  // (initial design) widened the bypass surface dangerously:
+  // `--allow=/.ssh/` would have whitelisted `nested/.ssh/id_rsa`
+  // because `.ssh/` appears as substring. Basename-only matching
+  // covers every documented use case (basenames like `.env.example`,
+  // `id_rsa.example`) while preventing path-traversal-via-substring.
   const allowPatterns = args
     .filter(a => a.startsWith("--allow="))
     .map(a => a.slice("--allow=".length))
@@ -1612,8 +1617,11 @@ function run(subcommand, args) {
     const { isSensitivePath } = require("./sensitive-path.cjs");
     const blocked = files.filter((f) => {
       if (!isSensitivePath(f)) return false;
-      // Apply --allow whitelist: if any pattern matches the path, exempt it.
-      for (const pat of allowPatterns) if (f.includes(pat)) return false;
+      // Apply --allow whitelist: equality or prefix match on basename.
+      const base = path.basename(f);
+      for (const pat of allowPatterns) {
+        if (base === pat || base.startsWith(pat)) return false;
+      }
       return true;
     });
     if (blocked.length > 0) {

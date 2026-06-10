@@ -11875,6 +11875,30 @@ else
   fail "K91: --allow mismatch — refused_exit=$K91_REFUSED_EXIT (want 2), allowed_reason='$K91_ALLOWED_REASON' (want 'ok')"
 fi
 
+# K91b: --allow uses basename-anchored match, NOT full-path substring.
+# Code-review hardening: prior implementation matched substring anywhere
+# in the path, so `--allow=.ssh/` would bypass `nested/.ssh/id_rsa`.
+# Fix: match against path.basename(f) only. K91b verifies the attack
+# pattern is correctly refused even with the (path-traversal-shaped)
+# allow flag present.
+K91B_TMP=$(mktemp -d)
+mkdir -p "$K91B_TMP/.devt/state" "$K91B_TMP/graphify-out" "$K91B_TMP/nested/.ssh"
+echo '{"graphify":{"enabled":true}}' > "$K91B_TMP/.devt/config.json"
+printf '{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"y","label":"Y","source_file":"nested/.ssh/id_rsa"}],"links":[]}' > "$K91B_TMP/graphify-out/graph.json"
+touch "$K91B_TMP/nested/.ssh/id_rsa"
+# With --allow=.ssh/ (path-substring-shaped) — should STILL refuse.
+if (cd "$K91B_TMP" && node "$CLI" graphify symbols-in-files nested/.ssh/id_rsa --allow=.ssh/ >/dev/null 2>&1); then
+  K91B_ATTACK_EXIT=0
+else
+  K91B_ATTACK_EXIT=$?
+fi
+rm -rf "$K91B_TMP"
+if [ "$K91B_ATTACK_EXIT" = "2" ]; then
+  pass "K91b: --allow is basename-anchored (path-substring-shaped pattern like --allow=.ssh/ does NOT bypass nested/.ssh/id_rsa)"
+else
+  fail "K91b: --allow attack surface — path-substring pattern bypassed sensitive-path filter (exit=$K91B_ATTACK_EXIT, want 2)"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
