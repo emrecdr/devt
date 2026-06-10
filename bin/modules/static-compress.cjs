@@ -158,11 +158,11 @@ function compressFile(filepath) {
     readback = fs.readFileSync(backup, "utf8");
   } catch (e) {
     try { fs.unlinkSync(backup); } catch { /* best-effort */ }
-    return {
+    return _logAndReturn("compress", {
       ok: false,
       path: filepath,
       reason: `backup readback failed (read error: ${e.code || e.message}) — aborting before touching input.`,
-    };
+    });
   }
   if (readback !== original) {
     try { fs.unlinkSync(backup); } catch { /* best-effort */ }

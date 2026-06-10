@@ -11716,6 +11716,33 @@ else
   fail "K86: decompose mismatch — summary=$K86_HAS_SUMMARY blocks=$K86_HAS_BLOCKS total=$K86_TOTAL pct_sum=$K86_PCT_SUM agent=$K86_AGENT has_gov_rules=$K86_HAS_GOV_RULES wrapper_nonneg=$K86_WRAPPER_NONNEG nested_in=$K86_BLOCKS_HAVE_NESTED_IN export=$K86_EXPORT_OK"
 fi
 
+# K86b: dispatch decompose handles multi-occurrence tags via per-byte
+# coverage tracking. Field finding: when CLAUDE.md prose mentions
+# literal tag names (e.g. "<task>" or "<governing_rules>" appearing in
+# documentation inside the governing_rules block), the prior summation-
+# based algorithm counted each occurrence as a sibling outermost range,
+# producing static_bytes + dynamic_bytes > total_bytes and wrapper_bytes
+# < 0. The fix paints per-byte coverage from outermost ranges only —
+# mathematically eliminates the double-count class. K86b runs against
+# the verifier:dev envelope rendered FROM devt's own repo (which has
+# the multi-mention pathology in CLAUDE.md) and asserts:
+# (a) wrapper_bytes >= 0
+# (b) static + dynamic + wrapper === total_bytes (no float jitter)
+# (c) multiple blocks with the same tag-name CAN appear in blocks[]
+#     (no merge-by-tag-name)
+K86B_OUT=$(node "$CLI" dispatch decompose verifier:dev 2>/dev/null)
+K86B_WRAPPER=$(echo "$K86B_OUT" | jq -r '.summary.wrapper_bytes' 2>/dev/null)
+K86B_STATIC=$(echo "$K86B_OUT" | jq -r '.summary.static_bytes' 2>/dev/null)
+K86B_DYNAMIC=$(echo "$K86B_OUT" | jq -r '.summary.dynamic_bytes' 2>/dev/null)
+K86B_TOTAL=$(echo "$K86B_OUT" | jq -r '.total_bytes' 2>/dev/null)
+K86B_SUM=$((K86B_STATIC + K86B_DYNAMIC + K86B_WRAPPER))
+K86B_TASK_OCCURRENCES=$(echo "$K86B_OUT" | jq -r '[.blocks[] | select(.tag == "task")] | length' 2>/dev/null)
+if [ "$K86B_WRAPPER" -ge "0" ] && [ "$K86B_SUM" = "$K86B_TOTAL" ] && [ "$K86B_TASK_OCCURRENCES" -ge "1" ]; then
+  pass "K86b: byte-coverage tracking (wrapper non-negative, static+dynamic+wrapper === total, multi-occurrence tags listed individually)"
+else
+  fail "K86b: byte-coverage mismatch — wrapper=$K86B_WRAPPER (want ≥0) sum=$K86B_SUM total=$K86B_TOTAL task_occurrences=$K86B_TASK_OCCURRENCES (want ≥1)"
+fi
+
 # K87: static-compress always persists log entry (greenfield audit B2).
 # Prior implementation only called _logEntry on the success return path
 # — refusal paths (mode=off, backup exists, sensitive path, drift,

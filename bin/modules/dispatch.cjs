@@ -476,60 +476,71 @@ function cmdDecompose(target) {
   for (const t of STATIC_TAGS) allRanges.push(...findTagRanges(t, "static"));
   for (const t of DYNAMIC_TAGS) allRanges.push(...findTagRanges(t, "dynamic"));
 
-  // Identify the outermost ancestor for each range (or null if it's itself outermost).
-  // Outermost = no other range fully contains it. Counted-toward-summary set
-  // is the outermost ranges only; inner ranges keep their bytes for visibility
-  // but `nested_in` flags them as not counted in the summary totals.
+  // Per-byte coverage tracking — guarantees no double-counting and
+  // mathematically prevents negative wrapper_bytes. For each range,
+  // determine its outermost ancestor by strict containment; outermost
+  // ranges paint their byte span into a coverage map. Each byte is
+  // attributed to at most one tag (the outermost containing it). The
+  // wrapper category is total_bytes - bytes-painted-by-any-range.
+  //
+  // Why this replaces the prior aggregate-summation: a tag like <task>
+  // can legitimately appear MULTIPLE times in a rendered envelope
+  // (literal mentions inside CLAUDE.md prose, plus the real dispatch
+  // <task> block). Summing per-tag-name across all occurrences double-
+  // counted bytes when occurrences overlapped or when CLAUDE.md's prose
+  // inside <governing_rules> contained literal <task> mentions — caused
+  // a "real" outer-task plus 4 nested-prose-task siblings, all summed
+  // as one entity, producing static_bytes + dynamic_bytes > total_bytes
+  // and wrapper_bytes < 0.
   for (const r of allRanges) {
     r.nested_in = null;
+    let smallestContainer = null;
+    let smallestSpan = Infinity;
     for (const other of allRanges) {
       if (other === r) continue;
+      // Strict containment: other contains r exclusively.
       if (other.start <= r.start && other.end >= r.end && (other.start < r.start || other.end > r.end)) {
-        // `other` strictly contains `r`. Pick the smallest such container
-        // (deepest direct parent) when there are multiple — that's the
-        // most informative nested_in label for the reader.
-        if (!r.nested_in || (other.end - other.start) < (r._containerSpan || Infinity)) {
-          r.nested_in = other.tag;
-          r._containerSpan = other.end - other.start;
+        const span = other.end - other.start;
+        if (span < smallestSpan) {
+          smallestSpan = span;
+          smallestContainer = other;
         }
       }
     }
-    delete r._containerSpan;
+    if (smallestContainer) r.nested_in = smallestContainer.tag;
   }
 
-  const blocks = allRanges.map((r) => ({
+  // Paint per-byte coverage from outermost ranges only.
+  // Each byte: "static" | "dynamic" | undefined (wrapper).
+  const coverage = new Array(totalBytes);
+  for (const r of allRanges) {
+    if (r.nested_in) continue; // inner ranges don't paint — their ancestor already did
+    for (let i = r.start; i < r.end; i++) {
+      // Painting precedence: first writer wins. Two outermost siblings
+      // CAN'T overlap by definition of "strict containment exclusion",
+      // but if they touch end-to-start the indices won't collide. If
+      // by pathology they do (envelope rendering bug), we accept the
+      // first-painted kind — the count stays consistent with total_bytes.
+      if (coverage[i] === undefined) coverage[i] = r.kind;
+    }
+  }
+  let staticBytes = 0, dynamicBytes = 0;
+  for (let i = 0; i < totalBytes; i++) {
+    if (coverage[i] === "static") staticBytes++;
+    else if (coverage[i] === "dynamic") dynamicBytes++;
+  }
+
+  // Build the per-block report. Each occurrence is a distinct entry
+  // (no per-tag-name merging) so consumers can see exactly which
+  // occurrence contributed which byte span — critical for envelopes
+  // with multiple appearances of the same tag.
+  const blocksOut = allRanges.map((r) => ({
     tag: r.tag,
     kind: r.kind,
     bytes: r.bytes,
-    count: 1,
     nested_in: r.nested_in,
   }));
-
-  // Aggregate per-tag counts (some tags may appear multiple times) and merge.
-  const byTag = new Map();
-  for (const b of blocks) {
-    const key = b.tag + "|" + (b.nested_in || "");
-    if (byTag.has(key)) {
-      const ex = byTag.get(key);
-      ex.bytes += b.bytes;
-      ex.count += 1;
-    } else {
-      byTag.set(key, { ...b });
-    }
-  }
-  const mergedBlocks = Array.from(byTag.values());
-
-  // Sum only OUTERMOST ranges toward static/dynamic totals — nested ranges
-  // already had their bytes counted by their ancestor.
-  let staticBytes = 0;
-  let dynamicBytes = 0;
-  for (const b of mergedBlocks) {
-    if (b.nested_in) continue;
-    if (b.kind === "static") staticBytes += b.bytes;
-    else if (b.kind === "dynamic") dynamicBytes += b.bytes;
-  }
-  mergedBlocks.sort((a, b) => b.bytes - a.bytes);
-  const blocksOut = mergedBlocks;
+  blocksOut.sort((a, b) => b.bytes - a.bytes);
   const wrapperBytes = totalBytes - staticBytes - dynamicBytes;
   const round = (n) => Math.round(n * 1000) / 1000;
   for (const b of blocksOut) b.pct = round(b.bytes / totalBytes);

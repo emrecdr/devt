@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.90.2] - 2026-06-10
+
+**Deep-validation patches — DV1 + DV2 fixes for incomplete v0.90.0 claims.** A deeper validation pass against the v0.90.0 trajectory surfaced two cases where CHANGELOG language exceeded actual code coverage. Both fixes ship as a patch since they restore the contract the CHANGELOG promised rather than introducing new behavior.
+
+Smoke: 842 passed, 0 failed (+1 K86b). Locking: 3/3.
+
+### Fixed
+
+- **DV1: `dispatch decompose` wrapper_bytes no longer goes negative on envelopes with multi-occurrence tags.** v0.90.0 B1 fixed strict nesting (e.g. `<review_checklist>` inside `<governing_rules>`) by adding the `nested_in` ancestor analysis. But when a tag like `<task>` appeared MULTIPLE times in an envelope (literal mentions in CLAUDE.md prose inside the `<governing_rules>` block, plus the real dispatch `<task>` block), the byte-summation approach treated each occurrence as a sibling outermost range. Sum of static + dynamic could exceed total, producing negative wrapper_bytes. Live evidence: devt's own verifier:dev envelope returned `wrapper_bytes: -11710`. Fix: replace summation with per-byte coverage tracking. Each byte in the rendered envelope is attributed to at most one tag (the outermost containing it); wrapper_bytes = total - bytes-painted. Mathematically eliminates the double-count class entirely. K86b regression guard locks the invariant.
+
+- **DV2: `compressFile` backup-readback read-error path now logs to `static-compress.jsonl`.** v0.90.0 B2 claim was "ALL return paths log", but 1-of-12 returns in `compressFile` was still a bare `return` — the catch-block for `fs.readFileSync` errors on the backup file (disk corruption, antivirus interference at the worst moment). The branch where the audit trail matters MOST was the one missing it. Fix: route the catch-block return through `_logAndReturn("compress", ...)` consistent with the other 11 paths.
+
+### Backlog (persisted for v0.91.0)
+
+The deeper validation pass produced an actionable backlog at `.devt/state/v091-backlog.md` (RESET_EXEMPT, gitignored). Highest-leverage next-cycle item: content-aware dispatch hygiene gate (2,218 raw_dispatch warnings vs 1 of any other type in field — 3 orders of magnitude dominant signal).
+
 ## [0.90.1] - 2026-06-10
 
 **Post-v0.90.0 code-review fix — `--allow` whitelist hardened to basename match.** A code-review pass surfaced an over-permissive match in the v0.90.0 G7 `--allow` flag: prior implementation matched the pattern as substring anywhere in the path, so `--allow=.ssh/` would have bypassed `nested/.ssh/id_rsa` (because `.ssh/` appears as substring). Every documented field-evidenced use case (`.env.example`, `.env.sample`, similar template basenames) is a filename pattern — not a path component. Fix: switch to basename-equality OR basename-prefix match. Closes the path-traversal-via-substring bypass surface without affecting any legitimate use case.
