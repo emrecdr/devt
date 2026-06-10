@@ -222,6 +222,7 @@ Commands:
   dispatch render-filled <a>:<w|auto>  Render envelope with state-driven placeholder substitution (use :auto to resolve workflow_id from active state)
   dispatch compile --check  Diff would-be-rendered vs committed marker regions; exit 1 on drift
   dispatch compile --write  Re-render marker regions atomically (manual pre-release step)
+  dispatch decompose <a>:<w|auto>  Static/dynamic byte breakdown of the rendered envelope; surfaces which blocks dominate per-dispatch cache_creation cost
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
   preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md

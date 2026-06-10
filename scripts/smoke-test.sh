@@ -11670,6 +11670,40 @@ else
   fail "K85: prose-shrink correctness mismatch — heading=$K85_C1 in_heading=$K85_C2 indented_fence=$K85_C3 lowercase=$K85_C4 inline_fences=$K85_C5 no_i_flag=$K85_NO_I_FLAG heading_pattern=$K85_HAS_HEADING_PATTERN safe_collapse=$K85_HAS_SAFE_COLLAPSE"
 fi
 
+# K86: dispatch decompose CLI surface (v0.89.0 measurement tool).
+# Pure read-only — render envelope, classify each XML block as static
+# or dynamic, return JSON with summary + per-block detail. Validates:
+# (a) JSON shape (.summary, .blocks); (b) static_pct + dynamic_pct +
+# wrapper_pct ≈ 1.0; (c) governing_rules detected as static when present
+# in the rendered envelope; (d) the new exports (cmdDecompose) are wired.
+K86_TMP=$(mktemp -d)
+mkdir -p "$K86_TMP/.devt/state"
+echo '{}' > "$K86_TMP/.devt/config.json"
+echo '{"workflow_id":"dev","active":true,"workflow_type":"dev","phase":"verify","task":"k86 fixture"}' > "$K86_TMP/.devt/state/workflow.yaml"
+K86_OUT=$(cd "$K86_TMP" && node "$CLI" dispatch decompose verifier:dev 2>/dev/null)
+K86_HAS_SUMMARY=$(echo "$K86_OUT" | jq -r '.summary | type == "object"' 2>/dev/null)
+K86_HAS_BLOCKS=$(echo "$K86_OUT" | jq -r '.blocks | type == "array"' 2>/dev/null)
+K86_TOTAL=$(echo "$K86_OUT" | jq -r '.total_bytes' 2>/dev/null)
+K86_PCT_SUM=$(echo "$K86_OUT" | jq -r '(.summary.static_pct + .summary.dynamic_pct + .summary.wrapper_pct)' 2>/dev/null)
+K86_AGENT=$(echo "$K86_OUT" | jq -r '.agent' 2>/dev/null)
+K86_HAS_GOV_RULES=$(echo "$K86_OUT" | jq -r '[.blocks[] | select(.tag == "governing_rules" and .kind == "static")] | length > 0' 2>/dev/null)
+# Export guard — cmdDecompose available externally
+K86_EXPORT_OK=$(node -e "console.log(typeof require('$ROOT/bin/modules/dispatch.cjs').cmdDecompose === 'function')")
+rm -rf "$K86_TMP"
+# pct_sum should round to ~1.0 (allow tiny float jitter via 0.99-1.01 window)
+PCT_OK=$(awk "BEGIN { v=$K86_PCT_SUM; if (v >= 0.99 && v <= 1.01) print 1; else print 0 }")
+if [ "$K86_HAS_SUMMARY" = "true" ] \
+   && [ "$K86_HAS_BLOCKS" = "true" ] \
+   && [ "$K86_TOTAL" -gt "0" ] \
+   && [ "$PCT_OK" = "1" ] \
+   && [ "$K86_AGENT" = "verifier" ] \
+   && [ "$K86_HAS_GOV_RULES" = "true" ] \
+   && [ "$K86_EXPORT_OK" = "true" ]; then
+  pass "K86: dispatch decompose CLI surface (JSON shape, pct sums to 1, governing_rules classified static, cmdDecompose exported)"
+else
+  fail "K86: decompose mismatch — summary=$K86_HAS_SUMMARY blocks=$K86_HAS_BLOCKS total=$K86_TOTAL pct_sum=$K86_PCT_SUM agent=$K86_AGENT has_gov_rules=$K86_HAS_GOV_RULES export=$K86_EXPORT_OK"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

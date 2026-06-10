@@ -917,7 +917,9 @@ For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](d
 
 ### Static-file compression (built-in)
 
-devt ships `static-compress` for compression of project markdown files that load into every code-touching agent dispatch — `.devt/rules/*.md` and project-local `guardrails/*.md`. An envelope audit showed `guardrails_inline` dominating dispatch envelope cost at ~87%, so compressing that prose layer (while leaving fenced code, inline code, URLs, paths, identifiers, version numbers, and heading lines byte-equal) gives a meaningful per-dispatch token saving. **Default is `on`** — flip to `off` in `.devt/config.json` to disable; the init-time prompt asks at setup.
+devt ships `static-compress` for compression of project markdown files that load into every code-touching agent dispatch — `.devt/rules/*.md` and project-local `guardrails/*.md`. The compressor preserves fenced code, inline code, URLs, paths, identifiers, version numbers, and heading lines byte-equal; only prose changes. **Default is `on`** — flip to `off` in `.devt/config.json` to disable; the init-time prompt asks at setup.
+
+**Honest measurement note**: in real workflows the per-dispatch wire savings are small — ~0.06–0.19% on a 37–115 KB rendered envelope in greenfield-api with an 88.86% prompt-cache hit rate. The reason is that most of the envelope is the `governing_rules` block (often dominated by `CLAUDE.md`), and Anthropic's cache hierarchy means in-place edits to cached content invalidate downstream cache. Use the new `dispatch decompose` CLI (below) to measure your own envelopes — the empirical biggest lever per dispatch is usually selective inlining of `governing_rules`, not regex compression.
 
 ```bash
 # Compress all project rules in one shot
@@ -931,6 +933,19 @@ echo '{"static_compress":{"mode":"off"}}' >> .devt/config.json
 **Compression ratio depends on prose density**: conversational or filler-heavy markdown compresses 25–35% (the compressor's design target); tightly written technical specifications compress 4–15% (measured ~4% on `guardrails/golden-rules.md`). The compressor (`prose-shrink.cjs`, zero-dependency caveman-shrink port) runs through the structural-drift validator post-compression — any drift → backup deleted, input file untouched. Five safety layers before the input is touched (sensitive-path denylist, size cap, empty-file refusal, identical-output refusal, backup-readback verification). Fully reversible via the `<path>.original.md` backup sibling.
 
 Recipe + full safety semantics: [`docs/static-compress-recipe.md`](docs/static-compress-recipe.md). Smoke gates **K77** (round-trip), **K85** (prose-shrink correctness), **K74** (structural validator) lock the contract.
+
+### Envelope decomposition (measurement tool)
+
+When investigating "where are my tokens actually going?", devt ships a read-only CLI that decomposes any rendered dispatch envelope into static vs dynamic blocks and ranks them by byte size:
+
+```bash
+# Decompose any agent's envelope for the active workflow
+node bin/devt-tools.cjs dispatch decompose verifier:auto
+# Same, with explicit workflow_id
+node bin/devt-tools.cjs dispatch decompose code-reviewer:code_review
+```
+
+Returns JSON with a `summary` (total/static/dynamic/wrapper bytes + percentages) and a `blocks[]` array sorted by size. Static blocks (`governing_rules`, `inline_rubrics`, `files_to_read`, `provenance_protocol`, etc.) pay cache-creation cost on every Task() dispatch; dynamic blocks (`scope_hint`, `scope_trust`, `memory_signal`, `graph_impact`, `prior_outputs`, `task`) vary per dispatch. The tool is the empirical input for per-agent inlining decisions — if one block dominates, that's your lever. Smoke gate **K86** locks the contract.
 
 ### Where to read more
 

@@ -407,6 +407,100 @@ function cmdRenderFilled(target) {
   return applySubstitutions(template, subs);
 }
 
+// STATIC_TAGS / DYNAMIC_TAGS — empirically classified per the envelope
+// decomposition study. STATIC means content varies rarely or
+// never across dispatches of the same workflow (governing_rules,
+// guardrails, rubrics, files_to_read, decisions); DYNAMIC means the
+// content changes per dispatch (scope_hint/scope_trust/memory_signal/
+// graph_impact/task/prior_outputs/prior_outputs_note). Static blocks
+// pay cache_creation cost on every Task() dispatch (each Task() is a
+// fresh sub-conversation), so identifying which agents have large
+// static slices is the primary input to A1 (selective inlining) work.
+const STATIC_TAGS = [
+  "governing_rules", "inline_rubrics", "rubric_content", "inline_guardrails",
+  "files_to_read", "baseline", "plan", "decisions", "agent_skills", "spec",
+  "workflow_type", "rubric_path", "original_task", "provenance_protocol",
+  "impl_summary", "test_summary", "impl_summary_sidecar", "review_checklist",
+  "graph_impact_status",
+];
+const DYNAMIC_TAGS = [
+  "scope_hint", "scope_trust", "memory_signal", "graph_impact", "graph_impact_content",
+  "task_description", "prior_outputs", "prior_outputs_note", "workflow_id", "task",
+  "god_node_warnings",
+];
+
+// cmdDecompose — render the envelope for an agent:workflow and report
+// the static/dynamic byte breakdown. Pure measurement (read-only). Use
+// case: "before optimizing token cost on this envelope, what slice
+// am I actually targeting?" Output is JSON with summary + per-block
+// detail sorted by bytes desc. Per-block bytes include the wrapper tags.
+// Unknown tags (not in STATIC_TAGS or DYNAMIC_TAGS) are counted toward
+// the "wrapper" residual.
+function cmdDecompose(target) {
+  if (!target || !target.includes(":")) {
+    throw new Error(
+      "Usage: dispatch decompose <agent>:<workflow_id|auto> (colon-joined) " +
+      "OR dispatch decompose <agent> <workflow_id|auto> (space-separated)",
+    );
+  }
+  let [agent, workflowId] = target.split(":");
+  if (workflowId === "auto") workflowId = resolveAutoWorkflowId();
+  const text = cmdRenderFilled(target);
+  const totalBytes = Buffer.byteLength(text, "utf8");
+
+  function measureTag(name) {
+    // Match outermost <tag>...</tag> or <tag attr="...">...</tag>; non-greedy
+    // content. NOT line-anchored — the envelope is a single rendered string
+    // with embedded XML, not Markdown.
+    const escapedName = name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+    const re = new RegExp("<" + escapedName + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + escapedName + ">", "g");
+    let totalBytesInTag = 0;
+    let count = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      totalBytesInTag += Buffer.byteLength(m[0], "utf8");
+      count += 1;
+    }
+    return { total: totalBytesInTag, count };
+  }
+
+  const blocks = [];
+  let staticBytes = 0;
+  let dynamicBytes = 0;
+  for (const t of STATIC_TAGS) {
+    const r = measureTag(t);
+    if (r.count > 0) {
+      blocks.push({ tag: t, kind: "static", bytes: r.total, count: r.count });
+      staticBytes += r.total;
+    }
+  }
+  for (const t of DYNAMIC_TAGS) {
+    const r = measureTag(t);
+    if (r.count > 0) {
+      blocks.push({ tag: t, kind: "dynamic", bytes: r.total, count: r.count });
+      dynamicBytes += r.total;
+    }
+  }
+  blocks.sort((a, b) => b.bytes - a.bytes);
+  const wrapperBytes = totalBytes - staticBytes - dynamicBytes;
+  const round = (n) => Math.round(n * 1000) / 1000;
+  for (const b of blocks) b.pct = round(b.bytes / totalBytes);
+  return {
+    agent,
+    workflow_id: workflowId,
+    total_bytes: totalBytes,
+    summary: {
+      static_bytes: staticBytes,
+      static_pct: round(staticBytes / totalBytes),
+      dynamic_bytes: dynamicBytes,
+      dynamic_pct: round(dynamicBytes / totalBytes),
+      wrapper_bytes: wrapperBytes,
+      wrapper_pct: round(wrapperBytes / totalBytes),
+    },
+    blocks,
+  };
+}
+
 function cmdCompile(mode) {
   const regions = listMarkerRegions();
   const drift = [];
@@ -494,10 +588,20 @@ function run(subcommand, args) {
       json(result);
       return mode === "check" && result.drift.length > 0 ? 1 : 0;
     }
+    case "decompose": {
+      // Same arg semantics as render-filled — accepts colon-joined OR
+      // space-separated `<agent> <workflow_id|auto>`.
+      let target = args[0];
+      if (target && !target.includes(":") && args[1]) {
+        target = args[0] + ":" + args[1];
+      }
+      try { json(cmdDecompose(target)); return 0; }
+      catch (err) { process.stderr.write(err.message + "\n"); return 2; }
+    }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile|decompose>\n");
       return 2;
   }
 }
 
-module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled };
+module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdDecompose };

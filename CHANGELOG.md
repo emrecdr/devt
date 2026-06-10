@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.89.0] - 2026-06-10
+
+**Measurement-pivot release: `dispatch decompose` CLI + honest doc-update.** Real-workflow measurement in greenfield-api showed static-compress saves only 0.06–0.19% per rendered dispatch envelope (vs the 4–15% disk-level savings README implied). Deep research (5-source adversarial verification) confirmed: at 88%+ prompt-cache hit rate, in-place compression of cached system content can NET NEGATIVE due to Anthropic's cache hierarchy (any edit invalidates downstream cache at 1.25× write vs 0.1× read). The empirically validated highest-leverage lever for devt is per-agent selective inlining of `governing_rules` (83.5% of verifier:dev envelope is one block, mostly `CLAUDE.md`). Per-agent surgical change is risky without behavioral validation, so v0.89.0 ships the measurement tool first; the inlining work follows as v0.90.0 with proper per-agent validation.
+
+Smoke: 835 passed, 0 failed (+1 K86). Locking: 3/3.
+
+### Added
+
+- **`dispatch decompose <agent>:<workflow_id|auto>` CLI** (`bin/modules/dispatch.cjs::cmdDecompose`). Pure read-only: renders the envelope (via existing `cmdRenderFilled`), classifies each XML block as static or dynamic via the `STATIC_TAGS` / `DYNAMIC_TAGS` registries, returns JSON with summary (`total_bytes`, `static_bytes`, `dynamic_bytes`, `wrapper_bytes` + percentages) and a `blocks[]` array sorted by byte size desc. Use to answer "which static block dominates my envelope?" before any per-agent inlining surgery. Same `:auto` semantics as `render-filled` for workflow_id resolution.
+- **K86 smoke gate**. Asserts JSON shape (`.summary`, `.blocks`), pct components sum to ~1.0, `governing_rules` correctly classified as static when present, `cmdDecompose` exported for downstream consumers.
+
+### Changed
+
+- **README static-compress section now honest**. The prior claim "~87% of envelope cost" was for the `guardrails_inline` block (plugin source), but empirical measurement showed the dominant block is `governing_rules` (project rules, mostly `CLAUDE.md`). The per-dispatch wire savings from static-compress in real workflows are 0.06–0.19%, much smaller than the 4–15% disk-level reduction suggested. README now reflects measurement, not aspiration. Introduces the new `dispatch decompose` CLI as the user-facing tool for envelope-cost investigation.
+- **INTERNALS.md** documents K86 row in the smoke-gate table.
+
+### Research-validated next step (v0.90.0+ backlog)
+
+The 5-source adversarial-verified research (cited in commit message) ranks the highest-leverage levers for devt's regime (88%+ cache hit rate, 37–115 KB envelopes):
+
+1. **Per-agent selective inlining of `governing_rules`** — surgical change requiring per-agent behavioral validation. Largest empirical leverage (~30 KB / dispatch when applicable).
+2. **Reduce Task() dispatch count per workflow** — orchestration surgery; merge adjacent steps where scope permits.
+3. **MCP description trimming** — small leverage (~9 KB amortized), risk of degrading tool-selection quality.
+
+v0.89.0 ships the measurement tool only. The actual inlining work waits for per-agent validation (sub-agent behavior, not just envelope sizes).
+
 ## [0.88.3] - 2026-06-10
 
 **README doc-parity with v0.88.0 default flip.** v0.88.0 flipped `DEFAULTS.static_compress.mode` from `'off'` to `'on'` in code, but README still documented the old default in 3 places (JSON config example line 417, config table row line 449, broken anchor link to the renamed section heading). Reader-facing docs now match the shipped behavior.
