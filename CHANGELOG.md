@@ -56,6 +56,35 @@ After Phase 2, an audit found 5 internal routing tables still referencing direct
 
 - **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
 
+### Phase 6 — CLAUDE.md slim-down (29.9% reduction in per-dispatch governing-rules cost)
+
+After Phase 1-5 transformed the surface, Phase 6 targets the **token cost lever**: CLAUDE.md is loaded into every session AND every sub-agent dispatch. Per prior measurement (memory observation 21859), CLAUDE.md is **~94% of the 31KB `governing_rules` block** injected into every sub-agent prompt. Slimming it has compounding cost impact across the plugin.
+
+**Research backing**: per CC `best-practices` doc — "CLAUDE.md is loaded every session, so only include things that apply broadly... For each line, ask: would removing this cause Claude to make mistakes? If not, cut it. Bloated CLAUDE.md files cause Claude to ignore your actual instructions! ... Excluded: Detailed API documentation (link to docs instead)."
+
+**What moved**: lines 92-141 (50 lines of verbose CLI reference with multi-paragraph descriptions: `state assert-*` gates, `state check-agent-output`, `state new-instance/list-instances`, `state recover-partial-impl`, `state advance-phase`, `state refresh-scope-context`, `static-compress`, `graphify rebuild`) → new `## Development CLI Reference` section in `docs/INTERNALS.md`. The Releasing subsection (~30 lines of release flow detail) → 2-line summary pointing to `scripts/release.sh` header comments.
+
+**What stayed**: primary CLI surface (one-liners for the every-session token budget — `init`, `state read|update|reset|validate|sync|prune`, `config get|set`, `models *`, `setup --template`, `health`, `update *`, `memory *`, `semantic *`, `report *`). All "Universal Rules", "Key Conventions", "Critical Agent + Workflow Contracts", architecture overview unchanged.
+
+### Metrics
+
+| Surface | Before | After | Δ |
+|---|---:|---:|---:|
+| CLAUDE.md line count | 295 | 240 | −55 (−18.6%) |
+| CLAUDE.md bytes | 35,699 | 25,048 | **−10,651 (−29.9%)** |
+| Estimated `governing_rules` block reduction per sub-agent dispatch | ~31KB | ~21KB | **~32% savings** |
+| docs/INTERNALS.md grew (CLI reference relocated) | 569 lines | 639 lines | +70 lines |
+
+The ~10KB removed from CLAUDE.md was pure reference material — token-cost-per-dispatch with zero behavioral information. CC docs explicitly recommend `docs/` for "detailed API documentation."
+
+Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
+
+### Validated NOT removed
+
+Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
+
+---
+
 ### Phase 5 — Runtime alignment + K100 (hooks/, bin/, templates/)
 
 After Phases 3+4 aligned the contract layer (commands/workflows/agents/skills) and the doc layer (docs/, README.md), Phase 5 closes the final alignment gap: the **runtime layer** — hook scripts that emit prompts to users, CLI modules that emit error messages, and templates that ship to user projects on `/devt:setup --init`.

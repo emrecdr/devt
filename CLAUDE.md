@@ -88,99 +88,44 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 
 ## Development Commands
 
+Primary CLI surface (one-liners for the every-session token budget; verbose entries are in `docs/INTERNALS.md::Development CLI Reference`):
+
 ```bash
-# Run the CLI tools directly
+# Compound context init (one call returns workflow context as JSON — token-saver pattern)
 node bin/devt-tools.cjs init workflow "task"
 node bin/devt-tools.cjs init review "task"
-node bin/devt-tools.cjs state read
-node bin/devt-tools.cjs state read-section --file plan.md --section "Phase 2" # Slice one heading; exact-then-prefix match
-node bin/devt-tools.cjs state update key=value
-node bin/devt-tools.cjs state reset # Archives non-exempt artifacts to .devt/state/.archive/<ts>/ (ring buffer; size: state.archive_runs, default 5; set 0 to disable)
-node bin/devt-tools.cjs state validate # Check state/artifact consistency
-node bin/devt-tools.cjs state sync # Reconstruct workflow.yaml from artifacts
-node bin/devt-tools.cjs state prune [--dry-run] # Remove orphaned artifacts
-node bin/devt-tools.cjs state check-agent-output <path> # Substance check: detects stub phrases, low word count, heading-only outputs
-node bin/devt-tools.cjs state check-agent-output <path> --structural --baseline=<sentinel-snapshot-path> [--mode=superset|equality] # Structural-drift check against a stub-first sentinel snapshot — extracts headings/code-blocks/URLs/paths/inline-codes/bullets via structural-validator.cjs (caveman validate.py port) and reports drift via structural_drift:{ok, errors, warnings, mode}. Default mode=superset (final must contain all baseline structures, may add more — fits devt's stub-first protocol). mode=equality enforces strict identity. Gated by config.validator.structural_mode (default 'warn'); 'off' is a no-op even when the flag is passed.
-node bin/devt-tools.cjs state assert-graphify-decision # Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs
-node bin/devt-tools.cjs state list-lane-outputs # Read workflow.yaml::lanes[] registry with per-lane file existence + size + stale flag (mtime < first_created_at)
-node bin/devt-tools.cjs state new-instance [--tag=<label>] # Multi-instance isolation. Generates an 8-char hex workflow_id, creates .devt/state/<id>/ subdir + .devt/state/.instances/<id>.json index entry. Typical use: `export DEVT_WORKFLOW_ID=$(devt-tools state new-instance --tag=feature-X | jq -r .wf_id)` per terminal. When DEVT_WORKFLOW_ID is set, getStateDir() returns the per-instance subdir so workflow artifacts (decisions.md, plan.md, impl-summary.md, claim-check-failures.jsonl, gate-trace.jsonl, etc.) don't collide between concurrent devt sessions. Cross-instance files (deferred.md, council transcripts, last-curator-run.txt, probe-failures.jsonl, .graphify-rebuild.lock) stay at the root. Backwards compatible: when DEVT_WORKFLOW_ID is unset, all paths resolve to the legacy `.devt/state/` root — existing single-instance users see no change. ID format `[A-Za-z0-9_-]{1,64}` is enforced; unsafe values (path traversal attempts, etc.) fall back to legacy with a stderr warning
-node bin/devt-tools.cjs state list-instances # Enumerate all instance subdirectories under .devt/state/. Returns {wf_id, created_at, last_active, phase, tag, file_count} per instance, sorted by last_active descending. Use when returning to a project the next session and need to find your previous instance: `devt-tools state list-instances | jq -r '.instances[] | "\(.wf_id) phase=\(.phase) tag=\(.tag)"'`
-node bin/devt-tools.cjs state cleanup [--apply] [--stale-days=N] [--ad-hoc-stale-days=N] # Archive ad_hoc + ephemeral + stale pattern_allowed; init.cjs auto-fires with --stale-days=1 --ad-hoc-stale-days=1 to preserve current-session work-in-progress files
-node bin/devt-tools.cjs state update-lane <id> status=<status> # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
-node bin/devt-tools.cjs state assert-knowledge-candidates-tagged # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
-node bin/devt-tools.cjs state aggregate-knowledge-candidates # Pulls #KNOWLEDGE-CANDIDATE: tags from review-lane-*.md / review.md / impl-summary*.md into scratchpad with dedup + provenance comments
-node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4] # WARN-mode gate reading preflight-brief.json::topic.extraction_confidence; never blocks, returns {ok:true, warn:bool, confidence, threshold, reason}
-node bin/devt-tools.cjs state assert-no-raw-dispatches-this-session # Post-hoc enforcement (greenfield calibration #12). Scans dispatch-warnings.jsonl for source:raw_dispatch with ts >= first_created_at; BLOCKS workflow finalize when any. Honors dispatch_hygiene_mode={block|warn|off}. Compensates for CC PreToolUse Task-deny not enforcing
-node bin/devt-tools.cjs state assert-artifact-present <agent> # Layer-1 mechanical claim-check. Reads agent's outputs.primary from agents/io-contracts.yaml, asserts the file exists + is non-empty. Returns {ok, agent, expected_path, exists, size_bytes, reason}. Every call persists result to .devt/state/claim-check-failures.jsonl for Layer-2 consumption. Workflow runners call after each output-writing dispatch to verify "agent claims it wrote X" against ground truth. Polymorphic form: `assert-artifact-present <agent>:lane-<id>` resolves expected_path from `workflow.yaml::lanes[].review_file` instead of io-contracts (used by code-review-parallel for per-lane Layer-1 records — each lane persists a distinct stream within the workflow window)
-node bin/devt-tools.cjs state assert-claim-checks-resolved # Layer-2 post-hoc finalize gate (greenfield cal #16+#17). Reads claim-check-failures.jsonl, computes per-agent latest verdict in workflow window; failures with no subsequent success block. Resolution semantic: successful re-runs overwrite prior failures. Honors claim_check_mode={block|warn|off} (default block, mirrors dispatch_hygiene_mode). Wired into all 4 workflow finalize sites adjacent to assert-no-raw-dispatches-this-session
-node bin/devt-tools.cjs state recover-partial-impl <agent> # Rate-limit-mid-section recovery diagnostic (greenfield cal #19 §5 Q17). The PARTIAL contract triggers at section boundaries; a rate-limit MID-section leaves impl-summary.md at its stub-first sentinel with no structured sidecar. CLI reads dispatch-warnings.jsonl::task_output_bytes for low_output:true + on-disk primary substance and returns a recovery decision: recovery_needed=true + suggested_action=SendMessage-resume when stub+low_output pattern matches; recovery_needed=true + suggested_action=investigate when stub but no low_output signal; recovery_needed=true + suggested_action=targeted-fix when the artifact is substantive but missing one or more sections declared in io-contracts.yaml::outputs.expected_sections (structural-drift recovery via structural-validator.cjs — gated by config.validator.structural_mode); recovery_needed=false + primary_state=substantive|missing for cleaner outcomes; recovery_needed=false + sidecar_status=<terminal> short-circuit when sidecar declares DONE/PARTIAL/etc. dev-workflow + quick-implement orchestrators call after programmer dispatch and route on the suggestion via [PARTIAL_IMPL_RECOVERY] / [STRUCTURAL_DRIFT_DETECTED] echo. Optional malformed_jsonl_lines:N field surfaces degraded dispatch-warnings telemetry when present
-node bin/devt-tools.cjs static-compress <path> [--restore] # Opt-in prose compressor for project markdown files (.devt/rules/*.md, guardrails/*.md, skill bodies). Probes for `headroom` CLI on PATH for neural extractive compression; falls back to prose-shrink.cjs (regex, caveman-shrink port) when absent. Either engine runs through structural-validator post-compression — drift detected → backup deleted, input untouched. Five safety layers before backup-write: sensitive-path denylist refusal, size cap (500 KB default), empty refusal, identical-output refusal, backup-readback with byte-mismatch detail on failure. Reversible via <path>.original.md sibling and --restore. Gated by config.static_compress.mode='off' default (returns ok:true, skipped:true, exit 0 when off — config-as-designed, not failure). Compress + restore actions log to .devt/state/static-compress.jsonl (RESET_EXEMPT). User-facing recipe: docs/static-compress-recipe.md
-node bin/devt-tools.cjs state advance-phase <phase> [key=value ...] # Runtime gate-at-transition (greenfield cal #18 #1). Reads workflow_type from state, looks up required gates for target phase in workflows/_phase-gates.yaml, runs each gate via existing assert-* functions; throws on any failure → process exits 1. Phases NOT in registry fall through to plain update (backwards compat). Every gate firing logs to gate-trace.jsonl with name prefixed "advance-phase:<gate>". Migrated 4 workflows at finalize-deactivation (replaces `state update phase=X status=DONE active=false`)
-node bin/devt-tools.cjs state refresh-scope-context # Alias for `preflight scope-cache`. Re-derives scope_trust from preflight-brief.json::graph_stats + staleness (with staleness-threshold override) and persists to workflow.yaml::scope_trust_json. Idempotent, ~50ms. Wired into each dispatch site so cached scope_trust always reflects current graph state, not the value computed at workflow start
-node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N] # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
-node bin/devt-tools.cjs config get
-node bin/devt-tools.cjs config set key=value
-node bin/devt-tools.cjs models get [profile]     # Default: balanced. Profiles: quality / balanced / budget / inherit
-node bin/devt-tools.cjs models resolve [profile] # Aliases resolved to model IDs (opus → claude-opus-4-6 etc.)
-node bin/devt-tools.cjs models list              # List 4 available profiles
-node bin/devt-tools.cjs models table [profile]   # Per-agent assignments — see README.md::Model profiles for the full table
-node bin/devt-tools.cjs setup --template <name> [--mode create|update|reinit] [--detect]
-node bin/devt-tools.cjs semantic sync
-node bin/devt-tools.cjs semantic query <search terms>
-node bin/devt-tools.cjs semantic compact [--dry-run]
-node bin/devt-tools.cjs semantic status
-node bin/devt-tools.cjs report window [--weeks N]
-node bin/devt-tools.cjs report generate [--weeks N] [--output PATH]
+
+# State (workflow.yaml + .devt/state/ artifacts)
+node bin/devt-tools.cjs state read|update|reset|validate|sync|prune
+node bin/devt-tools.cjs state read-section --file plan.md --section "Phase 2"
+node bin/devt-tools.cjs state cleanup [--apply] [--stale-days=N]
+
+# Config + agent/model profiles
+node bin/devt-tools.cjs config get|set
+node bin/devt-tools.cjs models get|resolve|list|table [profile]
+
+# Project setup + maintenance
+node bin/devt-tools.cjs setup --template <name> [--mode create|update|reinit]
 node bin/devt-tools.cjs health [--repair]
-node bin/devt-tools.cjs update check [--force]
-node bin/devt-tools.cjs update status
-node bin/devt-tools.cjs update local-version
-node bin/devt-tools.cjs update install-type
-node bin/devt-tools.cjs update dirty
-node bin/devt-tools.cjs update clear-cache
-node bin/devt-tools.cjs update changelog
+node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|clear-cache|changelog
+
+# Memory layer (multi-root, FTS5)
+node bin/devt-tools.cjs memory init|index|query|get|affects|list|links|active|rejected-keywords|validate|suggest
+
+# Semantic search + reports
+node bin/devt-tools.cjs semantic sync|query|compact|status
+node bin/devt-tools.cjs report window|generate [--weeks N]
 ```
 
-There are no build steps or linters configured for the plugin itself. The codebase is all CommonJS Node.js (`.cjs`) for the tooling and Markdown for prompts/workflows/agents.
+→ docs/INTERNALS.md::Development CLI Reference for the full inventory including `state assert-*` gates, claim-check, `recover-partial-impl`, multi-instance isolation (`state new-instance|list-instances`), `static-compress`, and `graphify rebuild`.
 
-CI runs two test scripts on every push (`.github/workflows/ci.yml`):
+No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-```bash
-bash scripts/smoke-test.sh # CLI smoke checks across all subcommands (manifest parses, init/state/config/models/update/health/semantic/report/setup return JSON, 50 KB cap rejection, concurrent locking, agent 500-line budget)
-node scripts/test-locking.cjs # 20-worker concurrent state-write test — asserts no lost updates, no orphaned .lock
-```
-
-Run both locally before committing changes to `bin/`, `hooks/`, or `.claude-plugin/`. The CI workflow also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage (every VERSION must have a matching `## [X.Y.Z]` section), and `workflow_type` registry coverage (every entry in `VALID_WORKFLOW_TYPES` must have routing in `next.md`).
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + drift guards K94-K100) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
-The release flow is tag-driven via `.github/workflows/release.yml`.
-
-**Recommended**: after bumping VERSION + plugin.json + CHANGELOG and committing, run:
-
-```bash
-bash scripts/release.sh X.Y.Z
-```
-
-The helper pushes commits and the tag separately (avoiding the bulk-push edge case where the per-tag push event silent-skips), uses an annotated tag (more reliable workflow trigger than lightweight), verifies the GitHub release was created, and surfaces the manual-dispatch recovery command if it wasn't.
-
-**Manual flow** (use only if the helper isn't available — e.g., during initial setup):
-
-```bash
-# 1. Bump VERSION, plugin.json version, and write the new CHANGELOG section
-# 2. Commit (CI verifies coherence + CHANGELOG coverage on push to main)
-git commit -m "chore(release): vX.Y.Z — short headline"
-git push
-
-# 3. Tag and push — the release workflow fires on the tag-push event
-git tag vX.Y.Z
-git push origin vX.Y.Z
-
-# 4. If the workflow didn't fire (silent-skip recurrence), fall back to:
-gh workflow run release.yml -f tag=vX.Y.Z
-```
-
-The workflow extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` via `scripts/extract-changelog.sh` and creates a GitHub release with those notes. It is idempotent — if a release already exists for the tag, it exits cleanly. Tags containing `-` (e.g. `v1.0.0-rc1`) are flagged as prereleases. All step-output values are passed through `env:` rather than direct `${{ }}` shell interpolation, so a maliciously named tag cannot inject shell.
+Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHANGELOG, commit, then `bash scripts/release.sh X.Y.Z` — the helper handles separate commit-then-tag push (avoiding bulk-push silent-skip), annotated tag, post-push verification, and manual-dispatch recovery if the workflow didn't fire. See script header comments for the manual flow.
 
 ## Key Conventions
 
