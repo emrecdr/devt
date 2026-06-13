@@ -327,10 +327,10 @@ User → Command (thin) → Workflow (orchestration) → Agent (worker)
 
 The execution model follows a **Command → Workflow → Agent** architecture:
 
-- **Commands** (35 files): thin entry points. Parse arguments, delegate to a workflow. Each `commands/*.md` that delegates to a workflow file pairs the `@${CLAUDE_PLUGIN_ROOT}/workflows/<name>.md` reference with an explicit `Read` instruction in its `<process>` block — the workflow body is deterministically present in the orchestrator's context.
-- **Workflows** (34 files): orchestration. Determine tier, coordinate agents, manage state transitions. Orchestrator owns MCP calls — sub-agents consume the produced `.devt/state/*.md` files READ-ONLY. Each workflow's `<step>` blocks are the contract; orchestrators don't improvise N-way parallel fan-out beyond the dispatches the workflow specifies. For oversized review scopes, the code-reviewer's built-in `community-filter` defers out-of-scope files into `## Out-of-Scope Files (Deferred)` in `review.md`, then the orchestrator dispatches follow-up `/devt:review` calls for the deferred set.
+- **Commands** (19 files): thin entry points — 15 user-invocable + 4 specialized (`preflight`, `autoskill`, `thread`, `council`) hidden from the `/`-menu via `user-invocable: false` but still typed-callable. Parse arguments, delegate to a workflow. Each `commands/*.md` that delegates to a workflow file pairs the `@${CLAUDE_PLUGIN_ROOT}/workflows/<name>.md` reference with an explicit `Read` instruction in its `<process>` block — the workflow body is deterministically present in the orchestrator's context.
+- **Workflows** (36 files): orchestration. Determine tier, coordinate agents, manage state transitions. Orchestrator owns MCP calls — sub-agents consume the produced `.devt/state/*.md` files READ-ONLY. Each workflow's `<step>` blocks are the contract; orchestrators don't improvise N-way parallel fan-out beyond the dispatches the workflow specifies. For oversized review scopes, the code-reviewer's built-in `community-filter` defers out-of-scope files into `## Out-of-Scope Files (Deferred)` in `review.md`, then the orchestrator dispatches follow-up `/devt:review` calls for the deferred set.
 - **Agents** (11 files): 10 focused workers (programmer/tester/code-reviewer/docs-writer/architect/retro/curator/verifier/researcher/debugger) plus the opt-in `devt-coordinator` main-thread router. Every sub-agent's `tools:` is stdlib-only (`Read, Bash, Glob, Grep` + optional `Write, Edit`) — no `mcp__*` grants. MCP belongs to the orchestrator.
-- **Skills** (16 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
+- **Skills** (17 directories): technique libraries injected into agents (codebase scanning, complexity assessment, TDD patterns, verification patterns, memory curation, Graphify helpers, …).
 - **Hooks** (7 lifecycle events): SessionStart, Stop, SubagentStart, SubagentStop, PostToolUse, PreToolUse, UserPromptSubmit. Profile-controlled (`DEVT_HOOK_PROFILE=minimal|standard|full`). `run-hook.js` writes a forensic trace record per invocation to `.devt/state/hook-trace/run-hook.jsonl` — the diagnostic source-of-truth for "did the harness invoke this hook?".
 
 ### Workflow tiers
@@ -842,6 +842,7 @@ node bin/devt-tools.cjs health [--repair]
 node bin/devt-tools.cjs report window|generate
 node bin/devt-tools.cjs token-report [--sessions=N --baseline=PATH --compare=PATH --regression --fail-on-regression]
 node bin/devt-tools.cjs mcp-stats [--since=DATE --tool=NAME --workflow-id=ID --workflow-type=TYPE --phase=PHASE]
+node bin/devt-tools.cjs dispatch warnings [--by-source|--by-agent|--limit=N|--since=ISO|--raw]   # Summarize raw_dispatch incidents from .devt/state/dispatch-warnings.jsonl
 
 # Updates
 node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|clear-cache|changelog
@@ -870,14 +871,15 @@ devt/
   .claude-plugin/        Plugin manifest
   bin/
     devt-tools.cjs       CLI entry point
-    devt-memory-mcp.cjs  Vendored read-only MCP server (10 tools, JSON-RPC stdio)
-    modules/             init, state, config, model-profiles, setup, memory, preflight,
-                         discovery, graphify, deferred, mcp-stats, token-report,
-                         security, health, weekly-report, update, cli-args, io
-  commands/              Slash command entry points (32 files)
-  workflows/             Orchestration files (31 files)
-  agents/                Agent definitions (10 files; 3 agents bundle sub-skill subdirectories)
-  skills/                Skill libraries (16 directories)
+    devt-memory-mcp.cjs  Vendored MCP server (14 tools, JSON-RPC stdio; read-only by default, write surface gated by `DEVT_MCP_ALLOW_WRITES=1`)
+    modules/             32 zero-dep modules — init, state, config, model-profiles, setup, memory, preflight,
+                         discovery, graphify, deferred, dispatch, mcp-stats, token-report, hook-cost, security,
+                         health, weekly-report, update, prose-shrink, static-compress, … (full inventory:
+                         docs/INTERNALS.md::CLI Modules)
+  commands/              Slash command entry points (19 files: 15 visible + 4 specialized hidden)
+  workflows/             Orchestration files (36 files)
+  agents/                Agent definitions (11 files; 3 agents bundle sub-skill subdirectories)
+  skills/                Skill libraries (17 directories)
   hooks/                 Lifecycle hook scripts + hooks.json
   guardrails/            Protective guidelines
   references/            Technique libraries (questioning guide, domain probes, council offramp)
@@ -968,7 +970,7 @@ Returns JSON with a `summary` (total/static/dynamic/wrapper bytes + percentages)
 
 ### CI
 
-GitHub Actions runs `scripts/smoke-test.sh` (260+ assertions across all CLI subcommands) and `scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Version coherence, CHANGELOG coverage, and `workflow_type` registry coverage are enforced. Releases are tag-driven — push `vX.Y.Z` to fire `.github/workflows/release.yml` which extracts the matching CHANGELOG section into the GitHub release notes.
+GitHub Actions runs `scripts/smoke-test.sh` (850+ assertions across all CLI subcommands, including a 12-deep drift-guard stack `K94–K105` covering command stratification, parameter routing, stale-ref scans, `workflow_type` registry parity, size budgets, and CLI surface contracts) and `scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Version coherence, CHANGELOG coverage, and `workflow_type` registry coverage are enforced. Releases are tag-driven — push `vX.Y.Z` to fire `.github/workflows/release.yml` which extracts the matching CHANGELOG section into the GitHub release notes.
 
 ---
 
