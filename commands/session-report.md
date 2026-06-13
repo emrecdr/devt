@@ -1,6 +1,7 @@
 ---
 name: session-report
 description: Generate a session summary — work done, commits, decisions, outcomes
+user-invocable: false
 ---
 
 <objective>

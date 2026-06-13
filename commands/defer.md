@@ -1,6 +1,7 @@
 ---
 name: defer
 description: Capture a deferred TODO to .devt/state/deferred.md — survives across workflows. Use when something should be done later but shouldn't derail current work.
+user-invocable: false
 ---
 
 <tool_restrictions>

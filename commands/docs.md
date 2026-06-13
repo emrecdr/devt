@@ -1,6 +1,7 @@
 ---
 name: docs
 description: Update project documentation to reflect recent code changes — standalone, no active workflow required
+user-invocable: false
 ---
 
 <tool_restrictions>

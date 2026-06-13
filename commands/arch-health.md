@@ -2,6 +2,7 @@
 name: arch-health
 description: Architecture health scan — detect violations, coupling issues, and structural drift. Supports delta mode (new issues only), baseline management, and interactive triage.
 argument-hint: "[--all] [--update-baseline] [--triage]"
+user-invocable: false
 ---
 
 <tool_restrictions>

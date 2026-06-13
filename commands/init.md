@@ -1,6 +1,7 @@
 ---
 name: init
 description: Interactive project setup wizard that configures devt for a new or existing project
+user-invocable: false
 ---
 
 <tool_restrictions>

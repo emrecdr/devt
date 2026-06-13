@@ -1,6 +1,7 @@
 ---
 name: health
 description: Diagnose devt plugin health — checks .devt/state/, .devt/rules/, config, and hook status. Use when workflows fail unexpectedly or after interrupted sessions.
+user-invocable: false
 ---
 
 <tool_restrictions>

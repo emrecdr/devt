@@ -2,6 +2,7 @@
 name: preflight
 description: Generate a Topic Pre-Flight Brief for a task — surfaces governing ADR/CON/FLOW, REJ tombstones, lessons, and (with Graphify) blast radius. Auto-fired by dev workflows.
 argument-hint: "<task description>   e.g. /devt:preflight 'Add MFA to AuthService'"
+user-invocable: false
 ---
 
 <tool_restrictions>

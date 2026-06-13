@@ -1,6 +1,7 @@
 ---
 name: forensics
 description: Post-mortem investigation of failed or stuck workflows — analyzes artifacts, state, and git history to diagnose what went wrong
+user-invocable: false
 ---
 
 <tool_restrictions>

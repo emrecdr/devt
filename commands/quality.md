@@ -1,6 +1,7 @@
 ---
 name: quality
 description: Run quality gates — lint, typecheck, and tests
+user-invocable: false
 ---
 
 <tool_restrictions>

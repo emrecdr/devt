@@ -2,6 +2,7 @@
 name: clarify
 description: Discuss implementation choices and capture decisions before coding — identifies gray areas and prevents wrong assumptions
 argument-hint: "<task description> [--assumptions]"
+user-invocable: false
 ---
 
 <tool_restrictions>

@@ -1,6 +1,7 @@
 ---
 name: retro
 description: Extract lessons learned from the current session into persistent memory
+user-invocable: false
 ---
 
 <tool_restrictions>

@@ -1,6 +1,7 @@
 ---
 name: uninstall
 description: Reset or uninstall devt — pick between reinit (keep memory), project reset, full clean, or plugin uninstall
+user-invocable: false
 ---
 
 <tool_restrictions>

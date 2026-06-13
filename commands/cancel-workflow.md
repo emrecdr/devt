@@ -1,6 +1,7 @@
 ---
 name: cancel-workflow
 description: Abort the currently active workflow and reset state
+user-invocable: false
 ---
 
 <tool_restrictions>

@@ -1,6 +1,7 @@
 ---
 name: council
 description: Pressure-test an engineering decision through 5 advisors with adversarial peer review. Use for high-stakes choices where you suspect your first instinct is biased.
+user-invocable: false
 ---
 
 <tool_restrictions>

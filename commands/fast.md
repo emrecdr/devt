@@ -1,6 +1,7 @@
 ---
 name: fast
 description: Execute a trivial task inline — no subagents, no planning overhead. For tasks touching 3 or fewer files with no architectural impact.
+user-invocable: false
 ---
 
 <tool_restrictions>

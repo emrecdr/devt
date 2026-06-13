@@ -1,6 +1,7 @@
 ---
 name: pause
 description: Pause current workflow and create a structured handoff for session resumption — captures progress, decisions, and context notes
+user-invocable: false
 ---
 
 <tool_restrictions>

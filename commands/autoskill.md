@@ -1,6 +1,7 @@
 ---
 name: autoskill
 description: Analyze the current session for patterns and propose skill/agent improvements
+user-invocable: false
 ---
 
 <tool_restrictions>

@@ -1,6 +1,7 @@
 ---
 name: weekly-report
 description: Generate a weekly development activity report from git history
+user-invocable: false
 ---
 
 <tool_restrictions>

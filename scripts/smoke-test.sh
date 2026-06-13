@@ -12025,6 +12025,40 @@ else
   fail "K93: hook-cost-estimate mismatch — ok=$K93_OK summary=$K93_HAS_SUMMARY hooks=$K93_HAS_HOOKS_ARRAY total=$K93_TOTAL_HOOKS dhg=$K93_DHG_REC bash=$K93_BASH_REC sess=$K93_SESS_REC invalid_ok=$K93_INVALID_OK 24h_days=$K93_24H_DAYS"
 fi
 
+# K94: command-surface stratification contract.
+# Validates the Tier-1/Tier-2 visible-vs-hidden split shipped in v0.93.0+.
+# Visible (14): do, workflow, specify, plan, research, implement, debug,
+# review, ship, status, next, memory, help, note.
+# Hidden via `user-invocable: false` (22): clarify, fast, docs, retro,
+# pause, cancel-workflow, defer, init, update, uninstall, health,
+# arch-health, quality, forensics, session-report, weekly-report, tokens,
+# mcp-stats, preflight, autoskill, thread, council.
+# Hidden commands stay typed-callable — the frontmatter only affects the
+# `/`-menu autocomplete. The contract drift class this guards against:
+# a new command added without an explicit tier decision, or a hidden
+# command accidentally re-promoted to visible by frontmatter edit.
+K94_VISIBLE="do workflow specify plan research implement debug review ship status next memory help note"
+K94_HIDDEN="clarify fast docs retro pause cancel-workflow defer init update uninstall health arch-health quality forensics session-report weekly-report tokens mcp-stats preflight autoskill thread council"
+K94_VISIBLE_OK=yes
+for cmd in $K94_VISIBLE; do
+  if [ ! -f "$ROOT/commands/$cmd.md" ]; then K94_VISIBLE_OK=no; break; fi
+  if grep -q "^user-invocable: false" "$ROOT/commands/$cmd.md"; then K94_VISIBLE_OK=no; break; fi
+done
+K94_HIDDEN_OK=yes
+for cmd in $K94_HIDDEN; do
+  if [ ! -f "$ROOT/commands/$cmd.md" ]; then K94_HIDDEN_OK=no; break; fi
+  if ! grep -q "^user-invocable: false" "$ROOT/commands/$cmd.md"; then K94_HIDDEN_OK=no; break; fi
+done
+# Count check: every commands/*.md should be in exactly one bucket.
+K94_TOTAL_CMDS=$(find "$ROOT/commands" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+K94_EXPECTED=$(echo "$K94_VISIBLE $K94_HIDDEN" | wc -w | tr -d ' ')
+K94_TOTALS_MATCH=$([ "$K94_TOTAL_CMDS" = "$K94_EXPECTED" ] && echo yes || echo no)
+if [ "$K94_VISIBLE_OK" = "yes" ] && [ "$K94_HIDDEN_OK" = "yes" ] && [ "$K94_TOTALS_MATCH" = "yes" ]; then
+  pass "K94: command-surface stratification (14 visible, 22 hidden via user-invocable:false, totals match disk inventory)"
+else
+  fail "K94: stratification drift — visible_ok=$K94_VISIBLE_OK hidden_ok=$K94_HIDDEN_OK totals_match=$K94_TOTALS_MATCH (disk=$K94_TOTAL_CMDS expected=$K94_EXPECTED)"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

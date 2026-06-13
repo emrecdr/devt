@@ -6,6 +6,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+**Command surface stratification — 36 commands cut to 14 visible.** Adds `user-invocable: false` to 22 advanced/admin/telemetry commands so they're hidden from the `/`-autocomplete menu while remaining fully typed-callable. The casual-user mental model collapses from 36 equal-tier commands to 14 (6 Tier-1 daily entries + 6 Tier-2 verbs by intent + 2 knowledge commands). Aligns with the surface size of every successful CC plugin we measured: superpowers (14 skills), document-skills (18), feature-dev (1 command), pr-review-toolkit (1) — devt was the outlier at 36.
+
+This is Phase 1 of a 3-phase parameterization roadmap (the only phase shipped here). Phase 2 will wire parameter routing onto family heads (`/devt:workflow --mode=specify`, `/devt:status --report=session`, etc.). Phase 3 will delete the now-hidden command files and mass-update the ~200 internal cross-references to use the family-head + param form. Per current "no real users yet, ignore backward compat" stance, each phase ships clean without transitional shims.
+
+**Hidden (22):** clarify, fast, docs, retro, pause, cancel-workflow, defer, init, update, uninstall, health, arch-health, quality, forensics, session-report, weekly-report, tokens, mcp-stats, preflight, autoskill, thread, council.
+**Visible (14):** do, workflow, specify, plan, research, implement, debug, review, ship, status, next, memory, help, note.
+
+### Added
+
+- **`commands/help.md`** — rewritten with tiered display. Default `/devt:help` shows only Tier 1 (daily) + Tier 2 (verbs by intent) + Tier 3 (knowledge) = 14 commands. New `--all` flag surfaces the full 22-command advanced inventory grouped by family (workflow modes, lifecycle, admin, architecture, telemetry, specialized) plus the Phase 2 parameter-consolidation roadmap. Old help was 220 lines listing all 36 commands equally; new help leads with the casual-user working set.
+- **`scripts/smoke-test.sh::K94`** — locks the stratification contract. Asserts every command in the 14-visible list lacks `user-invocable: false`, every command in the 22-hidden list has it, and the totals match the disk inventory. Drift-class guarded: any new command added without an explicit tier decision will fail K94, forcing the maintainer to classify it before merge.
+
+### Validated against competitor surface
+
+| Plugin | Commands | Skills | Total user-visible | UX model |
+|---|---:|---:|---:|---|
+| devt before this change | 36 | 17 | 51-64 | command-first, equal tiers |
+| devt after Phase 1 | 14 visible (36 callable) | 13 visible | 27 | command-first, stratified |
+| superpowers (Anthropic) | 0 | 14 | 14 | skill-first |
+| document-skills (Anthropic) | 0 | 18 | 21 | skill-only |
+| feature-dev (CC official) | 1 | 0 | 4 | one entry command |
+| pr-review-toolkit | 1 | 0 | 7 | one entry command |
+
+devt is now in the LOW range for top-level commands without losing any underlying functionality. All 36 commands remain installed and direct-typed-callable; only autocomplete surface is reduced.
+
+### Why hide instead of delete (Phase 1 only)
+
+Cross-reference audit before deletion: the 23 to-be-hidden commands have **203 total references** across workflows/, commands/, agents/, skills/, guardrails/, docs/, README.md, and CLAUDE.md. `/devt:clarify` alone is referenced 27 times; `/devt:preflight` 19 times. A single-commit "clean rewrite" with deletions would require touching ~50 unique files for routing updates and is too risky for one cycle. Phase 1 (frontmatter-only) is fully reversible per-file and ships immediate UX clarity. Phases 2-3 land structural cleanliness without the all-or-nothing risk.
+
+---
+
 **Per-hook migration ROI CLI — observability before any hook-type change.** New `node bin/devt-tools.cjs hook-cost-estimate [--window=7d|24h]` subcommand reads `.devt/state/hook-trace/run-hook.jsonl` and reports, per hook script: fire count in the window, brittleness score (JS-regex + shell pattern count), estimated tokens-per-fire if migrated to `prompt`-type hook, estimated weekly LLM cost in USD, added latency, and a recommendation (`migrate` / `consider` / `stay`). Cross-references `hooks/hooks.json` to discover each script's event(s) so lifecycle hooks (SessionStart, Stop, SubagentStart/Stop, UserPromptSubmit, etc.) are never recommended for prompt-hook migration regardless of brittleness — they don't make decisions and would be pure cost. Built as the empirical foundation for future hook migration decisions: pick from data, not intuition.
 
 On the live devt trace (7 days, 2,413 fires), the tool classifies `dispatch-hygiene-guard.sh` as the single best migration candidate (138 fires, 10 JS-regex literals from the recent v0.91.0 false-positive fix, exits-nonzero=3 indicating real denial activity, est cost $0.04/wk), with `context-monitor.sh` and `memory-auto-index.sh` flagged for `consider` review (cost-driven — both fire on PostToolUse `*` with large stdin payloads, ~$6/wk and $5/wk respectively). Critical security guards like `bash-guard.sh` correctly stay shell-backed because their fire rate exceeds the migration cap.

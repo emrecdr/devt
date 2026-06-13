@@ -2,6 +2,7 @@
 name: update
 description: Check for and install devt plugin updates from GitHub. Use --force to bypass cache.
 argument-hint: "[--force]"
+user-invocable: false
 ---
 
 Check for newer versions of the devt plugin and guide the user through updating.

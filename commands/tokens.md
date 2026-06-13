@@ -1,6 +1,7 @@
 ---
 name: tokens
 description: Token usage telemetry from Claude Code session logs — per-session and aggregate cache-hit rate. Supports --sessions=N, --since, --baseline, --compare for measuring optimizations.
+user-invocable: false
 ---
 
 <tool_restrictions>

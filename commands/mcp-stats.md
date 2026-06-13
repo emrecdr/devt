@@ -1,6 +1,7 @@
 ---
 name: mcp-stats
 description: Per-tool MCP stats — calls, error rate, p50/p95/p99 durations from .devt/memory/_mcp-trace.jsonl. Flags --since, --tool, --top=N --by=calls|duration|errors, --prune-older-than.
+user-invocable: false
 ---
 
 <tool_restrictions>
