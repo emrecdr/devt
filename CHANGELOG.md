@@ -6,6 +6,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+**Command surface stratification + parameter routing — Phase 1 + Phase 2.** Casual user surface collapses from 36 equal-tier commands to 15 family-head commands with rich parameter modes that route to the right underlying workflow. Hidden direct-form commands remain typed-callable for muscle memory / scripts. No functionality removed; the structural cleanup is presentation + routing only.
+
+### Phase 2 — Parameter Routing (this commit)
+
+**6 family heads gained parameter routing**, eliminating the need to memorize 22 separate command names:
+
+| Family Head | Parameter Surface | Routes To |
+|---|---|---|
+| `/devt:workflow` | `--mode=specify\|plan\|research\|implement\|clarify\|fast\|docs` `--pause` `--cancel` `--retro` | corresponding workflow file |
+| `/devt:review` | `--focus=code\|arch\|quality\|security` `--quick` | code-review / arch-health-scan / quality-gates |
+| `/devt:debug` | `--mode=forensics` | debug.md / forensics.md |
+| `/devt:status` | `--report=session\|weekly` `--stats=tokens\|mcp\|hooks` `--health` | per-mode workflow or hook-cost-estimate CLI |
+| `/devt:note` | `--defer` `--tags=a,b,c` | note.md / defer.md |
+| **NEW `/devt:setup`** | `--init` `--update` `--uninstall` `--health [--repair]` | project-init / update / uninstall / health |
+
+Each family-head command parses `$ARGUMENTS` for routing flags, strips the matched flag, and reads the resolved workflow file via the Read tool. The existing direct-form commands (`/devt:init`, `/devt:health`, etc.) continue to work — they're hidden from `/`-autocomplete but typed invocation reaches the same workflow body.
+
+### Added
+
+- **`commands/setup.md`** — NEW family head consolidating admin operations (init / update / uninstall / health). Visible in `/`-autocomplete; raises visible count from 14 to 15.
+- **6 family-head commands rewritten** (`workflow`, `review`, `debug`, `status`, `note`, plus new `setup`) with explicit routing tables in `<process>` blocks. Each declares its `argument-hint:` parameter surface for autocomplete discoverability. Multi-target `@-refs` in `<execution_context>` document the workflows each command can route to.
+- **`scripts/smoke-test.sh::K95`** — locks the parameter routing contract. 23 (flag → workflow) pairings across the 6 family heads must all resolve; drift fails the test with the specific (cmd, flag, workflow) tuple that broke.
+- **`commands/help.md`** — rewritten to surface the Phase 2 parameter forms in the default view. `--all` flag still surfaces the 22 advanced direct-form commands with cross-references to their family-head + parameter equivalents.
+- **`README.md`** — updated to use parameter forms throughout: `/devt:init` → `/devt:setup --init`, `/devt:arch-health` → `/devt:review --focus=arch`, `/devt:quality` → `/devt:review --focus=quality`, `/devt:forensics` → `/devt:debug --mode=forensics`, `/devt:session-report` → `/devt:status --report=session`, etc. Direct-form commands documented as the legacy / muscle-memory path; family-head + parameter form is the recommended entry.
+
+### Validated
+
+- Phase 1 audit passed: all 22 hidden commands have `user-invocable: false`, all 14 → 15 visible commands lack it.
+- Phase 2 alignment audit found the README gap and fixed it in this commit.
+- Smoke: 846/846 (was 845 + K95). Locking: 3/3.
+
+### Notes
+
+This is Phase 1+2 of the 3-phase plan. Phase 3 (delete the 22 hidden command files and mass-update their ~200 cross-references to use family-head + param form) is deferred to a separate commit to keep this change set reviewable. The direct-form commands continue to work in the meantime — there is no behavioral break.
+
+---
+
 **Command surface stratification — 36 commands cut to 14 visible.** Adds `user-invocable: false` to 22 advanced/admin/telemetry commands so they're hidden from the `/`-autocomplete menu while remaining fully typed-callable. The casual-user mental model collapses from 36 equal-tier commands to 14 (6 Tier-1 daily entries + 6 Tier-2 verbs by intent + 2 knowledge commands). Aligns with the surface size of every successful CC plugin we measured: superpowers (14 skills), document-skills (18), feature-dev (1 command), pr-review-toolkit (1) — devt was the outlier at 36.
 
 This is Phase 1 of a 3-phase parameterization roadmap (the only phase shipped here). Phase 2 will wire parameter routing onto family heads (`/devt:workflow --mode=specify`, `/devt:status --report=session`, etc.). Phase 3 will delete the now-hidden command files and mass-update the ~200 internal cross-references to use the family-head + param form. Per current "no real users yet, ignore backward compat" stance, each phase ships clean without transitional shims.

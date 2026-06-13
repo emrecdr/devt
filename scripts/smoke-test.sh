@@ -12027,8 +12027,8 @@ fi
 
 # K94: command-surface stratification contract.
 # Validates the Tier-1/Tier-2 visible-vs-hidden split shipped in v0.93.0+.
-# Visible (14): do, workflow, specify, plan, research, implement, debug,
-# review, ship, status, next, memory, help, note.
+# Visible (15): do, workflow, specify, plan, research, implement, debug,
+# review, ship, status, next, setup, memory, help, note.
 # Hidden via `user-invocable: false` (22): clarify, fast, docs, retro,
 # pause, cancel-workflow, defer, init, update, uninstall, health,
 # arch-health, quality, forensics, session-report, weekly-report, tokens,
@@ -12037,7 +12037,7 @@ fi
 # `/`-menu autocomplete. The contract drift class this guards against:
 # a new command added without an explicit tier decision, or a hidden
 # command accidentally re-promoted to visible by frontmatter edit.
-K94_VISIBLE="do workflow specify plan research implement debug review ship status next memory help note"
+K94_VISIBLE="do workflow specify plan research implement debug review ship status next setup memory help note"
 K94_HIDDEN="clarify fast docs retro pause cancel-workflow defer init update uninstall health arch-health quality forensics session-report weekly-report tokens mcp-stats preflight autoskill thread council"
 K94_VISIBLE_OK=yes
 for cmd in $K94_VISIBLE; do
@@ -12054,9 +12054,60 @@ K94_TOTAL_CMDS=$(find "$ROOT/commands" -maxdepth 1 -name '*.md' | wc -l | tr -d 
 K94_EXPECTED=$(echo "$K94_VISIBLE $K94_HIDDEN" | wc -w | tr -d ' ')
 K94_TOTALS_MATCH=$([ "$K94_TOTAL_CMDS" = "$K94_EXPECTED" ] && echo yes || echo no)
 if [ "$K94_VISIBLE_OK" = "yes" ] && [ "$K94_HIDDEN_OK" = "yes" ] && [ "$K94_TOTALS_MATCH" = "yes" ]; then
-  pass "K94: command-surface stratification (14 visible, 22 hidden via user-invocable:false, totals match disk inventory)"
+  pass "K94: command-surface stratification (15 visible, 22 hidden via user-invocable:false, totals match disk inventory)"
 else
   fail "K94: stratification drift — visible_ok=$K94_VISIBLE_OK hidden_ok=$K94_HIDDEN_OK totals_match=$K94_TOTALS_MATCH (disk=$K94_TOTAL_CMDS expected=$K94_EXPECTED)"
+fi
+
+# K95: Phase-2 parameter routing contract.
+# Validates that family-head commands (workflow, review, debug, status,
+# note, setup) declare routing tables that delegate to the right
+# workflows/ file. Drift this guards against: a command's --mode/--focus/
+# --report flag silently pointing at a missing or renamed workflow file.
+# Each pairing is encoded as "command|flag|workflow_path" on one line.
+K95_PAIRS=(
+  "workflow|--mode=specify|workflows/specify.md"
+  "workflow|--mode=plan|workflows/create-plan.md"
+  "workflow|--mode=research|workflows/research-task.md"
+  "workflow|--mode=implement|workflows/quick-implement.md"
+  "workflow|--mode=clarify|workflows/clarify-task.md"
+  "workflow|--mode=fast|workflows/fast.md"
+  "workflow|--mode=docs|workflows/docs-extraction.md"
+  "workflow|--pause|workflows/pause-work.md"
+  "workflow|--retro|workflows/lesson-extraction.md"
+  "review|--focus=arch|workflows/arch-health-scan.md"
+  "review|--focus=quality|workflows/quality-gates.md"
+  "debug|--mode=forensics|workflows/forensics.md"
+  "status|--report=session|workflows/session-report.md"
+  "status|--report=weekly|workflows/weekly-report.md"
+  "status|--stats=tokens|workflows/tokens.md"
+  "status|--stats=mcp|workflows/mcp-stats.md"
+  "status|--stats=hooks|hook-cost-estimate"
+  "status|--health|workflows/health.md"
+  "note|--defer|workflows/defer.md"
+  "setup|--init|workflows/project-init.md"
+  "setup|--update|workflows/update.md"
+  "setup|--uninstall|workflows/uninstall.md"
+  "setup|--health|workflows/health.md"
+)
+K95_OK=yes
+K95_FAIL_PAIR=""
+for pair in "${K95_PAIRS[@]}"; do
+  cmd="${pair%%|*}"
+  rest="${pair#*|}"
+  flag="${rest%%|*}"
+  workflow="${rest#*|}"
+  file="$ROOT/commands/$cmd.md"
+  if grep -q -F -- "$flag" "$file" 2>/dev/null && grep -q -F -- "$workflow" "$file" 2>/dev/null; then
+    continue
+  fi
+  K95_OK=no
+  K95_FAIL_PAIR="$K95_FAIL_PAIR $cmd[$flag→$workflow]"
+done
+if [ "$K95_OK" = "yes" ]; then
+  pass "K95: parameter routing contract (6 family heads, ${#K95_PAIRS[@]} (flag → workflow) pairings all resolve)"
+else
+  fail "K95: routing drift —$K95_FAIL_PAIR"
 fi
 
 echo

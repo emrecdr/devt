@@ -148,7 +148,7 @@ Captures ⚖️ (decisions) and 🔵 (insights) tags during sessions. devt's dis
 ## Quick start
 
 ```bash
-/devt:init
+/devt:setup --init
 ```
 
 Scaffolds `.devt/rules/` with project-specific conventions and creates `.devt/config.json`. devt auto-detects your stack and selects the matching template (python-fastapi, go, typescript-node, vue-bootstrap, rust, or blank). The wizard pitches optional integrations and confirms detected primary branch. Declining still produces a fully working install.
@@ -387,7 +387,7 @@ Every devt-configured project gets a `.devt/rules/` directory containing project
 
 **Optional add-ons** (vary per template's domain): `api-changelog.md` (HTTP-API-serving templates), `canonical-entities.yaml` (entity-aware projects with newtype/enum drift detection), `arch-scan.py` + `detectors/` (Python arch-scanner shipped with python-fastapi).
 
-Run `/devt:init` to generate these from a template matched to your stack.
+Run `/devt:setup --init` to generate these from a template matched to your stack.
 
 ---
 
@@ -584,11 +584,11 @@ The loop is fully closed — lessons flow from completed work back into future a
 
 ### Architecture health scanning
 
-`/devt:arch-health` runs the project's architecture scanner (configured via `arch_scanner.command`) and detects structural drift across sessions:
+`/devt:review --focus=arch` runs the project's architecture scanner (configured via `arch_scanner.command`) and detects structural drift across sessions:
 
 - **Baseline mode** — first run captures the current state to `.devt/state/arch-baseline.json`
 - **Delta mode** — subsequent runs compare against baseline, surfacing only NEW violations (no noise from pre-existing debt)
-- **Triage mode** — interactive review of findings via AskUserQuestion: fix now, defer (`/devt:defer`), or accept-as-baseline
+- **Triage mode** — interactive review of findings via AskUserQuestion: fix now, defer (`/devt:note --defer`), or accept-as-baseline
 
 The python-fastapi reference template ships an `arch-scan.py` that detects 6 layer-violation patterns (LAYER-IMPORT-DOMAIN, LAYER-IMPORT-API, DB-IN-APPLICATION, INLINE-IMPORT, GOD-FILE, …). Other templates can wire any scanner — output must be JSON with a `findings` array.
 
@@ -596,11 +596,11 @@ The python-fastapi reference template ships an `arch-scan.py` that detects 6 lay
 
 ### Quality gates
 
-`/devt:quality` runs lint, typecheck, and tests as defined in `.devt/rules/quality-gates.md`. The rules file specifies the exact commands and pass criteria for your stack — devt has no opinion. Agents read this file before reporting "tests passing" so the claim is grounded in your project's actual gates, not assumptions.
+`/devt:review --focus=quality` runs lint, typecheck, and tests as defined in `.devt/rules/quality-gates.md`. The rules file specifies the exact commands and pass criteria for your stack — devt has no opinion. Agents read this file before reporting "tests passing" so the claim is grounded in your project's actual gates, not assumptions.
 
 ### Deferred-task tracker
 
-`.devt/state/deferred.md` with `DEF-NNN` ids holds cross-workflow TODOs ("things we said we'd do later"). Captured via `/devt:defer "<title>"` from any workflow. **Exempted from `state reset`** so items survive `/devt:cancel-workflow`. Surfaces in `/devt:status` (count) and `/devt:next` (idle pickup via AskUserQuestion). Distinct from the memory layer — deferred items are transient TODOs, not curator-gated, not in Pre-Flight Brief noise.
+`.devt/state/deferred.md` with `DEF-NNN` ids holds cross-workflow TODOs ("things we said we'd do later"). Captured via `/devt:note --defer "<title>"` from any workflow. **Exempted from `state reset`** so items survive `/devt:workflow --cancel`. Surfaces in `/devt:status` (count) and `/devt:next` (idle pickup via AskUserQuestion). Distinct from the memory layer — deferred items are transient TODOs, not curator-gated, not in Pre-Flight Brief noise.
 
 ### Threads — cross-session investigation context
 
@@ -612,7 +612,7 @@ The python-fastapi reference template ships an `arch-scan.py` that detects 6 lay
 
 ### Forensics — workflow post-mortem
 
-`/devt:forensics` analyzes a stuck or failed workflow's artifacts (`.devt/state/`, git history, recent commits) and diagnoses what went wrong. Useful when `/devt:next` hits a wall and you can't figure out why.
+`/devt:debug --mode=forensics` analyzes a stuck or failed workflow's artifacts (`.devt/state/`, git history, recent commits) and diagnoses what went wrong. Useful when `/devt:next` hits a wall and you can't figure out why.
 
 ### Autoskill — self-improving skill index
 
@@ -620,7 +620,7 @@ The python-fastapi reference template ships an `arch-scan.py` that detects 6 lay
 
 ### Reports
 
-`/devt:weekly-report` generates a markdown summary of git activity for the configured `git.contributors`. Runs against any time window. `/devt:session-report` generates a session summary (work done, commits, decisions, outcomes) without git dependency.
+`/devt:status --report=weekly` generates a markdown summary of git activity for the configured `git.contributors`. Runs against any time window. `/devt:status --report=session` generates a session summary (work done, commits, decisions, outcomes) without git dependency.
 
 ### Questioning protocol
 
@@ -766,10 +766,10 @@ Useful at end of day or when a workflow blocks on an external decision (waiting 
 ### Architecture drift check (over time)
 
 ```bash
-/devt:arch-health                        # first run: captures baseline
+/devt:review --focus=arch                        # first run: captures baseline
 # … weeks pass, code evolves …
-/devt:arch-health                        # subsequent run: shows DELTA only (new violations)
-/devt:arch-health --triage               # interactive: fix / defer / accept-as-baseline per finding
+/devt:review --focus=arch                        # subsequent run: shows DELTA only (new violations)
+/devt:review --focus=arch --triage               # interactive: fix / defer / accept-as-baseline per finding
 ```
 
 The baseline lives in `.devt/state/arch-baseline.json` so the team can ratchet quality forward without drowning in pre-existing debt noise.
@@ -777,7 +777,7 @@ The baseline lives in `.devt/state/arch-baseline.json` so the team can ratchet q
 ### Reset or uninstall
 
 ```bash
-/devt:uninstall
+/devt:setup --uninstall
 ```
 
 Interactive workflow that asks which level of reset you want and confirms before any destructive op. Always creates a `.devt.bak.YYYYMMDD-HHMMSS/` backup for project-reset and full-reset modes.
@@ -808,11 +808,13 @@ devt scatters a few files outside `.devt/` (`.mcp.json`, `.claude/agent-memory/d
 | `/devt:ship`     | Create PR with auto-generated description from workflow artifacts                                        |
 | `/devt:next`     | Auto-detect where you are and run the next logical step                                                  |
 
-**Setup & help:** `/devt:init`, `/devt:uninstall`, `/devt:help`.
+**Setup & help:** `/devt:setup` (with `--init|--update|--uninstall|--health`), `/devt:help`.
 
-**Utilities:** `/devt:status`, `/devt:pause`, `/devt:forensics`, `/devt:cancel-workflow`, `/devt:note`, `/devt:defer`, `/devt:health`, `/devt:session-report`, `/devt:update`, `/devt:thread`, `/devt:weekly-report`, `/devt:council`.
+**Utilities:** `/devt:status` (with `--report=session|weekly`, `--stats=tokens|mcp|hooks`, `--health`), `/devt:note` (with `--defer`), `/devt:workflow --pause` / `--cancel` / `--retro`, `/devt:debug --mode=forensics`.
 
-**Internal (called by workflows, available to power users):** `/devt:plan`, `/devt:research`, `/devt:clarify`, `/devt:implement`, `/devt:fast`, `/devt:review`, `/devt:quality`, `/devt:retro`, `/devt:docs`, `/devt:arch-health`, `/devt:autoskill`, `/devt:memory`, `/devt:preflight`.
+**Family-head verbs:** `/devt:plan`, `/devt:research`, `/devt:implement`, `/devt:debug`, `/devt:review` (with `--focus=arch|quality|security`), `/devt:memory`.
+
+**Specialized (direct-callable, hidden from autocomplete):** `/devt:thread`, `/devt:council`, `/devt:autoskill`, `/devt:preflight`. The 22 advanced direct-form commands listed by `/devt:help --all` continue to work when typed (e.g., `/devt:init` is the same as `/devt:setup --init`); the family-head + parameter form is the recommended entry.
 
 ### CLI tools
 
@@ -893,16 +895,16 @@ For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](d
 
 **Workflow fails or gets stuck:**
 - `/devt:status` — see current state
-- `/devt:forensics` — post-mortem investigation
-- `/devt:cancel-workflow` — reset and start over
+- `/devt:debug --mode=forensics` — post-mortem investigation
+- `/devt:workflow --cancel` — reset and start over
 - Check `.devt/state/` for artifact details
 
 **Plugin health issues:**
-- `/devt:health` — diagnose (21 checks across config, state, hooks, memory)
-- `/devt:health --repair` — auto-fix safe issues
+- `/devt:setup --health` — diagnose (21 checks across config, state, hooks, memory)
+- `/devt:setup --health --repair` — auto-fix safe issues
 
 **Missing `.devt/rules/`:**
-- `/devt:init` — set up project conventions
+- `/devt:setup --init` — set up project conventions
 
 **Agent returns BLOCKED:**
 - Read agent's output in `.devt/state/<phase>-summary.md` — task may need to be broken down or clarified
@@ -910,10 +912,10 @@ For the canonical `.devt/state/` filename contract see [`docs/STATE-RULES.md`](d
 **Memory layer not surfacing expected docs:**
 - `node bin/devt-tools.cjs memory validate` — check frontmatter / stale paths / broken links
 - `node bin/devt-tools.cjs memory index` — rebuild the FTS5 index
-- `/devt:health` — surfaces `MEM_INDEX_STALE`, `MEM_PATH_UNREACHABLE`, `MEM_VALIDATE_ERRORS`, `MEM_CONFLICT_HIGH`
+- `/devt:setup --health` — surfaces `MEM_INDEX_STALE`, `MEM_PATH_UNREACHABLE`, `MEM_VALIDATE_ERRORS`, `MEM_CONFLICT_HIGH`
 
 **MCP server warnings (`Missing environment variables: CLAUDE_PLUGIN_ROOT`, `unknown command 'mcp'`):**
-- Already fixed in current versions. Update via `/devt:update`.
+- Already fixed in current versions. Update via `/devt:setup --update`.
 
 ### Static-file compression (built-in)
 

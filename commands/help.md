@@ -1,20 +1,20 @@
 ---
 name: help
-description: Show devt commands organized by tier — basics first, advanced on demand
+description: Show devt commands organized by tier — basics first, advanced parameter forms on demand
 argument-hint: "[--all]"
 ---
 
 <objective>
-Display devt commands in tiered groups. Default view shows only the 14 user-facing commands — the rest are typed-callable but hidden from the `/` autocomplete to reduce noise. `--all` flag surfaces the full inventory including advanced operations.
+Display devt commands in tiered groups. Default view shows only the 15 family-head commands — the rest are typed-callable but hidden from the `/`-autocomplete and accessible via parameter modes on the family heads. `--all` flag surfaces the full inventory plus the parameter-form cross-reference.
 </objective>
 
 <process>
-Parse `$ARGUMENTS` for `--all` flag. If present, print the FULL guide (Tier 1 + Tier 2 + Advanced inventory). If absent, print only Tier 1 + Tier 2 sections. Do NOT modify, summarize, or abbreviate the output below.
+Parse `$ARGUMENTS` for `--all` flag. If present, print the FULL guide (Tier 1+2+3 + Advanced inventory + parameter cross-reference). If absent, print only Tier 1+2+3 sections. Do NOT modify, summarize, or abbreviate the output below.
 
 If `--all` is NOT in arguments, print:
 
 ```
-# devt — Command Reference (14 visible · 22 advanced)
+# devt — Command Reference (15 visible · 22 advanced)
 
 ## Tier 1 — Daily Commands
 
@@ -34,10 +34,33 @@ If `--all` is NOT in arguments, print:
 /devt:debug "bug"               Systematic 4-phase debug in isolated context
 /devt:review                    Standalone read-only code review
 
-## Tier 3 — Knowledge
+## Tier 3 — Knowledge & Admin
 
 /devt:memory <subcommand>       Permanent ADR/Concept/Flow/REJ layer (init, query, promote, …)
 /devt:note "idea"               Quick idea capture without derailing current work
+/devt:setup --<op>              Admin: --init | --update | --uninstall | --health
+
+## Family-Head Parameter Surface
+
+Many family heads accept parameter modes to access advanced functionality
+without leaving the casual surface. Show the parameter form with --all.
+
+  /devt:workflow "<task>" [--mode=specify|plan|research|implement|clarify|fast|docs]
+                          [--pause|--cancel|--retro]
+                          [--autonomous] [--to <phase>] [--only <phase>] [--chain]
+                          [--tdd] [--dry-run]
+
+  /devt:review            [--focus=code|arch|quality|security] [--quick]
+
+  /devt:debug "<bug>"     [--mode=forensics]
+
+  /devt:status            [--report=session|weekly]
+                          [--stats=tokens|mcp|hooks]
+                          [--health [--repair]]
+
+  /devt:note "<idea>"     [--defer] [--tags=a,b,c]
+
+  /devt:setup             --init | --update | --uninstall | --health
 
 ## Typical Workflows
 
@@ -59,82 +82,77 @@ If `--all` is NOT in arguments, print:
   Resuming interrupted work:
     /devt:next
 
-For the 22 advanced commands (workflow control, admin, telemetry, specialized tools),
+  First-time project setup:
+    /devt:setup --init
+
+  Diagnose plugin problems:
+    /devt:setup --health
+
+  See token telemetry:
+    /devt:status --stats=tokens
+
+For the full 22-command advanced inventory and direct-form aliases,
 run /devt:help --all
 ```
 
-Else (`--all` IS in arguments), print the SAME Tier 1+2+3 sections AS ABOVE, followed by:
+Else (`--all` IS in arguments), print the SAME Tier 1+2+3 + Parameter Surface sections AS ABOVE, followed by:
 
 ```
 
-## Advanced Commands (22 — typed-callable, hidden from /-autocomplete)
+## Advanced Direct-Form Commands (22 — typed-callable, hidden from /-autocomplete)
 
-These commands ARE installed and work when typed directly. They're hidden from
-the `/`-autocomplete menu to keep the day-to-day surface clean. Casual users
-rarely need them; advanced users can type the full name (e.g., /devt:health).
+These commands are installed and work when typed directly. They're hidden
+from the `/`-autocomplete menu and have parameter-form aliases on the
+family heads above. Typing the direct form still works for muscle memory
+or legacy scripts.
 
-### Workflow Modes ( specialized phases of the main pipeline )
+### Workflow Modes (folded under /devt:workflow --mode=)
 
-/devt:clarify                   Discuss gray-area implementation choices before coding
-/devt:fast "task"               Inline execution for trivial tasks — no subagents
-/devt:docs                      Standalone docs refresh without active workflow
-/devt:retro                     Extract lessons from current session into the playbook
+/devt:clarify          === /devt:workflow --mode=clarify
+/devt:fast "task"      === /devt:workflow --mode=fast
+/devt:docs             === /devt:workflow --mode=docs
+/devt:retro            === /devt:workflow --retro
 
-### Workflow Lifecycle Control
+### Workflow Lifecycle (folded under /devt:workflow --)
 
-/devt:pause                     Pause current workflow with structured handoff
-/devt:cancel-workflow           Abort active workflow and reset state
-/devt:defer "todo"              Capture a deferred TODO to .devt/state/deferred.md
+/devt:pause            === /devt:workflow --pause
+/devt:cancel-workflow  === /devt:workflow --cancel
+/devt:defer "todo"     === /devt:note --defer "todo"
 
-### Admin & Setup
+### Admin & Setup (folded under /devt:setup --)
 
-/devt:init                      Interactive project setup wizard
-/devt:update                    Check for and install devt updates from GitHub
-/devt:uninstall                 Reset or uninstall devt
-/devt:health [--repair]         Diagnose plugin health — 19 checks
+/devt:init             === /devt:setup --init
+/devt:update           === /devt:setup --update
+/devt:uninstall        === /devt:setup --uninstall
+/devt:health [--repair] === /devt:setup --health [--repair]
 
-### Architecture & Quality
+### Architecture & Quality (folded under /devt:review --focus=)
 
-/devt:arch-health               Architecture health scan — coupling, drift, violations
-/devt:quality                   Run lint + typecheck + tests per .devt/rules/quality-gates.md
+/devt:arch-health      === /devt:review --focus=arch
+/devt:quality          === /devt:review --focus=quality
 
-### Telemetry & Reports
+### Telemetry & Reports (folded under /devt:status --report= or --stats=)
 
-/devt:session-report            End-of-session summary — commits, files, decisions
-/devt:weekly-report             Weekly development activity from git history
-/devt:tokens                    Token usage telemetry — cache hit rate, per-session breakdown
-/devt:mcp-stats                 Per-MCP-tool stats — error rate, p50/p95/p99 durations
+/devt:session-report   === /devt:status --report=session
+/devt:weekly-report    === /devt:status --report=weekly
+/devt:tokens           === /devt:status --stats=tokens
+/devt:mcp-stats        === /devt:status --stats=mcp
 
-### Diagnostics
+### Diagnostics (folded under /devt:debug --mode=)
 
-/devt:forensics                 Post-mortem on stuck/failed workflows
+/devt:forensics        === /devt:debug --mode=forensics
 
-### Specialized Tools
+### Specialized Tools (no fold — direct-call only)
 
 /devt:preflight "task"          Generate a Topic Pre-Flight Brief on demand
 /devt:autoskill                 Detect session correction patterns, propose skill upgrades
 /devt:thread "name"             Persistent context threads for cross-session investigations
 /devt:council "decision"        Pressure-test high-stakes decisions through 5 advisors
 
-## Roadmap — Phase 2 Parameter Consolidation
-
-Several advanced commands will fold into parameter modes of the Tier-1 family heads:
-
-  /devt:fast → /devt:workflow --tier=trivial
-  /devt:clarify → /devt:workflow --mode=clarify
-  /devt:docs → /devt:workflow --mode=docs
-  /devt:retro → /devt:workflow --retro
-  /devt:pause / /devt:cancel-workflow → /devt:workflow --pause / --cancel
-  /devt:defer → /devt:note --defer
-  /devt:init / /devt:update / /devt:uninstall / /devt:health → /devt:setup --<mode>
-  /devt:arch-health / /devt:quality → /devt:review --focus=arch | quality
-  /devt:forensics → /devt:debug --mode=forensics
-  /devt:session-report / /devt:weekly-report → /devt:status --report=<mode>
-  /devt:tokens / /devt:mcp-stats → /devt:status --stats=<mode>
-
-After Phase 2 wires the parameter routing, the family-head form will be the
-recommended entry. The direct command names (above) will continue to work
-during the transition.
+The four specialized tools are kept direct-callable because their use
+cases are narrow enough that a parameter form would obscure them; they
+are intentionally surfaced only to advanced users who already know they
+exist.
 ```
 
 End printed output. Do not add commentary or summarization after the code block.
