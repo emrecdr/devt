@@ -9,6 +9,7 @@ description: |
   Investigates codebase patterns, identifies standard approaches, documents pitfalls, and recommends
   an implementation strategy. READ-ONLY — never writes production code.
 tools: Read, Bash, Glob, Grep
+memory: project
 skills:
   - devt:memory-pre-flight
   - devt:codebase-scan

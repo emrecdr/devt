@@ -2,6 +2,7 @@
 name: memory-pre-flight
 description: Use BEFORE any code edit, plan, or architectural decision. Defines the Two-Tier Pre-Flight Protocol (Topic Pre-Flight at workflow start; File Pre-Flight at each Edit). Agents preload this skill when they may modify code or propose changes — it tells them how to read the .devt/state/preflight-brief.md, when to escalate to a 5-lane File Pre-Flight, and how to scratchpad-summarize their findings before touching files. The PreToolUse pre-flight-guard hook checks the scratchpad — missing summaries warn or block the edit.
 allowed-tools: Bash Read Grep Glob
+user-invocable: false
 ---
 
 # Memory Pre-Flight Protocol

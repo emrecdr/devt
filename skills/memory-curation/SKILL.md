@@ -2,6 +2,7 @@
 name: memory-curation
 description: Promote any candidate into the unified memory layer at `.devt/memory/` — ephemeral DEC-xxx into permanent ADR-xxx, retro lesson drafts into LES-xxx, rejected ideas into REJ-xxx tombstones, or reviewing `_suggestions.md` proposals from the discovery engine. Trigger on 'promote this decision', 'capture as ADR/Concept/lesson', 'reject this idea, never suggest again', 'create tombstone', 'review memory suggestions', 'curator review', 'archive stale lesson', 'codify this rule', 'this should be permanent'. Single curation skill for ALL 5 doc types (decision, concept, flow, rejected, lesson). HARD INVARIANT — never writes a permanent `.devt/memory/**/*.md` file without explicit user approval via AskUserQuestion.
 allowed-tools: Bash Read Write Edit Grep Glob Skill Task
+user-invocable: false
 ---
 
 # Memory Curation

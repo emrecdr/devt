@@ -11559,6 +11559,17 @@ fi
 # (d) structural validator refuses bad compressions (most plugin files
 # trip validator because heading lines start with "The"); (e) result
 # shape is consistent with compressAll for telemetry continuity.
+# Snapshot any uncommitted maintainer edits in guardrails/ + skills/ BEFORE
+# this test runs. K84 uses --allow-dirty (compresses on top of whatever's
+# there) and then resets via git checkout. Without preservation, a smoke
+# run wipes the maintainer's in-progress skill/guardrails edits along with
+# the compression artifacts. We capture the diff, let the test run + reset,
+# then re-apply the diff to restore the working tree. Untracked files are
+# unaffected by `git diff` and `git checkout`, so they survive without
+# intervention.
+K84_PRESERVED_PATCH=$(mktemp)
+git -C "$ROOT" diff -- guardrails skills > "$K84_PRESERVED_PATCH" 2>/dev/null || true
+
 K84_OUT=$(node "$CLI" static-compress --plugin-build --allow-dirty 2>/dev/null)
 K84_OK=$(echo "$K84_OUT" | jq -r '.ok // false')
 K84_TOTAL=$(echo "$K84_OUT" | jq -r '.total_files // 0')
@@ -11568,10 +11579,18 @@ K84_HAS_BREAKDOWN=$(echo "$K84_OUT" | jq -r '.engine_breakdown | type == "object
 K84_HAS_GUARDRAILS_CANDIDATE=$(test "$K84_TOTAL" -ge "5" && echo yes || echo no)
 # Errors array exists (structural drift expected on heading-starts-with-article files)
 K84_HAS_ERRORS_FIELD=$(echo "$K84_OUT" | jq -r '.errors | type == "array"')
-# Working tree must remain CLEAN after pre-compress (we used --allow-dirty
-# so no clean-tree assertion ran, but any successful compresses DID write).
-# Restore via git checkout to keep this smoke run side-effect-free.
+# Reset compression artifacts so the smoke run stays side-effect-free
+# against a clean tree.
 git -C "$ROOT" checkout guardrails skills 2>/dev/null || true
+
+# Restore the maintainer's pre-K84 uncommitted state (if any). Empty patch
+# is a no-op via the -s check. Apply failure warns but does not fail the
+# test — manual recovery via the saved patch path stays available.
+if [ -s "$K84_PRESERVED_PATCH" ]; then
+  git -C "$ROOT" apply --whitespace=nowarn "$K84_PRESERVED_PATCH" 2>/dev/null \
+    || echo "  WARN: K84 could not restore prior uncommitted changes in guardrails/skills (patch at $K84_PRESERVED_PATCH); check git status" >&2
+fi
+rm -f "$K84_PRESERVED_PATCH"
 # CLI surface guard — usage string carries new flag
 K84_USAGE_HAS_FLAG=$(node "$CLI" static-compress 2>&1 | grep -c -- '--plugin-build' || true)
 if [ "$K84_OK" = "true" ] \

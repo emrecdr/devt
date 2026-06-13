@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+**Adopt modern Claude Code plugin primitives — additive frontmatter only.** Eight files touched, ~10 lines added, zero deletions. Surfaces plugin display metadata, opts agents into cross-session memory continuity where it helps, and hides preload-only helper skills from the `/` menu. Aligns with CC `plugins-reference` (v2.1.143+ `displayName`, v2.1.154+ `defaultEnabled`) and the `skills` doc's `user-invocable` field. No behavior change for current sessions; net win is surface-area clarity and per-agent memory continuity for architect / researcher / tester across sessions.
+
+### Added
+
+- **`.claude-plugin/plugin.json`** — `displayName: "devt"` (CC v2.1.143+ UI surfaces) and `defaultEnabled: false` (v2.1.154+). The `defaultEnabled: false` only affects NEW installs — existing users with explicit enablement are unaffected. Devt reshapes the development loop substantially (14 hooks, 11 agents, custom MCP) — opt-in matches the CC doc's recommendation for plugins that add cost or scope.
+- **`agents/architect.md`, `agents/researcher.md`, `agents/tester.md`** — `memory: project` frontmatter. Auto-injects `.claude/agent-memory/<agent>/MEMORY.md` (200 lines / 25 KB cap) at agent startup; subagent self-curates across sessions. Architectural patterns, research findings, and known flaky-test contexts now persist. Deliberately skipped: programmer (impl context churns too fast), verifier (per-task), docs-writer (derives from current code), devt-coordinator (stateless router). code-reviewer / curator / debugger / retro already had `memory: project`.
+- **`skills/memory-pre-flight/SKILL.md`, `skills/dispatch-helpers/SKILL.md`, `skills/memory-curation/SKILL.md`, `skills/scratchpad/SKILL.md`** — `user-invocable: false` frontmatter. These four are preload-only helpers consumed by agents via the `skills:` frontmatter list; users never type `/devt:memory-pre-flight` etc. Hiding from the `/` menu reduces catalog noise without affecting preload or Skill-tool invocation.
+
+### Considered, validated NOT to change
+
+- **Graphify delegation** — no standalone graphify plugin in the install registry (`~/.claude/plugins/installed_plugins.json`); devt's `mcp__plugin_devt_devt-graphify__*` is the only graphify MCP in the ecosystem. The ~1,950-LOC adapter is justified.
+- **Agent `effort:` adoption** — already 100% on all 11 agents.
+- **Skill progressive disclosure pass** — largest SKILL.md is `council` at 496 lines; none exceed the 500-line guideline.
+- **`disable-model-invocation: true`** on internal helpers — per CC skills doc, this *also* blocks preload into subagents, which would break devt's `skills:` agent frontmatter contract. `user-invocable: false` is the correct field for "hide from `/` menu, keep preloadable".
+- **`userConfig` migration** of `graphify.command` / `arch_scanner.command` / `memory.paths` — would force existing `.devt/config.json` users to re-enter values for marginal gain. Defer.
+- **Hook-type migration** (shell → `prompt` / `mcp_tool` / `agent`) — needs per-fire token-cost measurement before broader adoption.
+
+### Fixed
+
+- **`scripts/smoke-test.sh::K84` no longer wipes uncommitted maintainer edits in `skills/` or `guardrails/`.** Prior behavior: K84 runs `node bin/devt-tools.cjs static-compress --plugin-build --allow-dirty` (which writes compression artifacts on top of any in-progress files), then resets via `git -C "$ROOT" checkout guardrails skills` to keep the smoke run side-effect-free. Side effect: the checkout also wiped any uncommitted maintainer edits in those directories. Fix wraps the test in a **capture-diff → run-test → reset → reapply-diff** pattern: `git diff -- guardrails skills > "$PATCH"` BEFORE the test, the existing reset AFTER, then `git apply --whitespace=nowarn "$PATCH"` to restore the prior working state. Empty diff = no-op; apply failure warns but doesn't fail the test (saved patch path printed for manual recovery). Untracked files are unaffected by either operation, so they survive without intervention. Verified by snapshotting `user-invocable: false` in the 4 affected SKILL.md files before smoke ran, executing smoke (843 pass), and confirming the field was still present after.
+
 ## [0.91.0] - 2026-06-10
 
 **Content-aware dispatch hygiene gate — closes the v0.90.0-audit I1 false-positive class.** Greenfield reported that the `dispatch_hygiene_mode: block` gate flagged hand-injected envelopes identically to truly raw dispatches: a code-reviewer prompt that carries `<context>` + `<original_review>` + `<mode>synthesis_revision</mode>` (iter-2 revision pattern) was treated the same as a bare-prose "You are reviewing Lane A" prompt. The hand-injected case is the workflow's legitimate ergonomic — orchestrator hand-rolls a richer envelope than the canonical scope_*/memory_signal trio. Gate now recognizes content-aware signals.

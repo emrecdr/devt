@@ -7,6 +7,7 @@ description: >-
   (ephemeral, resets per workflow). Distinct from lesson-extraction (permanent lessons) and memory query
   (search past sessions).
 allowed-tools: Bash Read Write Edit Grep Glob WebFetch WebSearch Skill Task
+user-invocable: false
 ---
 
 # Scratchpad

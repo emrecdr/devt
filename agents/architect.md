@@ -10,6 +10,7 @@ description: |
   Examples: "review the module boundaries", "check for coupling issues in the new
   service", "assess the data flow between components".
 tools: Read, Bash, Glob, Grep
+memory: project
 skills:
   - devt:memory-pre-flight
   - devt:graphify-helpers

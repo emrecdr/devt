@@ -2,6 +2,7 @@
 name: dispatch-helpers
 description: Use when the orchestrator decides parallelism — when about to issue raw Agent() / Task() dispatches to devt:* subagents instead of routing through /devt:review or /devt:workflow. Surfaces the `dispatch render-filled` CLI so canonical context blocks (scope_trust, scope_hint, memory_signal, governing_rules, guardrails_inline, agent_skills) are never silently dropped. Trigger phrases include "fan out review across files X,Y,Z", "dispatch programmer in lanes", "parallel reviewer across communities", or any pattern where the orchestrator constructs a Task() prompt for a devt:* agent outside a /devt:* workflow.
 allowed-tools: Bash Read
+user-invocable: false
 ---
 
 # Dispatch Helpers — Canonical Envelope Generation for Raw Dispatches
