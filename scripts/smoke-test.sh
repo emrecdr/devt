@@ -12399,6 +12399,30 @@ else
   fail "K104: warnings mismatch — total=$K104_TOTAL span=$K104_HAS_SPAN by_source=$K104_HAS_BY_SOURCE top_agents=$K104_HAS_TOP_AGENTS recent=$K104_HAS_RECENT raw_len=$K104_RAW_LEN by_src_raw=$K104_BY_SRC_RAW by_src_tob=$K104_BY_SRC_TOB miss_exists=$K104_MISS_EXISTS export=$K104_EXPORT_OK"
 fi
 
+# K105: skill description size budget.
+# Skill frontmatter `description` is the model's routing-trigger signal —
+# included in the Skill tool's catalog prompt every session. CC docs
+# advise keeping descriptions short and trigger-focused. Current max
+# (strategic-analysis) is 835 bytes; K105 enforces a 950-byte cap (max +
+# ~14% headroom, matching the K101/K102 headroom pattern) to prevent
+# silent bloat. Drift class: skill descriptions growing into README
+# territory and burning per-session prompt budget across all 17 skills.
+K105_BUDGET=950
+K105_OVERFLOW=""
+for K105_SF in "$ROOT"/skills/*/SKILL.md; do
+  [ -f "$K105_SF" ] || continue
+  K105_NAME=$(basename "$(dirname "$K105_SF")")
+  K105_BYTES=$(awk '/^description:/{flag=1; next} flag && /^---$/{flag=0} flag' "$K105_SF" | wc -c | tr -d ' ')
+  if [ "$K105_BYTES" -gt "$K105_BUDGET" ]; then
+    K105_OVERFLOW="$K105_OVERFLOW $K105_NAME=${K105_BYTES}b;"
+  fi
+done
+if [ -z "$K105_OVERFLOW" ]; then
+  pass "K105: skill description size budget (every SKILL.md description ≤ ${K105_BUDGET} bytes; descriptions are model-routing triggers, not READMEs)"
+else
+  fail "K105: skill descriptions exceed budget —$K105_OVERFLOW Trim to ≤${K105_BUDGET}b — descriptions go into the Skill tool's per-session catalog and burn prompt budget."
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

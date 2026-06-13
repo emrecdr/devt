@@ -83,6 +83,25 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 12 — Deferred-queue hygiene + K105 skill description budget
+
+Final mini-bundle before tag. Queue audit found 44 open deferred items; validation reduced four to actionable status:
+
+- **DEF-042** ("Close stale DEF-007, 010, 011, 016") — already done. All 4 referenced items closed `2026-06-01`; the cleanup task itself was the only thing left to close.
+- **DEF-040** ("Document `dispatch_hygiene_mode` config key") — gap doesn't exist. Strict re-grep shows the key documented in `docs/HOOKS.md` plus 7 other files (`docs/AGENT-CONTRACTS.md`, `docs/INTERNALS.md`, `workflows/code-review.md`, `workflows/dev-workflow.md`, `bin/modules/state.cjs`, `bin/modules/config.cjs`, `README.md`).
+- **DEF-041** ("3 missing env vars in HOOKS.md") — false-positive from loose regex. Strict `${DEVT_*:-default}|${DEVT_*}|export DEVT_|test DEVT_` pattern returns empty for undocumented vars. Original grep matched substrings: `DEVT_BIN` (label in session-start help-text dump), `DEVT_CONFIG` (substring of local `HAS_DEVT_CONFIG` presence-flag), `DEVT_COUNTER_DIR` (substring of private `_DEVT_COUNTER_DIR` internal var). The 7 actually-documented env vars are the complete set in use.
+- **DEF-006** ("Skill description budget for `skills/`") — implemented as K105.
+
+**Validation discipline win.** Three of the four items shifted on re-validation: 1 already done, 2 false-positive (no real gap), 1 implementable. Had `DEF-041`'s loose-grep claim been taken at face value, the cycle would have shipped documentation rows for three non-existent config knobs — exactly the failure mode Golden Rule 7 ("Validate Before Implementing") guards against. Captured here because the pattern is general: long-deferred items can drift from real-when-captured to false-now-without-anyone-noticing.
+
+**Added: `scripts/smoke-test.sh::K105`** — skill description size budget. Caps every `skills/*/SKILL.md` frontmatter `description` field at **950 bytes** (current max 835 for `strategic-analysis` + ~14% headroom matching the K101/K102 pattern). Skill frontmatter descriptions are the model's routing-trigger signal — included in the Skill tool's per-session catalog prompt — so unchecked growth burns prompt budget across all 17 skills every session. Adversarially validated: temporarily lowering the budget to 800 → fails with exact 3 overflow skills (`code-review-guide=830b`, `strategic-analysis=835b`, `verification-patterns=832b`); restoring → passes. Drift class: skill descriptions ballooning into README territory.
+
+The drift-guard stack is now **12-deep (K94–K105)**. Smoke: 850/850. Locking: 3/3.
+
+**Deferred queue:** 44 open → 40 open (closed: DEF-006, DEF-040, DEF-041, DEF-042).
+
+---
+
 ### Phase 11 — Registry hardening + dispatch telemetry surface
 
 Three validated drift/feature fixes bundled. Origin: post-Phase 10 audit asked "what's worth shipping before tagging?" — measurement disproved theoretical candidates (engineering-principles/generative-debt trim, agent body trim, paths: expansion all rejected by 0 pedagogy markers and 100% operational density). Three real gaps surfaced instead.
