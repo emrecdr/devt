@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.93.0] - 2026-06-13
+
 **Command surface stratification + parameter routing — Phase 1 + Phase 2.** Casual user surface collapses from 36 equal-tier commands to 15 family-head commands with rich parameter modes that route to the right underlying workflow. Hidden direct-form commands remain typed-callable for muscle memory / scripts. No functionality removed; the structural cleanup is presentation + routing only.
 
 ### Phase 2 — Parameter Routing (this commit)
