@@ -21,4 +21,6 @@ Create a validated implementation plan that breaks the task into concrete, verif
 Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 
 Execute the planning workflow from the referenced file. The task description is provided as the command argument.
+
+**Elicit task if empty.** If `$ARGUMENTS` is empty, ask the user in plain prose: *"What task are we planning?"* Wait for the response and use it as the task. Do NOT proceed without a task — planning blind produces noise.
 </process>

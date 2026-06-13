@@ -83,6 +83,30 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 8 — No-task elicitation across family heads
+
+Phase 7 added the no-flag picker to `/devt:setup`. Phase 8 extends the same "make the dead-end interactive" pattern to family heads that take a task arg: `/devt:workflow`, `/devt:debug`, `/devt:plan`, `/devt:research`, `/devt:implement`. `/devt:specify` already had this behavior (its workflow body asks for a one-sentence description if input is empty).
+
+**Pattern**: each command body gets a `**Step 1.5 — Elicit task if empty**` (or equivalent inline note) that says:
+- If `$ARGUMENTS` is empty after flag-stripping (and `--autonomous` is NOT set for the dev pipeline), ask the user in plain prose with a command-specific question
+- Wait for the response, use it as the task description
+- Do NOT proceed without a task
+
+Per-command prose:
+- `/devt:workflow` → "What would you like to build, fix, or improve?"
+- `/devt:debug` → "Describe the bug or error you're seeing — include the symptom, where it happens, and what you expected."
+- `/devt:plan` → "What task are we planning?"
+- `/devt:research` → "What topic should I research? (e.g., a feature area, integration pattern, or specific subsystem)"
+- `/devt:implement` → "What would you like to implement? (Quick mode skips docs and retro — best for tasks touching 1-2 files with clear scope.)"
+
+`/devt:workflow --autonomous` with no task = STOP with error (autonomous runs need an upfront task) — preserves the existing precondition for unattended runs.
+
+The pattern is intentionally prose-based (not `AskUserQuestion`) because the input is free-text task description, not multiple-choice. CC's `AskUserQuestion` is ergonomically wrong for task input — prose ask is the standard agentic-loop interaction.
+
+Smoke: 846/846 (no new gates). Locking: 3/3.
+
+---
+
 ### Phase 7 — `/devt:setup` interactive picker UX
 
 When the user types `/devt:setup` with no operation flag, the previous behavior was "STOP with usage hint" — a dead-end error message telling them to re-type the command with `--init|--update|--uninstall|--health`. Phase 7 replaces that with an `AskUserQuestion` interactive picker showing all 4 operations with descriptions.

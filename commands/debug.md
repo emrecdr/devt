@@ -22,6 +22,8 @@ Debug a specific issue using systematic 4-phase investigation. Dispatches a debu
 
 **Step 1 — Parse $ARGUMENTS for --mode flag.** Strip the matched flag from $ARGUMENTS before passing the remaining text to the workflow.
 
+**Step 1.5 — Elicit bug description if empty.** After flag-stripping, if the remaining text is empty, ask the user in plain prose: *"Describe the bug or error you're seeing — include the symptom, where it happens, and what you expected."* Wait for the response and use it as the bug description.
+
 Routing table:
 
 | Detected in $ARGUMENTS | Workflow file to Read |

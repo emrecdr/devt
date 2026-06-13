@@ -30,6 +30,8 @@ Execute the development workflow for a given task. The primary family head of de
 
 **Step 1 — Parse $ARGUMENTS for routing flags.** Detect ONE primary flag (mutually exclusive). Strip the matched flag from $ARGUMENTS before passing the remaining text to the workflow as the task description.
 
+**Step 1.5 — Elicit task if empty.** After flag-stripping, if the remaining task text is empty AND `--autonomous` is NOT set, ask the user in plain prose: *"What would you like to build, fix, or improve?"* Wait for the response and use it as the task description. In autonomous mode, empty task = STOP with error (autonomous runs require an upfront task).
+
 Routing table (apply first match):
 
 | Detected in $ARGUMENTS | Workflow file to Read |
