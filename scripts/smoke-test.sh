@@ -12135,6 +12135,59 @@ else
   fail "K96: dangling routes —$K96_MISSING"
 fi
 
+# K97: stale-reference scan in contract files.
+# Every /devt:<name> reference in commands/, workflows/, agents/, skills/
+# must resolve to a file at commands/<name>.md. Catches typos, missing
+# files after a rename, and references to commands deleted without
+# updating callers. Scope is the contract layer ONLY — README and docs
+# may use meta-syntactic placeholders like /devt:<command-name> which
+# are documentation literals, not real references.
+K97_EXISTS=$(ls "$ROOT"/commands/*.md 2>/dev/null | sed -E 's|^.*/commands/||; s|\.md$||' | sort -u)
+K97_REFS=$( (grep -rohE '/devt:[a-z][a-z0-9-]*' "$ROOT"/commands "$ROOT"/workflows "$ROOT"/agents "$ROOT"/skills 2>/dev/null || true) | sed 's|^/devt:||' | sort -u )
+# Subcommand-only patterns (/devt:memory promote, /devt:note --defer, etc.) — strip the subcommand,
+# but our regex already stops at non-alphanumerics so the base name is captured.
+# Allowlist: known non-command refs that appear in docs/protocol descriptions.
+K97_ALLOWLIST="review-parallel command-name"
+K97_STALE=""
+for ref in $K97_REFS; do
+  if echo "$K97_EXISTS" | grep -qx "$ref"; then continue; fi
+  skip=no
+  for w in $K97_ALLOWLIST; do
+    if [ "$ref" = "$w" ]; then skip=yes; break; fi
+  done
+  [ "$skip" = "yes" ] && continue
+  K97_STALE="$K97_STALE $ref"
+done
+if [ -z "$K97_STALE" ]; then
+  pass "K97: stale-reference scan (every /devt:<name> in contract files resolves to commands/<name>.md)"
+else
+  fail "K97: stale refs —$K97_STALE"
+fi
+
+# K98: do.md ↔ devt-coordinator.md routing table parity.
+# The two routing tables are documented as mirrors. K98 enforces both
+# row count parity AND row-by-row "Route to" column parity. Catches the
+# class where someone updates one router but forgets the other (the
+# drift note already warns about this). Uses temp files instead of
+# process substitution to play nice with `set -euo pipefail`.
+K98_DO_TMP=$(mktemp)
+K98_DC_TMP=$(mktemp)
+awk '/^\| If the prompt/{seen=1; next} seen && /^\|/ && $0 !~ /^\|[ ]*---/{
+  n=split($0, a, "|"); if(n>=3){ gsub(/^[ \t`]+|[ \t`]+$/, "", a[3]); if(length(a[3]) > 0) print a[3] }
+}' "$ROOT/workflows/do.md" | sort > "$K98_DO_TMP"
+awk '/^\| If the prompt/{seen=1; next} seen && /^\|/ && $0 !~ /^\|[ ]*---/{
+  n=split($0, a, "|"); if(n>=3){ gsub(/^[ \t`]+|[ \t`]+$/, "", a[3]); if(length(a[3]) > 0) print a[3] }
+}' "$ROOT/agents/devt-coordinator.md" | sort > "$K98_DC_TMP"
+K98_DO_COUNT=$(wc -l < "$K98_DO_TMP" | tr -d ' ')
+K98_DC_COUNT=$(wc -l < "$K98_DC_TMP" | tr -d ' ')
+K98_DIFF=$(diff "$K98_DO_TMP" "$K98_DC_TMP" 2>/dev/null | head -10 || true)
+rm -f "$K98_DO_TMP" "$K98_DC_TMP"
+if [ "$K98_DO_COUNT" = "$K98_DC_COUNT" ] && [ -z "$K98_DIFF" ]; then
+  pass "K98: router parity ($K98_DO_COUNT routes match between workflows/do.md and agents/devt-coordinator.md)"
+else
+  fail "K98: router drift — do.md=$K98_DO_COUNT routes, devt-coordinator.md=$K98_DC_COUNT routes; diff lines: $K98_DIFF"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

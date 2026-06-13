@@ -56,6 +56,16 @@ After Phase 2, an audit found 5 internal routing tables still referencing direct
 
 - **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
 
+### Phase 2.6 — Drift-class guards K97 + K98 (validation completeness)
+
+After Phase 2.5, a structural validation pass surfaced two additional drift classes worth locking:
+
+- **K97 — stale-reference scan in contract files.** Every `/devt:<name>` reference in `commands/`, `workflows/`, `agents/`, and `skills/` must resolve to an existing `commands/<name>.md`. Catches: typos, renames that miss callers, references to commands deleted without updating the references. Allowlist for known meta-syntactic placeholders (`review-parallel` is internal-only per `code-review-parallel.md`; `command-name` is a generic doc placeholder).
+- **K98 — `workflows/do.md` ↔ `agents/devt-coordinator.md` routing parity.** The two routing tables are documented as mirrors; the drift note in `do.md` says "the smoke test enforces row-count parity but does not catch column-content drift." K98 closes that gap: extracts the "Route to" column from each, sorts, and asserts byte-equal output. Currently 19 routes match between the two files.
+- **`workflows/do.md` header text aligned** with `agents/devt-coordinator.md` ("If the prompt describes..." everywhere).
+
+Smoke: 849/849 (was 847 + K97 + K98).
+
 ---
 
 **Command surface stratification — 36 commands cut to 14 visible.** Adds `user-invocable: false` to 22 advanced/admin/telemetry commands so they're hidden from the `/`-autocomplete menu while remaining fully typed-callable. The casual-user mental model collapses from 36 equal-tier commands to 14 (6 Tier-1 daily entries + 6 Tier-2 verbs by intent + 2 knowledge commands). Aligns with the surface size of every successful CC plugin we measured: superpowers (14 skills), document-skills (18), feature-dev (1 command), pr-review-toolkit (1) — devt was the outlier at 36.

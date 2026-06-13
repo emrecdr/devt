@@ -59,8 +59,8 @@ options:
 
 Match the input against this routing table. Apply the **first matching** rule:
 
-| If the text describes... | Route to | Why |
-|--------------------------|----------|-----|
+| If the prompt describes... | Route to | Why |
+|----------------------------|----------|-----|
 | Setting up a project, "initialize", "configure" | `/devt:setup --init` | Project setup |
 | A bug, error, crash, "something broken" | `/devt:debug` | Systematic debugging |
 | Exploring, researching, "how does X work" | `/devt:research` | Codebase investigation |
