@@ -889,7 +889,7 @@ function synthesizeRecommendations(governing, rejected, blast) {
     recs.push(`${ids} govern: any solution involving the matched keywords is pre-rejected. Read these tombstones before proposing.`);
   }
   if (blast && blast.effect_size === "large") {
-    recs.push("Effect size is LARGE — coordinate via /devt:plan, not /devt:fast. Plan thorough test coverage for the dependent set.");
+    recs.push("Effect size is LARGE — coordinate via /devt:plan, not /devt:workflow --mode=fast. Plan thorough test coverage for the dependent set.");
   } else if (blast && blast.effect_size === "medium") {
     recs.push("Effect size is MEDIUM — STANDARD-tier review recommended; identify and test direct dependents.");
   }

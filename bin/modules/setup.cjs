@@ -3,7 +3,7 @@
 /**
  * Project setup — scaffolds .devt/rules/ from templates and creates .devt/config.json.
  *
- * Called by /devt:init command via the project-init workflow.
+ * Called by /devt:setup --init command via the project-init workflow.
  * The workflow handles the interactive questioning (AskUserQuestion).
  * This module handles the file operations.
  *
@@ -274,7 +274,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     }
     // Auto-enable graphify when binary is on PATH at first setup. Without this,
     // a fully-installed Graphify silently sits unused because the schema default
-    // is `enabled: false`. The /devt:init workflow has its own AskUserQuestion
+    // is `enabled: false`. The /devt:setup --init workflow has its own AskUserQuestion
     // for the same — this branch covers CLI-direct setup.
     if (probeGraphifyBinary()) {
       finalConfig = deepMerge(finalConfig, { graphify: { enabled: true } });

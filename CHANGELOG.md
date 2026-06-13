@@ -56,6 +56,46 @@ After Phase 2, an audit found 5 internal routing tables still referencing direct
 
 - **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
 
+### Phase 5 — Runtime alignment + K100 (hooks/, bin/, templates/)
+
+After Phases 3+4 aligned the contract layer (commands/workflows/agents/skills) and the doc layer (docs/, README.md), Phase 5 closes the final alignment gap: the **runtime layer** — hook scripts that emit prompts to users, CLI modules that emit error messages, and templates that ship to user projects on `/devt:setup --init`.
+
+**Validation pass before rewriting** found 46+ stale refs across 12 files, classified by impact:
+
+| Tier | Type | Files |
+|---|---|---|
+| **TIER 1** (user-facing) | Hook prompt strings | `session-start.sh` (9 edits), `stop.sh` (1) |
+| **TIER 1** (user-facing) | Error message `fix:` fields | `bin/modules/health.cjs` (22 edits) |
+| **TIER 1** (user-facing) | Warnings + recommendations | `init.cjs` (2), `preflight.cjs` (1), `state.cjs` (10), `devt-tools.cjs` (1) |
+| **TIER 1** (user-facing) | Markdown template HTML comments | `deferred.cjs` (2 — written into `deferred.md` viewed via `/devt:status`) |
+| **TIER 2** (comments/JSDoc) | Internal code comments | `dispatch-hygiene-guard.sh` (1), `discovery.cjs` (1), `logger.cjs` (2), `setup.cjs` (2) |
+
+**Best-practice frame**: per the CC docs' "address root causes, not symptoms" rule, ALL stale refs got rewritten (both T1 and T2) so error messages give actionable suggestions and internal docs stay aligned for future maintainers.
+
+**Bulk rewrite**: inline Node.js script (visible in transcript) applied 54 substitutions across 12 files in `hooks/` + `bin/` (.sh/.cjs/.js only). 5 additional manual fixes covered `.md` and `.py` files the script skipped: `hooks/quality-gate-verifier.md` (3 refs), `bin/modules/deferred.cjs` (multi-line comment), `templates/python-fastapi/arch-scan.py` (1), `templates/typescript-node/quality-gates.md` (1).
+
+### Added
+
+- **`scripts/smoke-test.sh::K100`** — runtime stale-reference scan. Every `/devt:<name>` reference in `hooks/`, `bin/`, and `templates/` (.sh/.cjs/.js/.py/.md) must resolve to an existing `commands/<name>.md`. Same allowlist as K97 (`review-parallel`, `command-name`). Drift class: a hook emits a stale "Run /devt:<deleted>" prompt that users follow into nowhere. This was a real bug that Phase 5's validation caught and fixed.
+
+**The drift-guard stack is now 7 deep — K94 through K100:**
+
+| Gate | Guards |
+|---|---|
+| K94 | Command stratification (15 visible + 4 specialized hidden) |
+| K95 | Parameter routing contract (23 (flag → workflow) pairings) |
+| K96 | Workflow file existence for K95 routes |
+| K97 | Stale `/devt:<name>` refs in contract files (commands/help.md exempt) |
+| K98 | Router parity between workflows/do.md and agents/devt-coordinator.md |
+| K99 | Workflow orphan detection (with subcommand-route allowlist) |
+| **K100** | **Runtime stale refs in hooks/+bin/+templates/** |
+
+Together they enforce every structural invariant of the v0.93 UX simplification across every layer: contract (K94-K98), reachability (K99), runtime (K100).
+
+Smoke: 845/845 (was 844 + K100). Locking: 3/3.
+
+---
+
 ### Phase 4 — Documentation alignment + K99 orphan guard
 
 After Phase 3, an audit found two final alignment gaps before declaring v0.93 done:

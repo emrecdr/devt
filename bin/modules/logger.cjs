@@ -8,8 +8,8 @@
  * - bin/devt-memory-mcp.cjs tool-call telemetry → .devt/memory/_mcp-trace.jsonl
  * (currently does its own appendFileSync; can migrate later for symmetry)
  *
- * Why JSONL not plain text: unified parsing surface for `/devt:forensics`,
- * `/devt:mcp-stats`, and future log readers. One record per line, valid JSON
+ * Why JSONL not plain text: unified parsing surface for `/devt:debug --mode=forensics`,
+ * `/devt:status --stats=mcp`, and future log readers. One record per line, valid JSON
  * per line, missing fields tolerated by the consumer.
  *
  * Atomicity invariant: each record's serialized form must fit within PIPE_BUF

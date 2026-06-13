@@ -49,7 +49,7 @@ if [[ "$IS_WORKFLOW_ACTIVE" == "true" && "$IS_COMPLETE" == "false" ]]; then
   if [[ -n "$TASK" ]]; then
     CONTEXT="${CONTEXT} Task: ${TASK}."
   fi
-  CONTEXT="${CONTEXT} State preserved in .devt/state/. Run /devt:next to resume or /devt:cancel-workflow to reset."
+  CONTEXT="${CONTEXT} State preserved in .devt/state/. Run /devt:next to resume or /devt:workflow --cancel to reset."
 
   node -e "
     const ctx = process.argv[1];

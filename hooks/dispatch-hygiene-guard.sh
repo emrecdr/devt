@@ -16,7 +16,7 @@
 #   warn — hook returns additionalContext advisory; allows the call.
 #   off — hook is a no-op for raw dispatches.
 # Always appends a forensic JSONL record to .devt/state/dispatch-warnings.jsonl
-# regardless of mode, so /devt:forensics can analyze bypass attempts.
+# regardless of mode, so /devt:debug --mode=forensics can analyze bypass attempts.
 #
 # Trigger condition: subagent_type matches /^devt:/ AND the prompt is MISSING
 # all of <scope_trust>, <scope_hint>, and <memory_signal> blocks. Having any

@@ -16,37 +16,37 @@ const { safeJsonParse } = require("./security.cjs");
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 
 const CHECKS = {
-  E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:init to set up project, or /devt:health --repair" },
-  E002: { severity: "error", message: ".devt/config.json not found", repairable: true, fix: "Run /devt:init, or /devt:health --repair to create with defaults" },
-  E003: { severity: "error", message: ".devt/config.json has invalid JSON", repairable: true, fix: "Fix JSON syntax, or /devt:health --repair to reset to defaults" },
-  E004: { severity: "error", message: ".devt/rules/ directory not found", repairable: false, fix: "Run /devt:init to scaffold rules from a template" },
-  E005: { severity: "error", message: ".devt/state/ directory not found", repairable: true, fix: "Run /devt:health --repair to create the directory" },
-  W001: { severity: "warning", message: "coding-standards.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
-  W002: { severity: "warning", message: "testing-patterns.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
-  W003: { severity: "warning", message: "quality-gates.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
-  W004: { severity: "warning", message: "architecture.md missing from .devt/rules/", repairable: false, fix: "Run /devt:init --mode update to add missing template files" },
-  W005: { severity: "warning", message: ".devt/state/ not in .gitignore", repairable: true, fix: "Run /devt:health --repair to add .devt/state/ to .gitignore" },
-  W006: { severity: "warning", message: "Stale workflow — active=true with old stopped_at", repairable: true, fix: "Run /devt:health --repair to clear stale state, or /devt:cancel-workflow" },
+  E001: { severity: "error", message: ".devt/ directory not found", repairable: true, fix: "Run /devt:setup --init to set up project, or /devt:setup --health --repair" },
+  E002: { severity: "error", message: ".devt/config.json not found", repairable: true, fix: "Run /devt:setup --init, or /devt:setup --health --repair to create with defaults" },
+  E003: { severity: "error", message: ".devt/config.json has invalid JSON", repairable: true, fix: "Fix JSON syntax, or /devt:setup --health --repair to reset to defaults" },
+  E004: { severity: "error", message: ".devt/rules/ directory not found", repairable: false, fix: "Run /devt:setup --init to scaffold rules from a template" },
+  E005: { severity: "error", message: ".devt/state/ directory not found", repairable: true, fix: "Run /devt:setup --health --repair to create the directory" },
+  W001: { severity: "warning", message: "coding-standards.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
+  W002: { severity: "warning", message: "testing-patterns.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
+  W003: { severity: "warning", message: "quality-gates.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
+  W004: { severity: "warning", message: "architecture.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
+  W005: { severity: "warning", message: ".devt/state/ not in .gitignore", repairable: true, fix: "Run /devt:setup --health --repair to add .devt/state/ to .gitignore" },
+  W006: { severity: "warning", message: "Stale workflow — active=true with old stopped_at", repairable: true, fix: "Run /devt:setup --health --repair to clear stale state, or /devt:workflow --cancel" },
   W007: { severity: "warning", message: "VERSION and plugin.json version mismatch", repairable: false, fix: "Update VERSION or plugin.json to match" },
-  W008: { severity: "warning", message: "Hook script not executable", repairable: true, fix: "Run /devt:health --repair to fix permissions, or: chmod +x hooks/<script>" },
+  W008: { severity: "warning", message: "Hook script not executable", repairable: true, fix: "Run /devt:setup --health --repair to fix permissions, or: chmod +x hooks/<script>" },
   W009: { severity: "warning", message: "Plugin agent file missing", repairable: false, fix: "Reinstall devt — agent files may be corrupted or incomplete" },
   W010: { severity: "warning", message: "Workflow missing <available_agent_types> section", repairable: false, fix: "Add <available_agent_types> to the workflow to prevent post-/clear silent fallback to general-purpose" },
   I001: { severity: "info", message: "CLAUDE.md not found (recommended)", repairable: false, fix: "Create a CLAUDE.md with project-specific guidance for Claude Code" },
   I003: { severity: "info", message: "No active workflow", repairable: false, fix: "No action needed — start a workflow with /devt:workflow" },
-  I004: { severity: "info", message: "Memory promotion candidates pending in _suggestions.md", repairable: false, fix: "Run /devt:retro or /devt:memory promote to triage candidates into permanent memory" },
-  W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:health --repair to clear invalid state, or /devt:cancel-workflow" },
+  I004: { severity: "info", message: "Memory promotion candidates pending in _suggestions.md", repairable: false, fix: "Run /devt:workflow --retro or /devt:memory promote to triage candidates into permanent memory" },
+  W011: { severity: "warning", message: "Invalid workflow state value", repairable: true, fix: "Run /devt:setup --health --repair to clear invalid state, or /devt:workflow --cancel" },
   W012: { severity: "warning", message: "Hook script referenced in hooks.json not found", repairable: false, fix: "Reinstall devt — hook files may be corrupted or incomplete" },
-  W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Re-run the phase to regenerate the artifact, fix the offending `## Status` line, or /devt:cancel-workflow to reset" },
+  W013: { severity: "warning", message: "Workflow state/artifact inconsistency", repairable: false, fix: "Re-run the phase to regenerate the artifact, fix the offending `## Status` line, or /devt:workflow --cancel to reset" },
   W014: { severity: "warning", message: "next.md missing routing for workflow_type", repairable: false, fix: "Add the missing workflow_type to the routing table in workflows/next.md" },
   // Memory layer checks — promoted from agent-orchestrated bash to native checks
   // so CI can rely on `health` returning these directly without an agent in the loop.
-  MEM_INDEX_STALE: { severity: "warning", message: "Memory FTS5 index is older than the most recent .devt/memory/**/*.md file", repairable: true, fix: "Run /devt:health --repair to rebuild, or: node bin/devt-tools.cjs memory index" },
+  MEM_INDEX_STALE: { severity: "warning", message: "Memory FTS5 index is older than the most recent .devt/memory/**/*.md file", repairable: true, fix: "Run /devt:setup --health --repair to rebuild, or: node bin/devt-tools.cjs memory index" },
   MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
   MEM_PATH_UNREACHABLE: { severity: "warning", message: "memory.paths references a directory that doesn't exist", repairable: false, fix: "Initialize the missing root: git submodule init, mount the NFS share, or remove the entry from .devt/config.json" },
   MEM_CONFLICT_HIGH: { severity: "info", message: "Memory layer has ID collisions across configured roots (last-wins applied)", repairable: false, fix: "Inspect with `node bin/devt-tools.cjs memory index` to see the collisions; rename project-local docs OR accept the override as intentional" },
   // Graphify integration drift — `graphify` binary on PATH but MCP server not registered in
   // .mcp.json. Setup wizard's MCP probe is one-shot at install time; users who install
-  // Graphify AFTER /devt:init don't auto-pick up the MCP entry. Warn-only by design — auto-
+  // Graphify AFTER /devt:setup --init don't auto-pick up the MCP entry. Warn-only by design — auto-
   // editing .mcp.json risks stomping user customizations.
   GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
   // DEF-052 (greenfield calibration #16): graphify silently emits empty hyperedges
@@ -436,7 +436,7 @@ function runChecks(pluginRoot) {
     } catch { /* memory module load failed — skip silently */ }
   }
 
-  // Drift case: Graphify installed after /devt:init never gets registered in .mcp.json.
+  // Drift case: Graphify installed after /devt:setup --init never gets registered in .mcp.json.
   // Read .mcp.json first — when graphify is already registered (the common case) we
   // skip the subprocess probe entirely.
   try {

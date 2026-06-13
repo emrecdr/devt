@@ -507,10 +507,10 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // Collect warnings for missing project setup
   const warnings = [];
   if (!rulesFound) {
-    warnings.push(".devt/rules/ not found. Run /devt:init to set up project.");
+    warnings.push(".devt/rules/ not found. Run /devt:setup --init to set up project.");
   }
   if (!configExists) {
-    warnings.push(".devt/config.json not found. Run /devt:init to configure project.");
+    warnings.push(".devt/config.json not found. Run /devt:setup --init to configure project.");
   }
 
   // Sanitize task text before it flows into agent prompts

@@ -208,7 +208,7 @@ Commands:
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
   deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md (v0.29.0+)
                             [--context="..."] [--tags=a,b,c] [--by=<agent>]
-                            Survives /devt:cancel-workflow (reset-exempted)
+                            Survives /devt:workflow --cancel (reset-exempted)
   deferred list             List deferred items [--status=open|closed] [--tag=X] [--limit=N]
   deferred get <DEF-ID>     Fetch a single deferred item
   deferred close <DEF-ID>   Mark deferred item as closed [--by=<agent>]

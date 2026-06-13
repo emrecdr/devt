@@ -7,8 +7,8 @@
  * we'd do later." Distinct from `.devt/memory/` (permanent canonical knowledge,
  * curator-gated) and the rest of `.devt/state/` (per-workflow ephemeral, wiped
  * on `state reset`). Exempted from `state reset` via `RESET_EXEMPT` in
- * `state.cjs` so a deferred TODO captured in workflow A survives `/devt:cancel-
- * workflow` and can be picked up in workflow B.
+ * `state.cjs` so a deferred TODO captured in workflow A survives
+ * `/devt:workflow --cancel` and can be picked up in workflow B.
  *
  * Format: append-only markdown, one item per `## DEF-NNN — title` block,
  * blocks separated by `---`. Each block has a small key:value list
@@ -32,8 +32,8 @@ const HEADER = [
   "# Deferred Tasks",
   "",
   "<!-- Append-only. Each item one block separated by `---`. -->",
-  "<!-- Captured by /devt:defer or `node bin/devt-tools.cjs deferred add ...`. -->",
-  "<!-- Survives /devt:cancel-workflow — exempted from state reset. -->",
+  "<!-- Captured by /devt:note --defer or `node bin/devt-tools.cjs deferred add ...`. -->",
+  "<!-- Survives /devt:workflow --cancel — exempted from state reset. -->",
   "",
 ].join("\n") + "\n";
 

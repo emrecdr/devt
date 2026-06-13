@@ -70,7 +70,7 @@ predictable — no LLM tokens consumed.
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if grep -q \"active: true\" .devt/state/workflow.yaml 2>/dev/null; then bash \"${CLAUDE_PLUGIN_ROOT}/scripts/run-quality-gates.sh\" || { echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"Quality gates failed — run /devt:quality to see details\\\"}\" ; exit 0; }; fi'",
+            "command": "bash -c 'if grep -q \"active: true\" .devt/state/workflow.yaml 2>/dev/null; then bash \"${CLAUDE_PLUGIN_ROOT}/scripts/run-quality-gates.sh\" || { echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"Quality gates failed — run /devt:review --focus=quality to see details\\\"}\" ; exit 0; }; fi'",
             "timeout": 60
           }
         ]
@@ -90,7 +90,7 @@ For a simpler version that just blocks on active workflows without running gates
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if grep -q \"active: true\" .devt/state/workflow.yaml 2>/dev/null; then echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"devt workflow still active — run /devt:quality before stopping\\\"}\" ; else exit 0; fi'",
+            "command": "bash -c 'if grep -q \"active: true\" .devt/state/workflow.yaml 2>/dev/null; then echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"devt workflow still active — run /devt:review --focus=quality before stopping\\\"}\" ; else exit 0; fi'",
             "timeout": 10
           }
         ]
@@ -104,7 +104,7 @@ For a simpler version that just blocks on active workflows without running gates
 
 - The hook only activates when a devt workflow is active (`active: true` in `workflow.yaml`).
 - Quality gate commands are defined per-project in `.devt/rules/quality-gates.md`.
-  Run `/devt:init` to scaffold this file if it does not exist.
+  Run `/devt:setup --init` to scaffold this file if it does not exist.
 - If no active workflow is detected, the hook allows completion immediately (zero overhead).
 - The existing `stop.sh` hook in devt's `hooks.json` already handles incomplete workflow
   detection. This verifier adds quality gate enforcement on top of that.

@@ -30,7 +30,7 @@ MIGRATION_WARNINGS=""
 # .devt/state/ exists but no .devt/rules/ (incomplete setup)
 if [[ -d ".devt/state" && "$HAS_DEV_RULES" == "false" ]]; then
   MIGRATION_WARNINGS="${MIGRATION_WARNINGS}
-Warning: .devt/state/ exists but .devt/rules/ is missing. Run /devt:init to set up project conventions."
+Warning: .devt/state/ exists but .devt/rules/ is missing. Run /devt:setup --init to set up project conventions."
 fi
 
 # ─── Workflow State Detection ───
@@ -78,7 +78,7 @@ if [[ -f "$UPDATE_CACHE" ]]; then
   UPDATE_MSG=$(node -e "
     try {
       const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-      if (d.update_available) process.stdout.write('Update available: v' + d.installed + ' -> v' + d.latest + '. Run /devt:update');
+      if (d.update_available) process.stdout.write('Update available: v' + d.installed + ' -> v' + d.latest + '. Run /devt:setup --update');
     } catch {}
   " "$UPDATE_CACHE" 2>/dev/null || true)
 fi
@@ -113,14 +113,14 @@ When to use what:
   Not sure what to do next     -> /devt:next
   Create PR when ready         -> /devt:ship
 
-Utilities: /devt:status, /devt:pause, /devt:cancel-workflow, /devt:note, /devt:health, /devt:update
+Utilities: /devt:status, /devt:workflow --pause, /devt:workflow --cancel, /devt:note, /devt:setup --health, /devt:setup --update
 
 Project: .devt/rules/ ${HAS_DEV_RULES} | .devt/config.json ${HAS_DEVT_CONFIG}"
 
 if [[ "$HAS_DEV_RULES" == "false" && "$HAS_DEVT_CONFIG" == "false" ]]; then
   CONTEXT="${CONTEXT}
 
-This project is not configured for devt yet. Run /devt:init to set up .devt/rules/ with coding standards, testing patterns, and quality gates. Without .devt/rules/, devt works but agents have no project-specific conventions to follow."
+This project is not configured for devt yet. Run /devt:setup --init to set up .devt/rules/ with coding standards, testing patterns, and quality gates. Without .devt/rules/, devt works but agents have no project-specific conventions to follow."
 fi
 
 if [[ -n "$HANDOFF_INFO" ]]; then
@@ -128,7 +128,7 @@ if [[ -n "$HANDOFF_INFO" ]]; then
 
 Paused workflow detected:
   ${HANDOFF_INFO}
-Run /devt:next to resume or /devt:cancel-workflow to start fresh."
+Run /devt:next to resume or /devt:workflow --cancel to start fresh."
 elif [[ -n "$STOPPED_AT" ]]; then
   RESUME_DETAIL="Previous session stopped at: ${STOPPED_AT}."
   [[ -n "$STOPPED_PHASE" ]] && RESUME_DETAIL="${RESUME_DETAIL} Phase: ${STOPPED_PHASE}."
@@ -136,7 +136,7 @@ elif [[ -n "$STOPPED_AT" ]]; then
   CONTEXT="${CONTEXT}
 
 ${RESUME_DETAIL} State in .devt/state/.
-Run /devt:next to resume or /devt:cancel-workflow to start fresh."
+Run /devt:next to resume or /devt:workflow --cancel to start fresh."
 fi
 
 if [[ -n "$MIGRATION_WARNINGS" ]]; then

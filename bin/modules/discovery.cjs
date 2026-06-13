@@ -5,7 +5,7 @@
  *
  * Sources of candidate proposals (in priority order):
  * 1. #KNOWLEDGE-CANDIDATE inline tags in `.devt/state/scratchpad.md`
- * 2. .devt/state/decisions.md DEC-xxx entries (existing /devt:clarify output)
+ * 2. .devt/state/decisions.md DEC-xxx entries (existing /devt:workflow --mode=clarify output)
  * 3. Graphify god-nodes via parseReportSections (when graphify-out/GRAPH_REPORT.md exists)
  * 4. claude-mem MCP observations via `.devt/state/claude-mem-harvest.md` (when the
  *    orchestrator's pre-harvest step persisted them — workflows invoke

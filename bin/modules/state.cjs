@@ -1055,7 +1055,7 @@ function updateState(keyValues) {
   }
 }
 
-// Files in .devt/state/ that survive `state reset` / `/devt:cancel-workflow`.
+// Files in .devt/state/ that survive `state reset` / `/devt:workflow --cancel`.
 // Most state is per-workflow ephemeral, but some artifacts span sessions —
 // e.g. deferred.md is the cross-workflow TODO queue and must NOT
 // disappear when the user cancels an unrelated active workflow.
@@ -1069,10 +1069,10 @@ const RESET_EXEMPT = new Set([
   ARCHIVE_DIR,                          // ring buffer survives reset (rolls off via pruneArchive)
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
-  "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:forensics post-hoc analysis
+  "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:debug --mode=forensics post-hoc analysis
   "probe-failures.jsonl",               // Q4 — graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
   ".graphify-rebuild.lock",             // DEF-038 — atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
-  "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:cancel-workflow
+  "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:workflow --cancel
   "graphify-impact-plan.json",          // R-2 (cal #19 secondary audit) — args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
 ]);
 
@@ -1108,7 +1108,7 @@ const STATE_FILE_CONTRACT = {
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
     "claude-mem-harvest.md", "claude-mem-skipped.txt", "last-curator-run.txt",
-    "continue-here.md",         // /devt:pause output (paired with handoff.json)
+    "continue-here.md",         // /devt:workflow --pause output (paired with handoff.json)
     "graph-impact.md",
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
     "graphify-skip-reason.txt", // explicit-skip artifact when the impact step's plan == "skip"
@@ -1427,7 +1427,7 @@ function checkWorkflowLock(preReadState) {
       phase: state.phase,
       tier: state.tier,
       message:
-        "A workflow is already active. Run /devt:cancel-workflow first, or wait for it to complete.",
+        "A workflow is already active. Run /devt:workflow --cancel first, or wait for it to complete.",
     };
   }
   return { locked: false };
@@ -1437,12 +1437,12 @@ function checkWorkflowLock(preReadState) {
  * Release an active workflow lock cleanly. Sets active=false, phase=cancelled,
  * status=cancelled, and stamps released_at. Distinct from resetState (which
  * archives all artifacts) — release preserves task outputs so a follow-up
- * /devt:next or /devt:retro can still consume them.
+ * /devt:next or /devt:workflow --retro can still consume them.
  *
  * Field signal (greenfield 2026-05-28 PM calibration #3 finding #3): the
  * ad-hoc workaround `state update active=false phase=cancelled status=cancelled`
  * tripped the VALID_PHASES warning. This subcommand encapsulates the correct
- * mutation set and stamps released_at so /devt:forensics can distinguish
+ * mutation set and stamps released_at so /devt:debug --mode=forensics can distinguish
  * orderly release from interrupted state.
  */
 function releaseWorkflow() {
@@ -3454,7 +3454,7 @@ function assertArchScanFresh(args) {
   if (!reportPath) {
     return {
       ok: false,
-      reason: "arch-scan-report.md not found in either per-instance dir or legacy root — no arch scan has run for this project. Suggest /devt:arch-health before review.",
+      reason: "arch-scan-report.md not found in either per-instance dir or legacy root — no arch scan has run for this project. Suggest /devt:review --focus=arch before review.",
     };
   }
   let mtime;
@@ -3468,7 +3468,7 @@ function assertArchScanFresh(args) {
       report_path: reportPath,
       age_hours: parseFloat(ageHours.toFixed(1)),
       max_age_hours: maxAgeHours,
-      reason: `arch-scan-report.md is ${ageHours.toFixed(1)}h old (limit ${maxAgeHours}h with --block). Re-run /devt:arch-health before review.`,
+      reason: `arch-scan-report.md is ${ageHours.toFixed(1)}h old (limit ${maxAgeHours}h with --block). Re-run /devt:review --focus=arch before review.`,
     };
   }
   return {
@@ -3479,7 +3479,7 @@ function assertArchScanFresh(args) {
     max_age_hours: maxAgeHours,
     reason: fresh
       ? `arch-scan-report.md fresh (${ageHours.toFixed(1)}h old, limit ${maxAgeHours}h)`
-      : `arch-scan-report.md is ${ageHours.toFixed(1)}h old (advisory — exceeds ${maxAgeHours}h fresh window). Review may miss recent architectural drift; consider /devt:arch-health refresh.`,
+      : `arch-scan-report.md is ${ageHours.toFixed(1)}h old (advisory — exceeds ${maxAgeHours}h fresh window). Review may miss recent architectural drift; consider /devt:review --focus=arch refresh.`,
   };
 }
 

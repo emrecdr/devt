@@ -27,7 +27,7 @@ Built-in detectors (shipped with the devt plugin):
 Add a new detector by dropping a file into ``.devt/rules/detectors/`` — no
 edits here required. See ``detectors/__init__.py`` for the protocol.
 
-Designed to be wired into devt's /devt:arch-health workflow via .devt/config.json:
+Designed to be wired into devt's /devt:review --focus=arch workflow via .devt/config.json:
 
   "arch_scanner": {
     "command": "python3 .devt/rules/arch-scan.py --json",

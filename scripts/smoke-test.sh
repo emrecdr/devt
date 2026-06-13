@@ -12249,6 +12249,33 @@ else
   fail "K99: orphan workflows — $K99_ORPHANS"
 fi
 
+# K100: runtime stale-reference scan in hooks/, bin/, templates/.
+# Every /devt:<name> reference in runtime files (.sh, .cjs, .js, .py, .md
+# under hooks/+bin/+templates/) must resolve to an existing commands/<name>.md.
+# K97 covers contract files (commands/workflows/agents/skills); K100 closes
+# the runtime layer where hooks emit user-facing prompts, bin modules emit
+# error messages, and templates ship to user projects on /devt:setup --init.
+# Drift class: a hook or CLI error message references a deleted command,
+# leaving users with stale "Run /devt:<deleted>" advice that fails.
+K100_EXISTS=$(ls "$ROOT"/commands/*.md 2>/dev/null | sed -E 's|^.*/commands/||; s|\.md$||' | sort -u)
+K100_REFS=$( (find "$ROOT/hooks" "$ROOT/bin" "$ROOT/templates" -type f \( -name '*.sh' -o -name '*.cjs' -o -name '*.js' -o -name '*.py' -o -name '*.md' \) 2>/dev/null | xargs grep -hoE '/devt:[a-z][a-z0-9-]*' 2>/dev/null || true) | sed 's|^/devt:||' | sort -u )
+K100_ALLOWLIST="review-parallel command-name"
+K100_STALE=""
+for ref in $K100_REFS; do
+  if echo "$K100_EXISTS" | grep -qx "$ref"; then continue; fi
+  skip=no
+  for w in $K100_ALLOWLIST; do
+    if [ "$ref" = "$w" ]; then skip=yes; break; fi
+  done
+  [ "$skip" = "yes" ] && continue
+  K100_STALE="$K100_STALE $ref"
+done
+if [ -z "$K100_STALE" ]; then
+  pass "K100: runtime stale-reference scan (every /devt:<name> in hooks/+bin/+templates/ resolves to commands/<name>.md)"
+else
+  fail "K100: runtime stale refs —$K100_STALE"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
