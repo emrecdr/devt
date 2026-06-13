@@ -11974,6 +11974,57 @@ else
   fail "K92: hygiene gate mismatch — hand_injected_pass=$K92_HAND_PASS docs_writer_pass=$K92_DOCS_PASS bare_denies=$K92_BARE_DENIES"
 fi
 
+# K93: hook-cost-estimate CLI surface + classification correctness.
+# Validates the per-hook migration ROI estimator: reads a synthetic
+# hook-trace JSONL (generated with dynamic timestamps so the smoke is
+# resilient to clock drift), runs the CLI, and asserts the recommendation
+# logic correctly classifies hooks by their event role and fire rate.
+# Uses devt's real hooks/ tree for brittleness scoring (module resolves
+# hooksDir via __dirname, not cwd) — so dispatch-hygiene-guard.sh's 10
+# JS-regex literals drive the "migrate" recommendation when fires <= 200.
+K93_TMP=$(mktemp -d)
+mkdir -p "$K93_TMP/.devt/state/hook-trace"
+K93_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Synthetic trace: dispatch-hygiene-guard at 50 fires (low → migrate eligible
+# given the real hook's brittleness=10); bash-guard at 1000 fires (high →
+# stay even if brittleness were high, since the fires cap kicks in);
+# session-start at 5 fires (lifecycle event → always stay regardless).
+{
+  for _ in $(seq 1 50); do echo "{\"ts\":\"$K93_TS\",\"script\":\"dispatch-hygiene-guard.sh\",\"stdin_bytes\":300,\"exit\":0}"; done
+  for _ in $(seq 1 1000); do echo "{\"ts\":\"$K93_TS\",\"script\":\"bash-guard.sh\",\"stdin_bytes\":700,\"exit\":0}"; done
+  for _ in $(seq 1 5); do echo "{\"ts\":\"$K93_TS\",\"script\":\"session-start.sh\",\"stdin_bytes\":160,\"exit\":0}"; done
+} > "$K93_TMP/.devt/state/hook-trace/run-hook.jsonl"
+K93_OUT=$(cd "$K93_TMP" && node "$CLI" hook-cost-estimate --window=7d 2>/dev/null)
+K93_OK=$(echo "$K93_OUT" | jq -r '.ok // false')
+K93_HAS_SUMMARY=$(echo "$K93_OUT" | jq -r '.summary | type == "object"')
+K93_HAS_HOOKS_ARRAY=$(echo "$K93_OUT" | jq -r '.hooks | type == "array"')
+K93_TOTAL_HOOKS=$(echo "$K93_OUT" | jq -r '.hooks | length')
+# Classification asserts — these are the contract that the algorithm
+# protects. Changing them requires updating the recommendation thresholds.
+K93_DHG_REC=$(echo "$K93_OUT" | jq -r '.hooks[] | select(.hook == "dispatch-hygiene-guard.sh") | .recommend')
+K93_BASH_REC=$(echo "$K93_OUT" | jq -r '.hooks[] | select(.hook == "bash-guard.sh") | .recommend')
+K93_SESS_REC=$(echo "$K93_OUT" | jq -r '.hooks[] | select(.hook == "session-start.sh") | .recommend')
+# Invalid window must surface as ok=false. The CLI exits 1 in that case
+# so pipefail would trip the smoke under set -e — wrap in `|| true` to
+# capture the JSON output without aborting the test (K91 pattern).
+K93_INVALID_OK=$(cd "$K93_TMP" && (node "$CLI" hook-cost-estimate --window=invalid 2>/dev/null || true) | jq -r '.ok // false')
+# 24h window flag wires through.
+K93_24H_DAYS=$(cd "$K93_TMP" && node "$CLI" hook-cost-estimate --window=24h 2>/dev/null | jq -r '.window_days')
+rm -rf "$K93_TMP"
+if [ "$K93_OK" = "true" ] \
+   && [ "$K93_HAS_SUMMARY" = "true" ] \
+   && [ "$K93_HAS_HOOKS_ARRAY" = "true" ] \
+   && [ "$K93_TOTAL_HOOKS" = "3" ] \
+   && [ "$K93_DHG_REC" = "migrate" ] \
+   && [ "$K93_BASH_REC" = "stay" ] \
+   && [ "$K93_SESS_REC" = "stay" ] \
+   && [ "$K93_INVALID_OK" = "false" ] \
+   && [ "$K93_24H_DAYS" = "1" ]; then
+  pass "K93: hook-cost-estimate (well-formed JSON, dispatch-hygiene→migrate, bash-guard→stay, session-start→stay, --window flag wires, invalid window errors)"
+else
+  fail "K93: hook-cost-estimate mismatch — ok=$K93_OK summary=$K93_HAS_SUMMARY hooks=$K93_HAS_HOOKS_ARRAY total=$K93_TOTAL_HOOKS dhg=$K93_DHG_REC bash=$K93_BASH_REC sess=$K93_SESS_REC invalid_ok=$K93_INVALID_OK 24h_days=$K93_24H_DAYS"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

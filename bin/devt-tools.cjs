@@ -110,6 +110,12 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "hook-cost-estimate": {
+        // hook-cost-estimate — per-hook migration ROI from run-hook.jsonl trace
+        const code = require("./modules/hook-cost.cjs").run(args.slice(1));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "bash-guard": {
         // bash-guard — PreToolUse Bash classifier; reads stdin tool-call JSON,
         // emits hook response. See bin/modules/bash-guard.cjs.
