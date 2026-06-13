@@ -3520,10 +3520,38 @@ echo "== Command description budget =="
 # command list — every char costs cold-start tokens. 180 chars is enough for
 # action verb + 1 trigger-phrase clause; multi-sentence paragraphs belong in
 # the command body, not the description field.
+#
+# YAML-aware extraction (node, not awk) — handles both inline and block-scalar
+# styles (same fix as K105). Prior awk-based extractor measured only the inline
+# content after `description: ` on the same line; block-scalar style would
+# report just the `>-` marker length (~2 chars), silently allowing unlimited
+# description bloat. Currently all 19 commands use inline style so the bug is
+# latent — the fix prevents future silent regression.
 DESC_LIMIT=180
 DESC_OVER=()
 for cmd_file in "$ROOT"/commands/*.md; do
-  desc_len=$(awk -F': ' '/^description:/ {sub(/^description: */, ""); print length($0); exit}' "$cmd_file")
+  desc_len=$(node -e '
+const text = require("fs").readFileSync(process.argv[1], "utf8");
+const m = text.match(/^---\n([\s\S]*?)\n---/);
+if (!m) { console.log(0); process.exit(0); }
+const lines = m[1].split("\n");
+let desc = "";
+let mode = null;
+for (const line of lines) {
+  if (mode === null) {
+    if (/^description:\s*[|>][-+]?\s*$/.test(line)) { mode = "block"; continue; }
+    const inlineMatch = line.match(/^description:\s*(.*)/);
+    if (inlineMatch) { desc += inlineMatch[1]; mode = "inline"; continue; }
+  } else if (mode === "block") {
+    if (/^[a-zA-Z_-]+:/.test(line) && !line.startsWith(" ")) break;
+    if (line.startsWith(" ") || line === "") desc += line.replace(/^  /, "") + " ";
+  } else if (mode === "inline") {
+    if (/^[a-zA-Z_-]+:/.test(line) && !line.startsWith(" ")) break;
+    desc += " " + line.trim();
+  }
+}
+console.log(desc.trim().length);
+' "$cmd_file")
   if [ -n "$desc_len" ] && [ "$desc_len" -gt "$DESC_LIMIT" ]; then
     DESC_OVER+=("$(basename "$cmd_file"): ${desc_len} chars")
   fi
