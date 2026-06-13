@@ -18,7 +18,7 @@ Every review starts at **100 points**.
 
 ### Spec/Plan Alignment (-15 / -7 / -3)
 
-- Critical: Required feature not implemented, captured decision (from /devt:clarify) ignored, impl-summary claims verified false
+- Critical: Required feature not implemented, captured decision (from /devt:workflow --mode=clarify) ignored, impl-summary claims verified false
 - Important: Unplanned feature added (scope creep), requirement interpretation doesn't match intent
 - Minor: Minor deviation from plan that doesn't affect functionality
 

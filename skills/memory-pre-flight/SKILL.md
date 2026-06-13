@@ -218,7 +218,7 @@ loop and stop the workflow.
 - During autoskill / weekly-report / session-report / status / help — these are
   meta workflows, not development workflows.
 - During retro / lesson-extraction — those READ memory but don't mutate code.
-- For trivial fast-tier work (`/devt:fast`) — the pre-flight overhead is larger
+- For trivial fast-tier work (`/devt:workflow --mode=fast`) — the pre-flight overhead is larger
   than the change itself; fast tier ships explicit "no Brief expected" semantics.
 
 ## Configuration

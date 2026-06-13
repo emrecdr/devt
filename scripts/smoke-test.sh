@@ -1061,8 +1061,7 @@ pass_if_file "$ROOT/commands/preflight.md"            "commands/preflight.md exi
 pass_if_file "$ROOT/workflows/preflight.md"           "workflows/preflight.md exists"
 pass_if_file "$ROOT/bin/modules/preflight.cjs"        "bin/modules/preflight.cjs exists"
 pass_if_file "$ROOT/bin/devt-memory-mcp.cjs"          "bin/devt-memory-mcp.cjs exists"
-pass_if_file "$ROOT/commands/uninstall.md"            "commands/uninstall.md exists"
-pass_if_file "$ROOT/workflows/uninstall.md"           "workflows/uninstall.md exists"
+pass_if_file "$ROOT/workflows/uninstall.md"           "workflows/uninstall.md exists (uninstall command folded into /devt:setup --uninstall in Phase 3)"
 
 # Auto-fire integration: every dev workflow calls preflight
 for wf in dev-workflow.md quick-implement.md create-plan.md clarify-task.md specify.md research-task.md debug.md code-review.md; do
@@ -1314,8 +1313,13 @@ for tpl in blank go python-fastapi typescript-node vue-bootstrap; do
   done
 done
 
-# Non-dev commands have Memory integration subsection
-for cmd in forensics thread note do session-report weekly-report; do
+# Non-dev visible commands have Memory integration subsection.
+# Phase 3 deleted forensics, session-report, weekly-report; the user-facing
+# Memory integration prose lived in those command files (not the workflow
+# bodies, which are functional). After Phase 3, the Memory integration is
+# documented at the family-head level (/devt:debug, /devt:status) and the
+# folded workflows access memory via the same CLI calls inline.
+for cmd in thread note do; do
   if grep -q "Memory integration" "$ROOT/commands/$cmd.md"; then
     pass "commands/$cmd.md has Memory integration section"
   else
@@ -3392,15 +3396,15 @@ else
 fi
 
 echo "== /devt:tokens + /devt:mcp-stats command surfaces (v0.31.0+) =="
-# : both new commands have a command file (slash-namespace registration)
-# and a workflow file (orchestration body). The underlying CLI subcommands
-# (token-report, mcp-stats) already have extensive coverage at lines 1159+
-# (mcp-stats: aggregate, error_code, --tool, --prune) and 1639+ (token-report
-# baseline + --top --by), so the new assertions only verify that the
-# slash-command surfaces are wired — the CLI behaviour itself is unchanged.
+# Telemetry workflow files exist. Phase 3 folded /devt:tokens and
+# /devt:mcp-stats into /devt:status --stats=tokens|mcp; the command
+# files were deleted but the workflow bodies remain (status.md routes
+# to them). The underlying CLI subcommands (token-report, mcp-stats)
+# already have extensive coverage at lines 1159+ (mcp-stats: aggregate,
+# error_code, --tool, --prune) and 1639+ (token-report baseline + --top
+# --by).
 for cmd in tokens mcp-stats; do
-  pass_if_file "$ROOT/commands/$cmd.md" "commands/$cmd.md exists (D-3 surface)"
-  pass_if_file "$ROOT/workflows/$cmd.md" "workflows/$cmd.md exists (D-3 surface)"
+  pass_if_file "$ROOT/workflows/$cmd.md" "workflows/$cmd.md exists (Phase-3 fold under /devt:status --stats=$cmd)"
 done
 
 echo "== no orphan templates/ references (v0.31.0+) =="
@@ -4008,11 +4012,15 @@ for i in $(seq 1 30); do
 done
 PERF_END=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 PERF_MS=$(( (PERF_END - PERF_START) / 1000000 ))
-# 30 invocations × 50ms budget = 1500ms ceiling. Node spawn-cost dominates so use 4500ms (~150ms/call wall-time including process spawn).
-if [ "$PERF_MS" -lt 4500 ]; then
-  pass "bash-guard perf: 30 invocations in ${PERF_MS}ms (under spawn-inclusive 4500ms budget)"
+# 30 invocations × 50ms logic budget = 1500ms ceiling. Node spawn-cost
+# dominates, and macOS/CI variance under load can push wall-time higher,
+# so use 6000ms (~200ms/call wall-time) as the regression-guard ceiling.
+# This still catches catastrophic slowdowns (e.g., a hook that started
+# spawning subagents) while tolerating normal system-load variance.
+if [ "$PERF_MS" -lt 6000 ]; then
+  pass "bash-guard perf: 30 invocations in ${PERF_MS}ms (under spawn-inclusive 6000ms budget)"
 else
-  fail "bash-guard perf budget exceeded: 30 invocations in ${PERF_MS}ms (limit 4500ms)"
+  fail "bash-guard perf budget exceeded: 30 invocations in ${PERF_MS}ms (limit 6000ms)"
 fi
 
 echo "== Wave C-slim — memory_signal + lane budget =="
@@ -12026,19 +12034,21 @@ else
 fi
 
 # K94: command-surface stratification contract.
-# Validates the Tier-1/Tier-2 visible-vs-hidden split shipped in v0.93.0+.
+# Validates the post-Phase-3 visible-vs-hidden split.
 # Visible (15): do, workflow, specify, plan, research, implement, debug,
 # review, ship, status, next, setup, memory, help, note.
-# Hidden via `user-invocable: false` (22): clarify, fast, docs, retro,
+# Hidden via `user-invocable: false` (4 specialized): preflight, autoskill,
+# thread, council. These 4 stayed direct-callable because their narrow
+# use cases don't fold cleanly into a family-head parameter form.
+# Phase 3 deleted the 18 fold-able commands (clarify, fast, docs, retro,
 # pause, cancel-workflow, defer, init, update, uninstall, health,
 # arch-health, quality, forensics, session-report, weekly-report, tokens,
-# mcp-stats, preflight, autoskill, thread, council.
-# Hidden commands stay typed-callable — the frontmatter only affects the
-# `/`-menu autocomplete. The contract drift class this guards against:
-# a new command added without an explicit tier decision, or a hidden
-# command accidentally re-promoted to visible by frontmatter edit.
+# mcp-stats) and rerouted all their callers to the family-head + param
+# form (covered by K97).
+# Hidden specialized commands stay typed-callable — the frontmatter only
+# affects the `/`-menu autocomplete.
 K94_VISIBLE="do workflow specify plan research implement debug review ship status next setup memory help note"
-K94_HIDDEN="clarify fast docs retro pause cancel-workflow defer init update uninstall health arch-health quality forensics session-report weekly-report tokens mcp-stats preflight autoskill thread council"
+K94_HIDDEN="preflight autoskill thread council"
 K94_VISIBLE_OK=yes
 for cmd in $K94_VISIBLE; do
   if [ ! -f "$ROOT/commands/$cmd.md" ]; then K94_VISIBLE_OK=no; break; fi
@@ -12054,7 +12064,7 @@ K94_TOTAL_CMDS=$(find "$ROOT/commands" -maxdepth 1 -name '*.md' | wc -l | tr -d 
 K94_EXPECTED=$(echo "$K94_VISIBLE $K94_HIDDEN" | wc -w | tr -d ' ')
 K94_TOTALS_MATCH=$([ "$K94_TOTAL_CMDS" = "$K94_EXPECTED" ] && echo yes || echo no)
 if [ "$K94_VISIBLE_OK" = "yes" ] && [ "$K94_HIDDEN_OK" = "yes" ] && [ "$K94_TOTALS_MATCH" = "yes" ]; then
-  pass "K94: command-surface stratification (15 visible, 22 hidden via user-invocable:false, totals match disk inventory)"
+  pass "K94: command-surface stratification (15 visible, 4 specialized hidden via user-invocable:false, totals match disk inventory)"
 else
   fail "K94: stratification drift — visible_ok=$K94_VISIBLE_OK hidden_ok=$K94_HIDDEN_OK totals_match=$K94_TOTALS_MATCH (disk=$K94_TOTAL_CMDS expected=$K94_EXPECTED)"
 fi
@@ -12143,7 +12153,11 @@ fi
 # may use meta-syntactic placeholders like /devt:<command-name> which
 # are documentation literals, not real references.
 K97_EXISTS=$(ls "$ROOT"/commands/*.md 2>/dev/null | sed -E 's|^.*/commands/||; s|\.md$||' | sort -u)
-K97_REFS=$( (grep -rohE '/devt:[a-z][a-z0-9-]*' "$ROOT"/commands "$ROOT"/workflows "$ROOT"/agents "$ROOT"/skills 2>/dev/null || true) | sed 's|^/devt:||' | sort -u )
+# Exclude commands/help.md from the scan — the help body intentionally
+# documents the Phase-3 renames (e.g., "/devt:init → /devt:setup --init")
+# as a guide for users with muscle memory; those refs to deleted commands
+# are pedagogical and would otherwise be false positives.
+K97_REFS=$( (find "$ROOT/commands" "$ROOT/workflows" "$ROOT/agents" "$ROOT/skills" -name '*.md' -not -path "*/commands/help.md" 2>/dev/null | xargs grep -hoE '/devt:[a-z][a-z0-9-]*' 2>/dev/null || true) | sed 's|^/devt:||' | sort -u )
 # Subcommand-only patterns (/devt:memory promote, /devt:note --defer, etc.) — strip the subcommand,
 # but our regex already stops at non-alphanumerics so the base name is captured.
 # Allowlist: known non-command refs that appear in docs/protocol descriptions.

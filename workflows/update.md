@@ -47,7 +47,7 @@ options:
   - label: "Proceed anyway"
     description: "Check for updates (workflow state is preserved)"
   - label: "Cancel"
-    description: "Finish or cancel the workflow first, then run /devt:update"
+    description: "Finish or cancel the workflow first, then run /devt:setup --update"
 ```
 
 If Cancel: STOP.
@@ -179,7 +179,7 @@ options:
     description: "Stay on v{installed} for now"
 ```
 
-**If Skip**: Report "Update skipped. Run /devt:update anytime." STOP.
+**If Skip**: Report "Update skipped. Run /devt:setup --update anytime." STOP.
 
 ### Execute based on install type:
 
@@ -273,7 +273,7 @@ Restart your Claude Code session to load the new version.
 
 If the new version differs by a minor or major bump, add:
 ```
-After restarting, run /devt:health to check for any migration steps.
+After restarting, run /devt:setup --health to check for any migration steps.
 ```
 
 </step>

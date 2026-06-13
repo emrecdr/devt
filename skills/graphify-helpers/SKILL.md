@@ -182,7 +182,7 @@ following features become approximations rather than precise:
 
 ## Upstream MCP tool surface
 
-When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:init`), the upstream MCP server exposes 10 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 6 are reachable by the AI agent via the Claude Code MCP system. One of them (`get_pr_impact`) is already wired into PR-scoped code review; the other 5 are available for ad-hoc agent use.
+When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:setup --init`), the upstream MCP server exposes 10 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 6 are reachable by the AI agent via the Claude Code MCP system. One of them (`get_pr_impact`) is already wired into PR-scoped code review; the other 5 are available for ad-hoc agent use.
 
 | MCP tool | devt wrapper / wiring | When to use |
 |---|---|---|
@@ -227,7 +227,7 @@ For tools without a devt wrapper, call them via the registered `graphify` MCP se
    ```
 
    Trigger values: `empty | error | not_setup | below_threshold | none`. The trace records workflow_id/workflow_type/phase automatically. Cal #21+ analytics: high empty-result rate signals under-resolved queries; high not_setup rate signals graphify install adoption is low.
-3. **Setup wizard pitch is "strongly recommended", not required.** `/devt:init` offers
+3. **Setup wizard pitch is "strongly recommended", not required.** `/devt:setup --init` offers
    Graphify install with a clear value prop, but a "no thanks" answer produces a fully
    working install. No feature is locked behind Graphify.
 4. **Respect Graphify's own config surface.** Honor `GRAPHIFY_OUT` env var,

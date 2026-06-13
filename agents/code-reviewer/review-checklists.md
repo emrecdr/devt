@@ -8,7 +8,7 @@ Comprehensive checklists for code review. Each category lists what to check, the
 | ------------------------------------------------------ | --------- | ---------------------------------------------------------------- |
 | All planned features implemented                       | Critical  | Spec called for caching layer, implementation skipped it         |
 | No unplanned features added (scope creep)              | Important | Added pagination when spec only required list endpoint           |
-| Decisions from `/devt:clarify` followed                | Critical  | Decision  chose REST over GraphQL, implementation uses gRPC  |
+| Decisions from `/devt:workflow --mode=clarify` followed                | Critical  | Decision  chose REST over GraphQL, implementation uses gRPC  |
 | Requirements interpretation matches original intent    | Important | Spec said "validate email", impl only checks for @ symbol       |
 | impl-summary claims verified against actual code       | Critical  | Summary says "added auth middleware" but no middleware exists    |
 

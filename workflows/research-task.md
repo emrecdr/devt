@@ -113,7 +113,7 @@ fi
 
 Read .devt/rules/ for project conventions.
 Read CLAUDE.md if it exists.
-Read .devt/state/decisions.md if it exists (from /devt:clarify).
+Read .devt/state/decisions.md if it exists (from /devt:workflow --mode=clarify).
 Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when researcher findings are inconclusive or contested enough to warrant offering `/devt:council` as a resolution path (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:research`).
 </step>
 

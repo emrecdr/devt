@@ -234,7 +234,7 @@ if [ -n "$WID" ]; then
 fi
 ```
 
-The CLI returns one of: `{action: "written", path}`, `{action: "skip", reason: "disabled"|"no_graphify_out"|"missing_workflow_id"}`, or `{action: "skip", reason: "<error>"}`. We discard the output (best-effort contract) but the trace lands in `.devt/memory/_mcp-trace.jsonl` for `/devt:forensics` to surface if write-memory starts failing.
+The CLI returns one of: `{action: "written", path}`, `{action: "skip", reason: "disabled"|"no_graphify_out"|"missing_workflow_id"}`, or `{action: "skip", reason: "<error>"}`. We discard the output (best-effort contract) but the trace lands in `.devt/memory/_mcp-trace.jsonl` for `/devt:debug --mode=forensics` to surface if write-memory starts failing.
 </step>
 
 <step name="report" gate="results are presented to the user">

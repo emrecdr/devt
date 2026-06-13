@@ -110,7 +110,7 @@ The setup wizard auto-detects the appropriate template. Add `--template <name>` 
 BACKUP=".devt.bak.$(date +%Y%m%d-%H%M%S)"
 [ -d .devt ] && cp -r .devt "$BACKUP" && echo "Backup created: $BACKUP"
 rm -rf .devt/
-echo "Removed .devt/. Run /devt:init to start fresh."
+echo "Removed .devt/. Run /devt:setup --init to start fresh."
 ```
 
 ### Mode C — Full reset
@@ -139,7 +139,7 @@ echo ""
 echo "Optional integration caches (NOT removed by default — uncomment if desired):"
 echo "  rm -rf graphify-out/   # only if you don't want the Graphify cache"
 echo ""
-echo "Full reset complete. Run /devt:init to start fresh."
+echo "Full reset complete. Run /devt:setup --init to start fresh."
 ```
 
 ### Mode D — Plugin uninstall
@@ -168,7 +168,7 @@ No-op. Print "No changes made." and proceed to Step 5.
 Print a clean summary of:
 - What was removed (list each path)
 - Where the backup is (if any)
-- Next recommended action (`/devt:init` for project resets; nothing for plugin uninstall or cancel)
+- Next recommended action (`/devt:setup --init` for project resets; nothing for plugin uninstall or cancel)
 
 Done.
 </step>

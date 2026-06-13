@@ -59,7 +59,7 @@ Status:  HEALTHY | DEGRADED | BROKEN
 
 **If update available:**
 ```
-Update:  {installed} → {latest} available. Run /devt:update
+Update:  {installed} → {latest} available. Run /devt:setup --update
 ```
 
 **If ahead (development version):**
@@ -76,14 +76,14 @@ Update:  {installed} (latest)
 ```
 Errors (must fix):
   E001: .devt/ directory not found
-        → Run /devt:init to set up project, or /devt:health --repair
+        → Run /devt:setup --init to set up project, or /devt:setup --health --repair
 ```
 
 **If warnings exist:**
 ```
 Warnings (should fix):
   W005: .devt/state/ not in .gitignore
-        → Run /devt:health --repair to add .devt/state/ to .gitignore
+        → Run /devt:setup --health --repair to add .devt/state/ to .gitignore
 ```
 
 **If info exists:**
@@ -94,7 +94,7 @@ Info:
 
 **Footer (if repairable issues exist):**
 ```
-{N} issues can be auto-repaired. Run: /devt:health --repair
+{N} issues can be auto-repaired. Run: /devt:setup --health --repair
 ```
 
 </step>
@@ -146,13 +146,13 @@ Status: DEGRADED → HEALTHY
 | E001 | error | .devt/ directory not found | Yes — creates it |
 | E002 | error | .devt/config.json not found | Yes — creates with defaults |
 | E003 | error | .devt/config.json invalid JSON | Yes — resets to defaults |
-| E004 | error | .devt/rules/ not found | No — run /devt:init |
+| E004 | error | .devt/rules/ not found | No — run /devt:setup --init |
 | E005 | error | .devt/state/ not found | Yes — creates it |
 | E006 | error | Node.js not available | No |
-| W001 | warning | coding-standards.md missing | No — run /devt:init --mode update |
-| W002 | warning | testing-patterns.md missing | No — run /devt:init --mode update |
-| W003 | warning | quality-gates.md missing | No — run /devt:init --mode update |
-| W004 | warning | architecture.md missing | No — run /devt:init --mode update |
+| W001 | warning | coding-standards.md missing | No — run /devt:setup --init --mode update |
+| W002 | warning | testing-patterns.md missing | No — run /devt:setup --init --mode update |
+| W003 | warning | quality-gates.md missing | No — run /devt:setup --init --mode update |
+| W004 | warning | architecture.md missing | No — run /devt:setup --init --mode update |
 | W005 | warning | .devt/state/ not in .gitignore | Yes — appends entry |
 | W006 | warning | Stale workflow (active but stopped >24h ago) | Yes — sets active=false |
 | W007 | warning | VERSION / plugin.json version mismatch | No |
@@ -175,8 +175,8 @@ Status: DEGRADED → HEALTHY
 | Fix permissions | chmod +x on hook scripts | None |
 
 **Not repairable (too risky):**
-- Missing .devt/rules/ — requires template selection (run /devt:init)
-- Missing rule files — requires template (run /devt:init --mode update)
+- Missing .devt/rules/ — requires template selection (run /devt:setup --init)
+- Missing rule files — requires template (run /devt:setup --init --mode update)
 - Invalid config values — requires user decision
 - Version mismatch — requires manual version bump
 

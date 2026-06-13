@@ -43,7 +43,7 @@ Check for stopped_at in workflow context:
 cat .devt/state/workflow.yaml 2>/dev/null || echo "NO_CONTEXT"
 ```
 
-Check for structured handoff from /devt:pause:
+Check for structured handoff from /devt:workflow --pause:
 
 ```bash
 cat .devt/state/handoff.json 2>/dev/null || echo "NO_HANDOFF"
@@ -74,21 +74,21 @@ Report:
 No active workflow.
 
 Use /devt:workflow or /devt:implement to start a new task.
-Use /devt:fast for trivial changes (3 or fewer files).
+Use /devt:workflow --mode=fast for trivial changes (3 or fewer files).
 ```
 
 If `DEFER_COUNTS.open > 0`, append:
 
 ```
 Deferred queue: {open} open, {closed} closed (total {total}).
-Use /devt:defer list to review, or /devt:next to pick one up.
+Use /devt:note --defer list to review, or /devt:next to pick one up.
 ```
 
 If stopped_at exists from a previous session:
 
 ```
 Previous session stopped at: {stopped_at}
-Resume with /devt:workflow or start fresh with /devt:cancel-workflow.
+Resume with /devt:workflow or start fresh with /devt:workflow --cancel.
 ```
 
 ### If active workflow:
@@ -119,14 +119,14 @@ Artifacts:
 
 Pre-Flight Brief: {FRESH | STALE | MISSING}  (generated {timestamp})
 
-Deferred queue: {open} open  (use /devt:defer list to review)
+Deferred queue: {open} open  (use /devt:note --defer list to review)
 
 Stuck-signal: {deny_count} denies in current session  (review .devt/state/preflight-denies.jsonl)
 
 Next: {description of what comes next}
 ```
 
-**Deferred queue inclusion**: always include the line if `deferred count` reports `open > 0`. Suppress when `open === 0` to avoid noise. The queue persists across `/devt:cancel-workflow`, so a long-running deferred backlog stays visible in every status check.
+**Deferred queue inclusion**: always include the line if `deferred count` reports `open > 0`. Suppress when `open === 0` to avoid noise. The queue persists across `/devt:workflow --cancel`, so a long-running deferred backlog stays visible in every status check.
 
 **Stuck-signal inclusion**: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check` and include the line only when `deny_count > 0`. Suppress when zero (the common case). Surfaces preflight, bash_destroy, and no_verify denies in the current workflow session — gives the user early visibility into guardrail loops before an autonomous flow pauses on the same signal.
 
@@ -187,8 +187,8 @@ Based on current state, suggest the appropriate next command:
 
 | State                                    | Suggestion                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------ |
-| No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:fast"              |
-| No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:cancel-workflow" (mention the workflow_type if available, e.g., "Interrupted research workflow") |
+| No workflow, no stopped_at               | "Start with /devt:workflow, /devt:implement, or /devt:workflow --mode=fast"              |
+| No workflow, has stopped_at              | "Resume with /devt:next or start fresh with /devt:workflow --cancel" (mention the workflow_type if available, e.g., "Interrupted research workflow") |
 | Active, phase=scan                       | "Continue with /devt:workflow to proceed to implementation"              |
 | Active, phase=regression_baseline        | "Continue with /devt:workflow to proceed to implementation"              |
 | Active, phase=implement                  | "Continue with /devt:workflow to proceed to testing"                     |
@@ -202,18 +202,18 @@ Based on current state, suggest the appropriate next command:
 | Active, phase=autoskill                  | "Continue with /devt:workflow to finalize"                               |
 | Active, phase=review_deferred            | "Continue with /devt:workflow to finalize"                               |
 | Active, phase=debug                      | "Continue with /devt:debug to resume investigation"                      |
-| Active, phase=arch_health_scan           | "Continue with /devt:arch-health to resume scan"                         |
+| Active, phase=arch_health_scan           | "Continue with /devt:review --focus=arch to resume scan"                         |
 | Active, workflow_type=quick_implement    | "Continue with /devt:implement to resume quick pipeline"                 |
 | Active, workflow_type=research           | "Continue with /devt:research to resume investigation"                   |
 | Active, workflow_type=plan               | "Continue with /devt:plan to resume planning"                            |
 | Active, workflow_type=specify            | "Continue with /devt:specify to resume spec generation"                  |
-| Active, workflow_type=clarify            | "Continue with /devt:clarify to resume decision capture"                 |
+| Active, workflow_type=clarify            | "Continue with /devt:workflow --mode=clarify to resume decision capture"                 |
 | Active, workflow_type=code_review        | "Continue with /devt:review to resume code review"                       |
 | Active, workflow_type=code_review_parallel | "Continue with /devt:review to resume parallel code review"            |
 | Active, workflow_type=preflight          | "Continue with /devt:preflight to regenerate the Brief"                  |
 | Active, workflow_type=memory_promote     | "Continue with /devt:memory promote to resume curator promotion"         |
 | Active, workflow_type=memory_reject      | "Continue with /devt:memory reject to resume tombstone capture"          |
-| Active, workflow_type=docs               | "Continue with /devt:docs to resume documentation refresh"               |
+| Active, workflow_type=docs               | "Continue with /devt:workflow --mode=docs to resume documentation refresh"               |
 | Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
 | Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 
@@ -225,7 +225,7 @@ Based on current state, suggest the appropriate next command:
 
 1. **No state tool**: If `devt-tools.cjs state read` fails, fall back to reading `.devt/state/` artifacts directly and inferring state from which files exist.
 2. **Partial state**: If some state fields are missing, report what is available and mark the rest as "unknown".
-3. **Stale state**: If the state file exists but `.devt/state/` is empty, report: "State file exists but no artifacts found. The workflow may be stale. Consider /devt:cancel-workflow."
+3. **Stale state**: If the state file exists but `.devt/state/` is empty, report: "State file exists but no artifacts found. The workflow may be stale. Consider /devt:workflow --cancel."
    </deviation_rules>
 
 <success_criteria>

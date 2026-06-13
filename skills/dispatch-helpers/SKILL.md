@@ -103,7 +103,7 @@ A single subagent dispatched for multi-section work (programmer doing R1-R10 imp
 
 **Why SendMessage is the cheap path.** SendMessage to the same subagent re-uses the full conversation cache — every prior Read, Edit, Bash result stays available at the cost of one new prompt. A fresh re-dispatch via `Task(subagent_type=...)` starts cold, paying the full context-loading cost (skill injection, governing rules, file Reads to re-discover working set). Field observation (greenfield cal #17): ~15-20 file Reads saved per SendMessage-resume vs cold re-dispatch.
 
-**When to use re-dispatch instead.** After session boundary (`/devt:pause` + resume in new session), or when the subagent-id is no longer addressable. Re-dispatch reads the partial artifact via `<continue_from_checkpoint>` block instead of conversation history.
+**When to use re-dispatch instead.** After session boundary (`/devt:workflow --pause` + resume in new session), or when the subagent-id is no longer addressable. Re-dispatch reads the partial artifact via `<continue_from_checkpoint>` block instead of conversation history.
 
 **Worked example** — programmer with 6-section impl (B.1-B.6), hit wall at B.5 mid-Edit:
 

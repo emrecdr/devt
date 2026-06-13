@@ -109,7 +109,7 @@ seconds here. In a devt project, prioritize:
   handler patterns; for a data-model question, scan existing schema)
 
 **Caller-passed validation material**: when the council is invoked from inside another
-workflow (e.g. via `references/council-offramp.md` from `/devt:clarify`, `/devt:research`,
+workflow (e.g. via `references/council-offramp.md` from `/devt:workflow --mode=clarify`, `/devt:research`,
 or `/devt:specify`), the caller may pass a `validation_material` array of file paths.
 Treat that list as the authoritative validation surface for the decision. For each path,
 check existence and tag it `EXISTS` or `MISSING` — pass the annotated list verbatim into
@@ -443,7 +443,7 @@ is a 3-4 word kebab-case derived from the framed question (e.g. `monolith-vs-ser
 
 Do **not** create an HTML report — devt is engineering tooling and markdown integrates
 with `.devt/state/`, `git diff`, and downstream workflows like `/devt:plan` and
-`/devt:clarify` in ways HTML cannot.
+`/devt:workflow --mode=clarify` in ways HTML cannot.
 
 After writing, surface the chairman verdict (the 5 sections from stage 4) directly in
 the chat. Reference the transcript path in a closing line so the user can dig into

@@ -60,7 +60,7 @@ uv run pytest tests/ -x
 
 ## Fix Helpers (NOT gates)
 
-These mutate code. Run manually, never as part of `/devt:quality`:
+These mutate code. Run manually, never as part of `/devt:review --focus=quality`:
 
 - `uv run ruff check --fix .` — apply auto-fixable lint suggestions
 - `uv run ruff format .` — reformat files in place

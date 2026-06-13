@@ -43,7 +43,7 @@ BEFORE researching:
    **Scope trust signal.** When the dispatch carries a `<scope_trust>` block, parse it as `{trust, lag_commits, fresh}`. Treat `<scope_hint>` as low-confidence when `trust === "sparse"` or `"empty"` (graphify graph too small to anchor reliable dependents), OR when `lag_commits` is non-null AND > 10 (graph is behind HEAD; paths may reflect deleted/renamed code). In low-trust mode, broaden Glob/Grep exploration and don't claim "no relevant prior art exists" based on scope_hint alone.
 
 2. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` — validate proposals against universal rules
-3. Read .devt/state/decisions.md if it exists — respect user decisions from /devt:clarify
+3. Read .devt/state/decisions.md if it exists — respect user decisions from /devt:workflow --mode=clarify
 4. Read the task description carefully — understand WHAT needs to be built
    </context_loading>
 

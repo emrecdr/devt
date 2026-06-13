@@ -2,7 +2,7 @@
 
 Captures a deferred TODO to `.devt/state/deferred.md`, or manages existing items
 (list / close / reopen / count / get). The file is exempted from `state reset`
-so items survive `/devt:cancel-workflow`.
+so items survive `/devt:workflow --cancel`.
 
 ---
 
@@ -26,7 +26,7 @@ Not applicable — this workflow does not dispatch subagents.
 
 <step name="route_subcommand" gate="subcommand identified or default add">
 
-Inspect the argument the user passed to `/devt:defer`:
+Inspect the argument the user passed to `/devt:note --defer`:
 
 - If first arg is `list` / `close` / `reopen` / `count` / `get` → route to the matching subcommand below.
 - Otherwise treat the entire argument as the title of a new deferred item (`add` mode).
@@ -36,7 +36,7 @@ If the argument is empty, ask via AskUserQuestion: "What should be deferred?" wi
 
 <step name="capture" gate="DEF-NNN written to .devt/state/deferred.md">
 
-_Run when the user typed `/devt:defer "<title>"` (no subcommand)._
+_Run when the user typed `/devt:note --defer "<title>"` (no subcommand)._
 
 Auto-detect capture context:
 
@@ -66,7 +66,7 @@ If the title is unclear or context-rich, offer to enrich via AskUserQuestion (ta
 
 <step name="list" gate="filtered list reported to user">
 
-_Run on `/devt:defer list [--status=...] [--tag=...]`._
+_Run on `/devt:note --defer list [--status=...] [--tag=...]`._
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred list ${FLAGS}
@@ -83,7 +83,7 @@ Default: `--status=open` (the active queue). Use `--status=closed` for completed
 
 <step name="close" gate="DEF-NNN status flipped to closed">
 
-_Run on `/devt:defer close DEF-007`._
+_Run on `/devt:note --defer close DEF-007`._
 
 Validate the id matches `DEF-\d{3,}` before invoking. Then:
 
@@ -96,14 +96,14 @@ Report the new state. If the id is not found, the CLI returns exit 1 — surface
 
 <step name="reopen" gate="DEF-NNN status flipped to open">
 
-_Run on `/devt:defer reopen DEF-007`._
+_Run on `/devt:note --defer reopen DEF-007`._
 
 Same shape as `close`, with `reopen`. Removes the `closed_at` and `closed_by` fields.
 </step>
 
 <step name="count" gate="counts emitted">
 
-_Run on `/devt:defer count`._
+_Run on `/devt:note --defer count`._
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred count
@@ -114,7 +114,7 @@ Renders as: `Deferred queue: N open, M closed (T total)`.
 
 <step name="get" gate="single DEF-NNN entry fetched">
 
-_Run on `/devt:defer get DEF-007`._
+_Run on `/devt:note --defer get DEF-007`._
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred get "$ID"

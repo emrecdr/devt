@@ -17,7 +17,7 @@ explicit user approval per `skills/memory-curation/SKILL.md`.
 
 <prerequisites>
 - `${CLAUDE_PLUGIN_ROOT}` is set
-- `.devt/memory/` exists (created by `/devt:init` or `/devt:memory init`)
+- `.devt/memory/` exists (created by `/devt:setup --init` or `/devt:memory init`)
 - One of:
   - `.devt/memory/_suggestions.md` exists (output of `/devt:memory suggest`), OR
   - The user provided a specific DEC-id, OR

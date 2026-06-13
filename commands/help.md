@@ -5,16 +5,16 @@ argument-hint: "[--all]"
 ---
 
 <objective>
-Display devt commands in tiered groups. Default view shows only the 15 family-head commands — the rest are typed-callable but hidden from the `/`-autocomplete and accessible via parameter modes on the family heads. `--all` flag surfaces the full inventory plus the parameter-form cross-reference.
+Display devt commands in tiered groups. Default view shows only the 15 family-head commands. `--all` flag surfaces the full inventory including the parameter surface and the 4 specialized direct-callable tools.
 </objective>
 
 <process>
-Parse `$ARGUMENTS` for `--all` flag. If present, print the FULL guide (Tier 1+2+3 + Advanced inventory + parameter cross-reference). If absent, print only Tier 1+2+3 sections. Do NOT modify, summarize, or abbreviate the output below.
+Parse `$ARGUMENTS` for `--all` flag. If present, print the FULL guide (Tier 1+2+3 + Parameter Surface + Specialized Tools). If absent, print only Tier 1+2+3 sections. Do NOT modify, summarize, or abbreviate the output below.
 
 If `--all` is NOT in arguments, print:
 
 ```
-# devt — Command Reference (15 visible · 22 advanced)
+# devt — Command Reference (15 visible · 4 specialized)
 
 ## Tier 1 — Daily Commands
 
@@ -41,9 +41,6 @@ If `--all` is NOT in arguments, print:
 /devt:setup --<op>              Admin: --init | --update | --uninstall | --health
 
 ## Family-Head Parameter Surface
-
-Many family heads accept parameter modes to access advanced functionality
-without leaving the casual surface. Show the parameter form with --all.
 
   /devt:workflow "<task>" [--mode=specify|plan|research|implement|clarify|fast|docs]
                           [--pause|--cancel|--retro]
@@ -91,68 +88,63 @@ without leaving the casual surface. Show the parameter form with --all.
   See token telemetry:
     /devt:status --stats=tokens
 
-For the full 22-command advanced inventory and direct-form aliases,
-run /devt:help --all
+For the 4 specialized direct-callable tools, run /devt:help --all
 ```
 
 Else (`--all` IS in arguments), print the SAME Tier 1+2+3 + Parameter Surface sections AS ABOVE, followed by:
 
 ```
 
-## Advanced Direct-Form Commands (22 — typed-callable, hidden from /-autocomplete)
+## Specialized Direct-Callable Tools (4 — hidden from /-autocomplete, typed-callable)
 
-These commands are installed and work when typed directly. They're hidden
-from the `/`-autocomplete menu and have parameter-form aliases on the
-family heads above. Typing the direct form still works for muscle memory
-or legacy scripts.
+These 4 commands have narrow use cases that don't fold cleanly into a
+family-head parameter form. They're hidden from `/`-autocomplete (use
+`user-invocable: false`) but invocable by typing the full name.
 
-### Workflow Modes (folded under /devt:workflow --mode=)
+/devt:preflight "<task>"        Generate a Topic Pre-Flight Brief on demand. Auto-fired
+                                by every dev workflow at context_init; standalone for
+                                ad-hoc Brief generation.
 
-/devt:clarify          === /devt:workflow --mode=clarify
-/devt:fast "task"      === /devt:workflow --mode=fast
-/devt:docs             === /devt:workflow --mode=docs
-/devt:retro            === /devt:workflow --retro
+/devt:autoskill                 Analyze the session for skill/agent improvement patterns.
+                                Proposes additions to .devt/state/autoskill-proposals.md;
+                                curator decides what merges into skill-index.yaml.
 
-### Workflow Lifecycle (folded under /devt:workflow --)
+/devt:thread "<name>"           Persistent context threads for multi-session work.
+                                Subcommands: create, list, resume, update. Each thread
+                                carries its own scratch + decision log across sessions.
 
-/devt:pause            === /devt:workflow --pause
-/devt:cancel-workflow  === /devt:workflow --cancel
-/devt:defer "todo"     === /devt:note --defer "todo"
+/devt:council "<decision>"      Pressure-test a high-stakes engineering decision through
+                                5 advisors (Contrarian / First Principles / Generalizer /
+                                Newcomer / Pragmatist) with adversarial peer review and
+                                chairman synthesis. Add --mixed-models for opus/sonnet/
+                                haiku diversity at extra cost. Transcript saves to
+                                .devt/state/council-*.md.
 
-### Admin & Setup (folded under /devt:setup --)
+## What Happened to /devt:init, /devt:health, /devt:retro, etc?
 
-/devt:init             === /devt:setup --init
-/devt:update           === /devt:setup --update
-/devt:uninstall        === /devt:setup --uninstall
-/devt:health [--repair] === /devt:setup --health [--repair]
+Phase 3 of the v0.93 UX simplification deleted 18 direct-form commands and
+folded their functionality under family-head + parameter forms:
 
-### Architecture & Quality (folded under /devt:review --focus=)
+  /devt:init             → /devt:setup --init
+  /devt:update           → /devt:setup --update
+  /devt:uninstall        → /devt:setup --uninstall
+  /devt:health           → /devt:setup --health
+  /devt:arch-health      → /devt:review --focus=arch
+  /devt:quality          → /devt:review --focus=quality
+  /devt:forensics        → /devt:debug --mode=forensics
+  /devt:clarify          → /devt:workflow --mode=clarify
+  /devt:fast             → /devt:workflow --mode=fast
+  /devt:docs             → /devt:workflow --mode=docs
+  /devt:retro            → /devt:workflow --retro
+  /devt:pause            → /devt:workflow --pause
+  /devt:cancel-workflow  → /devt:workflow --cancel
+  /devt:defer            → /devt:note --defer
+  /devt:session-report   → /devt:status --report=session
+  /devt:weekly-report    → /devt:status --report=weekly
+  /devt:tokens           → /devt:status --stats=tokens
+  /devt:mcp-stats        → /devt:status --stats=mcp
 
-/devt:arch-health      === /devt:review --focus=arch
-/devt:quality          === /devt:review --focus=quality
-
-### Telemetry & Reports (folded under /devt:status --report= or --stats=)
-
-/devt:session-report   === /devt:status --report=session
-/devt:weekly-report    === /devt:status --report=weekly
-/devt:tokens           === /devt:status --stats=tokens
-/devt:mcp-stats        === /devt:status --stats=mcp
-
-### Diagnostics (folded under /devt:debug --mode=)
-
-/devt:forensics        === /devt:debug --mode=forensics
-
-### Specialized Tools (no fold — direct-call only)
-
-/devt:preflight "task"          Generate a Topic Pre-Flight Brief on demand
-/devt:autoskill                 Detect session correction patterns, propose skill upgrades
-/devt:thread "name"             Persistent context threads for cross-session investigations
-/devt:council "decision"        Pressure-test high-stakes decisions through 5 advisors
-
-The four specialized tools are kept direct-callable because their use
-cases are narrow enough that a parameter form would obscure them; they
-are intentionally surfaced only to advanced users who already know they
-exist.
+Casual user surface: 15 family-head commands instead of 36 equal-tier commands.
 ```
 
 End printed output. Do not add commentary or summarization after the code block.

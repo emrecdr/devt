@@ -27,7 +27,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <review_scope>Read .devt/state/code-review-input.md</review_scope>
     <impl_summary>Read .devt/state/impl-summary.md (if exists)</impl_summary>
     <test_summary>Read .devt/state/test-summary.md (if exists)</test_summary>
-    <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
+    <decisions>Read .devt/state/decisions.md (if exists — from /devt:workflow --mode=clarify)</decisions>
     <learning_context>{learning_context — relevant review/quality lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>

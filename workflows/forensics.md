@@ -142,7 +142,7 @@ Present findings to the user (do NOT write to files — this is a verbal report)
 
 ### Recommended Recovery
 {One of:}
-- `/devt:cancel-workflow` then retry with adjusted task scope
+- `/devt:workflow --cancel` then retry with adjusted task scope
 - Fix the specific issue manually, then `/devt:workflow` to continue
 - `/devt:debug` to investigate the underlying bug
 - Reset state (`scripts/reset-workflow.sh`) and start fresh

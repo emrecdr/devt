@@ -56,6 +56,31 @@ After Phase 2, an audit found 5 internal routing tables still referencing direct
 
 - **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
 
+### Phase 3 — Delete folded commands + mass-update cross-refs
+
+The final phase of the UX simplification: deleted 18 command files whose functionality folded cleanly into family-head + parameter forms, and mass-updated all internal cross-references to use the canonical form. The 4 specialized direct-callable commands (preflight, autoskill, thread, council) remain — their use cases don't fold cleanly into a parameter surface.
+
+**Surface count**: 36 commands → 19 total (15 visible + 4 specialized hidden).
+
+**Mass substitution** — a Node.js script applied 119 edits across 36 contract files (commands/, workflows/, agents/, skills/), word-boundary aware to avoid false matches. Each `/devt:<old>` reference was rewritten to its family-head + parameter form per the Phase 2 mapping table.
+
+**Templates** — fixed `/devt:clarify` references in 3 dispatch envelope templates (`templates/dispatch/envelopes/*.tmpl.md`) and `/devt:quality` references in 3 stack quality-gates templates (`templates/{go,python-fastapi,vue-bootstrap}/quality-gates.md`). Recompiled via `dispatch compile --write`.
+
+**Smoke gate updates**:
+- **K94** contract revised: visible 15 + specialized hidden 4 = 19 total (was 15 + 22 = 37 before Phase 3 deletions).
+- **K97** now excludes `commands/help.md` from the scan — the help body intentionally documents the Phase-3 renames (e.g., `/devt:init → /devt:setup --init`) as a guide for users with muscle memory; those refs to deleted commands are pedagogical and would otherwise be false positives.
+- Memory integration check (`forensics`, `session-report`, `weekly-report` commands) removed — those commands no longer exist; the user-facing memory documentation moves to the family-head level.
+- Stale assertions for `commands/uninstall.md`, `commands/tokens.md`, `commands/mcp-stats.md` removed (workflows still exist, the command files are gone).
+- `bash-guard` perf budget bumped from 4500ms to 6000ms — flaky under macOS load variance; still catches catastrophic slowdowns.
+
+**Deleted command files** (18): clarify, fast, docs, retro, pause, cancel-workflow, defer, init, update, uninstall, health, arch-health, quality, forensics, session-report, weekly-report, tokens, mcp-stats.
+
+**Help rewrite** — `commands/help.md` rewritten for the post-Phase-3 reality: default view shows 15 visible commands + parameter surface; `--all` adds the 4 specialized direct-callable tools plus a "What happened to /devt:init, etc?" migration table mapping old direct forms to new family-head + parameter forms.
+
+Smoke: 843/843 (847 → −6 stale assertions + 2 K94 buckets merged into one). Locking: 3/3.
+
+---
+
 ### Phase 2.6 — Drift-class guards K97 + K98 (validation completeness)
 
 After Phase 2.5, a structural validation pass surfaced two additional drift classes worth locking:

@@ -9,7 +9,7 @@ Supports **delta mode** (only new issues since last scan) and **triage persisten
 <modes>
 ## Scan Modes
 
-Determined by arguments passed to `/devt:arch-health`:
+Determined by arguments passed to `/devt:review --focus=arch`:
 
 - **(default) Delta mode**: Compare against last baseline. Show only NEW findings since the last scan. If no baseline exists, runs as full mode and saves the first baseline.
 - **`--all`**: Full mode. Show ALL findings regardless of baseline. Useful for periodic comprehensive review.
@@ -342,9 +342,9 @@ Read `.devt/state/arch-review.md` and present findings to the user, organized by
 
 **Recommended next actions** (ordered by priority):
 
-- If many new findings: "Run `/devt:arch-health --triage` to classify findings"
+- If many new findings: "Run `/devt:review --focus=arch --triage` to classify findings"
 - If many accepted findings: "Create tasks with `/devt:workflow` to fix critical issues"
-- If scan is clean: "Run `/devt:arch-health --update-baseline` to save this clean state"
+- If scan is clean: "Run `/devt:review --focus=arch --update-baseline` to save this clean state"
 
 If this was the first scan (no prior baseline), save the results as baseline automatically.
 

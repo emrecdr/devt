@@ -36,7 +36,7 @@ Exit code 0 = pass. All Playwright E2E tests must pass. If tests are failing due
 
 ## Running All Gates
 
-For manual copy-paste — `/devt:quality` runs each gate above as its own block;
+For manual copy-paste — `/devt:review --focus=quality` runs each gate above as its own block;
 the runner's security validator rejects shell chaining operators inside fenced
 bash blocks, so this aggregator is tagged `text` rather than `bash`:
 

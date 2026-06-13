@@ -21,7 +21,7 @@ Tier 1 of the Two-Tier Pre-Flight Protocol (golden-rules Rule 14):
 <prerequisites>
 - `${CLAUDE_PLUGIN_ROOT}` is set
 - Node.js 22.5+ (required for `node:sqlite`)
-- `.devt/` exists (run `/devt:init` first)
+- `.devt/` exists (run `/devt:setup --init` first)
 - Optional: `.devt/memory/index.db` exists (run `/devt:memory init` for richer Brief)
 - Optional: `graphify.enabled: true` in `.devt/config.json` for blast radius
 </prerequisites>
@@ -115,11 +115,11 @@ Translate the JSON summary into:
 
 If `governing == 0 AND lane_e == 0 AND lane_f == 0`, add:
 
-> _No prior governance found for this topic. The Brief is empty by design — proceed with normal review discipline. Capture any architectural decisions you make during this task as DEC-xxx via `/devt:clarify`; curator will offer to promote them to ADRs at retro time._
+> _No prior governance found for this topic. The Brief is empty by design — proceed with normal review discipline. Capture any architectural decisions you make during this task as DEC-xxx via `/devt:workflow --mode=clarify`; curator will offer to promote them to ADRs at retro time._
 
 If Graphify status is `disabled` or `binary_missing`, add:
 
-> _Tip: install Graphify for ~10× lower token cost on code-search ops + symbol-anchored blast radius. See `/devt:init --graphify` or run `uv tool install graphifyy[mcp]`._
+> _Tip: install Graphify for ~10× lower token cost on code-search ops + symbol-anchored blast radius. See `/devt:setup --init --graphify` or run `uv tool install graphifyy[mcp]`._
 </step>
 
 </process>

@@ -151,7 +151,7 @@ Read the ACTUAL CODE and compare against the task specification:
 
 ### Decision Compliance (when decisions exist)
 
-If `.devt/state/decisions.md` exists (from `/devt:clarify`), verify each captured decision was followed:
+If `.devt/state/decisions.md` exists (from `/devt:workflow --mode=clarify`), verify each captured decision was followed:
 - Read every decision in the file
 - For each decision, trace whether the implementation honors it
 - A decision that was captured but ignored is a spec compliance failure

@@ -40,7 +40,7 @@ Checks dependencies against the Go vulnerability database. Catches known CVEs. I
 
 ## Quick Reference
 
-Run all gates sequentially (copy-paste for manual runs — `/devt:quality` runs each
+Run all gates sequentially (copy-paste for manual runs — `/devt:review --focus=quality` runs each
 gate above as its own block; the runner's security validator rejects shell
 chaining operators inside fenced bash blocks, so this aggregator is `text`):
 

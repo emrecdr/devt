@@ -193,7 +193,7 @@ Idempotent — running on an already-initialized project re-creates index.db cle
 
 After the index builds, surface a tip to the user about the discovery pipeline:
 
-> 💡 Memory index ready. As you work, claude-mem ⚖️/🔵 observations and decision logs collect candidate ADRs/CONs in `.devt/memory/_suggestions.md`. Run `/devt:retro` after workflows to have the curator promote them, or `/devt:memory promote` interactively.
+> 💡 Memory index ready. As you work, claude-mem ⚖️/🔵 observations and decision logs collect candidate ADRs/CONs in `.devt/memory/_suggestions.md`. Run `/devt:workflow --retro` after workflows to have the curator promote them, or `/devt:memory promote` interactively.
 </step>
 
 <step name="prompt_graphify_setup" gate="graphify install/enable prompt resolved">
@@ -218,9 +218,9 @@ header: "Graphify Install"
 multiSelect: false
 options:
   - label: "Yes, show install command (Recommended)"
-    description: "Prints the install command — does NOT execute it. devt setup continues regardless. Re-run /devt:init after install to register the integration."
+    description: "Prints the install command — does NOT execute it. devt setup continues regardless. Re-run /devt:setup --init after install to register the integration."
   - label: "No, skip"
-    description: "Continue without Graphify. Install later with `uv tool install graphifyy[mcp]` and re-run /devt:init."
+    description: "Continue without Graphify. Install later with `uv tool install graphifyy[mcp]` and re-run /devt:setup --init."
 ```
 
 On "Yes", print to the user (do NOT execute — Python env changes are user-owned):
@@ -231,7 +231,7 @@ To install Graphify:
   # or: pipx install graphifyy[mcp]
   # or: pip install graphifyy[mcp]    # works for CLI; MCP server entry still requires `uv` on PATH
 
-Then re-run /devt:init so devt can register the MCP server and offer to enable the integration.
+Then re-run /devt:setup --init so devt can register the MCP server and offer to enable the integration.
 ```
 
 **Case B — `graphify_available=yes` AND `graphify_enabled=no`** (the silent-failure case — Graphify is installed but devt isn't using it):
@@ -355,7 +355,7 @@ options:
   - label: "Yes, compress .devt/rules/ now"
     description: "Flips static_compress.mode to 'on' permanently + runs `static-compress --all` once. Future re-runs after rule edits: `node bin/devt-tools.cjs static-compress --all`."
   - label: "Skip — I'll enable later"
-    description: "Default stays mode='off'. Recipe at docs/static-compress-recipe.md if you want to enable later. Re-run /devt:init to re-offer."
+    description: "Default stays mode='off'. Recipe at docs/static-compress-recipe.md if you want to enable later. Re-run /devt:setup --init to re-offer."
 ```
 
 On "Yes":
@@ -369,7 +369,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" static-compress --all 2>&1 | jq 
 
 Emit a single confirmation line so the user knows the integration is live:
 
-> ✓ Static-compress enabled. Future `/devt:health` runs report savings in the `compression.savings` block. Re-compress after rule edits via `node bin/devt-tools.cjs static-compress --all`.
+> ✓ Static-compress enabled. Future `/devt:setup --health` runs report savings in the `compression.savings` block. Re-compress after rule edits via `node bin/devt-tools.cjs static-compress --all`.
 
 This step is best-effort and informational: failures NEVER fail init. Report which case was taken.
 </step>
@@ -403,7 +403,7 @@ options:
   - label: "Show me the install command"
     description: "Surface the one-liner. claude-mem registers its own MCP server in your global Claude config; devt detects it automatically at workflow time."
   - label: "Skip — I'll set it up later"
-    description: "Curator runs without claude-mem. Harvest pool is strictly smaller (scratchpad + decisions.md + graphify god-nodes only). Re-run /devt:init or check claude-mem docs when ready."
+    description: "Curator runs without claude-mem. Harvest pool is strictly smaller (scratchpad + decisions.md + graphify god-nodes only). Re-run /devt:setup --init or check claude-mem docs when ready."
 ```
 
 On "Show me the install command", emit verbatim:
@@ -413,7 +413,7 @@ On "Show me the install command", emit verbatim:
 > /plugin marketplace add anthropics/claude-code-plugins
 > /plugin install claude-mem
 > ```
-> Restart Claude Code after install. Verify with `jq '.plugins | keys[] | select(startswith("claude-mem@"))' ~/.claude/plugins/installed_plugins.json` and re-run `/devt:init` to re-detect.
+> Restart Claude Code after install. Verify with `jq '.plugins | keys[] | select(startswith("claude-mem@"))' ~/.claude/plugins/installed_plugins.json` and re-run `/devt:setup --init` to re-detect.
 
 **Case B — `claude_mem_available=yes`**: emit a confirmation line so the user knows the integration is live:
 
@@ -451,7 +451,7 @@ Report to the user:
 - Which template was applied
 - What git config was auto-detected vs manually entered
 - Remind them to review and customize `.devt/rules/` files for their project
-- Suggest next step: `/devt:workflow "your first task"` or `/devt:health` to verify
+- Suggest next step: `/devt:workflow "your first task"` or `/devt:setup --health` to verify
 </step>
 
 ---

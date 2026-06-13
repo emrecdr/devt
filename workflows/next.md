@@ -129,17 +129,17 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `dev` | `/devt:workflow` with the original task |
 | `quick_implement` | `/devt:implement` with the original task |
 | `debug` | `/devt:debug` with accumulated context from `.devt/state/debug-context.md` |
-| `retro` | `/devt:workflow --retro` (direct-form `/devt:retro` continues to work) |
-| `arch_health_scan` | `/devt:review --focus=arch` (direct-form `/devt:arch-health` continues to work) |
+| `retro` | `/devt:workflow --retro` |
+| `arch_health_scan` | `/devt:review --focus=arch` |
 | `code_review` | `/devt:review` |
 | `code_review_parallel` | `/devt:review` with the original scope |
 | `research` | `/devt:research` with the original task |
 | `plan` | `/devt:plan` with the original task |
 | `specify` | `/devt:specify` with the original task |
-| `clarify` | `/devt:workflow --mode=clarify` with the original task (direct-form `/devt:clarify` continues to work) |
+| `clarify` | `/devt:workflow --mode=clarify` with the original task |
 | `preflight` | `/devt:preflight` with the original task (or just `cat .devt/state/preflight-brief.md` if the Brief is FRESH) |
 | `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
-| `docs` | `/devt:workflow --mode=docs` (one-shot standalone docs refresh; direct-form `/devt:docs` continues to work) |
+| `docs` | `/devt:workflow --mode=docs` (one-shot standalone docs refresh; usually no resume needed) |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```
@@ -216,14 +216,14 @@ Route based on `workflow_type`:
 - `dev` → Execute `/devt:workflow` to resume from current phase
 - `quick_implement` → Execute `/devt:implement` to resume quick pipeline
 - `debug` → Execute `/devt:debug` to continue debugging
-- `retro` → Execute `/devt:workflow --retro` to continue lesson extraction (direct-form `/devt:retro` continues to work)
-- `arch_health_scan` → Execute `/devt:review --focus=arch` to continue scan (direct-form `/devt:arch-health` continues to work)
+- `retro` → Execute `/devt:workflow --retro` to continue lesson extraction
+- `arch_health_scan` → Execute `/devt:review --focus=arch` to continue scan
 - `code_review` → Execute `/devt:review` to continue review
 - `preflight` → Brief at `.devt/state/preflight-brief.md`. If `## Status: FRESH`, just `cat` it; if `## Status: STALE`, re-run `/devt:preflight` with the refined task. (Standalone preflight workflows complete in one shot — usually no resume needed.)
 - `research` → Execute `/devt:research` to continue investigation
 - `plan` → Execute `/devt:plan` to continue planning
 - `specify` → Execute `/devt:specify` to continue spec generation
-- `clarify` → Execute `/devt:workflow --mode=clarify` to continue decision capture (direct-form `/devt:clarify` continues to work)
+- `clarify` → Execute `/devt:workflow --mode=clarify` to continue decision capture
 - missing/unknown → Execute `/devt:workflow` (default)
 
 ### Active workflow, stuck signal
@@ -311,7 +311,7 @@ Clean slate. Use /devt:workflow to start building.
 <deviation_rules>
 1. **READ-ONLY detection**: The state detection step must NOT modify any files.
 2. **Ambiguous state**: If multiple interpretations are possible, ask the user rather than guessing.
-3. **Stale state**: If state file exists but artifacts are missing, suggest `/devt:workflow --cancel` to reset (direct-form `/devt:cancel-workflow` continues to work).
+3. **Stale state**: If state file exists but artifacts are missing, suggest `/devt:workflow --cancel` to reset.
 </deviation_rules>
 
 <success_criteria>

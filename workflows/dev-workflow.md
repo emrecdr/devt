@@ -176,7 +176,7 @@ Then load project context:
   - If no plan: proceed normally (programmer plans internally)
 - Read `.devt/state/research.md` if it exists (from /devt:research)
   - If research.md has status DONE_WITH_CONCERNS, flag concerns to planner/programmer as additional context
-- Read `.devt/state/handoff.json` if it exists (from /devt:pause)
+- Read `.devt/state/handoff.json` if it exists (from /devt:workflow --pause)
   - If handoff exists: restore phase, iteration, and remaining_tasks as resume context
   - Use handoff.next_action to guide which step to resume from
   - Compare handoff.last_commit with current `git rev-parse HEAD` — if they differ, warn user that codebase may have changed since pause
@@ -267,7 +267,7 @@ Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--au
 
 Parse the init output JSON:
 
-- If `workflow_lock.locked` is true: STOP. Report: "A workflow is already active. Run /devt:cancel-workflow first."
+- If `workflow_lock.locked` is true: STOP. Report: "A workflow is already active. Run /devt:workflow --cancel first."
 - If `dev_rules.missing_rules` is non-empty: WARN user which required files are missing
 - If `warnings` array is non-empty: report each warning
 - Store `models` for agent dispatch (use model values in Task() prompts)
@@ -920,7 +920,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
-    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
+    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:workflow --mode=clarify)</decisions>
     <!-- COMPLEX only: include arch_review and research -->
     <arch_review>Read .devt/state/arch-review.md (if it exists)</arch_review>
     <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>
@@ -1185,7 +1185,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {provenance_protocol}
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
-    <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
+    <decisions>Read .devt/state/decisions.md (if exists — from /devt:workflow --mode=clarify)</decisions>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>

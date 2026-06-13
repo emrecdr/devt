@@ -23,7 +23,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {provenance_protocol}
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
-    <decisions>Read .devt/state/decisions.md (if exists — from /devt:clarify)</decisions>
+    <decisions>Read .devt/state/decisions.md (if exists — from /devt:workflow --mode=clarify)</decisions>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>

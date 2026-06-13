@@ -59,7 +59,7 @@ Load project context:
 
 Load prior workflow artifacts (skip questions already answered by upstream workflows):
 - Read `.devt/state/research.md` if it exists (from `/devt:research`) — technical approaches and codebase patterns are already investigated. Treat research recommendations as settled context, not open questions.
-- Read `.devt/state/decisions.md` if it exists (from `/devt:clarify`) — decisions with DEC-xxx IDs are already captured. Do NOT re-ask about these choices during the interview.
+- Read `.devt/state/decisions.md` if it exists (from `/devt:workflow --mode=clarify`) — decisions with DEC-xxx IDs are already captured. Do NOT re-ask about these choices during the interview.
 </step>
 
 <step name="analyze" gate="codebase analysis complete">
@@ -105,7 +105,7 @@ Use AskUserQuestion to cover ALL categories below. Continue until requirements a
 **Prior findings check**: Before asking each question, check if the answer is already in prior artifacts loaded during init:
 - `research.md` — technical approach recommendations and codebase pattern findings
 - `decisions.md` — design choices captured with DEC-xxx IDs
-If a question's answer is already captured, reference the finding instead of re-asking: "Based on prior research, {finding} — I'll incorporate this into the spec." This avoids redundant questions when `/devt:research` or `/devt:clarify` ran before `/devt:specify`.
+If a question's answer is already captured, reference the finding instead of re-asking: "Based on prior research, {finding} — I'll incorporate this into the spec." This avoids redundant questions when `/devt:research` or `/devt:workflow --mode=clarify` ran before `/devt:specify`.
 
 **Ask NON-OBVIOUS questions only.** Skip anything the feature description or prior artifacts already answer.
 The goal is to resolve ambiguity, not to confirm the obvious. If the user said "add email
@@ -414,7 +414,7 @@ options:
     description: "Break the spec into detailed, ordered tasks before coding — recommended for complex features"
   - label: "Start implementation now (/devt:workflow)"
     description: "Jump straight to the full development pipeline — the spec will be used as the primary requirements source"
-  - label: "Clarify decisions first (/devt:clarify)"
+  - label: "Clarify decisions first (/devt:workflow --mode=clarify)"
     description: "Discuss remaining gray areas with more depth before planning"
   - label: "Pressure-test the spec's biggest decision (/devt:council)"
     description: "Pick the highest-stakes decision in the PRD and run it through 5 advisors with peer review before committing to /devt:plan — best when a load-bearing decision feels under-examined"

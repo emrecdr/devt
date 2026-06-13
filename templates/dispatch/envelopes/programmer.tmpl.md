@@ -24,7 +24,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 <reuse_candidates>Read .devt/state/reuse-candidates.md if present — graphify-derived list of existing functions with similar responsibility. Address each candidate in .devt/state/reuse-analysis.md before writing new code (see programmer.md::reuse_analysis step).</reuse_candidates>
     <scan_results>Read .devt/state/scan-results.md for existing patterns and code to reuse.</scan_results>
     <plan>Read .devt/state/plan.md (if it exists — from /devt:plan)</plan>
-    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:clarify)</decisions>
+    <decisions>Read .devt/state/decisions.md (if it exists — from /devt:workflow --mode=clarify)</decisions>
     <!-- COMPLEX only: include arch_review and research -->
     <arch_review>Read .devt/state/arch-review.md (if it exists)</arch_review>
     <research>Read .devt/state/research.md (if it exists — from /devt:research)</research>

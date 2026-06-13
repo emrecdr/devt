@@ -71,7 +71,7 @@ Weak / not-routable signals (treat as **pass-through**):
 - Prompts that are already a `/devt:*` command invocation (the command handles itself)
 - Prompts asking you for an opinion or for design discussion that should not commit to a
   workflow ("which approach is better?" without a concrete decision-capture intent → answer in
-  prose; "capture our decision about which approach" → /devt:clarify)
+  prose; "capture our decision about which approach" → /devt:workflow --mode=clarify)
 
 **Step 2 — If devt-shaped: apply the routing table; if pass-through: answer normally.**
 
@@ -197,7 +197,7 @@ These illustrate the classifier's calibration. Apply the same judgment to new pr
 - "review my changes on this branch" → `/devt:review`
 - "create a PR for this feature" → `/devt:ship`
 - "I'm picking back up after lunch" → `/devt:next`
-- "rename `parseUser` to `parseUserPayload` everywhere" → `/devt:fast` (trivial mechanical)
+- "rename `parseUser` to `parseUserPayload` everywhere" → `/devt:workflow --mode=fast` (trivial mechanical)
 
 **Pass-through (not devt-shaped):**
 
@@ -215,7 +215,7 @@ These illustrate the classifier's calibration. Apply the same judgment to new pr
 
 - "look at this bug" — could be `/devt:debug` (full session) or `/devt:review` (one-pass
   check) → ask
-- "let's discuss the auth approach" — could be `/devt:clarify` (capture a decision) or
+- "let's discuss the auth approach" — could be `/devt:workflow --mode=clarify` (capture a decision) or
   open conversation → ask, include "answer directly" option
 
 </calibration_examples>

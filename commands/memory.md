@@ -68,7 +68,7 @@ If the user passes no subcommand or an unknown one, surface the table above.
 
 - This command is **read/write on the markdown files**, **read-only on the index** during query subcommands, and **write on the index** during init/index.
 - Permanent ADR/CON/FLOW/REJ markdown files are NEVER created automatically by these subcommands. Phase 2 will add `promote` and `reject` subcommands that DO create files, but those routes through curator's AskUserQuestion approval flow.
-- For ephemeral session decisions (DEC-xxx in `.devt/state/decisions.md`), use `/devt:clarify` instead — those are workflow-scoped and reset between workflows.
-- For operational lessons ("when X fails, check Y first"), use `/devt:retro` — those go to the learning-playbook, not the memory layer.
+- For ephemeral session decisions (DEC-xxx in `.devt/state/decisions.md`), use `/devt:workflow --mode=clarify` instead — those are workflow-scoped and reset between workflows.
+- For operational lessons ("when X fails, check Y first"), use `/devt:workflow --retro` — those go to the learning-playbook, not the memory layer.
 
 </process>

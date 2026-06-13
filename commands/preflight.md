@@ -75,9 +75,9 @@ subcommand. Otherwise treat the entire argument as the task description for `gen
 - It is **write** on `.devt/state/preflight-brief.md` only — no other file is mutated.
 - Graphify (when enabled) is invoked via subprocess; failures degrade silently and the
   Brief notes `_Graphify disabled or unavailable_` instead of blocking.
-- The Brief is **per-workflow scope** — `/devt:cancel-workflow` and `state reset`
+- The Brief is **per-workflow scope** — `/devt:workflow --cancel` and `state reset`
   delete it. Re-running `/devt:preflight` overwrites in place.
-- For ephemeral DECs, use `/devt:clarify`. For permanent ADR/Concept/Flow promotion,
+- For ephemeral DECs, use `/devt:workflow --mode=clarify`. For permanent ADR/Concept/Flow promotion,
   use `/devt:memory promote`. This command does NOT write to `.devt/memory/`.
 
 </process>

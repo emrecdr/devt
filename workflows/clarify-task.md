@@ -39,7 +39,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
 
-The third call auto-fires the **Topic Pre-Flight Brief** — surfacing existing ADRs/Concepts/REJ tombstones for the topic. This is especially load-bearing for `/devt:clarify`: gray areas that match an active REJ tombstone do NOT need to be re-clarified — the team already decided. The Brief at `.devt/state/preflight-brief.md` is the first thing the agent should consult before listing gray areas.
+The third call auto-fires the **Topic Pre-Flight Brief** — surfacing existing ADRs/Concepts/REJ tombstones for the topic. This is especially load-bearing for `/devt:workflow --mode=clarify`: gray areas that match an active REJ tombstone do NOT need to be re-clarified — the team already decided. The Brief at `.devt/state/preflight-brief.md` is the first thing the agent should consult before listing gray areas.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question effectively. Follow the guide's philosophy: be a thinking partner, not an interviewer. **Critical sections**:
 - "Before You Ask" — grep/Read the codebase before any question; only ask about decisions requiring user judgment
@@ -48,7 +48,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to question
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/domain-probes.md` — structured probes for discovering domain unknowns, constraints, and edge cases. Use selectively based on the task's domain complexity.
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when a gray area is contentious enough to warrant offering `/devt:council` as a resolution path (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:clarify`).
+Read `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` — when a gray area is contentious enough to warrant offering `/devt:council` as a resolution path (threshold in §1; template in §2; capture in §3.2 — caller is `/devt:workflow --mode=clarify`).
 
 Load prior workflow artifacts (focus clarification on what's still ambiguous):
 - Read `.devt/state/research.md` if it exists (from `/devt:research`) — research findings inform which areas are already settled and which still need clarification. Do NOT re-ask about technical approaches that research already recommended.
@@ -75,7 +75,7 @@ For each gray area:
 
 1. **Evaluate against the council threshold** in `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §1. The gray area trips the threshold when ALL three conditions hold: multiple viable approaches with material trade-offs, hard to reverse, high stakes.
 
-2. **If the threshold trips**, present the question via `AskUserQuestion` using the offramp template from §2 — list Option A and Option B with trade-offs AND include the "Run /devt:council" option AND the "Defer" option. **Soft cap**: at most 1 council invocation per `/devt:clarify` session. If multiple gray areas trip the threshold, surface that explicitly and ask the user to pick the highest-stakes one to council.
+2. **If the threshold trips**, present the question via `AskUserQuestion` using the offramp template from §2 — list Option A and Option B with trade-offs AND include the "Run /devt:council" option AND the "Defer" option. **Soft cap**: at most 1 council invocation per `/devt:workflow --mode=clarify` session. If multiple gray areas trip the threshold, surface that explicitly and ask the user to pick the highest-stakes one to council.
 
 3. **If the threshold does not trip**, present the standard decision via `AskUserQuestion`:
    - The decision to make (one sentence)

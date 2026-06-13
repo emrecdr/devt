@@ -33,10 +33,10 @@ memory carries the running state.
 
 Trigger on:
 
-- End of `/devt:clarify`, `/devt:specify`, `/devt:research` when the workflow produced
+- End of `/devt:workflow --mode=clarify`, `/devt:specify`, `/devt:research` when the workflow produced
   DEC-xxx entries that look architectural (multi-session relevant, hard-to-reverse,
   high-stakes — meets the same threshold as the council offramp)
-- End of `/devt:retro` when retro extracted ADR/Concept/Flow candidates alongside
+- End of `/devt:workflow --retro` when retro extracted ADR/Concept/Flow candidates alongside
   operational lessons
 - End of `/devt:council` when the chairman's "What Grounded the Verdict" identifies a
   load-bearing decision worth codifying

@@ -17,7 +17,7 @@ AskUserQuestion approval flow.
 <prerequisites>
 - `${CLAUDE_PLUGIN_ROOT}` is set (devt plugin is loaded)
 - Node.js 22.5+ (required for `node:sqlite` FTS5 support)
-- `.devt/` exists (run `/devt:init` first if not)
+- `.devt/` exists (run `/devt:setup --init` first if not)
 </prerequisites>
 
 <available_agent_types>

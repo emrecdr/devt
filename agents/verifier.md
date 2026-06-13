@@ -42,7 +42,7 @@ BEFORE verifying, load the following in order:
 5. Read `.devt/state/test-summary.md` — what the tester claims was tested
 6. Read `.devt/state/review.md` — what the reviewer approved
 7. Read `.devt/state/plan.md` if it exists — the original plan (from `/devt:plan`)
-8. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:clarify`)
+8. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:workflow --mode=clarify`)
 9. **Governing rules (project)** — If the dispatch prompt includes a `<governing_rules>` block with `<claude_md>` and `<quality_gates>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads of `CLAUDE.md` and `.devt/rules/quality-gates.md`. Only Read from disk when the block is absent or a specific sub-tag is empty.
 10. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
 11. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
