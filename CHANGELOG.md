@@ -83,6 +83,63 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 9 — Measurement & Release Prep
+
+Capstone of the v0.93 cycle: quantifies the cumulative wins for the release narrative. Read-only measurement run — no code changes.
+
+**Cycle-wide metrics (fd8915f → HEAD):**
+
+| Metric | Before | After | Δ |
+|---|---:|---:|---|
+| Commits | — | — | 14 in cycle |
+| Visible commands (`/`-autocomplete) | 36 | **19** | −47% surface area |
+| Total commands on disk | 36 | 19 | −47% (18 folded into family-head + param forms) |
+| Hidden specialized commands | 0 | 4 | preflight, autoskill, thread, council |
+| Parameter routes | 0 | **23** | (flag → workflow) pairings across 6 family heads |
+| Workflows reachable | 36 | 36 | 100% (K99 guarded) |
+| `CLAUDE.md` size | 35,699 bytes | **25,048 bytes** | −10,651 bytes (−29.9%) |
+| Per-dispatch `governing_rules` block | ~31 KB | ~21 KB | **~32% lighter** |
+| Drift guards | 0 | **8** | K94–K101 |
+| Smoke tests | 843 | **846** | +3 (K99, K100, K101 added; K94 absorbed prior `commands/X.md exists` checks) |
+| Stale `/devt:<deleted>` refs (contract layer) | — | 0 | K97 enforced |
+| Stale `/devt:<deleted>` refs (doc layer) | — | 0 | Phase 4 fixed |
+| Stale `/devt:<deleted>` refs (runtime layer) | — | 0 | K100 enforced |
+
+**Hook telemetry — measured against the same v0.93 trace** (`node bin/devt-tools.cjs hook-cost-estimate --window=7d`):
+
+| Hook | Fires (7d) | Brittleness | Exit ≠ 0 | Est cost USD/wk if migrated to prompt-type |
+|---|---:|---:|---:|---:|
+| context-monitor.sh | 1,075 | 0 | 0 | $6.21 |
+| bash-guard.sh | 432 | 0 | 0 | $0.16 |
+| dispatch-hygiene-guard.sh | 247 | 10 | 3 | $0.06 |
+| subagent-status.sh | 212 | 0 | 30 | $0.08 |
+| prompt-guard.sh | 104 | 1 | 0 | $0.07 |
+| pre-flight-guard.sh | 104 | 3 | 0 | $0.07 |
+| memory-auto-index.sh | 104 | 1 | 0 | $5.25 |
+| read-before-edit-guard.sh | 94 | 0 | 0 | $0.07 |
+| workflow-context-injector.sh | 83 | 0 | 0 | $0.03 |
+| stop.sh | 45 | 0 | 0 | $0.05 |
+| session-start.sh | 9 | 1 | 0 | $0.00 |
+| dispatch-scope-guard.sh | 6 | 1 | 0 | $0.01 |
+| task-truncation-detector.sh | 6 | 1 | 0 | $0.02 |
+| **Total** | **2,521** | — | **33** | **$12.08** |
+
+**Migration recommendations** (from the cost estimator): `migrate=0`, `consider=4`, `stay=9`. No hook clears the brittleness ≥ 4 AND fires ≤ 200 threshold (dispatch-hygiene-guard, the highest-brittleness shell hook, has 247 fires/week — above the 200-cap that protects high-volume guards). The cost estimator's classifier validates: no hook should migrate to LLM-based decision logic right now.
+
+### Validated NOT done (intentional non-changes)
+
+Three Phase 9 candidates were validated and explicitly skipped because the analysis showed they were the wrong call:
+
+- **Skill `paths:` expansion** — re-analysis confirmed devt skills aren't file-extension-scoped; they trigger on prose language ("triage findings", "is this actually working") not on files. Adding paths would narrow auto-loading without value.
+- **Hook profile migration** — the hook-cost-estimate run shows `migrate=0`. No hook currently warrants the prompt-type migration cost. Revisit when a hook's brittleness or fire-rate shifts.
+- **Output style `force-for-plugin: true`** — would override the user's chosen output style (intrusive). Opt-in would add an unused artifact for users who don't invoke it. No clear value over the current convention layer.
+
+The drift-guard stack (K94–K101) covers every structural invariant established by Phases 1–8. The v0.93 cycle is structurally complete.
+
+Smoke: 846/846 (unchanged — read-only measurement). Locking: 3/3.
+
+---
+
 ### Phase 8 — No-task elicitation across family heads
 
 Phase 7 added the no-flag picker to `/devt:setup`. Phase 8 extends the same "make the dead-end interactive" pattern to family heads that take a task arg: `/devt:workflow`, `/devt:debug`, `/devt:plan`, `/devt:research`, `/devt:implement`. `/devt:specify` already had this behavior (its workflow body asks for a one-sentence description if input is empty).
