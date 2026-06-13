@@ -83,6 +83,50 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 11 — Registry hardening + dispatch telemetry surface
+
+Three validated drift/feature fixes bundled. Origin: post-Phase 10 audit asked "what's worth shipping before tagging?" — measurement disproved theoretical candidates (engineering-principles/generative-debt trim, agent body trim, paths: expansion all rejected by 0 pedagogy markers and 100% operational density). Three real gaps surfaced instead.
+
+**F1 — `workflows/status.md` routing table 4-row drift fix.** Direct measurement: `state.cjs::VALID_WORKFLOW_TYPES` holds 15 types, `workflows/next.md` routing table has 15 (parity), `workflows/status.md` had **11** — silently missing `dev`, `debug`, `retro`, `arch_health_scan`. Drift had persisted for weeks (memory observation 947 flagged it on May 7; never fixed). Effect: a user running `/devt:status` mid-workflow on any of those 4 types fell through the routing table to the catch-all bottom rows and got no resume guidance specific to their workflow type. Added 4 rows matching the next.md canonical resume commands.
+
+**F2 — `scripts/smoke-test.sh::K103` 4-way registry parity gate.** `CLAUDE.md::workflow_type Registry` claimed "the smoke test enforces presence in both surfaces" — `grep` confirmed no such gate existed; the claim was false. The F1 drift had been ship-able because nothing structurally enforced parity. K103 enforces 4-way parity across `state.cjs::VALID_WORKFLOW_TYPES` ↔ `next.md` routing table ↔ `status.md` routing table ↔ workflow-body `state update workflow_type=…` assignments. Validated adversarially: temporarily reverted F1 → K103 reported the exact 4 missing types with actionable remediation. Restored F1 → K103 passes. Drift class: silent registry/router divergence.
+
+**Implementation footgun (now documented inline):** under `set -euo pipefail` (line 14), the pattern `comm -23 <(A) <(B) | grep -v '^$' | tr '\n' ',' | sed 's/,$//'` exits 1 when `comm` produces empty output (the clean case — no drift) because `grep` finds no matches. `pipefail` propagates and `set -e` kills the script silently between K102 and the result echo. Defused with `|| true` on each pipeline. Same failure mode that bit K98 in Phase 2.6.
+
+**F4 — `node bin/devt-tools.cjs dispatch warnings` CLI.** `hooks/dispatch-hygiene-guard.sh` had been writing `.devt/state/dispatch-warnings.jsonl` for weeks on every raw_dispatch incident (a `Task(devt:* …)` call without a workflow envelope), accumulating **2,495 entries** spanning May–June 2026. No read surface existed; the telemetry sat unused. New `cmdWarnings()` in `bin/modules/dispatch.cjs` surfaces it:
+
+| Flag | Output |
+|---|---|
+| (default) | Summary: total, span, by_source breakdown, top 5 agents, last 5 recent |
+| `--by-source` | Counts grouped by `source` field |
+| `--by-agent` | Counts grouped by `agent` field, sorted descending |
+| `--limit=N` | Truncate output to N most-recent entries |
+| `--since=ISO` | Filter to entries with `ts ≥ ISO` |
+| `--raw` | Return full entry objects (`entries[]`) instead of aggregations |
+
+JSON output, pipable to `jq`. North-star vector 1 (coordination via clear protocols): silent telemetry now actionable.
+
+**First measurement from the new CLI:** of the 2,495 raw_dispatch incidents, 2,189 (87.7%) targeted `devt:code-reviewer`, 307 (12.3%) `devt:programmer`. Validates the workflow envelope discipline lives where the highest-frequency raw-dispatch attempts are caught.
+
+### Added
+
+- **`scripts/smoke-test.sh::K103`** — `workflow_type` registry 4-way parity gate (see F2 above).
+- **`scripts/smoke-test.sh::K104`** — `dispatch warnings` CLI surface contract (summary keys, `--raw --limit=N` truncation, `--by-source` aggregation, missing-file graceful response, `cmdWarnings` exported).
+- **`node bin/devt-tools.cjs dispatch warnings`** + 5 flags (see F4 above).
+- **`workflows/status.md`** — 4 routing-table rows for `dev`, `debug`, `retro`, `arch_health_scan`.
+
+The drift-guard stack is now **11-deep (K94–K104)**. Smoke: 849/849. Locking: 3/3.
+
+### Validated NOT shipped
+
+- **Trim `engineering-principles.md` + `generative-debt-checklist.md`.** Direct measurement: 0 "Common violation / Example / For example" markers in either file. Phase 10's trim pattern relied on extracting these markers; without them there's nothing to extract.
+- **Agent body trim.** Read of `agents/programmer.md` (largest, 446 lines): lines 1–237 operational protocol, 239–274 deviation-rule decision tables (load-bearing logic), 395–446 the impl-summary.md output template (sidecar contract — moving it would break the JSON sidecar shape downstream consumers depend on). Zero pedagogy markers across all 11 agent bodies. Agent bodies are dense protocol, not reference.
+- **Delegate `memory-graph.cjs` to graphify.** Different graphs: `memory-graph.cjs` traverses the memory layer's SQLite `links` table (relationships between ADR/Concept/Flow docs); graphify traverses source-code symbols. Correctly separated, no overlap.
+- **Standardize `phase=context_init` naming across all 15 registered workflow_types.** Of 15 workflow_types, 11 use `phase=context_init` + `<step name="context_init">`, 4 use alternative init phase names (`phase=debug` + `step name="init"`, `phase=retro` + `gather_context`, `phase=arch_health_scan` + `check_scanner`, `phase=docs` + `gather_context`). All 4 bootstrap state identically; the variation is cosmetic. Renaming would touch 4 files for no behavioral gain.
+- **Agent frontmatter uniformity audit.** All 11 agents already declare `model`, `effort`, `maxTurns`, `color`, `skills`, `tools` — no drift to fix.
+
+---
+
 ### Phase 10 — Inline guardrails trim + K102
 
 After Phase 6 trimmed CLAUDE.md by 29.9%, audit found the **inline guardrails block** (`init.cjs::loadInlineGuardrails`) is the *other* large per-dispatch context payload — **27,092 bytes** (golden-rules.md + engineering-principles.md + generative-debt-checklist.md) injected as `<guardrails_inline>` into every programmer/code-reviewer dispatch. Same lever as Phase 6, applied to a different surface.

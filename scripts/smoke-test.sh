@@ -12313,6 +12313,92 @@ else
   fail "K102: inline_guardrails exceed budget — ${K102_TOTAL} bytes > ${K102_BUDGET} cap. Move pedagogy / examples to docs/GUARDRAILS-REFERENCE.md per Phase 10 pattern."
 fi
 
+# K103: workflow_type registry 4-way parity.
+# Four surfaces independently declare workflow_type values:
+#   S1 — state.cjs::VALID_WORKFLOW_TYPES (the canonical registry)
+#   S2 — workflows/next.md routing table (resume command per type)
+#   S3 — workflows/status.md routing table (resume guidance per type)
+#   S4 — workflow bodies that actually set workflow_type via `state update`
+# Drift between them ships UX bugs: status.md routing drift went undetected
+# for weeks until a manual audit caught 4 missing rows
+# (dev/debug/retro/arch_health_scan). Drift class: silent registry/router divergence.
+K103_VALID=$(awk '/VALID_WORKFLOW_TYPES = new Set/,/\]\);/' "$ROOT/bin/modules/state.cjs" \
+  | grep -oE '"[a-z_]+"' | sed 's/"//g' | sort -u)
+K103_NEXT=$(awk '/^\| `workflow_type` \|/{flag=1; next} flag && /^\|/' "$ROOT/workflows/next.md" \
+  | grep -oE '`[a-z_]+`' | sed 's/`//g' | sort -u)
+K103_STATUS=$(grep -oE "workflow_type=[a-z_]+" "$ROOT/workflows/status.md" \
+  | sed 's/workflow_type=//' | sort -u)
+K103_BODY=$(grep -hE 'state update.*workflow_type=' "$ROOT/workflows/"*.md 2>/dev/null \
+  | grep -oE 'workflow_type=[a-z_]+' | sed 's/workflow_type=//' | sort -u)
+K103_ERRORS=""
+# Empty extractions usually mean the regex broke (file format changed).
+[ -z "$K103_VALID" ]  && K103_ERRORS="$K103_ERRORS extraction_empty:S1_VALID;"
+[ -z "$K103_NEXT" ]   && K103_ERRORS="$K103_ERRORS extraction_empty:S2_NEXT;"
+[ -z "$K103_STATUS" ] && K103_ERRORS="$K103_ERRORS extraction_empty:S3_STATUS;"
+[ -z "$K103_BODY" ]   && K103_ERRORS="$K103_ERRORS extraction_empty:S4_BODY;"
+# `|| true` defuses set -e + pipefail when comm produces empty output (clean
+# state). `grep -v '^$'` exits 1 on no matches; under pipefail that kills the
+# whole script before the gate can report its verdict.
+# Check A: every VALID type must have a next.md routing entry
+K103_MISS_NEXT=$(comm -23 <(echo "$K103_VALID") <(echo "$K103_NEXT") | grep -v '^$' | tr '\n' ',' | sed 's/,$//' || true)
+[ -n "$K103_MISS_NEXT" ] && K103_ERRORS="$K103_ERRORS missing_in_next.md=[$K103_MISS_NEXT];"
+# Check B: every VALID type must have a status.md routing entry
+K103_MISS_STATUS=$(comm -23 <(echo "$K103_VALID") <(echo "$K103_STATUS") | grep -v '^$' | tr '\n' ',' | sed 's/,$//' || true)
+[ -n "$K103_MISS_STATUS" ] && K103_ERRORS="$K103_ERRORS missing_in_status.md=[$K103_MISS_STATUS];"
+# Check C: no workflow body sets an invalid (unregistered) workflow_type
+K103_INVALID_BODY=$(comm -23 <(echo "$K103_BODY") <(echo "$K103_VALID") | grep -v '^$' | tr '\n' ',' | sed 's/,$//' || true)
+[ -n "$K103_INVALID_BODY" ] && K103_ERRORS="$K103_ERRORS bodies_set_invalid_types=[$K103_INVALID_BODY];"
+if [ -z "$K103_ERRORS" ]; then
+  pass "K103: workflow_type registry 4-way parity (state.cjs::VALID ↔ next.md ↔ status.md ↔ bodies)"
+else
+  fail "K103: workflow_type drift —$K103_ERRORS Add missing routing rows to next.md/status.md, or update state.cjs::VALID_WORKFLOW_TYPES."
+fi
+
+# K104: dispatch warnings CLI surface (raw_dispatch telemetry analytics).
+# Hooks write .devt/state/dispatch-warnings.jsonl on raw_dispatch incidents
+# (workflow envelope absent on Task(devt:* …)). K104 validates the analytics
+# CLI handles: (a) default summary shape; (b) --raw + --limit truncation;
+# (c) --by-source aggregation; (d) graceful missing-file response; (e) export.
+K104_TMP=$(mktemp -d)
+mkdir -p "$K104_TMP/.devt/state"
+# Fixture: 3 entries spanning 2 sources + 2 agents
+cat > "$K104_TMP/.devt/state/dispatch-warnings.jsonl" <<'WARNFIX'
+{"ts":"2026-06-01T10:00:00.000Z","source":"raw_dispatch","agent":"devt:code-reviewer","prompt_bytes":18,"prompt_preview":"first"}
+{"ts":"2026-06-01T11:00:00.000Z","source":"raw_dispatch","agent":"devt:programmer","prompt_bytes":20,"prompt_preview":"second"}
+{"ts":"2026-06-01T12:00:00.000Z","source":"task_output_bytes","agent":"devt:code-reviewer","prompt_bytes":99,"prompt_preview":"third"}
+WARNFIX
+K104_DEFAULT=$(cd "$K104_TMP" && node "$CLI" dispatch warnings 2>/dev/null)
+K104_TOTAL=$(echo "$K104_DEFAULT" | jq -r '.total' 2>/dev/null)
+K104_HAS_SPAN=$(echo "$K104_DEFAULT" | jq -r '.span | type == "object"' 2>/dev/null)
+K104_HAS_BY_SOURCE=$(echo "$K104_DEFAULT" | jq -r '.by_source | type == "object"' 2>/dev/null)
+K104_HAS_TOP_AGENTS=$(echo "$K104_DEFAULT" | jq -r '.top_agents | type == "object"' 2>/dev/null)
+K104_HAS_RECENT=$(echo "$K104_DEFAULT" | jq -r '.recent | type == "array"' 2>/dev/null)
+K104_RAW=$(cd "$K104_TMP" && node "$CLI" dispatch warnings --raw --limit=2 2>/dev/null)
+K104_RAW_LEN=$(echo "$K104_RAW" | jq -r '.entries | length' 2>/dev/null)
+K104_BY_SRC=$(cd "$K104_TMP" && node "$CLI" dispatch warnings --by-source 2>/dev/null)
+K104_BY_SRC_RAW=$(echo "$K104_BY_SRC" | jq -r '.counts.raw_dispatch' 2>/dev/null)
+K104_BY_SRC_TOB=$(echo "$K104_BY_SRC" | jq -r '.counts.task_output_bytes' 2>/dev/null)
+# Empty-file fixture for graceful-missing test
+K104_EMPTY=$(mktemp -d)
+K104_MISSING=$(cd "$K104_EMPTY" && node "$CLI" dispatch warnings 2>/dev/null)
+K104_MISS_EXISTS=$(echo "$K104_MISSING" | jq -r '.exists' 2>/dev/null)
+K104_EXPORT_OK=$(node -e "console.log(typeof require('$ROOT/bin/modules/dispatch.cjs').cmdWarnings === 'function')")
+rm -rf "$K104_TMP" "$K104_EMPTY"
+if [ "$K104_TOTAL" = "3" ] \
+   && [ "$K104_HAS_SPAN" = "true" ] \
+   && [ "$K104_HAS_BY_SOURCE" = "true" ] \
+   && [ "$K104_HAS_TOP_AGENTS" = "true" ] \
+   && [ "$K104_HAS_RECENT" = "true" ] \
+   && [ "$K104_RAW_LEN" = "2" ] \
+   && [ "$K104_BY_SRC_RAW" = "2" ] \
+   && [ "$K104_BY_SRC_TOB" = "1" ] \
+   && [ "$K104_MISS_EXISTS" = "false" ] \
+   && [ "$K104_EXPORT_OK" = "true" ]; then
+  pass "K104: dispatch warnings CLI surface (summary keys present, --raw --limit=N truncates, --by-source aggregates, missing-file graceful, cmdWarnings exported)"
+else
+  fail "K104: warnings mismatch — total=$K104_TOTAL span=$K104_HAS_SPAN by_source=$K104_HAS_BY_SOURCE top_agents=$K104_HAS_TOP_AGENTS recent=$K104_HAS_RECENT raw_len=$K104_RAW_LEN by_src_raw=$K104_BY_SRC_RAW by_src_tob=$K104_BY_SRC_TOB miss_exists=$K104_MISS_EXISTS export=$K104_EXPORT_OK"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

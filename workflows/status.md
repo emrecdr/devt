@@ -214,6 +214,10 @@ Based on current state, suggest the appropriate next command:
 | Active, workflow_type=memory_promote     | "Continue with /devt:memory promote to resume curator promotion"         |
 | Active, workflow_type=memory_reject      | "Continue with /devt:memory reject to resume tombstone capture"          |
 | Active, workflow_type=docs               | "Continue with /devt:workflow --mode=docs to resume documentation refresh"               |
+| Active, workflow_type=dev                | "Continue with /devt:workflow to resume dev workflow"                    |
+| Active, workflow_type=debug              | "Continue with /devt:debug to resume investigation"                      |
+| Active, workflow_type=retro              | "Continue with /devt:workflow --retro to resume lesson extraction"       |
+| Active, workflow_type=arch_health_scan   | "Continue with /devt:review --focus=arch to resume architecture scan"    |
 | Active, phase=complete                   | "Workflow is done. Use /devt:ship to create a PR"                        |
 | Active, status=BLOCKED                   | "Resolve the blocker described above, then continue with /devt:workflow" |
 

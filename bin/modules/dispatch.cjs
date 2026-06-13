@@ -609,6 +609,86 @@ function cmdCompile(mode) {
   return { regions_checked: regions.length, drift, mode };
 }
 
+// Surfaces .devt/state/dispatch-warnings.jsonl — the JSONL forensic log
+// written by hooks/dispatch-hygiene-guard.sh on raw_dispatch incidents
+// (a workflow envelope absent on Task(devt:* …)). JSONL shape per entry:
+//   { ts, source, agent, prompt_bytes, prompt_preview }
+function cmdWarnings(args) {
+  const tracePath = path.join(process.cwd(), ".devt/state/dispatch-warnings.jsonl");
+  let mode = "summary";
+  let limit = null;
+  let sinceTs = null;
+  let raw = false;
+  for (const a of args) {
+    if (a === "--by-source") mode = "by-source";
+    else if (a === "--by-agent") mode = "by-agent";
+    else if (a === "--raw") raw = true;
+    else if (a.startsWith("--limit=")) limit = parseInt(a.slice(8), 10);
+    else if (a.startsWith("--since=")) sinceTs = a.slice(8);
+  }
+  if (!fs.existsSync(tracePath)) {
+    return {
+      exists: false,
+      path: tracePath,
+      message: "No dispatch-warnings.jsonl yet — no raw_dispatch incidents recorded in this project.",
+    };
+  }
+  const text = fs.readFileSync(tracePath, "utf8");
+  const lines = text.split("\n").filter(Boolean);
+  const entries = [];
+  let parseErrors = 0;
+  for (const line of lines) {
+    try { entries.push(JSON.parse(line)); }
+    catch { parseErrors++; }
+  }
+  const filtered = sinceTs ? entries.filter((e) => e.ts && e.ts >= sinceTs) : entries;
+  if (raw) {
+    const slice = limit ? filtered.slice(-limit) : filtered;
+    return { entries: slice, total: filtered.length, parse_errors: parseErrors };
+  }
+  if (mode === "by-source") {
+    const counts = {};
+    for (const e of filtered) {
+      const k = e.source || "unknown";
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    return { mode: "by-source", total: filtered.length, parse_errors: parseErrors, counts };
+  }
+  if (mode === "by-agent") {
+    const counts = {};
+    for (const e of filtered) {
+      const k = e.agent || "unknown";
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return { mode: "by-agent", total: filtered.length, parse_errors: parseErrors, counts: Object.fromEntries(sorted) };
+  }
+  const bySource = {};
+  const byAgent = {};
+  for (const e of filtered) {
+    bySource[e.source || "unknown"] = (bySource[e.source || "unknown"] || 0) + 1;
+    byAgent[e.agent || "unknown"] = (byAgent[e.agent || "unknown"] || 0) + 1;
+  }
+  const topAgents = Object.entries(byAgent).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const recent = filtered.slice(-5).map((e) => ({
+    ts: e.ts,
+    source: e.source,
+    agent: e.agent,
+    prompt_preview: e.prompt_preview,
+  }));
+  return {
+    total: filtered.length,
+    parse_errors: parseErrors,
+    span: {
+      first: filtered.length ? filtered[0].ts : null,
+      last: filtered.length ? filtered[filtered.length - 1].ts : null,
+    },
+    by_source: bySource,
+    top_agents: Object.fromEntries(topAgents),
+    recent,
+  };
+}
+
 function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
   switch (subcommand) {
@@ -617,6 +697,9 @@ function run(subcommand, args) {
       return 0;
     case "contracts":
       json(cmdContracts());
+      return 0;
+    case "warnings":
+      json(cmdWarnings(args));
       return 0;
     case "render": {
       const out = cmdRender(args[0]);
@@ -658,9 +741,9 @@ function run(subcommand, args) {
       catch (err) { process.stderr.write(err.message + "\n"); return 2; }
     }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile|decompose>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile|decompose|warnings>\n");
       return 2;
   }
 }
 
-module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdDecompose };
+module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdDecompose, cmdWarnings };
