@@ -13,7 +13,7 @@ devt persists structured knowledge across **two distinct layers**, each with a d
 ├── plan.md, spec.md, etc.             workflow artifacts
 ├── preflight-brief.md                 Topic Pre-Flight Brief — auto-fired
 ├── scratchpad.md                      cross-agent handoff notes within workflow
-└── ...                                wiped on /devt:cancel-workflow OR `state reset`
+└── ...                                wiped on /devt:workflow --cancel OR `state reset`
 
 .devt/memory/                      ← LAYER 2: permanent (unified knowledge)
 ├── index.db                           gitignored FTS5 index (regenerable from markdown)
@@ -412,7 +412,7 @@ REJ tombstones suppress future proposals matching their `search_keywords` — th
 The harvest step (which writes `_suggestions.md`) and the curator review step (which dispatches `AskUserQuestion` per candidate) are wired separately:
 
 - **`harvest_observations`** — runs in every `dev-workflow`, `lesson-extraction`, and `quick-implement` finalize phase, regardless of complexity tier or `config.workflow.retro` flags. Cost is ~50ms when claude-mem is absent. Best-effort: harvest failures NEVER fail the workflow. This guarantees that a SIMPLE-tier workflow that skips retro+curator still buffers its observations into `_suggestions.md` for the next dev-workflow's curator to review.
-- **`curate`** — only runs when `complexity=COMPLEX` (or `/devt:retro` standalone). Dual-path: PLAYBOOK PATH (lessons.yaml → playbook) AND MEMORY-LAYER PATH (_suggestions.md → AskUserQuestion approval flow). Hard invariant: NEVER writes a permanent memory doc without explicit user approval.
+- **`curate`** — only runs when `complexity=COMPLEX` (or `/devt:workflow --retro` standalone). Dual-path: PLAYBOOK PATH (lessons.yaml → playbook) AND MEMORY-LAYER PATH (_suggestions.md → AskUserQuestion approval flow). Hard invariant: NEVER writes a permanent memory doc without explicit user approval.
 
 The decoupling makes harvest categorically unskippable — the scenario where `quick-implement` drops every ⚖️/🔵 observation on the floor cannot recur.
 

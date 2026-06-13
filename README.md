@@ -295,15 +295,15 @@ Runs after a workflow completes. Reads `impl-summary.md`, `test-summary.md`, `re
 
 **Pause mid-work, resume next session:**
 ```bash
-/devt:pause
+/devt:workflow --pause
 # next session in same project:
 /devt:next   # reads handoff.json, resumes
 ```
 
 **Capture a TODO without derailing:**
 ```bash
-/devt:defer "rate-limit /api/login — Redis backend, see SEC-007"
-# survives /devt:cancel-workflow; surfaces in /devt:next when idle
+/devt:note --defer "rate-limit /api/login — Redis backend, see SEC-007"
+# survives /devt:workflow --cancel; surfaces in /devt:next when idle
 ```
 
 **High-stakes architectural decision:**
@@ -429,7 +429,7 @@ Full schema for `.devt/config.json` (project root). Global `~/.devt/defaults.jso
 | `git.provider` | `github` / `gitlab` / `bitbucket` | auto-detect from remote |
 | `git.workspace` / `git.slug` | Repo identifiers (used by `/devt:ship`) | auto-detect |
 | `git.primary_branch` | Integration branch | 4-step fallback chain (`origin/HEAD` → `init.defaultBranch` → common-name heuristic → current branch) |
-| `git.contributors` | Display names for `/devt:weekly-report` | git log scan |
+| `git.contributors` | Display names for `/devt:status --report=weekly` | git log scan |
 | `agent_skills` | Per-agent skill list overrides | see `skill-index.yaml` |
 | `memory.paths` | Multi-root memory roots — last-wins precedence | project-local only |
 | `memory.preflight_mode` | Pre-flight guard hook strictness — `off` / `warn` / `block` | `block` |
@@ -545,7 +545,7 @@ A self-evolving knowledge graph that joins **the code that exists** (Graphify AS
 
 Two layers, two lifetimes:
 
-- `.devt/state/` — ephemeral per-workflow scratch (DEC-, lessons.yaml, scratchpad, Pre-Flight Brief). Reset on `/devt:cancel-workflow`.
+- `.devt/state/` — ephemeral per-workflow scratch (DEC-, lessons.yaml, scratchpad, Pre-Flight Brief). Reset on `/devt:workflow --cancel`.
 - `.devt/memory/` — permanent canonical knowledge, five doc types:
 
 | Type | Use for | Example |
@@ -566,7 +566,7 @@ Every dev workflow auto-fires `/devt:preflight "<task>"` at context_init. A 6-la
 
 | Flag | What it does |
 |---|---|
-| `--autonomous` | Skip the human-in-the-loop checkpoints between phases. After implement → auto-runs test → review → ship if review passes. State key `autonomous_chain` persists the choice across `/devt:next` resumes. Stop manually with `/devt:cancel-workflow`. |
+| `--autonomous` | Skip the human-in-the-loop checkpoints between phases. After implement → auto-runs test → review → ship if review passes. State key `autonomous_chain` persists the choice across `/devt:next` resumes. Stop manually with `/devt:workflow --cancel`. |
 | `--tdd` | Reverses implement/test phase order. Tester writes failing tests first against the spec, programmer then implements until tests pass. Best for tasks where the test contract is clearer than the implementation path. |
 | `--dry-run` | Preview the tier + pipeline + agents that would run, without dispatching any. Useful for understanding what `/devt:workflow` will do on a fragile task before committing. |
 
@@ -624,7 +624,7 @@ The python-fastapi reference template ships an `arch-scan.py` that detects 6 lay
 
 ### Questioning protocol
 
-`references/questioning-guide.md` defines how `/devt:clarify` and `/devt:specify` interview users. Key principles:
+`references/questioning-guide.md` defines how `/devt:workflow --mode=clarify` and `/devt:specify` interview users. Key principles:
 
 - **Before You Ask** — codebase-first: grep/Read/`memory query` before any question; only ask about decisions requiring user judgment
 - **Walk the Decision Tree** — resolve roots before dependents, cut subtrees on root answers
@@ -648,7 +648,7 @@ After advisors respond in parallel, responses are anonymized and **peer-reviewed
 **When the council fires:**
 
 - **Manually** — invoke `/devt:council "should we use Postgres or Mongo for this workload?"` whenever you suspect your first instinct is biased.
-- **Automatically (off-ramp)** — `references/council-offramp.md` defines the escalation criteria. `/devt:clarify` and `/devt:specify` route to council when an open question is high-stakes (architecture-shaping, expensive-to-reverse, or has 3+ defensible options with no clear winner). The off-ramp sequence is: clarify → if council-worthy → council → resume clarify with the council verdict as decision input.
+- **Automatically (off-ramp)** — `references/council-offramp.md` defines the escalation criteria. `/devt:workflow --mode=clarify` and `/devt:specify` route to council when an open question is high-stakes (architecture-shaping, expensive-to-reverse, or has 3+ defensible options with no clear winner). The off-ramp sequence is: clarify → if council-worthy → council → resume clarify with the council verdict as decision input.
 - **`--mixed-models` flag** — dispatches advisors across opus/sonnet/haiku for higher reasoning diversity at extra token cost. Default is single-model dispatch.
 
 The council deliberately does NOT fire for trivial questions (factual lookups, single-line fixes, syntax). The skill description's trigger boundary keeps it from being a hammer for every nail.
@@ -714,7 +714,7 @@ The `--tdd` flag swaps phase 3 and 4. Tester writes failing tests first, runs th
 /devt:workflow --autonomous "rename internal helper getUser → fetchUserById across the codebase"
 ```
 
-After implement → auto-runs test → review → ship. If review returns `NEEDS_WORK`, the chain pauses for human input. Stop manually with `/devt:cancel-workflow`. Best for mechanical changes where you trust the agents.
+After implement → auto-runs test → review → ship. If review returns `NEEDS_WORK`, the chain pauses for human input. Stop manually with `/devt:workflow --cancel`. Best for mechanical changes where you trust the agents.
 
 ### Fix a bug
 
@@ -734,7 +734,7 @@ Persists state across context resets via `memory: project` agent persistence at 
 ### Pause and resume
 
 ```bash
-/devt:pause   # captures: current phase, decisions so far, next action — to handoff.json + continue-here.md
+/devt:workflow --pause   # captures: current phase, decisions so far, next action — to handoff.json + continue-here.md
 ```
 
 Then in a future session in the same project:
@@ -748,12 +748,12 @@ Useful at end of day or when a workflow blocks on an external decision (waiting 
 ### Explore the deferred queue
 
 ```bash
-/devt:defer "rate-limit /api/login — Redis backend, see SEC-007"
-/devt:defer list
-/devt:defer close DEF-003
+/devt:note --defer "rate-limit /api/login — Redis backend, see SEC-007"
+/devt:note --defer list
+/devt:note --defer close DEF-003
 ```
 
-`/devt:next` surfaces an idle deferred queue via AskUserQuestion when no other work is resumable: "5 deferred items waiting. Pick one to start?" Items survive `/devt:cancel-workflow` (the only state-reset exemption).
+`/devt:next` surfaces an idle deferred queue via AskUserQuestion when no other work is resumable: "5 deferred items waiting. Pick one to start?" Items survive `/devt:workflow --cancel` (the only state-reset exemption).
 
 ### Architectural decision via council
 
@@ -814,7 +814,7 @@ devt scatters a few files outside `.devt/` (`.mcp.json`, `.claude/agent-memory/d
 
 **Family-head verbs:** `/devt:plan`, `/devt:research`, `/devt:implement`, `/devt:debug`, `/devt:review` (with `--focus=arch|quality|security`), `/devt:memory`.
 
-**Specialized (direct-callable, hidden from autocomplete):** `/devt:thread`, `/devt:council`, `/devt:autoskill`, `/devt:preflight`. The 22 advanced direct-form commands listed by `/devt:help --all` continue to work when typed (e.g., `/devt:init` is the same as `/devt:setup --init`); the family-head + parameter form is the recommended entry.
+**Specialized (direct-callable, hidden from autocomplete):** `/devt:thread`, `/devt:council`, `/devt:autoskill`, `/devt:preflight`. The 22 advanced direct-form commands listed by `/devt:help --all` continue to work when typed (e.g., `/devt:setup --init` is the same as `/devt:setup --init`); the family-head + parameter form is the recommended entry.
 
 ### CLI tools
 
@@ -977,10 +977,10 @@ GitHub Actions runs `scripts/smoke-test.sh` (260+ assertions across all CLI subc
 ### Updating
 
 ```bash
-/devt:update
+/devt:setup --update
 ```
 
-devt checks for new versions on GitHub at each session start. The `/devt:update` command auto-detects how devt was installed (plugin system or git clone) and runs the right update command. Restart your Claude Code session after updating.
+devt checks for new versions on GitHub at each session start. The `/devt:setup --update` command auto-detects how devt was installed (plugin system or git clone) and runs the right update command. Restart your Claude Code session after updating.
 
 Manual update: `cd ~/.devt && git pull origin main`.
 

@@ -488,7 +488,7 @@ In `workflows/dev-workflow.md`, replace the programmer agent's `<context>` block
     <!-- COMPLEX-only context: skip for SIMPLE and STANDARD to save tokens -->
     <arch_review>COMPLEX only: Read .devt/state/arch-review.md (if it exists). Skip for SIMPLE/STANDARD tiers.</arch_review>
     <research>COMPLEX only: Read .devt/state/research.md (if it exists — from /devt:research). Skip for SIMPLE/STANDARD tiers.</research>
-    <decisions>STANDARD+: Read .devt/state/decisions.md (if it exists — from /devt:clarify). Skip for SIMPLE tier.</decisions>
+    <decisions>STANDARD+: Read .devt/state/decisions.md (if it exists — from /devt:workflow --mode=clarify). Skip for SIMPLE tier.</decisions>
 
     <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
     <scope_requirements>

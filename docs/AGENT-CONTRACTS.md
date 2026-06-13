@@ -250,7 +250,7 @@ Task(subagent_type="devt:programmer", prompt="
 ")
 ```
 
-Re-dispatch is more expensive but survives session boundaries. Workflows choose based on whether the original subagent-id is still addressable (in-session = SendMessage; after `/devt:pause` + new session = re-dispatch).
+Re-dispatch is more expensive but survives session boundaries. Workflows choose based on whether the original subagent-id is still addressable (in-session = SendMessage; after `/devt:workflow --pause` + new session = re-dispatch).
 
 ### Agent artifact provenance
 
@@ -279,7 +279,7 @@ Re-dispatch is more expensive but survives session boundaries. Workflows choose 
 
 ## Questioning Protocol
 
-**Rule.** `/devt:clarify` and `/devt:specify` interview users following `references/questioning-guide.md`:
+**Rule.** `/devt:workflow --mode=clarify` and `/devt:specify` interview users following `references/questioning-guide.md`:
 
 - **Before You Ask** — codebase-first: grep/Read/`memory query` before any question; only ask about decisions requiring user judgment.
 - **Walk the Decision Tree** — resolve roots before dependents; cut subtrees on root answers.
@@ -323,7 +323,7 @@ skills: [codebase-scan]         # ✗ silently fails
 
 **Status.** Rejected. Do not propose adopting Anthropic's specialist-team cookbook pattern where specialists return structured JSON via `send_to_parent` with no shared file artifacts.
 
-**Why devt rejects this.** devt's file-based state (`.devt/state/*.{md,json}`) is the load-bearing mechanism for **cross-session resume + `/devt:next` + `/devt:pause` + handoff continuity** — capabilities that an in-conversation specialist-return pattern cannot provide. Anthropic's specialist cookbook assumes a single live orchestrator session; devt is plugin-orchestrated and outlives any conversation.
+**Why devt rejects this.** devt's file-based state (`.devt/state/*.{md,json}`) is the load-bearing mechanism for **cross-session resume + `/devt:next` + `/devt:workflow --pause` + handoff continuity** — capabilities that an in-conversation specialist-return pattern cannot provide. Anthropic's specialist cookbook assumes a single live orchestrator session; devt is plugin-orchestrated and outlives any conversation.
 
 **Reference.** This aligns with the managed-agents engineering article ("session log serves as durable, interrogable state").
 

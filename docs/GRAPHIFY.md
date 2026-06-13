@@ -26,7 +26,7 @@ Graphify is a multi-language tree-sitter AST extractor: `pip install graphifyy[m
 
 **Auto-enable on setup.** `setup.cjs` writes `graphify.enabled: true` when the `graphify` binary is on PATH at first setup. The schema default stays `false` for projects where the binary is absent (so the toggle is meaningful, not silently wrong).
 
-**User opt-in flow.** `/devt:init` pitches Graphify as strongly recommended via AskUserQuestion; declining still produces a fully working install.
+**User opt-in flow.** `/devt:setup --init` pitches Graphify as strongly recommended via AskUserQuestion; declining still produces a fully working install.
 
 ---
 
@@ -82,7 +82,7 @@ node bin/devt-tools.cjs state evict-graphify
 
 **Default debounce 30 s** (`graphify.rebuild_debounce_seconds`). Override per-call with `--debounce=N`.
 
-**RESET_EXEMPT.** Lock survives `/devt:cancel-workflow` deliberately — a half-broken workflow that crashes mid-rebuild leaves the lock behind, but the next `rebuild` invocation past the debounce window breaks it cleanly. Resetting on cancel would defeat the concurrency guarantee in active multi-workflow scenarios.
+**RESET_EXEMPT.** Lock survives `/devt:workflow --cancel` deliberately — a half-broken workflow that crashes mid-rebuild leaves the lock behind, but the next `rebuild` invocation past the debounce window breaks it cleanly. Resetting on cancel would defeat the concurrency guarantee in active multi-workflow scenarios.
 
 ---
 
@@ -104,7 +104,7 @@ node bin/devt-tools.cjs state evict-graphify
 
 **Surface.** `node bin/devt-tools.cjs health` raises `PROBE_FAILURES_RECENT` (info-level) when any record's `ts` is within the last 24 h. The check bucketizes by category so the user can distinguish "binary missing" from "binary broken" without reading the raw JSONL. Stale activity (>24 h old) is intentionally NOT flagged — keeps the warning meaningful after the user fixed the cause.
 
-**RESET_EXEMPT.** Survives `/devt:cancel-workflow` so root-cause forensics persist across sessions.
+**RESET_EXEMPT.** Survives `/devt:workflow --cancel` so root-cause forensics persist across sessions.
 
 ---
 

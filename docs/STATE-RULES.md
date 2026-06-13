@@ -40,7 +40,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `plan.md` | architect / planner | Implementation plan | (not status-gated) |
 | `spec.md` | spec-phase agent | Phase requirements clarification | (not status-gated) |
 | `scope.md` | orchestrator | Workflow scope text | (not status-gated) |
-| `decisions.md` | orchestrator | DEC-NNN entries from `/devt:clarify` | (not status-gated) |
+| `decisions.md` | orchestrator | DEC-NNN entries from `/devt:workflow --mode=clarify` | (not status-gated) |
 | `research.md` | researcher | Pattern + pitfall investigation | `ARTIFACT_SCHEMA` |
 | `scan-results.md` | architect (arch-health) | Architecture scan output | (not status-gated) |
 | `scan-delta.md` | architect (arch-health) | Delta from prior baseline | (not status-gated) |
@@ -61,7 +61,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `review.md` | code-reviewer | Code review body | Sidecar (review.json) |
 | `graph-impact.md` | orchestrator | Graphify-derived impact map | (not status-gated) |
 | `topic-symbols-dropped.json` | code-review.md substep 5 | Symbols dropped when `symbol_anchored` truncates >32 from preflight; consumed by F17 step to emit truncation notice in `graph-impact.md` (C7-2) | (not status-gated) |
-| `continue-here.md` | `/devt:pause` | Session-resume narrative | (not status-gated) |
+| `continue-here.md` | `/devt:workflow --pause` | Session-resume narrative | (not status-gated) |
 
 ### Per-workflow artifacts (markdown + JSON sidecar pairs)
 
@@ -78,7 +78,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 
 | Filename | Written by | Read by | Schema |
 |---|---|---|---|
-| `handoff.json` | `/devt:pause` | `/devt:next` | `JSON_INPUT_SCHEMAS` |
+| `handoff.json` | `/devt:workflow --pause` | `/devt:next` | `JSON_INPUT_SCHEMAS` |
 | `preflight-brief.json` | `preflight.cjs::generate` | every dispatch (`scope_hint`, `scope_trust`) | inline shape; informally documented in `preflight.cjs::generate` |
 
 ### Forensic / persistent logs (RESET_EXEMPT)
@@ -87,7 +87,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 |---|---|---|---|
 | `.lock` | `state update` PID mutex | JSON | ✓ |
 | `.archive/` | `state reset` + `state cleanup` | directory (ring buffer, default 5 snapshots) | ✓ |
-| `deferred.md` | `/devt:defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
+| `deferred.md` | `/devt:note --defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
 | `preflight-denies.jsonl` | preflight hook + bash-guard + graph_loader | JSONL (one record per deny) | ✓ |
 | `dispatch-warnings.jsonl` | dispatch-scope-guard hook | JSONL (advisory only) | ✓ |
 | `probe-failures.jsonl` | `graphify.probeBinary` + `setup.probePythonGraphifyMcp` | JSONL with `{ts, category, command, args, error, ...}` — categories: `spawn-error` / `timeout` / `nonzero-exit` / `not-installed` / `no-result`. `health` surfaces `PROBE_FAILURES_RECENT` info-check when activity is logged within the last 24h. | ✓ |
@@ -175,7 +175,7 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 
 | | `state reset` | `state cleanup` |
 |---|---|---|
-| When invoked | Workflow boundary (`/devt:cancel-workflow`, end-of-workflow) | On-demand (manual) |
+| When invoked | Workflow boundary (`/devt:workflow --cancel`, end-of-workflow) | On-demand (manual) |
 | What survives | RESET_EXEMPT only (5 entries) | canonical + non-stale pattern_allowed |
 | What's archived | Everything not RESET_EXEMPT → `.archive/<ts>/` | ad_hoc + ephemeral + stale pattern_allowed → `.archive/cleanup-<ts>/` |
 | Archive ring buffer | `state.archive_runs` (default 5) | Same ring buffer |

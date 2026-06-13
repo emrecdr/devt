@@ -30,7 +30,7 @@ Both bugs share a structural fingerprint that AST + Graphify can detect.
 | `templates/python-fastapi/canonical-entities.yaml`                 | Registry template — 10 default entities                    |
 | `skills/architecture-health-scanner/`                              | Already-existing skill, now triages CANONICAL-\* categories |
 
-Once a project runs `/devt:init` (or copies the template manually), these
+Once a project runs `/devt:setup --init` (or copies the template manually), these
 land at `.devt/rules/` and the canonical detector is live.
 
 ---
@@ -278,7 +278,7 @@ python3 .devt/rules/arch-scan.py --canonical-only
 # expected: AST findings still flow, R5/R6 silently skip
 
 # 7. devt:arch-health integration
-/devt:arch-health
+/devt:review --focus=arch
 # expected: CANONICAL-* findings appear in skill triage output
 ```
 

@@ -15,7 +15,7 @@ What do you need?
   |-- "Fix a bug"                         -->  /devt:debug
   |-- "Create a PR"                       -->  /devt:ship
   |-- "Not sure / continue from where I left off"  -->  /devt:next
-  |-- "Set up a new project"              -->  /devt:init
+  |-- "Set up a new project"              -->  /devt:setup --init
   |-- "What commands are available?"      -->  /devt:help
 ```
 
@@ -92,7 +92,7 @@ Use when you have a feature idea but not clear requirements. Produces a structur
 6. Asks what you want to do next:
    - **Create an implementation plan** --> chains to `/devt:plan`
    - **Start implementation now** --> chains to `/devt:workflow`
-   - **Clarify decisions first** --> chains to `/devt:clarify`
+   - **Clarify decisions first** --> chains to `/devt:workflow --mode=clarify`
    - **Done for now** --> saves and stops
 
 **When to use specify vs workflow directly:**
@@ -173,12 +173,12 @@ Reads all available state and acts:
 
 ## Setup
 
-### `/devt:init` -- Initialize project
+### `/devt:setup --init` -- Initialize project
 
 One-time setup for a new project. Scaffolds `.devt/rules/` with project conventions and creates `.devt/config.json`.
 
 ```bash
-/devt:init
+/devt:setup --init
 ```
 
 **What happens:**
@@ -208,17 +208,17 @@ Describe what you want in plain text. devt matches your intent to the right comm
 ```bash
 /devt:do "fix the login bug"          # → routes to /devt:debug
 /devt:do "add pagination to contacts" # → routes to /devt:workflow
-/devt:do "what changed this week"     # → routes to /devt:weekly-report
+/devt:do "what changed this week"     # → routes to /devt:status --report=weekly
 ```
 
 ---
 
-### `/devt:session-report` -- Session summary
+### `/devt:status --report=session` -- Session summary
 
 Generate a post-session report with commits, files changed, decisions, and outcomes. Reads from git log and `.devt/state/` artifacts.
 
 ```bash
-/devt:session-report
+/devt:status --report=session
 ```
 
 ---
@@ -235,26 +235,26 @@ Commands you call when needed, not part of the main flow.
 
 Shows: current workflow phase, tier, iteration count, what happened so far, what's next.
 
-### `/devt:pause` -- Save and resume later
+### `/devt:workflow --pause` -- Save and resume later
 
 ```bash
-/devt:pause
+/devt:workflow --pause
 ```
 
 Creates structured handoff in `.devt/state/handoff.json`. When you start a new session, devt detects the handoff and offers to resume.
 
-### `/devt:forensics` -- What went wrong?
+### `/devt:debug --mode=forensics` -- What went wrong?
 
 ```bash
-/devt:forensics
+/devt:debug --mode=forensics
 ```
 
 Post-mortem for failed or stuck workflows. Reads all artifacts, checks git history, runs quality gates, diagnoses the failure point, and recommends recovery.
 
-### `/devt:cancel-workflow` -- Reset
+### `/devt:workflow --cancel` -- Reset
 
 ```bash
-/devt:cancel-workflow
+/devt:workflow --cancel
 ```
 
 Aborts the active workflow and clears `.devt/state/`. Clean slate.
@@ -296,16 +296,16 @@ These five create three natural tensions (Contrarian ⇄ Generalizer, First Prin
 
 **Output**: a chairman verdict in chat (7 sections — agreement, clashes, blind spots, what grounded the verdict, where the council speculates, recommendation, the one thing to do first) plus a full transcript at `.devt/state/council-{slug}-{timestamp}.md` with all advisor responses and peer reviews.
 
-**Offramp integration with brainstorming workflows**: `/devt:clarify`, `/devt:research`, and `/devt:specify` will offer `/devt:council` as one of the resolution options when a gray area trips a 3-condition threshold (multiple viable approaches AND hard to reverse AND high stakes). The threshold and offramp template live in `references/council-offramp.md`. Soft cap of 1 council per workflow invocation; verdict is captured back into the calling workflow's primary artifact (DEC-xxx in `decisions.md` for clarify, "Council Verdict" section in `research.md` for research, PRD Decisions entry for specify). Offer-only — never auto-invoked.
+**Offramp integration with brainstorming workflows**: `/devt:workflow --mode=clarify`, `/devt:research`, and `/devt:specify` will offer `/devt:council` as one of the resolution options when a gray area trips a 3-condition threshold (multiple viable approaches AND hard to reverse AND high stakes). The threshold and offramp template live in `references/council-offramp.md`. Soft cap of 1 council per workflow invocation; verdict is captured back into the calling workflow's primary artifact (DEC-xxx in `decisions.md` for clarify, "Council Verdict" section in `research.md` for research, PRD Decisions entry for specify). Offer-only — never auto-invoked.
 
 **Skip the council for**: factual lookups, syntax fixes, single-line bugs, or validation-seeking when you've already decided. The council tells you what you don't want to hear — that's the feature.
 
-Distinct from `/devt:clarify` (resolves ambiguity through interview) and the `strategic-analysis` skill (produces a trade-off table for two named options). The council adds adversarial peer review and synthesis specifically for cases where one perspective feels untrustworthy.
+Distinct from `/devt:workflow --mode=clarify` (resolves ambiguity through interview) and the `strategic-analysis` skill (produces a trade-off table for two named options). The council adds adversarial peer review and synthesis specifically for cases where one perspective feels untrustworthy.
 
-### `/devt:health` -- Plugin diagnostics
+### `/devt:setup --health` -- Plugin diagnostics
 
 ```bash
-/devt:health
+/devt:setup --health
 ```
 
 Checks: config valid, state directory exists, hooks registered, required files present.
@@ -367,7 +367,7 @@ REJ docs additionally carry `reason` (user_preference | performance | security |
 
 **Templates**: `templates/memory/{ADR,CON,FLOW,REJ}-template.md` — copy + edit + drop into the appropriate subdir. Never commit a template scaffold (id `-000` would be skipped anyway, but it bloats history).
 
-Distinct from `/devt:clarify` (per-workflow DEC-xxx capture, resets between workflows) and `/devt:retro` (operational lessons to playbook). Use `/devt:memory` for **permanent architectural rules** that should govern future agent decisions across sessions.
+Distinct from `/devt:workflow --mode=clarify` (per-workflow DEC-xxx capture, resets between workflows) and `/devt:workflow --retro` (operational lessons to playbook). Use `/devt:memory` for **permanent architectural rules** that should govern future agent decisions across sessions.
 
 **Phase 5+ subcommands**:
 
@@ -511,7 +511,7 @@ devt: Assessed as COMPLEX... [runs]
 ```
 
 ```
-You: /devt:forensics
+You: /devt:debug --mode=forensics
 
 devt: Timeline: workflow ran 8/10 phases, stopped at verify (GAPS_FOUND)
       Root cause: JWT refresh token rotation not wired to middleware
@@ -528,16 +528,16 @@ These are called automatically by workflows. You can invoke them directly for fi
 |---|---|---|
 | `/devt:plan` | Create implementation plan with auto-research | `/devt:workflow` for COMPLEX tasks |
 | `/devt:research` | Investigate approaches, patterns, pitfalls | `/devt:plan` when research is needed |
-| `/devt:clarify` | Resolve ambiguity with interview or `--assumptions` mode | `/devt:specify` and `/devt:workflow` |
+| `/devt:workflow --mode=clarify` | Resolve ambiguity with interview or `--assumptions` mode | `/devt:specify` and `/devt:workflow` |
 | `/devt:implement` | Code + test + review (no docs/retro) | Equivalent to `/devt:workflow` SIMPLE tier |
-| `/devt:fast` | Inline execution, no subagents | Equivalent to `/devt:workflow` TRIVIAL tier |
+| `/devt:workflow --mode=fast` | Inline execution, no subagents | Equivalent to `/devt:workflow` TRIVIAL tier |
 | `/devt:review` | Standalone code review | Workflow review step |
-| `/devt:quality` | Run lint, typecheck, tests | Every workflow as quality gates |
-| `/devt:retro` | Extract lessons to playbook | Workflow retro step |
-| `/devt:docs` | Refresh project documentation against current state | Standalone post-workflow doc catch-up |
-| `/devt:arch-health` | Architecture violation scan | Workflow architect step |
+| `/devt:review --focus=quality` | Run lint, typecheck, tests | Every workflow as quality gates |
+| `/devt:workflow --retro` | Extract lessons to playbook | Workflow retro step |
+| `/devt:workflow --mode=docs` | Refresh project documentation against current state | Standalone post-workflow doc catch-up |
+| `/devt:review --focus=arch` | Architecture violation scan | Workflow architect step |
 | `/devt:autoskill` | Propose plugin improvements from session patterns | Standalone or workflow autoskill step |
-| `/devt:weekly-report` | Git-based contribution report | Standalone utility |
+| `/devt:status --report=weekly` | Git-based contribution report | Standalone utility |
 | `/devt:thread` | Cross-session context threads | Standalone utility |
 | `/devt:memory` | ADR/Concept/Flow/REJ permanent layer | All dev agents at context_loading; curator at promote/reject |
 | `/devt:preflight` | Topic Pre-Flight Brief generator | Auto-fired by every dev workflow at context_init |

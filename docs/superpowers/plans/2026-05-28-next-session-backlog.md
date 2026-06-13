@@ -1073,7 +1073,7 @@ Not a code task — but a deliberate calibration in a dev-workflow run with expl
 
 ### Task D-1 — Truncation forensics
 
-- [ ] Run `/devt:forensics` on greenfield's 3 truncated dispatches (programmer agent `a28840e8c54223a78`, code-reviewer agent `a45b60838b54a1d26`, tester agent — extract IDs from greenfield's session log).
+- [ ] Run `/devt:debug --mode=forensics` on greenfield's 3 truncated dispatches (programmer agent `a28840e8c54223a78`, code-reviewer agent `a45b60838b54a1d26`, tester agent — extract IDs from greenfield's session log).
 - [ ] Identify common failure mode signature: which agent? which dispatch length? which scope size? was the prior output viable as continuation context?
 - [ ] Document findings in `.devt/state/D1-truncation-forensics.md`.
 

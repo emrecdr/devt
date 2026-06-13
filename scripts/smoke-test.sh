@@ -12202,6 +12202,53 @@ else
   fail "K98: router drift — do.md=$K98_DO_COUNT routes, devt-coordinator.md=$K98_DC_COUNT routes; diff lines: $K98_DIFF"
 fi
 
+# K99: workflow orphan detection.
+# Every workflows/*.md file should be reachable from SOMEWHERE: either as
+# a command @-ref / explicit Read, or as an internal cross-workflow route,
+# or as a subcommand-routed workflow (e.g., workflows/memory-promote.md is
+# invoked via /devt:memory promote, not a direct @-ref).
+# Allowlist: workflows that are intentionally subcommand-routed or
+# internal-only (no command points at them directly).
+K99_ALLOWLIST="code-review-parallel memory-init memory-promote memory-reject"
+K99_ORPHANS=$(node -e '
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[1];
+const wfs = fs.readdirSync(path.join(root, "workflows"))
+  .filter(f => f.endsWith(".md"))
+  .map(f => "workflows/" + f);
+const referenced = new Set();
+for (const dir of ["commands", "workflows", "agents", "skills"]) {
+  const dirPath = path.join(root, dir);
+  if (!fs.existsSync(dirPath)) continue;
+  function walk(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.endsWith(".md")) {
+        const body = fs.readFileSync(full, "utf8");
+        const matches = body.match(/workflows\/[a-z][a-z0-9-]*\.md/g) || [];
+        matches.forEach(m => referenced.add(m));
+      }
+    }
+  }
+  walk(dirPath);
+}
+const allowlist = process.argv[2].split(" ").filter(Boolean);
+const orphans = wfs.filter(w => {
+  if (referenced.has(w)) return false;
+  const base = w.replace(/^workflows\//, "").replace(/\.md$/, "");
+  return !allowlist.includes(base);
+});
+process.stdout.write(orphans.join(" "));
+' "$ROOT" "$K99_ALLOWLIST")
+if [ -z "$K99_ORPHANS" ]; then
+  TOTAL_WFS=$(ls "$ROOT"/workflows/*.md 2>/dev/null | wc -l | tr -d ' ')
+  pass "K99: workflow orphan check ($TOTAL_WFS workflows reachable; allowlist for subcommand routes: $K99_ALLOWLIST)"
+else
+  fail "K99: orphan workflows — $K99_ORPHANS"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

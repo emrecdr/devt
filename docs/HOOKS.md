@@ -66,7 +66,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 ## Forensic Deny Log
 
-**File.** `.devt/state/preflight-denies.jsonl` (in `RESET_EXEMPT` — persists across `/devt:cancel-workflow`).
+**File.** `.devt/state/preflight-denies.jsonl` (in `RESET_EXEMPT` — persists across `/devt:workflow --cancel`).
 
 **Mechanism.** Every deny/warn appends one JSON record via `bin/modules/logger.cjs::appendJsonl`. 4KB-per-record PIPE_BUF cap guarantees POSIX atomic appends across concurrent writers.
 
@@ -128,7 +128,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 **Behavior.** Emits an advisory `additionalContext` when a subagent dispatch's prompt byte count exceeds `dispatch.max_prompt_bytes` (default `24576`) or its parsed `<scope_hint>` array exceeds `dispatch.max_files_hint` (default `8`). **NEVER blocks.**
 
-**Telemetry.** Each warning appends one JSONL record to `.devt/state/dispatch-warnings.jsonl` (`source: "dispatch_scope"`) so `/devt:forensics` can surface "this workflow had N over-scoped dispatches" post-hoc.
+**Telemetry.** Each warning appends one JSONL record to `.devt/state/dispatch-warnings.jsonl` (`source: "dispatch_scope"`) so `/devt:debug --mode=forensics` can surface "this workflow had N over-scoped dispatches" post-hoc.
 
 **Tunables.** Per project in `.devt/config.json::dispatch.{max_prompt_bytes, max_files_hint}`.
 
@@ -181,7 +181,7 @@ Use log-all mode when computing return-size histograms, latency baselines, or an
 4. Append to the SessionStart context as `What's new in devt v<version>:` followed by the extracted text.
 5. Update the stamp file so subsequent sessions stay silent for this version.
 
-**Why.** Greenfield calibration 2026-06-07: doc-promotion failed because users load their project's CLAUDE.md, never devt's. New slash commands (`/devt:docs`) and new CLAUDE.md sections (escape-hatch recipes) registered nowhere in user attention. The SessionStart hook is the single channel users actually see; surfacing the CHANGELOG headline once per upgrade closes the gap without spamming subsequent sessions.
+**Why.** Greenfield calibration 2026-06-07: doc-promotion failed because users load their project's CLAUDE.md, never devt's. New slash commands (`/devt:workflow --mode=docs`) and new CLAUDE.md sections (escape-hatch recipes) registered nowhere in user attention. The SessionStart hook is the single channel users actually see; surfacing the CHANGELOG headline once per upgrade closes the gap without spamming subsequent sessions.
 
 The mechanism is announcement-only. It does NOT change CLI behavior, does NOT block, and degrades gracefully when `CHANGELOG.md` is missing or the version section is absent (empty surfacing → no stamp update).
 

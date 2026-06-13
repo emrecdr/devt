@@ -37,7 +37,7 @@ Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level lock
 - `JSON_SIDECAR_SCHEMAS` — schema registry for sidecar `.json` files, with per-sidecar enums for `status` + `verdict` + `agent`.
 - `JSON_INPUT_SCHEMAS` — schemas for input-only JSON (e.g. `handoff.json`).
 - `SIDECAR_FOR_MARKDOWN` — maps markdown → sidecar so `validateConsistency()` reads from the right place.
-- `RESET_EXEMPT` — set of filenames preserved across `state reset`. Diagnostic side-channels live here so root-cause forensics survive `/devt:cancel-workflow`: `preflight-denies.jsonl`, `dispatch-warnings.jsonl`, `probe-failures.jsonl` (graphify+python probe failure categories — see `docs/GRAPHIFY.md::Probe Failure Diagnostics`), `.graphify-rebuild.lock` (DEF-038 atomic O_CREAT|O_EXCL — see `docs/GRAPHIFY.md::Debounced Rebuild`), `last-curator-run.txt`, `deferred.md`.
+- `RESET_EXEMPT` — set of filenames preserved across `state reset`. Diagnostic side-channels live here so root-cause forensics survive `/devt:workflow --cancel`: `preflight-denies.jsonl`, `dispatch-warnings.jsonl`, `probe-failures.jsonl` (graphify+python probe failure categories — see `docs/GRAPHIFY.md::Probe Failure Diagnostics`), `.graphify-rebuild.lock` (DEF-038 atomic O_CREAT|O_EXCL — see `docs/GRAPHIFY.md::Debounced Rebuild`), `last-curator-run.txt`, `deferred.md`.
 - `STATE_FILE_CONTRACT` — canonical filename inventory (referenced by `docs/STATE-RULES.md`).
 
 **Validation.** `updateState()` auto-runs `validateConsistency()` (shadow mode), emits stderr warnings, and persists `validation_status` / `validation_warnings` to `workflow.yaml` on mismatch.
@@ -295,7 +295,7 @@ Architecture progression across calibrations #14-#18: warn-at-dispatch (cal #14)
 
 **Belt-and-suspenders during migration cadence.** v0.73 ships advance-phase but RETAINS v0.72's inline gate-check bash blocks. Both fire for each finalize transition until cal evidence confirms the YAML registry path catches everything inline-checks catch. v0.74 cleanup removes inline checks once verified — sunset trigger explicit in v0.73 CHANGELOG.
 
-**Unified gate-trace.jsonl observability.** `bin/modules/state.cjs::traceGate(name, fn)` wraps every `assert-*` CLI subcommand in the `run()` switch. Records appended: `{ts, source:"gate_trace", gate, verdict:"ok"|"warn"|"fail", reason, workflow_id, workflow_type, phase}`. Cal #18 #4: gives unified observability across the entire gate surface in one file instead of stitching together `dispatch-warnings.jsonl` + `claim-check-failures.jsonl` + `preflight-denies.jsonl`. Query patterns: `jq -s 'group_by(.gate) | map({gate: .[0].gate, fires: length, blocks: map(select(.verdict=="fail")) | length})'`. **Cross-session retention**: gate-trace.jsonl is append-only — it persists across `/devt:cancel-workflow` and accumulates across workflows. Entries from prior workflows surface in the file with their original `workflow_id`. Filter to the current session with `jq 'select(.workflow_id == "<id-from-workflow.yaml>")'` or union the full `workflow_id_history[]` chain in `workflow.yaml` to span all ids belonging to the current logical session (per the immutable session anchors pattern).
+**Unified gate-trace.jsonl observability.** `bin/modules/state.cjs::traceGate(name, fn)` wraps every `assert-*` CLI subcommand in the `run()` switch. Records appended: `{ts, source:"gate_trace", gate, verdict:"ok"|"warn"|"fail", reason, workflow_id, workflow_type, phase}`. Cal #18 #4: gives unified observability across the entire gate surface in one file instead of stitching together `dispatch-warnings.jsonl` + `claim-check-failures.jsonl` + `preflight-denies.jsonl`. Query patterns: `jq -s 'group_by(.gate) | map({gate: .[0].gate, fires: length, blocks: map(select(.verdict=="fail")) | length})'`. **Cross-session retention**: gate-trace.jsonl is append-only — it persists across `/devt:workflow --cancel` and accumulates across workflows. Entries from prior workflows surface in the file with their original `workflow_id`. Filter to the current session with `jq 'select(.workflow_id == "<id-from-workflow.yaml>")'` or union the full `workflow_id_history[]` chain in `workflow.yaml` to span all ids belonging to the current logical session (per the immutable session anchors pattern).
 
 **`dispatch-warnings.jsonl` — discriminated-union schema.** The filename suggests single-source dispatch-warning records but the file actually carries multi-source telemetry. Every record has a `source:` discriminator + source-specific fields. Three active sources (writers in `hooks/`):
 
@@ -398,9 +398,9 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 **File.** `.devt/state/deferred.md` — markdown with `DEF-NNN` ids.
 
-**Capture.** Via `/devt:defer "<title>"` (or any agent calling `node bin/devt-tools.cjs deferred add`).
+**Capture.** Via `/devt:note --defer "<title>"` (or any agent calling `node bin/devt-tools.cjs deferred add`).
 
-**Survival.** Exempted from `state reset` via `RESET_EXEMPT` set in `bin/modules/state.cjs` so items survive `/devt:cancel-workflow`.
+**Survival.** Exempted from `state reset` via `RESET_EXEMPT` set in `bin/modules/state.cjs` so items survive `/devt:workflow --cancel`.
 
 **CLI.** `deferred add|list|get|close|reopen|count`.
 
@@ -481,7 +481,7 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 | `check-state-contract.cjs` | Static analyzer scanning every `agents/*.md` and `workflows/*.md` for `.devt/state/<filename>` references; flags any that match no `STATE_FILE_CONTRACT` pattern | **CI** (via smoke-test) |
 | `check-docs.sh` | Checks documentation completeness against `.devt/rules/documentation.md` — verifies declared doc paths + sections exist | Manual / quality gate |
 | `prompt-injection-scan.sh` | Scans plugin markdown for injection patterns that could compromise agent behavior | Manual / release gate |
-| `run-quality-gates.sh` | Extracts and executes bash commands from `.devt/rules/quality-gates.md` fenced blocks | Used by `/devt:quality` workflow |
+| `run-quality-gates.sh` | Extracts and executes bash commands from `.devt/rules/quality-gates.md` fenced blocks | Used by `/devt:review --focus=quality` workflow |
 | `init-dev-rules.sh` | Scaffolds `.devt/rules/` from a template (one-off setup helper) | Manual |
 | `cancel-workflow.sh` | Cancel active devt workflow — delegates to `devt-tools.cjs` | User-facing |
 | `reset-workflow.sh` | Reset devt workflow state — delegates to `devt-tools.cjs` for robust cleanup | User-facing |

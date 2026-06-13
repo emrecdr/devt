@@ -56,6 +56,36 @@ After Phase 2, an audit found 5 internal routing tables still referencing direct
 
 - **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
 
+### Phase 4 — Documentation alignment + K99 orphan guard
+
+After Phase 3, an audit found two final alignment gaps before declaring v0.93 done:
+
+1. **35 stale refs in `docs/`** across 8 documentation files (COMMANDS.md, INTERNALS.md, STATE-RULES.md, HOOKS.md, MEMORY.md, AGENT-CONTRACTS.md, GRAPHIFY.md, CANONICAL-ENTITY-DRIFT.md, plus 2 historical superpower plans). K97's scope is the contract layer (commands/workflows/agents/skills) by design; docs/ was outside its guard but should still be aligned for users reading the documentation.
+2. **17 stale refs in README.md** — Phase 2's update missed multiple sections (code blocks, troubleshooting examples).
+
+**Bulk substitution** — the Phase 3 script's sister script (`/tmp/phase4-docs-rewrite.cjs`) ran the same MAPPINGS table against `docs/` and `README.md` only. 72 edits across 12 files: README.md (17), docs/COMMANDS.md (27, the worst offender — it's the user-facing command reference), docs/STATE-RULES.md (5), docs/INTERNALS.md (5), docs/HOOKS.md (3), docs/AGENT-CONTRACTS.md (3), docs/GRAPHIFY.md (3), docs/opus-4-8-upgrade-report.md (3), docs/CANONICAL-ENTITY-DRIFT.md (2), docs/MEMORY.md (2), plus 2 historical superpowers plan files (1 each).
+
+**Post-rewrite audit confirms zero residual stale refs** in docs/+README for any of the 18 deleted command names.
+
+### Added
+
+- **`scripts/smoke-test.sh::K99`** — workflow orphan detection. Every `workflows/*.md` file must be reachable from somewhere: a command @-ref or explicit Read, a cross-workflow route, or via the allowlist for subcommand-routed workflows (`code-review-parallel` is invoked by `code-review.md::scope_check`; `memory-init`, `memory-promote`, `memory-reject` are invoked via `/devt:memory <subcommand>` not direct @-refs). Drift class: a workflow file added but never wired up, or a renamed workflow leaving an unreachable orphan. 36 workflows currently all reach.
+
+The drift-guard stack is now 6 deep:
+
+| Gate | Guards |
+|---|---|
+| K94 | Command stratification (15 visible + 4 specialized hidden) |
+| K95 | Parameter routing contract (23 (flag → workflow) pairings) |
+| K96 | Workflow file existence for K95 routes |
+| K97 | Stale `/devt:<name>` refs in contract files (commands/help.md exempt) |
+| K98 | Router parity between workflows/do.md and agents/devt-coordinator.md |
+| K99 | Workflow orphan detection (with subcommand-route allowlist) |
+
+Smoke: 844/844 (was 843 + K99). Locking: 3/3.
+
+---
+
 ### Phase 3 — Delete folded commands + mass-update cross-refs
 
 The final phase of the UX simplification: deleted 18 command files whose functionality folded cleanly into family-head + parameter forms, and mass-updated all internal cross-references to use the canonical form. The 4 specialized direct-callable commands (preflight, autoskill, thread, council) remain — their use cases don't fold cleanly into a parameter surface.
