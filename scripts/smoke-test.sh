@@ -12110,6 +12110,31 @@ else
   fail "K95: routing drift —$K95_FAIL_PAIR"
 fi
 
+# K96: workflow file existence — verify every K95-referenced workflow
+# actually exists on disk. K95 checks that the command body MENTIONS the
+# workflow file; K96 checks the file is not dangling. Catches: someone
+# renames workflows/forensics.md → workflows/post-mortem.md and forgets
+# to update commands/debug.md's routing table.
+K96_OK=yes
+K96_MISSING=""
+for pair in "${K95_PAIRS[@]}"; do
+  workflow="${pair##*|}"
+  # Skip non-file routes (e.g., "hook-cost-estimate" CLI reference)
+  case "$workflow" in
+    workflows/*) ;;
+    *) continue ;;
+  esac
+  if [ ! -f "$ROOT/$workflow" ]; then
+    K96_OK=no
+    K96_MISSING="$K96_MISSING $workflow"
+  fi
+done
+if [ "$K96_OK" = "yes" ]; then
+  pass "K96: workflow file existence (every K95 routing target exists on disk)"
+else
+  fail "K96: dangling routes —$K96_MISSING"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

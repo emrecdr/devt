@@ -41,6 +41,21 @@ Each family-head command parses `$ARGUMENTS` for routing flags, strips the match
 
 This is Phase 1+2 of the 3-phase plan. Phase 3 (delete the 22 hidden command files and mass-update their ~200 cross-references to use family-head + param form) is deferred to a separate commit to keep this change set reviewable. The direct-form commands continue to work in the meantime — there is no behavioral break.
 
+### Phase 2.5 — Internal Routing Alignment + K96
+
+After Phase 2, an audit found 5 internal routing tables still referencing direct-form hidden commands. The user-facing layer (commands/, help.md, README.md) was already aligned in Phase 2; this entry aligns the *internal* routing surface so the family-head + param form is the canonical recommendation in every contract document.
+
+- **`CLAUDE.md` workflow_type registry** updated: `retro`/`arch_health_scan`/`clarify`/`docs` rows now show `/devt:workflow --retro` / `/devt:review --focus=arch` / `/devt:workflow --mode=clarify` / `/devt:workflow --mode=docs` as the resume command. The `workflow_type` values themselves (internal identifiers) stay unchanged.
+- **`CLAUDE.md` Recipes 3 + 4** updated to use `/devt:workflow --mode=docs` and `/devt:workflow --retro` as the canonical entry; direct-form names continue to work as aliases.
+- **`CLAUDE.md` arch_scanner reference** updated: `arch_scanner.command` wires into `/devt:review --focus=arch` (direct-form `/devt:arch-health` aliased).
+- **`workflows/next.md` resume routing table + body** — every `/devt:retro` / `/devt:arch-health` / `/devt:clarify` / `/devt:docs` / `/devt:cancel-workflow` / `/devt:forensics` / `/devt:defer` updated to the family-head + param form.
+- **`workflows/do.md` routing table** — natural-language router now routes to canonical forms (e.g., "initialize" → `/devt:setup --init`, "trivial" → `/devt:workflow --mode=fast`).
+- **`agents/devt-coordinator.md` routing table** — mirror of do.md, same updates.
+
+### Added
+
+- **`scripts/smoke-test.sh::K96`** — verifies every K95-referenced workflow file actually exists on disk. K95 catches "command body mentions the route"; K96 catches "the workflow file at that route exists." Drift class: someone renames `workflows/forensics.md` and forgets to update `commands/debug.md`'s routing table. Smoke now 847/847 (was 846 + K96).
+
 ---
 
 **Command surface stratification — 36 commands cut to 14 visible.** Adds `user-invocable: false` to 22 advanced/admin/telemetry commands so they're hidden from the `/`-autocomplete menu while remaining fully typed-callable. The casual-user mental model collapses from 36 equal-tier commands to 14 (6 Tier-1 daily entries + 6 Tier-2 verbs by intent + 2 knowledge commands). Aligns with the surface size of every successful CC plugin we measured: superpowers (14 skills), document-skills (18), feature-dev (1 command), pr-review-toolkit (1) — devt was the outlier at 36.

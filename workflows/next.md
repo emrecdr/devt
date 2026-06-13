@@ -129,17 +129,17 @@ Read `stopped_phase` and `workflow_type` from state. Route to the correct workfl
 | `dev` | `/devt:workflow` with the original task |
 | `quick_implement` | `/devt:implement` with the original task |
 | `debug` | `/devt:debug` with accumulated context from `.devt/state/debug-context.md` |
-| `retro` | `/devt:retro` |
-| `arch_health_scan` | `/devt:arch-health` |
+| `retro` | `/devt:workflow --retro` (direct-form `/devt:retro` continues to work) |
+| `arch_health_scan` | `/devt:review --focus=arch` (direct-form `/devt:arch-health` continues to work) |
 | `code_review` | `/devt:review` |
 | `code_review_parallel` | `/devt:review` with the original scope |
 | `research` | `/devt:research` with the original task |
 | `plan` | `/devt:plan` with the original task |
 | `specify` | `/devt:specify` with the original task |
-| `clarify` | `/devt:clarify` with the original task |
+| `clarify` | `/devt:workflow --mode=clarify` with the original task (direct-form `/devt:clarify` continues to work) |
 | `preflight` | `/devt:preflight` with the original task (or just `cat .devt/state/preflight-brief.md` if the Brief is FRESH) |
 | `memory_promote` / `memory_reject` | `/devt:memory <subcommand>` (one-shot CLI workflows; usually no resume needed) |
-| `docs` | `/devt:docs` (one-shot standalone docs refresh; usually no resume needed) |
+| `docs` | `/devt:workflow --mode=docs` (one-shot standalone docs refresh; direct-form `/devt:docs` continues to work) |
 | missing/unknown | Ask the user which workflow to resume |
 
 ```
@@ -206,7 +206,7 @@ Otherwise: Ask "Create PR now?" → if yes, execute `/devt:ship`.
 ```
 Review file exists but sidecar is missing or unrecognized (possible interrupted review).
 ```
-`read-sidecar` returns `{ok: false}` when the file is missing or invalid. Ask: "Re-run the review from scratch, or cancel and start over?" → if re-run, execute `/devt:review`; if cancel, execute `/devt:cancel-workflow`.
+`read-sidecar` returns `{ok: false}` when the file is missing or invalid. Ask: "Re-run the review from scratch, or cancel and start over?" → if re-run, execute `/devt:review`; if cancel, execute `/devt:workflow --cancel`.
 
 ### Active workflow, phase known
 ```
@@ -216,14 +216,14 @@ Route based on `workflow_type`:
 - `dev` → Execute `/devt:workflow` to resume from current phase
 - `quick_implement` → Execute `/devt:implement` to resume quick pipeline
 - `debug` → Execute `/devt:debug` to continue debugging
-- `retro` → Execute `/devt:retro` to continue lesson extraction
-- `arch_health_scan` → Execute `/devt:arch-health` to continue scan
+- `retro` → Execute `/devt:workflow --retro` to continue lesson extraction (direct-form `/devt:retro` continues to work)
+- `arch_health_scan` → Execute `/devt:review --focus=arch` to continue scan (direct-form `/devt:arch-health` continues to work)
 - `code_review` → Execute `/devt:review` to continue review
 - `preflight` → Brief at `.devt/state/preflight-brief.md`. If `## Status: FRESH`, just `cat` it; if `## Status: STALE`, re-run `/devt:preflight` with the refined task. (Standalone preflight workflows complete in one shot — usually no resume needed.)
 - `research` → Execute `/devt:research` to continue investigation
 - `plan` → Execute `/devt:plan` to continue planning
 - `specify` → Execute `/devt:specify` to continue spec generation
-- `clarify` → Execute `/devt:clarify` to continue decision capture
+- `clarify` → Execute `/devt:workflow --mode=clarify` to continue decision capture (direct-form `/devt:clarify` continues to work)
 - missing/unknown → Execute `/devt:workflow` (default)
 
 ### Active workflow, stuck signal
@@ -240,7 +240,7 @@ Recent denies:
 
 Walk the user through the chain (top 5 records from `denies[]`). Then ask via AskUserQuestion:
 - "Review the offending pattern in `.devt/state/preflight-denies.jsonl`" → present the full deny chain; the user decides whether to adjust the agent's plan, narrow the destructive command's scope, or grant the `--no-verify` flag.
-- "Cancel and start over" → execute `/devt:cancel-workflow` (clears the workflow but the deny log persists thanks to RESET_EXEMPT, so the user can still review post-cancel).
+- "Cancel and start over" → execute `/devt:workflow --cancel` (clears the workflow but the deny log persists thanks to RESET_EXEMPT, so the user can still review post-cancel).
 - "Continue anyway (acknowledge the chain)" → the user has read the chain and accepts the pattern; route to the generic phase-known branch below. The signal will re-trigger if more denies accumulate.
 
 Do NOT silently advance past a stuck signal — the gate exists so guardrail loops surface to the user rather than burn iterations.
@@ -254,7 +254,7 @@ The artifact passed file existence but its status value is not in the allowed en
 Read `.devt/state/workflow.yaml` and the most recent artifact (impl-summary.md, review.md, verification.md, etc.) to identify the offending file. Then ask via AskUserQuestion:
 - "Re-run the prior phase" → execute the workflow command for the failing phase (e.g., `/devt:review` if review.md, `/devt:debug` if verification.md flagged)
 - "Mark as DONE_WITH_CONCERNS and proceed" → manually fix the artifact's `## Status` line to the canonical concerns variant, then re-run `/devt:next` (the flag clears automatically on the next state update with valid statuses)
-- "Investigate" → execute `/devt:forensics` to inspect the artifact
+- "Investigate" → execute `/devt:debug --mode=forensics` to inspect the artifact
 
 Do NOT silently advance past a `validation_status="warned"` flag — the gate exists to make ambiguity explicit.
 
@@ -265,8 +265,8 @@ Workflow blocked at {phase}: {reason}
 ```
 Present the blocker and ask the user how to proceed:
 - "Fix it and continue" → user fixes, then re-run `/devt:workflow`
-- "Cancel and start over" → execute `/devt:cancel-workflow`
-- "Investigate" → execute `/devt:forensics`
+- "Cancel and start over" → execute `/devt:workflow --cancel`
+- "Investigate" → execute `/devt:debug --mode=forensics`
 
 ### Uncommitted changes, no workflow
 ```
@@ -295,10 +295,10 @@ options:
   - label: "Start: {DEF-NNN-2 title}"
     description: "..."
   - label: "Skip — show me everything"
-    description: "Run /devt:defer list to see the full queue without starting work."
+    description: "Run /devt:note --defer list to see the full queue without starting work."
 ```
 
-On a "Start: DEF-NNN" pick, run `/devt:workflow "{title from DEF-NNN}"` and on workflow completion, prompt to close DEF-NNN. On "Skip", invoke `/devt:defer list`.
+On a "Start: DEF-NNN" pick, run `/devt:workflow "{title from DEF-NNN}"` and on workflow completion, prompt to close DEF-NNN. On "Skip", invoke `/devt:note --defer list`.
 
 ### Nothing detected
 ```
@@ -311,7 +311,7 @@ Clean slate. Use /devt:workflow to start building.
 <deviation_rules>
 1. **READ-ONLY detection**: The state detection step must NOT modify any files.
 2. **Ambiguous state**: If multiple interpretations are possible, ask the user rather than guessing.
-3. **Stale state**: If state file exists but artifacts are missing, suggest `/devt:cancel-workflow` to reset.
+3. **Stale state**: If state file exists but artifacts are missing, suggest `/devt:workflow --cancel` to reset (direct-form `/devt:cancel-workflow` continues to work).
 </deviation_rules>
 
 <success_criteria>

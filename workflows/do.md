@@ -61,24 +61,24 @@ Match the input against this routing table. Apply the **first matching** rule:
 
 | If the text describes... | Route to | Why |
 |--------------------------|----------|-----|
-| Setting up a project, "initialize", "configure" | `/devt:init` | Project setup |
+| Setting up a project, "initialize", "configure" | `/devt:setup --init` | Project setup |
 | A bug, error, crash, "something broken" | `/devt:debug` | Systematic debugging |
 | Exploring, researching, "how does X work" | `/devt:research` | Codebase investigation |
 | Defining a feature, "write a spec", "requirements" | `/devt:specify` | PRD generation |
 | Creating a plan, "plan how to", "approach" | `/devt:plan` | Implementation planning |
-| Discussing choices, "which approach", "gray area" | `/devt:clarify` | Decision capture |
+| Discussing choices, "which approach", "gray area" | `/devt:workflow --mode=clarify` | Decision capture |
 | A complex task: multi-file, architecture, migration | `/devt:workflow` | Full pipeline |
 | A simple task: 1-2 files, clear scope | `/devt:implement` | Quick pipeline |
-| A trivial task: typo, rename, config tweak | `/devt:fast` | Inline execution |
+| A trivial task: typo, rename, config tweak | `/devt:workflow --mode=fast` | Inline execution |
 | Reviewing code, "check my code" | `/devt:review` | Read-only analysis |
-| Running tests, lint, typecheck | `/devt:quality` | Quality gates |
+| Running tests, lint, typecheck | `/devt:review --focus=quality` | Quality gates |
 | Creating a PR, "ready to merge" | `/devt:ship` | PR creation |
 | Checking status, "where am I" | `/devt:status` | Workflow progress |
 | Resuming work, "continue", "pick up" | `/devt:next` | Auto-detect next step |
-| Pausing work, "stopping for now" | `/devt:pause` | Structured handoff |
+| Pausing work, "stopping for now" | `/devt:workflow --pause` | Structured handoff |
 | A note or idea for later | `/devt:note` | Idea capture |
-| Plugin health, diagnostics | `/devt:health` | Plugin validation |
-| Updating the plugin | `/devt:update` | Version check |
+| Plugin health, diagnostics | `/devt:setup --health` | Plugin validation |
+| Updating the plugin | `/devt:setup --update` | Version check |
 | Available commands, "help" | `/devt:help` | Command reference |
 
 **Ambiguity handling:** If the text matches 2+ routes, ask:

@@ -67,17 +67,17 @@ The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:ne
 | `dev` | `dev-workflow.md` | `/devt:workflow` |
 | `quick_implement` | `quick-implement.md` | `/devt:implement` |
 | `debug` | `debug.md` | `/devt:debug` |
-| `retro` | `lesson-extraction.md` | `/devt:retro` |
+| `retro` | `lesson-extraction.md` | `/devt:workflow --retro` |
 | `code_review` | `code-review.md` | `/devt:review` |
-| `arch_health_scan` | `arch-health-scan.md` | `/devt:arch-health` |
+| `arch_health_scan` | `arch-health-scan.md` | `/devt:review --focus=arch` |
 | `research` | `research-task.md` | `/devt:research` |
 | `plan` | `create-plan.md` | `/devt:plan` |
 | `specify` | `specify.md` | `/devt:specify` |
-| `clarify` | `clarify-task.md` | `/devt:clarify` |
+| `clarify` | `clarify-task.md` | `/devt:workflow --mode=clarify` |
 | `preflight` | `preflight.md` | `/devt:preflight` |
 | `memory_promote` | `memory-promote.md` | `/devt:memory promote` |
 | `memory_reject` | `memory-reject.md` | `/devt:memory reject` |
-| `docs` | `docs-extraction.md` | `/devt:docs` |
+| `docs` | `docs-extraction.md` | `/devt:workflow --mode=docs` |
 | `code_review_parallel` | `code-review-parallel.md` | `/devt:review` (re-routes via scope_check) |
 
 When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` and routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
@@ -221,9 +221,9 @@ node bin/devt-tools.cjs dispatch render-filled <agent>:auto                # res
 
 **Recipe 2 — Secondary side audit of a prior review.** No standalone slash command exists. Render `dispatch render-filled code-reviewer:code_review`, then replace the `<task>` block with the audit instructions. The envelope keeps the graph context the audit needs.
 
-**Recipe 3 — Standalone post-workflow docs refresh.** Use `/devt:docs` (one-shot slash, no active workflow required) — wraps `workflows/docs-extraction.md` which dispatches `devt:docs-writer` with the proper envelope.
+**Recipe 3 — Standalone post-workflow docs refresh.** Use `/devt:workflow --mode=docs` (one-shot slash, no active workflow required) — wraps `workflows/docs-extraction.md` which dispatches `devt:docs-writer` with the proper envelope. Direct-form `/devt:docs` continues to work as an alias.
 
-**Recipe 4 — Standalone post-workflow retro.** Use `/devt:retro` (one-shot slash) — wraps `workflows/lesson-extraction.md` which dispatches `devt:retro` + `devt:curator`.
+**Recipe 4 — Standalone post-workflow retro.** Use `/devt:workflow --retro` (one-shot slash) — wraps `workflows/lesson-extraction.md` which dispatches `devt:retro` + `devt:curator`. Direct-form `/devt:retro` continues to work as an alias.
 
 If none of these fit your case, raise the gap — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.
 
@@ -270,7 +270,7 @@ If none of these fit your case, raise the gap — the workflow pattern probably 
 
 ### Architecture health
 
-- `arch_scanner.command` config wires a project-supplied scanner into `/devt:arch-health`. When unset, the workflow probes `.devt/rules/arch-scan.{py,sh}` + `tests/architecture/arch-scan.py` + `scripts/arch-scan.py` and AskUserQuestion offers auto-wire / show-command / skip. python-fastapi template ships the canonical scanner at the convention path.
+- `arch_scanner.command` config wires a project-supplied scanner into `/devt:review --focus=arch` (direct-form `/devt:arch-health` continues to work as an alias). When unset, the workflow probes `.devt/rules/arch-scan.{py,sh}` + `tests/architecture/arch-scan.py` + `scripts/arch-scan.py` and AskUserQuestion offers auto-wire / show-command / skip. python-fastapi template ships the canonical scanner at the convention path.
 
 ### Graphify
 
