@@ -12276,6 +12276,22 @@ else
   fail "K100: runtime stale refs —$K100_STALE"
 fi
 
+# K101: CLAUDE.md size budget.
+# CLAUDE.md is loaded into every session AND every sub-agent dispatch
+# (it's ~94% of the governing_rules block per measurement). Phase 6
+# slimmed it from 35,699 bytes to 25,048 by moving the verbose CLI
+# reference to docs/INTERNALS.md::Development CLI Reference. K101 enforces
+# a 28,000-byte cap to prevent regrowth — that's the Phase 6 result + ~12%
+# headroom for natural maintenance. Drift class: large reference blocks
+# accumulating in CLAUDE.md instead of docs/INTERNALS.md.
+K101_BUDGET=28000
+K101_SIZE=$(wc -c < "$ROOT/CLAUDE.md" | tr -d ' ')
+if [ "$K101_SIZE" -le "$K101_BUDGET" ]; then
+  pass "K101: CLAUDE.md size budget (${K101_SIZE} bytes ≤ ${K101_BUDGET} cap; move reference material to docs/INTERNALS.md if growing)"
+else
+  fail "K101: CLAUDE.md exceeds size budget — ${K101_SIZE} bytes > ${K101_BUDGET} cap. Move reference material to docs/INTERNALS.md per CC best-practices (every byte costs per-session AND per-dispatch token budget)."
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

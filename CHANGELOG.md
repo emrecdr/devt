@@ -83,6 +83,14 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 6.5 — K101 CLAUDE.md size budget guard
+
+Adds the 8th drift gate to prevent CLAUDE.md regrowth after Phase 6's slim-down. K101 enforces a **28,000-byte cap** (current 25,048 + ~12% headroom for natural maintenance). Drift class: large reference blocks accumulating in CLAUDE.md instead of `docs/INTERNALS.md`. Per CC best-practices, "every byte costs per-session AND per-dispatch token budget."
+
+If K101 fails in a future change, the remediation message points the maintainer at the right pattern: move reference material to `docs/INTERNALS.md`, keep behavioral rules in CLAUDE.md.
+
+The drift-guard stack is now 8-deep (K94-K101). Smoke: 846/846.
+
 ---
 
 ### Phase 5 — Runtime alignment + K100 (hooks/, bin/, templates/)
