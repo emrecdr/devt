@@ -83,6 +83,26 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 7 — `/devt:setup` interactive picker UX
+
+When the user types `/devt:setup` with no operation flag, the previous behavior was "STOP with usage hint" — a dead-end error message telling them to re-type the command with `--init|--update|--uninstall|--health`. Phase 7 replaces that with an `AskUserQuestion` interactive picker showing all 4 operations with descriptions.
+
+This matches CC's interactive-picker pattern (recommended in the docs' "interview the user" section) and aligns with devt's existing pattern (the `--uninstall` workflow is already `AskUserQuestion`-gated for destructive ops). For casual users typing `/devt:setup` to explore options, the picker is more discoverable than reading the autocomplete hint.
+
+**Behavior matrix**:
+| User input | Behavior |
+|---|---|
+| `/devt:setup --init` (or any specific flag) | Routes directly to matching workflow (unchanged) |
+| `/devt:setup` (no flag) | **NEW**: AskUserQuestion with 4 labeled options + descriptions, routes after pick |
+| `/devt:setup --foo` (invalid flag) | STOP with error (unchanged) |
+| `/devt:setup --init --update` (multiple flags) | STOP with error (unchanged) |
+
+The picker question is canonical (deterministic phrasing in `commands/setup.md::Step 1.5`) so a future smoke gate can lock the contract if needed. Decline / Esc on the picker exits cleanly.
+
+Smoke: 846/846. Locking: 3/3. All 8 drift gates (K94-K101) PASS.
+
+---
+
 ### Phase 6.5 — K101 CLAUDE.md size budget guard
 
 Adds the 8th drift gate to prevent CLAUDE.md regrowth after Phase 6's slim-down. K101 enforces a **28,000-byte cap** (current 25,048 + ~12% headroom for natural maintenance). Drift class: large reference blocks accumulating in CLAUDE.md instead of `docs/INTERNALS.md`. Per CC best-practices, "every byte costs per-session AND per-dispatch token budget."
