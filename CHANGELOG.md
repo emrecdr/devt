@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.92.0] - 2026-06-13
+
 **Adopt modern Claude Code plugin primitives — additive frontmatter only.** Eight files touched, ~10 lines added, zero deletions. Surfaces plugin display metadata, opts agents into cross-session memory continuity where it helps, and hides preload-only helper skills from the `/` menu. Aligns with CC `plugins-reference` (v2.1.143+ `displayName`, v2.1.154+ `defaultEnabled`) and the `skills` doc's `user-invocable` field. No behavior change for current sessions; net win is surface-area clarity and per-agent memory continuity for architect / researcher / tester across sessions.
 
 ### Added
