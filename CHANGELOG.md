@@ -83,6 +83,38 @@ Smoke: 845/845 (unchanged from Phase 5 — content move only). Locking: 3/3.
 
 Behavioral rules — universal conventions, scope_mode, scope_hint contract, raw-dispatch policy, plugin mechanics summary, dispatch escape-hatch recipes — all retained because each has the property "removing this would cause Claude to make mistakes" per the CC docs' acid test.
 
+### Phase 10 — Inline guardrails trim + K102
+
+After Phase 6 trimmed CLAUDE.md by 29.9%, audit found the **inline guardrails block** (`init.cjs::loadInlineGuardrails`) is the *other* large per-dispatch context payload — **27,092 bytes** (golden-rules.md + engineering-principles.md + generative-debt-checklist.md) injected as `<guardrails_inline>` into every programmer/code-reviewer dispatch. Same lever as Phase 6, applied to a different surface.
+
+**Approach** (validated against CC best-practices: "for each line, ask whether removing it would cause Claude to make mistakes"): each Golden Rule has 4 sections — **What** (rule statement), **Why** (rationale), **Common violation** (pedagogy/examples), **Practice** (how-to). What/Why/Practice are behavioral content agents need at decision time; Common violation examples are reference material for pattern recognition that the agent can consult on demand.
+
+**Moved**: "Common violation" subsections of all 15 rules → new `docs/GUARDRAILS-REFERENCE.md`. `golden-rules.md` gains a single pointer line at the top.
+
+### Metrics
+
+| Surface | Before | After | Δ |
+|---|---:|---:|---:|
+| `guardrails/golden-rules.md` | 16,259 bytes | 12,813 bytes | −3,446 (−21.2%) |
+| `docs/GUARDRAILS-REFERENCE.md` (new) | — | 4,876 bytes | + |
+| **Inline guardrails total per dispatch** | **27,092 bytes** | **23,646 bytes** | **−3,446 (−12.7%)** |
+
+Across N programmer/code-reviewer dispatches per workflow this compounds. Combined with Phase 6 CLAUDE.md slim (−10,651 bytes per dispatch), the cycle now saves **~14,097 bytes of static context per dispatch**.
+
+### Added
+
+- **`scripts/smoke-test.sh::K102`** — inline_guardrails size budget gate. Caps `golden-rules.md + engineering-principles.md + generative-debt-checklist.md` total at **27,000 bytes** (Phase 10 result + ~14% headroom). Same pattern as K101 for CLAUDE.md. Drift class: detailed pedagogy accumulating in guardrails/ instead of docs/GUARDRAILS-REFERENCE.md. Remediation message points the maintainer at the right pattern.
+
+The drift-guard stack is now **9-deep (K94-K102)**.
+
+Smoke: 846/846 (K102 added, K101 unchanged). Locking: 3/3.
+
+### Engineering-principles.md and generative-debt-checklist.md — left as-is
+
+These two files were validated against the same pattern but NOT trimmed. They have less pedagogy/example content and a tighter rule-to-practice ratio. The trim ratio would be small (~5-10%) versus the maintenance cost of restructuring. K102's 27,000-byte budget covers them; if they grow significantly, future maintenance can apply the Phase 10 pattern then.
+
+---
+
 ### Phase 9 — Measurement & Release Prep
 
 Capstone of the v0.93 cycle: quantifies the cumulative wins for the release narrative. Read-only measurement run — no code changes.

@@ -12292,6 +12292,27 @@ else
   fail "K101: CLAUDE.md exceeds size budget — ${K101_SIZE} bytes > ${K101_BUDGET} cap. Move reference material to docs/INTERNALS.md per CC best-practices (every byte costs per-session AND per-dispatch token budget)."
 fi
 
+# K102: inline_guardrails size budget.
+# init.cjs::INLINE_GUARDRAILS injects golden-rules.md + engineering-principles.md
+# + generative-debt-checklist.md into <guardrails_inline> on every
+# programmer/code-reviewer dispatch. Phase 10 trimmed golden-rules.md by
+# moving "Common violation" examples to docs/GUARDRAILS-REFERENCE.md
+# (23,646 bytes total). K102 enforces a 27,000-byte cap (Phase 10 result
+# + ~14% headroom for natural rule maintenance). Drift class: detailed
+# pedagogy accumulating in guardrails/ instead of docs/GUARDRAILS-REFERENCE.md.
+K102_BUDGET=27000
+K102_TOTAL=0
+for g in golden-rules.md engineering-principles.md generative-debt-checklist.md; do
+  if [ -f "$ROOT/guardrails/$g" ]; then
+    K102_TOTAL=$((K102_TOTAL + $(wc -c < "$ROOT/guardrails/$g" | tr -d ' ')))
+  fi
+done
+if [ "$K102_TOTAL" -le "$K102_BUDGET" ]; then
+  pass "K102: inline_guardrails size budget (${K102_TOTAL} bytes ≤ ${K102_BUDGET} cap; move violation examples to docs/GUARDRAILS-REFERENCE.md if growing)"
+else
+  fail "K102: inline_guardrails exceed budget — ${K102_TOTAL} bytes > ${K102_BUDGET} cap. Move pedagogy / examples to docs/GUARDRAILS-REFERENCE.md per Phase 10 pattern."
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -4,6 +4,8 @@ Universal development rules that apply to every project, every language, every f
 
 **Severity levels**: `[CRITICAL]` — prevents real bugs, wasted work, or false claims; violating blocks workflow. `[WARNING]` — code quality and maintenance risk; fix when feasible. `[STYLE]` — code cleanliness; nice-to-have, deprioritize under turn pressure.
 
+> Concrete violation examples for each rule are catalogued in `docs/GUARDRAILS-REFERENCE.md`. The What/Why/Practice content stays inline because agents need it at decision time; the example reference is consulted only when pattern recognition is ambiguous.
+
 ---
 
 ## Rule 1: Scan Before Implementing `[CRITICAL]`
@@ -11,8 +13,6 @@ Universal development rules that apply to every project, every language, every f
 **What**: Always search the codebase for existing code before writing anything new. Never duplicate what already exists.
 
 **Why**: Duplication creates maintenance burden, inconsistency, and confusion. Every duplicate is a future bug — when one copy gets updated and the other does not.
-
-**Common violation**: Creating a new utility function without checking if one already exists. Creating a new error class when the module already defines one. Writing a new interface when the owning service already exports one.
 
 **Practice**: Before writing any class, function, interface, or constant — search for it. Check adjacent modules, shared utilities, and base classes. If something similar exists, extend or reuse it.
 
@@ -24,8 +24,6 @@ Universal development rules that apply to every project, every language, every f
 
 **Why**: Parallel implementations create confusion about which path is canonical. Dead code misleads future readers and agents. The codebase should reflect current reality, not historical versions.
 
-**Common violation**: Keeping the old implementation "just in case" alongside the new one. Adding a `_v2` suffix instead of replacing the original. Wrapping old behavior in a flag so both paths exist.
-
 **Practice**: When something changes, update it everywhere. Remove the old version. If rollback is needed, that is what version control is for.
 
 ---
@@ -35,8 +33,6 @@ Universal development rules that apply to every project, every language, every f
 **What**: Code is either active or deleted. There is no in-between state.
 
 **Why**: Commented-out code is invisible to linters, type checkers, and tests. It rots silently, becomes misleading, and clutters the codebase. Version control preserves history — comments should not.
-
-**Common violation**: Commenting out a block "for reference" during a refactor. Leaving a commented function call as a hint for future developers. Disabling a feature with `# TODO: re-enable this`.
 
 **Practice**: Delete it. If you need it later, `git log` has it. If you need to disable functionality, use a configuration flag, not comment syntax.
 
@@ -48,8 +44,6 @@ Universal development rules that apply to every project, every language, every f
 
 **Why**: TODOs are promises without deadlines. They accumulate, become invisible, and signal incomplete work. Code that ships with TODOs is code that ships broken.
 
-**Common violation**: `# TODO: handle edge case`. `pass  # implement later`. Returning a hardcoded value with a note to fix it. Adding `raise NotImplementedError` as a placeholder.
-
 **Practice**: If the code needs something, implement it now. If it is out of scope for the current task, discuss with the user — do not leave a marker and move on.
 
 ---
@@ -59,8 +53,6 @@ Universal development rules that apply to every project, every language, every f
 **What**: Touch only what the task requires. Clean up orphans your own changes create — not pre-existing ones.
 
 **Why**: LLM agents tend to over-improve adjacent code, conflating "I noticed it" with "I should fix it." Drive-by edits create review noise, conflict with parallel work, and obscure the real change. Every modified line should trace directly to the user's request.
-
-**Common violation**: "Improving" comments or formatting in code you happened to read. Refactoring a function next to the one you were asked to change. Renaming a variable mid-task because the existing name is awkward. Deleting pre-existing dead code that predates your task.
 
 **Practice**: Modify only what is necessary to complete the task. If your changes leave dangling imports or unused symbols, remove those — they are your mess.
 
@@ -83,8 +75,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Labeling a bug as "not my problem" or "pre-existing" is rationalization for not doing the work. If you found it during your session, you own it. The cost of fixing a bug now is always lower than fixing it later.
 
-**Common violation**: "This test was already failing before my changes." "This is a pre-existing issue, not related to this PR." "I'll create a ticket for this." "This is out of scope for the current task."
-
 **Practice**: Investigate the root cause. Implement the fix. Verify it works. If the fix is genuinely large enough to derail the current task, surface it to the user with full context — but never silently defer.
 
 ---
@@ -94,8 +84,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **What**: Verify that the problem actually exists before fixing it. Check assumptions against the actual codebase.
 
 **Why**: Fixing problems that do not exist wastes time and can introduce real bugs. Reports, reviews, and agent findings may contain false positives. The codebase is the source of truth — not summaries of it.
-
-**Common violation**: Implementing a "fix" based on a review finding without checking if the code actually has that problem. Adding validation for an edge case that the framework already handles. Refactoring code based on a stale description of its behavior.
 
 **Practice**: Before implementing any fix: read the actual source code, verify the reported issue exists, confirm the current behavior, then implement. Evidence first, action second.
 
@@ -107,8 +95,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Well-intentioned defensive coding, speculative generalization, and theoretical edge case handling add complexity without proportional benefit. Code that is harder to read is harder to maintain.
 
-**Common violation**: Adding validation for a value that is already constrained by the type system. Wrapping every function call in try/catch "just in case." Creating an abstraction layer for something that has exactly one implementation.
-
 **Practice**: For every proposed change, ask: What is the actual risk this mitigates? How likely is the failure scenario? How much complexity does this add? If the benefit is theoretical and the cost is concrete, reconsider.
 
 ---
@@ -118,8 +104,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **What**: Do not add multiple ways to accomplish the same thing. One canonical pattern per operation.
 
 **Why**: Multiple approaches create decision fatigue, inconsistency, and maintenance burden. Every alternative path is a path someone will use wrong.
-
-**Common violation**: Accepting both JSON arrays and comma-separated strings for the same parameter. Supporting both `snake_case` and `camelCase` in an API. Providing a convenience alias alongside the standard method.
 
 **Practice**: Pick the canonical approach. Document it. Enforce it. Reject alternatives with clear error messages. If someone needs a different format, the answer is "use the standard format" — not "we also support this other thing."
 
@@ -131,8 +115,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Confidence without verification is negligence. "It should work" is not the same as "it works." Quality gates, tests, and linters exist to catch what human review misses.
 
-**Common violation**: "I've implemented the fix" without running the quality gates. "All tests pass" without actually running them. "The linting is clean" based on visual inspection of the code.
-
 **Practice**: After every implementation: run linting, run type checking, run tests. Report the actual output. If something fails, fix it before reporting. The definition of "done" includes verified.
 
 ---
@@ -142,8 +124,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **What**: Always read `.devt/rules/` and `CLAUDE.md` before starting any work in a project. These contain the project's specific conventions, constraints, and quality gate commands.
 
 **Why**: Every project has its own conventions. Working without reading them produces code that is correct in isolation but wrong for the project. Retrofitting conventions after the fact is expensive and error-prone.
-
-**Common violation**: Starting to write code immediately and discovering the project's naming convention halfway through. Using a pattern that the project explicitly forbids. Running the wrong test command because the project uses a non-standard setup.
 
 **Practice**: First action in any session: read the project's rule files. Internalize the conventions before touching any code. This takes 30 seconds and prevents hours of rework.
 
@@ -155,8 +135,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Silent assumption is the most expensive failure mode in AI-assisted coding — agents pick a plausible interpretation, run with it, and produce code that solves the wrong problem. Surfacing the ambiguity costs one message; building the wrong thing costs hours.
 
-**Common violation**: Reading "add validation" and silently choosing client-side over server-side. Reading "fix the bug" without verifying which behavior is correct. Inferring requirements from variable names instead of asking. Picking a library or pattern without confirming it fits the project's conventions.
-
 **Practice**: Before implementing, explicitly list non-trivial assumptions. If two or more interpretations of the task are plausible, name them and ask the user to choose. If something is unclear, stop and ask — do not guess and run. Push back when a simpler approach exists or when the requested approach has a flaw.
 
 ---
@@ -167,8 +145,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Speculative features and pre-emptive abstractions add maintenance cost without users. "We might need this later" plumbing is almost always wrong about what later actually requires. Code that was not asked for is code that does not need to ship.
 
-**Common violation**: Adding configuration options nobody requested. Building a generic abstraction layer for code with one caller. Adding new public methods alongside the requested change. Implementing 200 lines when 50 would meet the requirement.
-
 **Practice**: Implement exactly what was asked. Resist adding flexibility, configurability, or hooks that were not requested. If you finish the task and notice the code could be 4x shorter, rewrite it. The senior-engineer test: would a careful reviewer say this is overcomplicated? If yes, simplify.
 
 ## Rule 14: Pre-Flight Protocol `[CRITICAL]`
@@ -177,8 +153,6 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Why**: Without pre-flight, agents either miss prior architectural decisions (silent ADR violations), propose approaches the team has explicitly rejected (REJ tombstone hits), or burn tokens re-discovering the same context per agent. Pre-flight is a five-second discipline that catches the kinds of governance drift that compound into incidents over months.
 
-**Common violation**: Editing a file because "I know what it does" without reading the Brief. Proposing Redis caching when REJ-001 explicitly tombstoned that. Writing the PREFLIGHT scratchpad line AFTER the edit instead of before (defeats the hook's purpose). Treating a STALE Brief as if it were authoritative (it isn't — STALE means coverage is incomplete).
-
 **Practice**: Dev workflows auto-fire `/devt:preflight` at context_init — read `.devt/state/preflight-brief.md` FIRST. For each edit, write the PREFLIGHT line first, then call Edit/Write. If the file isn't in the Brief's scope, run the 5-Lane File Pre-Flight (`memory affects` + `memory query` + `memory active` + Graphify symbol/wiki where applicable), append findings to scratchpad, then `node bin/devt-tools.cjs preflight mark-stale "scope expanded to <file>"` so the next agent knows. See `skills/memory-pre-flight/SKILL.md` for the full protocol.
 
 ## Rule 15: Memory Maintenance Protocol `[CRITICAL]`
@@ -186,7 +160,5 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **What**: After editing any `.devt/memory/**.md` file, the FTS5 unified index must be rebuilt — `node bin/devt-tools.cjs memory index`. Before proposing any new ADR/Concept/Flow/REJ candidate (via `discovery suggest` or curator), the `rejected/` folder MUST be consulted for matching `search_keywords` — if a tombstone matches, the candidate is suppressed silently. The PostToolUse `memory-auto-index` hook handles the rebuild automatically when `auto_index_on_change: true` (the default); manual `memory index` is the fallback when the hook is disabled.
 
 **Why**: A stale FTS5 index makes Pre-Flight queries return wrong results — agents proceed thinking governance has been read when it hasn't. REJ tombstones exist precisely so the team doesn't keep re-litigating the same rejected approach; bypassing tombstone checks reanimates settled debates.
-
-**Common violation**: Editing an ADR markdown but skipping `memory index`, leaving the index stale until the next `/devt:memory init`. Proposing an approach that matches a REJ's `search_keywords` because the suggestion path didn't query the rejected folder. Bulk-editing memory files without re-running validate.
 
 **Practice**: Trust the PostToolUse hook for routine edits — it's idempotent. After bulk operations or when hooks are disabled, run `node bin/devt-tools.cjs memory index && node bin/devt-tools.cjs memory validate`. When generating proposals via `discovery suggest`, the tooling already filters against `rejected_keywords` — never bypass that filter manually. When curator promotes a DEC → ADR, it must check for matching REJs first; the curator skill body documents this filter.
