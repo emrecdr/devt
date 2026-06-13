@@ -58,3 +58,9 @@ graphify-out/manifest.json
 
 # claude-mem local session DB
 .claude-mem/mem.db
+
+# devt project-local config (per-project overrides; devt dogfoods itself so this gets written into its own repo)
+.devt/config.json
+
+# Serena MCP runtime cache (external tool, not part of devt source)
+.serena/
