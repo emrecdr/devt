@@ -12402,17 +12402,46 @@ fi
 # K105: skill description size budget.
 # Skill frontmatter `description` is the model's routing-trigger signal —
 # included in the Skill tool's catalog prompt every session. CC docs
-# advise keeping descriptions short and trigger-focused. Current max
-# (strategic-analysis) is 835 bytes; K105 enforces a 950-byte cap (max +
-# ~14% headroom, matching the K101/K102 headroom pattern) to prevent
-# silent bloat. Drift class: skill descriptions growing into README
-# territory and burning per-session prompt budget across all 17 skills.
+# advise keeping descriptions short and trigger-focused. Current true max
+# (architecture-health-scanner) is 777 bytes; K105 enforces a 950-byte
+# cap (~22% headroom over current max). Drift class: skill descriptions
+# growing into README territory and burning per-session prompt budget
+# across all 17 skills.
+#
+# YAML-aware extraction (node, not awk) — handles BOTH styles:
+#   description: Foo bar baz...        ← inline scalar
+#   description: >-                    ← block scalar (folded/literal)
+#     Indented body...
+# Prior awk-based extractor skipped the inline content (after `next`) and
+# counted trailing frontmatter fields instead, undercounting inline-style
+# descriptions by ~500–700 bytes — surfaced on Jun 14 audit.
 K105_BUDGET=950
 K105_OVERFLOW=""
 for K105_SF in "$ROOT"/skills/*/SKILL.md; do
   [ -f "$K105_SF" ] || continue
   K105_NAME=$(basename "$(dirname "$K105_SF")")
-  K105_BYTES=$(awk '/^description:/{flag=1; next} flag && /^---$/{flag=0} flag' "$K105_SF" | wc -c | tr -d ' ')
+  K105_BYTES=$(node -e '
+const text = require("fs").readFileSync(process.argv[1], "utf8");
+const m = text.match(/^---\n([\s\S]*?)\n---/);
+if (!m) { console.log(0); process.exit(0); }
+const lines = m[1].split("\n");
+let desc = "";
+let mode = null;
+for (const line of lines) {
+  if (mode === null) {
+    if (/^description:\s*[|>][-+]?\s*$/.test(line)) { mode = "block"; continue; }
+    const inlineMatch = line.match(/^description:\s*(.*)/);
+    if (inlineMatch) { desc += inlineMatch[1]; mode = "inline"; continue; }
+  } else if (mode === "block") {
+    if (/^[a-zA-Z_-]+:/.test(line) && !line.startsWith(" ")) break;
+    if (line.startsWith(" ") || line === "") desc += line.replace(/^  /, "") + " ";
+  } else if (mode === "inline") {
+    if (/^[a-zA-Z_-]+:/.test(line) && !line.startsWith(" ")) break;
+    desc += " " + line.trim();
+  }
+}
+console.log(desc.trim().length);
+' "$K105_SF")
   if [ "$K105_BYTES" -gt "$K105_BUDGET" ]; then
     K105_OVERFLOW="$K105_OVERFLOW $K105_NAME=${K105_BYTES}b;"
   fi
