@@ -12411,6 +12411,19 @@ K104_EMPTY=$(mktemp -d)
 K104_MISSING=$(cd "$K104_EMPTY" && node "$CLI" dispatch warnings 2>/dev/null)
 K104_MISS_EXISTS=$(echo "$K104_MISSING" | jq -r '.exists' 2>/dev/null)
 K104_EXPORT_OK=$(node -e "console.log(typeof require('$ROOT/bin/modules/dispatch.cjs').cmdWarnings === 'function')")
+# Input validation: invalid --since / --limit reject with exit 2 + error on
+# stderr. Prior behavior: --since=garbage silently filtered everything out
+# (string comparison treats "garbage" > "2026-..."); --limit=-3 returned an
+# empty-array slice — both wrong-without-error UX failures.
+# `set +eo pipefail` inside each subshell disables BOTH errexit and pipefail
+# locally — set +e alone wasn't enough because pipefail on `node | grep` still
+# propagates node's exit 2 to the pipeline's exit, the subshell exits 2, and
+# the parent's set -e kills the script before reaching subsequent gates.
+K104_BAD_SINCE_EXIT=$(set +eo pipefail; cd "$K104_TMP"; node "$CLI" dispatch warnings --since=garbage >/dev/null 2>&1; echo $?)
+K104_BAD_SINCE_HAS_ERR=$(set +eo pipefail; cd "$K104_TMP"; node "$CLI" dispatch warnings --since=garbage 2>&1 1>/dev/null | grep -c "invalid --since")
+K104_BAD_LIMIT_EXIT=$(set +eo pipefail; cd "$K104_TMP"; node "$CLI" dispatch warnings --raw --limit=-3 >/dev/null 2>&1; echo $?)
+K104_BAD_LIMIT_HAS_ERR=$(set +eo pipefail; cd "$K104_TMP"; node "$CLI" dispatch warnings --raw --limit=-3 2>&1 1>/dev/null | grep -c "invalid --limit")
+K104_BAD_LIMIT_ZERO_EXIT=$(set +eo pipefail; cd "$K104_TMP"; node "$CLI" dispatch warnings --raw --limit=0 >/dev/null 2>&1; echo $?)
 rm -rf "$K104_TMP" "$K104_EMPTY"
 if [ "$K104_TOTAL" = "3" ] \
    && [ "$K104_HAS_SPAN" = "true" ] \
@@ -12421,10 +12434,15 @@ if [ "$K104_TOTAL" = "3" ] \
    && [ "$K104_BY_SRC_RAW" = "2" ] \
    && [ "$K104_BY_SRC_TOB" = "1" ] \
    && [ "$K104_MISS_EXISTS" = "false" ] \
-   && [ "$K104_EXPORT_OK" = "true" ]; then
-  pass "K104: dispatch warnings CLI surface (summary keys present, --raw --limit=N truncates, --by-source aggregates, missing-file graceful, cmdWarnings exported)"
+   && [ "$K104_EXPORT_OK" = "true" ] \
+   && [ "$K104_BAD_SINCE_EXIT" = "2" ] \
+   && [ "$K104_BAD_SINCE_HAS_ERR" = "1" ] \
+   && [ "$K104_BAD_LIMIT_EXIT" = "2" ] \
+   && [ "$K104_BAD_LIMIT_HAS_ERR" = "1" ] \
+   && [ "$K104_BAD_LIMIT_ZERO_EXIT" = "2" ]; then
+  pass "K104: dispatch warnings CLI surface (happy-path JSON shapes + input validation rejects invalid --since/--limit with exit 2 + stderr message)"
 else
-  fail "K104: warnings mismatch — total=$K104_TOTAL span=$K104_HAS_SPAN by_source=$K104_HAS_BY_SOURCE top_agents=$K104_HAS_TOP_AGENTS recent=$K104_HAS_RECENT raw_len=$K104_RAW_LEN by_src_raw=$K104_BY_SRC_RAW by_src_tob=$K104_BY_SRC_TOB miss_exists=$K104_MISS_EXISTS export=$K104_EXPORT_OK"
+  fail "K104: warnings mismatch — total=$K104_TOTAL span=$K104_HAS_SPAN by_source=$K104_HAS_BY_SOURCE top_agents=$K104_HAS_TOP_AGENTS recent=$K104_HAS_RECENT raw_len=$K104_RAW_LEN by_src_raw=$K104_BY_SRC_RAW by_src_tob=$K104_BY_SRC_TOB miss_exists=$K104_MISS_EXISTS export=$K104_EXPORT_OK bad_since_exit=$K104_BAD_SINCE_EXIT bad_since_err=$K104_BAD_SINCE_HAS_ERR bad_limit_exit=$K104_BAD_LIMIT_EXIT bad_limit_err=$K104_BAD_LIMIT_HAS_ERR bad_limit_zero=$K104_BAD_LIMIT_ZERO_EXIT"
 fi
 
 # K105: skill description size budget.

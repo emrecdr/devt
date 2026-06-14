@@ -617,14 +617,27 @@ function cmdWarnings(args) {
   const tracePath = path.join(process.cwd(), ".devt/state/dispatch-warnings.jsonl");
   let mode = "summary";
   let limit = null;
+  let limitRaw = null;
   let sinceTs = null;
   let raw = false;
   for (const a of args) {
     if (a === "--by-source") mode = "by-source";
     else if (a === "--by-agent") mode = "by-agent";
     else if (a === "--raw") raw = true;
-    else if (a.startsWith("--limit=")) limit = parseInt(a.slice(8), 10);
+    else if (a.startsWith("--limit=")) {
+      limitRaw = a.slice(8);
+      limit = parseInt(limitRaw, 10);
+    }
     else if (a.startsWith("--since=")) sinceTs = a.slice(8);
+  }
+  // Input validation. `--since=garbage` silently returned 0 results under
+  // string comparison (any non-ISO prefix > "2026-..." alphabetically).
+  // `--limit=-1` produced an empty-array slice. Both wrong-without-error.
+  if (sinceTs && isNaN(Date.parse(sinceTs))) {
+    throw new Error(`invalid --since value "${sinceTs}" (expected ISO date like 2026-06-01 or full timestamp)`);
+  }
+  if (limit !== null && (isNaN(limit) || limit < 1)) {
+    throw new Error(`invalid --limit value "${limitRaw}" (expected positive integer ≥ 1)`);
   }
   if (!fs.existsSync(tracePath)) {
     return {
@@ -699,8 +712,8 @@ function run(subcommand, args) {
       json(cmdContracts());
       return 0;
     case "warnings":
-      json(cmdWarnings(args));
-      return 0;
+      try { json(cmdWarnings(args)); return 0; }
+      catch (err) { process.stderr.write("dispatch warnings: " + err.message + "\n"); return 2; }
     case "render": {
       const out = cmdRender(args[0]);
       process.stdout.write(out + (out.endsWith("\n") ? "" : "\n"));
