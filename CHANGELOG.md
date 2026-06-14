@@ -6,6 +6,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+Post-v0.93.0 fix-up batch. Two parallel threads landed back-to-back: (a) an audit-driven sweep that surfaced YAML-naive extraction bugs in two smoke gates + silent-wrong-result UX bugs in three CLI surfaces; (b) greenfield calibration #21's full incorporation cycle (10 actions across 4 commits). Both threads were systematic — not "what looked broken" but "what would a structured probe of the input boundaries find?"
+
+### Audit-driven fix sweep (4 commits)
+
+**K105 YAML-aware extraction fix (`47b9a98`).** Phase 12's K105 silently miscounted 6 of 17 skill descriptions. The awk extractor only handled YAML block scalars (`description: >-`); for inline-style (`description: Foo bar...`) it skipped the inline content with `next` and counted trailing frontmatter fields instead. 4 inline-style skills had descriptions 500–700 bytes longer than reported. K105 had been structurally unable to catch inline-style bloat since shipping. Fixed with node-based YAML-aware extractor; budget unchanged at 950 bytes (current true max is 777b, architecture-health-scanner).
+
+**Command description gate twin fix (`b0f5596`).** Same root cause as K105 lived at `scripts/smoke-test.sh:3526` — the "Command description budget" gate's awk reported `2` bytes (the `>-` marker length) for any future YAML block-scalar command descriptions. Currently all 19 commands use inline style so the bug was latent; the fix prevents future silent regression. Same YAML-aware extractor applied.
+
+**dispatch warnings input validation (`c608340`).** `dispatch warnings --since=garbage` used string comparison `e.ts >= "garbage"` — alphabetically "g" > "2026-..." so the filter silently returned 0 results (user saw "no incidents in range" — wrong conclusion). `--limit=-3` returned `slice(-(-3))` = `slice(3)` on a 1-entry array → empty result. Both now reject with exit 2 + stderr error. K104 extended to lock the rejection contract.
+
+**Telemetry CLI input validation (`ccacd7f`).** Same bug class at three sites: `mcp-stats --since=invalid` silently no-op'd the filter (NaN > 0 is false); `token-report --since=invalid` ditto; `token-report --sessions=garbage` → `slice(0, "garbage")` coerces to `slice(0, 0)` → 0 sessions; `token-report --sessions=-5` → `slice(0, -5)` removes last 5. All four now reject with exit 2 + stderr error. K106 added to enforce the rejection contract across both telemetry CLIs.
+
+### Calibration #21 incorporation (2 commits)
+
+Greenfield calibration #21 ran across 3 rounds (full questions → honest answers → F21 falsification test → F26 organic discovery during test). The findings produced 10 distinct actions spanning behavior + docs + memory.
+
+**Behavior changes (`4fcfb6e`):**
+
+- **F26 — Cliff detector proportional-response gate.** Discovered during the F21 falsification test itself: a 112-byte probe prompt with a 39-byte reply tripped `low_output` and produced a false-alarm SendMessage-resume hint. Real cliff hits happen when an agent processes a substantial input but returns a stub. `low_output` now requires prompt ≥ 1000 bytes to fire (real workflow dispatch territory). K107 locks both halves of the contract.
+
+- **A4 — `state check-inherited-edits` CLI subcommand.** W12 case (cal #21 F-OBS-1 + F23): subagent died at credential expiry; retry inherited a `str | None` type from the partial prior session and silently self-corrected to `PScope`. Operator had no programmatic signal that files had been modified. New CLI runs `git status --porcelain` filtered by `workflow.yaml::first_created_at` to surface uncommitted source edits with a recommendation (clean / review / ambient_uncommitted). K108 validates the response shape across 3 fixture states.
+
+- **A2 — `/devt:status` raw_dispatch + cliff-signal counts.** F12 surfaced a discoverability gap: operator didn't know `dispatch warnings` CLI existed. `/devt:status` now includes a threshold-gated line showing session-scoped counts from both `dispatch-warnings.jsonl` sources. Inclusion rule suppresses the line when both counts are zero.
+
+- **A2b — PostToolUse raw_dispatch return-time hint.** F24 operator preference: catch the signal in the act-on-it window (PostToolUse return time) rather than wait for an explicit `/devt:status` call. `task-truncation-detector.sh` now emits a one-line hint in `additionalContext` regardless of whether THIS dispatch tripped a cliff, when any raw_dispatch entries exist within the last 60 minutes. Operator-confirmed chattiness trade-off. K109 validates 3 cases (quiet / loud / aged-out).
+
+**Documentation + memory (`ff78fb1`):**
+
+- **A0 + A9 — Envelope-managed dispatches are intentionally silent.** F21 falsification confirmed: dispatch-warnings.jsonl shows entries only for envelope-LESS dispatches. New section in `docs/COMMANDS.md` spells out the classification rules so future operators don't repeat F21's mental-model gap ("no entries means hook didn't fire" — wrong; could also mean "all dispatches were envelope-managed").
+
+- **A1 — `low_output` canary recipe.** F22 surfaced the distribution: greenfield's `low_output` is the dominant signal (6% vs 0% near_cliff vs 2% mid_task_language). Recipe focuses on `low_output` as the credential-expiry / auth-fail / 91-tool-wall canary with specific recovery prescriptions for each.
+
+- **A3 — Parallel sub-agent dispatch recipe.** F13: operator hand-rolled parallel dispatches because the recipe was buried in `workflows/quick-implement.md`'s `<step name="implement">` block. New section in `docs/COMMANDS.md` spotlights `dispatch render-filled` as the canonical envelope source and cross-references `workflows/code-review-parallel.md`.
+
+- **A5 — Inheritance-check protocol in programmer.md.** Cal #21 §1 F1 reference added to `agents/programmer.md::<self_check>`. If a programmer finds substantive work in a file it didn't write THIS dispatch, surface in `impl-summary.md::## Deviations` as `[Inherited] <file>:<symbol> — found X, corrected to Y`. Anchors the W12 pattern at the code surface future agents read.
+
+- **A6 — CON-002 memory concept.** Memorialized the F18 signal flip (devt 99.7% raw_dispatch vs greenfield 84.7% task_output_bytes) as a permanent Concept in `.devt/memory/concepts/CON-002-dispatch-telemetry-signal-flip.md`. Includes W12 case field evidence + concrete instrumentation table so future telemetry work has a reference for cross-project signal validation.
+
+- **A8 — Command-surface decision tree.** F25 explicit ask: "When should I dispatch sub-agents directly vs through /devt:workflow?" New file `docs/COMMAND-SURFACE-MAP.md` provides the decision tree, what-each-path-does breakdown, when-NOT-to-bypass framing, and a state-reference table.
+
+### Methodology lesson surfaced this cycle
+
+**The pipefail + `grep -c` trap caught us 4 times.** K98 (Phase 2.6), K103 (Phase 11), K104 input-validation extension, and K109 — each time a pipeline ending in `grep -c` or `comm` returning empty-but-zero broke silently under `set -euo pipefail`. Pattern: `node ... | grep -c "..."` where node may exit non-zero AND grep returning 0 matches both propagate via pipefail. Fix: `set +eo pipefail` in each test subshell. The lesson is worth a permanent reference for future smoke gate authors but the doc surface for it is TBD; current best practice is to look at K106 or K109's structure as the template.
+
+### Drift-guard stack — now 15-deep (K94–K109)
+
+| Gate | Surface |
+|---|---|
+| K94–K100 | command stratification + parameter routing + stale-ref scans (Phases 1-5) |
+| K101 | CLAUDE.md size budget (Phase 6.5) |
+| K102 | inline guardrails size budget (Phase 10) |
+| K103 | workflow_type 4-way registry parity (Phase 11) |
+| K104 | dispatch warnings CLI surface + input validation (Phase 11 + this batch) |
+| K105 | skill description size budget — NOW YAML-aware (Phase 12 + this batch) |
+| K106 | mcp-stats + token-report input validation (this batch) |
+| **K107** | **cliff detector proportional-response gate (cal #21 F26)** |
+| **K108** | **state check-inherited-edits response shape (cal #21 A4)** |
+| **K109** | **PostToolUse raw_dispatch return-time hint emit semantics (cal #21 A2b)** |
+
+Smoke 854/854 (was 850 at v0.93.0 tag), locking 3/3.
+
 ## [0.93.0] - 2026-06-13
 
 **Command surface stratification + parameter routing — Phase 1 + Phase 2.** Casual user surface collapses from 36 equal-tier commands to 15 family-head commands with rich parameter modes that route to the right underlying workflow. Hidden direct-form commands remain typed-callable for muscle memory / scripts. No functionality removed; the structural cleanup is presentation + routing only.
