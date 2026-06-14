@@ -1715,11 +1715,30 @@ function run(subcommand, args) {
       const depthArg = args.find(a => a.startsWith("--depth="));
       const maxBytesArg = args.find(a => a.startsWith("--max-bytes="));
       const direction = dirArg ? dirArg.split("=")[1] : "both";
-      const depth = depthArg ? parseInt(depthArg.split("=")[1], 10) : 1;
+      // Input validation: --depth must be a positive integer when present.
+      // Prior behavior propagated NaN through getNeighbors and produced
+      // unpredictable results (empty traversal silently).
+      let depth = 1;
+      if (depthArg) {
+        const depthVal = depthArg.split("=")[1];
+        const depthN = Number(depthVal);
+        if (!Number.isInteger(depthN) || depthN < 1) {
+          process.stderr.write(`graphify neighbors: invalid --depth value "${depthVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        depth = depthN;
+      }
       const opts = { direction, depth };
+      // Input validation: --max-bytes must be a positive integer when present.
+      // Prior behavior silently kept the default cap on invalid input.
       if (maxBytesArg) {
-        const v = parseInt(maxBytesArg.split("=")[1], 10);
-        if (Number.isInteger(v) && v > 0) opts.max_bytes = v;
+        const mbVal = maxBytesArg.split("=")[1];
+        const mbN = Number(mbVal);
+        if (!Number.isInteger(mbN) || mbN < 1) {
+          process.stderr.write(`graphify neighbors: invalid --max-bytes value "${mbVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        opts.max_bytes = mbN;
       }
       json(getNeighbors(args[0], opts));
       return 0;
@@ -1762,7 +1781,19 @@ function run(subcommand, args) {
     }
     case "symbols-in-files": {
       const limitArg = args.find(a => a.startsWith("--limit="));
-      const limit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 10) : 10;
+      // Input validation: --limit must be a positive integer when present.
+      // Prior behavior used `|| 10` fallback so --limit=garbage silently
+      // returned the default-10 result instead of the user's intended N.
+      let limit = 10;
+      if (limitArg) {
+        const limitVal = limitArg.split("=")[1];
+        const limitN = Number(limitVal);
+        if (!Number.isInteger(limitN) || limitN < 1) {
+          process.stderr.write(`graphify symbols-in-files: invalid --limit value "${limitVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        limit = limitN;
+      }
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify symbols-in-files <file>... [--limit=10]\n"); return 2; }
       files = filterSensitive(files);

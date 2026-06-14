@@ -1530,9 +1530,18 @@ function run(subcommand, args) {
       const task = args.filter(a => !a.startsWith("--")).join(" ").trim();
       if (!task) { process.stderr.write("Usage: preflight generate <task description> [--budget=N]\n"); return 2; }
       const opts = {};
+      // Input validation: --budget must be a positive integer when present.
+      // Without this guard, --budget=garbage|-5 silently kept the default
+      // budget, ignoring the user's intent — same UX bug class as the
+      // dispatch/mcp-stats/token-report/memory CLI fixes in this cycle.
       if (budgetArg) {
-        const n = parseInt(budgetArg.split("=")[1], 10);
-        if (Number.isFinite(n) && n > 0) opts.budget = n;
+        const budgetVal = budgetArg.split("=")[1];
+        const n = Number(budgetVal);
+        if (!Number.isInteger(n) || n < 1) {
+          process.stderr.write(`preflight generate: invalid --budget value "${budgetVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        opts.budget = n;
       }
       json(generate(task, opts));
       return 0;

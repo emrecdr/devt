@@ -12655,6 +12655,39 @@ else
   fail "K110: memory CLI validation mismatch — q_bad_exit=$K110_Q_BAD_EXIT q_bad_err=$K110_Q_BAD_HAS_ERR q_neg=$K110_Q_NEG_EXIT q_zero=$K110_Q_ZERO_EXIT l_bad_exit=$K110_L_BAD_EXIT l_bad_err=$K110_L_BAD_HAS_ERR l_neg=$K110_L_NEG_EXIT"
 fi
 
+# K111: graphify + preflight CLI input validation (ζ audit continuation).
+# Same silent-wrong-result UX bug class. Four flags fixed:
+#   preflight generate --budget    → silently kept default on invalid input
+#   graphify neighbors --depth     → NaN propagated through getNeighbors
+#   graphify neighbors --max-bytes → silent-default-on-invalid
+#   graphify symbols-in-files --limit → silent-default-on-invalid
+# All now reject with exit 2 + stderr error. K111 locks the rejection
+# contract across all 4 flags.
+K111_PF_BUDGET_EXIT=$(set +eo pipefail; node "$CLI" preflight generate "test" --budget=garbage >/dev/null 2>&1; echo $?)
+K111_PF_BUDGET_HAS_ERR=$(set +eo pipefail; node "$CLI" preflight generate "test" --budget=garbage 2>&1 1>/dev/null | grep -c "invalid --budget")
+K111_GN_DEPTH_EXIT=$(set +eo pipefail; node "$CLI" graphify neighbors nonexistent --depth=garbage >/dev/null 2>&1; echo $?)
+K111_GN_DEPTH_HAS_ERR=$(set +eo pipefail; node "$CLI" graphify neighbors nonexistent --depth=garbage 2>&1 1>/dev/null | grep -c "invalid --depth")
+K111_GN_MB_EXIT=$(set +eo pipefail; node "$CLI" graphify neighbors nonexistent --max-bytes=garbage >/dev/null 2>&1; echo $?)
+K111_GN_MB_HAS_ERR=$(set +eo pipefail; node "$CLI" graphify neighbors nonexistent --max-bytes=garbage 2>&1 1>/dev/null | grep -c "invalid --max-bytes")
+K111_GS_LIM_EXIT=$(set +eo pipefail; node "$CLI" graphify symbols-in-files "$ROOT/bin/devt-tools.cjs" --limit=garbage >/dev/null 2>&1; echo $?)
+K111_GS_LIM_HAS_ERR=$(set +eo pipefail; node "$CLI" graphify symbols-in-files "$ROOT/bin/devt-tools.cjs" --limit=garbage 2>&1 1>/dev/null | grep -c "invalid --limit")
+K111_GN_NEG_DEPTH_EXIT=$(set +eo pipefail; node "$CLI" graphify neighbors nonexistent --depth=-5 >/dev/null 2>&1; echo $?)
+K111_PF_NEG_BUDGET_EXIT=$(set +eo pipefail; node "$CLI" preflight generate "test" --budget=-1 >/dev/null 2>&1; echo $?)
+if [ "$K111_PF_BUDGET_EXIT" = "2" ] \
+   && [ "$K111_PF_BUDGET_HAS_ERR" = "1" ] \
+   && [ "$K111_GN_DEPTH_EXIT" = "2" ] \
+   && [ "$K111_GN_DEPTH_HAS_ERR" = "1" ] \
+   && [ "$K111_GN_MB_EXIT" = "2" ] \
+   && [ "$K111_GN_MB_HAS_ERR" = "1" ] \
+   && [ "$K111_GS_LIM_EXIT" = "2" ] \
+   && [ "$K111_GS_LIM_HAS_ERR" = "1" ] \
+   && [ "$K111_GN_NEG_DEPTH_EXIT" = "2" ] \
+   && [ "$K111_PF_NEG_BUDGET_EXIT" = "2" ]; then
+  pass "K111: graphify + preflight CLI input validation (preflight --budget, graphify --depth/--max-bytes/--limit all reject invalid input with exit 2 + stderr message)"
+else
+  fail "K111: graphify+preflight validation mismatch — pf_bud=$K111_PF_BUDGET_EXIT pf_bud_err=$K111_PF_BUDGET_HAS_ERR gn_depth=$K111_GN_DEPTH_EXIT gn_depth_err=$K111_GN_DEPTH_HAS_ERR gn_mb=$K111_GN_MB_EXIT gn_mb_err=$K111_GN_MB_HAS_ERR gs_lim=$K111_GS_LIM_EXIT gs_lim_err=$K111_GS_LIM_HAS_ERR gn_neg=$K111_GN_NEG_DEPTH_EXIT pf_neg=$K111_PF_NEG_BUDGET_EXIT"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

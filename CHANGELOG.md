@@ -6,11 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
-### Memory CLI input validation (post-v0.93.1)
+### CLI input validation sweep (post-v0.93.1)
 
-**`memory query --limit` + `memory links --depth` validation.** Continuation of the same silent-wrong-result UX bug class swept this cycle for dispatch warnings, mcp-stats, and token-report. `memory query --limit=garbage|-5|0` silently propagated NaN through to the FTS5 prepared statement and returned 0 results; `memory links --depth=garbage` did the same for graph traversal. Both now reject with exit 2 + stderr error. K110 added to enforce the rejection contract — same shape as K106/K109 with `set +eo pipefail` in each capture subshell.
+The validate-input-boundaries methodology continued to surface instances of the silent-wrong-result UX bug class across additional CLI surfaces. All shipped as exit-2-on-invalid with stderr error message, matching the pattern established by K106/K109.
 
-Drift-guard stack now **16-deep (K94–K110)**. Smoke 855/855, locking 3/3.
+**`memory query --limit` + `memory links --depth`.** `memory query --limit=garbage|-5|0` silently propagated NaN through to the FTS5 prepared statement and returned 0 results; `memory links --depth=garbage` did the same for graph traversal. K110 added.
+
+**`preflight generate --budget`.** Silently kept the default budget on invalid input — user's tuning intent was ignored without any signal.
+
+**`graphify neighbors --depth`.** NaN propagated through `getNeighbors` and produced unpredictable empty results.
+
+**`graphify neighbors --max-bytes`.** Silently kept the default cap on invalid input — user could not narrow the result size as requested.
+
+**`graphify symbols-in-files --limit`.** `parseInt(...) || 10` fallback masked invalid input by silently returning the default-10 result instead of the user's intended N. K111 added covering all 4 graphify+preflight flags.
+
+Drift-guard stack now **17-deep (K94–K111)**. Smoke 856/856, locking 3/3.
+
+### Validation methodology summary (post-v0.93.0)
+
+This cycle's "validate-input-boundaries" sweep caught 9 instances of the silent-wrong-result bug class across 6 CLI surfaces — dispatch warnings (2 flags), mcp-stats (1 flag), token-report (3 cases), memory query/links (4 cases), preflight generate (1 flag), graphify neighbors/symbols-in-files (3 flags). All shipped with the same exit-2-with-stderr-error contract. K106/K110/K111 lock the rejection behavior in CI. Six discrete bug classes that all reduce to "the function evaluated an invalid input the same way it would evaluate a missing input" — a Number()/parseInt() landmine that's prevalent in zero-dep Node CLI code.
 
 ## [0.93.1] - 2026-06-14
 
