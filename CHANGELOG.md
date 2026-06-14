@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.93.2] - 2026-06-15
+
 ### CLI input validation sweep (post-v0.93.1)
 
 The validate-input-boundaries methodology continued to surface instances of the silent-wrong-result UX bug class across additional CLI surfaces. All shipped as exit-2-on-invalid with stderr error message, matching the pattern established by K106/K109.
