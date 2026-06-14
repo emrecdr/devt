@@ -1472,7 +1472,24 @@ function run(subcommand, args) {
       const wantDomain = args.includes("--domain-counts");
       const wantCompact = args.includes("--json-compact");
       const hasTop = !!topArg;
-      let limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 20;
+      // Input validation: --limit must be a positive integer when present.
+      // Without this guard, `--limit=garbage` passes NaN through to the
+      // FTS5 query (which falls back to its own default of 20) and
+      // `--limit=-5` runs against the prepared statement with negative
+      // bound, both producing silent-wrong-results — same bug class as
+      // the dispatch/mcp-stats/token-report fixes in this cycle.
+      let limit;
+      if (limitArg) {
+        const limitVal = limitArg.split("=")[1];
+        const limitN = Number(limitVal);
+        if (!Number.isInteger(limitN) || limitN < 1) {
+          process.stderr.write(`memory query: invalid --limit value "${limitVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        limit = limitN;
+      } else {
+        limit = 20;
+      }
       let mode = "full";
       if (wantCount) mode = "count";
       else if (wantDomain) mode = "domain-counts";
@@ -1528,7 +1545,16 @@ function run(subcommand, args) {
         return 2;
       }
       const depthArg = args.find(a => a.startsWith("--depth="));
-      const depth = depthArg ? parseInt(depthArg.split("=")[1], 10) : 2;
+      let depth = 2;
+      if (depthArg) {
+        const depthVal = depthArg.split("=")[1];
+        const depthN = Number(depthVal);
+        if (!Number.isInteger(depthN) || depthN < 1) {
+          process.stderr.write(`memory links: invalid --depth value "${depthVal}" (expected positive integer ≥ 1)\n`);
+          return 2;
+        }
+        depth = depthN;
+      }
       json({ doc_id: args[0], depth, links: getLinks(args[0], depth) });
       return 0;
     }

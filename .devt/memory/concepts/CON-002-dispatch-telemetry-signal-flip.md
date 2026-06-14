@@ -5,7 +5,7 @@ doc_type: concept
 status: active
 confidence: verified
 domain: telemetry
-summary: dispatch-warnings.jsonl carries two signal classes (raw_dispatch from PreToolUse hygiene, task_output_bytes from PostToolUse cliff detection). The dominant signal is project-shaped not framework-shaped — devt sees 99.7% raw_dispatch + 0.08% task_output; greenfield sees 13% raw_dispatch + 84.7% task_output. Recipes must surface both classes, not over-index on devt's pattern.
+summary: dispatch-warnings.jsonl carries 2 signal classes (raw_dispatch + task_output_bytes). Dominant signal is project-shaped — devt 99.7%/0.08% vs greenfield 13%/84.7%. Recipes must surface both classes.
 keywords:
   - dispatch-warnings
   - raw_dispatch

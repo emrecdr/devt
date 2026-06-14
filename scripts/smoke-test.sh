@@ -12629,6 +12629,32 @@ else
   fail "K109: A2b hint emitter broken — quiet=$K109_QUIET_OK loud_match_count=$K109_LOUD_OK aged_silent=$K109_AGED_OK"
 fi
 
+# K110: memory CLI input validation (cal #21 methodology continuation).
+# Same silent-wrong-result UX bug class as K106 caught for mcp-stats and
+# token-report. memory query/links accepted --limit=garbage|-5|0 and
+# --depth=garbage silently — NaN propagated through to the FTS5 query or
+# graph traversal producing 0 results or unexpected behavior. K110 locks
+# the rejection contract for both subcommands so future input drift in
+# the memory CLI surface is caught in CI.
+K110_Q_BAD_EXIT=$(set +eo pipefail; node "$CLI" memory query "test" --limit=garbage >/dev/null 2>&1; echo $?)
+K110_Q_BAD_HAS_ERR=$(set +eo pipefail; node "$CLI" memory query "test" --limit=garbage 2>&1 1>/dev/null | grep -c "invalid --limit")
+K110_Q_NEG_EXIT=$(set +eo pipefail; node "$CLI" memory query "test" --limit=-5 >/dev/null 2>&1; echo $?)
+K110_Q_ZERO_EXIT=$(set +eo pipefail; node "$CLI" memory query "test" --limit=0 >/dev/null 2>&1; echo $?)
+K110_L_BAD_EXIT=$(set +eo pipefail; node "$CLI" memory links CON-001 --depth=garbage >/dev/null 2>&1; echo $?)
+K110_L_BAD_HAS_ERR=$(set +eo pipefail; node "$CLI" memory links CON-001 --depth=garbage 2>&1 1>/dev/null | grep -c "invalid --depth")
+K110_L_NEG_EXIT=$(set +eo pipefail; node "$CLI" memory links CON-001 --depth=-2 >/dev/null 2>&1; echo $?)
+if [ "$K110_Q_BAD_EXIT" = "2" ] \
+   && [ "$K110_Q_BAD_HAS_ERR" = "1" ] \
+   && [ "$K110_Q_NEG_EXIT" = "2" ] \
+   && [ "$K110_Q_ZERO_EXIT" = "2" ] \
+   && [ "$K110_L_BAD_EXIT" = "2" ] \
+   && [ "$K110_L_BAD_HAS_ERR" = "1" ] \
+   && [ "$K110_L_NEG_EXIT" = "2" ]; then
+  pass "K110: memory CLI input validation (memory query --limit + memory links --depth all reject invalid input with exit 2 + stderr message)"
+else
+  fail "K110: memory CLI validation mismatch — q_bad_exit=$K110_Q_BAD_EXIT q_bad_err=$K110_Q_BAD_HAS_ERR q_neg=$K110_Q_NEG_EXIT q_zero=$K110_Q_ZERO_EXIT l_bad_exit=$K110_L_BAD_EXIT l_bad_err=$K110_L_BAD_HAS_ERR l_neg=$K110_L_NEG_EXIT"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

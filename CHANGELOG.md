@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Memory CLI input validation (post-v0.93.1)
+
+**`memory query --limit` + `memory links --depth` validation.** Continuation of the same silent-wrong-result UX bug class swept this cycle for dispatch warnings, mcp-stats, and token-report. `memory query --limit=garbage|-5|0` silently propagated NaN through to the FTS5 prepared statement and returned 0 results; `memory links --depth=garbage` did the same for graph traversal. Both now reject with exit 2 + stderr error. K110 added to enforce the rejection contract — same shape as K106/K109 with `set +eo pipefail` in each capture subshell.
+
+Drift-guard stack now **16-deep (K94–K110)**. Smoke 855/855, locking 3/3.
+
 ## [0.93.1] - 2026-06-14
 
 Post-v0.93.0 fix-up batch. Two parallel threads landed back-to-back: (a) an audit-driven sweep that surfaced YAML-naive extraction bugs in two smoke gates + silent-wrong-result UX bugs in three CLI surfaces; (b) greenfield calibration #21's full incorporation cycle (10 actions across 4 commits). Both threads were systematic — not "what looked broken" but "what would a structured probe of the input boundaries find?"

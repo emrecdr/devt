@@ -5,7 +5,7 @@ doc_type: concept
 status: active
 confidence: verified
 domain: smoke-tests
-summary: Under `set -euo pipefail`, pipelines ending in `grep -c <pattern>` exit non-zero when there are zero matches (grep's exit-1-on-no-matches behavior). When this happens inside `$(...)` command substitution, the subshell exits non-zero, the parent's `set -e` fires, and the smoke test dies silently between gates with no FAIL message. Caught 4 times across the v0.93 cycle. Defuse with `set +eo pipefail` inside the subshell — set +e alone is not enough because pipefail propagates independently.
+summary: Under set -euo pipefail, smoke gates using $(... | grep -c ...) silently die when grep finds 0 matches — caught 4× this cycle. Defuse with set +eo pipefail in subshell.
 keywords:
   - pipefail
   - set-e
