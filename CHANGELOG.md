@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.93.1] - 2026-06-14
+
 Post-v0.93.0 fix-up batch. Two parallel threads landed back-to-back: (a) an audit-driven sweep that surfaced YAML-naive extraction bugs in two smoke gates + silent-wrong-result UX bugs in three CLI surfaces; (b) greenfield calibration #21's full incorporation cycle (10 actions across 4 commits). Both threads were systematic — not "what looked broken" but "what would a structured probe of the input boundaries find?"
 
 ### Audit-driven fix sweep (4 commits)
