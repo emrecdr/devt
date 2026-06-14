@@ -171,6 +171,8 @@ If ANY stub is found, it is a quality gate failure. Fix it before proceeding.
 <self_check>
 After quality gates pass, before writing the summary, verify your own claims:
 
+**Inheritance check (cal #21 §1 F1).** If you read a file and find it already contains substantive work toward this task that you did NOT write in this dispatch — that's evidence a prior dispatch (same or earlier session) died mid-flight and you inherited its edits. Greenfield W12 case: retry agent inherited `PermissionQueryParams.scope: str | None` from a partial earlier session and silently corrected to `PScope`. The correction was right but the silence was the problem — no signal reached the orchestrator. Surface inherited state in your impl-summary's `## Deviations` section as `[Inherited] <file>:<symbol> — found state X from prior dispatch, corrected to Y`. The orchestrator can then run `node bin/devt-tools.cjs state check-inherited-edits` to confirm the broader git-tracked picture.
+
 1. **Files exist**: For every file you claim to have created, verify it exists:
    `ls -la path/to/claimed/file`
 

@@ -414,6 +414,76 @@ The Brief surfaces 6 lanes: A (domain match), B (FTS expansion), C (symbol match
 
 ---
 
+## Dispatch Telemetry
+
+devt collects two independent telemetry streams in `.devt/state/dispatch-warnings.jsonl` and surfaces them via `node bin/devt-tools.cjs dispatch warnings`. Both streams are project-shaped: see [`.devt/memory/concepts/CON-002-dispatch-telemetry-signal-flip.md`](../.devt/memory/concepts/CON-002-dispatch-telemetry-signal-flip.md) for the field-validated distribution analysis.
+
+### What gets logged and when (A0 + A9)
+
+| Source | Hook | Logged when |
+|---|---|---|
+| `raw_dispatch` | `hooks/dispatch-hygiene-guard.sh` (PreToolUse) | Task call to a `devt:*` agent without ANY of 10 envelope-signal blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<original_review>`, `<lane_scope>`, `<god_node_warnings>`, `<prior_outputs>`, `<provenance_protocol>`) |
+| `task_output_bytes` | `hooks/task-truncation-detector.sh` (PostToolUse) | Sub-agent return triggers a cliff: `near_cliff` (output ≥ 40KB threshold), `low_output` (output < 500B AND prompt ≥ 1000B per F26's proportional gate), or `mid_task_language` (continuation phrasing in return) |
+
+**Envelope-managed dispatches are intentionally silent.** If you dispatch `devt:programmer` with all 3 canonical envelope blocks (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`) and you don't see your dispatch in `dispatch-warnings.jsonl`, that's success — not a hook failure. The detector classified your dispatch as workflow-managed and exited at the envelope check. This was field-validated by cal #21 F21 falsification: a deliberate envelope-less probe dispatch DID appear; the prior envelope-injected dispatches correctly did NOT.
+
+`docs-writer`, `retro`, `curator`, and `devt-coordinator` are additionally exempt from raw_dispatch detection per `agents/io-contracts.yaml` (`graphify_inputs: []` declares no envelope contract). The detector exits silently for those agents regardless of prompt shape.
+
+### Reading the telemetry
+
+```bash
+node bin/devt-tools.cjs dispatch warnings                     # default summary view
+node bin/devt-tools.cjs dispatch warnings --by-source         # raw_dispatch vs task_output_bytes counts
+node bin/devt-tools.cjs dispatch warnings --by-agent          # which agents get hit most
+node bin/devt-tools.cjs dispatch warnings --limit=5 --raw     # 5 most-recent raw entries
+node bin/devt-tools.cjs dispatch warnings --since=1h          # filter to last hour
+node bin/devt-tools.cjs dispatch warnings --since=2026-06-01  # since ISO date
+```
+
+Invalid `--since` (non-ISO) and invalid `--limit` (non-positive integer) exit 2 with a stderr error rather than silently returning wrong results.
+
+### The `low_output` canary (A1)
+
+`low_output` is the dominant signal in projects with substantive sub-agent work (greenfield 6% vs devt 0.08% — see CON-002). It catches three failure modes:
+
+1. **Credential expiry returning zero tokens.** The W12 case (cal #21 F-OBS-1): subagent died at "Not logged in" returning 0 bytes. `low_output: true` would have fired had the proportional gate not been added; F26 added the prompt-size gate so it now correctly fires here (prompt was ~5KB envelope; output 0 bytes).
+2. **Auth/permission failure mid-dispatch.** Similar pattern to credential expiry — agent gets blocked before substantive work, returns a stub.
+3. **91-tool-call wall hit.** Greenfield's "Now B.5" case (cal #17): programmer returned 140 bytes after substantial work because it hit the Claude Code tool-call ceiling.
+
+**Recovery prescription when `low_output: true` fires** with `near_cliff: false` and `mid_task_language: false`:
+
+1. Read the structured sidecar artifact (e.g., `impl-summary.json`) — check `Status` field. If `PARTIAL` or absent, this is a mid-task wall hit.
+2. If `Status: PARTIAL`, `SendMessage`-resume the same agent ID with `<continue_from_section>...</continue_from_section>` — preserves cache, saves ~15-20 Reads vs cold re-dispatch.
+3. If sidecar is absent entirely AND output is a stub, this is the credential-expiry pattern. Acknowledge the auth event, re-dispatch with the same envelope plus a note that prior work landed zero files. Before re-dispatching, run `node bin/devt-tools.cjs state check-inherited-edits` to surface any uncommitted source edits from the dead dispatch.
+
+**`low_output` is NOT recovery-actionable for trivial dispatches.** Probe prompts (< 1000 bytes) with small replies are proportional, not cliff hits. F26's prompt-size gate suppresses the false alarm. If you see `low_output: true` with a tiny prompt in `dispatch-warnings.jsonl` from an old session pre-F26, ignore it.
+
+### Parallel sub-agent dispatch recipe (A3)
+
+When the orchestrator needs to run N independent sub-agents in parallel without going through `/devt:workflow`'s full pipeline (e.g., fan-out review across lanes, parallel research streams), the canonical pattern is:
+
+1. **Run `/devt:workflow` once first** to populate `workflow.yaml::scope_*_json` + `.devt/state/graph-impact.md` (single-source preparation; all lanes inherit).
+2. **Render the canonical envelope for each lane** using `dispatch render-filled`:
+   ```bash
+   node bin/devt-tools.cjs dispatch render-filled programmer:auto
+   node bin/devt-tools.cjs dispatch render-filled code-reviewer:auto
+   ```
+   Each envelope carries `<scope_trust>`, `<scope_hint>`, `<memory_signal>`, governing rules, and guardrails — all populated from current state.
+3. **Hand-inject + dispatch each lane** as a separate `Agent(subagent_type="devt:<agent>", prompt="<rendered envelope> + <lane-specific task>")` call from main thread.
+4. **Each lane's dispatch is correctly classified as workflow-managed** by the hygiene guard (envelope blocks present). No raw_dispatch entries.
+5. **Synthesize results** in the orchestrator: read each lane's primary artifact, compose the final output.
+
+Without step 2's `dispatch render-filled`, hand-rolled envelope construction is error-prone. The CLI exists specifically to support this case.
+
+For ad-hoc parallel review across files, `workflows/code-review-parallel.md` is the sanctioned multi-lane pattern (declared in `agents/io-contracts.yaml` as a specific workflow type, K103-validated). Use that workflow when scope > 10 files AND user opts in via AskUserQuestion; orchestrator improvisation outside it is prohibited per `CLAUDE.md::Workflow single-dispatch contract`.
+
+### Discoverability surfaces
+
+- `/devt:status` includes a `Dispatch warnings:` line when session-scoped counts are > 0 (per A2). Threshold-gated; suppressed when both raw and cliff counts are zero.
+- `hooks/task-truncation-detector.sh` emits a one-line hint in `additionalContext` at sub-agent return time when raw_dispatch entries exist within the last hour (per A2b). Operator-confirmed UX preference: catch the signal in the act-on-it window, not the next status check.
+
+---
+
 ## Typical Flows
 
 ### Flow 1: Quick fix
