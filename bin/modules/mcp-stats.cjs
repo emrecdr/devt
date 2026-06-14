@@ -295,6 +295,17 @@ function run(subcommand, args) {
   const opts = require("./cli-args.cjs").parseFlags(allArgs);
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 
+  // Input validation. Invalid --since previously silently no-op'd the filter:
+  // `new Date("garbage").getTime()` → NaN, `NaN > 0` → false, filter at
+  // loadEntries() skipped entirely. User sees full unfiltered output thinking
+  // the filter applied — wrong-result-without-error.
+  if (opts.since !== undefined && opts.since !== "" && isNaN(Date.parse(opts.since))) {
+    process.stderr.write(JSON.stringify({
+      error: `invalid --since value "${opts.since}" (expected ISO date like 2026-06-01 or full timestamp)`,
+    }) + "\n");
+    return 2;
+  }
+
   // Prune mode
   if (opts.prune_older_than) {
     try { json(pruneOlderThan(opts.prune_older_than)); return 0; }

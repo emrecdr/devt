@@ -405,6 +405,27 @@ function run(subcommand, args) {
   // Token-report has no subcommands — flags only. Treat any subcommand-shaped first arg as a flag.
   const allArgs = subcommand && subcommand.startsWith("--") ? [subcommand, ...args] : args;
   const opts = require("./cli-args.cjs").parseFlags(allArgs);
+
+  // Input validation. Prior silent-wrong-result bugs:
+  //   --since=garbage → new Date("garbage").getTime() = NaN, `sinceMs > 0`
+  //     check at buildReport() skipped filter; user saw unfiltered output
+  //     thinking the date filter applied.
+  //   --sessions=garbage → sessionLimit = "garbage" (truthy string),
+  //     filtered.slice(0, "garbage") coerces to slice(0, 0) → 0 sessions.
+  //   --sessions=-5 → filtered.slice(0, -5) → removed last 5 sessions
+  //     (silent unexpected behavior).
+  if (opts.since !== undefined && opts.since !== "" && isNaN(Date.parse(opts.since))) {
+    process.stderr.write(`[token-report] invalid --since value "${opts.since}" (expected ISO date like 2026-06-01 or full timestamp)\n`);
+    return 2;
+  }
+  if (opts.sessions !== undefined) {
+    const n = Number(opts.sessions);
+    if (!Number.isInteger(n) || n < 1) {
+      process.stderr.write(`[token-report] invalid --sessions value "${opts.sessions}" (expected positive integer ≥ 1)\n`);
+      return 2;
+    }
+  }
+
   const report = buildReport(opts);
 
   // --baseline=PATH: snapshot current aggregate as a baseline file (for later --compare).

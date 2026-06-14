@@ -12498,6 +12498,39 @@ else
   fail "K105: skill descriptions exceed budget —$K105_OVERFLOW Trim to ≤${K105_BUDGET}b — descriptions go into the Skill tool's per-session catalog and burn prompt budget."
 fi
 
+# K106: telemetry CLI input validation (mcp-stats, token-report).
+# Prior silent-wrong-result bugs in these telemetry surfaces (companions
+# to the dispatch warnings fix in K104):
+#   mcp-stats --since=garbage     → exit 0, filter silently no-op'd (NaN > 0 = false)
+#   token-report --since=garbage  → same silent no-op pattern
+#   token-report --sessions=garbage → exit 0, returned 0 sessions (slice(0, "garbage") → 0)
+#   token-report --sessions=-5    → exit 0, returned slice(0, -5) (removed last 5)
+# All four now reject with exit 2 + stderr error message. K106 locks the
+# rejection contract so future regressions get caught in CI.
+# `set +eo pipefail` inside each subshell — required because the expected
+# non-zero exits from the CLIs would otherwise propagate through the parent
+# script's set -e (same trap K104's input-validation tests had to defuse).
+K106_MS_SINCE_EXIT=$(set +eo pipefail; cd "$ROOT"; node "$CLI" mcp-stats --since=garbage >/dev/null 2>&1; echo $?)
+K106_MS_SINCE_HAS_ERR=$(set +eo pipefail; cd "$ROOT"; node "$CLI" mcp-stats --since=garbage 2>&1 1>/dev/null | grep -c "invalid --since")
+K106_TR_SINCE_EXIT=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --since=garbage >/dev/null 2>&1; echo $?)
+K106_TR_SINCE_HAS_ERR=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --since=garbage 2>&1 1>/dev/null | grep -c "invalid --since")
+K106_TR_SESS_BAD_EXIT=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --sessions=garbage >/dev/null 2>&1; echo $?)
+K106_TR_SESS_BAD_HAS_ERR=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --sessions=garbage 2>&1 1>/dev/null | grep -c "invalid --sessions")
+K106_TR_SESS_NEG_EXIT=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --sessions=-5 >/dev/null 2>&1; echo $?)
+K106_TR_SESS_ZERO_EXIT=$(set +eo pipefail; cd "$ROOT"; node "$CLI" token-report --sessions=0 >/dev/null 2>&1; echo $?)
+if [ "$K106_MS_SINCE_EXIT" = "2" ] \
+   && [ "$K106_MS_SINCE_HAS_ERR" = "1" ] \
+   && [ "$K106_TR_SINCE_EXIT" = "2" ] \
+   && [ "$K106_TR_SINCE_HAS_ERR" = "1" ] \
+   && [ "$K106_TR_SESS_BAD_EXIT" = "2" ] \
+   && [ "$K106_TR_SESS_BAD_HAS_ERR" = "1" ] \
+   && [ "$K106_TR_SESS_NEG_EXIT" = "2" ] \
+   && [ "$K106_TR_SESS_ZERO_EXIT" = "2" ]; then
+  pass "K106: telemetry CLI input validation (mcp-stats --since, token-report --since/--sessions all reject invalid input with exit 2 + stderr message)"
+else
+  fail "K106: telemetry CLI validation mismatch — ms_since_exit=$K106_MS_SINCE_EXIT ms_since_err=$K106_MS_SINCE_HAS_ERR tr_since_exit=$K106_TR_SINCE_EXIT tr_since_err=$K106_TR_SINCE_HAS_ERR tr_sess_bad_exit=$K106_TR_SESS_BAD_EXIT tr_sess_bad_err=$K106_TR_SESS_BAD_HAS_ERR tr_sess_neg_exit=$K106_TR_SESS_NEG_EXIT tr_sess_zero_exit=$K106_TR_SESS_ZERO_EXIT"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]
