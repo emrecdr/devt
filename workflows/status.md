@@ -123,12 +123,25 @@ Deferred queue: {open} open  (use /devt:note --defer list to review)
 
 Stuck-signal: {deny_count} denies in current session  (review .devt/state/preflight-denies.jsonl)
 
+Dispatch warnings: {raw_dispatch_count} raw_dispatch + {task_output_count} cliff signal(s) since workflow start  (run `node bin/devt-tools.cjs dispatch warnings --by-source` to inspect)
+
 Next: {description of what comes next}
 ```
 
 **Deferred queue inclusion**: always include the line if `deferred count` reports `open > 0`. Suppress when `open === 0` to avoid noise. The queue persists across `/devt:workflow --cancel`, so a long-running deferred backlog stays visible in every status check.
 
 **Stuck-signal inclusion**: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check` and include the line only when `deny_count > 0`. Suppress when zero (the common case). Surfaces preflight, bash_destroy, and no_verify denies in the current workflow session — gives the user early visibility into guardrail loops before an autonomous flow pauses on the same signal.
+
+**Dispatch warnings inclusion** (cal #21 F12, A2): surface the line only when at least one warning of either source has been logged since the current workflow started. Read `workflow.yaml::first_created_at` and pipe it to `--since`:
+
+```bash
+WF_START=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.first_created_at||o.created_at||'');}catch{console.log('');}}")
+if [ -n "$WF_START" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch warnings --since="$WF_START" --by-source 2>/dev/null
+fi
+```
+
+Suppress when both counts are zero. `raw_dispatch` indicates orchestrator bypass attempts (Task() calls without `<scope_trust>/<scope_hint>/<memory_signal>` blocks); `task_output_bytes` (renamed for status display as "cliff signals") indicates sub-agent return-size anomalies caught by `hooks/task-truncation-detector.sh`. Both are session-scoped via the `--since` filter so the counts reflect the current workflow only.
 
 **Pre-Flight Brief inclusion**: if `.devt/state/preflight-brief.md` exists, run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight status` to get its FRESH/STALE/MISSING status + generated_at, and surface that line in the status output. STALE is a soft warning — suggest re-running `/devt:preflight` if the workflow's scope feels different from the Brief's task.
 

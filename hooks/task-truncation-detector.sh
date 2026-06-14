@@ -99,7 +99,16 @@ node -e "
   // as a suspiciously LARGE return signals context overflow. Field evidence:
   // 140 bytes; chosen threshold 500 gives 3.5x headroom over the observed case.
   const LOW_OUTPUT_THRESHOLD = 500;
-  const lowOutput = outputBytes < LOW_OUTPUT_THRESHOLD;
+  // F26 (cal #21): proportional-response gate. Trivial/experimental dispatches
+  // with tiny prompts (e.g. 112-byte probe → 39-byte reply) tripped lowOutput
+  // and produced false-alarm SendMessage-resume suggestions. Real workflow
+  // dispatches carry envelope blocks alone >= ~1KB; below that, small reply
+  // is proportional, not a cliff. Gate fires only when the prompt was
+  // substantive (>= 1000 bytes).
+  const PROMPT_SIZE_GATE = 1000;
+  const promptText = (input.tool_input || {}).prompt || '';
+  const promptBytes = Buffer.byteLength(promptText, 'utf8');
+  const lowOutput = outputBytes < LOW_OUTPUT_THRESHOLD && promptBytes >= PROMPT_SIZE_GATE;
 
   // WI-3b: opportunistic stop_reason capture. Claude API messages carry a
   // stop_reason field (end_turn / max_tokens / tool_use / pause_turn / refusal).
@@ -131,7 +140,37 @@ node -e "
   // skip this short-circuit so every dispatch logs a record (no advisory
   // emit on the no-signal path — that part stays signal-gated below).
   const cliffFired = nearCliff || lowOutput || midTaskLanguage;
-  if (!cliffFired && !logAll) process.exit(0);
+
+  // A2b (cal #21 F24): compute raw_dispatch hint BEFORE the cliff-exit so
+  // the hook can still emit the hint even when this particular dispatch
+  // didn't trip a cliff. Operator-confirmed UX preference: catch the signal
+  // in the act-on-it window (PostToolUse return time). Threshold: any
+  // raw_dispatch entry in the last 60 minutes triggers the hint.
+  let rawDispatchHint = null;
+  if (stateDir) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dispatchPath = path.join(stateDir, 'dispatch-warnings.jsonl');
+      if (fs.existsSync(dispatchPath)) {
+        const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+        const content = fs.readFileSync(dispatchPath, 'utf8');
+        let recentCount = 0;
+        for (const ln of content.split('\n')) {
+          if (!ln) continue;
+          try {
+            const r = JSON.parse(ln);
+            if (r.source === 'raw_dispatch' && r.ts && r.ts >= oneHourAgo) recentCount++;
+          } catch { /* malformed line — counted via JSONL parse path below */ }
+        }
+        if (recentCount > 0) {
+          rawDispatchHint = '[devt] ' + recentCount + ' raw_dispatch incident(s) in last hour — run: node bin/devt-tools.cjs dispatch warnings --by-agent';
+        }
+      }
+    } catch { /* read failure must not break hook */ }
+  }
+
+  if (!cliffFired && !logAll && !rawDispatchHint) process.exit(0);
 
   // Forensic append — best-effort, never fails the hook.
   if (stateDir) {
@@ -156,9 +195,6 @@ node -e "
     } catch { /* forensic write failure must NEVER affect the hook */ }
   }
 
-  // Advisory only fires on cliff signals — calibration-mode log-all writes
-  // forensic records but does NOT add orchestrator-visible advisory noise.
-  if (!cliffFired) process.exit(0);
 
   // Compose advisory based on which cliff triggered. The two cliffs are mutually
   // exclusive by definition (output can't be both > 40KB and < 500 bytes).
@@ -171,7 +207,7 @@ node -e "
       'consider (a) reading the structured sidecar artifact written by this agent instead of the prose return, ',
       '(b) re-dispatching with a tighter scope, or (c) splitting the work across multiple Task calls.',
     ].join('');
-  } else {
+  } else if (cliffFired) {
     // lowOutput OR midTaskLanguage branch — both signal possible mid-task return
     const signals = [];
     if (lowOutput) signals.push('low output (' + outputBytes + ' bytes, threshold ' + LOW_OUTPUT_THRESHOLD + ')');
@@ -183,6 +219,15 @@ node -e "
       '(b) if Status is PARTIAL or sidecar is absent, SendMessage-resume the same agent with <continue_from_section>...</continue_from_section> ',
       'rather than advancing phase=DONE. See docs/AGENT-CONTRACTS.md::Q8 for PARTIAL semantics.',
     ].join('');
+  } else {
+    // No cliff but raw_dispatch hint earned the path here — advisory IS the hint
+    advisory = '';
+  }
+
+  // A2b: append the raw_dispatch hint to whichever advisory composed above
+  // (or stand alone as the entire advisory when no cliff fired).
+  if (rawDispatchHint) {
+    advisory = advisory ? advisory + '\n\n' + rawDispatchHint : rawDispatchHint;
   }
 
   const output = JSON.stringify({

@@ -2937,6 +2937,98 @@ function recoverPartialImpl(agent) {
 //           reason}. ok=false on timeout (file never stabilized) or path
 // not found. Workflows can choose: BLOCK on ok=false (strict) or warn-and-
 // proceed (best-effort with sentinel logging).
+
+// Cal #21 F-OBS-1 + F23: when a sub-agent dispatch dies mid-flight (credential
+// expiry, network failure, model rate-limit), the orchestrator typically
+// re-dispatches without programmatic visibility into what files the dead
+// dispatch may have already edited. Greenfield's W12 case: died at
+// "Not logged in", retry inherited PermissionQueryParams.scope: str | None
+// from the partial prior session and self-corrected to PScope — but the
+// orchestrator had no signal to know edits had landed. detectInheritedSourceEdits
+// surfaces uncommitted git changes filtered by mtime > workflow start so
+// orchestrators can decide before re-dispatching: clean (revert prior edits),
+// merge (treat as in-progress work), or investigate.
+//
+// Returns: {ok, workflow_started_at, count_total, count_after_workflow_start,
+//           recommendation, guidance, files}. files[] entries carry status code
+//           (M/A/D etc.), path, and mtime_after_workflow_start boolean.
+function detectInheritedSourceEdits() {
+  const { execSync } = require("child_process");
+  let workflowStartIso = null;
+  try {
+    const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
+    if (fs.existsSync(wfPath)) {
+      const raw = fs.readFileSync(wfPath, "utf8");
+      // first_created_at is the immutable session anchor (per existing
+      // semantics in state.cjs). created_at rotates on workflow_type
+      // transitions; for the inheritance-detection use case we want the
+      // earliest anchor of the current session.
+      const m = raw.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m) ||
+                raw.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+      if (m) workflowStartIso = m[1].trim();
+    }
+  } catch { /* no workflow active; report all uncommitted as ambient */ }
+  const workflowStartMs = workflowStartIso ? new Date(workflowStartIso).getTime() : 0;
+  let porcelain;
+  try {
+    porcelain = execSync("git status --porcelain", {
+      cwd: findProjectRoot(),
+      timeout: 3000,
+      encoding: "utf8",
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "git status failed (not a git repo, or git unavailable)",
+      error: e.message,
+    };
+  }
+  const files = [];
+  let filesAfterStart = 0;
+  for (const line of porcelain.split("\n")) {
+    if (!line) continue;
+    const status = line.slice(0, 2);
+    const filename = line.slice(3).trim();
+    // Skip untracked (??) — these could be the current dispatch's in-progress
+    // writes, not inherited state. Skip ignored (!!) — irrelevant.
+    if (status === "??" || status === "!!") continue;
+    let mtimeAfterStart = false;
+    if (workflowStartMs > 0) {
+      try {
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+        const stat = fs.statSync(path.join(findProjectRoot(), filename));
+        mtimeAfterStart = stat.mtimeMs > workflowStartMs;
+      } catch { /* file may have been deleted (status D) */ }
+    }
+    if (mtimeAfterStart) filesAfterStart++;
+    files.push({
+      status: status.trim(),
+      file: filename,
+      mtime_after_workflow_start: mtimeAfterStart,
+    });
+  }
+  let recommendation, guidance;
+  if (files.length === 0) {
+    recommendation = "clean";
+    guidance = "No uncommitted source edits — safe to dispatch.";
+  } else if (filesAfterStart > 0) {
+    recommendation = "review";
+    guidance = `${filesAfterStart} file(s) modified since workflow start at ${workflowStartIso}. If you did not intend these edits, run \`git diff\` to inspect, then either commit them as part of the current workflow OR \`git checkout <file>\` to revert before re-dispatching.`;
+  } else {
+    recommendation = "ambient_uncommitted";
+    guidance = `${files.length} uncommitted file(s) predate the current workflow (ambient state). Likely operator WIP from before workflow start; usually safe to ignore, but worth a glance if a dispatch dies unexpectedly.`;
+  }
+  return {
+    ok: true,
+    workflow_started_at: workflowStartIso,
+    count_total: files.length,
+    count_after_workflow_start: filesAfterStart,
+    recommendation,
+    guidance,
+    files,
+  };
+}
+
 function assertFileQuiescent(filePath, args) {
   if (!filePath || typeof filePath !== "string") {
     return { ok: false, reason: "missing path argument" };
@@ -4918,6 +5010,8 @@ function run(subcommand, args) {
       return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
     case "recover-partial-impl":
       return recoverPartialImpl(args[0]);
+    case "check-inherited-edits":
+      return detectInheritedSourceEdits();
     case "assert-file-quiescent":
       return assertFileQuiescent(args[0], args.slice(1));
     case "assert-lanes-quiesced":
@@ -4969,7 +5063,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }

@@ -5884,8 +5884,12 @@ echo "== Task-matcher hooks accept BOTH tool_name='Task' AND tool_name='Agent' =
 AGENT_TMP=$(mktemp -d)
 mkdir -p "$AGENT_TMP/.devt/state"
 AGENT_FAILURES=""
-# task-truncation-detector writes a record on every Task/Agent fire
-(cd "$AGENT_TMP" && echo '{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"devt:programmer"},"tool_response":"x"}' | bash "$ROOT/hooks/task-truncation-detector.sh") >/dev/null 2>&1
+# task-truncation-detector writes a record on every Task/Agent fire when a
+# cliff signal triggers. F26 (cal #21): lowOutput now also requires the
+# input prompt to be >= 1000 bytes to fire (proportional-response gate),
+# so the fixture includes a 1024-byte filler prompt to exercise the path.
+AGENT_PROMPT=$(node -e "process.stdout.write('A'.repeat(1024))")
+(cd "$AGENT_TMP" && printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"devt:programmer\",\"prompt\":\"$AGENT_PROMPT\"},\"tool_response\":\"x\"}" | bash "$ROOT/hooks/task-truncation-detector.sh") >/dev/null 2>&1
 if ! tail -1 "$AGENT_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null | /usr/bin/grep -q "task_output_bytes"; then
   AGENT_FAILURES="${AGENT_FAILURES}task-truncation-detector "
 fi
@@ -5930,7 +5934,11 @@ mkdir -p "$TRUNC_TMP/.devt/state"
 # WI-3b (greenfield calibration #17): LOW-output path NOW emits an advisory.
 # Suspiciously small returns are a mid-task wall signal greenfield's "Now B.5"
 # case (140 bytes) exposed. Threshold: <500 bytes triggers LOW cliff advisory.
-LOW_OUT=$(cd "$TRUNC_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+# F26 (cal #21): proportional-response gate — lowOutput now requires the
+# input prompt to be >= 1000 bytes (real workflow dispatch territory) to
+# fire. Fixtures use a 1024-byte filler prompt to represent that.
+TRUNC_PROMPT=$(node -e "process.stdout.write('A'.repeat(1024))")
+LOW_OUT=$(cd "$TRUNC_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\",\"prompt\":\"$TRUNC_PROMPT\"},\"tool_response\":\"ok\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
 if echo "$LOW_OUT" | grep -q "below LOW threshold\|SendMessage-resume"; then
   pass "task-truncation-detector emits LOW-output advisory (WI-3b) on tiny sub-agent return"
 else
@@ -12529,6 +12537,96 @@ if [ "$K106_MS_SINCE_EXIT" = "2" ] \
   pass "K106: telemetry CLI input validation (mcp-stats --since, token-report --since/--sessions all reject invalid input with exit 2 + stderr message)"
 else
   fail "K106: telemetry CLI validation mismatch — ms_since_exit=$K106_MS_SINCE_EXIT ms_since_err=$K106_MS_SINCE_HAS_ERR tr_since_exit=$K106_TR_SINCE_EXIT tr_since_err=$K106_TR_SINCE_HAS_ERR tr_sess_bad_exit=$K106_TR_SESS_BAD_EXIT tr_sess_bad_err=$K106_TR_SESS_BAD_HAS_ERR tr_sess_neg_exit=$K106_TR_SESS_NEG_EXIT tr_sess_zero_exit=$K106_TR_SESS_ZERO_EXIT"
+fi
+
+# K107: cliff detector proportional-response gate (cal #21 F26).
+# Greenfield's F21 falsification test accidentally exposed this: a 112-byte
+# probe prompt with a 39-byte reply tripped lowOutput and produced a false
+# SendMessage-resume hint. Real cliff hits happen when an agent processes a
+# substantial input (envelope blocks alone are >= ~1KB) but returns a stub.
+# F26 added a 1000-byte prompt-size gate to lowOutput. K107 locks both halves
+# of the contract: trivial prompt → no advisory; substantial prompt → advisory.
+K107_TMP=$(mktemp -d)
+mkdir -p "$K107_TMP/.devt/state"
+# Case 1: trivial prompt (50 bytes) + small reply (10 bytes) → no advisory
+K107_TRIVIAL=$(cd "$K107_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"do a quick thing"},"tool_response":"done"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+# Case 2: substantial prompt (1024 bytes) + small reply (5 bytes) → advisory + record
+K107_BIG_PROMPT=$(node -e "process.stdout.write('A'.repeat(1024))")
+rm -f "$K107_TMP/.devt/state/dispatch-warnings.jsonl"
+K107_SUBSTANTIVE=$(cd "$K107_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\",\"prompt\":\"$K107_BIG_PROMPT\"},\"tool_response\":\"ok\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+K107_TRIVIAL_QUIET=no
+K107_SUBSTANTIVE_LOUD=no
+K107_RECORD_WRITTEN=no
+[ -z "$K107_TRIVIAL" ] && K107_TRIVIAL_QUIET=yes
+echo "$K107_SUBSTANTIVE" | grep -q "SendMessage-resume\|below LOW threshold" && K107_SUBSTANTIVE_LOUD=yes
+[ -s "$K107_TMP/.devt/state/dispatch-warnings.jsonl" ] && tail -1 "$K107_TMP/.devt/state/dispatch-warnings.jsonl" | grep -q '"low_output":true' && K107_RECORD_WRITTEN=yes
+rm -rf "$K107_TMP"
+if [ "$K107_TRIVIAL_QUIET" = "yes" ] && [ "$K107_SUBSTANTIVE_LOUD" = "yes" ] && [ "$K107_RECORD_WRITTEN" = "yes" ]; then
+  pass "K107: cliff detector proportional-response gate (trivial prompt → silent; substantive prompt → advisory + lowOutput record)"
+else
+  fail "K107: proportional-response gate broken — trivial_quiet=$K107_TRIVIAL_QUIET substantive_loud=$K107_SUBSTANTIVE_LOUD record_written=$K107_RECORD_WRITTEN"
+fi
+
+# K108: state check-inherited-edits surfaces uncommitted source files (cal #21 A4).
+# Greenfield's W12 retry inherited a `str | None` type from a prior dead dispatch
+# and self-corrected to `PScope`. The orchestrator had no programmatic signal that
+# files had been modified. detectInheritedSourceEdits surfaces uncommitted git
+# state filtered by workflow start mtime so re-dispatching is an informed choice.
+# K108 validates the function's response shape against fixtures with three states:
+#   (a) clean git repo no workflow active → ok=true, recommendation=clean
+#   (b) clean git repo + dirty file mtime>workflow_start → recommendation=review
+#   (c) non-git directory → ok=false with clear reason
+K108_TMP=$(mktemp -d)
+mkdir -p "$K108_TMP/.devt/state"
+# Case A: no git → ok=false
+K108_NOGIT=$(cd "$K108_TMP" && node "$CLI" state check-inherited-edits 2>/dev/null)
+K108_NOGIT_OK=$(echo "$K108_NOGIT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===false?'yes':'no');}catch{console.log('parse-err');}})")
+# Case B: git init + workflow.yaml + uncommitted file modified after start → review
+(cd "$K108_TMP" && git init -q && git config user.email "a@b.c" && git config user.name "test" && echo "baseline" > tracked.txt && git add tracked.txt && git commit -q -m "baseline" 2>/dev/null) >/dev/null 2>&1
+# workflow.yaml with first_created_at set to 1 hour ago
+K108_OLD_TS=$(node -e "console.log(new Date(Date.now() - 3600000).toISOString())")
+printf 'first_created_at: "%s"\nworkflow_id: "k108-test"\nactive: true\n' "$K108_OLD_TS" > "$K108_TMP/.devt/state/workflow.yaml"
+# Modify the tracked file now (mtime > workflow start)
+echo "edit" >> "$K108_TMP/tracked.txt"
+K108_DIRTY=$(cd "$K108_TMP" && node "$CLI" state check-inherited-edits 2>/dev/null)
+K108_DIRTY_REC=$(echo "$K108_DIRTY" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.recommendation||'none');}catch{console.log('parse-err');}})")
+K108_DIRTY_COUNT=$(echo "$K108_DIRTY" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.count_after_workflow_start||0);}catch{console.log('parse-err');}})")
+K108_DIRTY_HAS_GUIDANCE=$(echo "$K108_DIRTY" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(typeof o.guidance==='string' && o.guidance.length>10?'yes':'no');}catch{console.log('parse-err');}})")
+rm -rf "$K108_TMP"
+if [ "$K108_NOGIT_OK" = "yes" ] \
+   && [ "$K108_DIRTY_REC" = "review" ] \
+   && [ "$K108_DIRTY_COUNT" = "1" ] \
+   && [ "$K108_DIRTY_HAS_GUIDANCE" = "yes" ]; then
+  pass "K108: state check-inherited-edits (no-git → ok=false; dirty post-workflow-start → recommendation=review + count_after_workflow_start=1 + guidance present)"
+else
+  fail "K108: check-inherited-edits broken — nogit_ok=$K108_NOGIT_OK dirty_rec=$K108_DIRTY_REC dirty_count=$K108_DIRTY_COUNT dirty_guidance=$K108_DIRTY_HAS_GUIDANCE"
+fi
+
+# K109: PostToolUse raw_dispatch return-time hint (cal #21 A2b).
+# When dispatch-warnings.jsonl contains raw_dispatch entries within the last
+# hour, task-truncation-detector.sh emits a one-line hint in additionalContext
+# regardless of whether the current dispatch tripped a cliff. Operator-confirmed
+# UX preference from F24 — catch the signal in the act-on-it window.
+K109_TMP=$(mktemp -d)
+mkdir -p "$K109_TMP/.devt/state"
+# Case A: no recent raw_dispatch entries → no hint, no advisory
+K109_QUIET=$(cd "$K109_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"tiny"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+# Case B: seed a fresh raw_dispatch entry → hint emits
+K109_NOW=$(node -e "console.log(new Date().toISOString())")
+echo "{\"ts\":\"$K109_NOW\",\"source\":\"raw_dispatch\",\"agent\":\"devt:code-reviewer\",\"prompt_bytes\":18,\"prompt_preview\":\"k109 seed\"}" > "$K109_TMP/.devt/state/dispatch-warnings.jsonl"
+K109_LOUD=$(cd "$K109_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"tiny"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+# Case C: seed an OLD raw_dispatch (2 hours ago) → hint should NOT fire
+K109_OLD_TS=$(node -e "console.log(new Date(Date.now() - 7200*1000).toISOString())")
+echo "{\"ts\":\"$K109_OLD_TS\",\"source\":\"raw_dispatch\",\"agent\":\"devt:code-reviewer\",\"prompt_bytes\":18,\"prompt_preview\":\"k109 old\"}" > "$K109_TMP/.devt/state/dispatch-warnings.jsonl"
+K109_AGED=$(cd "$K109_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"tiny"},"tool_response":"ok"}' | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
+K109_QUIET_OK=$([ -z "$K109_QUIET" ] && echo "yes" || echo "no")
+K109_LOUD_OK=$(echo "$K109_LOUD" | /usr/bin/grep -c "raw_dispatch incident" 2>/dev/null || echo 0)
+K109_AGED_OK=$([ -z "$K109_AGED" ] && echo "yes" || echo "no")
+rm -rf "$K109_TMP"
+if [ "$K109_QUIET_OK" = "yes" ] && [ "$K109_LOUD_OK" = "1" ] && [ "$K109_AGED_OK" = "yes" ]; then
+  pass "K109: PostToolUse raw_dispatch return-time hint (no recent entries → silent; fresh entry → hint emits; aged entry → silent)"
+else
+  fail "K109: A2b hint emitter broken — quiet=$K109_QUIET_OK loud_match_count=$K109_LOUD_OK aged_silent=$K109_AGED_OK"
 fi
 
 echo
