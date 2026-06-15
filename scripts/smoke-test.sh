@@ -5380,7 +5380,7 @@ echo "== Documentation discipline: no devt-internal version refs =="
 # this aligns local behavior with CI behavior.
 VERSION_REF_HITS=$(cd "$ROOT" && git grep -nE "v0\.[0-9]+\.[0-9]+|\bsince v[0-9]" -- \
   'agents/*.md' 'workflows/*.md' 'skills/**/*.md' 'docs/*.md' 2>/dev/null \
-  | grep -vE "^docs/superpowers/plans/|^CHANGELOG\.md|/CHANGELOG\.md" || true)
+  | grep -vE "^docs/superpowers/plans/|^CHANGELOG\.md|/CHANGELOG\.md|^docs/archive/" || true)
 if [ -z "$VERSION_REF_HITS" ]; then
   pass "no devt-internal version refs in agents/workflows/skills/docs"
 else

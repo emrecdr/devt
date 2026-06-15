@@ -88,7 +88,7 @@ Project templates in `templates/` (python-fastapi, go, typescript-node, vue-boot
 
 ## Development Commands
 
-Primary CLI surface (one-liners for the every-session token budget; verbose entries are in `docs/INTERNALS.md::Development CLI Reference`):
+Primary CLI surface (one-liners for the every-session token budget; verbose entries are in `docs/operator-guide/CLI-REFERENCE.md`):
 
 ```bash
 # Compound context init (one call returns workflow context as JSON — token-saver pattern)
@@ -117,7 +117,7 @@ node bin/devt-tools.cjs semantic sync|query|compact|status
 node bin/devt-tools.cjs report window|generate [--weeks N]
 ```
 
-→ docs/INTERNALS.md::Development CLI Reference for the full inventory including `state assert-*` gates, claim-check, `recover-partial-impl`, multi-instance isolation (`state new-instance|list-instances`), `static-compress`, and `graphify rebuild`.
+→ docs/operator-guide/CLI-REFERENCE.md for the full inventory including `state assert-*` gates, claim-check, `recover-partial-impl`, multi-instance isolation (`state new-instance|list-instances`), `static-compress`, and `graphify rebuild`.
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
