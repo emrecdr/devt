@@ -2213,7 +2213,7 @@ function assertVerifierGradedAllAxes() {
       rubric_axes_present: rubricAxesPresent,
       criteria_total: criteriaTotal,
       missing_axes_count: missing,
-      reason: `rubric declares ${rubricAxesPresent} axes (A–${String.fromCharCode(64 + rubricAxesPresent)}) but verifier graded only ${criteriaTotal}; verifier stopped early and skipped ${missing} axis (axes). Re-dispatch verifier with the full rubric body and re-grade.`,
+      reason: `rubric declares ${rubricAxesPresent} axes (A–${rubricAxesPresent <= 26 ? String.fromCharCode(64 + rubricAxesPresent) : "Z+"}) but verifier graded only ${criteriaTotal}; verifier stopped early and skipped ${missing} axis (axes). Re-dispatch verifier with the full rubric body and re-grade.`,
     };
   }
   return {

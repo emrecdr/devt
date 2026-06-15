@@ -718,6 +718,25 @@ MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.
 VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
 ```
 
+**Cal #22 F2 — verifier walk-all-axes substance gate.** Greenfield's verifier walked rubric axes A–G and stopped at G, silently skipping axis H. Verdict came back `satisfied` despite the missing grade. Post-hoc check: count axes in the pinned rubric and compare against `verification.json::criteria_total`. On mismatch, override the verdict to `needs_revision` so the workflow re-dispatches the verifier with explicit instruction to walk every declared axis.
+
+```bash
+AXES_ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-graded-all-axes 2>/dev/null)
+AXES_OK=$(echo "$AXES_ASSERT" | jq -r '.ok // false')
+AXES_COVERAGE_GAP=false
+if [ "$AXES_OK" = "false" ]; then
+  AXES_REASON=$(echo "$AXES_ASSERT" | jq -r '.reason // "verifier under-graded the rubric"')
+  echo "[axes-coverage] $AXES_REASON"
+  AXES_COVERAGE_GAP=true
+  # Force needs_revision regardless of verifier's self-reported verdict — its
+  # satisfied/needs_revision split is unreliable when it didn't walk the full
+  # rubric. Surface AXES_REASON + missing_axes_count as `<reviewer_feedback>`
+  # in the next iteration's verifier dispatch so it grades every axis explicitly.
+fi
+```
+
+When `AXES_COVERAGE_GAP=true`, treat the verdict as `needs_revision` regardless of what `verification.json::verdict` says — skip the route block below and apply the RETRY operator using `AXES_REASON` as the `revisions[]` gap. When the workflow hits `MAX_ITER` with `AXES_COVERAGE_GAP=true` still set, PRUNE with explicit notice that axes were under-graded so the user sees the structural gap, not just the count gap.
+
 Route on `verdict`:
 
 - **`verdict=satisfied`** (status=VERIFIED or DONE_WITH_CONCERNS): proceed to `present_findings`.
