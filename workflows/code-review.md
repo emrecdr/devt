@@ -581,14 +581,17 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 
     **Self-grade against the rubric as you write (C7-7).** The same axes the
     verifier will use to grade your review are inlined in <rubric_content> (or
-    readable at <rubric_path> as fallback). Walk axes A–G before emitting
-    review.md: scope coverage (every input file mentioned), finding specificity
-    (file:line + rule ref or pattern citation), severity calibration (no
-    Critical-rated nits, no Minor-rated security issues), remediation
-    concreteness (Critical/Important findings include a fix direction), ADR
-    Compliance section when memory affects-paths returned hits, Reuse
-    Discipline section when reuse-candidates.md is non-empty. Closing these
-    gaps in your first pass avoids a verifier revision loop.
+    readable at <rubric_path> as fallback). Walk EVERY declared axis (both the
+    A–G table rows AND any `## Axis [A-Z] —` top-level headings, currently
+    including axis H for dispatch warnings acknowledgment per cal #22 F2)
+    before emitting review.md: scope coverage (every input file mentioned),
+    finding specificity (file:line + rule ref or pattern citation), severity
+    calibration (no Critical-rated nits, no Minor-rated security issues),
+    remediation concreteness (Critical/Important findings include a fix
+    direction), ADR Compliance section when memory affects-paths returned
+    hits, Reuse Discipline section when reuse-candidates.md is non-empty,
+    Dispatch warnings section per axis H. Closing these gaps in your first
+    pass avoids a verifier revision loop.
 
     Graph-impact map: the orchestrator wrote `.devt/state/graph-impact.md` (or `graphify-skip-reason.txt`)
     during context_init using upstream Graphify MCP. You consume that file READ-ONLY — your tool surface
