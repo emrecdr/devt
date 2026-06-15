@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.94.0] - 2026-06-15
+
 ### Cal #22 Round 1 — Telemetry to Enforcement (F1 + F2 + F3 + F4)
 
 Greenfield's deep field session against v0.93.3 produced a 9-finding audit with a coherent theme: gates that compute structured signals but don't enforce them. Three distinct gates fit the pattern (`assert-graphify-decision` informational drill-down fields, verifier rubric axis taxonomy, `check-symbol-godnodes` non-monotonic aggregation). All trace to the same CON-001 substance-enforcement-gates concept — instances 6 and 7 added to its field-validated table.
@@ -20,7 +22,7 @@ Greenfield's deep field session against v0.93.3 produced a 9-finding audit with 
 
 **F4 — CON-001 sixth and seventh instances.** Updated `.devt/memory/concepts/CON-001-substance-enforcement-gates.md::Field-validated instances (now 7)` with C22F1 (gate flip) and C22F2 (walk-all-axes). The CON-001 pattern is now structural to devt's design vocabulary — 7 field instances over 6 months means any new gate that returns structured fields without enforcing them inherits the concept's accumulated lessons.
 
-Drift-guard stack now **21-deep (K94–K115)**. Smoke 860/860, locking 3/3.
+Drift-guard stack now **22-deep (K94–K115)**. Smoke 860/860, locking 3/3.
 
 ## [0.93.3] - 2026-06-15
 

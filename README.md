@@ -970,7 +970,7 @@ Returns JSON with a `summary` (total/static/dynamic/wrapper bytes + percentages)
 
 ### CI
 
-GitHub Actions runs `scripts/smoke-test.sh` (850+ assertions across all CLI subcommands, including a 12-deep drift-guard stack `K94–K105` covering command stratification, parameter routing, stale-ref scans, `workflow_type` registry parity, size budgets, and CLI surface contracts) and `scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Version coherence, CHANGELOG coverage, and `workflow_type` registry coverage are enforced. Releases are tag-driven — push `vX.Y.Z` to fire `.github/workflows/release.yml` which extracts the matching CHANGELOG section into the GitHub release notes.
+GitHub Actions runs `scripts/smoke-test.sh` (860+ assertions across all CLI subcommands, including a 22-deep drift-guard stack `K94–K115` covering command stratification, parameter routing, stale-ref scans, `workflow_type` registry parity, size budgets, CLI surface contracts, telemetry-CLI input validation, push-not-pull session signal surfacing, and substance-enforcement gates per CON-001) and `scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Version coherence, CHANGELOG coverage, and `workflow_type` registry coverage are enforced. Releases are tag-driven — push `vX.Y.Z` to fire `.github/workflows/release.yml` which extracts the matching CHANGELOG section into the GitHub release notes.
 
 ---
 

@@ -572,7 +572,10 @@ node bin/devt-tools.cjs state check-agent-output <path> --structural --baseline=
 # Structural-drift check against a stub-first sentinel snapshot — extracts headings/code-blocks/URLs/paths/inline-codes/bullets via structural-validator.cjs (caveman validate.py port) and reports drift via structural_drift:{ok, errors, warnings, mode}. Default mode=superset (final must contain all baseline structures, may add more — fits devt's stub-first protocol). mode=equality enforces strict identity. Gated by config.validator.structural_mode (default 'warn'); 'off' is a no-op even when the flag is passed.
 
 node bin/devt-tools.cjs state assert-graphify-decision
-# Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs
+# Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs. Cal #22 F1: when plan_tier ∈ {symbol_anchored, bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections AND graphify_decision_mode=block (default), returns ok:false to force F16 drill-down completion. Opt-out via .devt/config.json::graphify_decision_mode: "warn" (mirrors dispatch_hygiene_mode pattern; CON-001 instance #6).
+
+node bin/devt-tools.cjs state assert-verifier-graded-all-axes
+# Cal #22 F2: post-hoc check that the verifier walked every axis in the pinned rubric. Counts both heading-style (`## Axis [A-Z] —`) and table-row-style (`| **X.`) axes; compares against verification.json::criteria_total. Mismatch → ok:false with missing_axes_count surfaced. Workflow_types whose rubrics don't use axis taxonomy (e.g. dev uses verification levels L1-L5.5) return ok:true with explicit skip reason. Greenfield calibration #22 evidence: verifier walked code_review axes A–G and stopped, silently skipping axis H (CON-001 instance #7).
 
 node bin/devt-tools.cjs state list-lane-outputs
 # Read workflow.yaml::lanes[] registry with per-lane file existence + size + stale flag (mtime < first_created_at)
