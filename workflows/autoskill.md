@@ -51,7 +51,7 @@ Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::
 
 Read the current session's workflow artifacts from .devt/state/ (if they exist).
 Read the learning playbook for historical patterns.
-Read `${CLAUDE_PLUGIN_ROOT}/guardrails/skill-update-guidelines.md` — safe patterns for evolving the plugin.
+Read `${CLAUDE_PLUGIN_ROOT}/docs/operator-guide/skill-update-guidelines.md` — safe patterns for evolving the plugin.
 </step>
 
 <step name="detect" gate="signals identified">

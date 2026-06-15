@@ -1762,7 +1762,7 @@ Agents follow Rules 1-4 from the programmer agent's deviation framework (see `ag
 
 **Scope**: Only auto-fix issues directly caused by the current task. Pre-existing issues are logged to `.devt/state/scratchpad.md` under category `Deferred`.
 
-**Failure recovery**: If a workflow phase is stuck in a fix loop or an agent repeatedly returns BLOCKED, consult `${CLAUDE_PLUGIN_ROOT}/guardrails/incident-runbook.md` for escalation procedures before giving up.
+**Failure recovery**: If a workflow phase is stuck in a fix loop or an agent repeatedly returns BLOCKED, consult `${CLAUDE_PLUGIN_ROOT}/docs/operator-guide/incident-runbook.md` for escalation procedures before giving up.
 </deviation_rules>
 
 <success_criteria>
