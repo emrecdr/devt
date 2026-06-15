@@ -5465,7 +5465,7 @@ echo "== No legacy observation_search refs (server-beta runtime, breaks worker d
 # scripts/smoke-test.sh excluded because this gate's own grep pattern matches itself.
 OBS_SEARCH_HITS=$(grep -rnE "mcp__plugin_claude-mem_mcp-search__observation_search" \
   "$ROOT/agents" "$ROOT/workflows" "$ROOT/skills" "$ROOT/bin" "$ROOT/docs" \
-  2>/dev/null | grep -vE "/CHANGELOG\.md|/docs/superpowers/plans/" || true)
+  2>/dev/null | grep -vE "/CHANGELOG\.md|/docs/superpowers/plans/|/docs/archive/" || true)
 if [ -z "$OBS_SEARCH_HITS" ]; then
   pass "no observation_search refs in agents/workflows/skills/bin/docs"
 else
