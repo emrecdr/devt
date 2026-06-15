@@ -6,6 +6,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 simplification — Round 1 (6C complete; remaining cuts northstar-validated)
+
+Greenfield Cal #23 surfaced 18 SAFE-marked simplification candidates after deep field evaluation of v0.94.1. Per-cut northstar audit (goals: clear protocols, quality always increases, tokens always optimized, delegate to graphify+claude-mem) demoted 5 from SAFE → SKIP and recategorized 2 from cuts → other:
+
+- **SKIP** `10A inline config keys` — fails goal #2 (operator agency)
+- **SKIP** `10C drop FORBIDDEN_KEYS guard` — fails goal #2 (prototype-pollution defense is functional security, not a defensive limit per the standing rule)
+- **SKIP** `7B remove DEVT_DISABLED_HOOKS` — fails goal #2 (operator kill-switch agency)
+- **SKIP** `7D remove bash-guard denials` — fails goal #2 catastrophically (`rm -rf /` defense)
+- **SKIP** `4B trivially-true K-gates` — fails goal #2 (future-regression protection)
+- **RECATEGORIZED** `3A 4 single-use asserts` → inline rather than delete
+- **RECATEGORIZED** `8C suggestions aging` → feature, not cut
+
+### 6C — Operator-onboarding guardrails moved to docs/operator-guide/
+
+`incident-runbook.md` + `skill-update-guidelines.md` moved from `guardrails/` to `docs/operator-guide/`. Both are on-demand reads (not in INLINE_GUARDRAILS list), so the move is semantic re-location with no runtime impact. Workflow references updated. `guardrails/` directory now contains ONLY files actually injected at dispatch time (CON-001 substance-vs-form applied to directory structure).
+
+### Remaining cuts (deferred to future cycles, ranked by northstar fit)
+
+| Cut | Why deferred from this session |
+|---|---|
+| 2A/2B/2C agent partials | Fails goal #3 without compile pipeline (agent bodies aren't templated). Pivot to "delete + link" needs K-gate enforcement layer |
+| B2 cal-N refs | More nuanced than greenfield estimated; many refs are inline justifications, not pure prose appendix |
+| 1E F17 CLI extraction | Substantive — needs careful test surface |
+| 5B INTERNALS.md split | Substantive doc restructure |
+| 5C COMMANDS.md per-file | Substantive doc restructure |
+| 7E merge dispatch guards | Substantive hook refactor — both have K-gate test coverage; merge risk-managed |
+| 9A envelope template parameterization | Extends existing template compile system; works with infrastructure rather than against |
+| 4C K-gate redundancy consolidation | Requires audit-first then cuts |
+
+Each surviving cut earns its own focused session with northstar re-validation at apply-time. Smoke 864/864.
+
 ## [0.94.1] - 2026-06-15
 
 ### Meta-gates — prevent next cycle's drift before it happens
