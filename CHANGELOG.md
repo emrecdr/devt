@@ -22,7 +22,28 @@ Greenfield's deep field session against v0.93.3 produced a 9-finding audit with 
 
 **F4 — CON-001 sixth and seventh instances.** Updated `.devt/memory/concepts/CON-001-substance-enforcement-gates.md::Field-validated instances (now 7)` with C22F1 (gate flip) and C22F2 (walk-all-axes). The CON-001 pattern is now structural to devt's design vocabulary — 7 field instances over 6 months means any new gate that returns structured fields without enforcing them inherits the concept's accumulated lessons.
 
-Drift-guard stack now **22-deep (K94–K115)**. Smoke 860/860, locking 3/3.
+### Validation pass + axis-H propagation (pre-tag fixes)
+
+A `/simplify` code review on the cal #22 batch caught two findings that would have shipped silently otherwise:
+
+**Validation Finding 1 — `assert-verifier-graded-all-axes` was unwired.** The new state CLI existed and `agents/verifier.md` prose claimed "mismatches fail the workflow's verify step" — but no workflow actually called the CLI post-verifier. Same UX failure mode as cal #21 V6 (CLIs that operators must remember to invoke get forgotten), ironically reintroduced by the same commit that diagnosed the pattern. Wired into `workflows/code-review.md::verify step`: immediately after reading `verification.json`, the workflow calls `assert-verifier-graded-all-axes`; on `ok:false`, it overrides the verifier's self-reported verdict to `needs_revision` and re-dispatches with the missing-axes reason as `<reviewer_feedback>`. The routing skips the verdict block when `AXES_COVERAGE_GAP=true` so the verifier's stale verdict doesn't poison the RETRY decision.
+
+**Validation Finding 2 — charCode boundary for rubrics with > 26 axes.** `String.fromCharCode(64 + rubricAxesPresent)` produced non-letter chars at 27+ (charCode 91 = `[`). Clamped to `"Z+"` for the edge case so the gate's user-facing reason stays legible. Visible-only — gate logic unaffected.
+
+**Doc propagation sweep.** Three forward-looking instructions still said "walk axes A–G" and would have led the code-reviewer agent + verifier dispatch to silently skip axis H — the exact failure mode F2 was designed to prevent. Updated:
+- `agents/code-reviewer.md::Rubric self-check (C7-7)` — walks every declared axis including H; cites cal #22 §Q1 as failure precedent
+- `docs/AGENT-CONTRACTS.md::Reviewer rubric self-check` — clarified hybrid taxonomy (table A–G + heading H); described post-hoc enforcement
+- `templates/dispatch/envelopes/code-reviewer-code_review.tmpl.md` — source-of-truth for the compiled rubric-self-check region in `workflows/code-review.md`. Editing the workflow body directly was reverted by `dispatch compile --write`; updating the template source + recompile persists correctly.
+
+The K1 dispatch-drift gate caught the compile-cache staleness during the doc-sync pass and pointed back to the template source — exactly the kind of architectural discipline check the gate exists for.
+
+### Doc sync to v0.94.0 reality
+
+- `README.md`: drift-guard count 12-deep K94–K105 → 22-deep K94–K115; smoke assertion count 850+ → 860+; scope blurb extended (telemetry-CLI input validation + push-not-pull session signal surfacing + substance-enforcement gates per CON-001)
+- `CLAUDE.md`: drift guards K94–K100 → 22-deep K94–K115
+- `docs/INTERNALS.md`: state CLI reference adds `assert-verifier-graded-all-axes` entry + extends `assert-graphify-decision` to document the cal #22 F1 gate flip semantics
+
+Drift-guard stack now **22-deep (K94–K115)**. Smoke 860/860, locking 3/3, K1 dispatch-drift 0 across 20 compiled regions.
 
 ## [0.93.3] - 2026-06-15
 
