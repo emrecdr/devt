@@ -95,6 +95,22 @@ Choose `failed` only when:
 
 `failed` is a hard stop. The workflow surfaces BLOCKED to the user. Do not use `failed` for "I found a few gaps" — that is what `needs_revision` is for.
 
+## Required: Dispatch warnings acknowledgment
+
+Greenfield calibration #21 V6 surfaced an LLM-operator UX failure mode: session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `verification.md` MUST include a `## Dispatch warnings (session-scoped)` section.
+
+**What goes in the section:**
+
+- Either `raw_dispatch + cliff_signal counts since workflow_start: N + M` (a single line is sufficient when both signals were noise — small N suggests envelope-discipline lapses, small M suggests proportional sub-agent returns).
+- OR a brief "investigated, none load-bearing" line citing `node bin/devt-tools.cjs dispatch warnings --since=<workflow_start>` as the inspection source.
+- OR a structured triage when counts are non-trivial (≥3 of either): one bullet per incident class with the corrective action taken or deferred.
+
+**Verifier check:**
+
+If the section is missing from `verification.md`, the verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "verification.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. This is a process gap, not a quality gap — the implementation work itself is not at issue.
+
+**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, the section may state `n/a (no incidents logged this session)` in one line and pass.
+
 ## Decision Sketch
 
 ```

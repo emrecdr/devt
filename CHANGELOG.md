@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #21 Round 5 V6 — push-not-pull session signal surfacing
+
+Greenfield's V6 honest answer in calibration round 5 revealed an LLM-operator UX failure mode that wasn't anticipated when the cal #21 telemetry changes shipped: A2 (`/devt:status` dispatch warnings line), A2b (PostToolUse return-time hint), A4 (`state check-inherited-edits` CLI) were all infrastructure-correct but **operator-passive** — operators forget the CLIs exist when head-down in a workflow. Greenfield's own confession: "I had the exact use case for `state check-inherited-edits` and forgot it existed." Two concrete fixes inverting the surfacing semantics from pull to push:
+
+**G1 — UserPromptSubmit hook injects session-scoped signals.** Extended `hooks/workflow-context-injector.sh` so the next-prompt `additionalContext` line includes session-scoped signal counts when present (suppressed when both zero). When an active workflow has any raw_dispatch entries since `first_created_at` in `dispatch-warnings.jsonl` OR uncommitted source edits with mtime > workflow start, the hook adds a second line to the existing workflow-status output:
+
+```
+[devt session signal] N raw_dispatch + M cliff signal(s); K uncommitted source edit(s) since workflow start
+  — inspect: dispatch warnings --by-source | state check-inherited-edits
+```
+
+The operator sees the signal at the moment they're issuing the next prompt — no `/devt:status` invocation required. Performance cost: ~50–100ms per UserPromptSubmit (JSONL scan + git status with 1s timeout). Fail-open on any probe error. K112 validates both quiet (no signals → workflow line only) and loud (recent raw_dispatch → workflow + session-signal lines) cases.
+
+**G3 — Verifier rubric mandates `## Dispatch warnings (session-scoped)` section in `verification.md` + `review.md`.** Both `references/rubrics/dev.v1.md` and `references/rubrics/code_review.v1.md` now require finalize-time acknowledgment. The verifier emits `needs_revision` with a `dispatch-warnings` gap when the section is absent. Skip condition: `n/a (no incidents logged this session)` when the JSONL is absent or empty. K113 validates both rubric files contain the requirement + section title.
+
+### Pipefail trap caught for the 5th time (now CON-003-aware)
+
+K112's first attempt hit the same pipefail + `grep -c` + command-substitution trap CON-003 documented as caught 4 times in v0.93. Set count to 5: the `set +eo pipefail` inside the subshell is insufficient when the OUTER script's `set -e` triggers on the substitution's non-zero exit. Required defuser is `|| FALLBACK` appended to the substitution itself, not just inside the subshell. CON-003 reference template should be updated to show both defuser layers in the next revision cycle.
+
+Drift-guard stack now **19-deep (K94–K113)**. Smoke 858/858, locking 3/3.
+
 ## [0.93.2] - 2026-06-15
 
 ### CLI input validation sweep (post-v0.93.1)

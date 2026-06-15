@@ -12688,6 +12688,60 @@ else
   fail "K111: graphify+preflight validation mismatch — pf_bud=$K111_PF_BUDGET_EXIT pf_bud_err=$K111_PF_BUDGET_HAS_ERR gn_depth=$K111_GN_DEPTH_EXIT gn_depth_err=$K111_GN_DEPTH_HAS_ERR gn_mb=$K111_GN_MB_EXIT gn_mb_err=$K111_GN_MB_HAS_ERR gs_lim=$K111_GS_LIM_EXIT gs_lim_err=$K111_GS_LIM_HAS_ERR gn_neg=$K111_GN_NEG_DEPTH_EXIT pf_neg=$K111_PF_NEG_BUDGET_EXIT"
 fi
 
+# K112: G1 — UserPromptSubmit session signal push (cal #21 round 5 V6).
+# Greenfield's V6 honest answer revealed A2/A2b/A4 infrastructure works but
+# discovery surfaces are too passive for an LLM operator — operators forget
+# the CLIs exist when head-down in a workflow. G1 extends the
+# workflow-context-injector hook to push session-scoped telemetry counts
+# into UserPromptSubmit additionalContext when signals exist; stays silent
+# when clean. K112 validates both halves of the contract.
+K112_TMP=$(mktemp -d)
+mkdir -p "$K112_TMP/.devt/state"
+K112_OLD_TS=$(node -e "console.log(new Date(Date.now() - 3600000).toISOString())")
+K112_NOW_TS=$(node -e "console.log(new Date().toISOString())")
+# Active workflow.yaml — first_created_at set 1h ago. Note: K112 does NOT
+# initialize a git repo (the hook's inherited-edit probe fails open on git
+# errors, so we only validate the dispatch-warnings half here). K108
+# already validates state check-inherited-edits against a real git fixture.
+printf 'active: true\nworkflow_id: k112-test\nworkflow_type: dev\nphase: implement\ntier: STANDARD\niteration: 1\ntask: "k112 fixture"\nfirst_created_at: "%s"\n' "$K112_OLD_TS" > "$K112_TMP/.devt/state/workflow.yaml"
+# Case A: quiet (no dispatch warnings) → workflow line only
+K112_QUIET=$(set +eo pipefail; cd "$K112_TMP" && echo '{}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>/dev/null) || K112_QUIET=""
+K112_QUIET_HAS_WF=$(set +eo pipefail; echo "$K112_QUIET" | /usr/bin/grep -c '\[devt\] STANDARD' 2>/dev/null) || K112_QUIET_HAS_WF=0
+K112_QUIET_HAS_SIGNAL=$(set +eo pipefail; echo "$K112_QUIET" | /usr/bin/grep -c 'session signal' 2>/dev/null) || K112_QUIET_HAS_SIGNAL=0
+# Case B: loud (seed recent raw_dispatch) → workflow + session signal lines
+echo "{\"ts\":\"$K112_NOW_TS\",\"source\":\"raw_dispatch\",\"agent\":\"devt:code-reviewer\",\"prompt_bytes\":18,\"prompt_preview\":\"k112 seed\"}" > "$K112_TMP/.devt/state/dispatch-warnings.jsonl"
+K112_LOUD=$(set +eo pipefail; cd "$K112_TMP" && echo '{}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>/dev/null) || K112_LOUD=""
+K112_LOUD_HAS_WF=$(set +eo pipefail; echo "$K112_LOUD" | /usr/bin/grep -c '\[devt\] STANDARD' 2>/dev/null) || K112_LOUD_HAS_WF=0
+K112_LOUD_HAS_SIGNAL=$(set +eo pipefail; echo "$K112_LOUD" | /usr/bin/grep -c 'session signal' 2>/dev/null) || K112_LOUD_HAS_SIGNAL=0
+K112_LOUD_HAS_RAW=$(set +eo pipefail; echo "$K112_LOUD" | /usr/bin/grep -c 'raw_dispatch' 2>/dev/null) || K112_LOUD_HAS_RAW=0
+rm -rf "$K112_TMP"
+if [ "$K112_QUIET_HAS_WF" = "1" ] \
+   && [ "$K112_QUIET_HAS_SIGNAL" = "0" ] \
+   && [ "$K112_LOUD_HAS_WF" = "1" ] \
+   && [ "$K112_LOUD_HAS_SIGNAL" = "1" ] \
+   && [ "$K112_LOUD_HAS_RAW" = "1" ]; then
+  pass "K112: UserPromptSubmit session signal push (quiet workflow → workflow line only; recent raw_dispatch → both workflow + session signal lines including raw_dispatch count)"
+else
+  fail "K112: G1 hook mismatch — quiet_wf=$K112_QUIET_HAS_WF quiet_sig=$K112_QUIET_HAS_SIGNAL loud_wf=$K112_LOUD_HAS_WF loud_sig=$K112_LOUD_HAS_SIGNAL loud_raw=$K112_LOUD_HAS_RAW"
+fi
+
+# K113: G3 — verifier rubric mandates Dispatch warnings acknowledgment section.
+# Both dev.v1.md and code_review.v1.md must contain the requirement text
+# pointing at `## Dispatch warnings (session-scoped)`. Drift class: rubric
+# trim removes the section without removing the corresponding verifier check.
+K113_DEV_HAS=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings acknowledgment' "$ROOT/references/rubrics/dev.v1.md" 2>/dev/null) || K113_DEV_HAS=0
+K113_CR_HAS=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings acknowledgment' "$ROOT/references/rubrics/code_review.v1.md" 2>/dev/null) || K113_CR_HAS=0
+K113_DEV_REQ=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings (session-scoped)' "$ROOT/references/rubrics/dev.v1.md" 2>/dev/null) || K113_DEV_REQ=0
+K113_CR_REQ=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings (session-scoped)' "$ROOT/references/rubrics/code_review.v1.md" 2>/dev/null) || K113_CR_REQ=0
+if [ "$K113_DEV_HAS" -ge "1" ] \
+   && [ "$K113_CR_HAS" -ge "1" ] \
+   && [ "$K113_DEV_REQ" -ge "1" ] \
+   && [ "$K113_CR_REQ" -ge "1" ]; then
+  pass "K113: verifier rubric mandates Dispatch warnings acknowledgment section (both dev.v1.md + code_review.v1.md contain requirement + section title)"
+else
+  fail "K113: G3 rubric drift — dev_has=$K113_DEV_HAS cr_has=$K113_CR_HAS dev_req=$K113_DEV_REQ cr_req=$K113_CR_REQ"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

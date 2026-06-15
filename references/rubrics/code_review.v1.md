@@ -43,6 +43,21 @@ The verifier evaluates the review against **six axes**. Each axis must pass for 
 
 A seventh axis — **REJ tombstone alignment** — is a hard fail rather than a gap: if `review.md` proposes (in any remediation) an approach whose keywords match a REJ tombstone via `memory rejected-keywords`, the verdict is `failed` (not `needs_revision`). The reviewer is recommending something the team explicitly tombstoned; that's not a "fix this and retry" — it's a structural confusion that needs human review.
 
+## Required: Dispatch warnings acknowledgment
+
+Greenfield calibration #21 V6 surfaced an LLM-operator UX failure mode: session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `review.md` MUST include a `## Dispatch warnings (session-scoped)` section.
+
+**What goes in the section:**
+
+- Either `raw_dispatch + cliff_signal counts since workflow_start: N + M` on a single line (sufficient when both signals are noise).
+- OR a structured triage when counts are non-trivial (≥3 of either): one bullet per incident class with the corrective action taken or deferred.
+
+**Verifier check:**
+
+If the section is missing from `review.md`, this is an axis gap (axis H — process acknowledgment). The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings.
+
+**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, the section may state `n/a (no incidents logged this session)` in one line and pass.
+
 ## Reject these shortcuts
 
 The verifier MUST NOT pass a review on any of the following signals alone — each is a verification shortcut that bypasses real grading. When encountered, emit `needs_revision` with the shortcut named in the `revisions[]` entry's `gap` field. This list anticipates the cheap-but-wrong paths a writer-agent will try first under iteration pressure (cookbook outcome-grader pattern: anticipate shortcuts).

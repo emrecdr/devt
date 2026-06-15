@@ -42,6 +42,9 @@ fi
 # Parse state and build context using node (proper JSON handling)
 RESULT=$(node -e "
   const state = JSON.parse(process.argv[1]);
+  const fs = require('fs');
+  const path = require('path');
+  const { execSync } = require('child_process');
 
   // Active workflow — compact status line.
   // Format is human-facing only (no programmatic consumers). Compactness wins
@@ -57,11 +60,74 @@ RESULT=$(node -e "
     if (state.stop_at_phase) flags.push('to=' + state.stop_at_phase);
     if (state.only_phase) flags.push('only=' + state.only_phase);
     const flagStr = flags.length > 0 ? '·' + flags.join('+') : '';
-    const context = '[devt] ' + tier + '/' + phase + (iter > 1 ? '·i' + iter : '') + flagStr + ' · \"' + task + '\"';
+    const lines = ['[devt] ' + tier + '/' + phase + (iter > 1 ? '·i' + iter : '') + flagStr + ' · \"' + task + '\"'];
+
+    // G1 (cal #21 round 5 V6): session-scoped telemetry push. Greenfield's
+    // V6 honest answer revealed A2/A2b/A4 infrastructure works but discovery
+    // surfaces are too passive for an LLM operator — operators forget the
+    // CLIs exist when head-down in a workflow. UserPromptSubmit injection
+    // surfaces the same signals without requiring the operator to ask.
+    // All probes fail-open: any error path → no signal line, no broken hook.
+    const workflowStart = state.first_created_at || state.created_at || null;
+    if (workflowStart) {
+      const startMs = new Date(workflowStart).getTime();
+      const signals = [];
+
+      // Probe 1: dispatch-warnings.jsonl session-scoped counts.
+      // Inline JSONL scan — same pattern as A2b in task-truncation-detector.sh.
+      try {
+        const dispatchPath = path.join(process.cwd(), '.devt', 'state', 'dispatch-warnings.jsonl');
+        if (fs.existsSync(dispatchPath)) {
+          const content = fs.readFileSync(dispatchPath, 'utf8');
+          let raw = 0, cliff = 0;
+          for (const ln of content.split('\n')) {
+            if (!ln) continue;
+            try {
+              const r = JSON.parse(ln);
+              if (!r.ts || new Date(r.ts).getTime() < startMs) continue;
+              if (r.source === 'raw_dispatch') raw++;
+              else if (r.source === 'task_output_bytes') cliff++;
+            } catch { /* malformed line */ }
+          }
+          if (raw > 0 || cliff > 0) {
+            signals.push(raw + ' raw_dispatch + ' + cliff + ' cliff signal(s)');
+          }
+        }
+      } catch { /* fs error — silent */ }
+
+      // Probe 2: inherited source edits via git status, scoped to mtime >
+      // workflow start. 1-second timeout caps hook latency cost.
+      try {
+        const porcelain = execSync('git status --porcelain', {
+          cwd: process.cwd(),
+          timeout: 1000,
+          encoding: 'utf8',
+        });
+        let inherited = 0;
+        for (const ln of porcelain.split('\n')) {
+          if (!ln) continue;
+          const status = ln.slice(0, 2);
+          const filename = ln.slice(3).trim();
+          if (status === '??' || status === '!!') continue;
+          try {
+            const stat = fs.statSync(path.join(process.cwd(), filename));
+            if (stat.mtimeMs > startMs) inherited++;
+          } catch { /* deleted file or stat error */ }
+        }
+        if (inherited > 0) {
+          signals.push(inherited + ' uncommitted source edit(s) since workflow start');
+        }
+      } catch { /* git error — silent */ }
+
+      if (signals.length > 0) {
+        lines.push('[devt session signal] ' + signals.join('; ') + ' — inspect: dispatch warnings --by-source | state check-inherited-edits');
+      }
+    }
+
     const output = {
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: context
+        additionalContext: lines.join('\n')
       }
     };
     process.stdout.write(JSON.stringify(output));
