@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.93.3] - 2026-06-15
+
 ### Cal #21 Round 5 V6 — push-not-pull session signal surfacing
 
 Greenfield's V6 honest answer in calibration round 5 revealed an LLM-operator UX failure mode that wasn't anticipated when the cal #21 telemetry changes shipped: A2 (`/devt:status` dispatch warnings line), A2b (PostToolUse return-time hint), A4 (`state check-inherited-edits` CLI) were all infrastructure-correct but **operator-passive** — operators forget the CLIs exist when head-down in a workflow. Greenfield's own confession: "I had the exact use case for `state check-inherited-edits` and forgot it existed." Two concrete fixes inverting the surfacing semantics from pull to push:
