@@ -12857,8 +12857,10 @@ K117_CHECK=$(node -e "
   const smoke = fs.readFileSync('$0', 'utf8');
   const readme = fs.readFileSync('$ROOT/README.md', 'utf8');
   const claude = fs.readFileSync('$ROOT/CLAUDE.md', 'utf8');
-  // Count K94-K1XX gate definitions in smoke
-  const gateMatches = smoke.match(/^# K(9[4-9]|1[0-9][0-9])[a-z]?:/gm) || [];
+  // Count K94-K1XX gate definitions in smoke. Accepts `# K94:` and
+  // `# K94 (anything):` so gate authors can add parenthetical hints
+  // without breaking the count.
+  const gateMatches = smoke.match(/^# K(9[4-9]|1[0-9][0-9])[a-z]?(\s+\(.*?\))?:/gm) || [];
   const actual = gateMatches.length;
   // Highest K number
   const nums = gateMatches.map(m => parseInt(m.match(/K(\d+)/)[1], 10));
@@ -12899,17 +12901,24 @@ K118_CHECK=$(node -e "
     const out = execSync('git log --pretty=format:%H ' + lastTag + '..HEAD -- bin/ hooks/ workflows/ .claude-plugin/ 2>/dev/null', {encoding:'utf8'});
     codeCommits = out.split('\n').filter(Boolean).length;
   } catch { codeCommits = 0; }
-  // Read [Unreleased] section content
+  // Read [Unreleased] OR the version section immediately above the previous
+  // tag — both are valid resting places for content covering code commits
+  // since the last tag. Gate accepts whichever is non-empty.
   const changelog = fs.readFileSync('$ROOT/CHANGELOG.md', 'utf8');
   const unreleasedMatch = changelog.match(/^## \[Unreleased\]\s*\n([\s\S]*?)(?=^## \[)/m);
   const unreleasedBody = unreleasedMatch ? unreleasedMatch[1].trim() : '';
-  const unreleasedHasContent = unreleasedBody.length > 0;
-  if (codeCommits > 0 && !unreleasedHasContent) {
-    console.log('FAIL:' + codeCommits + '-code-commit(s)-since-' + lastTag + '-but-[Unreleased]-empty');
-  } else if (codeCommits === 0 && !unreleasedHasContent) {
-    console.log('OK:no-code-commits-empty-Unreleased-fine');
+  // Find sections between [Unreleased] and [lastTag] — those describe
+  // changes post-lastTag (e.g., a freshly-renamed [next-version]).
+  const tagWithoutV = lastTag.replace(/^v/, '');
+  const postTagSections = changelog.match(new RegExp('## \\\\[Unreleased\\\\][\\\\s\\\\S]*?(?=## \\\\[' + tagWithoutV.replace(/\\./g, '\\\\.') + '\\\\])', 'm'));
+  const postTagBody = postTagSections ? postTagSections[0].replace(/^## \\\\[Unreleased\\\\]\\\\s*\\\\n/m, '').trim() : '';
+  const hasCoverage = unreleasedBody.length > 0 || postTagBody.length > 50; // > 50 to skip just-version-headers
+  if (codeCommits > 0 && !hasCoverage) {
+    console.log('FAIL:' + codeCommits + '-code-commit(s)-since-' + lastTag + '-but-no-Unreleased-or-post-tag-content');
+  } else if (codeCommits === 0 && !hasCoverage) {
+    console.log('OK:no-code-commits-empty-fine');
   } else {
-    console.log('OK:' + codeCommits + '-code-commits-Unreleased-has-' + unreleasedBody.length + '-bytes');
+    console.log('OK:' + codeCommits + '-code-commits-coverage-' + (unreleasedBody.length || postTagBody.length) + '-bytes');
   }
 " 2>/dev/null)
 if echo "$K118_CHECK" | /usr/bin/grep -qE "^(OK|SKIP):"; then
