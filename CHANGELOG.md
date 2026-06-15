@@ -14,6 +14,12 @@ Round 2 update: shipped 2 more cuts after the round-1 northstar audit.
 
 **7E — Merge dispatch-scope-guard + dispatch-hygiene-guard hooks (`4057666`).** Two PreToolUse hooks on Task that shared the same matcher and did similar work (parse input, walk to .devt, write forensic record, emit hook output) merged into one. Single subprocess per Task call instead of two. Walk to .devt happens once (state+config in same pass) instead of 3 times. Distinct `source` discriminators preserved in dispatch-warnings.jsonl. Three behavioral tests verify: scope over-cap fires advisory ✓, raw devt:* fires hygiene block ✓, envelope-managed dispatch silently passes ✓. Net change: 5 files, +163/-217 lines.
 
+### Round 3 batch — substantive doc restructure
+
+**N1 — CHANGELOG.md historical archive (`34ef759`).** 141 versioned entries (v0.1.0 → v0.94.1) at 748KB / 4273 lines. Split at the natural v0.50.0 boundary: active CHANGELOG.md retains v0.50.0+ (~84 versions, 432KB), `docs/archive/CHANGELOG-historical.md` gets v0.1.0–v0.49.x (~58 versions, 317KB) with header explaining the split. Active CHANGELOG 42% smaller at every read. `extract-changelog.sh` still works for any v0.50+ version; older versions reachable via archive. Smoke gate exclusion list extended to `^docs/archive/` for the version-ref discipline check + observation_search gate.
+
+**5B partial — Development CLI Reference extraction (`b9fcad7`).** INTERNALS.md was 60KB; the "Development CLI Reference" section alone was 10KB of verbose CLI inventory — operator-onboarding content that belongs alongside the 6C guardrails. Extracted to `docs/operator-guide/CLI-REFERENCE.md`. INTERNALS.md now 50KB (-17%), retains all runtime-load-bearing internals (workflow mechanics, state validation, governing rules, inline guardrails, substance-enforcement gates). CLAUDE.md cross-refs (2 places) updated to the new location. The other INTERNALS sections (CLI Modules 14KB, Workflow Mechanics 14KB, Substance-Enforcement Gates 6KB) stay — they're runtime-load-bearing per the same northstar discipline.
+
 ### Cal #23 simplification — Round 1 (6C complete; remaining cuts northstar-validated)
 
 Greenfield Cal #23 surfaced 18 SAFE-marked simplification candidates after deep field evaluation of v0.94.1. Per-cut northstar audit (goals: clear protocols, quality always increases, tokens always optimized, delegate to graphify+claude-mem) demoted 5 from SAFE → SKIP and recategorized 2 from cuts → other:
