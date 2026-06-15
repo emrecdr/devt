@@ -1,29 +1,35 @@
 #!/usr/bin/env bash
-# Dispatch hygiene guard — PreToolUse hook on Task tool calls.
-# Detects "raw dispatches" where the orchestrator dispatches a devt:* subagent
-# WITHOUT the workflow-managed context blocks (<scope_trust>, <scope_hint>,
-# <memory_signal>). Closes the failure mode where the orchestrator rolls its
-# own Task() fan-out and bypasses /devt:review entirely — all of the Wave 1-4
-# protections (Graphify-first directive, impact-plan, telemetry) live inside
-# workflow dispatch templates, so a raw dispatch silently strips every
-# integration the workflow was supposed to inject.
+# Dispatch guard — merged PreToolUse hook on Task tool calls.
 #
-# L1 — Behavior depends on `dispatch_hygiene_mode` in .devt/config.json:
-#   block (default) — hook returns {decision:"deny"} for investigative subagents
-#     (code-reviewer, programmer, verifier, researcher, debugger, architect,
-#     tester). Hard-blocks the dispatch. Curator/docs-writer/retro are exempt
-#     because they don't consume scope blocks.
-#   warn — hook returns additionalContext advisory; allows the call.
-#   off — hook is a no-op for raw dispatches.
-# Always appends a forensic JSONL record to .devt/state/dispatch-warnings.jsonl
-# regardless of mode, so /devt:debug --mode=forensics can analyze bypass attempts.
+# Cal #23 7E: scope-check + hygiene-check folded into one hook (was two: this
+# file plus dispatch-scope-guard.sh). Single subprocess per Task call instead
+# of two. Behaviors preserved exactly:
 #
-# Trigger condition: subagent_type matches /^devt:/ AND the prompt is MISSING
-# all of <scope_trust>, <scope_hint>, and <memory_signal> blocks. Having any
-# ONE counts as "workflow-dispatched" — the heuristic is forgiving so workflows
-# can update the canonical set over time without retripping this hook.
+#   SCOPE CHECK (advisory, never blocks): warns when prompt bytes or
+#   <scope_hint> path count exceeds caps. Fires for ANY Task call.
+#   Writes source='dispatch_scope' record + advisory additionalContext.
+#   Config: .devt/config.json::dispatch.{max_prompt_bytes,max_files_hint}
+#   (defaults 24576 / 12).
 #
-# Kill switch: DEVT_DISABLED_HOOKS=dispatch-hygiene-guard.sh.
+#   HYGIENE CHECK (may block per config): detects "raw dispatches" where a
+#   devt:* subagent is invoked WITHOUT the workflow-managed context blocks
+#   (<scope_trust>, <scope_hint>, <memory_signal>, and 7 others). Fires only
+#   when subagent_type starts with 'devt:' AND envelope blocks are missing.
+#   Writes source='raw_dispatch' record + (per `dispatch_hygiene_mode` config)
+#   either a decision:deny block or a warn-mode additionalContext advisory.
+#
+# Both checks write to .devt/state/dispatch-warnings.jsonl with distinct
+# `source` discriminators so /devt:status, mcp-stats --by=source, and
+# /devt:debug --mode=forensics can route each class independently.
+#
+# Output composition:
+#   - If hygiene blocks: emit decision:deny (scope advisory is dropped — would
+#     have been advisory-only anyway, and the block message takes priority).
+#   - If hygiene doesn't block: emit additionalContext combining any scope
+#     advisory + hygiene advisory (when present).
+#
+# Kill switches: DEVT_DISABLED_HOOKS=dispatch-hygiene-guard.sh (env);
+# `dispatch_hygiene_mode: "off"` in .devt/config.json (per-project).
 #
 [[ $- == *i* ]] && return
 set -euo pipefail
@@ -47,11 +53,91 @@ node -e "
   if (_toolName !== 'Task' && _toolName !== 'Agent') process.exit(0);
 
   const subagent = (input.tool_input || {}).subagent_type || '';
-  // Only fire on devt:* subagent dispatches. Other agent types are out of scope.
-  if (!subagent.startsWith('devt:')) process.exit(0);
-
   const prompt = (input.tool_input || {}).prompt || '';
   if (!prompt) process.exit(0);
+
+  const fs = require('fs');
+  const path = require('path');
+
+  // Walk-once: find .devt/state + .devt/config.json in one pass.
+  let stateDir = null;
+  let cfg = {};
+  {
+    let dir = process.cwd();
+    for (let i = 0; i < 8; i++) {
+      const devtDir = path.join(dir, '.devt');
+      if (fs.existsSync(devtDir)) {
+        const sd = path.join(devtDir, 'state');
+        if (fs.existsSync(sd)) stateDir = sd;
+        const cfgPath = path.join(devtDir, 'config.json');
+        if (fs.existsSync(cfgPath)) {
+          try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* malformed — defaults */ }
+        }
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+
+  // ============================================================
+  // SCOPE CHECK — advisory, fires for any Task call
+  // ============================================================
+  let scopeAdvisory = null;
+  {
+    const maxBytes = (cfg.dispatch && typeof cfg.dispatch.max_prompt_bytes === 'number') ? cfg.dispatch.max_prompt_bytes : 24576;
+    const maxFiles = (cfg.dispatch && typeof cfg.dispatch.max_files_hint === 'number') ? cfg.dispatch.max_files_hint : 12;
+    const promptBytes = Buffer.byteLength(prompt, 'utf8');
+    let scopeHintCount = 0;
+    const sh = prompt.match(/<scope_hint>([\s\S]*?)<\/scope_hint>/);
+    if (sh) {
+      try {
+        const arr = JSON.parse(sh[1].trim());
+        if (Array.isArray(arr)) scopeHintCount = arr.length;
+      } catch { /* malformed scope_hint — count stays 0 */ }
+    }
+    const warnings = [];
+    if (promptBytes > maxBytes) {
+      warnings.push('dispatch prompt is ' + promptBytes + ' B (cap=' + maxBytes + '); risk of mid-investigation budget exhaustion');
+    }
+    if (scopeHintCount > maxFiles) {
+      warnings.push('scope_hint has ' + scopeHintCount + ' paths (cap=' + maxFiles + '); agent may not finish reading all of them');
+    }
+    if (warnings.length > 0) {
+      // Forensic append — best-effort.
+      if (stateDir) {
+        try {
+          const record = JSON.stringify({
+            ts: new Date().toISOString(),
+            source: 'dispatch_scope',
+            agent: subagent || 'Task',
+            prompt_bytes: promptBytes,
+            scope_hint_count: scopeHintCount,
+            cap_bytes: maxBytes,
+            cap_files: maxFiles,
+            warnings,
+          }) + '\n';
+          fs.appendFileSync(path.join(stateDir, 'dispatch-warnings.jsonl'), record);
+        } catch { /* log failure non-fatal */ }
+      }
+      scopeAdvisory = 'DISPATCH-SCOPE [' + (subagent || 'Task') + ']: ' + warnings.join('; ') + ' — advisory; dispatch proceeds. Consider tightening the brief if budget exhaustion occurs.';
+    }
+  }
+
+  // ============================================================
+  // HYGIENE CHECK — may block per dispatch_hygiene_mode config
+  // ============================================================
+  // Only fire on devt:* subagent dispatches. Other agent types are out of scope.
+  if (!subagent.startsWith('devt:')) {
+    // Scope advisory still surfaces for non-devt agents.
+    if (scopeAdvisory) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: scopeAdvisory },
+      }));
+    }
+    process.exit(0);
+  }
 
   // Workflow-dispatched prompts always carry at least one of these blocks.
   // Raw orchestrator-rolled prompts carry none. The check is intentionally
@@ -79,7 +165,15 @@ node -e "
   const hasProvenance = /<provenance_protocol>/.test(prompt);
   if (hasScope || hasHint || hasMemSig || hasContext || hasGraphImpact ||
       hasOriginalReview || hasLaneScope || hasGodNode || hasPriorOutputs ||
-      hasProvenance) process.exit(0);
+      hasProvenance) {
+    // Envelope-managed dispatch — hygiene passes. Surface scope advisory if any.
+    if (scopeAdvisory) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: scopeAdvisory },
+      }));
+    }
+    process.exit(0);
+  }
 
   // Envelope-not-required agents — per agents/io-contracts.yaml, these agents
   // declare graphify_inputs: [] AND don't consume memory_signal/scope blocks.
@@ -90,7 +184,14 @@ node -e "
   // devt-coordinator is a main-thread router with no envelope contract.
   const subagentName = subagent.slice(5);  // strip 'devt:' prefix
   const ENVELOPE_NOT_REQUIRED = new Set(['docs-writer', 'retro', 'curator', 'devt-coordinator']);
-  if (ENVELOPE_NOT_REQUIRED.has(subagentName)) process.exit(0);
+  if (ENVELOPE_NOT_REQUIRED.has(subagentName)) {
+    if (scopeAdvisory) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: scopeAdvisory },
+      }));
+    }
+    process.exit(0);
+  }
 
   // Raw dispatch detected. Build advisory + forensic record.
   const advisory = [
@@ -100,19 +201,8 @@ node -e "
   ].join(' ');
 
   // Forensic append — best-effort, never fails the hook.
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    let dir = process.cwd();
-    let stateDir = null;
-    for (let i = 0; i < 8; i++) {
-      const candidate = path.join(dir, '.devt', 'state');
-      if (fs.existsSync(candidate)) { stateDir = candidate; break; }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-    if (stateDir) {
+  if (stateDir) {
+    try {
       const promptPreview = prompt.slice(0, 200).replace(/\n+/g, ' ');
       const record = JSON.stringify({
         ts: new Date().toISOString(),
@@ -122,33 +212,24 @@ node -e "
         prompt_preview: promptPreview,
       });
       fs.appendFileSync(path.join(stateDir, 'dispatch-warnings.jsonl'), record + '\n');
-    }
-  } catch { /* forensic write failure must NEVER affect the hook */ }
+    } catch { /* forensic write failure must NEVER affect the hook */ }
+  }
 
-  // L1 — read dispatch_hygiene_mode from project's .devt/config.json (upward
-  // search). Defaults to 'block'. Failure to read = block (fail-secure: better
-  // to over-block a misconfigured project than to silently strip the gate).
+  // L1 — read dispatch_hygiene_mode. Defaults to 'block' (fail-secure).
   let mode = 'block';
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    let dir = process.cwd();
-    for (let i = 0; i < 8; i++) {
-      const candidate = path.join(dir, '.devt', 'config.json');
-      if (fs.existsSync(candidate)) {
-        const cfg = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-        if (cfg && typeof cfg.dispatch_hygiene_mode === 'string') {
-          mode = cfg.dispatch_hygiene_mode.toLowerCase();
-        }
-        break;
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  } catch { /* keep default 'block' on any failure */ }
+  if (cfg && typeof cfg.dispatch_hygiene_mode === 'string') {
+    mode = cfg.dispatch_hygiene_mode.toLowerCase();
+  }
 
-  if (mode === 'off') process.exit(0);
+  if (mode === 'off') {
+    // 'off' suppresses hygiene advisory but scope advisory still surfaces.
+    if (scopeAdvisory) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: scopeAdvisory },
+      }));
+    }
+    process.exit(0);
+  }
 
   // Agent-type filter for block mode. Only investigative agents consume scope
   // blocks; curator/docs-writer/retro/devt-coordinator dispatch templates
@@ -163,6 +244,8 @@ node -e "
   if (shouldBlock) {
     // Claude Code hook contract: {decision:'deny', reason:...} blocks the call.
     // Reason includes remediation guidance so orchestrator can fix and retry.
+    // Scope advisory is dropped here — would have been advisory-only and the
+    // block message takes priority.
     const denyReason =
       '[devt dispatch hygiene — BLOCKED] ' + advisory +
       ' Remediation: dispatch via the workflow (/devt:review, /devt:workflow, /devt:debug) which injects the required context blocks, ' +
@@ -181,8 +264,6 @@ node -e "
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     if (pluginRoot) {
-      const path = require('path');
-      const fs = require('fs');
       const dispatchPath = path.join(pluginRoot, 'bin', 'modules', 'dispatch.cjs');
       if (fs.existsSync(dispatchPath)) {
         const dispatch = require(dispatchPath);
@@ -191,7 +272,9 @@ node -e "
     }
   } catch { /* fall back to advisory-only — envelope rendering is best-effort */ }
 
-  const advisoryParts = ['[devt dispatch hygiene] ' + advisory];
+  const advisoryParts = [];
+  if (scopeAdvisory) advisoryParts.push(scopeAdvisory);
+  advisoryParts.push('[devt dispatch hygiene] ' + advisory);
   if (envelope) {
     advisoryParts.push(
       '',

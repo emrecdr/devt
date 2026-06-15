@@ -4144,15 +4144,15 @@ done
 # dispatch-scope-guard hook: registered in hooks.json + run-hook.js profile,
 # behaves as advisory (never blocks), appends to dispatch-warnings.jsonl when
 # over cap, silent under cap.
-if grep -q "dispatch-scope-guard.sh" "$ROOT/hooks/hooks.json"; then
-  pass "dispatch-scope-guard registered in hooks.json (PreToolUse matcher=Task)"
+if grep -q "dispatch-hygiene-guard.sh" "$ROOT/hooks/hooks.json"; then
+  pass "dispatch-hygiene-guard registered (scope+hygiene merged 7E) in hooks.json (PreToolUse matcher=Task)"
 else
-  fail "dispatch-scope-guard.sh not registered in hooks.json"
+  fail "dispatch-hygiene-guard.sh not registered in hooks.json"
 fi
-if grep -q "dispatch-scope-guard.sh" "$ROOT/hooks/run-hook.js"; then
-  pass "dispatch-scope-guard.sh declared in run-hook.js profile registry"
+if grep -q "dispatch-hygiene-guard.sh" "$ROOT/hooks/run-hook.js"; then
+  pass "dispatch-hygiene-guard.sh declared in run-hook.js profile registry"
 else
-  fail "dispatch-scope-guard.sh missing from run-hook.js HOOK_PROFILES"
+  fail "dispatch-hygiene-guard.sh missing from run-hook.js HOOK_PROFILES"
 fi
 # End-to-end: over-cap dispatch fires warning + JSONL record + non-blocking exit.
 # JSON payload built via Node to avoid shell-escape fragility — printf-based
@@ -4171,16 +4171,16 @@ OVER_INPUT=$(node -e '
     },
   }));
 ')
-HOOK_OUT=$(cd "$HOOK_TMP" && printf '%s' "$OVER_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+HOOK_OUT=$(cd "$HOOK_TMP" && printf '%s' "$OVER_INPUT" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
 if echo "$HOOK_OUT" | grep -q '"additionalContext"' && echo "$HOOK_OUT" | grep -q 'DISPATCH-SCOPE'; then
-  pass "dispatch-scope-guard emits PreToolUse additionalContext when over cap"
+  pass "dispatch-hygiene-guard (merged) emits PreToolUse additionalContext when over cap"
 else
-  fail "dispatch-scope-guard did not emit expected warning context (got: $HOOK_OUT)"
+  fail "dispatch-hygiene-guard (merged) did not emit expected warning context (got: $HOOK_OUT)"
 fi
 if [ -f "$HOOK_TMP/.devt/state/dispatch-warnings.jsonl" ] && grep -q 'dispatch_scope' "$HOOK_TMP/.devt/state/dispatch-warnings.jsonl"; then
   pass "dispatch-scope-guard appends forensic record to dispatch-warnings.jsonl"
 else
-  fail "dispatch-scope-guard did not write forensic JSONL record"
+  fail "dispatch-hygiene-guard (merged) did not write forensic JSONL record"
 fi
 UNDER_INPUT=$(node -e '
   process.stdout.write(JSON.stringify({
@@ -4188,7 +4188,7 @@ UNDER_INPUT=$(node -e '
     tool_input: { subagent_type: "x", prompt: "<scope_hint>[]</scope_hint><task>tiny</task>" },
   }));
 ')
-UNDER_OUT=$(cd "$HOOK_TMP" && printf '%s' "$UNDER_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+UNDER_OUT=$(cd "$HOOK_TMP" && printf '%s' "$UNDER_INPUT" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
 if [ -z "$UNDER_OUT" ]; then
   pass "dispatch-scope-guard silent under cap (no false positives)"
 else
@@ -4200,7 +4200,7 @@ SKIP_INPUT=$(node -e '
     tool_input: { file_path: "foo.txt" },
   }));
 ')
-SKIP_OUT=$(cd "$HOOK_TMP" && printf '%s' "$SKIP_INPUT" | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1)
+SKIP_OUT=$(cd "$HOOK_TMP" && printf '%s' "$SKIP_INPUT" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
 if [ -z "$SKIP_OUT" ]; then
   pass "dispatch-scope-guard ignores non-Task tool calls"
 else
@@ -5899,7 +5899,7 @@ if ! echo "$HG" | /usr/bin/grep -q "Raw devt:\|raw_dispatch"; then
   AGENT_FAILURES="${AGENT_FAILURES}dispatch-hygiene-guard "
 fi
 # dispatch-scope-guard fires its scope warnings — feed it a payload that triggers a warning
-SG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"x"}}' | bash "$ROOT/hooks/dispatch-scope-guard.sh" 2>&1 || true)
+SG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"x"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
 # (no advisory expected on small prompt — just verify it doesn't error out)
 if [ -z "$AGENT_FAILURES" ]; then
   pass "all 3 Task-matcher hooks accept tool_name='Agent' (the actual Claude Code payload key)"
