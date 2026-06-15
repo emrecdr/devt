@@ -133,6 +133,7 @@ If skipping, report why and suggest next command. Do NOT dispatch the researcher
 ## Step 3: Dispatch Researcher
 
 <!-- BEGIN dispatch:researcher:research -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/researcher-research.tmpl.md -->
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 <context>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">

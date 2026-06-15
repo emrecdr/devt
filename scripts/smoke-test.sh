@@ -8752,7 +8752,7 @@ fi
 M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M12_RM=$(/usr/bin/grep -c 'rm -f .devt/state/topic-symbols-dropped' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}')
+M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}' || true)
 if [ "${M12_CAPTURE:-0}" -ge 3 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
   pass "M12: dropped-symbol capture + emit + state registration (capture refs=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state regs=${M12_REG})"
 else
@@ -11175,10 +11175,10 @@ K73_TMP=$(mktemp -d)
 cd "$K73_TMP"
 node "$CLI" init workflow "K73 inlining test" >/dev/null 2>&1
 # absent: rendered envelope shows the (no graph-impact.md available — ...) notice
-K73_ABSENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "no graph-impact.md available")
+K73_ABSENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "no graph-impact.md available" || true)
 # present: write graph-impact.md and confirm content inlines verbatim
 echo "## SENTINEL_K73_MARKER" > .devt/state/graph-impact.md
-K73_PRESENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "SENTINEL_K73_MARKER")
+K73_PRESENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "SENTINEL_K73_MARKER" || true)
 cd "$ROOT"
 rm -rf "$K73_TMP"
 if [ "$K73_ABSENT" -ge 1 ] && [ "$K73_PRESENT" -ge 1 ]; then
@@ -11269,9 +11269,9 @@ K77_A=$(cd "$K77_TMP" && node "$CLI" static-compress sample.md 2>/dev/null | jq 
 echo '{"static_compress":{"mode":"on"}}' > "$K77_TMP/.devt/config.json"
 K77_B_JSON=$(cd "$K77_TMP" && node "$CLI" static-compress sample.md 2>/dev/null)
 K77_B_OK=$(echo "$K77_B_JSON" | jq -r '.ok' 2>/dev/null)
-K77_B_HAS_URL=$(grep -c "https://example.com/foo" "$K77_TMP/sample.md" 2>/dev/null)
-K77_B_HAS_PATH=$(grep -c "/path/to/file.txt" "$K77_TMP/sample.md" 2>/dev/null)
-K77_B_HAS_CODE=$(grep -c '`inline_code`' "$K77_TMP/sample.md" 2>/dev/null)
+K77_B_HAS_URL=$(grep -c "https://example.com/foo" "$K77_TMP/sample.md" 2>/dev/null || true)
+K77_B_HAS_PATH=$(grep -c "/path/to/file.txt" "$K77_TMP/sample.md" 2>/dev/null || true)
+K77_B_HAS_CODE=$(grep -c '`inline_code`' "$K77_TMP/sample.md" 2>/dev/null || true)
 K77_B_HAS_BACKUP=$(test -f "$K77_TMP/sample.original.md" && echo "yes" || echo "no")
 # Fixture C: --restore returns byte-identical original
 (cd "$K77_TMP" && node "$CLI" static-compress --restore sample.md >/dev/null 2>&1) || true
@@ -11351,7 +11351,7 @@ K79_ACTION=$(echo "$K79_OUT" | jq -r '.suggested_action // ""' 2>/dev/null)
 K79_MISSING=$(echo "$K79_OUT" | jq -r '.drift.missing_sections | length' 2>/dev/null)
 K79_TMPL_PATH="$ROOT/templates/dispatch/envelopes/programmer-fix.tmpl.md"
 if [ -f "$K79_TMPL_PATH" ]; then
-  K79_TMPL_HAS_PLACEHOLDER=$(grep -c "{drift_errors}" "$K79_TMPL_PATH")
+  K79_TMPL_HAS_PLACEHOLDER=$(grep -c "{drift_errors}" "$K79_TMPL_PATH" 2>/dev/null || true)
 else
   K79_TMPL_HAS_PLACEHOLDER=0
 fi
@@ -12807,6 +12807,149 @@ if [ "$K115_OK" = "no" ] && [ "$K115_MISSING" = "1" ] && [ "$K115_MATCH_OK" = "y
   pass "K115: assert-verifier-graded-all-axes catches verifier stopping short (criteria_total=6 vs rubric=7 → ok=false, missing=1); passes on match (criteria_total=7); skips dev workflow (no axis taxonomy)"
 else
   fail "K115: walk-all-axes broken — miss_ok_no=$K115_OK miss_count=$K115_MISSING match_ok_yes=$K115_MATCH_OK dev_skip_yes=$K115_DEV_OK"
+fi
+
+# K116 (M3): pipefail+grep-c trap auto-detector (CON-003 codification).
+# Under `set -euo pipefail`, command substitutions ending in `grep -c` exit
+# non-zero when grep finds 0 matches, which kills the substitution silently
+# and breaks subsequent smoke gates. Caught 5× during v0.93→v0.94 cycle.
+# Scans smoke-test.sh for $(... grep -c ...) patterns lacking the defuser.
+# Implemented in node so the gate itself doesn't fall into its own trap.
+K116_VIOLATIONS=$(node -e "
+  const fs = require('fs');
+  const lines = fs.readFileSync('$0', 'utf8').split('\n');
+  const violations = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip comments and string-literal references to grep -c
+    if (/^\s*#/.test(line)) continue;
+    if (/^\s*\/\//.test(line)) continue;
+    // Skip lines where \$ is escaped (\\\$ in source — literal text, not substitution)
+    if (/\\\\\\\$\\(/.test(line)) continue;
+    // Skip lines that don't contain a substitution with grep -c
+    if (!/\\\$\\(.*grep -c/.test(line)) continue;
+    // Defuser anywhere in line: set +e[o] pipefail
+    if (/set \+e?o? pipefail/.test(line)) continue;
+    // Defuser anywhere in line (after grep -c): '|| true' / '|| echo' / '|| \w+='
+    const afterGrepC = line.substring(line.indexOf('grep -c'));
+    if (/\\|\\|\\s*(true\\b|echo\\b|\\w+=)/.test(afterGrepC)) continue;
+    violations.push((i + 1) + ':' + line.trim().substring(0, 80));
+  }
+  if (violations.length > 0) {
+    console.log('VIOLATIONS:' + violations.length);
+    violations.slice(0, 3).forEach(v => console.log('  L' + v));
+  } else {
+    console.log('CLEAN');
+  }
+" 2>/dev/null)
+if echo "$K116_VIOLATIONS" | /usr/bin/grep -q "^CLEAN$"; then
+  pass "K116: pipefail+grep-c trap auto-detector (CON-003) — no undefused \$(... grep -c ...) substitutions"
+else
+  fail "K116: undefused grep-c substitutions found: $K116_VIOLATIONS"
+fi
+
+# K117 (M1): K-gate count auto-validator. Catches the off-by-one drift class
+# observed 3× during v0.93→v0.94 (15→16, 17→21, 21→22). Counts actual K-gate
+# definitions and verifies README + CLAUDE.md "N-deep" claim + "Kn-Km" range
+# upper bound match. Node-based so the gate doesn't trip CON-003.
+K117_CHECK=$(node -e "
+  const fs = require('fs');
+  const smoke = fs.readFileSync('$0', 'utf8');
+  const readme = fs.readFileSync('$ROOT/README.md', 'utf8');
+  const claude = fs.readFileSync('$ROOT/CLAUDE.md', 'utf8');
+  // Count K94-K1XX gate definitions in smoke
+  const gateMatches = smoke.match(/^# K(9[4-9]|1[0-9][0-9])[a-z]?:/gm) || [];
+  const actual = gateMatches.length;
+  // Highest K number
+  const nums = gateMatches.map(m => parseInt(m.match(/K(\d+)/)[1], 10));
+  const top = Math.max.apply(null, nums);
+  // Parse README + CLAUDE.md claims
+  const readmeDeep = (readme.match(/(\d+)-deep/) || [0,'0'])[1];
+  const readmeRange = (readme.match(/K94[-–]K(\d+)/) || [0,'0'])[1];
+  const claudeDeep = (claude.match(/(\d+)-deep/) || [0,'0'])[1];
+  const claudeRange = (claude.match(/K94[-–]K(\d+)/) || [0,'0'])[1];
+  const failures = [];
+  if (parseInt(readmeDeep,10) !== actual) failures.push('README \"' + readmeDeep + '-deep\" != actual ' + actual);
+  if (parseInt(readmeRange,10) !== top) failures.push('README \"K94-K' + readmeRange + '\" != actual top K' + top);
+  if (parseInt(claudeDeep,10) !== actual) failures.push('CLAUDE \"' + claudeDeep + '-deep\" != actual ' + actual);
+  if (parseInt(claudeRange,10) !== top) failures.push('CLAUDE \"K94-K' + claudeRange + '\" != actual top K' + top);
+  console.log(failures.length === 0 ? 'OK:actual=' + actual + ':top=K' + top : 'FAIL:' + failures.join('; '));
+" 2>/dev/null)
+if echo "$K117_CHECK" | /usr/bin/grep -q "^OK:"; then
+  pass "K117: K-gate count auto-validator (smoke gate count matches README + CLAUDE.md \"N-deep\" + \"K94-K[top]\" claims; CON-001 applied to docs)"
+else
+  fail "K117: doc count drift — $K117_CHECK"
+fi
+
+# K118 (M2): CHANGELOG [Unreleased] coverage for code surface commits.
+# Catches the failure mode where bin/ hooks/ workflows/ .claude-plugin/
+# changed since the last tag but [Unreleased] is empty (or has only the
+# anchor heading). Pre-commit version of the existing CHANGELOG-coverage
+# gate; this one validates intent BEFORE the [version] rename.
+K118_CHECK=$(node -e "
+  const fs = require('fs');
+  const { execSync } = require('child_process');
+  let lastTag;
+  try { lastTag = execSync('git describe --tags --abbrev=0 2>/dev/null', {encoding:'utf8'}).trim(); }
+  catch { console.log('SKIP:no-tags'); process.exit(0); }
+  if (!lastTag) { console.log('SKIP:no-tag-resolved'); process.exit(0); }
+  // Count code-surface commits since last tag
+  let codeCommits;
+  try {
+    const out = execSync('git log --pretty=format:%H ' + lastTag + '..HEAD -- bin/ hooks/ workflows/ .claude-plugin/ 2>/dev/null', {encoding:'utf8'});
+    codeCommits = out.split('\n').filter(Boolean).length;
+  } catch { codeCommits = 0; }
+  // Read [Unreleased] section content
+  const changelog = fs.readFileSync('$ROOT/CHANGELOG.md', 'utf8');
+  const unreleasedMatch = changelog.match(/^## \[Unreleased\]\s*\n([\s\S]*?)(?=^## \[)/m);
+  const unreleasedBody = unreleasedMatch ? unreleasedMatch[1].trim() : '';
+  const unreleasedHasContent = unreleasedBody.length > 0;
+  if (codeCommits > 0 && !unreleasedHasContent) {
+    console.log('FAIL:' + codeCommits + '-code-commit(s)-since-' + lastTag + '-but-[Unreleased]-empty');
+  } else if (codeCommits === 0 && !unreleasedHasContent) {
+    console.log('OK:no-code-commits-empty-Unreleased-fine');
+  } else {
+    console.log('OK:' + codeCommits + '-code-commits-Unreleased-has-' + unreleasedBody.length + '-bytes');
+  }
+" 2>/dev/null)
+if echo "$K118_CHECK" | /usr/bin/grep -qE "^(OK|SKIP):"; then
+  pass "K118: CHANGELOG [Unreleased] coverage (code-surface commits since last tag → [Unreleased] non-empty)"
+else
+  fail "K118: $K118_CHECK"
+fi
+
+# K119 (M4): compiled-region EDIT-SOURCE marker presence. Each
+# <!-- BEGIN dispatch:agent:workflow_id --> in workflows/*.md MUST be
+# immediately followed by an <!-- EDIT-SOURCE: templates/dispatch/... -->
+# marker. Field signal: during v0.94.0 doc-sync I edited workflows/code-review.md
+# inside a compiled region twice before realizing it was managed by dispatch
+# compile --write. The marker eliminates this class of architectural-coupling
+# confusion. Updates to dispatch.cjs::cmdCompile to emit the marker are part
+# of the same commit.
+K119_CHECK=$(node -e "
+  const fs = require('fs');
+  const path = require('path');
+  const dir = '$ROOT/workflows';
+  const violations = [];
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.md')) continue;
+    const content = fs.readFileSync(path.join(dir, f), 'utf8');
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const beginMatch = lines[i].match(/^<!-- BEGIN dispatch:([\w-]+):([\w-]+) -->/);
+      if (!beginMatch) continue;
+      const next = lines[i + 1] || '';
+      if (!next.match(/^<!-- EDIT-SOURCE: templates\/dispatch\/(envelopes|blocks)\//)) {
+        violations.push(f + ':L' + (i + 1) + ':' + beginMatch[1] + ':' + beginMatch[2]);
+      }
+    }
+  }
+  console.log(violations.length === 0 ? 'CLEAN' : 'VIOLATIONS:' + violations.length + ':' + violations.slice(0, 3).join(','));
+" 2>/dev/null)
+if echo "$K119_CHECK" | /usr/bin/grep -q "^CLEAN$"; then
+  pass "K119: compiled-region EDIT-SOURCE markers present (every <!-- BEGIN dispatch:... --> in workflows/*.md is followed by <!-- EDIT-SOURCE: templates/... -->)"
+else
+  fail "K119: missing EDIT-SOURCE markers — $K119_CHECK"
 fi
 
 echo

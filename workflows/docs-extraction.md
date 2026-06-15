@@ -87,6 +87,7 @@ List which signals are present. If both 1 and 2 are absent, the docs-writer will
 Dispatch the docs-writer agent. The dispatch envelope is rendered by `dispatch.cjs compile --write` so it stays consistent with the in-workflow variant:
 
 <!-- BEGIN dispatch:docs-writer:docs -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/docs-writer-docs.tmpl.md -->
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   <context>
     <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md, README.md (if exists)</files_to_read>

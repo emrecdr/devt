@@ -232,6 +232,7 @@ Dispatch the programmer agent:
 
 ```
 <!-- BEGIN dispatch:programmer:quick_implement -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/programmer-quick_implement.tmpl.md -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
@@ -353,6 +354,7 @@ Dispatch the tester agent:
 
 ```
 <!-- BEGIN dispatch:tester:quick_implement -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/tester-quick_implement.tmpl.md -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
@@ -417,6 +419,7 @@ Dispatch the code-reviewer agent:
 
 ```
 <!-- BEGIN dispatch:code-reviewer:quick_implement -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/code-reviewer-quick_implement.tmpl.md -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">

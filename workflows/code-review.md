@@ -541,6 +541,7 @@ Dispatch the code-reviewer agent with the identified file scope:
 
 ```
 <!-- BEGIN dispatch:code-reviewer:code_review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/code-reviewer-code_review.tmpl.md -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
@@ -670,6 +671,7 @@ Dispatch the verifier:
 
 ```
 <!-- BEGIN dispatch:verifier:code_review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/verifier-code_review.tmpl.md -->
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
@@ -807,6 +809,7 @@ When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
 
 ```
 <!-- BEGIN dispatch:curator:code_review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-code_review.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>

@@ -203,6 +203,19 @@ function renderEnvelope(agent, workflowId, contracts) {
   return envelope.replace(/\{\{workflow_id\}\}/g, workflowId);
 }
 
+// Compute the EDIT-SOURCE marker for a given agent + workflow_id. Returns
+// the relative path to the template that cmdCompile would render. Used by
+// cmdCompile to prepend a marker line to the in-workflow compiled body so
+// editors see the actual template source at edit time (K119 enforces).
+// Kept separate from renderEnvelope so render-filled output (CLI consumer
+// paste path) stays free of the marker (K2 expects pure Task() output).
+function editSourceMarkerFor(agent, workflowId) {
+  const specificPath = path.join(ENVELOPES_DIR, `${agent}-${workflowId}.tmpl.md`);
+  const defaultPath = path.join(ENVELOPES_DIR, `${agent}.tmpl.md`);
+  const envelopePath = fs.existsSync(specificPath) ? specificPath : defaultPath;
+  return `<!-- EDIT-SOURCE: ${path.relative(PLUGIN_ROOT, envelopePath)} -->`;
+}
+
 function cmdList() {
   return { regions: listMarkerRegions() };
 }
@@ -585,7 +598,8 @@ function cmdCompile(mode) {
       const currentBody = lines.slice(region.begin_line, region.end_line - 1).join("\n");
       let rendered;
       try {
-        rendered = renderEnvelope(region.agent, region.workflow_id, contracts);
+        rendered = editSourceMarkerFor(region.agent, region.workflow_id) + "\n" +
+                   renderEnvelope(region.agent, region.workflow_id, contracts);
       } catch (err) {
         drift.push({ ...region, error: err.message });
         continue;

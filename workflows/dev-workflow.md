@@ -534,6 +534,7 @@ If no risk signals trip, skip the prompt and dispatch only the researcher.
 
 ```
 <!-- BEGIN dispatch:researcher:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/researcher.tmpl.md -->
 Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
   <context>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
@@ -560,6 +561,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 ```
 # Only when arch_health was opted-in above — dispatched in the SAME message as the researcher Task call.
 <!-- BEGIN dispatch:architect:dev-arch-health -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/architect-dev-arch-health.tmpl.md -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
@@ -749,6 +751,7 @@ Dispatch the architect agent to review the proposed approach before implementati
 
 ```
 <!-- BEGIN dispatch:architect:dev-arch-review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/architect-dev-arch-review.tmpl.md -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
     <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
@@ -894,6 +897,7 @@ Dispatch the programmer agent:
 
 ```
 <!-- BEGIN dispatch:programmer:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/programmer.tmpl.md -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
     <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
@@ -1045,6 +1049,7 @@ Dispatch the tester agent:
 
 ```
 <!-- BEGIN dispatch:tester:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/tester.tmpl.md -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
     <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
@@ -1160,6 +1165,7 @@ Dispatch the code-reviewer agent:
 
 ```
 <!-- BEGIN dispatch:code-reviewer:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/code-reviewer.tmpl.md -->
 Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
@@ -1310,6 +1316,7 @@ If all three artifacts exist, dispatch the verifier agent:
 
 ```
 <!-- BEGIN dispatch:verifier:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/verifier.tmpl.md -->
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>dev</workflow_type>
@@ -1419,6 +1426,7 @@ Dispatch both agents in parallel:
 
 ```
 <!-- BEGIN dispatch:docs-writer:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/docs-writer.tmpl.md -->
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   <context>
     <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
@@ -1437,6 +1445,7 @@ Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
 <!-- END dispatch:docs-writer:dev -->
 
 <!-- BEGIN dispatch:retro:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/retro.tmpl.md -->
 Task(subagent_type="devt:retro", model="{models.retro}", prompt="
   <context>
     <files_to_read>
@@ -1544,6 +1553,7 @@ fi
 
 ```
 <!-- BEGIN dispatch:curator:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/curator.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>

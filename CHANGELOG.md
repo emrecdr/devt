@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.94.1] - 2026-06-15
+
+### Meta-gates — prevent next cycle's drift before it happens
+
+The v0.93→v0.94 cycle's introspection surfaced four systematic failure modes the existing drift-guard stack didn't catch. v0.94.1 adds K116–K119 as preventive auto-detectors so future cycles don't repeat the same mistakes.
+
+**K116 — Pipefail+`grep -c` trap auto-detector.** Codifies CON-003. Scans `scripts/smoke-test.sh` for `$(... grep -c ...)` substitutions lacking the defuser pattern (`set +eo pipefail` inside subshell OR `|| FALLBACK` defuser). Pattern caught 5× during v0.93→v0.94, each costing ~15min debug time before the trap was diagnosed. The gate is implemented in node so it doesn't fall into its own trap. Also fixed 7 pre-existing un-defused patterns surfaced by the new gate (K73_ABSENT/PRESENT, K77_B_HAS_URL/PATH/CODE, K79_TMPL_HAS_PLACEHOLDER, M12_REG).
+
+**K117 — K-gate count auto-validator.** Catches the off-by-one drift class observed 3× during v0.93→v0.94 (each release: "X-deep" claim in README + CLAUDE.md drifted from actual smoke-gate count). Counts `^# K(9[4-9]|1[0-9][0-9]):` definitions in smoke-test.sh and verifies both files' `N-deep` + `K94-Ktop` claims match. Was 12-deep/K94-K105 at v0.93.0 → 22-deep/K94-K115 at v0.94.0 (off by 9, drifted forward at each release). Now: gate fails on first drift instead of accumulating until the next manual sweep.
+
+**K118 — CHANGELOG [Unreleased] coverage gate.** Catches the failure mode the v0.94.0 wrap-up exposed: code-surface commits since the last tag (`bin/`, `hooks/`, `workflows/`, `.claude-plugin/`) but `[Unreleased]` is empty. Pre-version-rename check that complements the existing CHANGELOG version-coverage gate. v0.94.0's `[0.94.0]` section was missing the validation pass + axis-H propagation + template source fix content; the gate would have caught the omission pre-commit.
+
+**K119 — Compiled-region EDIT-SOURCE markers.** During v0.94.0 doc-sync, edits to `workflows/code-review.md` inside compiled `<!-- BEGIN dispatch:... -->` regions got reverted by `dispatch compile --write` twice before I realized the body was managed by the compile system. `bin/modules/dispatch.cjs::cmdCompile` now prepends `<!-- EDIT-SOURCE: templates/dispatch/envelopes/X.tmpl.md -->` to every compiled body. Editors viewing the workflow file see the template source path immediately and know where to edit instead. `editSourceMarkerFor` is kept separate from `renderEnvelope` so `dispatch render-filled` output stays marker-free (K2 invariant preserved).
+
+### Why "meta-gates" is the right framing
+
+These four gates don't ship new features. They convert four CON-001-class telemetry-without-enforcement gaps into hard automated checks. The meta-pattern: **every recurring failure mode the cycle introspection surfaced becomes a smoke gate.** v0.93.x's "validate-input-boundaries" methodology operated on user input; v0.94.0's "telemetry-to-enforcement" operated on gate results; v0.94.1's meta-gates operate on the cycle's own documentation and infrastructure. The methodology spiral closes one more layer.
+
+Drift-guard stack now **26-deep (K94–K119)**. Smoke 864/864, locking 3/3.
+
 ## [0.94.0] - 2026-06-15
 
 ### Cal #22 Round 1 — Telemetry to Enforcement (F1 + F2 + F3 + F4)

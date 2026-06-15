@@ -145,6 +145,7 @@ Write to `.devt/state/debug-context.md`
 ## Step 3: Dispatch Debugger
 
 <!-- BEGIN dispatch:debugger:debug -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/debugger-debug.tmpl.md -->
 Task(subagent_type="devt:debugger", model="{models.debugger}", prompt="
 <context>
 <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md</files_to_read>
@@ -213,6 +214,7 @@ When ACTIVE, dispatch curator:
 
 ```
 <!-- BEGIN dispatch:curator:debug -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-debug.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
     <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
