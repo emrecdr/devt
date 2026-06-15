@@ -12970,19 +12970,19 @@ fi
 # state update, expect length ≤ 6 (archive_runs default 5 + 1 anchor).
 K120_TMP=$(mktemp -d)
 mkdir -p "$K120_TMP/.devt/state"
-# Build a 50-entry history with distinct UUIDs
-K120_HIST=$(node -e "
-const ids = Array.from({length: 50}, (_, i) => 'k120-id-' + String(i).padStart(2, '0') + '-aaaa-bbbb-cccc-dddddddddddd');
-console.log(JSON.stringify(ids));
-")
-printf 'active: true\nworkflow_id: "k120-id-49-aaaa-bbbb-cccc-dddddddddddd"\noriginal_workflow_id: "k120-id-00-aaaa-bbbb-cccc-dddddddddddd"\nworkflow_type: dev\nphase: implement\ntier: STANDARD\nfirst_created_at: "2026-06-01T00:00:00.000Z"\ncreated_at: "2026-06-01T00:00:00.000Z"\nworkflow_id_history: %s\n' "$K120_HIST" > "$K120_TMP/.devt/state/workflow.yaml"
-K120_BEFORE=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.workflow_id_history.length);}catch{console.log('parse-err');}})") || K120_BEFORE=0
+# Build a 10-entry history with the serialization format the YAML parser
+# round-trips correctly (JSON-stringified array inside double-quoted string,
+# with backslash-escaped inner quotes — matches serializeSimpleYaml output).
+K120_HIST_VAL=$(node -e "console.log(JSON.stringify(JSON.stringify(Array.from({length: 10}, (_, i) => 'k120-id-' + String(i).padStart(2, '0')))));")
+printf 'active: true\nworkflow_id: "k120-id-09"\noriginal_workflow_id: "k120-id-00"\nworkflow_type: dev\nphase: implement\ntier: STANDARD\nfirst_created_at: "2026-06-01T00:00:00.000Z"\ncreated_at: "2026-06-01T00:00:00.000Z"\nworkflow_id_history: %s\n' "$K120_HIST_VAL" > "$K120_TMP/.devt/state/workflow.yaml"
+# Defensive parse: state read returns history as array OR JSON-string depending on path
+K120_BEFORE=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const h=Array.isArray(o.workflow_id_history)?o.workflow_id_history:JSON.parse(o.workflow_id_history);console.log(h.length);}catch{console.log('parse-err');}})") || K120_BEFORE=0
 (cd "$K120_TMP" && node "$CLI" state update phase=verify >/dev/null 2>&1) || true
-K120_AFTER=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.workflow_id_history.length);}catch{console.log('parse-err');}})") || K120_AFTER=0
-K120_ANCHOR_PRESERVED=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.workflow_id_history[0]==='k120-id-00-aaaa-bbbb-cccc-dddddddddddd'?'yes':'no');}catch{console.log('parse-err');}})") || K120_ANCHOR_PRESERVED="parse-err"
+K120_AFTER=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const h=Array.isArray(o.workflow_id_history)?o.workflow_id_history:JSON.parse(o.workflow_id_history);console.log(h.length);}catch{console.log('parse-err');}})") || K120_AFTER=0
+K120_ANCHOR_PRESERVED=$(set +eo pipefail; cd "$K120_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const h=Array.isArray(o.workflow_id_history)?o.workflow_id_history:JSON.parse(o.workflow_id_history);console.log(h[0]==='k120-id-00'?'yes':'no');}catch{console.log('parse-err');}})") || K120_ANCHOR_PRESERVED="parse-err"
 rm -rf "$K120_TMP"
-if [ "$K120_BEFORE" = "50" ] && [ "$K120_AFTER" = "6" ] && [ "$K120_ANCHOR_PRESERVED" = "yes" ]; then
-  pass "K120: workflow_id_history trim respects archive_runs cap (50 → 6 entries, original_workflow_id anchor preserved at index 0)"
+if [ "$K120_BEFORE" = "10" ] && [ "$K120_AFTER" = "6" ] && [ "$K120_ANCHOR_PRESERVED" = "yes" ]; then
+  pass "K120: workflow_id_history trim respects archive_runs cap (10 → 6 entries, original_workflow_id anchor preserved at index 0)"
 else
   fail "K120: trim broken — before=$K120_BEFORE after=$K120_AFTER anchor_preserved=$K120_ANCHOR_PRESERVED"
 fi
