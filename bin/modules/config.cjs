@@ -48,6 +48,17 @@ const DEFAULTS = {
   // dispatch_hygiene_mode — block-default makes the audit-trail review
   // involuntary rather than perceived-urgency optional.
   claim_check_mode: "block",
+  // Cal #22 F1 (greenfield I1): graphify_decision_mode gates the F16 drill-down
+  // skip case in assert-graphify-decision. block: when tier ∈ {symbol_anchored,
+  // bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections,
+  // gate returns ok:false (forces operator to re-run F16 or explicitly opt out).
+  // warn: drill_down_skipped surfaces in result but does not flip ok.
+  // Same default rationale as dispatch_hygiene_mode + claim_check_mode —
+  // block-default makes substance enforcement involuntary (CON-001 #6).
+  // Field evidence: 5+ prior greenfield sessions skipped F16 entirely while
+  // assert-graphify-decision returned ok:true because under_three_drill_downs
+  // was informational only.
+  graphify_decision_mode: "block",
   // Structural-drift validator mode for sub-agent output artifacts.
   // checkAgentOutput's --structural --baseline=<path> flag compares the
   // final agent artifact against the stub-first sentinel snapshot via the

@@ -29,7 +29,7 @@ schema_version: 1
 
 A recurring devt failure mode: gates verify an artifact exists, has the right shape, or has the right section count — but not whether the **substance** behind the form is real. LLM orchestrators under context pressure classify advisory warnings as "not load-bearing" and skip them; soft signals lose to perceived urgency every time. Only gates that block involuntarily have observed efficacy.
 
-## Field-validated instances (5)
+## Field-validated instances (7)
 
 | Gate | Form check (passed) | Substance gap (bypassed) | Fix |
 |---|---|---|---|
@@ -38,6 +38,8 @@ A recurring devt failure mode: gates verify an artifact exists, has the right sh
 | **L1** | `dispatch-hygiene-guard.sh` warned | Advisory was ignored 6× in one session by same LLM | Default-block (`{decision:"deny"}`) |
 | **F26** | `## Drill-down:` headings present | Headings hand-written without MCP calls | Cross-reference `_mcp-trace.jsonl` for `get_neighbors` records in `workflow_id` window |
 | **F27/F28/F29/F30** | `review.md` / `impl-summary.md` exists | Body is "Stub written; analysis in progress." | `state check-agent-output` detects stub phrases + low word count + heading-only; wired into both `code-review.md` and `dev-workflow.md` verifier pre-gates AND into the verifier agent body itself for defense-in-depth |
+| **C22F1** (cal #22) | `assert-graphify-decision` computed `under_three_drill_downs:true` | Field was informational only; `ok:true` returned despite F16 drill-down entirely skipped (0 get_neighbors calls + 0 drill-down sections, 5+ greenfield sessions over weeks) | Flip the gate: when `plan_tier ∈ {symbol_anchored, bulk_scoped}` AND `mcp_get_neighbors_calls === 0` AND `drillDownSections === 0`, return `ok:false`. Opt-out via `.devt/config.json::graphify_decision_mode: "warn"`. K114 locks the contract. |
+| **C22F2** (cal #22) | Verifier returned `verdict: satisfied` with `criteria_total: 7` | Verifier walked rubric axes A–G and stopped — silently skipped axis H (`## Axis H — Dispatch warnings acknowledgment` added in v0.93.3 G3). The count was right (7 axes graded) but covered the wrong set (axes A–F+G instead of A–E+G+H). Coverage mismatch invisible to count-based gates. | Two-layer fix: (1) Verifier prompt prose mandates "walk EVERY axis declared in rubric, count by `^## Axis [A-Z] —` heading and `^\| **X.` table-row patterns"; (2) `state assert-verifier-graded-all-axes` post-hoc check counts rubric axes (both styles) and fails when `criteria_total < rubricAxesPresent`. K115 locks the contract. |
 
 ## How to recognize the class
 

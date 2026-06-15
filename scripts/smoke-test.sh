@@ -12742,6 +12742,73 @@ else
   fail "K113: G3 rubric drift — dev_has=$K113_DEV_HAS cr_has=$K113_CR_HAS dev_req=$K113_DEV_REQ cr_req=$K113_CR_REQ"
 fi
 
+# K114: cal #22 F1 — assert-graphify-decision gate flip (greenfield I1).
+# Field evidence: 5+ prior greenfield sessions skipped F16 drill-down entirely
+# (0 get_neighbors calls, 0 drill-down sections) while the gate returned
+# ok:true because under_three_drill_downs was informational only.
+# Fixture: workflow.yaml + graphify-impact-plan.json(tier=symbol_anchored)
+# + graph-impact.md with 1 section (no drill-down) + config.json with
+# graphify_decision_mode=block → expect ok:false.
+K114_TMP=$(mktemp -d)
+mkdir -p "$K114_TMP/.devt/state"
+mkdir -p "$K114_TMP/.devt/memory"
+mkdir -p "$K114_TMP/graphify-out"
+# graphify.status() returns "ready" only when graphify-out/graph.json exists.
+# Synthetic minimal graph file — assert-graphify-decision doesn't load it.
+printf '{"nodes":[],"edges":[]}\n' > "$K114_TMP/graphify-out/graph.json"
+K114_OLD_TS=$(node -e "console.log(new Date(Date.now() - 60000).toISOString())")
+printf 'active: true\nworkflow_id: k114-test\nworkflow_type: code_review\nphase: review\ntier: STANDARD\niteration: 1\ntask: "k114 fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K114_OLD_TS" "$K114_OLD_TS" > "$K114_TMP/.devt/state/workflow.yaml"
+printf '{"tier":"symbol_anchored","args":{"symbols":["PScope","PAction"]},"git_provider":"github"}\n' > "$K114_TMP/.devt/state/graphify-impact-plan.json"
+printf '## Top direct dependents\n\nSomething substantive enough to clear the byte gate.\n' > "$K114_TMP/.devt/state/graph-impact.md"
+printf '{"graphify_decision_mode":"block","graphify":{"enabled":true}}\n' > "$K114_TMP/.devt/config.json"
+K114_RESULT=$(set +eo pipefail; cd "$K114_TMP" && node "$CLI" state assert-graphify-decision 2>/dev/null) || K114_RESULT=""
+K114_OK=$(set +eo pipefail; echo "$K114_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===false?'no':'yes');}catch{console.log('parse-err');}})") || K114_OK="parse-err"
+K114_HAS_REASON=$(set +eo pipefail; echo "$K114_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(typeof o.reason==='string' && o.reason.includes('F16 drill-down')?'yes':'no');}catch{console.log('parse-err');}})") || K114_HAS_REASON="parse-err"
+K114_HAS_SKIPPED=$(set +eo pipefail; echo "$K114_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.drill_down_skipped===true?'yes':'no');}catch{console.log('parse-err');}})") || K114_HAS_SKIPPED="parse-err"
+# Also verify warn mode opt-out works
+printf '{"graphify_decision_mode":"warn","graphify":{"enabled":true}}\n' > "$K114_TMP/.devt/config.json"
+K114_WARN_RESULT=$(set +eo pipefail; cd "$K114_TMP" && node "$CLI" state assert-graphify-decision 2>/dev/null) || K114_WARN_RESULT=""
+K114_WARN_OK=$(set +eo pipefail; echo "$K114_WARN_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===true?'yes':'no');}catch{console.log('parse-err');}})") || K114_WARN_OK="parse-err"
+rm -rf "$K114_TMP"
+if [ "$K114_OK" = "no" ] && [ "$K114_HAS_REASON" = "yes" ] && [ "$K114_HAS_SKIPPED" = "yes" ] && [ "$K114_WARN_OK" = "yes" ]; then
+  pass "K114: assert-graphify-decision F16 drill-down skip gates ok=false in block mode + opts out in warn mode (CON-001 #6 substance-over-form)"
+else
+  fail "K114: gate flip broken — block_ok_no=$K114_OK has_reason=$K114_HAS_REASON has_skipped=$K114_HAS_SKIPPED warn_ok_yes=$K114_WARN_OK"
+fi
+
+# K115: cal #22 F2 — assert-verifier-graded-all-axes (greenfield Q1).
+# Field evidence: greenfield's verifier walked rubric axes A–G and stopped at
+# G, silently skipping axis H "## Axis H — Dispatch warnings acknowledgment".
+# Verdict came back satisfied despite the missing axis grade.
+# Fixture: workflow.yaml (workflow_type=code_review) + verification.json with
+# criteria_total=7 → expect ok:false with missing_axes_count=1 (rubric has 8
+# axes A–H after the F2 rename).
+K115_TMP=$(mktemp -d)
+mkdir -p "$K115_TMP/.devt/state"
+K115_OLD_TS=$(node -e "console.log(new Date(Date.now() - 60000).toISOString())")
+printf 'active: true\nworkflow_id: k115-test\nworkflow_type: code_review\nphase: verify\ntier: STANDARD\niteration: 1\ntask: "k115 fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K115_OLD_TS" "$K115_OLD_TS" > "$K115_TMP/.devt/state/workflow.yaml"
+# code_review.v1.md has 7 axes total (A,B,C,D,E,G in table + H as heading;
+# F is genuinely absent). criteria_total=6 simulates the cal #22 case where
+# verifier stopped one axis short of the rubric's declared count.
+printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":6,"criteria_met":6}\n' > "$K115_TMP/.devt/state/verification.json"
+K115_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-verifier-graded-all-axes 2>/dev/null) || K115_RESULT=""
+K115_OK=$(set +eo pipefail; echo "$K115_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===false?'no':'yes');}catch{console.log('parse-err');}})") || K115_OK="parse-err"
+K115_MISSING=$(set +eo pipefail; echo "$K115_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.missing_axes_count||0);}catch{console.log('parse-err');}})") || K115_MISSING="parse-err"
+# Happy path: criteria_total matches rubric axis count (7)
+printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":7,"criteria_met":7}\n' > "$K115_TMP/.devt/state/verification.json"
+K115_MATCH_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-verifier-graded-all-axes 2>/dev/null) || K115_MATCH_RESULT=""
+K115_MATCH_OK=$(set +eo pipefail; echo "$K115_MATCH_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===true?'yes':'no');}catch{console.log('parse-err');}})") || K115_MATCH_OK="parse-err"
+# Also verify dev workflow_type returns gate-does-not-apply (no axis taxonomy)
+printf 'active: true\nworkflow_id: k115-dev\nworkflow_type: dev\nphase: verify\ntier: STANDARD\niteration: 1\ntask: "k115 dev fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K115_OLD_TS" "$K115_OLD_TS" > "$K115_TMP/.devt/state/workflow.yaml"
+K115_DEV_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-verifier-graded-all-axes 2>/dev/null) || K115_DEV_RESULT=""
+K115_DEV_OK=$(set +eo pipefail; echo "$K115_DEV_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===true && /does not use axis taxonomy/.test(o.reason||'')?'yes':'no');}catch{console.log('parse-err');}})") || K115_DEV_OK="parse-err"
+rm -rf "$K115_TMP"
+if [ "$K115_OK" = "no" ] && [ "$K115_MISSING" = "1" ] && [ "$K115_MATCH_OK" = "yes" ] && [ "$K115_DEV_OK" = "yes" ]; then
+  pass "K115: assert-verifier-graded-all-axes catches verifier stopping short (criteria_total=6 vs rubric=7 → ok=false, missing=1); passes on match (criteria_total=7); skips dev workflow (no axis taxonomy)"
+else
+  fail "K115: walk-all-axes broken — miss_ok_no=$K115_OK miss_count=$K115_MISSING match_ok_yes=$K115_MATCH_OK dev_skip_yes=$K115_DEV_OK"
+fi
+
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #22 Round 1 — Telemetry to Enforcement (F1 + F2 + F3 + F4)
+
+Greenfield's deep field session against v0.93.3 produced a 9-finding audit with a coherent theme: gates that compute structured signals but don't enforce them. Three distinct gates fit the pattern (`assert-graphify-decision` informational drill-down fields, verifier rubric axis taxonomy, `check-symbol-godnodes` non-monotonic aggregation). All trace to the same CON-001 substance-enforcement-gates concept — instances 6 and 7 added to its field-validated table.
+
+**F1 — `assert-graphify-decision` gate flip (greenfield I1).** Field evidence from greenfield: 5+ prior sessions skipped the F16 top-3 drill-down step entirely (0 `get_neighbors` MCP calls, 0 drill-down sections in `graph-impact.md`) while the gate returned `ok:true` because `under_three_drill_downs` was informational only. Flipped: when `plan_tier ∈ {symbol_anchored, bulk_scoped}` AND 0 calls AND 0 sections AND `graphify_decision_mode === "block"` (new config knob, default block), gate returns `ok:false` with operator-actionable reason. Opt-out via `.devt/config.json::graphify_decision_mode: "warn"` mirrors the `dispatch_hygiene_mode` pattern. K114 locks the contract across block + warn cases.
+
+**F2 — Verifier walk-all-axes contract (greenfield Q1).** Field evidence: greenfield's verifier walked rubric axes A–G and stopped at G, silently skipping axis H (`## Axis H — Dispatch warnings acknowledgment` added in v0.93.3). Verdict came back `satisfied` despite the missing axis grade. Two-layer fix:
+- **Rubric:** Renamed `## Required: Dispatch warnings acknowledgment` → `## Axis H — Dispatch warnings acknowledgment` in `references/rubrics/code_review.v1.md` so it sorts naturally with the table-style A–G axes. Verifier prose updated in `agents/verifier.md` to mandate walking every axis (both `^## Axis [A-Z] —` heading and `^\| **X.` table-row patterns).
+- **Post-hoc check:** New CLI `state assert-verifier-graded-all-axes` reads `verification.json::criteria_total` and compares against the count of axes in the pinned rubric body (hybrid heading + table-row detection). Mismatch → `ok:false` with `missing_axes_count` surfaced. Workflows whose rubrics don't use axis taxonomy (e.g., `dev` uses verification levels L1–L5.5) return `ok:true` with explicit skip reason. K115 locks the contract across miss + match + skip cases.
+
+**F3 — `check-symbol-godnodes` non-monotonic diagnostic (greenfield Q2/Q-final).** Field evidence: greenfield's bisect grid showed non-additive aggregation across 2–3 file combinations (A+B → lost A's god-node, C+D → lost C's, etc.) with correct aggregation at N≥4 (order-invariant). Reproducer: `check-symbol-godnodes app/core/error_codes.py app/services/clients/api/v1/relative_action_routes.py` returns `[]` in greenfield's env vs `[{symbol:"ErrorCode", ...}]` in devt's. Code-level inspection shows clean single-pass Set lookup with no obvious non-monotonic logic; the divergence between environments suggests graph-state coupling (cached `nodeMap` topology or `loadGraph()` return-shape variance across rebuilds). Conservative scope: shipped a structured diagnostic comment block at `bin/modules/graphify.cjs:1385` with field-debugging hints; deferred code fix until reproducible. The bug class is documented for future cycles.
+
+**F4 — CON-001 sixth and seventh instances.** Updated `.devt/memory/concepts/CON-001-substance-enforcement-gates.md::Field-validated instances (now 7)` with C22F1 (gate flip) and C22F2 (walk-all-axes). The CON-001 pattern is now structural to devt's design vocabulary — 7 field instances over 6 months means any new gate that returns structured fields without enforcing them inherits the concept's accumulated lessons.
+
+Drift-guard stack now **21-deep (K94–K115)**. Smoke 860/860, locking 3/3.
+
 ## [0.93.3] - 2026-06-15
 
 ### Cal #21 Round 5 V6 — push-not-pull session signal surfacing

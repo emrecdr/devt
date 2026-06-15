@@ -1382,6 +1382,26 @@ function symbolsInFiles(diffFiles, limit = 10) {
 //
 // Returns [{symbol, source_file, edge_count, is_god_node}] sorted by
 // edge_count desc, already filtered to is_god_node=true.
+// Cal #22 F3 (greenfield Q2/Q-final): non-monotonic aggregation bug observed
+// in greenfield's environment. Bisect grid result on a 5-file diff:
+//   A+B → lost A's god-node, C+D → lost C's, A+B+C → lost A, C+D+E → lost all,
+//   A+B+C+D → correct, A+B+C+D+E → correct, E+D+C+B+A → correct (order-
+//   invariant at N≥4). The reproducer in greenfield is:
+//     check-symbol-godnodes app/core/error_codes.py \
+//       app/services/clients/api/v1/relative_action_routes.py
+//   returns [] in greenfield's env vs [{symbol:"ErrorCode",...}] in devt's.
+//
+// Code-level inspection (this function): single-pass Set lookup over nodeMap;
+// no obvious non-monotonic logic. The divergence between environments
+// strongly suggests graph-state dependency (cached nodeMap topology, ordering,
+// or `loadGraph()` return shape varying across rebuilds). Defer code fix
+// until reproducible. If you encounter this in field:
+//   1. Capture the input file list + edge_threshold + full CLI output
+//   2. Capture graphify status (built_at SHA, node_count, edge_count)
+//   3. Run the same args after `graphify rebuild` and compare
+//   4. If the result changes across rebuilds, the bug is graph-state coupled
+//      (likely in loadGraph or the nodeMap iteration); if it persists, the
+//      bug is in this function's Set/iteration logic.
 function checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50) {
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) return [];
   const loaded = loadGraph();

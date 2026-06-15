@@ -1782,8 +1782,48 @@ function assertGraphifyDecision() {
     } catch { /* trace unavailable — leave count at 0 */ }
     fabricatedDrillDown = mcpGetNeighborsCalls === 0;
   }
+  // Cal #22 F1 (greenfield I1): flip drill-down skip from informational to
+  // gating. Field evidence: 5+ prior sessions including greenfield's run
+  // skipped the F16 top-3 drill-down step entirely (0 get_neighbors calls,
+  // 0 drill-down sections) while assert-graphify-decision returned ok:true
+  // because the fields were informational only. Same CON-001 substance-
+  // enforcement-gates pattern (6th instance).
+  //
+  // Distinguishing skip from legitimate small-graph case: skip is
+  // characterized by tier ∈ {symbol_anchored, bulk_scoped} (drill-down
+  // mandated) AND mcpGetNeighborsCalls === 0 (no calls attempted) AND
+  // drillDownSections === 0 (no sections written). A small graph with
+  // few-or-zero dependents would still produce at least one get_neighbors
+  // call (the F16 step's "skip if 0 dependents" branch fires AFTER the call).
+  //
+  // Gate is opt-out via .devt/config.json::graphify_decision_mode = "warn"
+  // (default "block"). Mirrors dispatch_hygiene_mode pattern at line ~4398.
+  let planTier = null;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const planPath = path.join(dir, "graphify-impact-plan.json");
+    if (fs.existsSync(planPath)) {
+      const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+      if (plan && typeof plan.tier === "string") planTier = plan.tier;
+    }
+  } catch { /* plan missing or malformed — tier stays null, gate stays informational */ }
+  let graphifyDecisionMode = "block";
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const configPath = path.join(findProjectRoot(), ".devt", "config.json");
+    if (fs.existsSync(configPath)) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      if (cfg && typeof cfg.graphify_decision_mode === "string") {
+        graphifyDecisionMode = cfg.graphify_decision_mode.toLowerCase();
+      }
+    }
+  } catch { /* config missing — keep block default */ }
+  const drillDownMandated = planTier === "symbol_anchored" || planTier === "bulk_scoped";
+  const drillDownSkipped = haveImpact && drillDownMandated &&
+                           mcpGetNeighborsCalls === 0 && drillDownSections === 0;
+  const drillDownGateFires = graphifyDecisionMode === "block" && drillDownSkipped;
   const result = {
-    ok: !fabricatedDrillDown && !hasThinDrillDowns && !(malformedDrillDownHeadings > 0),
+    ok: !fabricatedDrillDown && !hasThinDrillDowns && !(malformedDrillDownHeadings > 0) && !drillDownGateFires,
     file: haveImpact ? "graph-impact.md" : "graphify-skip-reason.txt",
     graphify_state: "ready",
     file_bytes: fileBytes,
@@ -1796,6 +1836,9 @@ function assertGraphifyDecision() {
     fabricated_drill_down: fabricatedDrillDown,
     thin_drill_down_sections: thinDrillDownSections,
     thin_drill_downs: thinDrillDowns,
+    plan_tier: planTier,
+    graphify_decision_mode: graphifyDecisionMode,
+    drill_down_skipped: drillDownSkipped,
   };
   if (malformedDrillDownHeadings > 0) {
     result.reason =
@@ -1812,6 +1855,13 @@ function assertGraphifyDecision() {
       `${thinDrillDownSections} drill-down section(s) below ${DRILL_DOWN_MIN_BYTES}-byte ` +
       `substance threshold with no truncation marker (${sym}). Either the MCP ` +
       `response was empty or the drill-down was hand-typed.`;
+  } else if (drillDownGateFires) {
+    result.reason =
+      `F16 drill-down step skipped: tier=${planTier} mandates top-3 get_neighbors ` +
+      `but graph-impact.md has 0 drill-down sections and 0 get_neighbors MCP calls ` +
+      `recorded in this workflow's window. Re-run the F16 step (the "## Drill-down: ` +
+      `<DEP>" blocks for top-3 dependents). To opt out, set graphify_decision_mode: ` +
+      `"warn" in .devt/config.json.`;
   }
   if (result.ok) {
     const freshness = isArtifactFresh(filePath);
@@ -2047,6 +2097,131 @@ function assertVerifierRan() {
     verification_enabled: true,
     sidecar_present: haveSidecar,
     markdown_present: haveMd,
+  };
+}
+
+// Cal #22 F2 (greenfield Q1 — verifier walked rubric axes A–G and stopped,
+// silently skipping axis H "## Axis H — Dispatch warnings acknowledgment").
+// Same CON-001 substance-vs-form failure mode: the rubric's H axis was
+// computed at edit time but the verifier didn't enforce walking it.
+//
+// Counts `^## Axis [A-Z] —` headings in the pinned rubric body and compares
+// against verification.json::criteria_total. Mismatch → ok:false with the
+// missing-axis count surfaced. Workflow types whose rubrics don't use
+// axis-letter taxonomy (e.g. dev workflow uses Verification Levels L1-L5.5)
+// return ok:true with reason "rubric does not use axis taxonomy".
+//
+// Returns {ok, reason?, rubric_axes_present, criteria_total, missing_axes_count}.
+function assertVerifierGradedAllAxes() {
+  const { getMergedConfig } = require("./config.cjs");
+  const cfg = getMergedConfig();
+  const dir = getStateDir();
+  // Resolve workflow_type to know which rubric was pinned.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  let workflowType = null;
+  if (fs.existsSync(wfPath)) {
+    const raw = fs.readFileSync(wfPath, "utf8");
+    const m = raw.match(/^workflow_type:\s*"?([^"\n]+)"?\s*$/m);
+    if (m) workflowType = m[1].trim();
+  }
+  if (!workflowType) {
+    return { ok: true, reason: "no active workflow — gate does not apply" };
+  }
+  // Resolve rubric path: cfg.rubrics[<workflow_type>] is the filename in
+  // references/rubrics/. Same pattern as the workflow dispatch templates.
+  const rubricFilename = cfg && cfg.rubrics && cfg.rubrics[workflowType];
+  if (!rubricFilename) {
+    return {
+      ok: true,
+      workflow_type: workflowType,
+      reason: `no rubric pinned for workflow_type=${workflowType} — gate does not apply`,
+    };
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const rubricPath = path.join(__dirname, "..", "..", "references", "rubrics", rubricFilename);
+  if (!fs.existsSync(rubricPath)) {
+    return {
+      ok: true,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      reason: `rubric file ${rubricFilename} not found at expected path — gate does not apply`,
+    };
+  }
+  const rubricBody = fs.readFileSync(rubricPath, "utf8");
+  // Code-review rubric uses a hybrid taxonomy: axes A–G live as TABLE ROWS in
+  // the "Grading axes" table (`| **A. Scope coverage** | ...`), while axis H
+  // (added cal #22 F2) is a top-level heading. Count both patterns so the gate
+  // applies to the full taxonomy regardless of authoring shape.
+  const headingMatches = rubricBody.match(/^##\s+Axis\s+[A-Z]\s+—/gm);
+  const tableMatches = rubricBody.match(/^\|\s+\*\*[A-Z]\.\s+/gm);
+  const headingCount = headingMatches ? headingMatches.length : 0;
+  const tableCount = tableMatches ? tableMatches.length : 0;
+  const rubricAxesPresent = headingCount + tableCount;
+  if (rubricAxesPresent === 0) {
+    return {
+      ok: true,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      rubric_axes_present: 0,
+      reason: `rubric does not use axis taxonomy (no "## Axis [A-Z] —" headings or "| **X." table rows found) — gate does not apply`,
+    };
+  }
+  // Read verification.json sidecar to get criteria_total.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const sidecarPath = path.join(dir, "verification.json");
+  if (!fs.existsSync(sidecarPath)) {
+    return {
+      ok: false,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      rubric_axes_present: rubricAxesPresent,
+      reason: `verification.json sidecar absent — verifier never ran or sidecar was deleted`,
+    };
+  }
+  let criteriaTotal = null;
+  try {
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+    if (sidecar && typeof sidecar.criteria_total === "number") {
+      criteriaTotal = sidecar.criteria_total;
+    }
+  } catch {
+    return {
+      ok: false,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      rubric_axes_present: rubricAxesPresent,
+      reason: `verification.json malformed — cannot read criteria_total`,
+    };
+  }
+  if (criteriaTotal === null) {
+    return {
+      ok: false,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      rubric_axes_present: rubricAxesPresent,
+      criteria_total: null,
+      reason: `verification.json missing criteria_total field — verifier did not declare how many axes it graded`,
+    };
+  }
+  const missing = rubricAxesPresent - criteriaTotal;
+  if (missing > 0) {
+    return {
+      ok: false,
+      workflow_type: workflowType,
+      rubric_path: rubricFilename,
+      rubric_axes_present: rubricAxesPresent,
+      criteria_total: criteriaTotal,
+      missing_axes_count: missing,
+      reason: `rubric declares ${rubricAxesPresent} axes (A–${String.fromCharCode(64 + rubricAxesPresent)}) but verifier graded only ${criteriaTotal}; verifier stopped early and skipped ${missing} axis (axes). Re-dispatch verifier with the full rubric body and re-grade.`,
+    };
+  }
+  return {
+    ok: true,
+    workflow_type: workflowType,
+    rubric_path: rubricFilename,
+    rubric_axes_present: rubricAxesPresent,
+    criteria_total: criteriaTotal,
   };
 }
 
@@ -4986,6 +5161,8 @@ function run(subcommand, args) {
         : undefined;
       return checkAgentOutput(args[0], opts);
     }
+    case "assert-verifier-graded-all-axes":
+      return traceGate("assert-verifier-graded-all-axes", () => assertVerifierGradedAllAxes());
     case "assert-verifier-ran":
       return traceGate("assert-verifier-ran", () => assertVerifierRan());
     case "assert-scope-check-handled":
@@ -5063,7 +5240,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
       );
   }
 }
