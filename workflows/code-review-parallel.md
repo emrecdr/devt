@@ -229,7 +229,11 @@ fi
 
 ```bash
 for LANE_ID in $(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | jq -r '.[].id'); do
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:auto > "/tmp/lane-${LANE_ID}-envelope.txt"
+  # Pin the per-lane envelope to the per-file review template explicitly. Using
+  # `:auto` would resolve to `code_review_parallel` (the synthesis template)
+  # while this workflow is active — wrong for lane dispatch, which is per-file
+  # review, not synthesis.
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review > "/tmp/lane-${LANE_ID}-envelope.txt"
 done
 ```
 
@@ -421,27 +425,61 @@ SUBSTANCE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lan
 Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction:
 
 ```
-Task(subagent_type="devt:code-reviewer", model="{models.code_reviewer}", prompt="
+<!-- BEGIN dispatch:code-reviewer:code_review_parallel -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md -->
+Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt="
   <context>
     <workflow_type>code_review_parallel</workflow_type>
-    <lane_files>
-{LANE_FILES_NEWLINE_SEPARATED}
-    </lane_files>
-    <scope_trust>{from workflow.yaml}</scope_trust>
-    <scope_hint>{from workflow.yaml}</scope_hint>
-    <memory_signal>{from workflow.yaml}</memory_signal>
-    <governing_rules>{from init payload}</governing_rules>
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+      <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
+      <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
+      <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
+      <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
+      <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
+    </governing_rules>
+<memory_signal>{memory_signal_json}</memory_signal>
+    <scope_hint>{scope_hint_json}</scope_hint>
+    <scope_trust>{scope_trust_json}</scope_trust>
+    <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
+    {prior_outputs}
+    {provenance_protocol}
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
     <rubric_content>{inline_rubrics.code_review}</rubric_content>
+    <lane_files>{lane_files_newline_separated}</lane_files>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   <task>
-    Synthesize the N lane review files listed in <lane_files> into a single
-    .devt/state/review.md (and .devt/state/review.json sidecar). Dedupe findings
-    by (file:line:finding_class), reconcile severity using the rubric, preserve
-    all Critical findings, group by file. Add a ## Lane Provenance section
-    listing each lane's id, community, status, and finding count contributed.
+    Synthesize the N lane review files listed in <lane_files> into a single .devt/state/review.md
+    plus .devt/state/review.json sidecar. Synthesis mode — you are NOT performing a fresh review;
+    the lane files were produced by per-lane code-reviewer dispatches over disjoint file slices.
+    Read each lane file, then consolidate.
+
+    Synthesis rules:
+    - Dedupe findings by (file:line:finding_class). When the same finding appears in multiple
+      lanes (cross-cutting concern), keep the most specific one and cite all source lanes.
+    - Reconcile severity using the rubric in <rubric_content> when lanes disagree — promote to
+      the higher severity when evidence supports it.
+    - Preserve EVERY Critical finding. Important and Minor may be deduped but never silently
+      dropped — when you drop one, note it in the per-lane provenance.
+    - Group findings by file for the consolidated output.
+    - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
+      count contributed. Lanes with status=deferred contribute zero findings — still list them so
+      the reader knows coverage is partial.
+
+    Self-grade against the rubric as you write (axes that apply to synthesis: A — every lane
+    referenced; B — every kept finding carries file:line + severity + rule ref; C — severity
+    calibration after merge; D — Critical remediations remain concrete; H — dispatch warnings
+    acknowledged). The verifier will grade against the same rubric — closing these gaps here
+    avoids a revision loop.
+
+    Do NOT re-issue lane reviews. Do NOT issue new graph queries (your tool surface has no
+    `mcp__*graphify*`; the per-lane reviewers already consumed graph-impact.md). Do NOT promote
+    or curate memory — the parallel workflow's `present_findings` step runs lane aggregation
+    + knowledge-candidate gating separately.
   </task>
+  Write the consolidated review to .devt/state/review.md and the sidecar to .devt/state/review.json
 ")
+<!-- END dispatch:code-reviewer:code_review_parallel -->
 ```
 
 After the dispatch returns, validate that review.md + review.json exist and pass the F28 substance check on review.md (the consolidator could itself return a stub):
@@ -502,20 +540,28 @@ SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 Dispatch the verifier:
 
 ```
+<!-- BEGIN dispatch:verifier:code_review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/verifier-code_review.tmpl.md -->
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <!-- Inline rubric body from init payload — verifier prefers this over the
+         on-disk Read at <rubric_path> when present. Falls back to path when
+         omitted (oversized rubric → init returns null inline_rubrics). -->
     <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
-    <memory_signal>{memory_signal_json}</memory_signal>
+<memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
-    <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
+    <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
+<governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    {prior_outputs}
+    {provenance_protocol}
     <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
@@ -536,6 +582,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
 ")
+<!-- END dispatch:verifier:code_review -->
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing:

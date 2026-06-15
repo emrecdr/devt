@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 round 4 — code-review-parallel envelope migration
+
+**Envelope migration for `code-review-parallel.md`.** Last workflow without EDIT-SOURCE markers; brought up to the canonical pattern. Two compiled regions added (`dispatch:verifier:code_review` + `dispatch:code-reviewer:code_review_parallel`), one new envelope template (`templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md`) for the synthesis-mode consolidate dispatch.
+
+- **Verify-step drift fix**: parallel verify was missing `<god_node_warnings>`, `{prior_outputs}`, and `{provenance_protocol}` placeholders that the canonical `verifier-code_review.tmpl.md` carries. Migrating to the shared template force-syncs both surfaces — `dispatch compile --check` is now the structural guarantee, replacing the prose-only "KEEP IN SYNC" comment as the enforcement mechanism.
+- **Discoverability tip pinned**: lane envelope generation changed from `dispatch render-filled code-reviewer:auto` to `code-reviewer:code_review`. The `:auto` would have resolved to the new synthesis template while `code_review_parallel` is active — wrong for per-file lane review.
+- Region count: 20 → 22 regions tracked by `dispatch compile --check`. Zero drift after migration.
+
 ### Cal #23 simplification — Round 1+2 (6C, 8E, 7E complete)
 
 Round 2 update: shipped 2 more cuts after the round-1 northstar audit.
