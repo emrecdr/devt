@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 round 5 — memory-candidate footer collapsed to single CLI call
+
+**`memory candidates-footer` subcommand added to `bin/modules/memory.cjs`.** Encapsulates the status-read + threshold check + cooldown probe + canonical hint emission + cooldown-timestamp touch that 4 workflows had been hand-rolling identically in 7-line bash blocks. Single CLI call replaces the duplication; the prose `KEEP IN SYNC across …` comment becomes vestigial (and is dropped) because the duplicated surface no longer exists.
+
+- **Workflows updated**: `workflows/code-review.md`, `workflows/code-review-parallel.md`, `workflows/quick-implement.md`, `workflows/dev-workflow.md` each replace their footer bash block with `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-footer`. Net workflow diff: −24 lines of duplicated bash.
+- **`workflows/next.md` deliberately unchanged**: its variant uses `ready_to_surface` as a shell variable to gate a downstream AskUserQuestion; the underlying `candidates-status` primitive remains the right surface for that call site.
+- **Behaviour preserved**: silent exit 0 when not ready; canonical `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.` line + cooldown touch when ready. Verified via temp-fixture exercise of both branches.
+
 ### Cal #23 round 4 — code-review-parallel envelope migration
 
 **Envelope migration for `code-review-parallel.md`.** Last workflow without EDIT-SOURCE markers; brought up to the canonical pattern. Two compiled regions added (`dispatch:verifier:code_review` + `dispatch:code-reviewer:code_review_parallel`), one new envelope template (`templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md`) for the synthesis-mode consolidate dispatch.

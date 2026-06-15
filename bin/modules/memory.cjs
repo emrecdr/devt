@@ -1795,6 +1795,53 @@ function run(subcommand, args) {
       json({ ok: true, touched_at: ts });
       return 0;
     }
+    case "candidates-footer": {
+      // Finalize-footer convenience wrapper. Replaces the 7-line bash block
+      // previously inlined in code-review.md, code-review-parallel.md,
+      // quick-implement.md::finalize, dev-workflow.md::finalize — each of
+      // which composed candidates-status + a jq probe + candidates-touch-surface
+      // by hand. Centralizing here eliminates the drift surface their
+      // KEEP IN SYNC prose comments had been trying to enforce.
+      //
+      // Contract: silent (no stdout) when not ready; emits a leading blank
+      // line + the canonical 💭 hint when ready_to_surface, then touches the
+      // cooldown. Always exits 0 — surface failure is best-effort.
+      //
+      // Does NOT serve /devt:next's variant, which needs ready_to_surface as
+      // a shell variable to gate a downstream AskUserQuestion. That call site
+      // keeps the underlying candidates-status primitive.
+      const cfg = require("./config.cjs").getMergedConfig().memory || {};
+      const threshold = Number.isInteger(cfg.candidates_surface_threshold) ? cfg.candidates_surface_threshold : 5;
+      const cooldownHours = Number.isFinite(cfg.candidates_surface_cooldown_hours) ? cfg.candidates_surface_cooldown_hours : 24;
+      const root = findProjectRoot();
+      const suggestionsPath = path.join(root, ".devt", "memory", "_suggestions.md");
+      const cooldownPath = path.join(root, ".devt", "memory", ".last-candidate-surface");
+      let count = 0;
+      if (fs.existsSync(suggestionsPath)) {
+        try {
+          const content = fs.readFileSync(suggestionsPath, "utf8");
+          count = (content.match(/^### [⚖️🔵🔄]/gmu) || []).length;
+        } catch { /* count stays 0 */ }
+      }
+      let hoursSinceLast = null;
+      if (fs.existsSync(cooldownPath)) {
+        try {
+          const ts = fs.readFileSync(cooldownPath, "utf8").trim();
+          const parsed = new Date(ts).getTime();
+          if (!isNaN(parsed)) hoursSinceLast = (Date.now() - parsed) / 3_600_000;
+        } catch { /* stays null */ }
+      }
+      const ready = count >= threshold && (hoursSinceLast === null || hoursSinceLast >= cooldownHours);
+      if (ready) {
+        process.stdout.write(`\n💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.\n`);
+        try {
+          const memDir = path.join(root, ".devt", "memory");
+          if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
+          fs.writeFileSync(cooldownPath, new Date().toISOString() + "\n", "utf8");
+        } catch { /* best-effort */ }
+      }
+      return 0;
+    }
     case "promote":
     case "reject": {
       // These subcommands are routed to curator via workflows/memory-promote.md and
@@ -1814,7 +1861,7 @@ function run(subcommand, args) {
         `Unknown memory subcommand: ${subcommand}\n` +
         `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
         `       validate | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
-        `       candidates-status | candidates-touch-surface |\n` +
+        `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
         `       promote (via /devt:memory) | reject (via /devt:memory)\n`
       );
       return 2;
