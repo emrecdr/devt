@@ -992,6 +992,23 @@ function updateState(keyValues) {
       ) {
         current.workflow_id_history.push(current.workflow_id);
       }
+      // Cal #23 8E: trim workflow_id_history to archive_runs cap. Greenfield
+      // session evidence — history grew to 234 entries while cap was 5
+      // because the self-healing logic above appends + backfills but never
+      // bounds. Trim policy: preserve original_workflow_id anchor (index 0)
+      // for cross-rotation trace attribution, keep the last N ids where
+      // N = state.archive_runs. When history length ≤ N+1, no-op. Preserves
+      // the same chronological-order invariant the self-healing code maintains.
+      const archiveRuns = getArchiveRuns();
+      if (current.workflow_id_history.length > archiveRuns + 1) {
+        const original = current.original_workflow_id;
+        const recentN = current.workflow_id_history.slice(-archiveRuns);
+        if (original && !recentN.includes(original)) {
+          current.workflow_id_history = [original, ...recentN];
+        } else {
+          current.workflow_id_history = recentN;
+        }
+      }
     }
     // S1-v3 deactivation gate (greenfield calibration #14). On active=true→false
     // transition, invoke assertNoRawDispatchesThisSession before write. Block
