@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 simplification — Round 1+2 (6C, 8E, 7E complete)
+
+Round 2 update: shipped 2 more cuts after the round-1 northstar audit.
+
+**8E — `workflow_id_history` trim to `archive_runs` cap (`215d123` + `2d881d7`).** Greenfield session evidence: history grew to 234 entries while archive_runs cap was 5. Self-healing logic appended + backfilled but never bounded. Added trim after self-heal at state.cjs:993: preserve `original_workflow_id` anchor at index 0, keep last N entries where N = archive_runs. Idempotent self-healing — runs on every state update. K120 locks the contract (10 → 6 entries fixture, anchor preserved). Northstar: bounded growth (#2 quality), smaller workflow.yaml per dispatch (#3 tokens).
+
+**7E — Merge dispatch-scope-guard + dispatch-hygiene-guard hooks (`4057666`).** Two PreToolUse hooks on Task that shared the same matcher and did similar work (parse input, walk to .devt, write forensic record, emit hook output) merged into one. Single subprocess per Task call instead of two. Walk to .devt happens once (state+config in same pass) instead of 3 times. Distinct `source` discriminators preserved in dispatch-warnings.jsonl. Three behavioral tests verify: scope over-cap fires advisory ✓, raw devt:* fires hygiene block ✓, envelope-managed dispatch silently passes ✓. Net change: 5 files, +163/-217 lines.
+
 ### Cal #23 simplification — Round 1 (6C complete; remaining cuts northstar-validated)
 
 Greenfield Cal #23 surfaced 18 SAFE-marked simplification candidates after deep field evaluation of v0.94.1. Per-cut northstar audit (goals: clear protocols, quality always increases, tokens always optimized, delegate to graphify+claude-mem) demoted 5 from SAFE → SKIP and recategorized 2 from cuts → other:
