@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 round 6 — graphify mechanical wins + opt-in rules-exclude
+
+Four small mechanical wins from the cross-calibration between Greenfield's Graphify-integration evaluation and a second workflow-architecture thread. Each item field-anchored; rejected items (SERVER_VERSION discipline, standalone normalize-tool-name CLI, agent-body block-fragment extraction) documented under [Cal #23 round 6 — rejected after validation](#) below.
+
+**A1 — `get_community` removed from MCP advertised surface (`bin/devt-graphify-mcp.cjs`).** Field signal: zero agent invocations across 50+ raw-dispatched lane reviews — no workflow tells an agent to reach for it. The JS function `graphify.getCommunity()` remains in `bin/modules/graphify.cjs` and stays in active use via the `graphify lane-suggestions` CLI. MCP wrapper handler block deleted (correcting GF's Q8(i) framing — there was no separate "handler block" from TOOLS[]; the handler IS the registry entry). Smoke gate replaced with an inversion gate that locks the removal — accidental re-add now fails CI rather than silently re-introduces a dead agent-facing surface.
+
+**A2 — Bitbucket PR-scoped skip observability (`workflows/code-review.md` impact-plan).** Existing routing already correctly falls through from `pr_scoped` to `symbol_anchored`/`bulk_scoped` for non-GitHub providers (not a bug). Added `pr_scoped_skip_reason` field to `graphify-impact-plan.json` so post-hoc audits can answer "why didn't this Bitbucket PR use pr_scoped?" without re-deriving from provider + tier. Computed once before the if/elif chain; empty string when pr_scoped fires or no PR present.
+
+**A3 — Namespace-split paragraph in `docs/INTERNALS.md`.** Tool-name forms (`mcp__plugin_devt_devt-graphify__*` prefixed in workflow prose vs `mcp__devt-graphify__*` unprefixed in trace records) documented next to the tool inventory, pointing to `mcpStats.normalizeToolName()` at `bin/modules/mcp-stats.cjs:121` as the canonical translator. Removes the every-future-implementer-rediscovery tax — the canonical implementation existed but was buried in one module's inline comment. Tool inventory's `get_community` row updated to `NOT ADVERTISED` with re-advertise instructions.
+
+**W7 — `--rules-exclude` flag for `dispatch render-filled` (`bin/modules/dispatch.cjs`).** Per-dispatch opt-in CLAUDE.md (and other `governing_rules.content` entries) section strip by exact `## Heading` match. Field signal: 3 CLAUDE.md sections were cited 0 times across both L1 and L6 lane reviews (~15-20% of CLAUDE.md per dispatch). Section matching is exact title (predictable, no regex); preamble before first `##` always preserved; emitted envelope carries a `<!-- rules-excluded: N sections (X.X KB saved) -->` trailer for audit. Measured: 18.1KB saved on `programmer:dev` envelope with 2 sections excluded (~34% reduction of the 53KB baseline). Opt-in keeps project-portability open; will promote to `.devt/config.json` after field-evidence accumulates (Workflow Q14 promotion threshold: ≥3 dispatches in 30 days with the same exclude set).
+
+**Rejected after validation** (recorded for future audit):
+- **SERVER_VERSION discipline** — clients don't read `serverInfo.version`; protocolHistory array was speculation; revisit only if Claude Code plugin marketplace introduces a compatibility constraint.
+- **Standalone `graphify normalize-tool-name` CLI** — `mcpStats.normalizeToolName()` at `bin/modules/mcp-stats.cjs:121` already exists; any future caller `require()`s it directly.
+- **Agent-body block-fragment infrastructure** — original Round 6 proposal premise was wrong (per-pool-load, not per-dispatch); real saving was ~150 tokens × per dispatch + 2 commits/6mo of cross-file edits, not worth half a day of building agent-body compile system.
+- **"600 lines duplicated graphify bash"** — retracted by GF after measurement; the MCP-setup inheritance architecture in `code-review-parallel.md::context_init` is correct.
+
 ### Cal #23 round 5 — memory-candidate footer collapsed to single CLI call
 
 **`memory candidates-footer` subcommand added to `bin/modules/memory.cjs`.** Encapsulates the status-read + threshold check + cooldown probe + canonical hint emission + cooldown-timestamp touch that 4 workflows had been hand-rolling identically in 7-line bash blocks. Single CLI call replaces the duplication; the prose `KEEP IN SYNC across …` comment becomes vestigial (and is dropped) because the duplicated surface no longer exists.

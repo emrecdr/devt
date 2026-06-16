@@ -4617,16 +4617,17 @@ if node -e "const g=require('$ROOT/bin/modules/graphify.cjs');process.exit(typeo
 else
   fail "graphify.cjs missing getCommunity export"
 fi
+# cal #23 round 6: get_community was removed from the MCP advertised tool
+# surface (zero agent invocations field-observed). The JS wrapper above stays
+# (consumed by `graphify lane-suggestions` CLI). The two prior gates that
+# verified the tool advertised + degraded gracefully are replaced by a single
+# inversion gate that locks the removal — flags accidental re-add without
+# documentation. Re-advertising means re-authoring the handler block in
+# bin/devt-graphify-mcp.cjs AND updating the expectedTools self-test array.
 if echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q '"name":"get_community"'; then
-  pass "devt-graphify MCP relay exposes get_community tool"
+  fail "devt-graphify MCP relay unexpectedly advertises get_community — round 6 removed it; re-add only with documented agent-facing use case"
 else
-  fail "devt-graphify MCP relay missing get_community tool"
-fi
-# Functional: invalid id returns degraded payload (defense)
-if echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_community","arguments":{"community_id":"not-a-number"}}}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q 'degraded.*true'; then
-  pass "get_community gracefully degrades on invalid community_id (non-integer string)"
-else
-  fail "get_community failed to degrade on invalid community_id"
+  pass "devt-graphify MCP relay correctly omits get_community from advertised surface (cal #23 round 6 removal locked)"
 fi
 if grep -q "graphify-out/wiki/index.md" "$ROOT/bin/modules/preflight.cjs"; then
   pass "preflight.cjs prepends graphify-out/wiki/index.md to suggested_reading when present"

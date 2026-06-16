@@ -180,6 +180,17 @@ IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get gr
 # first one whose preconditions all hold. Bitbucket projects skip PR-scoped
 # because the upstream mcp__graphify__get_pr_impact tool is GitHub-only and
 # returns "PR not found on GitHub" — the workflow would waste a call.
+# Observable PR-scoped skip telemetry: when a PR number was extracted but
+# the provider is non-GitHub (Bitbucket etc.), the existing tier chain
+# correctly skips pr_scoped and falls through to symbol_anchored/bulk_scoped.
+# Record the SKIP reason as a separate field in plan.json so post-hoc audits
+# can answer "why did this Bitbucket PR not use pr_scoped?" without re-deriving
+# from provider + tier. Empty string when pr_scoped fires OR no PR present.
+PR_SCOPED_SKIP_REASON=""
+if [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" != "github" ]; then
+  PR_SCOPED_SKIP_REASON="provider=$GIT_PROVIDER; PR-scoped requires GitHub"
+fi
+
 if [ "$GRAPHIFY_STATE" != "ready" ]; then
   TIER="skip"; SKIP_REASON="graphify state=$GRAPHIFY_STATE"; TOOL=""; ARGS_JSON='{}'
 elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
@@ -209,8 +220,8 @@ else
   TIER="skip"; SKIP_REASON="no PR (or non-GitHub), no topic symbols, scope below threshold"; TOOL=""; ARGS_JSON='{}'
 fi
 
-jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --arg provider "$GIT_PROVIDER" --argjson args "$ARGS_JSON" \
-  '{tier: $tier, tool: $tool, args: $args, skip_reason: $skip_reason, git_provider: $provider}' \
+jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --arg provider "$GIT_PROVIDER" --arg pr_skip "$PR_SCOPED_SKIP_REASON" --argjson args "$ARGS_JSON" \
+  '{tier: $tier, tool: $tool, args: $args, skip_reason: $skip_reason, git_provider: $provider, pr_scoped_skip_reason: $pr_skip}' \
   > .devt/state/graphify-impact-plan.json
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 ```

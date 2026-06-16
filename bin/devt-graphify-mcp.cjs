@@ -183,24 +183,13 @@ const TOOLS = {
     },
   },
 
-  get_community: {
-    description: "List nodes belonging to a graphify community (Leiden cluster). Returns up to `limit` members sorted by degree desc — highest-leverage members lead. Use when graph-impact.md surfaces an affected community and you want to enumerate the other files in that cluster to scope follow-up checks.",
-    inputSchema: {
-      type: "object",
-      required: ["community_id"],
-      properties: {
-        community_id: { type: "integer", description: "Community id (integer from graph.json node.community attribute, or from graph-impact.md::affected_communities)" },
-        limit: { type: "integer", minimum: 1, maximum: 200, description: "Member cap (default 50)" },
-      },
-    },
-    handler: ({ community_id, limit }) => {
-      if (community_id === undefined || community_id === null) return { error: "community_id required (integer)" };
-      const opts = {};
-      if (limit) opts.limit = limit;
-      try { return graphify.getCommunity(community_id, opts); }
-      catch (e) { return { error: e.message }; }
-    },
-  },
+  // get_community removed from MCP advertised tool surface. Field signal
+  // (greenfield calibration thread): zero agent invocations across 50+ raw-
+  // dispatched lane reviews — no workflow tells an agent to reach for it.
+  // The JS function `graphify.getCommunity()` (bin/modules/graphify.cjs) is
+  // the canonical contract + remains in active use via `graphify lane-
+  // suggestions` CLI. Re-advertise here if a future workflow needs agent-
+  // facing community enumeration.
 };
 
 // ----------------------------------------------------------------------------
@@ -438,7 +427,7 @@ module.exports = {
 if (require.main === module && process.argv.includes("--self-test")) {
   const expectedTools = [
     "status", "freshness", "graph_stats", "get_node", "get_neighbors",
-    "shortest_path", "query_graph", "blast_radius", "god_nodes", "get_community",
+    "shortest_path", "query_graph", "blast_radius", "god_nodes",
   ];
   const listed = listTools().tools.map(t => t.name).sort();
   const missing = expectedTools.filter(t => !listed.includes(t));

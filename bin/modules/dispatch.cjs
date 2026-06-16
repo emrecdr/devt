@@ -407,9 +407,47 @@ function buildSubstitutionTable(agent) {
   };
 }
 
-function cmdRenderFilled(target) {
+// Strip top-level `## <heading>` sections from a markdown string whose exact
+// heading title appears in the exclude list. Match is on the trimmed title
+// after the leading `## ` — predictable, no regex sub-matching. Each excluded
+// section spans from its `## Heading` line up to (but not including) the next
+// `## ` line OR end of string. Preamble (content before the first `## ` line)
+// is always preserved. Returns {filtered, bytesSaved, sectionsCut}.
+function stripMarkdownSections(content, excludeHeadings) {
+  if (!content || !excludeHeadings || excludeHeadings.length === 0) {
+    return { filtered: content || "", bytesSaved: 0, sectionsCut: 0 };
+  }
+  const excludeSet = new Set(excludeHeadings.map(h => h.trim()));
+  const lines = content.split("\n");
+  const out = [];
+  let i = 0;
+  let cut = 0;
+  let savedBytes = 0;
+  while (i < lines.length && !/^##\s+/.test(lines[i])) {
+    out.push(lines[i]);
+    i++;
+  }
+  while (i < lines.length) {
+    const m = lines[i].match(/^##\s+(.+?)\s*$/);
+    if (!m) { out.push(lines[i]); i++; continue; }
+    const title = m[1].trim();
+    const start = i;
+    i++;
+    while (i < lines.length && !/^##\s+/.test(lines[i])) i++;
+    const sectionLines = lines.slice(start, i);
+    if (excludeSet.has(title)) {
+      cut++;
+      savedBytes += sectionLines.join("\n").length + 1;
+    } else {
+      out.push(...sectionLines);
+    }
+  }
+  return { filtered: out.join("\n"), bytesSaved: savedBytes, sectionsCut: cut };
+}
+
+function cmdRenderFilled(target, options) {
   if (!target || !target.includes(":")) {
-    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto> (colon-joined) OR dispatch render-filled <agent> <workflow_id|auto> (space-separated)");
+    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list] (colon-joined) OR dispatch render-filled <agent> <workflow_id|auto> (space-separated)");
   }
   let [agent, workflowId] = target.split(":");
   if (workflowId === "auto") {
@@ -417,7 +455,37 @@ function cmdRenderFilled(target) {
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
   const subs = buildSubstitutionTable(agent);
-  return applySubstitutions(template, subs);
+
+  // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
+  // entries) section strip by exact `## Heading` match. Field signal
+  // (greenfield calibration thread Q6): 3 sections were cited 0 times across
+  // both L1 and L6 lane reviews — ~15-20% of CLAUDE.md per dispatch. Per-
+  // dispatch opt-in keeps project portability open; promote to config after
+  // field evidence accumulates.
+  const excludeHeadings = (options && options.rulesExclude) || [];
+  let totalSaved = 0;
+  let totalSectionsCut = 0;
+  if (excludeHeadings.length > 0 && subs.governing_rules && subs.governing_rules.content) {
+    const newContent = {};
+    for (const [key, value] of Object.entries(subs.governing_rules.content)) {
+      if (typeof value === "string") {
+        const r = stripMarkdownSections(value, excludeHeadings);
+        newContent[key] = r.filtered;
+        totalSaved += r.bytesSaved;
+        totalSectionsCut += r.sectionsCut;
+      } else {
+        newContent[key] = value;
+      }
+    }
+    subs.governing_rules = { ...subs.governing_rules, content: newContent };
+  }
+
+  let out = applySubstitutions(template, subs);
+  if (totalSectionsCut > 0) {
+    const kb = (totalSaved / 1024).toFixed(1);
+    out += `\n<!-- rules-excluded: ${totalSectionsCut} sections (${kb} KB saved) -->\n`;
+  }
+  return out;
 }
 
 // STATIC_TAGS / DYNAMIC_TAGS — empirically classified per the envelope
@@ -738,12 +806,19 @@ function run(subcommand, args) {
       // space-separated `<agent> <workflow_id|auto>` (more intuitive for typed
       // CLI use). cal #19 §7 F3: colon-only is non-obvious; users naturally
       // try space-separated first. Both forms render the same envelope.
-      let target = args[0];
-      if (target && !target.includes(":") && args[1]) {
-        target = args[0] + ":" + args[1];
+      const positional = args.filter(a => !a.startsWith("--"));
+      let target = positional[0];
+      if (target && !target.includes(":") && positional[1]) {
+        target = positional[0] + ":" + positional[1];
       }
+      // --rules-exclude=<comma-separated heading list>: opt-in section strip
+      // from governing_rules.content. Matches by exact `## Heading` title.
+      const excludeArg = args.find(a => a.startsWith("--rules-exclude="));
+      const rulesExclude = excludeArg
+        ? excludeArg.slice("--rules-exclude=".length).split(",").map(s => s.trim()).filter(Boolean)
+        : [];
       let out;
-      try { out = cmdRenderFilled(target); }
+      try { out = cmdRenderFilled(target, { rulesExclude }); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
