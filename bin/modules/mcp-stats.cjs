@@ -59,12 +59,12 @@ function getWorkflowCreatedAt() {
   if (!fs.existsSync(wfPath)) return null;
   try {
     const raw = fs.readFileSync(wfPath, "utf8");
-    // NEW-1: prefer first_created_at (immutable session anchor) over
-    // created_at (rotates on workflow_type transitions). When a session
-    // does code_review → code_review_parallel mid-flight, created_at
-    // jumps forward and trace records from the code_review init phase
-    // become unreachable via `--since-workflow-created`. first_created_at
-    // anchors session start so all in-session records surface.
+    // Prefer first_created_at (immutable session anchor) over created_at
+    // (rotates on workflow_type transitions). When a session does
+    // code_review → code_review_parallel mid-flight, created_at jumps
+    // forward and trace records from the code_review init phase become
+    // unreachable via `--since-workflow-created`. first_created_at anchors
+    // session start so all in-session records surface.
     const mFirst = raw.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
     const mLegacy = raw.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
     const m = mFirst || mLegacy;
@@ -108,11 +108,11 @@ function readJsonlLines(filePath) {
   return { entries, raw, parseErrors, exists: true };
 }
 
-// NEW-4 (greenfield calibration #5): trace records use UNPREFIXED tool
-// names — the handler name as the MCP server sees it (mcp__devt-graphify__
-// blast_radius). Orchestrators call MCP via the plugin-namespace PREFIXED
-// form (mcp__plugin_devt_devt-graphify__blast_radius) per Claude Code's
-// plugin loader. Without normalization, mcp-stats --tool=<prefixed> matches
+// Trace records use UNPREFIXED tool names — the handler name as the MCP
+// server sees it (mcp__devt-graphify__blast_radius). Orchestrators call
+// MCP via the plugin-namespace PREFIXED form
+// (mcp__plugin_devt_devt-graphify__blast_radius) per Claude Code's plugin
+// loader. Without normalization, mcp-stats --tool=<prefixed> matches
 // nothing because exact equality compares two forms that are functionally
 // equivalent but lexically different. The fix normalizes BOTH the query
 // pattern and the trace record's tool field to the unprefixed form before
@@ -158,14 +158,14 @@ function loadEntries(opts) {
   // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
   // returning 0 entries for every wildcard query and breaking the telemetry surface.
   const toolMatcher = opts.tool ? buildToolMatcher(opts.tool) : null;
-  // HF-2 (greenfield calibration #7) + G6 (calibration #8): when --workflow-id
-  // is supplied AND matches the current workflow, union with the entire
-  // workflow_id_history[] chain — not just the 1-hop original anchor.
-  // Sessions that chain through three or more workflow_types (e.g.
-  // dev → code_review → debug → quick_implement) accumulate trace records
-  // tagged with each intermediate id; the 1-hop union saw current ↔ original
-  // but missed everything in between. Historical-id queries stay strict so
-  // a user citing a specific id gets only that id's records.
+  // When --workflow-id is supplied AND matches the current workflow,
+  // union with the entire workflow_id_history[] chain — not just the
+  // 1-hop original anchor. Sessions that chain through three or more
+  // workflow_types (e.g. dev → code_review → debug → quick_implement)
+  // accumulate trace records tagged with each intermediate id; the 1-hop
+  // union saw current ↔ original but missed everything in between.
+  // Historical-id queries stay strict so a user citing a specific id gets
+  // only that id's records.
   let acceptedWorkflowIds = null;
   if (opts.workflow_id) {
     acceptedWorkflowIds = new Set([opts.workflow_id]);
@@ -178,9 +178,9 @@ function loadEntries(opts) {
           const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
           if (origMatch) acceptedWorkflowIds.add(origMatch[1].trim());
           // workflow_id_history serializes as a JSON-stringified array via
-          // state.cjs::serializeSimpleYaml (NEW-3 path). Pull the raw quoted
-          // line and JSON.parse — avoids pulling in parseSimpleYaml from a
-          // peer module and keeps this filter self-contained.
+          // state.cjs::serializeSimpleYaml. Pull the raw quoted line and
+          // JSON.parse — avoids pulling in parseSimpleYaml from a peer
+          // module and keeps this filter self-contained.
           const histMatch = raw.match(/^workflow_id_history:\s*"(.*)"\s*$/m);
           if (histMatch) {
             try {

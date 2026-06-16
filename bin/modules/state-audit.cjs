@@ -146,29 +146,28 @@ function cleanupStateFiles(opts = {}) {
   const contract = state.STATE_FILE_CONTRACT || {};
   const staleDays = Number.isFinite(opts.staleDays) ? opts.staleDays : (contract.stale_days_default || 14);
   const staleCutoffMs = Date.now() - (staleDays * 24 * 60 * 60 * 1000);
-  // H1 (greenfield calibration #9): when invoked from init.cjs's auto-sweep,
-  // preserve recent ad-hoc files (likely current-session work in progress)
-  // and only archive accumulated cruft. Two opt-in gates:
+  // When invoked from init.cjs's auto-sweep, preserve recent ad-hoc files
+  // (likely current-session work in progress) and only archive accumulated
+  // cruft. Two opt-in gates:
   //   - adHocStaleDays: calendar-age gate
   //   - adHocCutoffMtime: explicit ISO timestamp gate. init.cjs reads
   //     workflow.yaml::created_at BEFORE the strip+restamp and passes it
   //     as the cutoff. Anything ad-hoc older than the PRIOR workflow's
-  //     start is fair game for archive.
-  //     Strictly better than calendar age — catches multi-PR-per-day
-  //     residue (greenfield's 16 leftover files from yesterday's session).
+  //     start is fair game for archive. Strictly better than calendar age
+  //     — catches multi-PR-per-day residue.
   // adHocCutoffMtime takes precedence when both are set.
   const adHocStaleDays = Number.isFinite(opts.adHocStaleDays) ? opts.adHocStaleDays : null;
   const cutoffMtimeParsed = opts.adHocCutoffMtime ? new Date(opts.adHocCutoffMtime).getTime() : NaN;
   const adHocCutoffMs = Number.isFinite(cutoffMtimeParsed)
     ? cutoffMtimeParsed
     : (adHocStaleDays != null ? Date.now() - (adHocStaleDays * 24 * 60 * 60 * 1000) : null);
-  // H1-v3 (greenfield calibration #11): pattern_allowed bucket suffers the
-  // same residue problem as ad_hoc did pre-H1-v2 — calendar-age `staleDays`
-  // doesn't catch ~19h-old prior-workflow files (greenfield's 5 stale
-  // review-lane-*.md leak). Mirror adHocCutoffMtime: when caller passes
-  // an explicit cutoff timestamp, it takes precedence over staleDays.
-  // init.cjs uses workflow.yaml::created_at BEFORE strip so the prior
-  // workflow's start defines the cutoff.
+  // The pattern_allowed bucket suffers the same residue problem as ad_hoc
+  // — calendar-age `staleDays` doesn't catch prior-workflow files (e.g. a
+  // handful of stale review-lane-*.md leaking from yesterday's session).
+  // Mirror adHocCutoffMtime: when caller passes an explicit cutoff
+  // timestamp, it takes precedence over staleDays. init.cjs uses
+  // workflow.yaml::created_at BEFORE strip so the prior workflow's start
+  // defines the cutoff.
   const patternAllowedCutoffParsed = opts.patternAllowedCutoffMtime ? new Date(opts.patternAllowedCutoffMtime).getTime() : NaN;
   const patternAllowedCutoffMs = Number.isFinite(patternAllowedCutoffParsed) ? patternAllowedCutoffParsed : staleCutoffMs;
 
@@ -229,14 +228,13 @@ function cleanupStateFiles(opts = {}) {
 // data thinking it's current). Eviction is called from every workflow's context_init
 // BEFORE any graphify MCP calls — workflows that don't call graphify still benefit
 // (no stale data from a sibling workflow lingers).
-// R-2 (greenfield cal #19 secondary audit) — graphify-impact-plan.json is
-// DELIBERATELY NOT evicted here. The plan carries the {tier, tool, args}
-// audit trail for the impact step. Evicting it before regeneration loses the
-// "args VERBATIM" evidence the workflow contract depends on. The plan IS
-// idempotently overwritten in context_init substep 5 each session, so
-// staleness from a crashed prior session is bounded to the next workflow
-// start. The plan is also RESET_EXEMPT in state.cjs so forensics across
-// sessions remain available.
+// graphify-impact-plan.json is DELIBERATELY NOT evicted here. The plan
+// carries the {tier, tool, args} audit trail for the impact step. Evicting
+// it before regeneration loses the "args VERBATIM" evidence the workflow
+// contract depends on. The plan IS idempotently overwritten in
+// context_init each session, so staleness from a crashed prior session is
+// bounded to the next workflow start. The plan is also RESET_EXEMPT in
+// state.cjs so forensics across sessions remain available.
 const GRAPHIFY_EVICTABLE = Object.freeze([
   "graph-impact.md",
   "graphify-skip-reason.txt",
@@ -313,13 +311,12 @@ function evictGraphifyArtifacts(opts = {}) {
 // Also NOT included: workflow.yaml itself (init.cjs handles that
 // separately via updateState).
 //
-// H11 (greenfield calibration #9): single-PR canonical outputs (review.md,
-// review.json, test-summary.{md,json}, impl-summary.{md,json},
-// verification.{md,json}, debug-summary.md) MUST be evicted on init * when
-// stale — they're workflow-scoped, not cross-workflow. Greenfield's verifier
-// first-pass-failed because it graded against PR #374's stale review.md.
-// Eviction is gated by mtime < first_created_at so current-session writes
-// stay intact.
+// Single-PR canonical outputs (review.md, review.json, test-summary.{md,
+// json}, impl-summary.{md,json}, verification.{md,json}, debug-summary.md)
+// MUST be evicted on init * when stale — they're workflow-scoped, not
+// cross-workflow. Observed: a verifier first-pass-failed because it graded
+// against a stale review.md from a prior PR. Eviction is gated by
+// mtime < first_created_at so current-session writes stay intact.
 const WORKFLOW_SCOPED_CANONICAL = Object.freeze([
   "review.md",
   "review.json",
@@ -383,13 +380,12 @@ function evictWorkflowArtifacts(opts = {}) {
     }
   }
 
-  // H11 (greenfield calibration #9): workflow-scoped canonical sweep. These
-  // filenames carry a single PR's output (review.md, test-summary.{md,json},
-  // etc.) and should be evicted when their mtime predates the current
-  // session's first_created_at — otherwise the verifier grades against the
-  // PRIOR PR's review.md and silently produces wrong verdicts. Greenfield's
-  // PR #376 verifier first-pass-failed against PR #374's stale review.md.
-  // The anchor read below also serves the slug-variant sweep that follows.
+  // Workflow-scoped canonical sweep. These filenames carry a single PR's
+  // output (review.md, test-summary.{md,json}, etc.) and should be evicted
+  // when their mtime predates the current session's first_created_at —
+  // otherwise the verifier grades against the PRIOR PR's review.md and
+  // silently produces wrong verdicts. The anchor read below also serves
+  // the slug-variant sweep that follows.
   let anchorMs = 0;
   try {
     const wfYaml = fs.readFileSync(path.join(stateDir, "workflow.yaml"), "utf8");

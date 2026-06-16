@@ -150,7 +150,7 @@ fi
 # should start from a clean skeleton.
 ENT_LEAK=$(awk '/app\.services\.(countries|clients|identity|organizations|licences|photos)/' "$SETUP_TMP_PY/.devt/rules/canonical-entities.yaml" 2>/dev/null)
 if [ -z "$ENT_LEAK" ]; then
-  pass "templates/python-fastapi/canonical-entities.yaml ships clean (no greenfield-specific import paths)"
+  pass "templates/python-fastapi/canonical-entities.yaml ships clean (no project-specific import paths)"
 else
   fail "templates/python-fastapi/canonical-entities.yaml leaks project-specific paths:"
   echo "$ENT_LEAK" | sed 's/^/    /'
@@ -4627,7 +4627,7 @@ fi
 if echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q '"name":"get_community"'; then
   fail "devt-graphify MCP relay unexpectedly advertises get_community — round 6 removed it; re-add only with documented agent-facing use case"
 else
-  pass "devt-graphify MCP relay correctly omits get_community from advertised surface (cal #23 round 6 removal locked)"
+  pass "devt-graphify MCP relay correctly omits get_community from advertised surface"
 fi
 if grep -q "graphify-out/wiki/index.md" "$ROOT/bin/modules/preflight.cjs"; then
   pass "preflight.cjs prepends graphify-out/wiki/index.md to suggested_reading when present"
@@ -5941,7 +5941,7 @@ mkdir -p "$TRUNC_TMP/.devt/state"
 TRUNC_PROMPT=$(node -e "process.stdout.write('A'.repeat(1024))")
 LOW_OUT=$(cd "$TRUNC_TMP" && printf '%s' "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:programmer\",\"prompt\":\"$TRUNC_PROMPT\"},\"tool_response\":\"ok\"}" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>&1 || true)
 if echo "$LOW_OUT" | grep -q "below LOW threshold\|SendMessage-resume"; then
-  pass "task-truncation-detector emits LOW-output advisory (WI-3b) on tiny sub-agent return"
+  pass "task-truncation-detector emits LOW-output advisory on tiny sub-agent return"
 else
   fail "task-truncation-detector missed LOW-output advisory on 2-byte return: $LOW_OUT"
 fi
@@ -6822,7 +6822,7 @@ fi
 } > "$F31_TMP/leading.md"
 F31B=$(cd "$F31_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output leading.md 2>/dev/null)
 if echo "$F31B" | jq -e '.looks_like_stub == true and (.stub_phrases_found | length) >= 1' >/dev/null 2>&1; then
-  pass "F31b: leading 'Stub:' marker pattern catches field-validated greenfield stub form"
+  pass "F31b: leading 'Stub:' marker pattern catches the field-observed stub form"
 else
   fail "F31b: leading-Stub-marker regex missed — got: $F31B"
 fi
@@ -6850,7 +6850,7 @@ for TOK in service notification scope secondary graphify; do
   /usr/bin/grep -q "\"$TOK\"" "$ROOT/bin/modules/preflight.cjs" || F38_MISSING="$F38_MISSING $TOK"
 done
 if [ -z "$F38_MISSING" ]; then
-  pass "F38a: SYMBOL_DENYLIST extended with greenfield prose-noise tokens (service|notification|scope|secondary|graphify all present)"
+  pass "F38a: SYMBOL_DENYLIST extended with prose-noise tokens (service|notification|scope|secondary|graphify all present)"
 else
   fail "F38a: denylist missing tokens:$F38_MISSING"
 fi
@@ -8815,7 +8815,7 @@ rm -rf "$M13_TMP"
 # new field.
 M14_GRAPHIFY=$(/usr/bin/grep -c "source_file: (node && node.source_file)" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M14_PERSIST=$(/usr/bin/grep -c "ambiguous_details: Array.isArray" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
-M14_WORKFLOW=$(/usr/bin/grep -c "Ambiguous bindings (C7-3)" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M14_WORKFLOW=$(/usr/bin/grep -c "## Ambiguous bindings" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M14_AGENT=$(/usr/bin/grep -cE "ambiguous.*non-empty" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 M14_JQ=$(/usr/bin/grep -c "ambiguous: (.blast.ambiguous_details // \[\])" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "${M14_GRAPHIFY:-0}" -ge 1 ] && [ "${M14_PERSIST:-0}" -ge 1 ] && [ "${M14_WORKFLOW:-0}" -ge 1 ] && [ "${M14_AGENT:-0}" -ge 1 ] && [ "${M14_JQ:-0}" -ge 1 ]; then
@@ -8832,7 +8832,7 @@ fi
 # on the same axes (north-stars #1 coordination, #3 token efficiency).
 M15_SINGLE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M15_PARALLEL_LANE=$(/usr/bin/grep -c "rubric_content>{inline_rubrics.code_review}</rubric_content" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
-M15_AGENT=$(/usr/bin/grep -c "Rubric self-check (C7-7)" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+M15_AGENT=$(/usr/bin/grep -c "Rubric self-check" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 if [ "${M15_SINGLE:-0}" -ge 2 ] && [ "${M15_PARALLEL_LANE:-0}" -ge 2 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
   pass "M15: code_review rubric inlined into reviewer dispatch (single=${M15_SINGLE} parallel=${M15_PARALLEL_LANE} agent=${M15_AGENT})"
 else

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Dispatch guard — merged PreToolUse hook on Task tool calls.
 #
-# Cal #23 7E: scope-check + hygiene-check folded into one hook (was two: this
-# file plus dispatch-scope-guard.sh). Single subprocess per Task call instead
-# of two. Behaviors preserved exactly:
+# scope-check + hygiene-check folded into one hook (was two: this file plus
+# dispatch-scope-guard.sh). Single subprocess per Task call instead of two.
+# Behaviors preserved exactly:
 #
 #   SCOPE CHECK (advisory, never blocks): warns when prompt bytes or
 #   <scope_hint> path count exceeds caps. Fires for ANY Task call.
@@ -143,12 +143,11 @@ node -e "
   // Raw orchestrator-rolled prompts carry none. The check is intentionally
   // forgiving: ANY of the signals counts as workflow-managed.
   //
-  // Content-aware expansion (greenfield audit, post-v0.90 trajectory):
-  // legitimate hand-injected envelopes (iter-2 revision dispatches,
-  // custom lane fan-out with structured context blocks) were being flagged
-  // as raw_dispatch because they use richer structures than the canonical
-  // scope_*/memory_signal trio. Expanded the signal set to include any
-  // of: context, graph_impact, original_review, lane_scope,
+  // Content-aware expansion: legitimate hand-injected envelopes (revision
+  // dispatches, custom lane fan-out with structured context blocks) were
+  // being flagged as raw_dispatch because they use richer structures than
+  // the canonical scope_*/memory_signal trio. Expanded the signal set to
+  // include any of: context, graph_impact, original_review, lane_scope,
   // god_node_warnings, prior_outputs, provenance_protocol. ANY one of
   // these (in addition to the original canonical three) indicates an
   // envelope-managed dispatch — content-aware detection that closes the
@@ -175,12 +174,12 @@ node -e "
     process.exit(0);
   }
 
-  // Envelope-not-required agents — per agents/io-contracts.yaml, these agents
-  // declare graphify_inputs: [] AND don't consume memory_signal/scope blocks.
-  // Their dispatches LEGITIMATELY lack the envelope; the hook would over-fire
-  // and pollute dispatch-warnings.jsonl with false-positive raw_dispatch
-  // records (greenfield 2026-06-02 evidence: 2 of 11 raw_dispatch records
-  // were docs-writer + retro, both contracted to receive no envelope).
+  // Envelope-not-required agents — per agents/io-contracts.yaml, these
+  // agents declare graphify_inputs: [] AND don't consume memory_signal /
+  // scope blocks. Their dispatches LEGITIMATELY lack the envelope; without
+  // this exemption the hook would over-fire and pollute
+  // dispatch-warnings.jsonl with false-positive raw_dispatch records
+  // (docs-writer + retro are contracted to receive no envelope).
   // devt-coordinator is a main-thread router with no envelope contract.
   const subagentName = subagent.slice(5);  // strip 'devt:' prefix
   const ENVELOPE_NOT_REQUIRED = new Set(['docs-writer', 'retro', 'curator', 'devt-coordinator']);

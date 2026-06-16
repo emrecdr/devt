@@ -97,7 +97,7 @@ Choose `failed` only when:
 
 ## Required: Dispatch warnings acknowledgment
 
-Greenfield calibration #21 V6 surfaced an LLM-operator UX failure mode: session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `verification.md` MUST include a `## Dispatch warnings (session-scoped)` section.
+Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `verification.md` MUST include a `## Dispatch warnings (session-scoped)` section.
 
 **What goes in the section:**
 

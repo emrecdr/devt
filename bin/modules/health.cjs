@@ -50,9 +50,8 @@ const CHECKS = {
   // Graphify AFTER /devt:setup --init don't auto-pick up the MCP entry. Warn-only by design — auto-
   // editing .mcp.json risks stomping user customizations.
   GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
-  // DEF-052 (greenfield calibration #16): graphify silently emits empty hyperedges
-  // when skill/binary versions drift. Field-confirmed at greenfield: skill 0.7.10 vs
-  // binary 0.8.24 across multiple calibrations, never surfaced until cal #16 audit.
+  // Graphify silently emits empty hyperedges when skill/binary versions
+  // drift. Drift is invisible without this surfaced check.
   GRAPHIFY_SKILL_DRIFT: { severity: "warning", message: "Graphify skill version drifted from binary — hyperedges may silently return empty", repairable: false, fix: "Run `graphify install` to refresh the local skill bundle to match the binary version" },
   PROBE_FAILURES_RECENT: { severity: "info", message: "Probe failures logged in .devt/state/probe-failures.jsonl — graphify/python setup detection diagnostics available", repairable: false, fix: "Inspect categories (timeout, nonzero-exit, spawn-error) to disambiguate \"not installed\" from \"installed but broken\"; common fixes: extend timeout in env, repair PATH, reinstall graphifyy[mcp] extra" },
 };
@@ -460,10 +459,10 @@ function runChecks(pluginRoot) {
     }
   } catch { /* swallow */ }
 
-  // DEF-052 (greenfield calibration #16): detect graphify skill/binary version drift.
-  // Only probes when the binary is on PATH (otherwise nothing to compare against).
-  // Skipping the probe when graphify is absent keeps health fast on projects that
-  // don't use graphify at all.
+  // Detect graphify skill/binary version drift. Only probes when the
+  // binary is on PATH (otherwise nothing to compare against). Skipping the
+  // probe when graphify is absent keeps health fast on projects that don't
+  // use graphify at all.
   try {
     if (require("./graphify.cjs").probeBinary()) {
       const drift = require("./graphify.cjs").detectSkillVersionDrift();
@@ -584,24 +583,24 @@ function runRepairs(pluginRoot, checkResult) {
         }
 
         case "MEM_INDEX_STALE": {
-          // V65-7 (greenfield calibration #6): MEM_INDEX_STALE was declared
-          // repairable: true in the issue catalogue but had no matching switch
-          // case, so `health --repair` returned repairs: [] despite the
-          // warning being repairable. Users hit "Yes — auto-repair" and the
-          // system reported success without actually rebuilding the index;
-          // they had to fall back to `memory index` manually. The repair is
-          // exactly that CLI call surfaced through the official handler so
-          // the auto-repair button works as advertised.
+          // MEM_INDEX_STALE was declared repairable: true in the issue
+          // catalogue but had no matching switch case, so `health --repair`
+          // returned repairs: [] despite the warning being repairable.
+          // Users hit "Yes — auto-repair" and the system reported success
+          // without actually rebuilding the index; they had to fall back
+          // to `memory index` manually. The repair is exactly that CLI
+          // call surfaced through the official handler so the auto-repair
+          // button works as advertised.
           const { rebuildIndex } = require("./memory.cjs");
           const result = rebuildIndex();
           if (result && result.ok !== false) {
-            // H12 (greenfield calibration #9): rebuildIndex returns `inserted`,
-            // not `indexed_count` / `doc_count`. The legacy field-name fallback
-            // chain always resolved to 0, making every successful rebuild
-            // report "doc_count=0" even when the FTS5 index was populated
-            // correctly (greenfield: actual doc count was 7, reported as 0).
-            // Keep the legacy fallbacks for forward-compat with any caller
-            // that might return one of those keys; just put `inserted` first.
+            // rebuildIndex returns `inserted`, not `indexed_count` /
+            // `doc_count`. The legacy field-name fallback chain always
+            // resolved to 0, making every successful rebuild report
+            // "doc_count=0" even when the FTS5 index was populated
+            // correctly. Keep the legacy fallbacks for forward-compat with
+            // any caller that might return one of those keys; just put
+            // `inserted` first.
             const docCount = (result && result.inserted) || (result && result.indexed_count) || (result && result.doc_count) || 0;
             const conflictCount = (result && Array.isArray(result.conflicts)) ? result.conflicts.length : 0;
             repairs.push({

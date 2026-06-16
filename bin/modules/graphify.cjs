@@ -494,15 +494,15 @@ function getNeighbors(symbol, options) {
   const { visited } = _bfs(loaded.cache.adj, fromId, direction, depth);
   visited.delete(fromId);
 
-  // NEW-5 (greenfield calibration #5): god-nodes can return tens of thousands
-  // of incoming neighbors at depth=2 (greenfield's AuditMapping overflowed
-  // 84KB and the MCP transport dropped the response, yielding zero signal
-  // on the most-important symbol). The `max_bytes` option caps the serialized
-  // size at a target; sorting by depth-ascending then label-alphabetical
-  // keeps the truncation deterministic and prefers the closest neighbors
-  // (most relevant for impact analysis). When truncation fires, the response
-  // carries `truncated: true` + counts so consumers can flag the partial
-  // result instead of trusting it as complete.
+  // God-nodes can return tens of thousands of incoming neighbors at depth=2
+  // (observed: a single high-degree symbol overflowing the MCP transport
+  // limit and yielding zero signal on the most-important symbol). The
+  // `max_bytes` option caps the serialized size at a target; sorting by
+  // depth-ascending then label-alphabetical keeps the truncation
+  // deterministic and prefers the closest neighbors (most relevant for
+  // impact analysis). When truncation fires, the response carries
+  // `truncated: true` + counts so consumers can flag the partial result
+  // instead of trusting it as complete.
   const items = [];
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
@@ -637,11 +637,10 @@ function blastRadius(symbols, _options) {
       if (info.depth === 1) direct.add(label);
       else if (info.depth === 2) indirect.add(label);
       if (node && node.source_file) modules.add(path.dirname(node.source_file));
-      // C7-3+C7-6: include source_file so consumers can show the colliding
-      // module (greenfield calibration #4 + #7: two ExternalCallService
-      // modules collided unflagged — reviewers had no signal which module
-      // each finding referenced). source_file may be empty for synthetic
-      // nodes, kept as "" then.
+      // Include source_file so consumers can show the colliding module.
+      // Observed: same-label modules in different packages collide unflagged
+      // — reviewers have no signal which module each finding referenced.
+      // source_file may be empty for synthetic nodes, kept as "" then.
       if (info.edge && info.edge.confidence === "AMBIGUOUS") {
         ambiguous.push({
           symbol: sym,
@@ -1020,11 +1019,11 @@ function godNodes(limit = 10) {
   }));
 }
 
-// F17 — Check whether files in the diff scope are graphify god-nodes.
-// Field rationale (greenfield 2026-05-26): routes.py at 2,463 LOC was almost
-// certainly a god node, but symbol-anchored scan_prep missed it because the
-// anchor list didn't include routes.py module-level symbols. This function
-// maps file paths back to graph nodes (via `source_file` metadata) and reports
+// Check whether files in the diff scope are graphify god-nodes.
+// Observed: large files (multi-thousand LOC routers/services) are almost
+// certainly god nodes, but symbol-anchored scan_prep misses them because
+// the anchor list doesn't include module-level symbols. This function maps
+// file paths back to graph nodes (via `source_file` metadata) and reports
 // the max-degree symbol per file — orchestrators can flag any file above
 // `edgeThreshold` (default 50) as a god-node candidate for the review.
 //
@@ -1078,15 +1077,14 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
 // Caller (code-review-parallel.md::partition_lanes) handles the fallback
 // by routing to the legacy top-N-path partition.
 //
-// C7-4 (greenfield calibration #7): options.targetLanes consolidates groups
-// into N super-groups when the raw community count exceeds N. Greenfield's
-// PR returned 44 micro-communities at 95% coverage → unusable for the
-// 5-lane cap. Their manual override grouped by domain path (audit+obs /
-// clients+identity / external_calls / nettie+migrations / hurl+docs).
-// Path-prefix consolidation matches that pattern: when groups > targetLanes,
-// keep top-N by file count as anchors, merge remaining groups into the
-// anchor whose files share the longest common directory prefix. Result has
-// exactly `target_lanes` super-groups (or fewer if input had fewer raw groups).
+// options.targetLanes consolidates groups into N super-groups when the raw
+// community count exceeds N. Observed failure mode: a PR returns dozens of
+// micro-communities at high coverage → unusable for a small lane cap.
+// Path-prefix consolidation matches the manual-override pattern (group by
+// domain path): when groups > targetLanes, keep top-N by file count as
+// anchors, merge remaining groups into the anchor whose files share the
+// longest common directory prefix. Result has exactly `target_lanes`
+// super-groups (or fewer if input had fewer raw groups).
 
 // Round 7 W6 — service-boundary auto-detect. When the graph carries no
 // Leiden community labels, scan diff files for common 2-segment service
@@ -1199,12 +1197,11 @@ function laneSuggestions(diffFiles, options) {
     const counts = byFileCommunityCounts.get(bn);
     counts.set(node.community, (counts.get(node.community) || 0) + 1);
   }
-  // NEW-6 (greenfield calibration #5): the legacy strict-coverage check
-  // required 100% of diff files to have graph nodes — any diff with tests,
-  // migrations, .md docs failed and routed to full fallback. Greenfield's
-  // session: 47/91 files lacked nodes → community partition never fired
-  // despite 44 files having clean community labels. The marquee feature
-  // was consistently absent in practice.
+  // A strict-coverage check that requires 100% of diff files to have graph
+  // nodes routes any diff with tests, migrations, or docs to full fallback
+  // — observed pattern: roughly half the files in a typical PR lack nodes,
+  // so community partition would never fire despite many files having
+  // clean community labels.
   //
   // Now: full fallback only fires when ZERO files have nodes (graph
   // irrelevant for this diff). Partial coverage falls through to the
@@ -1233,9 +1230,9 @@ function laneSuggestions(diffFiles, options) {
   }
   // Group input files (preserve original path strings, not basenames).
   // Files without a community attribute previously collapsed into a single
-  // "ungrouped" bucket; greenfield 2026-06-07 calibration: 24 of 42 files
-  // (57%) landed there for a PR with mixed code/hurl/docs/config — manual
-  // reshape was required every multi-file review.
+  // "ungrouped" bucket; observed pattern: more than half the files in a
+  // mixed code/hurl/docs/config PR land there, requiring manual reshape on
+  // every multi-file review.
   //
   // Sub-classify the ungrouped bucket by file-extension archetype so
   // prose-only / test-only / config-only files cluster coherently.
@@ -1279,9 +1276,9 @@ function laneSuggestions(diffFiles, options) {
   let groups = Array.from(groupsByCommunity.values())
     .sort((a, b) => b.files.length - a.files.length);
 
-  // C7-4 — consolidate to target_lanes super-groups via path-prefix similarity
-  // when raw count exceeds target. Anchors are the top-N by file count; each
-  // remaining group merges into its best anchor.
+  // Consolidate to target_lanes super-groups via path-prefix similarity
+  // when raw count exceeds target. Anchors are the top-N by file count;
+  // each remaining group merges into its best anchor.
   let consolidationMeta = null;
   const targetLanes = Number.isInteger(options.targetLanes) && options.targetLanes > 0
     ? options.targetLanes : null;
@@ -1296,8 +1293,8 @@ function laneSuggestions(diffFiles, options) {
     for (const lg of leftovers) {
       // Pick the anchor whose files share the longest common path prefix with
       // this leftover group's files. Cheap proxy for graph-distance — matches
-      // greenfield's manual domain-based consolidation (their override grouped
-      // audit/clients/external_calls by top-level path component).
+      // the manual domain-based consolidation pattern of grouping by
+      // top-level path component.
       let bestAnchor = anchors[0];
       let bestScore = -1;
       for (const a of anchors) {
@@ -1320,14 +1317,14 @@ function laneSuggestions(diffFiles, options) {
   }
 
   if (uncoveredCount > 0) {
-    // Skew check (greenfield audit G6 2026-06-10): if the largest group
-    // dominates the covered scope (>40%), the partition is too skewed to
-    // drive parallelism — one lane would do most of the work while others
-    // sit nearly idle. Downgrade to mode=fallback with a reason so the
-    // orchestrator falls back to path-based partitioning instead of
-    // accepting the bad partition. Threshold 0.40 chosen by greenfield's
-    // observed pathology (230-file giant + 3 noise buckets ≈ 95% skew on
-    // a 5-lane request).
+    // Skew check: if the largest group dominates the covered scope (>40%),
+    // the partition is too skewed to drive parallelism — one lane would do
+    // most of the work while others sit nearly idle. Downgrade to
+    // mode=fallback with a reason so the orchestrator falls back to
+    // path-based partitioning instead of accepting the bad partition.
+    // Threshold 0.40 chosen against observed pathology: a single dominant
+    // group plus a handful of noise buckets approaching ~95% skew on a
+    // small-lane request.
     const SKEW_THRESHOLD = 0.40;
     const totalCovered = groups.reduce((s, g) => s + g.files.length, 0);
     const maxGroup = groups.reduce((m, g) => Math.max(m, g.files.length), 0);
@@ -1387,21 +1384,21 @@ function _avgPrefixSimilarity(filesA, filesB) {
 // Top-N non-noise symbols whose source_file is in the diff. Used by
 // code-review.md's bulk_scoped tier (B-XI) to convert "scope > 10 files +
 // dense graph" into a symbol_anchored blast_radius call instead of a less
-// useful query_graph text search. Field signal (greenfield calibration #3
-// finding #4): for bitbucket + dense + >10 files, query_graph(text=REVIEW_SCOPE)
-// returns keyword matches that don't reflect the call graph. blast_radius
-// with diff-derived symbols produces actual structural impact.
+// useful query_graph text search. For dense graphs with >10 files,
+// query_graph(text=REVIEW_SCOPE) returns keyword matches that don't reflect
+// the call graph. blast_radius with diff-derived symbols produces actual
+// structural impact.
 //
 // Returns envelope: { symbols: [{symbol, source_file, edge_count}], reason,
 // graph_lag_commits, total_matches }. Symbols sorted desc by edge_count, with
 // file/concept/json-key nodes filtered out. Defaults to limit=10 (matches
-// blast_radius's typical comfortable input size). Greenfield audit G2
-// 2026-06-10: prior shape was bare array which silently collapsed three
-// distinct states ([] for "no input", "graph not loaded", "no matching
-// nodes") into the same caller observation. Envelope shape disambiguates:
-// reason explains WHY symbols is empty when it is, graph_lag_commits lets
-// the orchestrator decide whether to re-index before trusting the answer,
-// and total_matches preserves the "limit truncated" signal.
+// blast_radius's typical comfortable input size). Prior shape was a bare
+// array which silently collapsed three distinct states ([] for "no input",
+// "graph not loaded", "no matching nodes") into the same caller
+// observation. Envelope shape disambiguates: reason explains WHY symbols is
+// empty when it is, graph_lag_commits lets the orchestrator decide whether
+// to re-index before trusting the answer, and total_matches preserves the
+// "limit truncated" signal.
 function symbolsInFiles(diffFiles, limit = 10) {
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
     return { symbols: [], reason: "no input files", graph_lag_commits: null, total_matches: 0 };
@@ -1455,20 +1452,16 @@ function symbolsInFiles(diffFiles, limit = 10) {
 //
 // Returns [{symbol, source_file, edge_count, is_god_node}] sorted by
 // edge_count desc, already filtered to is_god_node=true.
-// Cal #22 F3 (greenfield Q2/Q-final): non-monotonic aggregation bug observed
-// in greenfield's environment. Bisect grid result on a 5-file diff:
-//   A+B → lost A's god-node, C+D → lost C's, A+B+C → lost A, C+D+E → lost all,
-//   A+B+C+D → correct, A+B+C+D+E → correct, E+D+C+B+A → correct (order-
-//   invariant at N≥4). The reproducer in greenfield is:
-//     check-symbol-godnodes app/core/error_codes.py \
-//       app/services/clients/api/v1/relative_action_routes.py
-//   returns [] in greenfield's env vs [{symbol:"ErrorCode",...}] in devt's.
+// Known non-monotonic aggregation bug in some environments. Observed
+// pattern on a 5-file diff: subsets of size <4 can silently lose god-node
+// entries while N≥4 returns correct results and is order-invariant.
 //
-// Code-level inspection (this function): single-pass Set lookup over nodeMap;
-// no obvious non-monotonic logic. The divergence between environments
-// strongly suggests graph-state dependency (cached nodeMap topology, ordering,
-// or `loadGraph()` return shape varying across rebuilds). Defer code fix
-// until reproducible. If you encounter this in field:
+// Code-level inspection (this function): single-pass Set lookup over
+// nodeMap; no obvious non-monotonic logic. The divergence between
+// environments strongly suggests graph-state dependency (cached nodeMap
+// topology, ordering, or `loadGraph()` return shape varying across
+// rebuilds). Defer code fix until reproducible. If you encounter this in
+// field:
 //   1. Capture the input file list + edge_threshold + full CLI output
 //   2. Capture graphify status (built_at SHA, node_count, edge_count)
 //   3. Run the same args after `graphify rebuild` and compare
@@ -1546,16 +1539,12 @@ function getCommunity(communityId, options = {}) {
   return { source: "graphify", results: matches.slice(0, limit) };
 }
 
-// Option A (greenfield calibration #11): hyperedges are graphify's machine-
-// discovered "design plans" — semantic groupings that span multiple files
-// (route + service + repo + readme + test). When a task's symbols/paths
-// overlap any hyperedge's member set, lifting ALL members into preflight's
-// symbol channel auto-catches the "fixed code, forgot the readme/test/
-// migration" failure mode. Greenfield's graph has 3 hyperedges:
-//   hyper_billing_country_fk_flow (route → service → repo → event → audit)
-//   hyper_vat_resolution_chain (invoice → country → billing)
-//   hyper_audit_jurisdiction_snapshot (org lifecycle + invoice events)
-// Each is a high-confidence (≥0.85) cross-file binding.
+// Hyperedges are graphify's machine-discovered "design plans" — semantic
+// groupings that span multiple files (route + service + repo + readme +
+// test). When a task's symbols/paths overlap any hyperedge's member set,
+// lifting ALL members into preflight's symbol channel auto-catches the
+// "fixed code, forgot the readme/test/migration" failure mode. Each
+// hyperedge is a high-confidence (≥0.85) cross-file binding.
 //
 // Returns hyperedges whose `nodes[]` intersects ANY input symbol or
 // source_file. Mirrors the shape of laneSuggestions / checkLargeFilesGodNodes
@@ -1705,7 +1694,7 @@ function run(subcommand, args) {
   // Scoped to the 4 file-accepting subcommands: passing .env or ~/.ssh/id_rsa
   // would otherwise feed the path into graphify queries, which is a disclosure
   // path the orchestrator rarely intends.
-  // Parse --allow=<basename> args (repeatable) — greenfield audit G7.
+  // Parse --allow=<basename> args (repeatable).
   // Whitelist basename patterns let known-safe files bypass the
   // sensitive-path denylist. Field-evidenced use case:
   // `.env.example`, `.env.sample` (committed templates, never real
@@ -1964,13 +1953,12 @@ function _logProbeFailure(category, command, args, detail) {
   } catch { /* diagnostic side-channel; never raise */ }
 }
 
-// WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
-// graphify's _resolveOne returns ONE node arbitrarily by Map iteration order
-// when two distinct definitions share a label. Greenfield's case: two
-// `update_license_rights` methods (LicenseDetailService.update_license_rights
-// + LicenseService.update_license_rights). Memory entry 14398 wrongly flagged
-// "2-caller risk" because the resolver picked one and missed the other. This
-// helper finds ALL nodes with the exact (case-insensitive) label match, so
+// Label-collision detection. graphify's _resolveOne returns ONE node
+// arbitrarily by Map iteration order when two distinct definitions share a
+// label. Observed: two distinct same-named methods on different service
+// classes — a single-binding picture wrongly underreports caller risk
+// because the resolver picked one and missed the other. This helper finds
+// ALL nodes with the exact (case-insensitive) label match, so
 // preflight can surface the collision in the brief before downstream agents
 // trust a single-binding picture. Returns {source, collisions, count} where
 // count > 1 means a real collision; count == 1 is normal; count == 0 means
@@ -1999,15 +1987,14 @@ function getSymbolCollisions(label) {
   return { source: "graphify", collisions, count: collisions.length };
 }
 
-// DEF-052 (greenfield calibration #16 field confirmation). When the locally-installed
-// graphify skill bundle drifts from the binary version, graphify silently emits an
-// empty hyperedges list — workflows downstream see hyperedges_matched=[] and assume
-// "no semantic groupings found" when the real cause is version drift. Greenfield's
-// case: skill 0.7.10 vs binary 0.8.24 across multiple calibrations. Surface format:
+// When the locally-installed graphify skill bundle drifts from the binary
+// version, graphify silently emits an empty hyperedges list — workflows
+// downstream see hyperedges_matched=[] and assume "no semantic groupings
+// found" when the real cause is version drift. Surface format:
 //   stderr: "  warning: skill is from graphify X.Y.Z, package is A.B.C. Run 'graphify install' to update."
-// Best-effort: spawn failure / no graphify on PATH / unrecognized warning format
-// all return `{detected:false}` so callers can layer this on top of existing
-// fallback behavior without changing it.
+// Best-effort: spawn failure / no graphify on PATH / unrecognized warning
+// format all return `{detected:false}` so callers can layer this on top of
+// existing fallback behavior without changing it.
 function detectSkillVersionDrift() {
   let r;
   try {

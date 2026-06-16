@@ -203,7 +203,7 @@ The summary cell is a **one-line index**, not a mini-section. Cells longer than 
 ❌ **Bad — bloated summary (773 chars, broke Bitbucket rendering):**
 
 ```
-| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (GFBUGS-184 / GFBUGS-132 Phase 1a)**: `PATCH /api/v1/licenses/{id}/rights` now accepted for `head_relative` on B2C licenses (new `LICENSE_UPDATE_RIGHTS` permission, new `LicenseRightsUpdatedEvent` audit). **Added (GFBUGS-144 / GFBUGS-176)**: `DELETE /api/v1/clients/{client_id}/messages?sender_user_id=<uid>` (moderation) and `DELETE /api/v1/clients/{client_id}/messages/mine` (self-delete) + new `MessageDeletedEvent`. **Added (GFBUGS-177)**: `DELETE /api/v1/clients/{client_id}/photos/mine` (self-delete; reuses `PhotoBulkDeletedEvent`). **Changed (GFBUGS-134)**: `POST /api/v1/licenses/{id}/unlock` rejects RELATIVE-scope callers on organisation-owned licenses with `403`. **Operational**: ... |
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (TICKET-184 / TICKET-132 Phase 1a)**: `PATCH /api/v1/licenses/{id}/rights` now accepted for `head_relative` on B2C licenses (new `LICENSE_UPDATE_RIGHTS` permission, new `LicenseRightsUpdatedEvent` audit). **Added (TICKET-144 / TICKET-176)**: `DELETE /api/v1/clients/{client_id}/messages?sender_user_id=<uid>` (moderation) and `DELETE /api/v1/clients/{client_id}/messages/mine` (self-delete) + new `MessageDeletedEvent`. **Added (TICKET-177)**: `DELETE /api/v1/clients/{client_id}/photos/mine` (self-delete; reuses `PhotoBulkDeletedEvent`). **Changed (TICKET-134)**: `POST /api/v1/licenses/{id}/unlock` rejects RELATIVE-scope callers on organisation-owned licenses with `403`. **Operational**: ... |
 ```
 
 ✅ **Good — concise summary (212 chars):**

@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #25 — doc slim + ephemeral-ref sweep + stale-plans cleanup
+
+Three-track doc-slim pass aligned with north-star goals (output quality preserved, token cost reduced per dispatch). Net change: 48 files modified, 7 files deleted, 1 file created; **+981 / -7032 lines** (-5965 from plan deletions, -86 net from prose density).
+
+**α — CLAUDE.md duplication collapse (`CLAUDE.md`, new `docs/operator-guide/DISPATCH-RECIPES.md`).** CLAUDE.md is preloaded into every agent dispatch and main session. Three "Critical Agent + Workflow Contracts" paragraphs (each ~5 lines) collapsed to one-line pointers since `docs/AGENT-CONTRACTS.md` already carries the full contract bodies. Five-recipe "Dispatch Escape-Hatch Recipes" section (~35 lines) extracted to `docs/operator-guide/DISPATCH-RECIPES.md`. CLAUDE.md: 262 → 225 lines (-14%). Per-dispatch token savings compound across every workflow.
+
+**β + γ — Workflow + agent prose density (11 files, 54 edits, ~1.6KB stripped).** Stripped ephemeral provenance (cal #N, C7-N, R10-N, PR #N, dated session refs, project-specific symbols) from `workflows/code-review*.md`, `workflows/dev-workflow.md`, `workflows/quick-implement.md`, `workflows/debug.md`, smaller workflows, and `agents/{code-reviewer,programmer,verifier}.md`. Technical content preserved — only attribution removed. Pattern: `Field signal (greenfield 2026-05-27 PR #372): ...` → `Why: ...` with the same technical content.
+
+**E — Broader sweep across active code + docs (~30 files, ~7KB stripped).** Extended the same taxonomy to: 11 CJS modules (`bin/modules/*.cjs`), 8 active docs (`docs/AGENT-CONTRACTS.md`, `INTERNALS.md`, `HOOKS.md`, `GRAPHIFY.md`, `COMMANDS.md`, `STATE-RULES.md`, `operator-guide/CLI-REFERENCE.md`, etc.), 3 hooks, 3 skills, 2 pinned-version rubrics. **Verified zero code-logic changes** via `git diff | grep` filter excluding comment lines — all 11 CJS modules show zero non-comment additions/deletions.
+
+**F — Stale plans cleanup (6 plans + 1 dated spec deleted).** All `docs/superpowers/plans/*.md` files targeted shipped functionality (v0.8 GSD improvements, v0.60 mechanical gates, v0.61 reuse pre-search, v0.62 workflow freshness, post-v0.62 backlog) — codebase is at 0.95.0, 35+ versions past their targets. Files recoverable from git history if needed.
+
+**Memory rule clarified.** `feedback_no_version_refs_in_code` now carries the **static-rule exception** explicitly: references to numbered IDs that map to hard-coded static rule files (`.devt/memory/concepts/CON-NNN-*.md`, `.devt/memory/decisions/ADR-NNN-*.md`, K-gates in `scripts/smoke-test.sh`) ARE allowed because the source persists. Ephemeral refs (calibration rounds, PR numbers, dated session logs) remain forbidden. Verified static refs kept: `[[CON-001]]`, `[[CON-002]]`, `[[CON-003]]` wiki-links across 5 files.
+
+**Regressions caught + fixed during execution**:
+- M14 + M15 smoke gates re-pinned to new header text (`Ambiguous bindings`, `Rubric self-check`)
+- K1 dispatch-compile drift fixed via source-template sync (template + region now share new wording)
+- F10b stale `review-scope` ref restored to `REVIEW_SCOPE` (variable name, not file name)
+
+**Validation**: smoke 869/869, gate 16/16, locking 3/3, graphify 35/35, envelope-compile 22/0 drift.
+
 ### Cal #24 round 12 follow-up — strip round/cal/ID refs from codebase
 
 Codebase is not the changelog. Stripped round numbers, calibration IDs, ticket refs, and other provenance markers introduced during R10-R12 across 14 files (`hooks/*`, `bin/modules/*`, `bin/devt-graphify-mcp.cjs`, `workflows/_phase-gates.yaml`, `workflows/code-review*.md`, `agents/code-reviewer.md`, `scripts/smoke-test.sh`). Replaced provenance with rule/invariant phrasing or field-observed framing; the WHY signal stays load-bearing, the time-pinned context decays out. Net: +135 / −134 lines (information density preserved). Smoke 869/0, gate 16/0, locking 3/0, envelope-compile 22/0. K-gate self-IDs (K121-K124 inside their own pass/fail messages) intentionally retained as self-referential.

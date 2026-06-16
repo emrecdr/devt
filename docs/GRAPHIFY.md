@@ -202,7 +202,7 @@ The pattern mirrors the one in `bin/devt-memory-mcp.cjs` (which adopted it earli
 
 ## Hyperedge-aware preflight (Option A)
 
-Graphify's hyperedges are machine-discovered semantic groupings — multi-file scopes that "should change together" (e.g., route + service + repo + readme + test for a billing flow). Greenfield's graph has 3 such hyperedges, each binding 4-6 nodes with `confidence_score ≥ 0.85`.
+Graphify's hyperedges are machine-discovered semantic groupings — multi-file scopes that "should change together" (e.g., route + service + repo + readme + test for a billing flow). Each binds several nodes with `confidence_score ≥ 0.85`.
 
 `bin/modules/graphify.cjs::getHyperedgesContaining(symbols, opts)` loads `graph.json::hyperedges[]` and returns those whose member nodes intersect any input symbol or source_file. Each result carries:
 
@@ -217,7 +217,7 @@ Graphify's hyperedges are machine-discovered semantic groupings — multi-file s
 
 `preflight.generate` probes hyperedges with `topic.symbols` and persists matches in `preflight-brief.json::hyperedges_matched[]`. `/devt:ship::hyperedge_completeness_scan` consumes that array — when any hyperedge has `completeness < 1.0`, AskUserQuestion surfaces the partial coverage so the user can decide: expand scope, defer the missing pieces, or accept partial coverage. Capability-probe style — fails open when graphify is disabled or graph has no hyperedges.
 
-The intent: catch the "you fixed code, forgot the readme/test/migration" failure mode automatically. Greenfield calibration #11 evidence: PR #376's task matched 3 hyperedges with 83% / 50% / 20% completeness — the 20% (1 of 5 members) case would have caught "you fixed the service but forgot the route + repo + event + audit_mapper".
+The intent: catch the "you fixed code, forgot the readme/test/migration" failure mode automatically. Observed pattern: a typical PR matches multiple hyperedges at varying completeness; the low-completeness cases (say 20% — 1 of 5 members) would catch "you fixed the service but forgot the route + repo + event + audit mapper".
 
 ---
 
@@ -229,7 +229,7 @@ The intent: catch the "you fixed code, forgot the readme/test/migration" failure
 
 **M2 — God-node de-ranking.** Read `god_nodes` from `GRAPH_REPORT.md` via `graphify.parseReportSections()` and exclude symbols whose edge_count tops the god-node threshold. Without M2, the picker promotes framework keywords like FastAPI's `Depends` (888+ edges) over task-specific function names; downstream `blast_radius` then explodes across the whole codebase.
 
-**M3 — Diff-recency weighting.** Run `git diff HEAD --unified=0` (best-effort, 2s timeout, 256 KB cap) and count word-bounded occurrences of each candidate. The final score becomes `token_overlap_score + min(diffCount × 0.2, 2.0)` — a symbol mentioned 5+ times in the diff dominates token-overlap noise from unrelated test/debounce/util symbols. Greenfield field example: `DebounceService` was picked over `_check_calendar_feature_gate` for a license-gate PR because token overlap matched debounce.py test files; M3 inverted the pick to the diff-mentioned subject. Falls through gracefully when git is unavailable or the diff is empty (no boost applied; M1 + M2 still active).
+**M3 — Diff-recency weighting.** Run `git diff HEAD --unified=0` (best-effort, 2s timeout, 256 KB cap) and count word-bounded occurrences of each candidate. The final score becomes `token_overlap_score + min(diffCount × 0.2, 2.0)` — a symbol mentioned 5+ times in the diff dominates token-overlap noise from unrelated test/util symbols. Observed: a generic service name can be picked over the task's actual subject when token overlap matches unrelated test files; M3 inverts the pick to the diff-mentioned subject. Falls through gracefully when git is unavailable or the diff is empty (no boost applied; M1 + M2 still active).
 
 The helper `_diffSymbolCounts(candidates)` returns a `Map<symbol, count>`; callers do not need to know about git state.
 
@@ -239,10 +239,10 @@ The helper `_diffSymbolCounts(candidates)` returns a `Map<symbol, count>`; calle
 
 - **`community`** — every file has a graph community label (clustering ran successfully). Files group by dominant community.
 - **`partial`** — some files have community labels, some don't (no graph node OR cluster-id missing). Covered files group by community; uncovered files used to collapse into a single `community: null` mega-bucket.
-- **`service_boundary`** (round 7 W6) — graph has no Leiden community attributes (or graph not loaded at all), but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `internal/X/`, `packages/X/`, `apps/X/`, `pkg/X/`, `cmd/X/` — first-wins anchoring, column-0 or `/`-preceded to prevent `vendor/app/services/X/` false matches). Each lane's `community` field carries the service path (e.g. `app/services/identity`); reason field reports which prefix matched + coverage %. Field signal: greenfield's graph carries zero `community` attrs on every probed node — every parallel review reverted to legacy path-based partition that semantically broke service boundaries. Service-boundary mode is shape-compatible with community mode so the consumer at `code-review-parallel.md::partition_lanes` is one bash condition.
+- **`service_boundary`** — graph has no Leiden community attributes (or graph not loaded at all), but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `internal/X/`, `packages/X/`, `apps/X/`, `pkg/X/`, `cmd/X/` — first-wins anchoring, column-0 or `/`-preceded to prevent `vendor/app/services/X/` false matches). Each lane's `community` field carries the service path (e.g. `app/services/identity`); reason field reports which prefix matched + coverage %. Some real-world graphs carry zero `community` attrs on every probed node — without service-boundary mode every parallel review reverts to legacy path-based partition that semantically breaks service boundaries. Service-boundary mode is shape-compatible with community mode so the consumer at `code-review-parallel.md::partition_lanes` is one bash condition.
 - **`fallback`** — neither path matches (no graph, no service prefix at threshold). Caller bash falls through to the legacy top-2-level path partition.
 
-**Archetype sub-classifier.** Greenfield 2026-06-07 calibration: 24 of 42 files (57%) in a real PR landed in the mega-bucket — mostly hurl/docs/config files with no graph nodes. The orchestrator manually reshaped to coherent lanes every review.
+**Archetype sub-classifier.** In real-world PRs more than half the files often land in the mega-bucket — mostly hurl/docs/config files with no graph nodes. Without the sub-classifier the orchestrator manually reshaped to coherent lanes every review.
 
 The new `_archetype(f)` helper sub-classifies uncovered files by extension + path:
 

@@ -36,11 +36,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
     Every valid finding must be reported with file, line, severity, and rule reference.
 
-    **Self-grade against the rubric as you write (C7-7).** The same axes the
+    **Self-grade against the rubric as you write.** The same axes the
     verifier will use to grade your review are inlined in <rubric_content> (or
     readable at <rubric_path> as fallback). Walk EVERY declared axis (both the
     A–G table rows AND any `## Axis [A-Z] —` top-level headings, currently
-    including axis H for dispatch warnings acknowledgment per cal #22 F2)
+    including axis H for dispatch warnings acknowledgment)
     before emitting review.md: scope coverage (every input file mentioned),
     finding specificity (file:line + rule ref or pattern citation), severity
     calibration (no Critical-rated nits, no Minor-rated security issues),

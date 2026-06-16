@@ -99,10 +99,10 @@ function isArtifactFresh(artifactPath) {
   let createdAt;
   try {
     const yaml = fs.readFileSync(workflowPath, "utf8");
-    // NEW-1: prefer first_created_at (immutable session anchor) over
-    // created_at (rotates on workflow_type transitions). Backward-compat:
-    // fall back to created_at when first_created_at is absent — older
-    // workflow.yaml files predate the immutable field.
+    // Prefer first_created_at (immutable session anchor) over created_at
+    // (which rotates on workflow_type transitions). Fall back to created_at
+    // when first_created_at is absent — older workflow.yaml files predate
+    // the immutable field.
     const mFirst = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
     const mLegacy = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
     const m = mFirst || mLegacy;
@@ -144,18 +144,17 @@ function isArtifactFresh(artifactPath) {
  * top-level keys round-trip as scalars (objects/arrays get JSON.stringify'd
  * on write and JSON.parse'd on read when the value looks like JSON).
  *
- * NEW-2 (greenfield calibration #5): the legacy parser dropped nested
- * `lanes:` blocks entirely on read, causing every `state update` to
- * re-serialize without them — `assert-lanes-registered` would report
- * lane_count: 0 after any state mutation between partition_lanes and
- * dispatch_lanes.
+ * Why nested `lanes:` is special-cased: the simple flat parser would
+ * otherwise drop the block on read, causing `state update` to re-serialize
+ * without it and assert-lanes-registered to report lane_count: 0 after any
+ * state mutation between partition_lanes and dispatch_lanes.
  *
- * NEW-3: the legacy serializer did `${value}` template coercion, which
- * stringifies non-primitive objects to "[object Object]" — the
- * memory_signal_json and scope_hint_json caches were getting destroyed
- * on every state.update call. Now: objects/arrays get JSON.stringify'd
- * before write, and JSON-shaped strings get parsed back into objects on
- * read so downstream code sees structured data, not stringified blobs.
+ * Why objects/arrays are JSON-encoded before quote-wrap: template coercion
+ * would otherwise stringify them to "[object Object]" / "1,2,3", destroying
+ * memory_signal_json and scope_hint_json caches on every state.update call.
+ * Objects/arrays serialize via JSON.stringify before write; JSON-shaped
+ * strings parse back into structured data on read so downstream code sees
+ * objects, not stringified blobs.
  */
 function parseSimpleYaml(content) {
   const result = {};
@@ -165,7 +164,7 @@ function parseSimpleYaml(content) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) { i++; continue; }
-    // NEW-2 special-case: lanes: header followed by indented `- id:` entries.
+    // Special-case: lanes: header followed by indented `- id:` entries.
     // Capture the contiguous block until the next non-indented line.
     if (trimmed === "lanes:") {
       const lanes = [];
@@ -204,8 +203,8 @@ function parseSimpleYaml(content) {
       let value = rawValue;
       if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\"/g, '"');
-        // NEW-3: JSON-shaped strings parse back to structured data so
-        // downstream consumers see objects/arrays, not stringified blobs.
+        // JSON-shaped strings parse back to structured data so downstream
+        // consumers see objects/arrays, not stringified blobs.
         if ((value.startsWith("{") && value.endsWith("}")) ||
             (value.startsWith("[") && value.endsWith("]"))) {
           try { result[key] = JSON.parse(value); }
@@ -229,14 +228,14 @@ function serializeSimpleYaml(obj) {
   let lanesBlock = null;
   for (const [key, value] of Object.entries(obj)) {
     if (key === "lanes" && Array.isArray(value)) {
-      // NEW-2: lanes round-trip as a structured block, preserving every
-      // lane's fields across state mutations.
+      // Lanes round-trip as a structured block, preserving every lane's
+      // fields across state mutations.
       lanesBlock = value;
       continue;
     }
-    // NEW-3: objects + arrays serialize via JSON.stringify before the
-    // quote-wrap path. Without this, template coercion stringifies
-    // objects to "[object Object]" and arrays to "1,2,3" (comma-join).
+    // Objects + arrays serialize via JSON.stringify before the quote-wrap
+    // path. Without this, template coercion stringifies objects to
+    // "[object Object]" and arrays to "1,2,3" (comma-join).
     if (value && typeof value === "object") {
       const json = JSON.stringify(value);
       const escaped = json.replace(/"/g, '\\"');
@@ -283,7 +282,7 @@ const KNOWN_STATE_KEYS = {
   // on every workflow_type transition (state.cjs::updateState) so mcp-stats
   // --workflow-id can union all historical ids when matching the current one,
   // not just the original ↔ current 1-hop. Serializes as JSON-stringified
-  // array via the NEW-3 path; typeof [] is "object" for schema validation.
+  // array via the JSON-encode path; typeof [] is "object" for schema validation.
   workflow_id_history: "object",
   last_session: "string",
   stopped_at: "string",
@@ -310,12 +309,10 @@ const PHASE_ORDER = [
   "plan", "architect", "implement", "test", "simplify", "review",
   "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
   "identify_scope", "debug", "complete", "finalize",
-  // Terminal phase set by `state release` for workflows abandoned mid-flight
-  // (greenfield 2026-05-28 PM calibration #3 finding #3: ad-hoc workaround
-  // `state update active=false phase=cancelled` tripped the VALID_PHASES
-  // warning because the enum didn't include the value the workflow actually
-  // ended in). Distinct from "complete" (normal terminal) and "finalize"
-  // (last-step-before-complete).
+  // Terminal phase set by `state release` for workflows abandoned mid-flight.
+  // Why explicit: ad-hoc `state update active=false phase=cancelled` would
+  // otherwise trip the VALID_PHASES warning. Distinct from "complete" (normal
+  // terminal) and "finalize" (last-step-before-complete).
   "cancelled",
 ];
 
@@ -341,13 +338,13 @@ const PHASE_ARTIFACT_MAP = {
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
-// Round 7 W5 — tier ordering for deterministic floor enforcement. Matches the
+// Tier ordering for deterministic floor enforcement. Matches the
 // workflows/dev-workflow.md::Quick Classification Heuristic table (TRIVIAL≤3
 // files; SIMPLE≤2 files; COMPLEX≥10 files). updateState() consults this to
 // auto-elevate when the agent-judged tier falls below the file-count floor.
-// Field signal: greenfield's 180-file review was seeded SIMPLE by detectTier()
-// (init.cjs:536 — task-text only) and never re-evaluated against the scope
-// list. Floor enforcement closes the loop regardless of caller.
+// Why floor enforcement: detectTier() in init.cjs uses task-text only and is
+// never re-evaluated against the actual scope list, so a 180-file review can
+// be seeded SIMPLE. Floor enforcement closes the loop regardless of caller.
 const TIER_RANK = { TRIVIAL: 0, SIMPLE: 1, STANDARD: 2, COMPLEX: 3 };
 
 // Always preserved by prune — cross-workflow inputs not tied to a single phase.
@@ -406,10 +403,10 @@ const VERIFICATION_VERDICTS = ["satisfied", "needs_revision", "failed"];
 
 const JSON_SIDECAR_SCHEMAS = {
   "impl-summary.json": {
-    // PARTIAL (greenfield calibration #16/#17 Q8 contract): work-doer subagents
-    // that hit the per-dispatch tool budget mid-task signal incomplete work via
-    // Status: PARTIAL + a Next-section marker. Workflow runners route PARTIAL to
-    // SendMessage-resume instead of advancing phase=DONE.
+    // Why PARTIAL exists: work-doer subagents that hit the per-dispatch tool
+    // budget mid-task signal incomplete work via Status: PARTIAL + a Next-section
+    // marker. Workflow runners route PARTIAL to SendMessage-resume instead of
+    // advancing phase=DONE.
     status: ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
     verdict: ["PASS", "FAIL", "INDETERMINATE"],
     agent: ["programmer"],
@@ -612,11 +609,11 @@ function readState() {
   if (parsed.complexity && !parsed.tier) {
     parsed.tier = parsed.complexity;
   }
-  // Deep-parse `_json`-suffixed values so consumers don't have to. Field
-  // failure (greenfield 2026-05-26): `STATE=$(state read); echo "$STATE" | jq`
-  // broke because zsh's echo interpreted embedded `\n` escapes in nested
-  // string values, producing invalid JSON for downstream jq. With deep-parse,
-  // those keys hold real objects/arrays — no escape sequences to misinterpret.
+  // Deep-parse `_json`-suffixed values so consumers don't have to.
+  // Why: `STATE=$(state read); echo "$STATE" | jq` breaks because zsh's echo
+  // interprets embedded `\n` escapes in nested string values, producing
+  // invalid JSON for downstream jq. With deep-parse, those keys hold real
+  // objects/arrays — no escape sequences to misinterpret.
   for (const k of Object.keys(parsed)) {
     if (!k.endsWith("_json")) continue;
     const v = parsed[k];
@@ -892,13 +889,14 @@ function releaseLock(lockFile) {
 
 function updateState(keyValues, opts = {}) {
   ensureStateDir();
-  // Detect phase=X status=DONE update intent BEFORE acquiring
-  // the lock. Gates fire OUTSIDE the lock to avoid recursive lock attempts
-  // from any future gate that calls readState/updateState. Field-evidenced:
-  // 99:7 update-vs-advance call ratio across shipped workflows; gates were
-  // dead for ~93% of phase transitions. opts.skipGates is set by advanceState
-  // (gates already ran there) and by --skip-gates CLI flag (explicit opt-out
-  // for ad-hoc callers that don't want the enforcement layer).
+  // Detect phase=X status=DONE update intent BEFORE acquiring the lock.
+  // Gates fire OUTSIDE the lock to avoid recursive lock attempts from any
+  // future gate that calls readState/updateState. Why update-time gating:
+  // shipped workflows call `state update phase=X status=DONE` ~99x for every
+  // ~7 calls to `advance-phase`, so update-time gates catch the vast majority
+  // of phase transitions. opts.skipGates is set by advanceState (gates already
+  // ran there) and by --skip-gates CLI flag (explicit opt-out for ad-hoc
+  // callers that don't want the enforcement layer).
   const skipGates = !!opts.skipGates;
   let phaseGateRun = null;
   if (!skipGates && Array.isArray(keyValues)) {
@@ -963,12 +961,12 @@ function updateState(keyValues, opts = {}) {
     // mcp-trace records would silently attribute the new workflow's MCP calls
     // to the old workflow_id, breaking telemetry attribution across boundaries.
     const previousWorkflowType = current.workflow_type;
-    // S1-v3 (greenfield calibration #14): snapshot active state BEFORE the
-    // update loop so the deactivation gate (after the loop, before write)
-    // can detect the true→false transition. CLI-driven orchestrators that
-    // flip `active=false` via direct `state update active=false ...` bypass
-    // the workflow .md finalize step where the gate originally lived.
-    // Hooking the gate here closes that escape hatch regardless of caller.
+    // Snapshot active state BEFORE the update loop so the deactivation gate
+    // (after the loop, before write) can detect the true→false transition.
+    // Why hooked at updateState: CLI-driven orchestrators that flip
+    // `active=false` via direct `state update active=false ...` bypass the
+    // workflow .md finalize step where the gate originally lived. Hooking
+    // the gate here closes that escape hatch regardless of caller.
     // releaseWorkflow() routes through this same updateState call (L1403),
     // so `state release` is covered automatically.
     const wasActive = current.active === true;
@@ -1009,8 +1007,7 @@ function updateState(keyValues, opts = {}) {
     // preserve the stamp; resetState() clears workflow.yaml, so the next active=true
     // re-stamps. Anchors the stuck-detector to a precise session boundary.
     //
-    // NEW-1 (greenfield calibration #5): two fields are immutable for the lifetime
-    // of the workflow:
+    // Two fields are immutable for the lifetime of the workflow:
     //   - first_created_at — frozen at first active=true; used by freshness gates
     //     (assert-preflight-fresh, assert-claude-mem-harvest, assert-graphify-decision)
     //     as the staleness anchor. Survives workflow_type transitions.
@@ -1112,11 +1109,11 @@ function updateState(keyValues, opts = {}) {
       ) {
         current.workflow_id_history.push(current.workflow_id);
       }
-      // Cal #23 8E: trim workflow_id_history to archive_runs cap. Greenfield
-      // session evidence — history grew to 234 entries while cap was 5
-      // because the self-healing logic above appends + backfills but never
-      // bounds. Trim policy: preserve original_workflow_id anchor (index 0)
-      // for cross-rotation trace attribution, keep the last N ids where
+      // Trim workflow_id_history to archive_runs cap. Why bounded: the
+      // self-healing logic above appends + backfills but never bounds, so
+      // long-lived sessions can grow history to hundreds of entries.
+      // Trim policy: preserve original_workflow_id anchor (index 0) for
+      // cross-rotation trace attribution; keep the last N ids where
       // N = state.archive_runs. When history length ≤ N+1, no-op. Preserves
       // the same chronological-order invariant the self-healing code maintains.
       const archiveRuns = getArchiveRuns();
@@ -1130,8 +1127,8 @@ function updateState(keyValues, opts = {}) {
         }
       }
     }
-    // S1-v3 deactivation gate (greenfield calibration #14). On active=true→false
-    // transition, invoke assertNoRawDispatchesThisSession before write. Block
+    // Deactivation gate: on active=true→false transition, invoke
+    // assertNoRawDispatchesThisSession before write. Block
     // (throw) when mode=block and raw dispatches present in workflow window;
     // warn to stderr when mode=warn|off; pass silently when clean. The gate
     // reads workflow.yaml from disk for its `created_at` anchor — that's the
@@ -1207,10 +1204,10 @@ const RESET_EXEMPT = new Set([
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:debug --mode=forensics post-hoc analysis
-  "probe-failures.jsonl",               // Q4 — graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
-  ".graphify-rebuild.lock",             // DEF-038 — atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
-  "last-curator-run.txt",               // F6 — auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:workflow --cancel
-  "graphify-impact-plan.json",          // R-2 (cal #19 secondary audit) — args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
+  "probe-failures.jsonl",               // graphify+python probe failures (category, command, args, error). Survives reset so health subcommand can surface root-cause across sessions.
+  ".graphify-rebuild.lock",             // atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
+  "last-curator-run.txt",               // auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:workflow --cancel
+  "graphify-impact-plan.json",          // args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1261,8 +1258,8 @@ const STATE_FILE_CONTRACT = {
     "reuse-analysis.md",        // written by programmer per-candidate decisions (assert-reuse-analyzed gate)
     "reuse-search-attempted.txt", // marker written by workflow bash BEFORE derive-reuse-candidates CLI — distinguishes "never ran" from "ran with 0 candidates"
     "knowledge-candidates-none.txt", // declared-none artifact for assert-knowledge-candidates-tagged (escape hatch with structured reason)
-    "topic-symbols-dropped.json",  // C7-2 — symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review F17 step to emit truncation notice in graph-impact.md
-    "probe-failures.jsonl",        // Q4 — append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
+    "topic-symbols-dropped.json",  // symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review step to emit truncation notice in graph-impact.md
+    "probe-failures.jsonl",        // append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1270,7 +1267,7 @@ const STATE_FILE_CONTRACT = {
     "^test-summary-[A-Za-z0-9_.-]+\\.(md|json)$",
     "^verification-[A-Za-z0-9_.-]+\\.(md|json)$",
     "^slice-[A-Za-z0-9_.-]+\\.md$",
-    // F10 — slug variants for plan-class / research-class / spec-class / debug-class.
+    // Slug variants for plan-class / research-class / spec-class / debug-class.
     // Use case: multi-phase tasks where one workflow produces multiple plan/research/debug
     // artifacts. Each variant carries a task-derived slug so archived snapshots are
     // browseable via `state history`. NOT for parallel-concurrent workflows — single-tenant
@@ -1576,10 +1573,10 @@ function checkWorkflowLock(preReadState) {
  * archives all artifacts) — release preserves task outputs so a follow-up
  * /devt:next or /devt:workflow --retro can still consume them.
  *
- * Field signal (greenfield 2026-05-28 PM calibration #3 finding #3): the
- * ad-hoc workaround `state update active=false phase=cancelled status=cancelled`
- * tripped the VALID_PHASES warning. This subcommand encapsulates the correct
- * mutation set and stamps released_at so /devt:debug --mode=forensics can distinguish
+ * Why a dedicated subcommand: ad-hoc
+ * `state update active=false phase=cancelled status=cancelled` trips the
+ * VALID_PHASES warning. This subcommand encapsulates the correct mutation
+ * set and stamps released_at so /devt:debug --mode=forensics can distinguish
  * orderly release from interrupted state.
  */
 function releaseWorkflow() {
@@ -1791,20 +1788,18 @@ function assertGraphifyDecision() {
       graphify_state: "ready",
     };
   }
-  // F18 — content-quality signal. The gate passes when one artifact exists,
-  // but workflows + auditors benefit from knowing whether graph-impact.md
-  // carries substantive content. Field observation (greenfield 2026-05-26):
-  // "I had no signal whether content was complete enough." We expose
-  // file_bytes + section_count (Markdown `## ` headings) so downstream tooling
-  // can flag thin payloads as advisory — never block, since legitimate empty
-  // results exist (e.g., leaf nodes with zero callers).
+  // Content-quality signal. The gate passes when one artifact exists, but
+  // workflows + auditors benefit from knowing whether graph-impact.md carries
+  // substantive content. Expose file_bytes + section_count (Markdown `## `
+  // headings) so downstream tooling can flag thin payloads as advisory —
+  // never block, since legitimate empty results exist (e.g., leaf nodes with
+  // zero callers).
   //
-  // B6 — drill-down count signal (signal-only, not blocking). F16 prescribes
-  // top-3 drill-down on direct_dependents but the bash gate only writes
-  // graph-impact.md without enforcing section structure. Field 2026-05-26:
-  // orchestrator drilled top-1 (ClientService) and skipped top-2/3. We count
+  // Drill-down count signal (signal-only, not blocking). The drill-down spec
+  // prescribes top-3 drill-down on direct_dependents, but the bash gate only
+  // writes graph-impact.md without enforcing section structure. Count
   // `## Drill-down:` sections and surface drill_down_sections +
-  // under_three_drill_downs so workflows / auditors can flag incomplete F16
+  // under_three_drill_downs so workflows / auditors can flag incomplete
   // execution. Not enforced as BLOCK because legitimate small graphs may have
   // fewer than 3 direct_dependents to drill into.
   const filePath = haveImpact ? graphImpactPath : skipReasonPath;
@@ -1812,11 +1807,10 @@ function assertGraphifyDecision() {
   let sectionCount = 0;
   let drillDownSections = 0;
   let malformedDrillDownHeadings = 0;
-  // Per-section substance bookkeeping. Field (greenfield 2026-05-27 PR #372 P5):
-  // F26 counted sections but didn't measure each section's body. A response can
-  // have 3 headings with empty bodies and pass the count gate. We measure each
-  // drill-down section's byte count after the heading; require ≥ 200 bytes OR
-  // an explicit truncation marker ("— TRUNCATED" or "saved to /tmp/.../") that
+  // Per-section substance bookkeeping. Why per-section: counting sections
+  // alone is fooled by 3 headings with empty bodies. Measure each drill-down
+  // section's byte count after the heading; require ≥ 200 bytes OR an
+  // explicit truncation marker ("— TRUNCATED" or "saved to /tmp/.../") that
   // documents an oversized response was saved off-context for later reference.
   const DRILL_DOWN_MIN_BYTES = 200;
   const TRUNCATION_MARKER_RE = /(?:—\s*TRUNCATED\b|saved (?:to|at)\s+[/\w.-]+)/i;
@@ -1830,13 +1824,12 @@ function assertGraphifyDecision() {
       sectionCount = m ? m.length : 0;
       const dm = content.match(/^##\s+Drill-down:/gim);
       drillDownSections = dm ? dm.length : 0;
-      // H4.1-v2 (greenfield calibration #11): detect non-spec drill-down
-      // headings (### or ####) so the gate doesn't silently award credit
-      // when format violates the canonical `## Drill-down: <SYM>` shape.
-      // Greenfield evidence: writer used ### → drillDownSections returned 0
-      // AND gate returned ok:true (no sections to validate). Now: if ANY
-      // `#+ Drill-down:` heading exists outside the strict `^## ` form,
-      // flag it and let the substance check fail.
+      // Detect non-spec drill-down headings (### or ####) so the gate doesn't
+      // silently award credit when format violates the canonical
+      // `## Drill-down: <SYM>` shape. Without this, a writer using ### causes
+      // drillDownSections == 0 AND gate returns ok:true (no sections to
+      // validate). If ANY `#+ Drill-down:` heading exists outside the strict
+      // `^## ` form, flag it and let the substance check fail.
       const anyDepthDrillDown = content.match(/^#+\s+Drill-down:/gim);
       const anyDepthCount = anyDepthDrillDown ? anyDepthDrillDown.length : 0;
       malformedDrillDownHeadings = anyDepthCount - drillDownSections;
@@ -1868,12 +1861,12 @@ function assertGraphifyDecision() {
   const underThreeDrillDowns = haveImpact && drillDownSections < 3;
   const hasThinDrillDowns = thinDrillDownSections > 0;
   // Substance check: a drill-down section in graph-impact.md asserts the
-  // orchestrator called get_neighbors via MCP. Field (greenfield 2026-05-26
-  // PR #372): 3 prose drill-downs were written from codebase knowledge with
-  // zero MCP calls — form-only gate (sections exist) passed silently. Cross-
-  // reference _mcp-trace.jsonl for get_neighbors records scoped to the
-  // current workflow_id; if drill-down headings exist but no MCP calls
-  // landed in this workflow's window, mark fabricated and fail the gate.
+  // orchestrator called get_neighbors via MCP. Without this check, prose
+  // drill-downs written from codebase knowledge with zero MCP calls pass
+  // silently (form-only gate). Cross-reference _mcp-trace.jsonl for
+  // get_neighbors records scoped to the current workflow_id; if drill-down
+  // headings exist but no MCP calls landed in this workflow's window, mark
+  // fabricated and fail the gate.
   let mcpGetNeighborsCalls = 0;
   let fabricatedDrillDown = false;
   if (haveImpact && drillDownSections >= 1) {
@@ -1882,12 +1875,11 @@ function assertGraphifyDecision() {
       const wfPath = path.join(dir, "workflow.yaml");
       if (fs.existsSync(wfPath)) {
         const wfYaml = fs.readFileSync(wfPath, "utf8");
-        // HF-1: build a Set of acceptable workflow_ids — current rotated value
+        // Build a Set of acceptable workflow_ids — current rotated value
         // PLUS the original anchor — so trace records emitted BEFORE the
-        // workflow_type transition still match. Greenfield calibration #7
-        // hit "fabricated drill-down" false positive because the orchestrator's
-        // 3 get_neighbors calls landed under the prior workflow_id while the
-        // gate queried the rotated one. Backward-compat: when original is
+        // workflow_type transition still match. Without the original anchor,
+        // get_neighbors calls landing under a prior workflow_id cause a false
+        // "fabricated drill-down" positive after rotation. When original is
         // absent (legacy workflow.yaml), only the current id is accepted.
         const wfIdMatch = wfYaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
         const origIdMatch = wfYaml.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
@@ -1919,19 +1911,17 @@ function assertGraphifyDecision() {
     } catch { /* trace unavailable — leave count at 0 */ }
     fabricatedDrillDown = mcpGetNeighborsCalls === 0;
   }
-  // Cal #22 F1 (greenfield I1): flip drill-down skip from informational to
-  // gating. Field evidence: 5+ prior sessions including greenfield's run
-  // skipped the F16 top-3 drill-down step entirely (0 get_neighbors calls,
-  // 0 drill-down sections) while assert-graphify-decision returned ok:true
-  // because the fields were informational only. Same CON-001 substance-
-  // enforcement-gates pattern (6th instance).
+  // Drill-down skip is gating, not informational — applies the [[CON-001]]
+  // substance-enforcement-gates pattern. Without this, the top-3 drill-down
+  // step can be skipped entirely (0 get_neighbors calls, 0 drill-down sections)
+  // while assert-graphify-decision returns ok:true.
   //
   // Distinguishing skip from legitimate small-graph case: skip is
   // characterized by tier ∈ {symbol_anchored, bulk_scoped} (drill-down
   // mandated) AND mcpGetNeighborsCalls === 0 (no calls attempted) AND
   // drillDownSections === 0 (no sections written). A small graph with
   // few-or-zero dependents would still produce at least one get_neighbors
-  // call (the F16 step's "skip if 0 dependents" branch fires AFTER the call).
+  // call (the "skip if 0 dependents" branch fires AFTER the call).
   //
   // Gate is opt-out via .devt/config.json::graphify_decision_mode = "warn"
   // (default "block"). Mirrors dispatch_hygiene_mode pattern at line ~4398.
@@ -2017,20 +2007,20 @@ function assertGraphifyDecision() {
   return result;
 }
 
-// Substance check for agent output files. Field (greenfield 2026-05-26
-// PR #372): 5/6 lane sub-agent dispatches returned status:completed with
-// placeholder bodies like "Stub written; analysis in progress." The verifier
-// approved them on file-existence alone. This function detects stub markers,
-// low word count, and heading-only structure so downstream gates can refuse
-// to accept the output without re-dispatch.
+// Substance check for agent output files. Lane sub-agent dispatches can
+// return status:completed with placeholder bodies like
+// "Stub written; analysis in progress." while the verifier approves on
+// file-existence alone. This function detects stub markers, low word count,
+// and heading-only structure so downstream gates can refuse to accept the
+// output without re-dispatch.
 const STUB_MARKER_PATTERNS = [
   /\bstub written\b/i,
-  // Verb-prefixed "in progress" variants. Field validation (greenfield 2026-05-26)
-  // surfaced "Stub: analysis in progress" — broader pattern catches realistic
+  // Verb-prefixed "in progress" variants. "Stub: analysis in progress" and
+  // similar forms appear in stub bodies; broader pattern catches realistic
   // variants without false-positives on substantive prose (validated against
   // real review.md files: matches stub, zero matches on 2132-word real review).
   /\b(?:analysis|implementation|review|work|writing|investigation)\s+in\s+progress\b/i,
-  // Leading "Stub:" or "Stub." marker — field stubs frequently use this prefix
+  // Leading "Stub:" or "Stub." marker — stubs frequently use this prefix
   // form independent of the "in progress" phrase.
   /^\s*stub\s*[:.]/im,
   /^\s*TODO\s*:/m,
@@ -2146,11 +2136,9 @@ function checkAgentOutput(filePath, opts) {
 // Workflow types that dispatch a verifier when config.workflow.verification=true.
 // Other workflow types (quick_implement, debug, retro, plan, specify, etc.)
 // intentionally skip verification by design — applying the gate uniformly
-// produces false-negative blocks. Field signal (greenfield 2026-05-28 PM
-// calibration #2, 1c + 6a #2): orchestrator running quick_implement with
-// project config.workflow.verification=true hit assert-verifier-ran ok:false
-// even though quick_implement has no verifier step. Silent miss that should
-// have been a no-op.
+// produces false-negative blocks. Without this allow-list, a project running
+// quick_implement with workflow.verification=true would hit assert-verifier-ran
+// ok:false even though quick_implement has no verifier step (silent miss).
 const VERIFIER_REQUIRED_WORKFLOWS = new Set([
   "dev",
   "code_review",
@@ -2158,15 +2146,14 @@ const VERIFIER_REQUIRED_WORKFLOWS = new Set([
 ]);
 
 // Substance gate ensuring the verifier dispatch actually ran when config
-// said it should. Field (greenfield 2026-05-27 PR #372): orchestrator with
-// config.workflow.verification=true skipped the verifier step entirely,
-// rationalizing that "8-lane fan-out is verifier-grade." Nothing in the
-// workflow contract enforced the dispatch happening; the conditional skip
-// at the top of the verify step was the only check, and orchestrators
-// under context pressure rationalize past conditional skips. Same arch
-// class as L1: gate-bypass via "I'll skip this one." We expose the
-// post-dispatch substance check as a CLI; workflows wire it into
-// present_findings.
+// said it should. Without this gate, an orchestrator with
+// config.workflow.verification=true can skip the verifier step entirely
+// (e.g., rationalizing that "fan-out is verifier-grade") and nothing in the
+// workflow contract enforces the dispatch happening — the conditional skip
+// at the top of the verify step is the only check, and orchestrators under
+// context pressure rationalize past conditional skips. Same arch class as
+// gate-bypass via "I'll skip this one." This CLI exposes the post-dispatch
+// substance check; workflows wire it into present_findings.
 function assertVerifierRan() {
   // require() at call time to avoid circular deps with config.cjs at module load
   // (same pattern as the validateConsistency path elsewhere in this file).
@@ -2237,10 +2224,11 @@ function assertVerifierRan() {
   };
 }
 
-// Cal #22 F2 (greenfield Q1 — verifier walked rubric axes A–G and stopped,
-// silently skipping axis H "## Axis H — Dispatch warnings acknowledgment").
-// Same CON-001 substance-vs-form failure mode: the rubric's H axis was
-// computed at edit time but the verifier didn't enforce walking it.
+// Verifier-axis-coverage gate. Without this, a verifier can walk rubric
+// axes A–G and stop, silently skipping axis H ("## Axis H — Dispatch warnings
+// acknowledgment"). Same [[CON-001]] substance-vs-form failure mode: the
+// rubric's H axis was computed at edit time but the verifier didn't enforce
+// walking it.
 //
 // Counts `^## Axis [A-Z] —` headings in the pinned rubric body and compares
 // against verification.json::criteria_total. Mismatch → ok:false with the
@@ -2288,8 +2276,8 @@ function assertVerifierGradedAllAxes() {
   const rubricBody = fs.readFileSync(rubricPath, "utf8");
   // Code-review rubric uses a hybrid taxonomy: axes A–G live as TABLE ROWS in
   // the "Grading axes" table (`| **A. Scope coverage** | ...`), while axis H
-  // (added cal #22 F2) is a top-level heading. Count both patterns so the gate
-  // applies to the full taxonomy regardless of authoring shape.
+  // is a top-level heading. Count both patterns so the gate applies to the
+  // full taxonomy regardless of authoring shape.
   const headingMatches = rubricBody.match(/^##\s+Axis\s+[A-Z]\s+—/gm);
   const tableMatches = rubricBody.match(/^\|\s+\*\*[A-Z]\.\s+/gm);
   const headingCount = headingMatches ? headingMatches.length : 0;
@@ -2370,9 +2358,9 @@ function assertVerifierGradedAllAxes() {
 //     AskUserQuestion answer)
 //   - OR .devt/state/scope-check-required.txt does NOT exist (condition
 //     didn't match; gate doesn't apply)
-// Field rationale (greenfield 2026-05-27): orchestrator skipped the
-// AskUserQuestion silently with the rationalization "user pre-stated
-// parallel intent." Prose gate failed.
+// Why a mechanical gate: orchestrators can skip the AskUserQuestion silently
+// with rationalizations like "user pre-stated parallel intent." Prose-only
+// gates don't survive this; this gate forces the answer artifact to exist.
 function assertScopeCheckHandled() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -2408,11 +2396,11 @@ function assertScopeCheckHandled() {
 
 // Mechanical gate for code-review-parallel.md::dispatch_lanes. partition_lanes
 // is supposed to populate workflow.yaml::lanes[] via state update-lane calls.
-// Field rationale (greenfield 2026-05-27): orchestrator skipped lane
-// registration entirely; list-lane-outputs returned {"lanes":[]} despite
-// 6 lanes being dispatched manually. This gate fails when partition_lanes
-// runs but produces zero lane records — forcing the orchestrator to either
-// register lanes or fall back to single-dispatch explicitly.
+// Why this gate exists: orchestrators can skip lane registration entirely;
+// list-lane-outputs then returns {"lanes":[]} despite lanes being dispatched
+// manually. This gate fails when partition_lanes runs but produces zero lane
+// records — forcing the orchestrator to either register lanes or fall back
+// to single-dispatch explicitly.
 function assertLanesRegistered() {
   const result = listLaneOutputs();
   const laneCount = (result.lanes || []).length;
@@ -2432,10 +2420,10 @@ function assertLanesRegistered() {
 // Mechanical gate for code-review-parallel.md::verify step. The consolidator
 // (code-reviewer in synthesis mode) writes .devt/state/consolidator-ran.txt
 // as its first action (synthesis-mode handler in agents/code-reviewer.md).
-// Field rationale (greenfield 2026-05-27): orchestrator wrote the
-// consolidated review.md themselves instead of dispatching the synthesis
-// agent. Verifier graded it and the silent skip was invisible. This gate
-// fails when ≥1 lane passed substance but no consolidator marker exists.
+// Why this gate exists: orchestrators can write the consolidated review.md
+// themselves instead of dispatching the synthesis agent. The verifier grades
+// it and the silent skip is invisible. This gate fails when ≥1 lane passed
+// substance but no consolidator marker exists.
 function assertConsolidatorDispatched() {
   const result = listLaneOutputs();
   const substancePassCount = (result.lanes || []).filter(
@@ -2475,10 +2463,10 @@ function assertConsolidatorDispatched() {
 }
 
 // Mechanical gate ensuring the auto_curator step was at least considered.
-// Field rationale (greenfield 2026-05-27): orchestrator skipped the step
-// entirely with "default config has it disabled" rationale, but never
-// actually read the config to confirm. This forces a consideration marker
-// regardless of the config outcome.
+// Without this, an orchestrator can skip the step entirely with "default
+// config has it disabled" rationale while never actually reading the config
+// to confirm. This forces a consideration marker regardless of the config
+// outcome.
 function assertAutoCuratorConsidered() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -2507,17 +2495,14 @@ function assertAutoCuratorConsidered() {
 }
 
 // Mechanical gate: programmer must write .devt/state/reuse-analysis.md
-// before code is written. Field rationale: prose-only "scan existing code
-// first" gets rationalized past, producing 5-variations-of-same-function.
+// before code is written. Why mechanical: prose-only "scan existing code
+// first" gets rationalized past, producing N-variations-of-same-function.
 // Pattern: derive-reuse-candidates writes the candidate list; programmer
 // must address each candidate in reuse-analysis.md with a decision.
-// NEW-7 (greenfield calibration #5): assert-reuse-analyzed was workflow_type-
-// blind, returning ok:false on /devt:review sessions even though review is
-// READ-ONLY and never dispatches a programmer. The gate is correct for
-// implement-flows (dev / quick_implement) but creates noise for review-only
-// flows. Same pattern as VERIFIER_REQUIRED_WORKFLOWS (A9) — declare the
-// implement-flow opt-in set, return ok:true for others with a workflow-type
-// reason.
+// Workflow-type-scoped: a blind gate returns ok:false on /devt:review
+// sessions even though review is READ-ONLY and never dispatches a programmer.
+// Declare the implement-flow opt-in set; return ok:true for others with a
+// workflow-type reason. Same pattern as VERIFIER_REQUIRED_WORKFLOWS.
 const REUSE_REQUIRED_WORKFLOWS = new Set([
   "dev",
   "quick_implement",
@@ -2551,12 +2536,11 @@ function assertReuseAnalyzed() {
 
   // Three-state gate. Marker presence distinguishes the legitimate "ran with
   // zero candidates" pass from the silent "workflow bash skipped the step"
-  // failure. Greenfield calibration #2: assert-reuse-analyzed returned
-  // ok:true under the old escape clause when reuse-candidates.md was simply
-  // absent, blessing a session where the entire pre-search step never ran.
-  // The marker is written BEFORE the derive-reuse-candidates CLI invocation
-  // by the workflow bash, so its presence is the canonical "orchestrator
-  // attempted the step" signal.
+  // failure. Without the marker, this gate returned ok:true when
+  // reuse-candidates.md was simply absent, blessing a session where the
+  // entire pre-search step never ran. The marker is written BEFORE the
+  // derive-reuse-candidates CLI invocation by the workflow bash, so its
+  // presence is the canonical "orchestrator attempted the step" signal.
   if (!fs.existsSync(markerPath)) {
     return {
       ok: false,
@@ -2635,11 +2619,10 @@ function assertReuseAnalyzed() {
 // in scratchpad.md (canonical capture path → harvester → curator) OR declared
 // none explicitly via knowledge-candidates-none.txt with a structured reason.
 //
-// Greenfield calibration #2 finding 6a#1+6e: the agent prose at
-// workflows/quick-implement.md said "load-bearing — not optional" but no
-// assert-* enforced it. Result: 4 candidates described in review.md prose
-// but ZERO #KNOWLEDGE-CANDIDATE lines in scratchpad. The candidates never
-// reached the curator harvester. Hard miss.
+// Without this gate, agent prose at workflows/quick-implement.md says
+// "load-bearing — not optional" but nothing enforces it. Observed failure
+// mode: candidates described in review.md prose but ZERO #KNOWLEDGE-CANDIDATE
+// lines in scratchpad, so candidates never reach the curator harvester.
 //
 // The structured none-declaration is the deliberate escape hatch — pure CRUD
 // tasks, conventional-pattern implementations, or topics already covered by
@@ -2731,11 +2714,11 @@ function assertKnowledgeCandidatesTagged() {
 // lanes might surface the same architectural rule, and the downstream
 // harvester does its own dedup, but writing the same line twice into
 // scratchpad pollutes the audit trail.
-// G4 (greenfield calibration #8): the structural side of preflight has
-// observable decision artifacts (graphify-skip-reason.txt, staleness lag);
-// the semantic side did not, so an orchestrator could read scope_hint
-// without knowing whether the underlying symbols were trustworthy. This
-// gate surfaces the extraction confidence numerically. Returns
+// The structural side of preflight has observable decision artifacts
+// (graphify-skip-reason.txt, staleness lag); the semantic side did not, so
+// an orchestrator could read scope_hint without knowing whether the
+// underlying symbols were trustworthy. This gate surfaces the extraction
+// confidence numerically. Returns
 // `ok: true` always — the gate WARNS, it does not block (per the
 // "no defensive limits for low-risk scenarios" rule; semantic quality is
 // signal, not safety). Default warn threshold 0.4 (configurable via
@@ -2790,15 +2773,14 @@ function assertPreflightSemanticQuality(args) {
   };
 }
 
-// S1 (greenfield calibration #12): post-hoc enforcement gate for raw devt:*
-// agent dispatches. The PreToolUse `dispatch-hygiene-guard.sh` hook detects
-// raw dispatches correctly and returns `{decision:"deny"}` — but Claude Code
-// does NOT enforce PreToolUse deny verdicts on the Task tool in current
-// versions (verified empirically against greenfield's session: hook fired 4
-// times, 4 raw_dispatch entries written to dispatch-warnings.jsonl, but all
-// 4 sub-agents ran anyway). The hook's `mode:"block"` is functionally a
-// no-op for Task dispatches; the advisory surfaces in additionalContext but
-// the orchestrator can rationalize past it.
+// Post-hoc enforcement gate for raw devt:* agent dispatches. The PreToolUse
+// `dispatch-hygiene-guard.sh` hook detects raw dispatches correctly and
+// returns `{decision:"deny"}` — but Claude Code does NOT enforce PreToolUse
+// deny verdicts on the Task tool in current versions (hook fires and writes
+// raw_dispatch entries to dispatch-warnings.jsonl, but sub-agents run
+// anyway). The hook's `mode:"block"` is functionally a no-op for Task
+// dispatches; the advisory surfaces in additionalContext but the orchestrator
+// can rationalize past it.
 //
 // This gate is the post-hoc mitigation: at workflow finalize/present_findings
 // time, scan dispatch-warnings.jsonl for `source:"raw_dispatch"` entries
@@ -2806,32 +2788,31 @@ function assertPreflightSemanticQuality(args) {
 // the workflow if any are present. Same pattern as
 // assert-knowledge-candidates-tagged (gate-cluster sibling at finalize).
 //
-// S1-v2 (greenfield calibration #13): scope corrected from `first_created_at`
-// (immutable session anchor) to `created_at` (current workflow's start, rotates
-// on every init * and workflow_type transition). Original session-scope was
-// too aggressive for pattern-C open-ended sessions — greenfield's evidence:
-// 31 historical raw dispatches across 18 prior workflows blocked a CURRENT
-// workflow whose 2 dispatches were both properly enveloped. The right scope
-// is per-workflow: each new init * gives a clean window so legitimate
-// per-workflow review remains independent of historical accumulation.
+// Scope is `created_at` (current workflow's start, rotates on every init *
+// and workflow_type transition), not `first_created_at` (immutable session
+// anchor). Session-scope was too aggressive for pattern-C open-ended
+// sessions: historical raw dispatches across prior workflows would block a
+// CURRENT workflow whose own dispatches were all properly enveloped. The
+// right scope is per-workflow: each new init * gives a clean window so
+// legitimate per-workflow review remains independent of historical
+// accumulation.
 //
 // Setting `dispatch_hygiene_mode:"warn"` in .devt/config.json opts out — the
 // gate respects the same config knob the PreToolUse hook reads. Useful for
 // projects that intentionally orchestrate ad-hoc agent dispatches.
-// WI-4 / Q11 (greenfield calibration #16): mechanical claim-check. Workflow
-// runners call this AFTER each output-writing dispatch to verify the agent
-// actually wrote its declared output, instead of trusting the agent's verbal
-// "I wrote X" claim. Greenfield's cal #17 §G evidence: architect returned a
-// 2391-byte verbal summary claiming "wrote arch-review.md" but the file was
-// never on disk — main thread had to reconstruct it. This gate catches
-// exactly that case before phase advances.
+// Mechanical claim-check. Workflow runners call this AFTER each
+// output-writing dispatch to verify the agent actually wrote its declared
+// output, instead of trusting the agent's verbal "I wrote X" claim. Observed
+// failure mode: architect returns a verbal summary claiming "wrote
+// arch-review.md" but the file is never on disk — main thread has to
+// reconstruct it. This gate catches exactly that case before phase advances.
 //
 // Reads agent → primary output from agents/io-contracts.yaml (single source of
-// truth — see WI-4b / M8 artifact manifest). Returns:
+// truth — see artifact manifest). Returns:
 //   {ok:true, agent, expected_path, exists:true, size_bytes, reason}
 //   {ok:false, agent, expected_path, exists:false, reason}
 //   {ok:false, agent, reason: "agent not declared in io-contracts"}
-// WI-1 / Layer-2: wrapper that persists every result (success + failure) to
+// Layer-2 wrapper persists every result (success + failure) to
 // claim-check-failures.jsonl. Layer-2 assertClaimChecksResolved reads the
 // jsonl at finalize. Persistence is fail-open; the wrapped result is the
 // authoritative return value.
@@ -2907,11 +2888,11 @@ function _assertArtifactPresentInner(agent) {
   // short-circuit: files above STUB_SIZE_THRESHOLD bytes are empirically
   // substantive (lane stubs observed at 65/72 B; substantive lanes at
   // 7–42 KB). Skipping the regex scan for large files keeps the per-call
-  // cost flat for the common case. Field signal: cal #20 §1 documented
-  // Layer-1 recording success on 65-byte stubs — Layer-2 would PASS
-  // false-positive if a stub won the latest-timestamp slot. substance_verdict
-  // closes that gap. Backwards compat: assertClaimChecksResolved treats
-  // missing field as "substantive" so historical records keep passing.
+  // cost flat for the common case. Without substance_verdict, Layer-1
+  // records success on stub-sized files and Layer-2 PASSes false-positive
+  // when a stub wins the latest-timestamp slot. substance_verdict closes
+  // that gap. Backwards compat: assertClaimChecksResolved treats missing
+  // field as "substantive" so historical records keep passing.
   const substance = _computeSubstanceVerdict(artifactPath, sizeBytes);
   return {
     ok: true,
@@ -2968,8 +2949,8 @@ function _assertLaneArtifactPresent(canonicalAgent, laneId) {
   }
   // Substance-aware Layer-1 (lane variant) — same semantic as the canonical
   // form: size-threshold short-circuit + checkAgentOutput for small files.
-  // Closes the cal #20 §1 friction where lane Layer-1 recorded success on
-  // 65/72-byte stubs that substance_check_lanes correctly flagged later.
+  // Closes the gap where lane Layer-1 recorded success on stub-sized files
+  // that substance_check_lanes correctly flagged later.
   const substance = _computeSubstanceVerdict(lane.review_file, lane.file_size_bytes);
   return {
     ok: true,
@@ -3007,7 +2988,7 @@ function _computeSubstanceVerdict(artifactPath, sizeBytes) {
   return { verdict: "substantive" };
 }
 
-// Q2-E / greenfield cal #19 §5 Q17 — rate-limit-mid-section recovery diagnostic.
+// Rate-limit-mid-section recovery diagnostic.
 // The PARTIAL contract in programmer.md triggers at section boundaries. When a
 // rate-limit interrupts the agent MID-section, no PARTIAL sidecar emits and
 // impl-summary.md stays at its stub-first sentinel. The agent provably cannot
@@ -3229,14 +3210,14 @@ function recoverPartialImpl(agent) {
   return substantiveReturn;
 }
 
-// Substance-check race fix (cal #20 §3) — mtime-stability primitive.
+// Substance-check race fix — mtime-stability primitive.
 // PRIMARY mechanism for guarding against premature substance reads.
 //
-// Failure mode (cal #20 §10): an orchestrator's substance check on a lane file
-// fired BEFORE the agent's Task() returned; the read saw a 72-byte stub
-// because the agent's write hadn't completed. The orchestrator then dispatched
-// a retry based on the false stub signal; the retry's smaller output
-// overwrote the first-pass's substantive output → 28 KB of findings lost.
+// Failure mode: an orchestrator's substance check on a lane file fires
+// BEFORE the agent's Task() returns; the read sees a stub because the
+// agent's write hasn't completed. The orchestrator then dispatches a retry
+// based on the false stub signal; the retry's smaller output overwrites the
+// first-pass's substantive output → findings lost.
 //
 // Mtime-stability is mechanically robust without orchestrator burden: stat
 // the file at T0, sleep settle-ms, stat again at T1. If size and mtime
@@ -3250,16 +3231,16 @@ function recoverPartialImpl(agent) {
 // not found. Workflows can choose: BLOCK on ok=false (strict) or warn-and-
 // proceed (best-effort with sentinel logging).
 
-// Cal #21 F-OBS-1 + F23: when a sub-agent dispatch dies mid-flight (credential
-// expiry, network failure, model rate-limit), the orchestrator typically
-// re-dispatches without programmatic visibility into what files the dead
-// dispatch may have already edited. Greenfield's W12 case: died at
-// "Not logged in", retry inherited PermissionQueryParams.scope: str | None
-// from the partial prior session and self-corrected to PScope — but the
-// orchestrator had no signal to know edits had landed. detectInheritedSourceEdits
-// surfaces uncommitted git changes filtered by mtime > workflow start so
-// orchestrators can decide before re-dispatching: clean (revert prior edits),
-// merge (treat as in-progress work), or investigate.
+// When a sub-agent dispatch dies mid-flight (credential expiry, network
+// failure, model rate-limit), the orchestrator typically re-dispatches
+// without programmatic visibility into what files the dead dispatch may have
+// already edited. Observed failure mode: dispatch dies at "Not logged in",
+// retry inherits partial edits from the prior session and self-corrects —
+// but the orchestrator has no signal that edits have landed.
+// detectInheritedSourceEdits surfaces uncommitted git changes filtered by
+// mtime > workflow start so orchestrators can decide before re-dispatching:
+// clean (revert prior edits), merge (treat as in-progress work), or
+// investigate.
 //
 // Returns: {ok, workflow_started_at, count_total, count_after_workflow_start,
 //           recommendation, guidance, files}. files[] entries carry status code
@@ -3397,7 +3378,7 @@ function assertFileQuiescent(filePath, args) {
   };
 }
 
-// Substance-check race fix (cal #20 §3) — workflow-mechanical OPT-IN.
+// Substance-check race fix — workflow-mechanical OPT-IN.
 //
 // SECONDARY mechanism — available for workflows that enforce explicit
 // lane-status discipline (orchestrator advances lanes[].status from in_flight
@@ -3832,11 +3813,11 @@ function archScanTrace(event, args) {
   }
 }
 
-// Arch scanner freshness check — closes the cal #19 §9 Surprise 3 pattern
-// ("23 subcommands but only 8 used by workflows"). When wired into
-// /devt:review's context_init, surfaces a [STALE-ARCH-SCAN] sentinel if the
-// arch-scan-report.md is older than --max-age-hours (default 24) — orchestrator
-// can decide whether to surface to user or proceed silently.
+// Arch scanner freshness check — closes the "many subcommands declared but
+// few exercised by workflows" pattern. When wired into /devt:review's
+// context_init, surfaces a [STALE-ARCH-SCAN] sentinel if the
+// arch-scan-report.md is older than --max-age-hours (default 24) —
+// orchestrator can decide whether to surface to user or proceed silently.
 //
 // Returns ok:true + warn:true on stale; ok:true + warn:false on fresh; ok:false
 // only on missing report (advisory-only gate by default).
@@ -4351,26 +4332,25 @@ function listInstances() {
   return { ok: true, instances, count: instances.length };
 }
 
-// WI-1 / Layer-2 (greenfield cal #16+#17): persistence helper for
-// assertArtifactPresent results. Every Layer-1 call appends a record so
-// Layer-2 (assertClaimChecksResolved) can compute per-agent latest verdict
-// at finalize. Last write per agent in window wins — successful re-runs
-// after a failure RESOLVE the failure (the orchestrator re-dispatched).
-// Fail-open: jsonl write errors are silenced (matches dispatch-warnings.jsonl
-// pattern — forensic best-effort, never affect the caller).
-// v0.73 WI-3 (greenfield cal #18 assessment #4): unified gate-trace.jsonl
-// observability. Every assert-* CLI subcommand appends one record so cal #19+
-// has a single source of truth for "did gate X fire? what verdict? when?".
-// Complements the per-class jsonls (dispatch-warnings, claim-check-failures)
-// without duplicating them — those carry rich per-gate forensic data; this
-// carries the firing-rate + verdict timeline.
+// Layer-2 persistence helper for assertArtifactPresent results. Every
+// Layer-1 call appends a record so Layer-2 (assertClaimChecksResolved) can
+// compute per-agent latest verdict at finalize. Last write per agent in
+// window wins — successful re-runs after a failure RESOLVE the failure (the
+// orchestrator re-dispatched). Fail-open: jsonl write errors are silenced
+// (matches dispatch-warnings.jsonl pattern — forensic best-effort, never
+// affect the caller).
+// Unified gate-trace.jsonl observability. Every assert-* CLI subcommand
+// appends one record so there is a single source of truth for "did gate X
+// fire? what verdict? when?". Complements the per-class jsonls
+// (dispatch-warnings, claim-check-failures) without duplicating them — those
+// carry rich per-gate forensic data; this carries the firing-rate + verdict
+// timeline.
 //
 // Verdict derivation: ok:true → "ok"; ok:true + warn:true → "warn"; ok:false
 // → "fail". Mirrors the standard {ok, warn?, reason} shape every gate returns.
 // Fail-open persistence (matches dispatch-warnings.jsonl pattern).
-// v0.73 Phase B (greenfield cal #18 assessment #1): YAML parser for
-// workflows/_phase-gates.yaml. Zero-dep purpose-built parser mirroring
-// dispatch.cjs::parseIoContracts. Schema:
+// YAML parser for workflows/_phase-gates.yaml. Zero-dep purpose-built parser
+// mirroring dispatch.cjs::parseIoContracts. Schema:
 //   workflow_types:
 //     <workflow_type>:
 //       <phase>:
@@ -4407,25 +4387,25 @@ function parsePhaseGatesYaml(content) {
   return result;
 }
 
-// v0.73 Phase B (greenfield cal #18 assessment #1): runtime gate enforcement.
-// `state advance-phase <phase> [key=value ...]` reads the workflow_type from
-// workflow.yaml, looks up gates for the target phase in _phase-gates.yaml,
-// runs each gate via the existing assert-* functions, and refuses to advance
-// on any failure. Throws on block (devt-tools.cjs outer catch exits 1).
+// Runtime gate enforcement. `state advance-phase <phase> [key=value ...]`
+// reads the workflow_type from workflow.yaml, looks up gates for the target
+// phase in _phase-gates.yaml, runs each gate via the existing assert-*
+// functions, and refuses to advance on any failure. Throws on block
+// (devt-tools.cjs outer catch exits 1).
 //
 // Phases NOT in the registry → falls through to a plain phase update,
 // preserving backwards compatibility. Gates NOT recognized → reported as
 // blocking failures (catches typos in the YAML).
 //
 // Every gate firing logs to gate-trace.jsonl via persistGateTrace, with
-// gate name prefixed by "advance-phase:" so cal #19+ can distinguish
+// gate name prefixed by "advance-phase:" so consumers can distinguish
 // transition-time gates from manual one-off gate runs.
 // Shared phase-gate runner. Extracted from advanceState so
 // `updateState` can fire gates when `state update phase=X status=DONE` is
-// called directly (field-evidenced: 99:7 update-vs-advance call ratio across
-// devt's own workflow files — gates defined in _phase-gates.yaml were dead
-// for ~93% of phase transitions). Pure: reads YAML + dispatches GATE_FNS;
-// caller decides what to do with blockedBy.
+// called directly (devt's own workflow files lean heavily on `state update`
+// over `state advance-phase`, so without this extraction gates in
+// _phase-gates.yaml would be dead for most phase transitions). Pure: reads
+// YAML + dispatches GATE_FNS; caller decides what to do with blockedBy.
 //
 // Returns one of:
 //   {fired:false, note:"<reason>"}  — workflow_type missing / YAML absent /
@@ -4612,11 +4592,12 @@ function assertClaimChecksResolved() {
   const failsPath = path.join(dir, "claim-check-failures.jsonl");
   if (!fs.existsSync(failsPath)) {
     // Honest read of the absent file: structurally fine (nothing to resolve)
-    // but ambiguous about coverage. cal #19 surfaced that code-review-parallel
-    // had zero Layer-1 calls → file stayed absent → gate auto-passed without
-    // ever verifying any lane output. Reason now flags the ambiguity so
-    // /devt:next and the audit trail can distinguish "workflow doesn't dispatch
-    // output-writers" from "workflow should have but Layer-1 never fired."
+    // but ambiguous about coverage. Without explicit flagging, a workflow that
+    // never dispatches Layer-1 calls leaves this file absent → gate
+    // auto-passes without ever verifying any lane output. Reason now flags
+    // the ambiguity so /devt:next and the audit trail can distinguish
+    // "workflow doesn't dispatch output-writers" from "workflow should have
+    // but Layer-1 never fired."
     return {
       ok: true,
       unresolved_count: 0,
@@ -4673,13 +4654,13 @@ function assertClaimChecksResolved() {
       continue;
     }
     // Substance-aware Layer-2 — verdict=success with substance_verdict=stub
-    // is treated as unresolved. Closes the cal #20 §1 friction where Layer-1
-    // recorded success on 65/72-byte stubs (file present + size > 0 = ok)
-    // but the agent dispatch produced no substantive output. The retry path
-    // is unchanged: a substantive re-dispatch overwrites the stub record
+    // is treated as unresolved. Closes the gap where Layer-1 recorded
+    // success on stub-sized files (file present + size > 0 = ok) but the
+    // agent dispatch produced no substantive output. The retry path is
+    // unchanged: a substantive re-dispatch overwrites the stub record
     // (last-write-wins per agent), so stub-then-substantive-retry stays the
     // happy path. Backwards compat: records without substance_verdict
-    // (pre-substance-aware) default-resolve as substantive.
+    // default-resolve as substantive.
     if (rec.verdict === "success" && rec.substance_verdict === "stub") {
       unresolved.push({
         agent,
@@ -4748,7 +4729,7 @@ function assertNoRawDispatchesThisSession() {
   } catch { /* keep defaults on any failure */ }
 
   // Read workflow anchor — only count dispatches from the CURRENT workflow.
-  // S1-v2: `created_at` (rotates on init *) not `first_created_at` (immutable
+  // Use `created_at` (rotates on init *) not `first_created_at` (immutable
   // session anchor). Workflow-scope matches the gate's intent: each new
   // workflow gets a clean window, so a workflow's pass/fail reflects ONLY
   // its own dispatch hygiene, not accumulated history across the session.
@@ -4847,10 +4828,9 @@ function aggregateKnowledgeCandidates() {
         f === "review.md" ||
         // Programmers writing #KNOWLEDGE-CANDIDATE tags in impl-summary*.md
         // would otherwise be stranded — the aggregator only scanned review
-        // outputs, leaving valid candidates invisible to the gate (field
-        // signal: greenfield 2026-05-29 calibration #8, quick_implement
-        // workflow producing 3 tags in impl-summary.md with zero reaching
-        // scratchpad.md).
+        // outputs, leaving valid candidates invisible to the gate. Observed
+        // failure mode: quick_implement workflow produced tags in
+        // impl-summary.md with zero reaching scratchpad.md.
         /^impl-summary(?:-[A-Za-z0-9_.-]+)?\.md$/.test(f)
       );
   } catch {
@@ -4987,16 +4967,16 @@ function listLaneOutputs() {
   return { lanes };
 }
 
-// Round 8 W1 — formal lane registration shortcut. Greenfield calibration
-// thread Q3: orchestrators with a hand-rolled partition (knew the 7 lanes
-// up front, didn't need lane-suggestions to compute them) were forced into
-// raw-dispatch territory because no CLI accepts the partition directly. 50
-// raw_dispatch hygiene warnings fired in one PR session. This CLI is the
-// formal alternative — it writes the canonical lane entry into
-// workflow.yaml::lanes[] and persists the per-lane files list in a
-// sidecar at .devt/state/lane-files/<id>.json. The sidecar split avoids
-// extending parseSimpleYaml + serializeSimpleYaml's lane round-trip
-// (which today handles primitive values only; arrays would corrupt).
+// Formal lane registration shortcut. Orchestrators with a hand-rolled
+// partition (knew the lanes up front, didn't need lane-suggestions to
+// compute them) were forced into raw-dispatch territory because no CLI
+// accepts the partition directly — observed bursts of raw_dispatch hygiene
+// warnings fired in single sessions. This CLI is the formal alternative —
+// it writes the canonical lane entry into workflow.yaml::lanes[] and
+// persists the per-lane files list in a sidecar at
+// .devt/state/lane-files/<id>.json. The sidecar split avoids extending
+// parseSimpleYaml + serializeSimpleYaml's lane round-trip (which today
+// handles primitive values only; arrays would corrupt).
 //
 // Returns {ok, lane: {...full metadata}} or {ok: false, reason}.
 function registerLane({ id, scope, files, allowOverwrite }) {
@@ -5238,11 +5218,11 @@ function assertPreflightFresh() {
   let createdAt;
   try {
     const content = fs.readFileSync(workflowPath, "utf8");
-    // HF-1: prefer immutable first_created_at over mutable created_at.
-    // Greenfield calibration #7: state update workflow_type=... rotates
-    // created_at, retroactively invalidating preflight-brief.json written
-    // BEFORE the transition. first_created_at anchors session start and
-    // never rotates. Backward-compat fallback for legacy workflow.yaml.
+    // Prefer immutable first_created_at over mutable created_at.
+    // `state update workflow_type=...` rotates created_at, retroactively
+    // invalidating preflight-brief.json written BEFORE the transition.
+    // first_created_at anchors session start and never rotates. Backward-
+    // compat fallback for legacy workflow.yaml.
     const mFirst = content.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
     const mLegacy = content.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
     const m = mFirst || mLegacy;
@@ -5340,13 +5320,12 @@ function assertClaudeMemHarvest() {
     };
   }
   if (haveSkipped) {
-    // Structured payload requirement. Greenfield calibration #2 finding 6b#3:
-    // a one-line skip reason satisfied the gate but produced no value. The
-    // valid-reason enum forces the orchestrator to commit to a concrete
-    // reason category that downstream observability can aggregate over.
-    // task_unrelated_to_history additionally requires a details= line so
-    // the deliberate override leaves an audit trail rather than a bare
-    // assertion.
+    // Structured payload requirement. Without this, a one-line skip reason
+    // satisfied the gate but produced no value. The valid-reason enum forces
+    // the orchestrator to commit to a concrete reason category that
+    // downstream observability can aggregate over. task_unrelated_to_history
+    // additionally requires a details= line so the deliberate override
+    // leaves an audit trail rather than a bare assertion.
     const skipContent = fs.readFileSync(skippedPath, "utf8");
     const reasonMatch = skipContent.match(/^reason=([a-z_]+)$/m);
     const validReasons = new Set([
@@ -5505,9 +5484,9 @@ function run(subcommand, args) {
       const opts = { dryRun: args.includes("--dry-run") };
       return audit.evictWorkflowArtifacts(opts);
     }
-    // v0.73 WI-3: every assert-* gate firing logs to gate-trace.jsonl via
-    // traceGate wrapper for unified observability (cal #19+). assertArtifactPresent
-    // already persists to claim-check-failures.jsonl; gate-trace.jsonl adds the
+    // Every assert-* gate firing logs to gate-trace.jsonl via traceGate
+    // wrapper for unified observability. assertArtifactPresent already
+    // persists to claim-check-failures.jsonl; gate-trace.jsonl adds the
     // unified firing-rate + verdict timeline across all 14 gates.
     case "assert-graphify-decision":
       return traceGate("assert-graphify-decision", () => assertGraphifyDecision());

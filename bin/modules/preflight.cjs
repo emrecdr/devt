@@ -140,10 +140,10 @@ const SYMBOL_DENYLIST = new Set([
   "add", "fix", "remove", "delete", "update", "change", "rename", "refactor",
   "implement", "build", "create", "make", "extend", "improve", "optimize",
   "support", "introduce", "migrate", "wire", "integrate", "polish",
-  // Field signal (greenfield 2026-05-28 calibration #2): "Enrich relative-clients
-  // picker endpoint…" returned topic.symbols=["Enrich"] — the lone noise symbol
-  // also blocked the snake_case FTS fallback (gated on symbols.length === 0).
-  // Extend with task-vocabulary verbs that appear PascalCase at sentence start.
+  // Tasks like "Enrich <Component> picker endpoint…" return topic.symbols=
+  // ["Enrich"] — the lone noise symbol also blocks the snake_case FTS
+  // fallback (gated on symbols.length === 0). Extend with task-vocabulary
+  // verbs that appear PascalCase at sentence start.
   "enrich", "harvest", "normalize", "validate", "deprecate", "sunset",
   "ratify", "expose", "enable", "disable", "surface", "propagate",
   "expand", "shrink", "split", "merge", "join", "annotate", "tag", "track",
@@ -169,20 +169,20 @@ const SYMBOL_DENYLIST = new Set([
   "intercom", "segment", "datadog", "sentry", "pagerduty", "cloudflare",
   // Domain-prose tokens that slip through when REVIEW_SCOPE prose contains
   // PascalCase labels that LOOK like symbols but are descriptive English
-  // (greenfield 2026-05-27 PR #372: "Deep notification service review" → the
-  // regex extracted Deep, Notification, Service as symbols; none are graph
-  // nodes; they polluted the 32-symbol blast_radius args).
+  // Observed: a prose REVIEW_SCOPE like "Deep notification service review"
+  // had the PascalCase regex extract Deep, Notification, Service as symbols;
+  // none are graph nodes; they polluted the blast_radius args.
   "deep", "shallow", "primary", "secondary", "tertiary",
   "service", "services", "notification", "notifications", "scope", "scopes",
   "audit", "audits", "summary", "summaries",
   "lane", "lanes", "tier", "tiers", "phase", "phases",
   // devt-internal terminology that appears in task descriptions about devt itself
   "graphify", "claudemem", "devt", "preflight",
-  // Field signal (greenfield calibration #16 + #17): task-text noise tokens
-  // that win the central-symbol picker by string-overlap with the task
-  // description. "Batch B" scored 1.0 against task "Batch B refactor…",
-  // beating real graph symbols. Single-token English words that LOOK like
-  // PascalCase identifiers slip past the PascalCase regex.
+  // Task-text noise tokens that win the central-symbol picker by string-
+  // overlap with the task description. e.g. "Batch B" scored 1.0 against
+  // task "Batch B refactor…", beating real graph symbols. Single-token
+  // English words that LOOK like PascalCase identifiers slip past the
+  // PascalCase regex.
   "batch", "wave", "section", "full", "skip", "semver",
 ]);
 
@@ -306,14 +306,15 @@ function extractDiffSymbols(opts = {}) {
  * rank ABOVE PascalCase-on-text matches in the returned `symbols` array
  * because changed-file declarations are higher-signal than NLP-on-task-text.
  */
-// G3 — extract a referenced plan file's contributing sections so its symbols
+// Extract a referenced plan file's contributing sections so its symbols
 // reach the extractor without depending on the user redoing the work in the
-// task text. Greenfield calibration #8: a task "Implement X per
-// /Users/emrec/.claude/plans/foo.md" gave the extractor zero scope_hint signal
-// from the plan even though the plan contained an explicit `## Files to
-// change` table. Scope intentionally narrow: only `~/.claude/plans/*.md` (the
-// established convention); project-local `docs/plans/*.md` deferred to a
-// follow-up if anyone asks. Returns absolute paths so callers can read them.
+// task text. Without this, a task like "Implement X per
+// /Users/emrec/.claude/plans/foo.md" gives the extractor zero scope_hint
+// signal from the plan even when the plan contains an explicit `## Files to
+// change` table. Scope intentionally narrow: only `~/.claude/plans/*.md`
+// (the established convention); project-local `docs/plans/*.md` deferred to
+// a follow-up if anyone asks. Returns absolute paths so callers can read
+// them.
 function extractPlanReferences(taskText) {
   if (!taskText || typeof taskText !== "string") return [];
   const homeDir = require("os").homedir();
@@ -390,11 +391,10 @@ function extractTopic(taskText, opts = {}) {
     return { domains: [], symbols: [], keywords: [], raw: "", resolution_path: "none" };
   }
   const text = taskText.trim();
-  // Strip absolute path + URL tokens before tokenization. Field signal
-  // (greenfield 2026-05-29 calibration #8): a task like "...per
-  // /Users/emrec/.claude/plans/foo.md" leaked `Users`, `emrec`, `claude`,
-  // `plans` into keywords AND the PascalCase regex picked `Users` as a
-  // symbol, crowding out the real `billing_country` signal. The raw field
+  // Strip absolute path + URL tokens before tokenization. Without this, a
+  // task like "...per /Users/emrec/.claude/plans/foo.md" leaks `Users`,
+  // `emrec`, `claude`, `plans` into keywords AND the PascalCase regex picks
+  // `Users` as a symbol, crowding out real domain signal. The raw field
   // below preserves the original text for downstream prose; only the
   // tokenization view is sanitized.
   const tokenizableText = text
@@ -414,11 +414,11 @@ function extractTopic(taskText, opts = {}) {
   // may truncate to top-N — the higher-signal source wins.
   const seen = new Set();
   const symbols = [];
-  // G4-v2 (greenfield calibration #11): per-symbol provenance ledger.
-  // Reviewers triaging god-node noise need to know WHY a symbol landed in
-  // the topic — was it diff-anchored, plan-referenced, text-fallback, or
-  // FTS-rescued? `symbolProvenance` maps symbol → source channel; surfaces
-  // in preflight-brief.json::topic.symbol_provenance for downstream
+  // Per-symbol provenance ledger. Reviewers triaging god-node noise need to
+  // know WHY a symbol landed in the topic — was it diff-anchored, plan-
+  // referenced, text-fallback, or FTS-rescued? `symbolProvenance` maps
+  // symbol → source channel; surfaces in
+  // preflight-brief.json::topic.symbol_provenance for downstream
   // graphify-impact-plan.json consumers.
   const symbolProvenance = {};
   // resolution_path tracks the DEEPEST fallback leg that contributed at least
@@ -465,19 +465,20 @@ function extractTopic(taskText, opts = {}) {
     words.filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !domainSet.has(w) && !symbolLower.has(w))
   )).sort();
 
-  // Service-directory fallback. Field case (greenfield GF-543): "tablet_communication
-  // permission" returned 0 symbols because tablet_communication is a snake_case
-  // directory name, not a PascalCase identifier. Without this fallback the
-  // scan_prep cascade fails (symbols=0 → blast=skip → impact=skip → subagent blind).
+  // Service-directory fallback. Tasks like "tablet_communication permission"
+  // return 0 symbols because tablet_communication is a snake_case directory
+  // name, not a PascalCase identifier. Without this fallback the scan_prep
+  // cascade fails (symbols=0 → blast=skip → impact=skip → subagent blind).
   // When `opts.graphifyQuery` is injected, resolve snake_case + kebab_case
   // keywords via FTS against the live graph. The gate fires when either
   //   (a) no symbols at all survived diff+text, OR
   //   (b) every surviving symbol is ≤6 chars (likely PascalCase noise like
   //       "Enrich" that escapes the denylist but carries no useful signal).
-  // Greenfield calibration #2 (GFBUGS-180): a single noise symbol that
-  // survived denylist filtering blocked the rescue path entirely under the
-  // legacy `symbols.length === 0` gate. Cap at 3 candidate queries — beyond
-  // that the FTS pass starts polluting scope_hint with weak matches.
+  // The "all short symbols" branch matters: a single noise symbol that
+  // survives denylist filtering would otherwise block the rescue path
+  // entirely under a `symbols.length === 0` gate. Cap at 3 candidate
+  // queries — beyond that the FTS pass starts polluting scope_hint with
+  // weak matches.
   const SNAKE = /^[a-z][a-z0-9]+(_[a-z0-9]+)+$/;
   const KEBAB = /^[a-z][a-z0-9]+(-[a-z0-9]+)+$/;
   const graphifyQuery = typeof opts.graphifyQuery === "function" ? opts.graphifyQuery : null;
@@ -504,13 +505,13 @@ function extractTopic(taskText, opts = {}) {
     }
   }
 
-  // Terminal fallback. Field case (greenfield calibration #2): tasks dominated
-  // by domain nouns ("license", "subscription", "picker") carry no PascalCase,
-  // no snake_case, no kebab_case keywords — the keyword FTS legs above all
-  // miss. Run one FTS pass on the full task text so the graph itself decides
-  // which nouns resolve. Cap merge at 5 — beyond that we're polluting
-  // scope_hint with weak matches that the keyword legs would have caught if
-  // they were strong signal.
+  // Terminal fallback. Tasks dominated by domain nouns ("license",
+  // "subscription", "picker") carry no PascalCase, no snake_case, no
+  // kebab_case keywords — the keyword FTS legs above all miss. Run one FTS
+  // pass on the full task text so the graph itself decides which nouns
+  // resolve. Cap merge at 5 — beyond that we're polluting scope_hint with
+  // weak matches that the keyword legs would have caught if they were
+  // strong signal.
   if (symbols.length === 0 && graphifyQuery) {
     let r;
     try { r = graphifyQuery(text, { limit: 5 }); } catch { r = null; }
@@ -940,12 +941,12 @@ function resolveTripleBudget(taskText, cfg, opts) {
 }
 
 // Deterministic 0.0–1.0 score for how much we trust the extracted symbols.
-// Greenfield calibration #8 surfaced the gap: the structural side of preflight
-// (lag, decision artifact, threshold) was fully observable, but the semantic
-// side (do symbols actually match the task's subject?) was invisible. Without
-// a numeric handle, orchestrators couldn't degrade scope_hint when extraction
-// produced noise; with one, downstream gates can warn and v0.69 R3/R4 can
-// fold it into adaptive-threshold decisions.
+// The structural side of preflight (lag, decision artifact, threshold) is
+// fully observable, but the semantic side (do symbols actually match the
+// task's subject?) is invisible without a numeric handle. With one,
+// orchestrators can degrade scope_hint when extraction produces noise and
+// downstream gates can warn or fold the score into adaptive-threshold
+// decisions.
 //
 // Scoring tiers:
 //   1.0  diff symbols present — grounded in actual code touched
@@ -1039,16 +1040,16 @@ function generate(taskText, opts) {
     graphifyQuery: (text, qOpts) => graphify.queryGraph(text, qOpts),
   });
 
-  // v0.73 WI-4 (greenfield cal #18 assessment #2): extend v0.71 M1 graph-
-  // existence filter from just-the-central-symbol to ALL topic.symbols.
-  // Without this, downstream blast_radius wastes cycles on phantom symbols
-  // and the dispatch envelope shows misleading "topic.symbols=[A,B,C]" when
-  // only one of them actually exists in graphify. When graphify is ready,
-  // keep only symbols whose getNode returns a real graph node; surface
-  // dropped non-existent symbols as topic.symbols_dropped_no_graph_node so
-  // downstream agents (and cal #19 observability) can see what was filtered.
-  // Falls through to legacy (no filtering) when graphify unavailable —
-  // identical degradation pattern to M1 in pickCentralSymbol.
+  // Extend the graph-existence filter from just-the-central-symbol to ALL
+  // topic.symbols. Without this, downstream blast_radius wastes cycles on
+  // phantom symbols and the dispatch envelope shows misleading
+  // "topic.symbols=[A,B,C]" when only one of them actually exists in
+  // graphify. When graphify is ready, keep only symbols whose getNode
+  // returns a real graph node; surface dropped non-existent symbols as
+  // topic.symbols_dropped_no_graph_node so downstream agents and
+  // observability can see what was filtered. Falls through to legacy (no
+  // filtering) when graphify unavailable — identical degradation pattern to
+  // the central-symbol filter in pickCentralSymbol.
   let symbolsDroppedNoGraphNode = [];
   try {
     const graphStatus = graphify.status();
@@ -1117,9 +1118,9 @@ function generate(taskText, opts) {
   // B2 — when the topic central symbol is itself a god-node, blast.direct_dependents
   // is the god-node's general neighborhood (often 200+ entries unrelated to the task).
   // Suppressing direct_dependents avoids poisoning scope_hint with structurally
-  // adjacent but task-irrelevant paths. Field case (greenfield 2026-05-26):
-  // ClientService god-node match produced scope_hint filled with
-  // OrganizationCreatedEvent etc. that had zero overlap with the actual task scope.
+  // adjacent but task-irrelevant paths. Observed: a god-node central-symbol
+  // match produces a scope_hint filled with unrelated downstream events that
+  // have zero overlap with the actual task scope.
   const directDeps = blast.god_node_match
     ? []
     : (blast.direct_dependents || []).slice(0, MAX_DIRECT_DEPS);
@@ -1178,11 +1179,11 @@ function generate(taskText, opts) {
   let topGods = [];
   try { topGods = (graphify.godNodes(3) || []).slice(0, 3); } catch { /* empty */ }
 
-  // Option A (greenfield calibration #11): hyperedge intersection lookup.
-  // For every hyperedge whose members include any of topic.symbols (or
-  // diff-file basenames), record the match + which members are in/out of
-  // scope. Surfaces in sidecar so /devt:ship completeness gate can warn
-  // when a PR touches some-but-not-all members of a semantic grouping.
+  // Hyperedge intersection lookup. For every hyperedge whose members include
+  // any of topic.symbols (or diff-file basenames), record the match + which
+  // members are in/out of scope. Surfaces in sidecar so /devt:ship
+  // completeness gate can warn when a PR touches some-but-not-all members
+  // of a semantic grouping.
   let hyperedgesMatched = [];
   try {
     const hyperResult = graphify.getHyperedgesContaining(topic.symbols, { limit: 10 });
@@ -1190,11 +1191,11 @@ function generate(taskText, opts) {
       hyperedgesMatched = hyperResult.results;
     }
   } catch { /* hyperedge lookup is best-effort */ }
-  // DEF-052 (greenfield calibration #16): when hyperedges_matched is empty AND
-  // the locally-installed graphify skill drifts from the binary version, surface
-  // the version mismatch as a reason in the sidecar. Workflows that consume
-  // hyperedges_matched can flag "no hyperedges due to skill 0.7.10 vs binary 0.8.24
-  // drift" instead of silently treating empty as "no semantic groupings found".
+  // When hyperedges_matched is empty AND the locally-installed graphify
+  // skill drifts from the binary version, surface the version mismatch as a
+  // reason in the sidecar. Workflows that consume hyperedges_matched can
+  // flag "no hyperedges due to skill X.Y.Z vs binary A.B.C drift" instead
+  // of silently treating empty as "no semantic groupings found".
   let hyperedgesSuppressedReason = null;
   if (!hyperedgesMatched || hyperedgesMatched.length === 0) {
     try {
@@ -1205,12 +1206,12 @@ function generate(taskText, opts) {
     } catch { /* drift detection is best-effort */ }
   }
 
-  // WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
-  // For each topic.symbol, check whether MORE THAN ONE node in the graph shares
-  // its label. When count > 1, surface the collision in blast.collisions[]
-  // so downstream agents see ALL distinct definitions rather than the single
-  // arbitrarily-resolved one (greenfield's update_license_rights × 2 case).
-  // Empty array when no collisions OR graphify unavailable — fail-open.
+  // Label-collision detection. For each topic.symbol, check whether MORE
+  // THAN ONE node in the graph shares its label. When count > 1, surface
+  // the collision in blast.collisions[] so downstream agents see ALL
+  // distinct definitions rather than the single arbitrarily-resolved one
+  // (e.g. two same-named functions in different modules). Empty array when
+  // no collisions OR graphify unavailable — fail-open.
   const symbolCollisions = [];
   try {
     if (Array.isArray(topic.symbols)) {
@@ -1227,17 +1228,16 @@ function generate(taskText, opts) {
     }
   } catch { /* collision detection is best-effort */ }
 
-  // WI-4 / Q2 (greenfield cal #17 §F2): caller_count_via_grep cross-check.
-  // For each top topic.symbol (cap at 5 to bound cost), run git grep for the
-  // literal seed pattern + "(" — the canonical callsite shape. Compare with
-  // graphify's direct_dependents_count: when graphify's count is ≥ Nx the
-  // grep count (default 3x), emit a magnification advisory in the brief.
-  // Field evidence: greenfield's update_license_rights reported 33 modules
-  // via BFS-in depth 2 (interface transitive reach), grep showed 1 literal
-  // caller — 33x magnification. The advisory lets downstream agents calibrate.
-  // Strong N4 alignment: delegates to git grep + graphify rather than
-  // reimplementing caller-counting; pure coordination wrapper around two
-  // existing tools.
+  // caller_count_via_grep cross-check. For each top topic.symbol (cap at 5
+  // to bound cost), run git grep for the literal seed pattern + "(" — the
+  // canonical callsite shape. Compare with graphify's
+  // direct_dependents_count: when graphify's count is ≥ Nx the grep count
+  // (default 3x), emit a magnification advisory in the brief. Observed
+  // pattern: interface-defined methods report large transitive-reach counts
+  // via BFS-in depth 2 while grep shows few literal callers — the advisory
+  // lets downstream agents calibrate. Delegates to git grep + graphify
+  // rather than reimplementing caller-counting; pure coordination wrapper
+  // around two existing tools.
   let callerCountGrep = null;
   let magnificationAdvisory = null;
   try {
@@ -1291,9 +1291,9 @@ function generate(taskText, opts) {
   const topicWithConfidence = {
     ...topic,
     extraction_confidence: extractionConfidence,
-    // v0.73 WI-4: surface symbols that were extracted but had no matching
-    // graphify node (when graphify was ready). Empty array when graphify
-    // disabled OR all extracted symbols were graph-anchored.
+    // Surface symbols that were extracted but had no matching graphify node
+    // (when graphify was ready). Empty array when graphify disabled OR all
+    // extracted symbols were graph-anchored.
     symbols_dropped_no_graph_node: symbolsDroppedNoGraphNode,
   };
   atomicWriteJsonSync(sidecarDest, {
@@ -1308,35 +1308,34 @@ function generate(taskText, opts) {
       effect_size: blast.effect_size,
       source: blast.source,
       direct_dependents_count: (blast.direct_dependents || []).length,
-      // HF-3 (greenfield calibration #7): god_node_match + ambiguous_bindings
-      // were emitted in the function's returned envelope but stripped on
-      // persist. Downstream consumers — workflows/code-review.md::substep_3's
-      // jq extraction for <god_node_warnings> + future ambiguous_bindings
-      // surfacing — read .blast.god_node_match from the persisted JSON and
-      // got null, then fell back to false. Code-reviewer's severity-elevation
-      // path keys on the boolean, so god-nodes silently under-elevated in
-      // every dispatch. Persist both fields explicitly so the cached state
+      // god_node_match + ambiguous_bindings used to be emitted in the
+      // function's returned envelope but stripped on persist. Downstream
+      // consumers — workflows/code-review.md::substep_3's jq extraction for
+      // <god_node_warnings> + ambiguous_bindings surfacing — read
+      // .blast.god_node_match from the persisted JSON and got null, then
+      // fell back to false. Code-reviewer's severity-elevation path keys on
+      // the boolean, so god-nodes silently under-elevated in every
+      // dispatch. Persist both fields explicitly so the cached state
       // matches the function's in-memory return.
       god_node_match: !!blast.god_node_match,
       ambiguous_bindings: blast.ambiguous_bindings || 0,
-      // C7-3+C7-6 (greenfield calibration #7): the ambiguous_bindings COUNT
-      // was visible but the colliding symbols + their source_files were not.
-      // Greenfield's session had two ExternalCallService modules (external_calls
-      // Nettie vs external_calling Vicasa legacy); reviewers had to manually
-      // cross-check every finding against both modules. Persist the full
-      // details list so workflows can surface them in <god_node_warnings> +
-      // graph-impact.md without re-running blast_radius.
+      // The ambiguous_bindings COUNT used to be visible but the colliding
+      // symbols + their source_files were not. Observed: a single label
+      // resolved to two distinct modules in different packages, forcing
+      // reviewers to manually cross-check every finding against both
+      // definitions. Persist the full details list so workflows can surface
+      // them in <god_node_warnings> + graph-impact.md without re-running
+      // blast_radius.
       ambiguous_details: Array.isArray(blast.ambiguous_details) ? blast.ambiguous_details : [],
-      // WI-6b / M4 (greenfield calibration #17 §F4): label-collision detection.
-      // For each topic.symbol whose label has > 1 matching node, surface every
-      // distinct binding so downstream agents see all definitions, not just
-      // the one arbitrarily resolved by _resolveOne's Map-iteration order.
-      // Empty array when no collisions OR graphify unavailable.
+      // Label-collision detection. For each topic.symbol whose label has > 1
+      // matching node, surface every distinct binding so downstream agents
+      // see all definitions, not just the one arbitrarily resolved by
+      // _resolveOne's Map-iteration order. Empty array when no collisions
+      // OR graphify unavailable.
       collisions: symbolCollisions,
-      // WI-4 / Q2 (greenfield cal #17 §F2): grep-derived caller count
-      // cross-check for the top topic.symbols. When BFS-derived count is
-      // >= threshold × grep count, magnification_advisory flags potential
-      // interface-edge amplification (e.g., 33 vs 1 case).
+      // Grep-derived caller count cross-check for the top topic.symbols.
+      // When BFS-derived count is >= threshold × grep count,
+      // magnification_advisory flags potential interface-edge amplification.
       caller_count_grep: callerCountGrep,
       magnification_advisory: magnificationAdvisory,
     },
@@ -1405,33 +1404,33 @@ function readBriefMeta() {
   };
 }
 
-// B1 — pick the central symbol from a topic.symbols list that best matches the
-// task description text. Field rationale (greenfield 2026-05-26): the prior
-// bash logic `jq -r '.[0]'` picked the alphabetically-first symbol regardless
-// of task relevance (chose `AuditMapping` for a task about clients/relatives).
-// Strategy: tokenize each symbol (CamelCase + snake_case + _underscores) into
+// Pick the central symbol from a topic.symbols list that best matches the
+// task description text. Without this, a naive `jq -r '.[0]'` picks the
+// alphabetically-first symbol regardless of task relevance. Strategy:
+// tokenize each symbol (CamelCase + snake_case + _underscores) into
 // lowercase 3-char-plus tokens, score by what fraction appear in task text.
-// Highest score wins; ties broken by original order; falls back to first symbol
-// when no symbol scores above zero.
+// Highest score wins; ties broken by original order; falls back to first
+// symbol when no symbol scores above zero.
 function pickCentralSymbol(symbols, taskText) {
   if (!Array.isArray(symbols) || symbols.length === 0) return null;
 
-  // M1 (greenfield calibration #16 + #17): filter candidates by graph existence
-  // BEFORE token-overlap scoring. Without this filter the picker can return a
-  // task-text noise word ("Batch") that scores 1.0 against the task description
-  // even though it has no graph node — downstream blast_radius then runs against
-  // a fictional symbol and returns degraded results. When graphify is unavailable
-  // (not setup, disabled, or graph degraded), fall through to legacy scoring on
-  // raw symbols so projects without graphify behave as before. Gate via the
-  // exported graphify.status() so we distinguish "graph not loaded" from
-  // "graph loaded but symbol absent" — both look like source:"grep" through
-  // getNode but only the former should trigger legacy fallback.
+  // Filter candidates by graph existence BEFORE token-overlap scoring.
+  // Without this filter the picker can return a task-text noise word
+  // ("Batch") that scores 1.0 against the task description even though it
+  // has no graph node — downstream blast_radius then runs against a
+  // fictional symbol and returns degraded results. When graphify is
+  // unavailable (not setup, disabled, or graph degraded), fall through to
+  // legacy scoring on raw symbols so projects without graphify behave as
+  // before. Gate via the exported graphify.status() so we distinguish
+  // "graph not loaded" from "graph loaded but symbol absent" — both look
+  // like source:"grep" through getNode but only the former should trigger
+  // legacy fallback.
   //
-  // M2 (greenfield 2026-06-05 calibration): god-node de-ranking. Without this
-  // filter the picker promotes high-degree framework keywords like FastAPI's
-  // `Depends` (888 edges) over task-specific function names — downstream
-  // blast_radius then explodes across the whole codebase. Read god_nodes from
-  // GRAPH_REPORT.md and exclude symbols whose edge_count exceeds the threshold.
+  // God-node de-ranking. Without this filter the picker promotes high-
+  // degree framework keywords (e.g. FastAPI's `Depends`) over task-specific
+  // function names — downstream blast_radius then explodes across the whole
+  // codebase. Read god_nodes from GRAPH_REPORT.md and exclude symbols whose
+  // edge_count exceeds the threshold.
   let graphValidSymbols = [];
   let graphAvailable = false;
   let godNodeSymbols = new Set();
@@ -1468,14 +1467,14 @@ function pickCentralSymbol(symbols, taskText) {
     : symbols;
   if (candidates === null) return null;
 
-  // M3 (greenfield 2026-06-07 calibration): diff-recency weighting. M2
-  // de-ranked god nodes but the surviving candidates were token-overlap-noisy
-  // — DebounceService got picked over _check_calendar_feature_gate for a
-  // license-gate PR because token overlap matched debounce.py test files in
-  // the topic.symbols list. Solution: count how many times each candidate
-  // appears in the working-tree git diff and add a weight to its score.
-  // Symbols that ARE the diff's primary subject (mentioned many times) win
-  // even when their tokens don't match the task description vocabulary.
+  // Diff-recency weighting. God-node de-ranking leaves surviving candidates
+  // that are still token-overlap-noisy — e.g. a generic service name can be
+  // picked over the task's actual subject when token overlap matches
+  // unrelated test files in the topic.symbols list. Solution: count how
+  // many times each candidate appears in the working-tree git diff and add
+  // a weight to its score. Symbols that ARE the diff's primary subject
+  // (mentioned many times) win even when their tokens don't match the task
+  // description vocabulary.
   const diffCounts = _diffSymbolCounts(candidates);
 
   const task = (taskText || "").toLowerCase();

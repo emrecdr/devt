@@ -127,7 +127,7 @@ Generic taxonomy of architecture scanner findings. Each category describes what 
 
 **Typical severity**: Low to Critical depending on sub-category.
 
-**Investigation**: Read `.devt/rules/canonical-entities.yaml` to understand which concepts are registered and what their canonical entities are. For HIGH/CRITICAL findings on DTOs and events: many are *intentional* string-typed transport fields (ISO codes from/to API) — those belong in the baseline. For domain models: bare `str` country fields ARE bugs (this was the root cause of PR #376). The fix is to add an FK column and an ISO ↔ FK resolver in the service.
+**Investigation**: Read `.devt/rules/canonical-entities.yaml` to understand which concepts are registered and what their canonical entities are. For HIGH/CRITICAL findings on DTOs and events: many are *intentional* string-typed transport fields (ISO codes from/to API) — those belong in the baseline. For domain models: bare `str` country fields ARE bugs — a recurring root-cause pattern. The fix is to add an FK column and an ISO ↔ FK resolver in the service.
 
 For `CANONICAL-WRONG-OWNER`: this catches actual misrouted relationships (e.g. settings attached to the wrong owner). Always a true positive worth investigating.
 

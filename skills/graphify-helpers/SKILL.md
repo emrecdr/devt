@@ -226,7 +226,7 @@ For tools without a devt wrapper, call them via the registered `graphify` MCP se
    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state graphify-fallback-trace empty --skill=codebase-scan --operation=symbol-lookup
    ```
 
-   Trigger values: `empty | error | not_setup | below_threshold | none`. The trace records workflow_id/workflow_type/phase automatically. Cal #21+ analytics: high empty-result rate signals under-resolved queries; high not_setup rate signals graphify install adoption is low.
+   Trigger values: `empty | error | not_setup | below_threshold | none`. The trace records workflow_id/workflow_type/phase automatically. Analytics: high empty-result rate signals under-resolved queries; high not_setup rate signals graphify install adoption is low.
 3. **Setup wizard pitch is "strongly recommended", not required.** `/devt:setup --init` offers
    Graphify install with a clear value prop, but a "no thanks" answer produces a fully
    working install. No feature is locked behind Graphify.

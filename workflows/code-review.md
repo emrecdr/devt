@@ -124,7 +124,7 @@ When `god_node_match=true`, the agent sees a structured warning ("you're about t
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 ```
 
-**Arch-scan freshness advisory.** Check whether an arch-scan-report.md is available and how recent it is. Advisory-only by default — surfaces a `[STALE-ARCH-SCAN]` sentinel if the report is older than 24h so the reviewer can decide whether to refresh before reviewing structural changes. Closes the cal #19 §9 Surprise 3 pattern (state subcommands available but not wired into workflows):
+**Arch-scan freshness advisory.** Check whether an arch-scan-report.md is available and how recent it is. Advisory-only by default — surfaces a `[STALE-ARCH-SCAN]` sentinel if the report is older than 24h so the reviewer can decide whether to refresh before reviewing structural changes. Surfaces state subcommands that would otherwise be available but unwired into workflows:
 
 ```bash
 ARCH_FRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null || echo '{}')
@@ -151,22 +151,21 @@ TOPIC_SYMBOLS_RAW=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.jso
 TOPIC_SYMBOLS_RAW_COUNT=$(echo "$TOPIC_SYMBOLS_RAW" | jq 'length')
 # Pre-truncate to the MCP blast_radius cap (32). Preflight orders symbols by
 # relevance (governing-doc anchors first, then diff symbols, then prose), so
-# slicing the first 32 preserves that ranking. Field rationale (greenfield
-# 2026-05-27 PR #372 P2): the prior contract said "Use args VERBATIM" but
-# topic.symbols can exceed 32, making the contract mechanically unimplementable.
-# Truncating in the bash that WRITES the plan makes VERBATIM tractable.
+# slicing the first 32 preserves that ranking. Why: the prior contract said
+# "Use args VERBATIM" but topic.symbols can exceed 32, making the contract
+# mechanically unimplementable. Truncating in the bash that WRITES the plan
+# makes VERBATIM tractable.
 TOPIC_SYMBOLS=$(echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[:32]')
 TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
 if [ "$TOPIC_SYMBOLS_RAW_COUNT" -gt 32 ]; then
   echo "topic.symbols pre-truncated: ${TOPIC_SYMBOLS_RAW_COUNT} → 32 (MCP blast_radius cap)"
-  # C7-2 (greenfield calibration #7): capture the dropped symbols so the
-  # truncation isn't silent. Greenfield's NettieCalendarClientSetting was
-  # in the dropped 21 from a 53-symbol PR and the absence directly affected
-  # C-2's structural risk assessment. Sidecar is consumed by substep 7's
-  # F17 step which appends a "## Subject symbols dropped" notice to
-  # graph-impact.md (which doesn't exist yet at this point — substep 6
-  # writes it fresh). Reviewers can spot-check whether high-risk symbols
-  # were silently excluded from the impact analysis.
+  # Capture the dropped symbols so the truncation isn't silent — a high-risk
+  # symbol silently dropped from a 53-symbol set can directly affect structural
+  # risk assessment. Sidecar is consumed by substep 7's god-node check which appends
+  # a "## Subject symbols dropped" notice to graph-impact.md (which doesn't
+  # exist yet at this point — substep 6 writes it fresh). Reviewers can
+  # spot-check whether high-risk symbols were silently excluded from the
+  # impact analysis.
   echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[32:]' > .devt/state/topic-symbols-dropped.json
 else
   # Clear any stale dropped-list from a prior workflow so substep 7 doesn't
@@ -198,13 +197,13 @@ elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
 elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
   TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
 elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
-  # B-XI: prefer symbol_anchored driven from diff-file symbols over bulk_scoped
-  # text-search. Greenfield calibration #3 finding #4: for bitbucket + dense +
-  # >10 files, query_graph(text=REVIEW_SCOPE) returns keyword hits that don't
-  # reflect the call graph. blast_radius with symbols whose source_file is in
-  # the diff produces actual structural impact. Falls back to legacy bulk_scoped
-  # only when no symbols can be extracted from the diff files (graph too sparse,
-  # diff is all new files not yet indexed, etc.).
+  # Prefer symbol_anchored driven from diff-file symbols over bulk_scoped
+  # text-search. Why: for bitbucket + dense + >10 files,
+  # query_graph(text=REVIEW_SCOPE) returns keyword hits that don't reflect
+  # the call graph. blast_radius with symbols whose source_file is in the
+  # diff produces actual structural impact. Falls back to legacy bulk_scoped
+  # only when no symbols can be extracted from the diff files (graph too
+  # sparse, diff is all new files not yet indexed, etc.).
   DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
   DIFF_SYMBOLS_JSON='[]'
   if [ -n "$DIFF_FILES" ]; then
@@ -226,28 +225,28 @@ jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 ```
 
-### Substep 6: Execute the impact-plan + F16 multi-tier drill-down
+### Substep 6: Execute the impact-plan + multi-tier drill-down
 
 **EXECUTE THE PLAN.** Read `.devt/state/graphify-impact-plan.json`. This is not optional and not a "consider running it" — the next step gates on the output existing:
 
-**ARGS CONTRACT** — the `args` field in `graphify-impact-plan.json` is the single source of truth for what gets passed to the MCP tool. Use it VERBATIM. Do NOT substitute symbols, narrow the list, "pick anchors", or improvise an alternative parameter set — those changes are unauditable and were field-observed (greenfield PR-369, 2026-05-21) to degrade tier signal. If the args look wrong, fix the bash that wrote them; do not override at the call site.
+**ARGS CONTRACT** — the `args` field in `graphify-impact-plan.json` is the single source of truth for what gets passed to the MCP tool. Use it VERBATIM. Do NOT substitute symbols, narrow the list, "pick anchors", or improvise an alternative parameter set — those changes are unauditable and degrade tier signal. If the args look wrong, fix the bash that wrote them; do not override at the call site.
 
 - If `tier == "skip"`: write `.devt/state/graphify-skip-reason.txt` containing the `skip_reason` field verbatim. Do NOT call any MCP tool. The reviewer falls back to `<scope_hint>` plus raw file list and graph-impact analysis is correctly absent.
 - If `tier == "pr_scoped"`: call `mcp__graphify__get_pr_impact(args)` using the `args` object from the plan VERBATIM. **For Bitbucket projects this tier never fires** — the bash step routed past it. If the call errors (e.g. PR not found because the user-installed graphify MCP cannot reach the repo), fall back: write `graphify-skip-reason.txt` with the error and continue. Otherwise write the response verbatim to `.devt/state/graph-impact.md`.
 - If `tier == "bulk_scoped"`: call `mcp__plugin_devt_devt-graphify__query_graph(args)` using the `args` object from the plan VERBATIM. From the response's top-5 nodes (highest degree), call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: <label>, direction: "in", depth: 2})` for each. Concatenate into `graph-impact.md` with one `## <symbol>` heading per block.
 - If `tier == "symbol_anchored"`: call `mcp__plugin_devt_devt-graphify__blast_radius(args)` using the `args` object from the plan VERBATIM — the `symbols` array is computed from the diff in the bash step above; do not re-pick. Write the response verbatim to `graph-impact.md`.
 
-**F16 — Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response, ranked by `in_count` field if present (depth-1 incoming edges), else by `edge_count`, else by position in the response array. When the response has fewer than 3 dependents, drill on however many exist (skip the F16 step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Field rationale (greenfield 2026-05-26 PR #370): one blast_radius call alone left 5 lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
+**Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response, ranked by `in_count` field if present (depth-1 incoming edges), else by `edge_count`, else by position in the response array. When the response has fewer than 3 dependents, drill on however many exist (skip the drill-down step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Why: one blast_radius call alone leaves lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
 
 **Empty drill-down handling**: when `get_neighbors` returns `results: []` for a top-3 dependent (e.g., a module-level container where callers are dynamically dispatched), record the empty result as `## Drill-down: <SYM> (empty — dynamic dispatch suspected) [call: <correlation_id>]` and substitute the next-ranked dependent in the cap-3 slot. Bounded: try up to 5 ranked dependents before giving up on completing the top-3.
 
-**God-node oversize handling (NEW-5)**: when a top-3 dependent matches a `god_node_match=true` signal from the parent `blast_radius` response — typically a class with hundreds of incoming edges — the upstream MCP `get_neighbors(symbol, direction="in", depth=2)` response can overflow the MCP transport's response-size cap, returning zero usable data. Greenfield calibration #5 hit this on AuditMapping (84KB overflow → empty response). When this happens, fall back to the devt CLI wrapper which supports `--max-bytes` truncation: `node bin/devt-tools.cjs graphify neighbors <symbol> --direction=in --depth=2 --max-bytes=60000`. The CLI sorts results depth-ascending + label-alphabetical and truncates deterministically, returning `truncated: true` + `total_neighbors` so the heading can record the partial nature: `## Drill-down: <SYM> (truncated — depth-2 incoming exceeded 60KB; first <N> of <total>) [via CLI fallback]`.
+**God-node oversize handling**: when a top-3 dependent matches a `god_node_match=true` signal from the parent `blast_radius` response — typically a class with hundreds of incoming edges — the upstream MCP `get_neighbors(symbol, direction="in", depth=2)` response can overflow the MCP transport's response-size cap, returning zero usable data (observed: 84KB overflow → empty response on high-degree symbols). When this happens, fall back to the devt CLI wrapper which supports `--max-bytes` truncation: `node bin/devt-tools.cjs graphify neighbors <symbol> --direction=in --depth=2 --max-bytes=60000`. The CLI sorts results depth-ascending + label-alphabetical and truncates deterministically, returning `truncated: true` + `total_neighbors` so the heading can record the partial nature: `## Drill-down: <SYM> (truncated — depth-2 incoming exceeded 60KB; first <N> of <total>) [via CLI fallback]`.
 
-**Substance threshold on drill-down sections.** `assert-graphify-decision` doesn't check "was the MCP tool called?" — it checks "is each drill-down section dense enough to be useful?" The gate uses a substance-byte-threshold heuristic per `## Drill-down:` block (currently 200 bytes minimum after stripping headings). Field signal (greenfield cal #19 Surprise 1): a 57-byte GDPR drill-down was caught and failed the gate even though the MCP call succeeded — the section was thin because the topic extraction returned a generic concept (`GDPR`) that didn't map to a single useful subgraph. **If the gate fails with reason `drill-down section below substance threshold`**: re-derive the drill-down symbol from the impact-plan's `args.symbols` (NOT from topic keywords) so each section anchors on a real graph node with real dependents to enumerate. The gate is by design about output usefulness, not call presence.
+**Substance threshold on drill-down sections.** `assert-graphify-decision` doesn't check "was the MCP tool called?" — it checks "is each drill-down section dense enough to be useful?" The gate uses a substance-byte-threshold heuristic per `## Drill-down:` block (currently 200 bytes minimum after stripping headings). A thin drill-down (e.g., 57 bytes) can fail the gate even when the MCP call succeeded — the section is thin because the topic extraction returned a generic concept that didn't map to a single useful subgraph. **If the gate fails with reason `drill-down section below substance threshold`**: re-derive the drill-down symbol from the impact-plan's `args.symbols` (NOT from topic keywords) so each section anchors on a real graph node with real dependents to enumerate. The gate is by design about output usefulness, not call presence.
 
-### Substep 7: F17 deterministic god-node check
+### Substep 7: Deterministic god-node check
 
-**F17 — God-node auto-check on diff files.** After the tier executes (or even when it skipped), run a deterministic CPU-local check that catches god-nodes the symbol-anchored anchor list missed. The CLI maps each diff file back to graph nodes via `source_file` metadata and reports the max-degree symbol per file:
+**God-node auto-check on diff files.** After the tier executes (or even when it skipped), run a deterministic CPU-local check that catches god-nodes the symbol-anchored anchor list missed. The CLI maps each diff file back to graph nodes via `source_file` metadata and reports the max-degree symbol per file:
 
 ```bash
 DIFF_FILES=$(git diff --name-only ${PRIMARY_BRANCH:-main}...HEAD 2>/dev/null | tr '\n' ' ')
@@ -272,19 +271,18 @@ if [ -n "$DIFF_FILES" ]; then
       echo "$SYMBOL_GODNODES" | jq -r '.[] | "- `\(.symbol)` (\(.source_file)) has \(.edge_count) edges; any non-additive change cascades through every caller."'
     } >> .devt/state/graph-impact.md
   fi
-  # C7-2 (greenfield calibration #7): emit dropped-symbol truncation notice
-  # if substep 5 captured one. Reviewers see exactly which symbols were
-  # excluded from the symbol_anchored args so they can spot-check whether
-  # high-risk symbols are missing (greenfield's NettieCalendarClientSetting
-  # case). Section is informational — does not change tier routing or
-  # downstream gates. Cleared by substep 5's `rm -f` on non-truncated runs.
+  # Emit dropped-symbol truncation notice if substep 5 captured one. Reviewers
+  # see exactly which symbols were excluded from the symbol_anchored args so
+  # they can spot-check whether high-risk symbols are missing. Section is
+  # informational — does not change tier routing or downstream gates. Cleared
+  # by substep 5's `rm -f` on non-truncated runs.
   if [ -s ".devt/state/topic-symbols-dropped.json" ]; then
     DROPPED_COUNT=$(jq 'length' .devt/state/topic-symbols-dropped.json 2>/dev/null || echo 0)
     if [ "$DROPPED_COUNT" != "0" ] && [ "$DROPPED_COUNT" != "" ]; then
-      # Greenfield audit 2026-06-09: a 42-of-74 truncation notice landed
-      # at line 200+ in a multi-section file and reviewers missed it.
-      # When the drop count is non-trivial, prepend a short banner so the
-      # gap is visible before scrolling. Full list still appears at bottom.
+      # A large truncation notice can land deep in a multi-section file and
+      # be missed by reviewers. When the drop count is non-trivial, prepend
+      # a short banner so the gap is visible before scrolling. Full list
+      # still appears at bottom.
       if [ "$DROPPED_COUNT" -gt 5 ]; then
         TRUNC_BANNER=$(mktemp)
         {
@@ -296,7 +294,7 @@ if [ -n "$DIFF_FILES" ]; then
       fi
       {
         echo ""
-        echo "## Subject symbols dropped (truncation notice — C7-2)"
+        echo "## Subject symbols dropped (truncation notice)"
         echo ""
         echo "_${DROPPED_COUNT} of the ${TOPIC_SYMBOLS_RAW_COUNT:-?} extracted topic symbols were truncated by the MCP blast_radius 32-symbol cap. Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._"
         echo ""
@@ -304,12 +302,12 @@ if [ -n "$DIFF_FILES" ]; then
       } >> .devt/state/graph-impact.md
     fi
   fi
-  # v0.73 WI-5 (greenfield cal #18 assessment #3): surface partial-coverage
-  # hyperedges. Preflight computes hyperedges_matched with completeness ratio
-  # but the data never reached the code-reviewer prompt — greenfield's
-  # license_update_rights_flow at 14% (1/7 RBAC members in scope) was lost.
-  # Reviewers see the gap inline now: "task scope covers N/M members; consider
-  # expanding OR explicitly defer remaining in your verdict".
+  # Surface partial-coverage hyperedges. Preflight computes hyperedges_matched
+  # with completeness ratio but the data otherwise would not reach the
+  # code-reviewer prompt — e.g. a flow at 14% (1/7 members in scope) would
+  # be lost. Reviewers see the gap inline now: "task scope covers N/M
+  # members; consider expanding OR explicitly defer remaining in your
+  # verdict".
   HYPER_PARTIAL=$(jq -c '[.hyperedges_matched[]? | select(.completeness < 1.0)]' .devt/state/preflight-brief.json 2>/dev/null || echo "[]")
   HYPER_PARTIAL_COUNT=$(echo "$HYPER_PARTIAL" | jq 'length' 2>/dev/null || echo 0)
   if [ "$HYPER_PARTIAL_COUNT" != "0" ] && [ "$HYPER_PARTIAL_COUNT" != "" ]; then
@@ -322,31 +320,31 @@ if [ -n "$DIFF_FILES" ]; then
       echo "$HYPER_PARTIAL" | jq -r '.[] | "- **\(.label)** — \((.members_in_scope | length)) of \(.member_count) members in scope (\(((.completeness // 0) * 100) | floor)% complete). Out-of-scope members: \(.members - .members_in_scope | join(\", \"))"'
     } >> .devt/state/graph-impact.md
   fi
-  # C7-3+C7-6 (greenfield calibration #4 + #7): when blast_radius reports
-  # ambiguous_bindings > 0, emit the colliding symbols with their source_file
-  # so reviewers know which module each finding's symbol refers to. Greenfield
-  # session: two ExternalCallService modules (Nettie vs Vicasa legacy)
-  # collided unflagged → manual cross-check per finding. The persisted
-  # ambiguous_details (HF-3 + this commit) carries the data once; emit here
-  # so it travels into graph-impact.md alongside the god-node sections.
+  # When blast_radius reports ambiguous_bindings > 0, emit the colliding
+  # symbols with their source_file so reviewers know which module each
+  # finding's symbol refers to. Without this, colliding modules (e.g. a
+  # current and a legacy class with the same name) require manual
+  # cross-check per finding. The persisted ambiguous_details carries the
+  # data once; emit here so it travels into graph-impact.md alongside the
+  # god-node sections.
   AMB_COUNT=$(jq '.blast.ambiguous_bindings // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
   if [ "$AMB_COUNT" != "0" ] && [ "$AMB_COUNT" != "" ] && [ "$AMB_COUNT" != "null" ]; then
     {
       echo ""
-      echo "## Ambiguous bindings (C7-3)"
+      echo "## Ambiguous bindings"
       echo ""
-      echo "_${AMB_COUNT} symbol(s) resolve to multiple definition sites — reviewers should cite the module path explicitly when a finding references one of these symbols. Greenfield calibration evidence: two ExternalCall* modules collided unflagged across calibrations #4 + #7._"
+      echo "_${AMB_COUNT} symbol(s) resolve to multiple definition sites — reviewers should cite the module path explicitly when a finding references one of these symbols. Same-name modules from different packages can collide unflagged, forcing manual cross-check per finding._"
       echo ""
       jq -r '.blast.ambiguous_details // [] | .[] | "- `\(.symbol)` → resolves at `\(.node.source_file // "(no source_file)")` (label: `\(.node.label)`)"' .devt/state/preflight-brief.json 2>/dev/null
     } >> .devt/state/graph-impact.md
   fi
-  # C7-1 (greenfield calibration #7): F17's diff-anchored CLIs are silent
-  # when the diff touches CALLERS but not symbol-definition sites. Greenfield's
-  # most-common PR pattern is exactly that — changes in app/services/ reference
-  # symbols defined in app/core/, neither CLI fires. Fall back to preflight's
-  # graph-global god_nodes[] (already cached in preflight-brief.json) so the
-  # signal still reaches the dispatch context. Section is explicitly labelled
-  # "from preflight, not diff-anchored" so reviewers know the scope.
+  # The diff-anchored CLIs are silent when the diff touches CALLERS but
+  # not symbol-definition sites. A common PR pattern is exactly that —
+  # changes in services/ reference symbols defined in core/, neither CLI
+  # fires. Fall back to preflight's graph-global god_nodes[] (already
+  # cached in preflight-brief.json) so the signal still reaches the
+  # dispatch context. Section is explicitly labelled "from preflight,
+  # not diff-anchored" so reviewers know the scope.
   if [ "${GOD_COUNT:-0}" = "0" ] && [ "${SYM_COUNT:-0}" = "0" ]; then
     PREFLIGHT_GODS=$(jq -c '.god_nodes // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
     PG_COUNT=$(echo "$PREFLIGHT_GODS" | jq 'length')
@@ -364,15 +362,15 @@ if [ -n "$DIFF_FILES" ]; then
 fi
 ```
 
-Field rationale (greenfield 2026-05-26): `routes.py` at 2,463 LOC was almost certainly a god node, but the symbol-anchored anchor list missed it because the diff's PascalCase symbols (UserStatus, ConsentType) didn't include module-level identifiers from routes.py. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
+Why: a large module file (e.g. ~2,400 LOC) may be a god node, but the symbol-anchored anchor list can miss it because the diff's PascalCase symbols don't include module-level identifiers from that file. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
 
-Symbol-level rationale (greenfield 2026-05-28 calibration #4, graph-impact.md:62 verbatim): *"0 file-level god-nodes in PR #374 diff despite symbol-level god-node match on AuditMapping."* — `check-large-files` aggregates per-file (one max-degree symbol per basename) and missed AuditMapping when SmallHelper happened to be the file's reported top symbol. `check-symbol-godnodes` returns every above-threshold symbol whose `source_file` is in the diff with no per-file collapse, so a high-degree symbol cannot be eclipsed by a same-file sibling.
+Symbol-level rationale: `check-large-files` aggregates per-file (one max-degree symbol per basename) and can miss a true god-node symbol when a lower-degree sibling in the same file happens to be reported as the file's top symbol. `check-symbol-godnodes` returns every above-threshold symbol whose `source_file` is in the diff with no per-file collapse, so a high-degree symbol cannot be eclipsed by a same-file sibling.
 
 **Note on signal independence**: four signals now feed the reviewer, all independent:
 - `blast_radius::god_node_match` — symbol-aggregated; at least one input symbol matches a god-node in the graph.
 - `check-large-files` — file-aggregated; reports the max-degree symbol per diff file.
 - `check-symbol-godnodes` — symbol-level; reports every above-threshold symbol whose source_file is in the diff, no per-file aggregation.
-- `preflight.god_nodes` fallback (C7-1) — graph-global top god-nodes; only emitted when both diff-anchored CLIs return 0. Provides structural signal for the common pattern where the diff touches callers, not definition sites.
+- `preflight.god_nodes` fallback — graph-global top god-nodes; only emitted when both diff-anchored CLIs return 0. Provides structural signal for the common pattern where the diff touches callers, not definition sites.
 
 Any of the four can fire while the others stay silent — surface all four verbatim in the reviewer dispatch context. The fallback is mutually exclusive with the diff-anchored CLIs (only emits when they both go silent).
 
@@ -397,7 +395,7 @@ The assert auto-passes when graphify is disabled or the graph is missing (`graph
 
 ### Substep 8: Decision-artifact gates + claude-mem MCP pre-step
 
-**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught. Field signal (greenfield 2026-05-27 PR #372): orchestrator self-reported this pre-step as an unconscious skip — not rationalized, not noticed, simply absent from the workflow file.
+**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught. Why: this pre-step is easy to drop as an unconscious skip — not rationalized, not noticed, simply absent — without an enforcement gate.
 
 If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session:
 1. Call `mcp__plugin_claude-mem_mcp-search__search` with `query=${REVIEW_SCOPE}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with table-row observations (`| #NNNN | time | <emoji> | Title | ~tokens |`) grouped by source file.
@@ -433,7 +431,7 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 
 Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
 
-> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. This silences `dispatch-hygiene-guard.sh` raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple and avoids the bypass-pattern field-observed when long sessions accumulate unbounded raw-dispatch counts.
+> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. This silences `dispatch-hygiene-guard.sh` raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple and avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
 
 ```bash
 SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
@@ -535,10 +533,9 @@ SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
 # Skip-context injection — when graphify-skip-reason.txt exists, the reviewer
 # should know the impact-map is intentionally absent (not "graphify failed").
 # Coordination signal: tiny prompt cost, eliminates accidental over-reliance on
-# absent graph data. Field-observed: greenfield 2026-05-21 session had tier=skip
-# fire silently; reviewers fell back to grep without knowing graphify was the
-# wrong tool for the workflow (Bitbucket + stale brief). Explicit signal beats
-# implicit file-presence checks.
+# absent graph data. Why: when tier=skip fires silently, reviewers fall back
+# to grep without knowing graphify was the wrong tool for the workflow (e.g.,
+# Bitbucket + stale brief). Explicit signal beats implicit file-presence checks.
 if [ -f .devt/state/graphify-skip-reason.txt ]; then
   GRAPHIFY_STATUS=$(jq -nc --arg r "$(cat .devt/state/graphify-skip-reason.txt)" '{skipped: true, reason: $r}')
 elif [ -f .devt/state/graph-impact.md ]; then
@@ -593,11 +590,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Review ALL code in the listed files — do not filter by origin or label findings as pre-existing.
     Every valid finding must be reported with file, line, severity, and rule reference.
 
-    **Self-grade against the rubric as you write (C7-7).** The same axes the
+    **Self-grade against the rubric as you write.** The same axes the
     verifier will use to grade your review are inlined in <rubric_content> (or
     readable at <rubric_path> as fallback). Walk EVERY declared axis (both the
     A–G table rows AND any `## Axis [A-Z] —` top-level headings, currently
-    including axis H for dispatch warnings acknowledgment per cal #22 F2)
+    including axis H for dispatch warnings acknowledgment)
     before emitting review.md: scope coverage (every input file mentioned),
     finding specificity (file:line + rule ref or pattern citation), severity
     calibration (no Critical-rated nits, no Minor-rated security issues),
@@ -654,7 +651,7 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 
 **Artifact pre-gate**: confirm both `.devt/state/review.md` and `.devt/state/review.json` exist. If either is missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact. The sidecar is the routing source of truth; the markdown is the human-readable view.
 
-**Substance pre-gate (F28)**: even when the file exists, the code-reviewer may have returned a placeholder body (field signal: greenfield 2026-05-26 PR #372 multi-lane fan-out, 5/6 lane dispatches returned `status:completed` with bodies like "Stub written; analysis in progress."). Don't burn a verifier dispatch grading a stub — block here and re-dispatch the reviewer instead:
+**Substance pre-gate**: even when the file exists, the code-reviewer may have returned a placeholder body (e.g., multi-lane fan-outs where most lane dispatches return `status:completed` with bodies like "Stub written; analysis in progress."). Don't burn a verifier dispatch grading a stub — block here and re-dispatch the reviewer instead:
 
 ```bash
 SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md)
@@ -736,7 +733,7 @@ MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.
 VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
 ```
 
-**Cal #22 F2 — verifier walk-all-axes substance gate.** Greenfield's verifier walked rubric axes A–G and stopped at G, silently skipping axis H. Verdict came back `satisfied` despite the missing grade. Post-hoc check: count axes in the pinned rubric and compare against `verification.json::criteria_total`. On mismatch, override the verdict to `needs_revision` so the workflow re-dispatches the verifier with explicit instruction to walk every declared axis.
+**Verifier walk-all-axes substance gate.** A verifier can walk rubric axes A–G and stop at G, silently skipping axis H — and still return `verdict=satisfied` despite the missing grade. Post-hoc check: count axes in the pinned rubric and compare against `verification.json::criteria_total`. On mismatch, override the verdict to `needs_revision` so the workflow re-dispatches the verifier with explicit instruction to walk every declared axis.
 
 ```bash
 AXES_ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-graded-all-axes 2>/dev/null)
@@ -779,7 +776,7 @@ Route on `verdict`:
 
 <step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
 
-**F6 — Conditional auto-curator.** When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh discovery harvest and fire a curator dispatch. Skipped silently otherwise — default `false` keeps the workflow cost-neutral for users who don't opt in.
+**Conditional auto-curator.** When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh discovery harvest and fire a curator dispatch. Skipped silently otherwise — default `false` keeps the workflow cost-neutral for users who don't opt in.
 
 Decision logic (bash):
 
@@ -856,7 +853,7 @@ if echo "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Verifier-ran enforcement gate**. Before presenting findings, assert that the verifier step actually ran when `config.workflow.verification=true`. Field signal (greenfield 2026-05-27 PR #372): orchestrator skipped the verifier dispatch with the rationalization "8-lane fan-out is already verifier-grade." Nothing in the conditional skip at the top of the verify step pushed back. This gate makes the skip impossible:
+**Verifier-ran enforcement gate**. Before presenting findings, assert that the verifier step actually ran when `config.workflow.verification=true`. Why: orchestrators sometimes skip the verifier dispatch with rationalizations like "the fan-out is already verifier-grade." Nothing in the conditional skip at the top of the verify step pushes back. This gate makes the skip impossible:
 
 ```bash
 VERIF_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-ran)
@@ -880,7 +877,7 @@ if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Before knowledge-candidates aggregation, assert no raw devt:* dispatches happened this session. Claude Code does NOT enforce PreToolUse `decision:deny` on the Task tool — the existing `dispatch-hygiene-guard.sh` hook detects raw dispatches and writes them to `dispatch-warnings.jsonl` but cannot actually block. This gate is the post-hoc enforcement: any raw_dispatch entries with ts >= first_created_at blocks present_findings. Set `dispatch_hygiene_mode: "warn"` in `.devt/config.json` to opt out.
+**Dispatch-hygiene post-hoc gate.** Before knowledge-candidates aggregation, assert no raw devt:* dispatches happened this session. Claude Code does NOT enforce PreToolUse `decision:deny` on the Task tool — the existing `dispatch-hygiene-guard.sh` hook detects raw dispatches and writes them to `dispatch-warnings.jsonl` but cannot actually block. This gate is the post-hoc enforcement: any raw_dispatch entries with ts >= first_created_at blocks present_findings. Set `dispatch_hygiene_mode: "warn"` in `.devt/config.json` to opt out.
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
@@ -891,7 +888,7 @@ if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Knowledge-candidates-tagged gate.** Before presenting findings, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none explicitly via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in review.md prose but never tagged in scratchpad → never reached the curator harvester. The gate forces an explicit decision.
+**Knowledge-candidates-tagged gate.** Before presenting findings, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none explicitly via `knowledge-candidates-none.txt` with a structured reason. Why: candidates described in review.md prose but never tagged in scratchpad never reach the curator harvester. The gate forces an explicit decision.
 
 Aggregate first so any tags the reviewer placed in `review.md` / `impl-summary*.md` reach scratchpad before the gate inspects it (the aggregator is idempotent + cheap, safe to always run).
 

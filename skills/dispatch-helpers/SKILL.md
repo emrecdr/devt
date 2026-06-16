@@ -13,7 +13,7 @@ The devt CLAUDE.md "Critical Agent + Workflow Contracts" section says:
 
 > Never raw-dispatch devt agents. Orchestrators MUST route through devt slash commands (/devt:review, /devt:workflow, …). Direct Task(subagent_type="devt:*", prompt=…) calls bypass the workflow's dispatch template — losing <scope_trust>, <scope_hint>, <memory_signal>, the graph-impact map injection, the impact-plan, the verifier loop, and the telemetry surface.
 
-This skill exists for the edge case where the canonical workflow path genuinely doesn't fit — typically **parallel fan-out across multiple file groups or feature lanes** where the orchestrator wants to control slicing manually. Field evidence (greenfield calibrations #14 and #15) shows that without ergonomic envelope generation, orchestrators default to raw dispatches with prose context, dropping every workflow protection.
+This skill exists for the edge case where the canonical workflow path genuinely doesn't fit — typically **parallel fan-out across multiple file groups or feature lanes** where the orchestrator wants to control slicing manually. Without ergonomic envelope generation, orchestrators default to raw dispatches with prose context, dropping every workflow protection.
 
 Prefer `/devt:review`, `/devt:workflow`, or `/devt:debug` when applicable. This skill is for the narrow case requiring ad-hoc parallelism that the workflow doesn't support directly.
 
@@ -101,7 +101,7 @@ A single subagent dispatched for multi-section work (programmer doing R1-R10 imp
 
 **Architecture.** When a subagent hits a section boundary AND has more work remaining AND has done significant tool calls, it emits Status: PARTIAL with a Next-section marker (per `agents/<name>.md::section_completion_protocol`). The workflow's claim-check (Q11) reads the sidecar; PARTIAL routes to SendMessage-resume primary, re-dispatch fallback.
 
-**Why SendMessage is the cheap path.** SendMessage to the same subagent re-uses the full conversation cache — every prior Read, Edit, Bash result stays available at the cost of one new prompt. A fresh re-dispatch via `Task(subagent_type=...)` starts cold, paying the full context-loading cost (skill injection, governing rules, file Reads to re-discover working set). Field observation (greenfield cal #17): ~15-20 file Reads saved per SendMessage-resume vs cold re-dispatch.
+**Why SendMessage is the cheap path.** SendMessage to the same subagent re-uses the full conversation cache — every prior Read, Edit, Bash result stays available at the cost of one new prompt. A fresh re-dispatch via `Task(subagent_type=...)` starts cold, paying the full context-loading cost (skill injection, governing rules, file Reads to re-discover working set). Field observation: roughly 15-20 file Reads saved per SendMessage-resume vs cold re-dispatch.
 
 **When to use re-dispatch instead.** After session boundary (`/devt:workflow --pause` + resume in new session), or when the subagent-id is no longer addressable. Re-dispatch reads the partial artifact via `<continue_from_checkpoint>` block instead of conversation history.
 

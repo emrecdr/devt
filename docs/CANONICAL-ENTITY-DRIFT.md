@@ -5,14 +5,14 @@ production bug: **endpoints/models reference a domain concept (country,
 calling-settings, language, …) without being structurally connected to its
 canonical entity model.**
 
-Two real bugs from the greenfield-api project that motivated this work:
+Two motivating examples of this bug class:
 
 1. `Organization.billing_country: str` — free-form ISO code with no FK to the
-   `Country` entity. Untangled across 5 implementation waves in PR #376
-   (migration + ISO resolver + invoice VAT chain + audit mapper + hurl tests).
-2. Nettie `calling_settings` attached to `User` — the call target is actually
-   a `Client` (Client owns the tablet, has a license, is the callable party),
-   so the settings ended up on the wrong entity.
+   `Country` entity. Untangling required a multi-step migration + ISO
+   resolver + invoice VAT chain + audit mapper + integration tests.
+2. `calling_settings` attached to `User` when the call target is actually
+   a `Client` (Client owns the device, has the license, is the callable
+   party) — settings ended up on the wrong entity.
 
 Both bugs share a structural fingerprint that AST + Graphify can detect.
 

@@ -139,11 +139,11 @@ fi
 When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
 
 1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, returns the impact map with `direct_dependents` array.
-2. **Drill-down on top-3 direct dependents** (F16 — multi-tier follow-up). Parse `direct_dependents` from blast_radius response, take top-3 by impact_size, and for each call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEPENDENT_NAME>", direction: "in", depth: 2})`. Drills DOWN the impact tree so the programmer/code-reviewer sees which callers each high-risk dependent has.
+2. **Drill-down on top-3 direct dependents** (multi-tier follow-up). Parse `direct_dependents` from blast_radius response, take top-3 by impact_size, and for each call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEPENDENT_NAME>", direction: "in", depth: 2})`. Drills DOWN the impact tree so the programmer/code-reviewer sees which callers each high-risk dependent has.
 
 Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
 
-**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the F12 snake_case fallback also missed). Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
+**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the snake_case fallback also missed). Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 
@@ -512,7 +512,7 @@ Best-effort. Never fails the workflow.
 
 <step name="finalize" gate="final status is reported to user">
 
-**Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator harvester. Runs BEFORE the scratchpad truncate below — that order matters because the truncate would otherwise erase the very tags the gate checks for.
+**Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Why: candidates described in prose but never tagged never reach the curator harvester. Runs BEFORE the scratchpad truncate below — that order matters because the truncate would otherwise erase the very tags the gate checks for.
 
 **Layer-2 claim-check resolution gate.** Block finalize on any unresolved Layer-1 `assert-artifact-present` failures in this workflow window. Mirrors S1's post-hoc pattern. Set `claim_check_mode: "warn"` in config to opt out.
 
@@ -525,7 +525,7 @@ if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Block finalize on any in-session raw devt:* dispatches. CC doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
+**Dispatch-hygiene post-hoc gate.** Block finalize on any in-session raw devt:* dispatches. Claude Code doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
@@ -536,7 +536,7 @@ if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-First aggregate any candidates the programmer surfaced inside `impl-summary*.md` (covered by the same scanner as `review-lane-*.md`/`review.md`). Without this hop, tags written into the impl summary stay stranded and the gate trips with `tag_count: 0` despite valid candidates existing — greenfield calibration #8 evidence.
+First aggregate any candidates the programmer surfaced inside `impl-summary*.md` (covered by the same scanner as `review-lane-*.md`/`review.md`). Without this hop, tags written into the impl summary stay stranded and the gate trips with `tag_count: 0` despite valid candidates existing.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true

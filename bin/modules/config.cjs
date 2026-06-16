@@ -34,38 +34,39 @@ const DEFAULTS = {
   //     behavior). Surfaces the warning to the LLM but allows the call.
   //   "off" — hook is a no-op for raw dispatches.
   //
-  // Field rationale (greenfield 2026-05-26): orchestrator received 6 advisory
-  // warnings and proceeded anyway because "ceremony cost > result urgency".
-  // Soft warning lost to perceived urgency. block-default makes ceremony
-  // involuntary — friction beats protocol.
+  // Soft warnings lose to perceived urgency: an orchestrator can receive
+  // multiple advisory warnings and proceed anyway because "ceremony cost >
+  // result urgency". block-default makes ceremony involuntary — friction
+  // beats protocol.
   dispatch_hygiene_mode: "block",
-  // Hard kill-threshold for cumulative raw-dispatch
-  // count in a single workflow window. When count >= this threshold,
+  // Hard kill-threshold for cumulative raw-dispatch count in a single
+  // workflow window. When count >= this threshold,
   // assertNoRawDispatchesThisSession returns ok:false REGARDLESS of
-  // dispatch_hygiene_mode (hard-limit safety, not soft hygiene). Field signal:
-  // greenfield accumulated 62 warn-mode warnings in one session with zero
-  // enforcement. Set null to disable. Set higher (e.g. 10) for projects that
-  // intentionally fan out beyond /devt:* — loud audit signal either way.
+  // dispatch_hygiene_mode (hard-limit safety, not soft hygiene). Without
+  // this hard cap, warn-mode sessions can accumulate dozens of warnings
+  // with zero enforcement. Set null to disable. Set higher (e.g. 10) for
+  // projects that intentionally fan out beyond /devt:* — loud audit signal
+  // either way.
   dispatch_hygiene_kill_threshold: 3,
-  // Layer-2 claim-check enforcement (greenfield cal #16+#17). Mirrors
-  // dispatch_hygiene_mode pattern. Workflow Layer-1 (state assert-artifact-
-  // present) prints [BLOCKED] inline; Layer-2 (state assert-claim-checks-
-  // resolved) reads claim-check-failures.jsonl at finalize phases. block:
-  // unresolved failures fail the finalize gate. warn: surfaces summary but
-  // allows advance. off: gate auto-passes. Same default rationale as
+  // Layer-2 claim-check enforcement. Mirrors dispatch_hygiene_mode pattern.
+  // Workflow Layer-1 (state assert-artifact-present) prints [BLOCKED]
+  // inline; Layer-2 (state assert-claim-checks-resolved) reads
+  // claim-check-failures.jsonl at finalize phases. block: unresolved
+  // failures fail the finalize gate. warn: surfaces summary but allows
+  // advance. off: gate auto-passes. Same default rationale as
   // dispatch_hygiene_mode — block-default makes the audit-trail review
   // involuntary rather than perceived-urgency optional.
   claim_check_mode: "block",
-  // Cal #22 F1 (greenfield I1): graphify_decision_mode gates the F16 drill-down
-  // skip case in assert-graphify-decision. block: when tier ∈ {symbol_anchored,
+  // graphify_decision_mode gates the drill-down skip case in
+  // assert-graphify-decision. block: when tier ∈ {symbol_anchored,
   // bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections,
-  // gate returns ok:false (forces operator to re-run F16 or explicitly opt out).
-  // warn: drill_down_skipped surfaces in result but does not flip ok.
-  // Same default rationale as dispatch_hygiene_mode + claim_check_mode —
-  // block-default makes substance enforcement involuntary (CON-001 #6).
-  // Field evidence: 5+ prior greenfield sessions skipped F16 entirely while
-  // assert-graphify-decision returned ok:true because under_three_drill_downs
-  // was informational only.
+  // gate returns ok:false (forces operator to re-run the drill-down step
+  // or explicitly opt out). warn: drill_down_skipped surfaces in result
+  // but does not flip ok. Same default rationale as dispatch_hygiene_mode
+  // + claim_check_mode — block-default makes substance enforcement
+  // involuntary (CON-001 #6). Without this, sessions can skip the
+  // drill-down entirely while the assert-graphify-decision gate returns
+  // ok:true because under_three_drill_downs is informational only.
   graphify_decision_mode: "block",
   // Structural-drift validator mode for sub-agent output artifacts.
   // checkAgentOutput's --structural --baseline=<path> flag compares the
@@ -124,11 +125,11 @@ const DEFAULTS = {
     // somewhere else. Hook reads this value directly from .devt/config.json
     // (not via getMergedConfig) since it runs outside the Node.js context.
     task_truncation_warn_bytes: 40000,
-    // task_truncation_log_all: when true, the task-truncation-detector logs
-    // EVERY sub-agent return to dispatch-warnings.jsonl regardless of cliff
-    // signals — calibration-cycle mode. Default false (quiet-by-default per
-    // greenfield 2026-06 calibration: 178 of 192 records carried no
-    // actionable signal). Enable in .devt/config.json::telemetry when
+    // task_truncation_log_all: when true, the task-truncation-detector
+    // logs EVERY sub-agent return to dispatch-warnings.jsonl regardless of
+    // cliff signals — calibration-cycle mode. Default false (quiet-by-
+    // default — the vast majority of records carry no actionable signal in
+    // normal operation). Enable in .devt/config.json::telemetry when
     // computing return-size histograms, latency baselines, or other
     // analyses that need full coverage.
     task_truncation_log_all: false,
@@ -209,11 +210,11 @@ const DEFAULTS = {
     // the user to refresh the graph before proceeding. Set to null to disable
     // the staleness gate entirely (warning still surfaces in the Brief).
     stale_threshold: 30,
-    // WI-4 / Q2 (greenfield cal #17 §F2): when graphify's BFS-derived
-    // direct_dependents_count is ≥ N× the literal git-grep caller count,
-    // emit a magnification advisory in the brief. Field evidence: 33 modules
-    // reported vs 1 ground-truth = 33× — clearly above 3× threshold. Set to
-    // null to disable the cross-check entirely.
+    // When graphify's BFS-derived direct_dependents_count is ≥ N× the
+    // literal git-grep caller count, emit a magnification advisory in the
+    // brief. Default 3× catches typical interface-amplification cases
+    // where transitive reach dwarfs literal callsites. Set to null to
+    // disable the cross-check entirely.
     blast_magnification_threshold: 3,
     // After an implementation phase writes new code (impl-summary.json with
     // non-empty files_modified), the workflow decides how to handle the now-

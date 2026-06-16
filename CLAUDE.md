@@ -152,47 +152,10 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 
 ### Critical Agent + Workflow Contracts (read these before modifying any workflow)
 
-- **Never raw-dispatch devt agents.** Orchestrators MUST route through devt slash commands (`/devt:review`, `/devt:workflow`, `/devt:implement`, `/devt:debug`, `/devt:research`, etc.). Direct `Task(subagent_type="devt:*", prompt=...)` calls bypass the workflow's dispatch template — losing `<scope_trust>`, `<scope_hint>`, `<memory_signal>`, the graph-impact map injection, the impact-plan, the verifier loop, and the telemetry surface. Defense in depth catches this: (1) `hooks/dispatch-hygiene-guard.sh` emits an advisory `additionalContext` and appends `source: "raw_dispatch"` to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks; (2) `agents/code-reviewer.md::workflow_context_assertion` hard-stops with `status=BLOCKED` + `verdict=NEEDS_WORK` + a Critical finding pointing at the raw dispatch rather than producing a shallow review. Custom parallelism over multi-slice reviews? Run `/devt:review` once to get the bash plan + graph-impact map computed, then re-dispatch the sliced reviewers manually with `<scope_trust>` + `<scope_hint>` + reference to `.devt/state/graph-impact.md` injected into each prompt.
-
-- **Orchestrator owns MCP; sub-agents are MCP-blind by design.** Every sub-agent's `tools:` frontmatter declares stdlib tools only (`Read, Bash, Glob, Grep` for read-only; `+ Write, Edit` for writers) — never `mcp__*`. The orchestrator runs MCP calls (e.g. `mcp__devt-graphify__query_graph`, `blast_radius`) inside workflow `context_init` bash blocks, writes results to `.devt/state/graph-impact.md`, and sub-agents consume that file READ-ONLY. Agent bodies and workflow `<task>` dispatch blocks MUST NOT instruct `mcp__*graphify*` calls — those would be dead code the sub-agent can't execute. Smoke gates enforce both: no agent body mentions MCP graphify, no workflow dispatch block carries the `Graphify-first discovery|investigation protocol` / `PROACTIVELY` sub-agent protocol signatures. The architect agent preloads `graphify-helpers` skill which uses `node bin/devt-tools.cjs graphify <subcmd>` CLI wrappers (Bash-callable, not MCP-callable) — that path is correct and stays.
-
-- **Workflow single-dispatch contract for `/devt:review`.** The `workflows/code-review.md` spec defines EXACTLY ONE `Task(subagent_type="devt:code-reviewer", …)` dispatch + ONE `Task(subagent_type="devt:verifier", …)` dispatch — no `slice`, `partition`, or `parallel fan-out` keyword appears in the file. When a review scope exceeds the agent's per-dispatch budget, the **canonical recovery path** is the code-reviewer's built-in `community-filter for large reviews` (restrict deep review to files in the affected_communities listed in `graph-impact.md` when scope > 10 files; defer the rest into `## Out-of-Scope Files (Deferred)` in `review.md`), then the orchestrator dispatches follow-up `/devt:review` calls for the deferred set. Orchestrators MUST NOT improvise N-way parallel fan-out without the workflow contract — that pattern has no synthesis spec, no slice-aware verifier rubric, and historically produced partial completion (~40% sub-agent success rate in field). If parallel fan-out is genuinely needed, the orchestrator must inject `<scope_trust>` + `<scope_hint>` + a reference to `.devt/state/graph-impact.md` into each manual dispatch and synthesize the results.
-
-### Dispatch Escape-Hatch Recipes
-
-When a workflow pattern doesn't fit any `/devt:*` slash command (multi-lane fan-out with custom per-lane scope, secondary side audits, ad-hoc continuations after a workflow closed), use these recipes instead of hand-rolling a raw `Task()` call. Each preserves the workflow envelope (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<graph_impact>`) so the dispatch-hygiene hook doesn't fire and the agent gets the full graph context.
-
-**Get the canonical envelope for any agent + workflow combo** — render the current envelope (with all placeholders filled from `.devt/state/workflow.yaml`) and paste into your `Task()` call:
-
-```bash
-node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_type>     # e.g. code-reviewer:code_review_parallel
-node bin/devt-tools.cjs dispatch render-filled <agent>:auto                # resolves workflow_type from active workflow.yaml
-```
-
-**Recipe 1 — Multi-lane parallel review with custom scope.** Run `/devt:review` once to populate `workflow.yaml::scope_*_json` + `.devt/state/graph-impact.md`, then manually fan out N lane dispatches. For each lane, start from `dispatch render-filled code-reviewer:code_review_parallel` and edit the `<task>` block to scope the lane's files. Each lane gets the envelope automatically.
-
-**Recipe 2 — Secondary side audit of a prior review.** No standalone slash command exists. Render `dispatch render-filled code-reviewer:code_review`, then replace the `<task>` block with the audit instructions. The envelope keeps the graph context the audit needs.
-
-**Recipe 3 — Standalone post-workflow docs refresh.** Use `/devt:workflow --mode=docs` (one-shot slash, no active workflow required) — wraps `workflows/docs-extraction.md` which dispatches `devt:docs-writer` with the proper envelope.
-
-**Recipe 4 — Standalone post-workflow retro.** Use `/devt:workflow --retro` (one-shot slash) — wraps `workflows/lesson-extraction.md` which dispatches `devt:retro` + `devt:curator`.
-
-If none of these fit your case, raise the gap — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.
-
-**Recipe 5 — Multi-lane parallel review with a hand-rolled partition (formal alternative to raw dispatch).** When you already know the per-lane file partition (you don't need `code-review.md::partition_lanes` to compute it via `graphify lane-suggestions` or path-based fallback) — register each lane formally so the dispatch envelope carries the canonical C7-7 self-grade directive, files persist to a per-lane sidecar, and the hygiene guard sees the lane registry instead of raw dispatches. Two-step flow:
-
-```bash
-# 1. Register lanes — either incrementally or in bulk from a YAML file
-node bin/devt-tools.cjs state register-lane --id=L1 --scope=identity --files=app/services/identity/auth.py,app/services/identity/middleware.py
-# or, for the common "I have all N lanes mapped" case:
-node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml
-
-# 2. Emit one envelope per registered lane (canonical code-reviewer:code_review template — carries C7-7)
-node bin/devt-tools.cjs dispatch render-lanes --out=/tmp/lane-envelopes/
-# Each lane gets its own envelope with <lane_id>, <lane_community>, <lane_files> injected, and `Write review to .devt/state/review.md` overridden to the lane's review_file.
-```
-
-Paste each `/tmp/lane-envelopes/lane-L*.txt` into a parallel `Task()` call (one message, N Task tools). Lanes get the full canonical envelope + C7-7 directive without the orchestrator hand-rolling task text. Greenfield calibration Q12-Q13 receipts: hand-rolled raw-dispatch task text consistently omitted C7-7; this path makes the bypass structurally impossible.
+- **Never raw-dispatch devt agents.** Route through `/devt:*` slash commands; raw `Task(subagent_type="devt:*")` bypasses envelope (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, graph-impact map, impact-plan, verifier loop, telemetry). Three-layer defense: `dispatch-hygiene-guard.sh` (advisory) → `assert-no-raw-dispatches-this-session` finalize gate (block) → `code-reviewer.md::workflow_context_assertion` (hard-stop). → docs/AGENT-CONTRACTS.md (Never raw-dispatch).
+- **Orchestrator owns MCP; sub-agents are MCP-blind.** Sub-agents declare stdlib tools only (`Read, Bash, Glob, Grep` + `Write, Edit` for writers) — never `mcp__*`. Orchestrators run MCP, write to `.devt/state/graph-impact.md`, sub-agents consume read-only. Architect's `graphify-helpers` skill uses Bash-callable CLI wrappers, not MCP. → docs/AGENT-CONTRACTS.md (Orchestrator owns MCP).
+- **Single-dispatch contract for `/devt:review`.** `workflows/code-review.md` defines EXACTLY ONE reviewer + ONE verifier dispatch. Large reviews use the built-in community-filter (>10 files → restrict to `affected_communities`, defer rest); sanctioned parallel fan-out lives in `workflows/code-review-parallel.md` only. → docs/AGENT-CONTRACTS.md (Single-dispatch contract).
+- **Escape hatches** for cases no `/devt:*` command fits (custom multi-lane fan-out, side audits, ad-hoc continuations). → docs/operator-guide/DISPATCH-RECIPES.md.
 
 ### Agent + Workflow Contracts (full reference)
 

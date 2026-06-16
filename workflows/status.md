@@ -132,7 +132,7 @@ Next: {description of what comes next}
 
 **Stuck-signal inclusion**: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check` and include the line only when `deny_count > 0`. Suppress when zero (the common case). Surfaces preflight, bash_destroy, and no_verify denies in the current workflow session — gives the user early visibility into guardrail loops before an autonomous flow pauses on the same signal.
 
-**Dispatch warnings inclusion** (cal #21 F12, A2): surface the line only when at least one warning of either source has been logged since the current workflow started. Read `workflow.yaml::first_created_at` and pipe it to `--since`:
+**Dispatch warnings inclusion**: surface the line only when at least one warning of either source has been logged since the current workflow started. Read `workflow.yaml::first_created_at` and pipe it to `--since`:
 
 ```bash
 WF_START=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.first_created_at||o.created_at||'');}catch{console.log('');}}")

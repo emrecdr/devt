@@ -14,14 +14,14 @@
 # architecture where finalize-time gates check work-product regardless of
 # which transition led there.
 #
-# Scope (v0.73 initial): the FINAL-DEACTIVATION phase per workflow_type (the
+# Scope (initial): the FINAL-DEACTIVATION phase per workflow_type (the
 # `complete` / `debug` deactivation step). Workflow .md files invoke
 # `state advance-phase complete active=false` at the end; this YAML declares
-# which gates must pass first. v0.72's inline gate-check bash blocks remain
-# as belt-and-suspenders during the transition cadence — v0.74 cleanup
-# removes them once cal #19+ confirms the YAML path catches everything.
-# Untracked phases auto-pass — advance-phase falls through to a plain phase
-# update without running any gates, preserving backwards compatibility.
+# which gates must pass first. Inline gate-check bash blocks remain as
+# belt-and-suspenders during the transition cadence — removed once field
+# coverage confirms the YAML path catches everything. Untracked phases
+# auto-pass — advance-phase falls through to a plain phase update without
+# running any gates, preserving backwards compatibility.
 #
 # Scope extension: every INTERMEDIATE phase under each workflow_type gates
 # `assert-no-raw-dispatches-this-session`. Field-observed: raw_dispatches

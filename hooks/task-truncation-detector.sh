@@ -99,12 +99,12 @@ node -e "
   // as a suspiciously LARGE return signals context overflow. Field evidence:
   // 140 bytes; chosen threshold 500 gives 3.5x headroom over the observed case.
   const LOW_OUTPUT_THRESHOLD = 500;
-  // F26 (cal #21): proportional-response gate. Trivial/experimental dispatches
-  // with tiny prompts (e.g. 112-byte probe → 39-byte reply) tripped lowOutput
-  // and produced false-alarm SendMessage-resume suggestions. Real workflow
-  // dispatches carry envelope blocks alone >= ~1KB; below that, small reply
-  // is proportional, not a cliff. Gate fires only when the prompt was
-  // substantive (>= 1000 bytes).
+  // Proportional-response gate. Trivial/experimental dispatches with tiny
+  // prompts (e.g. probe → small reply) trip lowOutput and produce false-
+  // alarm SendMessage-resume suggestions. Real workflow dispatches carry
+  // envelope blocks alone >= ~1KB; below that, small reply is proportional,
+  // not a cliff. Gate fires only when the prompt was substantive (>= 1000
+  // bytes).
   const PROMPT_SIZE_GATE = 1000;
   const promptText = (input.tool_input || {}).prompt || '';
   const promptBytes = Buffer.byteLength(promptText, 'utf8');
@@ -133,19 +133,19 @@ node -e "
   const midTaskLanguage = midTaskRegex.test(responseText);
 
   // Quiet-by-default: write a forensic record + emit advisory ONLY when a
-  // cliff signal fires. Greenfield field data (June 2026) showed 93% of
-  // emit-every-return records carried no actionable signal.
+  // cliff signal fires. Field data shows the vast majority of
+  // emit-every-return records carry no actionable signal.
   //
   // Calibration-mode override: when telemetry.task_truncation_log_all=true,
   // skip this short-circuit so every dispatch logs a record (no advisory
   // emit on the no-signal path — that part stays signal-gated below).
   const cliffFired = nearCliff || lowOutput || midTaskLanguage;
 
-  // A2b (cal #21 F24): compute raw_dispatch hint BEFORE the cliff-exit so
-  // the hook can still emit the hint even when this particular dispatch
-  // didn't trip a cliff. Operator-confirmed UX preference: catch the signal
-  // in the act-on-it window (PostToolUse return time). Threshold: any
-  // raw_dispatch entry in the last 60 minutes triggers the hint.
+  // Compute raw_dispatch hint BEFORE the cliff-exit so the hook can still
+  // emit the hint even when this particular dispatch didn't trip a cliff.
+  // UX preference: catch the signal in the act-on-it window (PostToolUse
+  // return time). Threshold: any raw_dispatch entry in the last 60 minutes
+  // triggers the hint.
   let rawDispatchHint = null;
   if (stateDir) {
     try {

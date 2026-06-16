@@ -84,7 +84,7 @@ node -e "
 "
 ```
 
-**D1 (greenfield calibration #11) — convention probe when NO_SCANNER.** Before falling through to manual analysis, probe conventional scanner locations and surface any discovery so the user can wire it. Mirrors the `graphify.probeBinary` capability-probe pattern. Probe order: `.devt/rules/arch-scan.py` (the project-scoped devt convention used by python-fastapi template + greenfield), `.devt/rules/arch-scan.sh`, `tests/architecture/arch-scan.py`, `scripts/arch-scan.py`.
+**Convention probe when NO_SCANNER.** Before falling through to manual analysis, probe conventional scanner locations and surface any discovery so the user can wire it. Mirrors the `graphify.probeBinary` capability-probe pattern. Probe order: `.devt/rules/arch-scan.py` (the project-scoped devt convention used by the python-fastapi template), `.devt/rules/arch-scan.sh`, `tests/architecture/arch-scan.py`, `scripts/arch-scan.py`.
 
 ```bash
 if [ "$(echo "$SCANNER_RESULT" | head -1)" = "NO_SCANNER" ]; then

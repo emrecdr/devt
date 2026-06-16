@@ -3,13 +3,13 @@
 
 /**
  * Gate unit tests — exercises five named claim-check / substance gates against
- * fixture artifacts. Closes the substance-byte-threshold regression class GF
- * flagged (Cal #23 Wave 2 Q11): the 200-byte drill-down floor in
- * assertGraphifyDecision is load-bearing prose with zero JS coverage, and a
- * future tweak from 200 → 150 would silently change drill-down acceptance
- * across every code review.
+ * fixture artifacts. Closes the substance-byte-threshold regression class:
+ * the 200-byte drill-down floor in assertGraphifyDecision is load-bearing
+ * prose with zero JS coverage, and a future tweak from 200 → 150 would
+ * silently change drill-down acceptance across every code review.
  *
- * Gates covered (line numbers per cal #23 round 7 checkpoint):
+ * Gates covered (line numbers shift as state.cjs grows — use grep on the
+ * function name when navigating):
  *   1. assertGraphifyDecision     — state.cjs:1701
  *   2. assertArtifactPresent      — state.cjs:2778
  *   3. assertFileQuiescent        — state.cjs:3284
@@ -236,7 +236,7 @@ process.stdout.write("== assertClaimChecksResolved ==\n");
   cleanup();
 }
 
-// ── 5. assertVerifierGradedAllAxes — cal #22 F2 axis-walk enforcement ──────
+// ── 5. assertVerifierGradedAllAxes — axis-walk enforcement ─────────────────
 process.stdout.write("== assertVerifierGradedAllAxes ==\n");
 {
   const { runCli, cleanup } = setupDevtFixture();

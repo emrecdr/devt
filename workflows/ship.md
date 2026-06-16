@@ -127,7 +127,7 @@ echo "merge_risk_scan: $SCAN_VERDICT"
 
 <step name="hyperedge_completeness_scan" gate="hyperedge coverage scan complete (or no hyperedges to scan)">
 
-## Hyperedge Completeness Scan (Option A — greenfield calibration #11)
+## Hyperedge Completeness Scan
 
 Graphify's hyperedges are machine-discovered semantic groupings — multi-file scopes that "should change together" (e.g., route + service + repo + readme + test for a billing flow). When this PR's scope touches some-but-not-all members of a hyperedge, flag it before opening the PR so the user can decide: expand scope, defer the missing pieces, or accept partial coverage.
 

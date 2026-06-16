@@ -6,7 +6,7 @@ argument-hint: "<scope-description>"
 
 # Parallel-Lane Code Review Workflow
 
-> **KEEP IN SYNC**: This workflow re-uses the same context_init payload + verify step as `workflows/code-review.md`. When you change one, audit the other. Smoke gate F36b enforces that both files share the same governing_rules / memory_signal / scope_trust prep idioms.
+> **KEEP IN SYNC**: This workflow re-uses the same context_init payload + verify step as `workflows/code-review.md`. When you change one, audit the other. A smoke gate enforces that both files share the same governing_rules / memory_signal / scope_trust prep idioms.
 
 This workflow is invoked from `code-review.md::scope_check` when the review scope exceeds 10 files AND the user opts into parallel via `AskUserQuestion`. It is NOT a user-facing slash command — there is no `/devt:review-parallel`; the routing is internal to `/devt:review`.
 
@@ -59,7 +59,7 @@ If not configured, omit the block.
 
 <step name="context_init" gate="compound init succeeds + lane partition computed">
 
-**MCP-setup inheritance architecture (B-X).** This workflow is dispatched AFTER `code-review.md::context_init` has already run its full 8-substep setup — including the Graphify impact-plan, F16 multi-tier drill-down, F17 god-node check, and claude-mem MCP harvest. The result is `.devt/state/graph-impact.md` + cached `workflow.yaml::memory_signal_json` / `scope_hint_json` / `scope_trust_json`. Lanes consume those READ-ONLY through the dispatch templates below — they do NOT run their own MCP calls. Greenfield audit flagged this as "0 functional MCP calls" — that observation is correct but the architecture is intentional: lanes are MCP-blind by design (per CLAUDE.md::Critical Agent + Workflow Contracts), and graph-impact.md is the orchestrator-mediated handoff that gives lanes the same blast-radius context without each lane re-querying the graph. The single-source preparation also keeps trace records / correlation_ids consistent across all lanes of one review.
+**MCP-setup inheritance architecture.** This workflow is dispatched AFTER `code-review.md::context_init` has already run its full 8-substep setup — including the Graphify impact-plan, multi-tier drill-down, god-node check, and claude-mem MCP harvest. The result is `.devt/state/graph-impact.md` + cached `workflow.yaml::memory_signal_json` / `scope_hint_json` / `scope_trust_json`. Lanes consume those READ-ONLY through the dispatch templates below — they do NOT run their own MCP calls. The "0 functional MCP calls" observation in lane traces is expected: lanes are MCP-blind by design (per CLAUDE.md::Critical Agent + Workflow Contracts), and graph-impact.md is the orchestrator-mediated handoff that gives lanes the same blast-radius context without each lane re-querying the graph. The single-source preparation also keeps trace records / correlation_ids consistent across all lanes of one review.
 
 When this workflow is dispatched WITHOUT a prior `code-review.md::context_init` run (e.g., direct invocation in tests), `STATE.memory_signal_json` will be empty `"{}"`. That's a graceful degradation — lanes still dispatch, just without inherited MCP context — but the orchestrator should re-route to `code-review.md` first when the cached fields are empty AND the project has graphify enabled.
 
@@ -127,7 +127,7 @@ if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MO
   if [ "$LANE_MODE" = "partial" ]; then
     COVERED=$(echo "$LANE_SUG" | jq -r '.covered_count')
     UNCOVERED=$(echo "$LANE_SUG" | jq -r '.uncovered_count')
-    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED}) (NEW-6)"
+    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED})"
   elif [ "$LANE_MODE" = "service_boundary" ]; then
     SB_REASON=$(echo "$LANE_SUG" | jq -r '.reason')
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → service-boundary partition (${SB_REASON}) (R7-W6)"
@@ -154,12 +154,11 @@ echo "partition_lanes: ${PREFIX_COUNT} groups (cap=5 in next step)"
 # Build lanes block. Each prefix becomes one lane. The lanes block is then
 # injected into workflow.yaml (replacing any prior lanes: section).
 # Per-lane sizing (B-VIII): file count + estimated LOC are computed so an
-# oversized lane (> 15 files OR > 800 LOC) is flagged before dispatch. Field
-# signal (greenfield calibration #3 finding #1): Lane C with 25 files /
-# 1577 LOC consistently exhausted code-reviewer's maxTurns budget on both
-# dispatches. The thresholds are heuristics validated against that case —
-# tunable via .devt/config.json::workflow.lane_oversized_thresholds in
-# future, hardcoded here for now.
+# oversized lane (> 15 files OR > 800 LOC) is flagged before dispatch. Why:
+# lanes with ~25 files / ~1500 LOC consistently exhaust code-reviewer's
+# maxTurns budget on both dispatches. The thresholds are heuristics tunable
+# via .devt/config.json::workflow.lane_oversized_thresholds in future,
+# hardcoded here for now.
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LANE_NUM=1
 OVERSIZED_COUNT=0
@@ -209,7 +208,7 @@ echo "Partitioned into ${LANE_COUNT} lanes (path-based, cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
 ```
 
-**Oversized-lane surface (B-VIII)**: when any lane carries `oversized: true` in `workflow.yaml::lanes[]`, surface a one-line summary to the user with paths-based remediation hints. The orchestrator may proceed (the dispatch will still attempt the lane) or use AskUserQuestion to offer narrowing — see the AskUserQuestion block below. Field signal: greenfield Lane C with 25 files / 1577 LOC consistently hit the maxTurns ceiling before findings could be written.
+**Oversized-lane surface (B-VIII)**: when any lane carries `oversized: true` in `workflow.yaml::lanes[]`, surface a one-line summary to the user with paths-based remediation hints. The orchestrator may proceed (the dispatch will still attempt the lane) or use AskUserQuestion to offer narrowing — see the AskUserQuestion block below. Why: lanes with ~25 files / ~1500 LOC consistently hit the maxTurns ceiling before findings can be written.
 
 ```bash
 OVERSIZED_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
@@ -231,7 +230,7 @@ fi
 
 **Foreground parallel dispatch.** Issue ONE message containing N `Task(subagent_type="devt:code-reviewer", …)` calls — one per lane in `workflow.yaml::lanes[]`. Sequential Task calls serialize; only multi-Task-in-one-message gets true parallelism per the Anthropic Task contract (same idiom as `dev-workflow.md:506` researcher+architect parallel dispatch).
 
-**Discoverability tip (F7/F16)**: Each lane needs the canonical envelope per the Q8/Q11 contracts. Rather than hand-rolling N prompts (a documented field-evidence failure mode), generate the paste-ready envelope per lane via:
+**Discoverability tip**: Each lane needs the canonical envelope per the Q8/Q11 contracts. Rather than hand-rolling N prompts (a documented failure mode), generate the paste-ready envelope per lane via:
 
 ```bash
 for LANE_ID in $(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | jq -r '.[].id'); do
@@ -272,10 +271,10 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules>{governing_rules.content from init payload}</governing_rules>`
-- `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` (C7-7)
-- `<rubric_content>{inline_rubrics.code_review}</rubric_content>` (C7-7 — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice)
+- `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>`
+- `<rubric_content>{inline_rubrics.code_review}</rubric_content>` — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice
 
-**L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Field evidence: a prose-only README lane received the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
+**L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Why: a prose-only README lane otherwise receives the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
 
 ```bash
 LANE_FILES_PROSE_ONLY=$(echo "$LANE_FILES_JSON" | jq -r 'all(. as $f | ["md","rst","txt","adoc"] | any($f | test("\\.\(.)$"; "i")))' 2>/dev/null || echo "false")
@@ -312,7 +311,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lane
 
 <step name="substance_check_lanes" gate="every lane has terminal status (substance_pass | stub_redispatched | deferred)">
 
-After dispatch_lanes returns, run `state check-agent-output` on each lane's review file. F28 catches stub outputs (greenfield 2026-05-26 PR #372 5/6-lanes-stub failure mode). Each lane also fires a per-lane Layer-1 claim-check (`state assert-artifact-present code-reviewer:lane-<id>`) so Layer-2's `assertClaimChecksResolved` at finalize sees lane-level resolution semantics — closes the cal #19 coverage gap where parallel reviews had Layer-1 silently absent.
+After dispatch_lanes returns, run `state check-agent-output` on each lane's review file. The substance check catches stub outputs (a common multi-lane failure mode where most lanes return `status:completed` with placeholder bodies). Each lane also fires a per-lane Layer-1 claim-check (`state assert-artifact-present code-reviewer:lane-<id>`) so Layer-2's `assertClaimChecksResolved` at finalize sees lane-level resolution semantics — without this, parallel reviews have Layer-1 silently absent.
 
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
@@ -320,7 +319,7 @@ STUB_LANE_IDS=""
 for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
   LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
   LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
-  # Substance-check race guard (cal #20 §3) — mtime-stability before any
+  # Substance-check race guard — mtime-stability before any
   # read. Mechanically robust against premature substance checks regardless
   # of orchestrator polling discipline. Stats the file at T0, sleeps 500ms,
   # stats again — only proceeds when size + mtime are identical (no active
@@ -371,7 +370,7 @@ If `STUB_LANES_FOR_REDISPATCH` is non-empty, proceed to redispatch_lanes. Otherw
 
 <step name="redispatch_lanes" gate="all stub_redispatched lanes have new outputs OR are deferred">
 
-For each lane with `status=stub_redispatched`, issue ONE re-dispatch with a NARROWED prompt. Identical re-dispatch (same prompt, same scope) wastes budget — greenfield calibration #3 finding #2: "On stub-retry, identical re-dispatch wastes budget; ask for '5 highest-signal findings only' trades completeness for substance." Increment `redispatch_count` BEFORE the Task() call so the next substance_check_lanes pass correctly routes a second stub to deferred.
+For each lane with `status=stub_redispatched`, issue ONE re-dispatch with a NARROWED prompt. Why: identical re-dispatch (same prompt, same scope) wastes budget; trading completeness for substance ("ask for the 5 highest-signal findings only") is more likely to land. Increment `redispatch_count` BEFORE the Task() call so the next substance_check_lanes pass correctly routes a second stub to deferred.
 
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
@@ -488,7 +487,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 <!-- END dispatch:code-reviewer:code_review_parallel -->
 ```
 
-After the dispatch returns, validate that review.md + review.json exist and pass the F28 substance check on review.md (the consolidator could itself return a stub):
+After the dispatch returns, validate that review.md + review.json exist and pass the substance check on review.md (the consolidator could itself return a stub):
 
 ```bash
 SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md)
@@ -505,13 +504,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=consolidate s
 
 <step name="verify" gate="verification.json is written or step is skipped">
 
-> **KEEP IN SYNC**: This step body is a duplicate of `workflows/code-review.md::verify`. When you change one, copy to the other. devt's workflow loader does not support partial-file include. Smoke gate F36b enforces both files share the same `state assert-graphify-decision` + `state check-agent-output` + `state assert-verifier-ran` invocations.
+> **KEEP IN SYNC**: This step body is a duplicate of `workflows/code-review.md::verify`. When you change one, copy to the other. devt's workflow loader does not support partial-file include. A smoke gate enforces both files share the same `state assert-graphify-decision` + `state check-agent-output` + `state assert-verifier-ran` invocations.
 
 _Skip this step if `config.workflow.verification` is `false`._
 
 **Artifact pre-gate**: confirm both `.devt/state/review.md` and `.devt/state/review.json` exist (the consolidator writes these). If either is missing, **STOP with BLOCKED**.
 
-**Substance pre-gate (F28)**: even when the file exists, the consolidator may have returned a placeholder body. Same gate as code-review.md::verify:
+**Substance pre-gate**: even when the file exists, the consolidator may have returned a placeholder body. Same gate as code-review.md::verify:
 
 ```bash
 SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md)

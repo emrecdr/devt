@@ -49,12 +49,11 @@ node -e "
     }
 
     // Refuse to fire if the target file is NOT a descendant of the resolved
-    // project root. Field signal (greenfield 2026-05-28 PM calibration #3,
-    // preflight-denies.jsonl): edits to /tmp/*.md and ~/.claude/plans/*.md
-    // tripped the hook against greenfield-api's scratchpad because the
-    // walk-up resolved greenfield-api as the project root (from cwd) and the
-    // hook then required PREFLIGHT for unrelated files. Out-of-project files
-    // are by definition not governed by this project's memory layer.
+    // project root. Why: edits to /tmp/*.md and ~/.claude/plans/*.md can
+    // trip the hook against an unrelated project's scratchpad because the
+    // walk-up resolves the cwd-anchored project as root and the hook then
+    // requires PREFLIGHT for files outside that project. Out-of-project
+    // files are by definition not governed by this project's memory layer.
     //
     // Symlink resolution: macOS exposes /tmp -> /private/tmp and /var ->
     // /private/var. Node's process.cwd() returns the canonical (resolved)

@@ -2,7 +2,7 @@
 
 Practical decision tree for orchestrators choosing between the `/devt:*` workflows, parameter modes, and direct sub-agent dispatch. Surfaces what each path does, what it costs, and when bypassing the workflow is the right call.
 
-This doc was prompted by greenfield calibration #21 F25: "I bypassed `/devt:workflow` because (a) it felt heavy for waves with locked plans, (b) I didn't know `/devt:workflow --mode=fast` existed, and (c) the workflow file gave the dispatch protocol but not the meta-choice framing."
+This doc exists because operators bypass `/devt:workflow` when (a) it feels heavy for executing fixed waves against a locked plan, (b) they don't know `/devt:workflow --mode=fast` exists, and (c) the workflow file gives the dispatch protocol but not the meta-choice framing.
 
 ---
 
@@ -99,7 +99,7 @@ Reads `.devt/state/` artifacts (impl-summary, test-summary, review verdict), gen
 <memory_signal>{"counts": {...}, "top": [...]}</memory_signal>
 ```
 
-`dispatch-hygiene-guard.sh` exempts envelope-managed dispatches from logging (cal #21 F21 falsification confirmed). If your dispatch has all 3 blocks, the hook is silent — that's success, not a hook failure.
+`dispatch-hygiene-guard.sh` exempts envelope-managed dispatches from logging. If your dispatch has all 3 blocks, the hook is silent — that's success, not a hook failure.
 
 For docs-writer, retro, curator, and devt-coordinator, envelope blocks are not required (they're declared `graphify_inputs: []` in `agents/io-contracts.yaml`).
 

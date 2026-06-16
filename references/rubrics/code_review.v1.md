@@ -45,7 +45,7 @@ A seventh axis — **REJ tombstone alignment** — is a hard fail rather than a 
 
 ## Axis H — Dispatch warnings acknowledgment
 
-Greenfield calibration #21 V6 surfaced an LLM-operator UX failure mode: session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `review.md` MUST include a `## Dispatch warnings (session-scoped)` section.
+Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `review.md` MUST include a `## Dispatch warnings (session-scoped)` section.
 
 **What goes in the section:**
 

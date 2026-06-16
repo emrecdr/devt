@@ -1,8 +1,8 @@
 # devt — Development CLI Reference
 
-Extracted from `docs/INTERNALS.md` per Cal #23 5B simplification. The verbose
-CLI inventory lives here so the runtime-load-bearing INTERNALS.md stays tight.
-CLAUDE.md keeps the short primary list for always-on context budget.
+Extracted from `docs/INTERNALS.md`. The verbose CLI inventory lives here so
+the runtime-load-bearing INTERNALS.md stays tight. CLAUDE.md keeps the
+short primary list for always-on context budget.
 
 ---
 
@@ -20,10 +20,10 @@ node bin/devt-tools.cjs state check-agent-output <path> --structural --baseline=
 # Structural-drift check against a stub-first sentinel snapshot — extracts headings/code-blocks/URLs/paths/inline-codes/bullets via structural-validator.cjs (caveman validate.py port) and reports drift via structural_drift:{ok, errors, warnings, mode}. Default mode=superset (final must contain all baseline structures, may add more — fits devt's stub-first protocol). mode=equality enforces strict identity. Gated by config.validator.structural_mode (default 'warn'); 'off' is a no-op even when the flag is passed.
 
 node bin/devt-tools.cjs state assert-graphify-decision
-# Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs. Cal #22 F1: when plan_tier ∈ {symbol_anchored, bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections AND graphify_decision_mode=block (default), returns ok:false to force F16 drill-down completion. Opt-out via .devt/config.json::graphify_decision_mode: "warn" (mirrors dispatch_hygiene_mode pattern; CON-001 instance #6).
+# Confirms graphify decision artifact + cross-refs _mcp-trace.jsonl for fabricated drill-downs. When plan_tier ∈ {symbol_anchored, bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections AND graphify_decision_mode=block (default), returns ok:false to force drill-down completion. Opt-out via .devt/config.json::graphify_decision_mode: "warn" (mirrors dispatch_hygiene_mode pattern; CON-001 instance #6).
 
 node bin/devt-tools.cjs state assert-verifier-graded-all-axes
-# Cal #22 F2: post-hoc check that the verifier walked every axis in the pinned rubric. Counts both heading-style (`## Axis [A-Z] —`) and table-row-style (`| **X.`) axes; compares against verification.json::criteria_total. Mismatch → ok:false with missing_axes_count surfaced. Workflow_types whose rubrics don't use axis taxonomy (e.g. dev uses verification levels L1-L5.5) return ok:true with explicit skip reason. Greenfield calibration #22 evidence: verifier walked code_review axes A–G and stopped, silently skipping axis H (CON-001 instance #7).
+# Post-hoc check that the verifier walked every axis in the pinned rubric. Counts both heading-style (`## Axis [A-Z] —`) and table-row-style (`| **X.`) axes; compares against verification.json::criteria_total. Mismatch → ok:false with missing_axes_count surfaced. Workflow_types whose rubrics don't use axis taxonomy (e.g. dev uses verification levels L1-L5.5) return ok:true with explicit skip reason. Observed failure mode: a verifier walks the first several axes and silently skips a later axis, returning `satisfied` despite the missing grade (CON-001 instance #7).
 
 node bin/devt-tools.cjs state list-lane-outputs
 # Read workflow.yaml::lanes[] registry with per-lane file existence + size + stale flag (mtime < first_created_at)
@@ -32,7 +32,7 @@ node bin/devt-tools.cjs state update-lane <id> status=<status>
 # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
 
 node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py [--overwrite]
-# Formal registration shortcut for orchestrators with a hand-rolled partition (round 8 W1). Writes the canonical lane entry into workflow.yaml::lanes[] with derived metadata (slug via slugifyLaneName, file_count, est_loc, oversized) + new `registered_at` ISO timestamp. Per-lane files persist to .devt/state/lane-files/<id>.json sidecar (canonical subdir per round 9 #1; not flagged by state cleanup). Validates id matches /^L\d+$/; rejects duplicates without --overwrite. Lock-aware read-modify-write. Replaces the 50-raw_dispatch hygiene-warnings escape hatch greenfield calibration Q3 surfaced
+# Formal registration shortcut for orchestrators with a hand-rolled partition. Writes the canonical lane entry into workflow.yaml::lanes[] with derived metadata (slug via slugifyLaneName, file_count, est_loc, oversized) + new `registered_at` ISO timestamp. Per-lane files persist to .devt/state/lane-files/<id>.json sidecar (canonical subdir; not flagged by state cleanup). Validates id matches /^L\d+$/; rejects duplicates without --overwrite. Lock-aware read-modify-write. Replaces the raw-dispatch escape hatch that orchestrators previously used to express hand-rolled partitions
 
 node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
 # Bulk wrapper (round 8 W2). YAML inline-array files: form + JSON both accepted. Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?}], errors:[]}
@@ -47,7 +47,7 @@ node bin/devt-tools.cjs state assert-preflight-semantic-quality [--threshold=0.4
 # WARN-mode gate reading preflight-brief.json::topic.extraction_confidence; never blocks, returns {ok:true, warn:bool, confidence, threshold, reason}
 
 node bin/devt-tools.cjs state assert-no-raw-dispatches-this-session
-# Post-hoc enforcement (greenfield calibration #12). Scans dispatch-warnings.jsonl for source:raw_dispatch with ts >= first_created_at; BLOCKS workflow finalize when any. Honors dispatch_hygiene_mode={block|warn|off}. Compensates for CC PreToolUse Task-deny not enforcing
+# Post-hoc enforcement. Scans dispatch-warnings.jsonl for source:raw_dispatch with ts >= first_created_at; BLOCKS workflow finalize when any. Honors dispatch_hygiene_mode={block|warn|off}. Compensates for CC PreToolUse Task-deny not enforcing
 
 node bin/devt-tools.cjs state assert-artifact-present <agent>
 # Layer-1 mechanical claim-check. Reads agent's outputs.primary from agents/io-contracts.yaml, asserts the file exists + is non-empty. Returns {ok, agent, expected_path, exists, size_bytes, reason}. Every call persists result to .devt/state/claim-check-failures.jsonl for Layer-2 consumption. Workflow runners call after each output-writing dispatch to verify "agent claims it wrote X" against ground truth. Polymorphic form: `assert-artifact-present <agent>:lane-<id>` resolves expected_path from `workflow.yaml::lanes[].review_file` instead of io-contracts (used by code-review-parallel for per-lane Layer-1 records — each lane persists a distinct stream within the workflow window)
@@ -79,10 +79,10 @@ node bin/devt-tools.cjs state list-instances
 
 ```bash
 node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list]
-# Render an envelope with state-driven placeholder substitution. Defaults from active workflow.yaml when :auto. Opt-in --rules-exclude (round 6 W7) strips matching `## Heading` sections from inlined governing_rules.content before substitution — exact title match, predictable. Field signal: 3 CLAUDE.md sections were cited 0 times across both lanes in greenfield's review (~15-20% per-dispatch saving). Envelope carries a trailing `<!-- rules-excluded: N sections (X.X KB saved) -->` marker for audit. Measured ~34% byte reduction on programmer:dev with 2 sections excluded
+# Render an envelope with state-driven placeholder substitution. Defaults from active workflow.yaml when :auto. Opt-in --rules-exclude strips matching `## Heading` sections from inlined governing_rules.content before substitution — exact title match, predictable. Envelope carries a trailing `<!-- rules-excluded: N sections (X.X KB saved) -->` marker for audit. Typical savings run 15-35% per dispatch depending on which sections are excluded
 
 node bin/devt-tools.cjs dispatch render-lanes [target] [--target=<agent>:<workflow>] [--out=<dir>]
-# Round 8 W3 — emit per-lane envelopes for every entry in workflow.yaml::lanes[]. Default target is code-reviewer:code_review (the canonical per-file review template carrying the C7-7 self-grade directive in its task body — Q12 root-cause fix: hand-rolled raw-dispatch task text consistently omitted C7-7, so emitting envelopes from the canonical template by default makes the bypass structurally impossible). Each lane gets the base envelope + injected <lane_id>, <lane_community>, <lane_files> before </context>; canonical "Write review to .devt/state/review.md" trailer is overridden per-lane to lane.review_file so concurrent lanes don't clobber one path. Stdout mode: concatenated with `<!-- LANE: <id> -->` separators. --out=dir mode: writes one file per lane + returns JSON summary with byte counts. Empty-state path (round 9 #4): clear stderr message + usage hint before exit 2
+# Emit per-lane envelopes for every entry in workflow.yaml::lanes[]. Default target is code-reviewer:code_review (the canonical per-file review template carrying the self-grade directive in its task body — hand-rolled raw-dispatch task text consistently omits the self-grade directive, so emitting envelopes from the canonical template by default makes the bypass structurally impossible). Each lane gets the base envelope + injected <lane_id>, <lane_community>, <lane_files> before </context>; canonical "Write review to .devt/state/review.md" trailer is overridden per-lane to lane.review_file so concurrent lanes don't clobber one path. Stdout mode: concatenated with `<!-- LANE: <id> -->` separators. --out=dir mode: writes one file per lane + returns JSON summary with byte counts. Empty-state path: clear stderr message + usage hint before exit 2
 
 node bin/devt-tools.cjs dispatch compile --check|--write
 # Verifies (or rewrites) every <!-- BEGIN dispatch:agent:workflow_id --> region in workflows/*.md against its template at templates/dispatch/envelopes/. Returns regions_checked + drift array. --check exits 1 when drift exists; --write atomically rewrites drifted bodies
@@ -92,7 +92,7 @@ node bin/devt-tools.cjs dispatch compile --check|--write
 
 ```bash
 node bin/devt-tools.cjs memory candidates-footer
-# Round 5 — finalize-footer convenience wrapper. Replaces the 7-line bash block previously inlined in 4 workflows (code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize). Silent (no stdout) when not ready; emits the canonical `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.` line + leading blank line when ready_to_surface, then touches the cooldown. Always exits 0 — surface failure is best-effort. workflows/next.md keeps the lower-level candidates-status primitive because its variant uses ready_to_surface as a shell variable to gate a downstream AskUserQuestion
+# Finalize-footer convenience wrapper. Replaces the multi-line bash block previously inlined in code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize. Silent (no stdout) when not ready; emits the canonical `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.` line + leading blank line when ready_to_surface, then touches the cooldown. Always exits 0 — surface failure is best-effort. workflows/next.md keeps the lower-level candidates-status primitive because its variant uses ready_to_surface as a shell variable to gate a downstream AskUserQuestion
 ```
 
 ### Build steps (maintainer-only)

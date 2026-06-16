@@ -60,7 +60,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `review-scope.md` | orchestrator | Code-review file list | (not status-gated) |
 | `review.md` | code-reviewer | Code review body | Sidecar (review.json) |
 | `graph-impact.md` | orchestrator | Graphify-derived impact map | (not status-gated) |
-| `topic-symbols-dropped.json` | code-review.md substep 5 | Symbols dropped when `symbol_anchored` truncates >32 from preflight; consumed by F17 step to emit truncation notice in `graph-impact.md` (C7-2) | (not status-gated) |
+| `topic-symbols-dropped.json` | code-review.md substep 5 | Symbols dropped when `symbol_anchored` truncates >32 from preflight; consumed by the impact step to emit a truncation notice in `graph-impact.md` | (not status-gated) |
 | `continue-here.md` | `/devt:workflow --pause` | Session-resume narrative | (not status-gated) |
 
 ### Per-workflow artifacts (markdown + JSON sidecar pairs)
@@ -186,14 +186,14 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 
 ### `state evict-workflow-artifacts` + `state cleanup` (both auto-fired on every `init *`)
 
-`init.cjs` runs two complementary sweeps before re-stamping `workflow.yaml`. Together they cover the three classes of stale state that calibration #8 + #9 surfaced:
+`init.cjs` runs two complementary sweeps before re-stamping `workflow.yaml`. Together they cover three classes of stale state:
 
 1. **Explicit allowlist** (evict-workflow-artifacts) — gate-satisfaction markers (`consolidator-ran.txt`, `auto-curator-considered.txt`, `reuse-search-attempted.txt`, `knowledge-candidates-none.txt`, etc.) plus verification sidecars (`verification.{md,json}`).
-2. **Workflow-scoped canonical sweep** (evict-workflow-artifacts) — `WORKFLOW_SCOPED_CANONICAL` set in `state-audit.cjs` covers `review.{md,json}`, `test-summary.{md,json}`, `impl-summary.{md,json}`, `verification.{md,json}`, `debug-summary.md`. Each is single-PR; eviction is gated by `mtime < first_created_at` so current-session writes survive. Greenfield calibration #9 evidence: verifier first-pass-failed because it graded against PR #374's stale `review.md` still on disk during PR #376's review session.
+2. **Workflow-scoped canonical sweep** (evict-workflow-artifacts) — `WORKFLOW_SCOPED_CANONICAL` set in `state-audit.cjs` covers `review.{md,json}`, `test-summary.{md,json}`, `impl-summary.{md,json}`, `verification.{md,json}`, `debug-summary.md`. Each is single-PR; eviction is gated by `mtime < first_created_at` so current-session writes survive. Without this sweep, a verifier first-pass-fails because it grades against a stale `review.md` from a prior PR still on disk.
 3. **Slug-variant regex sweep** (evict-workflow-artifacts) — matches `ALLOWED_PATTERNS` (`review-*.md`, `review-lane-*.{md,json}`, `impl-summary-*.{md,json}`, `test-summary-*.{md,json}`, `verification-*.{md,json}`, `slice-*.md`), also gated by `mtime < first_created_at`.
-4. **Ad-hoc bucket sweep** (cleanupStateFiles) — `init.cjs` calls `cleanupStateFiles({ staleDays: 1, adHocStaleDays: 1, adHocCutoffMtime: <prior_workflow_created_at>, patternAllowedCutoffMtime: <prior_workflow_created_at> })`. Both `adHocCutoffMtime` AND `patternAllowedCutoffMtime` (when set) take precedence over their respective `*StaleDays` calendar-age gates; `init.cjs` reads `workflow.yaml::created_at` BEFORE the strip+restamp and passes it uniformly for both buckets so anything in either bucket older than the PRIOR workflow's start gets archived. Falls back to calendar-age gates when `created_at` is unavailable. Catches multi-PR-per-day residue in BOTH ad-hoc files (greenfield calibration #10: ~16 files from prior same-day sessions) AND pattern_allowed files (greenfield calibration #11: 5 stale `review-lane-*.md` files from prior-day session that escaped the calendar-age gate). Recent files in both buckets (current-session work-in-progress) are preserved.
+4. **Ad-hoc bucket sweep** (cleanupStateFiles) — `init.cjs` calls `cleanupStateFiles({ staleDays: 1, adHocStaleDays: 1, adHocCutoffMtime: <prior_workflow_created_at>, patternAllowedCutoffMtime: <prior_workflow_created_at> })`. Both `adHocCutoffMtime` AND `patternAllowedCutoffMtime` (when set) take precedence over their respective `*StaleDays` calendar-age gates; `init.cjs` reads `workflow.yaml::created_at` BEFORE the strip+restamp and passes it uniformly for both buckets so anything in either bucket older than the PRIOR workflow's start gets archived. Falls back to calendar-age gates when `created_at` is unavailable. Catches multi-PR-per-day residue in BOTH ad-hoc files (handfuls of leftover files from prior same-day sessions) AND pattern_allowed files (stale `review-lane-*.md` files from prior-day sessions that escape the calendar-age gate). Recent files in both buckets (current-session work-in-progress) are preserved.
 
-Current-session writes are preserved by the mtime gates in (2), (3), and (4). Cross-workflow task outputs (`spec.md`, `plan.md`, `decisions.md`, `scratchpad.md`) are NOT in any sweep — they persist by design. Calibration timeline: #8 added (1)+(3); #9 added (2)+(4) after greenfield's session showed yesterday's `review.md` + accumulated ad-hoc files were still contaminating today's workflow.
+Current-session writes are preserved by the mtime gates in (2), (3), and (4). Cross-workflow task outputs (`spec.md`, `plan.md`, `decisions.md`, `scratchpad.md`) are NOT in any sweep — they persist by design.
 
 ---
 

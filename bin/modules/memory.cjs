@@ -135,11 +135,11 @@ function getDbPath() {
 //                                          (anchored to session, not clock)
 //   - default (no arg)                  → session-anchor with 24h fallback
 //
-// H10-v2 (greenfield calibration #10): the 5-min minutes-based default was
-// too tight for real sessions (greenfield's validate ran 10h after the
-// graphify call burst — a 5-min OR 60-min window both miss). Session anchor
-// is the right semantic: "if THIS session ever successfully called graphify,
-// the probe failure is anomalous and the warning is a false positive".
+// A short minutes-based default is too tight for real sessions (validate
+// often runs hours after the graphify call burst — a 5-min OR 60-min
+// window both miss). Session anchor is the right semantic: "if THIS
+// session ever successfully called graphify, the probe failure is
+// anomalous and the warning is a false positive".
 function recentSuccessfulGraphifyTraceCount(arg) {
   try {
     const tracePath = path.join(getMemoryRoot(), "_mcp-trace.jsonl");
@@ -967,11 +967,10 @@ function listRejectedKeywords() {
   `).all());
 }
 
-// WI-3 (greenfield cal #17 §J): validate that an entry's declared symbols
-// still exist in the current codebase. Catches stale memory entries that
-// propagate as false-positive risk warnings (cal #17 entry 14398 case:
-// memory wrongly flagged "2-caller risk" for update_license_rights; the
-// symbol existed but stale claims propagated). Scope: ONLY entries whose
+// Validate that an entry's declared symbols still exist in the current
+// codebase. Catches stale memory entries that propagate as false-positive
+// risk warnings (observed: a memory entry wrongly flagging "2-caller risk"
+// for a symbol because stale claims propagated). Scope: ONLY entries whose
 // doc_type is in the "risk warning" set — lessons + rejected (REJ
 // tombstones). Decisions/concepts/flows are reference material, not
 // propagating warnings — validating them adds cost without payback.
@@ -1210,18 +1209,18 @@ function validateSymbolsViaGraphify(docs) {
   let graphify;
   try { graphify = require("./graphify.cjs"); } catch { return []; }
 
-  // V65-2 (greenfield calibration #6): defer to graphify.status() as the
-  // authoritative readiness signal BEFORE entering the per-symbol probe
-  // loop. The legacy path ran 3 probe queries against the graph and
-  // aborted with GRAPHIFY_UNREACHABLE if any subset failed consecutively —
-  // even when the orchestrator's impact-plan path had successfully called
-  // blast_radius + get_neighbors seconds earlier. Two consumers, two
-  // retry budgets, divergent verdicts. Sharing a single status check
-  // gives validate the same "graphify is healthy" signal the orchestrator
-  // already trusted. When status reports not-ready, skip stale-symbol
-  // checks entirely with a STRUCTURED info-level note instead of the
-  // legacy silent `return []` — users see explicitly why the check was
-  // skipped rather than wondering whether validate ran the symbol pass.
+  // Defer to graphify.status() as the authoritative readiness signal
+  // BEFORE entering the per-symbol probe loop. The legacy path ran 3 probe
+  // queries against the graph and aborted with GRAPHIFY_UNREACHABLE if any
+  // subset failed consecutively — even when the orchestrator's impact-plan
+  // path had successfully called blast_radius + get_neighbors seconds
+  // earlier. Two consumers, two retry budgets, divergent verdicts. Sharing
+  // a single status check gives validate the same "graphify is healthy"
+  // signal the orchestrator already trusted. When status reports not-ready,
+  // skip stale-symbol checks entirely with a STRUCTURED info-level note
+  // instead of the legacy silent `return []` — users see explicitly why
+  // the check was skipped rather than wondering whether validate ran the
+  // symbol pass.
   const graphifyState = graphify.status();
   if (!graphifyState || graphifyState.state !== "ready") {
     return [{
@@ -1250,23 +1249,24 @@ function validateSymbolsViaGraphify(docs) {
         if (r && r.degraded) {
           consecutiveErrors++;
           if (consecutiveErrors >= 3) {
-            // H10 (greenfield calibration #9): the validator's queryGraph
-            // probe is a SEPARATE code path from the orchestrator's MCP
-            // dispatches. Greenfield evidence: 95 successful graphify MCP
-            // calls in the last hour, 0 errors, but the validator still
-            // claimed "3× consecutive failures". Check _mcp-trace.jsonl for
-            // any successful graphify call in the recent window — if found,
-            // the probe path is the one that's broken, not graphify itself.
-            // Downgrade to info-only so the warning surface doesn't cry wolf.
+            // The validator's queryGraph probe is a SEPARATE code path from
+            // the orchestrator's MCP dispatches. Observed: many successful
+            // graphify MCP calls in the last hour with 0 errors while the
+            // validator still claimed "3× consecutive failures". Check
+            // _mcp-trace.jsonl for any successful graphify call in the
+            // recent window — if found, the probe path is the one that's
+            // broken, not graphify itself. Downgrade to info-only so the
+            // warning surface doesn't cry wolf.
             //
-            // H10-v2 (greenfield calibration #10): use session-anchor (first_created_at)
-            // instead of a fixed minutes window. Graphify activity is bursty in real
-            // sessions (~100 calls during context_init, then quiet); memory validate
-            // typically runs HOURS after the burst, well past any reasonable minutes
-            // window. Session-anchor semantic: "if THIS session ever successfully
-            // called graphify, the probe failure is anomalous". Override via
-            // memory.graphify_probe_trace_window_minutes config for projects that
-            // prefer a sliding window.
+            // Use session-anchor (first_created_at) instead of a fixed
+            // minutes window. Graphify activity is bursty in real sessions
+            // (many calls during context_init, then quiet); memory validate
+            // typically runs HOURS after the burst, well past any
+            // reasonable minutes window. Session-anchor semantic: "if THIS
+            // session ever successfully called graphify, the probe failure
+            // is anomalous". Override via
+            // memory.graphify_probe_trace_window_minutes config for
+            // projects that prefer a sliding window.
             let recentOk;
             let modeDescription;
             try {
@@ -1496,10 +1496,10 @@ function run(subcommand, args) {
       else if (hasTop) { mode = "compact"; limit = Math.max(1, parseInt(topArg.split("=")[1], 10) || 5); }
       else if (wantCompact) mode = "compact";
       const out = queryFTS(terms, { limit, docType, mode });
-      // WI-3: --validate-refs enriches full-mode results with affects_symbols
-      // existence check. Only fires on full mode (aggregates have no row-level
-      // payload). Scope-filtered inside validateRefs (only lesson/rejected
-      // entries get validated; others return null).
+      // --validate-refs enriches full-mode results with affects_symbols
+      // existence check. Only fires on full mode (aggregates have no
+      // row-level payload). Scope-filtered inside validateRefs (only
+      // lesson/rejected entries get validated; others return null).
       if (wantValidateRefs && mode === "full" && Array.isArray(out)) {
         for (const result of out) {
           if (result && result.id) {
@@ -1711,14 +1711,13 @@ function run(subcommand, args) {
       // Discovery engine — harvests #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-nodes
       // entries into _suggestions.md for curator review. NEVER writes permanent doc files.
       //
-      // V65-1 (greenfield calibration #6): the auto-index PostToolUse hook
-      // reindexes per-file edits but doesn't observe writeSuggestionsReport's
-      // atomic write to _suggestions.md (atomicWriteFileSync uses rename-after-
-      // tmp-write which the hook's mtime-watch may miss). Result: FTS5 index
-      // drifts behind _suggestions.md by ~1h+ on active sessions until the
-      // next manual edit triggers a hook fire. Fix: invoke rebuildIndex
-      // immediately after writeSuggestionsReport so the index stays current
-      // with the document the CLI just produced.
+      // The auto-index PostToolUse hook reindexes per-file edits but doesn't
+      // observe writeSuggestionsReport's atomic write to _suggestions.md
+      // (atomicWriteFileSync uses rename-after-tmp-write which the hook's
+      // mtime-watch may miss). Result: FTS5 index drifts behind
+      // _suggestions.md until the next manual edit triggers a hook fire.
+      // Fix: invoke rebuildIndex immediately after writeSuggestionsReport
+      // so the index stays current with the document the CLI just produced.
       const discovery = require("./discovery.cjs");
       const result = discovery.harvest({});
       const suggestionsPath = discovery.writeSuggestionsReport(result);

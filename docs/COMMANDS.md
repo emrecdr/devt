@@ -425,7 +425,7 @@ devt collects two independent telemetry streams in `.devt/state/dispatch-warning
 | `raw_dispatch` | `hooks/dispatch-hygiene-guard.sh` (PreToolUse) | Task call to a `devt:*` agent without ANY of 10 envelope-signal blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<original_review>`, `<lane_scope>`, `<god_node_warnings>`, `<prior_outputs>`, `<provenance_protocol>`) |
 | `task_output_bytes` | `hooks/task-truncation-detector.sh` (PostToolUse) | Sub-agent return triggers a cliff: `near_cliff` (output ≥ 40KB threshold), `low_output` (output < 500B AND prompt ≥ 1000B per F26's proportional gate), or `mid_task_language` (continuation phrasing in return) |
 
-**Envelope-managed dispatches are intentionally silent.** If you dispatch `devt:programmer` with all 3 canonical envelope blocks (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`) and you don't see your dispatch in `dispatch-warnings.jsonl`, that's success — not a hook failure. The detector classified your dispatch as workflow-managed and exited at the envelope check. This was field-validated by cal #21 F21 falsification: a deliberate envelope-less probe dispatch DID appear; the prior envelope-injected dispatches correctly did NOT.
+**Envelope-managed dispatches are intentionally silent.** If you dispatch `devt:programmer` with all 3 canonical envelope blocks (`<scope_trust>` + `<scope_hint>` + `<memory_signal>`) and you don't see your dispatch in `dispatch-warnings.jsonl`, that's success — not a hook failure. The detector classified your dispatch as workflow-managed and exited at the envelope check. This is field-validated: a deliberate envelope-less probe dispatch DOES appear in the log; envelope-injected dispatches correctly do NOT.
 
 `docs-writer`, `retro`, `curator`, and `devt-coordinator` are additionally exempt from raw_dispatch detection per `agents/io-contracts.yaml` (`graphify_inputs: []` declares no envelope contract). The detector exits silently for those agents regardless of prompt shape.
 
@@ -444,11 +444,11 @@ Invalid `--since` (non-ISO) and invalid `--limit` (non-positive integer) exit 2 
 
 ### The `low_output` canary (A1)
 
-`low_output` is the dominant signal in projects with substantive sub-agent work (greenfield 6% vs devt 0.08% — see CON-002). It catches three failure modes:
+`low_output` is the dominant signal in projects with substantive sub-agent work (see CON-002). It catches three failure modes:
 
-1. **Credential expiry returning zero tokens.** The W12 case (cal #21 F-OBS-1): subagent died at "Not logged in" returning 0 bytes. `low_output: true` would have fired had the proportional gate not been added; F26 added the prompt-size gate so it now correctly fires here (prompt was ~5KB envelope; output 0 bytes).
+1. **Credential expiry returning zero tokens.** Subagent dies at "Not logged in" returning 0 bytes. `low_output: true` fires correctly when the prompt-size gate is active (prompt was a substantive envelope; output 0 bytes).
 2. **Auth/permission failure mid-dispatch.** Similar pattern to credential expiry — agent gets blocked before substantive work, returns a stub.
-3. **91-tool-call wall hit.** Greenfield's "Now B.5" case (cal #17): programmer returned 140 bytes after substantial work because it hit the Claude Code tool-call ceiling.
+3. **Tool-call wall hit.** A subagent returns a small "continuation marker" reply (e.g. "Now B.5") after substantial work because it hit the Claude Code tool-call ceiling.
 
 **Recovery prescription when `low_output: true` fires** with `near_cliff: false` and `mid_task_language: false`:
 

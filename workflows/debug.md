@@ -48,7 +48,7 @@ if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
 fi
 ```
 
-This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails. The `assert-preflight-fresh` gate catches orchestrators that skip `preflight generate` and reuse a stale brief from a prior workflow — field-validated: greenfield 2026-05-21 ran a code-review workflow where the brief was 4 hours older than `workflow.yaml::created_at`, leading to tier=skip from stale topic.symbols.
+This produces `.devt/state/preflight-brief.md` so the debugger reads governing rules + REJ tombstones before proposing fixes (especially load-bearing for "we already tried that" cases). Skip silently if the call fails. The `assert-preflight-fresh` gate catches orchestrators that skip `preflight generate` and reuse a stale brief from a prior workflow — a stale brief (hours older than `workflow.yaml::created_at`) leads to tier=skip from stale topic.symbols.
 
 **Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8 — high-leverage starting set for the debugger's hypothesis search:
 
@@ -104,7 +104,7 @@ fi
 When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
 
 1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, impact map with `direct_dependents`.
-2. **Drill-down on top-3 dependents** (F16). Parse `direct_dependents`, take top-3 by impact_size, call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for each. Debugger uses drill-down data to find callers across the bug's blast radius that may exhibit the same symptom.
+2. **Drill-down on top-3 dependents**. Parse `direct_dependents`, take top-3 by impact_size, call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for each. Debugger uses drill-down data to find callers across the bug's blast radius that may exhibit the same symptom.
 
 Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. The debugger Reads this file when present. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above — debugger falls back to grep+stack trace.
 
@@ -167,7 +167,7 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 ")
 <!-- END dispatch:debugger:debug -->
 
-**Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Closes the cal #19 coverage gap — debug.md's Layer-2 `assert-claim-checks-resolved` ran at finalize but no Layer-1 calls ever fired, so `claim-check-failures.jsonl` stayed absent and the gate passed vacuously regardless of dispatch outcome.
+**Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Why: without a Layer-1 check at the dispatch site, Layer-2's `assert-claim-checks-resolved` at finalize passes vacuously when no Layer-1 calls ever fired (`claim-check-failures.jsonl` stays absent regardless of dispatch outcome).
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present debugger)
@@ -250,7 +250,7 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 <step name="report" gate="results presented to user">
 ## Step 4: Report Results
 
-**Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Greenfield calibration #2 finding 6a#1: candidates described in prose but never tagged → never reached the curator. Runs BEFORE the scratchpad truncate below — that order matters.
+**Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Why: candidates described in prose but never tagged never reach the curator. Runs BEFORE the scratchpad truncate below — that order matters.
 
 **Layer-2 claim-check resolution gate.** Block report on any unresolved Layer-1 `assert-artifact-present` failures. Mirrors S1's post-hoc pattern. Set `claim_check_mode: "warn"` in config to opt out.
 
@@ -263,7 +263,7 @@ if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-**Dispatch-hygiene post-hoc gate (greenfield calibration #12, S1).** Block report on any in-session raw devt:* dispatches. CC doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
+**Dispatch-hygiene post-hoc gate.** Block report on any in-session raw devt:* dispatches. Claude Code doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)

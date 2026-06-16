@@ -106,11 +106,11 @@ decisions (architecture, security stance, naming conventions) still default to
 **When NO tooling-evolving signal is present** (clear project decision, security
 posture, architectural invariant), pre-recommend `active`.
 
-Greenfield calibration #2 finding 7c-7d: "Tooling-related candidates from THIS
-session (Hurl scalar predicate behavior, CONCURRENTLY migration pattern) should
-likely auto-route to candidate status rather than asking — they're descriptive,
-not opinionated." This pre-recommendation moves that judgment up-front so the
-user accepts/overrides instead of hunting through five symmetric options.
+Tooling-related candidates from a working session (e.g. test framework
+predicate behavior, migration patterns) should auto-route to candidate
+status rather than asking — they're descriptive, not opinionated. This
+pre-recommendation moves that judgment up-front so the user
+accepts/overrides instead of hunting through five symmetric options.
 
 For each candidate, present (apply the pre-recommendation by putting the
 recommended option FIRST with the suffix `(Recommended)` on the label;

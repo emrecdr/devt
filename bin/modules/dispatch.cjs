@@ -457,11 +457,10 @@ function cmdRenderFilled(target, options) {
   const subs = buildSubstitutionTable(agent);
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
-  // entries) section strip by exact `## Heading` match. Field signal
-  // (greenfield calibration thread Q6): 3 sections were cited 0 times across
-  // both L1 and L6 lane reviews — ~15-20% of CLAUDE.md per dispatch. Per-
-  // dispatch opt-in keeps project portability open; promote to config after
-  // field evidence accumulates.
+  // entries) section strip by exact `## Heading` match. Per-dispatch opt-in
+  // keeps project portability open; promote to config after field evidence
+  // accumulates that specific sections are routinely uncited across
+  // dispatches.
   const excludeHeadings = (options && options.rulesExclude) || [];
   let totalSaved = 0;
   let totalSectionsCut = 0;
@@ -605,10 +604,10 @@ function cmdDecompose(target) {
   // byte range. Nested tags (e.g. <review_checklist> inside <governing_rules>)
   // produce overlapping ranges — the prior implementation summed their
   // bytes naively, producing negative wrapper_bytes when nesting was deep.
-  // Fix (greenfield audit 2026-06-10): dedupe by NESTING. A tag's bytes
-  // are counted toward the outermost containing tag; inner tags appear
-  // in blocks[] for visibility (nested_in field) but their bytes are
-  // attributed only to the outermost ancestor in the summary totals.
+  // Dedupe by NESTING. A tag's bytes are counted toward the outermost
+  // containing tag; inner tags appear in blocks[] for visibility
+  // (nested_in field) but their bytes are attributed only to the outermost
+  // ancestor in the summary totals.
   function findTagRanges(name, kind) {
     const escapedName = name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
     const re = new RegExp("<" + escapedName + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + escapedName + ">", "g");
@@ -895,8 +894,8 @@ function run(subcommand, args) {
     case "render-filled": {
       // Accept both colon-joined `<agent>:<workflow_id|auto>` (canonical) and
       // space-separated `<agent> <workflow_id|auto>` (more intuitive for typed
-      // CLI use). cal #19 §7 F3: colon-only is non-obvious; users naturally
-      // try space-separated first. Both forms render the same envelope.
+      // CLI use). Colon-only is non-obvious; users naturally try
+      // space-separated first. Both forms render the same envelope.
       const positional = args.filter(a => !a.startsWith("--"));
       let target = positional[0];
       if (target && !target.includes(":") && positional[1]) {
@@ -906,9 +905,9 @@ function run(subcommand, args) {
       // from governing_rules.content. Matches by exact `## Heading` title.
       // Config-driven auto-wire. Reads
       // `.devt/config.json::rules.exclude_sections: []` and merges with the
-      // CLI flag list (dedupe). Field signal: greenfield never used the flag
-      // because it was unadvertised; project-level config makes the 18.1KB/
-      // dispatch saving accrue automatically without per-call plumbing.
+      // CLI flag list (dedupe). Project-level config makes the per-dispatch
+      // saving accrue automatically without per-call plumbing — important
+      // because an unadvertised CLI flag rarely gets used in practice.
       const excludeArg = args.find(a => a.startsWith("--rules-exclude="));
       const flagList = excludeArg
         ? excludeArg.slice("--rules-exclude=".length).split(",").map(s => s.trim()).filter(Boolean)
@@ -943,10 +942,10 @@ function run(subcommand, args) {
       // Render per-lane envelopes for every lane registered in
       // workflow.yaml::lanes[]. Default target is code-reviewer:code_review
       // — the canonical per-file review template that already carries the
-      // C7-7 self-grade directive in its task body. Greenfield calibration
-      // thread Q12 receipts: hand-rolled raw-dispatch task text consistently
-      // omits C7-7, so emitting envelopes from the canonical template by
-      // default makes the bypass structurally impossible.
+      // self-grade directive in its task body. Hand-rolled raw-dispatch
+      // task text consistently omits the self-grade directive, so emitting
+      // envelopes from the canonical template by default makes the bypass
+      // structurally impossible.
       //
       // Args: [target] [--target=agent:workflow] [--out=dir]
       const positional = args.filter(a => !a.startsWith("--"));
@@ -987,11 +986,11 @@ function run(subcommand, args) {
 }
 
 // Render per-lane envelopes for every lane registered in workflow.yaml::lanes[].
-// Each lane gets the canonical template body (with C7-7 directive baked in)
-// plus injected <lane_id>, <lane_community>, <lane_files> blocks and a lane-
-// specific output path override. When outDir is set, writes one file per
-// lane and returns a JSON summary; otherwise returns concatenated text with
-// <!-- LANE: <id> --> separators.
+// Each lane gets the canonical template body (with the self-grade directive
+// baked in) plus injected <lane_id>, <lane_community>, <lane_files> blocks
+// and a lane-specific output path override. When outDir is set, writes one
+// file per lane and returns a JSON summary; otherwise returns concatenated
+// text with <!-- LANE: <id> --> separators.
 // Merge config-level `rules.exclude_sections`
 // with the CLI flag list. Returns deduped array. Empty when neither source
 // has entries. Safe on missing config / missing nested key — returns the flag

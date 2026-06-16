@@ -71,9 +71,8 @@ function _logEntry(entry) {
 // return path persists an entry in .devt/state/static-compress.jsonl,
 // not just the success path. Prior implementation only called _logEntry
 // inline on success; refusal returns (mode=off, sensitive path, backup
-// exists, drift, etc.) left no audit trail. Greenfield 2026-06-10 surfaced
-// this: 14 files compressed but no log entries — the success calls had
-// logged but the subsequent refusals on re-runs didn't.
+// exists, drift, etc.) left no audit trail — so re-runs over already-
+// processed files looked silent in the log even when they short-circuited.
 function _logAndReturn(action, result) {
   _logEntry({ action, ts: new Date().toISOString(), ...result });
   return result;

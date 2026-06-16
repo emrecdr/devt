@@ -14,8 +14,8 @@ on:
     tags:
       - 'v*'
   # Manual fallback for the silent-skip pattern where a bulk `git push --tags`
-  # didn't fire the per-tag push event (greenfield 2026-05-27: v0.58.1–v0.62.0
-  # had to be backfilled by hand). Re-run via:
+  # didn't fire the per-tag push event (observed: bulk-pushing 5 sequential
+  # patch tags can result in only the latest tag's workflow firing). Re-run via:
   #   gh workflow run release.yml -f tag=vX.Y.Z
   workflow_dispatch:
     inputs:

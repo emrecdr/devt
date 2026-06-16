@@ -542,17 +542,17 @@ function initWorkflow(task, pluginRoot, initVerb) {
   try {
     const { evictWorkflowArtifacts, cleanupStateFiles } = require("./state-audit.cjs");
     evictWorkflowArtifacts({ dryRun: false });
-    // H1 (greenfield calibration #9): the workflow-artifact evict is keyed to a
-    // fixed allowlist + slug-variant regex, but state accumulates ad-hoc
-    // filenames that no regex catches. Wire cleanup here so every init *
-    // sweep covers both gate markers AND the ad_hoc bucket.
+    // The workflow-artifact evict is keyed to a fixed allowlist + slug-
+    // variant regex, but state accumulates ad-hoc filenames that no regex
+    // catches. Wire cleanup here so every init * sweep covers both gate
+    // markers AND the ad_hoc bucket.
     //
-    // H1-v2 (greenfield calibration #10): read the PRIOR workflow's
-    // created_at from workflow.yaml BEFORE init's strip+restamp. Pass it
-    // as adHocCutoffMtime so ad-hoc files older than the prior workflow's
-    // start get archived — catches multi-PR-per-day residue (greenfield's
-    // 16 leftover files like simplify-agent*-*.md, impl-wave-{A..E}.md).
-    // Falls back to staleDays=1 when created_at is unavailable.
+    // Read the PRIOR workflow's created_at from workflow.yaml BEFORE
+    // init's strip+restamp. Pass it as adHocCutoffMtime so ad-hoc files
+    // older than the prior workflow's start get archived — catches
+    // multi-PR-per-day residue (e.g. handfuls of leftover lane/wave files
+    // from yesterday's session). Falls back to staleDays=1 when
+    // created_at is unavailable.
     let priorCreatedAt = null;
     try {
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -568,23 +568,22 @@ function initWorkflow(task, pluginRoot, initVerb) {
       staleDays: 1,
       adHocStaleDays: 1,
       adHocCutoffMtime: priorCreatedAt,
-      // H1-v3 (greenfield calibration #11): same cutoff for pattern_allowed
-      // catches stale review-lane-*.md from prior same-day workflows that
-      // calendar-age `staleDays=1` couldn't catch.
+      // Same cutoff for pattern_allowed catches stale review-lane-*.md
+      // from prior same-day workflows that calendar-age `staleDays=1`
+      // couldn't catch.
       patternAllowedCutoffMtime: priorCreatedAt,
     });
   } catch { /* non-fatal */ }
 
   // Reset workflow.yaml on every init * call so stale prior-session values
   // (workflow_id, workflow_type, created_at from a closed workflow) never
-  // bleed into a new session. PRESERVATION RULE (greenfield audit B4
-  // 2026-06-10): when the existing workflow.yaml has `active: true`, the
-  // workflow is still in-flight — preserve created_at + workflow_id so
-  // mcp-stats / dispatch-warnings / gate-trace correlation across phase
-  // advances remains intact. Stripping on every init was rotating IDs
-  // dozens of times within a single conceptual workflow (greenfield
-  // observed 42 IDs in one workflow_id_history). Only strip when the
-  // prior workflow is closed (active: false or absent).
+  // bleed into a new session. PRESERVATION RULE: when the existing
+  // workflow.yaml has `active: true`, the workflow is still in-flight —
+  // preserve created_at + workflow_id so mcp-stats / dispatch-warnings /
+  // gate-trace correlation across phase advances remains intact. Stripping
+  // on every init was rotating IDs dozens of times within a single
+  // conceptual workflow. Only strip when the prior workflow is closed
+  // (active: false or absent).
   const workflowTypeForVerb = WORKFLOW_TYPE_BY_INIT_VERB[initVerb] || null;
   if (workflowTypeForVerb) {
     try {
@@ -606,11 +605,11 @@ function initWorkflow(task, pluginRoot, initVerb) {
           yaml = yaml
             .replace(/^created_at:.*\n?/gm, "")
             .replace(/^workflow_id:.*\n?/gm, "")
-            // H7 (greenfield calibration #9): lanes[] are workflow-scoped to
-            // code_review_parallel — they describe THIS PR's partition, not a
-            // persistent registry. Greenfield's PR #376 review saw PR #374's
-            // lanes still in workflow.yaml because the old parser preserved the
-            // block. Strip both the bare-key marker (rare empty form) AND the
+            // lanes[] are workflow-scoped to code_review_parallel — they
+            // describe THIS PR's partition, not a persistent registry.
+            // Without this strip, a new review can inherit stale lanes
+            // from the prior PR because the parser preserves the block.
+            // Strip both the bare-key marker (rare empty form) AND the
             // nested block ("lanes:\n  - id:..." with continuation lines).
             .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
         }
