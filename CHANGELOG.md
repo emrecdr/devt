@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.96.0] - 2026-06-16
+
 ### Cal #25 — doc slim + ephemeral-ref sweep + stale-plans cleanup
 
 Three-track doc-slim pass aligned with north-star goals (output quality preserved, token cost reduced per dispatch). Net change: 48 files modified, 7 files deleted, 1 file created; **+981 / -7032 lines** (-5965 from plan deletions, -86 net from prose density).
