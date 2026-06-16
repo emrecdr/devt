@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.95.0] - 2026-06-16
+
 ### Cal #23 docs sync — rounds 5-9 surfaces documented across operator + internals docs
 
 Doc-only sync covering all CLI surfaces, architecture, and state-contract changes shipped across rounds 5-9. Six files updated, +75 / −1 lines. No code change.
