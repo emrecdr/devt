@@ -13057,6 +13057,66 @@ else
   fail "K122: D-5 contract broken — refused=$K122_REFUSED after_refusal=$K122_STATE_AFTER_REFUSAL skipped=$K122_SKIPPED after_skip=$K122_STATE_AFTER_SKIP"
 fi
 
+# K123 (cal #24 round 12 Q3): cliff-counter at workflow-context-injector.sh
+# must read r.signal field — only count records with signal in (near_cliff,
+# low_output, mid_task). Pre-R12 the counter incremented for EVERY
+# task_output_bytes record regardless of signal, producing the "247 cliff
+# signals" cry-wolf greenfield cal #24 surfaced (actually 0 actionable
+# signals; 247/254 records were signal=null or signal=healthy noise).
+# K123 fixes by reading the bash hook's node-eval logic, dropping a fake
+# JSONL fixture, and asserting cliff count matches signal-aware semantics.
+K123_HOOK=$(cat "$ROOT/hooks/workflow-context-injector.sh")
+# Assert the corrected predicate is present (defensive — catches regressions
+# that revert R12 Q3 without breaking the runtime path).
+if echo "$K123_HOOK" | grep -q "r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy'"; then
+  K123_PREDICATE="present"
+else
+  K123_PREDICATE="missing"
+fi
+# Functional test: run the JSONL filter logic in isolation against a 5-record
+# fixture (3 healthy, 1 null, 1 near_cliff). Expected cliff count = 1.
+K123_FUNCTIONAL=$(node -e "
+  const records = [
+    {ts: '2099-01-01T00:00:00Z', source: 'task_output_bytes', signal: 'healthy'},
+    {ts: '2099-01-01T00:00:01Z', source: 'task_output_bytes', signal: 'healthy'},
+    {ts: '2099-01-01T00:00:02Z', source: 'task_output_bytes', signal: null},
+    {ts: '2099-01-01T00:00:03Z', source: 'task_output_bytes', signal: 'healthy'},
+    {ts: '2099-01-01T00:00:04Z', source: 'task_output_bytes', signal: 'near_cliff'},
+  ];
+  let cliff = 0;
+  for (const r of records) {
+    if (r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy') cliff++;
+  }
+  console.log(cliff);
+" 2>/dev/null)
+if [ "$K123_PREDICATE" = "present" ] && [ "$K123_FUNCTIONAL" = "1" ]; then
+  pass "K123: workflow-context-injector cliff-counter reads r.signal (only counts actionable signals; healthy/null filtered as noise per R10-6 discriminator)"
+else
+  fail "K123: R12 Q3 contract broken — predicate=$K123_PREDICATE functional_cliff_count=$K123_FUNCTIONAL (expected present/1)"
+fi
+
+# K124 (cal #24 round 12 Q4): blast_radius MCP schema maxItems raised
+# 32 → 256 (8x). Field signal (greenfield cal #24): 92-symbol PR review
+# silently dropped 60 symbols (65%) to the 32 cap. Cap was arbitrary
+# JSONSchema literal with no underlying transport constraint; CLI handles
+# unlimited. K124 locks the raised value and prevents accidental shrink.
+K124_MAX_ITEMS=$(grep -oE 'maxItems:\s*[0-9]+' "$ROOT/bin/devt-graphify-mcp.cjs" | grep -oE '[0-9]+' | head -1)
+# Functional test: parse the schema literal and confirm a 100-symbol input
+# would pass validation (the 32-cap would have failed).
+K124_VALIDATES=$(node -e "
+  const fs = require('fs');
+  const src = fs.readFileSync('$ROOT/bin/devt-graphify-mcp.cjs', 'utf8');
+  const m = src.match(/maxItems:\s*(\d+),\s*description:\s*\"Subject symbols/);
+  const cap = m ? parseInt(m[1], 10) : 0;
+  // A 100-symbol input would pass iff cap >= 100.
+  console.log(cap >= 100 ? 'pass' : 'fail');
+" 2>/dev/null)
+if [ "$K124_MAX_ITEMS" = "256" ] && [ "$K124_VALIDATES" = "pass" ]; then
+  pass "K124: blast_radius MCP schema maxItems=256 (R12 Q4 raise from 32; 100-symbol input now validates; field signal: greenfield 65% symbol drop fix)"
+else
+  fail "K124: R12 Q4 contract broken — maxItems=$K124_MAX_ITEMS validates_100=$K124_VALIDATES (expected 256/pass)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

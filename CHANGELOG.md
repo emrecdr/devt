@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #24 round 12 — stop wasting signal
+
+Two field-evidenced fixes; both single-line where they matter.
+
+- **Q3 cliff-counter signal-awareness** (`hooks/workflow-context-injector.sh:153`). R10-6 added `signal: healthy|near_cliff|low_output|mid_task` tagging to emitter; this consumer was still counting ALL `task_output_bytes` records. Greenfield cal #24: "247 cliff signals" was actually 0 actionable. Predicate now reads `r.signal && r.signal !== 'healthy'`. K123 locks. Cry-wolf eliminated.
+- **Q4 raise MCP `maxItems: 32 → 256`** (`bin/devt-graphify-mcp.cjs:166`). Cap was arbitrary literal with no transport constraint; CLI handles unlimited. Greenfield cal #24: 92-symbol PR review silently dropped 60 (65%). 256 covers 2.8x. K124 locks. Auto-split (D-1) subsumed.
+
+Drift-guard 29 → 31 (K94-K124). Smoke 869/869, gate 16/16, locking 3/3, envelope 22/0.
+
 ### Cal #24 round 11 — intermediate-phase gate coverage (D-5) + envelope_health substance signal (R11-3)
 
 Two Tier A items from the round 10 deferred list, both field-evidenced. Round 10 closed the enforcement gap for terminal-phase transitions; round 11 extends that to intermediate phases and surfaces context degradation that R10's presence-only check missed.

@@ -131,6 +131,13 @@ RESULT=$(node -e "
       // Inline JSONL scan — same pattern as A2b in task-truncation-detector.sh.
       // D-3: uses resolved _projectRoot so subdir invocations still find the
       // canonical state file.
+      // R12 Q3: cliff++ must read r.signal (R10-6 discriminator).
+      // task-truncation-detector tags every record signal in {healthy,
+      // near_cliff, low_output, mid_task}. Prior code counted ALL
+      // task_output_bytes records as cliff signals, training operators
+      // to ignore the banner (greenfield cal #24 reported 247 alerts;
+      // actually 0 actionable — all signal=null or signal=healthy).
+      // Pre-R10-6 records lack the signal field — treat as noise.
       try {
         const dispatchPath = path.join(_projectRoot, '.devt', 'state', 'dispatch-warnings.jsonl');
         if (fs.existsSync(dispatchPath)) {
@@ -142,7 +149,7 @@ RESULT=$(node -e "
               const r = JSON.parse(ln);
               if (!r.ts || new Date(r.ts).getTime() < startMs) continue;
               if (r.source === 'raw_dispatch') raw++;
-              else if (r.source === 'task_output_bytes') cliff++;
+              else if (r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy') cliff++;
             } catch { /* malformed line */ }
           }
           if (raw > 0 || cliff > 0) {

@@ -159,7 +159,15 @@ const TOOLS = {
       type: "object",
       required: ["symbols"],
       properties: {
-        symbols: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 32, description: "Subject symbols" },
+        // R12 Q4: maxItems raised 32 → 256 (8x). The 32 cap was an
+        // unjustified defensive literal — no underlying transport
+        // constraint. Field signal: greenfield cal #24 PR review had
+        // 92 topic symbols; the cap silently dropped 60 (65%), losing
+        // exactly the GFBUGS-294/325/327 domain surface. The CLI wrapper
+        // (graphify.blastRadius) accepts unlimited input; only this MCP
+        // schema constrained. 256 covers GF's case 2.8x; revisit only
+        // if a real response-size overflow is observed (none today).
+        symbols: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 256, description: "Subject symbols (cap 256 — R12 raise from 32, see schema comment)" },
       },
     },
     handler: ({ symbols }) => {
