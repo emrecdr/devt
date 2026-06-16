@@ -12989,5 +12989,17 @@ else
 fi
 
 echo
+echo "== test-gates.cjs subsuite =="
+# Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
+# threshold, assertArtifactPresent, assertFileQuiescent, assertClaimChecksResolved,
+# assertVerifierGradedAllAxes) bundled into one CI-visible pass/fail. Failure
+# details surface via direct `node scripts/test-gates.cjs` for debugging.
+if node "$ROOT/scripts/test-gates.cjs" >/dev/null 2>&1; then
+  pass "test-gates.cjs subsuite (16 gate assertions — run 'node scripts/test-gates.cjs' for per-gate detail)"
+else
+  fail "test-gates.cjs subsuite regression — run 'node scripts/test-gates.cjs' for details"
+fi
+
+echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

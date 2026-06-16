@@ -861,12 +861,23 @@ function run(subcommand, args) {
       const outDir = outFlag ? outFlag.slice("--out=".length) : null;
       try {
         const result = cmdRenderLanes(target, { outDir });
+        if (result.lane_count === 0) {
+          // Don't silently exit non-zero — tell the operator why and how to
+          // proceed. Round 9 #4 fix; previously empty stdout + exit 2 made
+          // the failure mode indistinguishable from a render bug.
+          process.stderr.write(
+            `dispatch render-lanes: ${result.reason || "no lanes available"}\n` +
+            `Run 'state register-lane --id=L1 --scope=<X> --files=a.py,b.py' for one lane,\n` +
+            `or 'state register-lanes --from=<lanes.yaml|.json>' for bulk.\n`,
+          );
+          return 2;
+        }
         if (outDir) {
           json(result);
         } else {
           process.stdout.write(result.text + (result.text.endsWith("\n") ? "" : "\n"));
         }
-        return result.lane_count > 0 ? 0 : 2;
+        return 0;
       } catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;

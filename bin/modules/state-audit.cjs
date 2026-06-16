@@ -45,6 +45,14 @@ const EPHEMERAL_PATTERNS = [
   /^.*~$/,
 ];
 
+// Subdirectories that are legitimate citizens of .devt/state/ — never flagged
+// ad_hoc, never moved by cleanupStateFiles. Update this set when a new
+// canonical subdir convention ships.
+const CANONICAL_SUBDIRS = new Set([
+  ".archive",     // reset/cleanup archive history
+  "lane-files",   // round 8 register-lane sidecar dir (per-lane files arrays)
+]);
+
 function classify(filename, knownCanonical) {
   if (knownCanonical.has(filename)) return "canonical";
   for (const re of EPHEMERAL_PATTERNS) {
@@ -97,8 +105,11 @@ function auditStateFiles(opts = {}) {
     try { stat = fs.statSync(entryPath); }
     catch { continue; }
     if (stat.isDirectory()) {
-      // .archive is the only legitimate subdir; treat as canonical.
-      if (name === ".archive") buckets.canonical.push({ name, size: 0, mtimeMs: stat.mtimeMs, isDir: true });
+      // Canonical subdirs: .archive (reset/cleanup history) and lane-files
+      // (round 8 register-lane sidecar dir carrying per-lane files arrays).
+      // Without this allowlist, `state cleanup` would archive the lane-files
+      // sidecars between register-lane and dispatch — round 9 #1 fix.
+      if (CANONICAL_SUBDIRS.has(name)) buckets.canonical.push({ name, size: 0, mtimeMs: stat.mtimeMs, isDir: true });
       else buckets.ad_hoc.push({ name, size: 0, mtimeMs: stat.mtimeMs, isDir: true });
       continue;
     }

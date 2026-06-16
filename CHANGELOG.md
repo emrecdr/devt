@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 round 9 — Tier A bug fix + Tier B test-coverage gaps closed
+
+Four gaps surfaced by post-Round 8 deep validation pass — one active bug and three test-coverage holes from rounds 6-8 that would have silently regressed without coverage.
+
+**#1 — `.devt/state/lane-files/` recognized as canonical subdir (`bin/modules/state-audit.cjs`).** Active bug from Round 8: the new Tier-C sidecar dir was classified `ad_hoc` by `state-audit::auditStateFiles` because the directory-check at line 100-103 only allowlisted `.archive`. Running `state cleanup` between `register-lane` and `dispatch render-lanes` would have archived the per-lane files sidecars, dropping the files list. Extracted `CANONICAL_SUBDIRS` set with `.archive` + `lane-files`; check replaced with `CANONICAL_SUBDIRS.has(name)`. Future canonical subdirs add one line each.
+
+**#4 — `dispatch render-lanes` writes clear stderr on no-lanes (`bin/modules/dispatch.cjs`).** Round 8 silent failure: empty stdout + exit 2 was indistinguishable from a render bug. CLI now writes the underlying `result.reason` plus a one-liner usage hint (`Run 'state register-lane --id=L1 --scope=<X> --files=a.py,b.py' for one lane, or 'state register-lanes --from=<lanes.yaml|.json>' for bulk.`) before exiting 2.
+
+**#3 — `test-gates.cjs` wired into smoke-test.sh CI gate (`scripts/smoke-test.sh`).** Round 7+B shipped 16 gate assertions as operator-runnable only — CI didn't catch regressions. Smoke now atomic-runs the subsuite as one gate; failure surfaces a hint to run the script directly for per-gate detail. Closes the regression-class GF flagged (substance-byte-threshold tweaks slipping through). Smoke total now 865 (was 864).
+
+**#2 — W6 service-boundary + W6b has_communities test coverage (`scripts/test-graphify.cjs`).** Round 7 shipped both without test coverage. Four new test blocks added at end of file:
+- W6 path A: graph not loaded + app/services/* shape → mode=service_boundary, 3 groups, reason mentions "graph not loaded"
+- W6 path B: graph loaded sans communities + app/services/* shape → mode=service_boundary, reason mentions "no community attributes"
+- W6 below-threshold: 1-of-5 service prefix coverage → mode=fallback (correctly skips service-boundary when <80%)
+- W6b graphStats has_communities=false on fixture graph
+
+test-graphify.cjs total: 35 passed, 0 failed (was 31). Future tweaks to the 7 prefix patterns or 80% coverage threshold can't silently change behavior.
+
+**Validation**: 865/865 smoke (incl. new test-gates gate), 3/3 locking, 22 envelope regions / 0 drift, 35/35 graphify tests, 16/16 gate tests. No behavior changes for any of the 5 prior rounds — these are purely additive coverage + bug-fix + UX polish.
+
 ### Cal #23 round 8 — Tier C lane orchestration: register-lane[s] + render-lanes
 
 Three new CLIs that turn the field-evidenced raw-dispatch escape hatch (greenfield calibration thread Q12-Q13: 50 raw_dispatch hygiene warnings in one PR session because orchestrators with a hand-rolled partition had no formal registration path) into a structurally-enforced canonical path.

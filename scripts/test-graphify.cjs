@@ -593,6 +593,91 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── R7 W6: service-boundary auto-detect ────────────────────────────────────
+// When the graph doesn't carry Leiden community attributes (greenfield's case
+// — every probed node degree-only, no `community` field), lane-suggestions
+// auto-detects service-boundary prefixes (app/services/X/, packages/X/, etc.)
+// at ≥80% coverage and emits mode=service_boundary with the service path as
+// the community field. Without this, parallel reviews silently fell back to
+// path-based partition that semantically broke service boundaries.
+
+// Path A: graph NOT loaded — service-boundary still works (purely path heuristic)
+{
+  const { tmp } = setupFixture({ withGraph: false });
+  const r = run(
+    tmp, "lane-suggestions",
+    "app/services/identity/auth.py", "app/services/identity/middleware.py",
+    "app/services/billing/charge.py", "app/services/billing/invoice.py",
+    "app/services/photos/upload.py", "app/services/photos/processor.py",
+    "--target-lanes=5",
+  );
+  const j = parseJson(r.stdout);
+  if (j && j.mode === "service_boundary"
+      && Array.isArray(j.groups) && j.groups.length === 3
+      && j.reason && j.reason.includes("graph not loaded")
+      && j.groups.every(g => typeof g.community === "string" && g.community.startsWith("app/services/"))) {
+    pass("W6 lane-suggestions service-boundary path-A: graph not loaded + 3 groups at app/services/* prefix");
+  } else {
+    fail("W6 service-boundary path-A", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// Path B: graph loaded but no community attributes — same service-boundary emit
+{
+  const { tmp } = setupFixture();
+  const r = run(
+    tmp, "lane-suggestions",
+    "app/services/identity/auth.py", "app/services/identity/middleware.py",
+    "app/services/billing/charge.py", "app/services/billing/invoice.py",
+    "--target-lanes=5",
+  );
+  const j = parseJson(r.stdout);
+  if (j && j.mode === "service_boundary"
+      && Array.isArray(j.groups) && j.groups.length === 2
+      && j.reason && j.reason.includes("no community attributes")) {
+    pass("W6 lane-suggestions service-boundary path-B: graph loaded sans communities + service-boundary fires");
+  } else {
+    fail("W6 service-boundary path-B", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// Path C: polyglot diff below 80% threshold — falls through to legacy path-based
+{
+  const { tmp } = setupFixture({ withGraph: false });
+  const r = run(
+    tmp, "lane-suggestions",
+    "app/services/identity/auth.py",
+    "random/file.py", "other/thing.md", "more/stuff.go", "another/blah.ts",
+    "--target-lanes=5",
+  );
+  const j = parseJson(r.stdout);
+  if (j && j.mode === "fallback") {
+    pass("W6 service-boundary skipped when coverage < 80% threshold (1/5 = 20%)");
+  } else {
+    fail("W6 below-threshold fallback", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// ── R7 W6b: has_communities field in graphStats ────────────────────────────
+// graphStats() probes the first 100 nodes for any non-null `community` attr
+// and surfaces the result as a boolean — consumed by preflight.cjs to warn
+// operators that parallel review will route via service-boundary or path
+// fallback, not Leiden communities.
+{
+  const { tmp } = setupFixture();
+  const r = run(tmp, "stats");
+  const j = parseJson(r.stdout);
+  if (j && j.state === "ready" && j.has_communities === false) {
+    pass("W6b graphStats has_communities=false on fixture (no community attrs)");
+  } else {
+    fail("W6b has_communities=false on fixture", `got: ${JSON.stringify(j)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── summary ────────────────────────────────────────────────────────────────
 process.stdout.write(`\nResults: ${PASS} passed, ${FAIL} failed\n`);
 if (FAIL > 0) {
