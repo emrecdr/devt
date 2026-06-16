@@ -177,9 +177,22 @@ node -e "
     try {
       const fs = require('fs');
       const path = require('path');
+      // R10-6 (cal #24 round 10): signal discriminator added so downstream
+      // consumers (dispatch warnings CLI, telemetry filters) can filter
+      // noise-floor events at READ time without breaking the stuck-detector
+      // (state.cjs:3000) which still needs every event in the stream.
+      // Greenfield session evidence: 246 cliff signals, 0 actionable.
+      // 'healthy' = neither cliff fired and no mid-task language match.
+      // Note: avoid backticks in this hook — they trigger bash command
+      // substitution inside the surrounding double-quoted heredoc.
+      let signal = 'healthy';
+      if (lowOutput) signal = 'low_output';
+      else if (nearCliff) signal = 'near_cliff';
+      else if (midTaskLanguage) signal = 'mid_task';
       const record = JSON.stringify({
         ts: new Date().toISOString(),
         source: 'task_output_bytes',
+        signal,
         agent: subagent,
         output_bytes: outputBytes,
         threshold_bytes: threshold,

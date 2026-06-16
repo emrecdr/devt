@@ -88,6 +88,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 <step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
+> **Hand-rolled-partition shortcut (R8 Tier C + R10):** If the orchestrator already knows the right lane breakdown (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely. Write a YAML file `/tmp/lanes.yaml` with `lanes: [{id: L1, scope: identity, files: [...]}, ...]`, then run `node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml && node bin/devt-tools.cjs dispatch render-lanes` — render-lanes emits paste-ready per-lane envelopes carrying C7-7 rubric directive + scope blocks + governing rules. Hygiene-guard silences the registered (lane_id × scope_hint × file_set) tuples so the raw_dispatch warnings that field-evidenced 62 events in greenfield's session don't fire. The auto-partitioner below is the FALLBACK when the partition isn't known up-front.
+
 Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise tries service-boundary auto-detect (R7-W6), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, `mode: "service_boundary"` when the graph has no community labels but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `packages/X/`, etc. — community field carries the service name), or `mode: "fallback"` when neither applies. The fallback case is the legacy path partition. The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
 ```bash

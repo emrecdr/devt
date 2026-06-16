@@ -46,6 +46,60 @@ RESULT=$(node -e "
   const path = require('path');
   const { execSync } = require('child_process');
 
+  // D-3 (cal #24 round 10 follow-up): walk-up project-root resolution so the
+  // hook works correctly when Claude Code is launched from a subdirectory of
+  // the project. Matches config.cjs::findProjectRoot semantics (walks up
+  // looking for .devt/ or .git/; falls back to cwd if no marker found).
+  function _hookFindProjectRoot() {
+    let dir = process.cwd();
+    while (dir !== path.dirname(dir)) {
+      if (fs.existsSync(path.join(dir, '.devt')) || fs.existsSync(path.join(dir, '.git'))) {
+        return dir;
+      }
+      dir = path.dirname(dir);
+    }
+    return process.cwd();
+  }
+  const _projectRoot = _hookFindProjectRoot();
+
+  // R10-3 (cal #24 round 10): config-drift banner. Greenfield's session
+  // demonstrated that a project's .devt/config.json overriding
+  // dispatch_hygiene_mode=warn was silently inherited — operator could not
+  // recall when or why it was set. Fires on every UserPromptSubmit (active
+  // OR idle) so the safety-floor weakening is visible at the moment the
+  // operator decides what to dispatch. Cheap: one shallow JSON read per
+  // prompt, only the explicit project overrides (not the merged config).
+  // D-2 (round 10 follow-up): memory.preflight_mode also watched (defaults
+  // to 'block' per state.cjs; warn/off means the PreToolUse PREFLIGHT-line
+  // check is downgraded).
+  const configAlertLines = [];
+  try {
+    const cfgPath = path.join(_projectRoot, '.devt', 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const drifts = [];
+      if (cfg.dispatch_hygiene_mode && cfg.dispatch_hygiene_mode !== 'block') {
+        drifts.push('dispatch_hygiene_mode=' + cfg.dispatch_hygiene_mode);
+      }
+      if (cfg.claim_check_mode && cfg.claim_check_mode !== 'block') {
+        drifts.push('claim_check_mode=' + cfg.claim_check_mode);
+      }
+      if (cfg.graphify_decision_mode && cfg.graphify_decision_mode !== 'block') {
+        drifts.push('graphify_decision_mode=' + cfg.graphify_decision_mode);
+      }
+      if (cfg.memory && cfg.memory.preflight_mode && cfg.memory.preflight_mode !== 'block') {
+        drifts.push('memory.preflight_mode=' + cfg.memory.preflight_mode);
+      }
+      if (drifts.length > 0) {
+        configAlertLines.push(
+          '[devt config alert] safety floor weakened: ' + drifts.join(', ') +
+          ' (fail-secure default = block). Restore: devt config set <key> block. ' +
+          'Audit: devt config get'
+        );
+      }
+    }
+  } catch { /* config read/parse failure — silent (don't break the hook) */ }
+
   // Active workflow — compact status line.
   // Format is human-facing only (no programmatic consumers). Compactness wins
   // tokens on every UserPromptSubmit during an active workflow.
@@ -75,8 +129,10 @@ RESULT=$(node -e "
 
       // Probe 1: dispatch-warnings.jsonl session-scoped counts.
       // Inline JSONL scan — same pattern as A2b in task-truncation-detector.sh.
+      // D-3: uses resolved _projectRoot so subdir invocations still find the
+      // canonical state file.
       try {
-        const dispatchPath = path.join(process.cwd(), '.devt', 'state', 'dispatch-warnings.jsonl');
+        const dispatchPath = path.join(_projectRoot, '.devt', 'state', 'dispatch-warnings.jsonl');
         if (fs.existsSync(dispatchPath)) {
           const content = fs.readFileSync(dispatchPath, 'utf8');
           let raw = 0, cliff = 0;
@@ -97,9 +153,12 @@ RESULT=$(node -e "
 
       // Probe 2: inherited source edits via git status, scoped to mtime >
       // workflow start. 1-second timeout caps hook latency cost.
+      // D-3: git invocation uses _projectRoot so git status reflects the
+      // canonical repo's working tree (matches the dispatch-warnings probe
+      // above).
       try {
         const porcelain = execSync('git status --porcelain', {
-          cwd: process.cwd(),
+          cwd: _projectRoot,
           timeout: 1000,
           encoding: 'utf8',
         });
@@ -110,7 +169,7 @@ RESULT=$(node -e "
           const filename = ln.slice(3).trim();
           if (status === '??' || status === '!!') continue;
           try {
-            const stat = fs.statSync(path.join(process.cwd(), filename));
+            const stat = fs.statSync(path.join(_projectRoot, filename));
             if (stat.mtimeMs > startMs) inherited++;
           } catch { /* deleted file or stat error */ }
         }
@@ -124,17 +183,33 @@ RESULT=$(node -e "
       }
     }
 
+    // R10-3: prepend config-drift banner ABOVE the workflow status so the
+    // safety-floor weakening is the topmost signal the operator sees.
+    const allLines = configAlertLines.concat(lines);
     const output = {
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: lines.join('\n')
+        additionalContext: allLines.join('\n')
+      }
+    };
+    process.stdout.write(JSON.stringify(output));
+  } else if (configAlertLines.length > 0) {
+    // R10-3: idle session BUT config is drifted — emit the banner standalone.
+    // Idle-state activity is otherwise silent (per the comment below) but
+    // safety-floor weakening is too important to hide; if the operator is
+    // about to dispatch ANYTHING off-script, they should know first.
+    const output = {
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: configAlertLines.join('\n')
       }
     };
     process.stdout.write(JSON.stringify(output));
   }
-  // No active workflow — silent. Idle state is reachable via explicit
-  // /devt:status or /devt:next; pinning it into every prompt costs tokens
-  // long after the workflow ended without adding load-bearing context.
+  // No active workflow + no config drift — silent. Idle state is reachable
+  // via explicit /devt:status or /devt:next; pinning it into every prompt
+  // costs tokens long after the workflow ended without adding load-bearing
+  // context.
 " "$STATE_JSON" 2>/dev/null) || exit 0
 
 # printf avoids echo's flag interpretation (-n, -e) regardless of JSON content

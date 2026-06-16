@@ -6,6 +6,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #24 round 10 — enforcement-gap close (phase-gates fire on state update, kill-threshold, recursive gitignore, config-drift banner, knowledge-candidate harvest at exit, signal discriminator)
+
+Greenfield's first v0.95.0 field evaluation surfaced the single highest-leverage gap in cal #24: **gates defined in `workflows/_phase-gates.yaml` were functionally dead for ~93% of phase transitions in shipped workflows** (99 `state update phase=X` call sites vs. 7 `state advance-phase` calls — and only `state advance-phase` fired the gate registry). Round 10 closes that gap end-to-end plus the field-validated supporting items.
+
+**R10-1 — Phase-gates fire on `state update phase=X status=DONE` (`bin/modules/state.cjs`).** Extracted reusable `runPhaseGates(workflowType, targetPhase)` helper from `advanceState`; `updateState` detects `phase=X` + `status=DONE` in keyValues and fires registered gates BEFORE the lock acquisition (avoids gate-readState recursion). On failure: throws with the blocked gates listed + alternative-command hints (e.g. raw_dispatch → `state register-lanes && dispatch render-lanes`; knowledge-candidate → `state aggregate-knowledge-candidates`). State stays at IN_PROGRESS. `--skip-gates` CLI flag opts out (loud name keeps the bypass auditable). `advanceState` passes `{skipGates: true}` when calling `updateState` internally so gates fire exactly once. Field-validated end-to-end in fresh project fixture: phase-gates fire correctly for `code_review_parallel.complete` (98 byte refusal output with three gate failures + alt-command hints + skip-gates instruction).
+
+**R10-4 — Hard kill-threshold on `assertNoRawDispatchesThisSession` (`bin/modules/state.cjs`).** New `dispatch_hygiene_kill_threshold: 3` config knob (null = disabled). When `raw_dispatch_count >= threshold`, gate returns `{ok: false, killed: true}` regardless of `dispatch_hygiene_mode` — hard-limit safety bypasses warn-mode. Closes the field-evidenced gap where greenfield accumulated 62 warn-mode warnings in one session with zero enforcement. Other gates stay mode-aware. The 3-count threshold lets intentional 1–2-off ad-hoc dispatches still work in warn mode; runaway-pattern (>=3) blocks regardless. Verified: warn mode + 3 raw_dispatches → `killed:true` with recovery instructions naming `state register-lanes` and `dispatch render-lanes`; warn mode + 2 → passes (soft-warn preserved).
+
+**R10-2 — Recursive gitignore + `--upgrade-gitignore` migration + W015 health check (`bin/modules/setup.cjs`, `bin/modules/health.cjs`).** Setup's required gitignore patterns changed from flat (`.devt/state/`) to recursive (`**/.devt/state/`) so sub-tree `devt` invocations (e.g. `tools/X/`, `tests/Y/`) no longer leak transient state files into PR diffs. Field signal: greenfield committed 6 transient files from sub-tree `.devt/state/` directories in one PR. New `devt setup --upgrade-gitignore` fast-path appends recursive pattern alongside any existing flat entry (idempotent, preserves backward compat — both patterns coexist). New W015 health code detects "flat-only" gitignores and recommends the upgrade; W015's repair handler calls the new fast-path. W005 messaging unchanged for "no `.devt/state` at all" case but now bootstraps with the recursive pattern.
+
+**R10-3 — Session-start config-drift banner (`hooks/workflow-context-injector.sh`).** When a project's `.devt/config.json` overrides any safety mode (`dispatch_hygiene_mode`, `claim_check_mode`, `graphify_decision_mode`) to a non-`block` value, emits `[devt config alert] safety floor weakened: <list> (fail-secure default = block). Restore: devt config set <key> block. Audit: devt config get` as the topmost line of every UserPromptSubmit context — active workflow OR idle session. Field signal: greenfield's project config had `dispatch_hygiene_mode=warn` for unknown reasons; the override was invisible at session start and remained inherited across sessions. Cheap: one shallow JSON read per prompt, only the explicit project overrides (not the merged config). Silent when all modes are default-block.
+
+**R10-5 — Knowledge-candidate harvest at every workflow exit (`hooks/stop.sh`).** `state aggregate-knowledge-candidates` now fires unconditionally on Stop hook, regardless of completion path. Field signal: off-script orchestrators that bypass the workflow (`62 raw_dispatch` events in greenfield's session) never reach `present_findings` → never call the aggregator → `scratchpad.md` candidates never propagate → curator never sees them. Fire-and-forget: the aggregator early-returns on absent sources, never overwrites existing scratchpad entries, never blocks shutdown.
+
+**R10-6 — `task_output_bytes` signal discriminator (`hooks/task-truncation-detector.sh`, `bin/modules/dispatch.cjs::cmdWarnings`).** Emit gains a `signal: healthy|near_cliff|low_output|mid_task` field. `dispatch warnings` CLI summary modes default-filter `signal: healthy` events; `--all` flag opts back into the full series. Stuck-detector at `state.cjs:3000` reads the file directly (bypasses this CLI), so its consumer contract is preserved. Field signal: greenfield session emitted 246 cliff signals — 0 actionable, all healthy noise drowning the actionable raw_dispatch count. When healthy events are filtered, summary results carry `filtered_noise_count` + `filter_hint` so operators see what was hidden.
+
+**R10-7 — Smoke gate K121 (`scripts/smoke-test.sh`).** Locks the R10-1 contract: state update phase=complete status=DONE refuses when gates block, --skip-gates opts out cleanly, state stays at IN_PROGRESS on refusal. Brings drift-guard stack to 28-deep (K94-K121, +1 from cal #23). CLAUDE.md + README.md updated for new gate count.
+
+**Rejected after validation** (recorded for future audit):
+- **GF's "flip dispatch_hygiene_mode default to block"** — devt already ships block-default at `config.cjs:41`. Greenfield's project config explicitly overrode. R10-3 banner surfaces the override; no devt-side default flip needed.
+- **F17 god-node bash CLI extraction** — R6 retraction validated again (27 vs 4 lines; inheritance architecture intentional). Skipping.
+- **SERVER_VERSION pinning** — R6 retraction stands (no consumer reads `serverInfo.version`).
+- **Wire `state update` to call `advance-phase` internally** — R10-1 achieves the same with smaller blast radius (gates run inline; advanceState still owns the phase-update orchestration).
+
+### Cal #24 round 10 follow-ups — validated polish + Round-11 carryovers
+
+Five improvement opportunities validated and shipped alongside Round 10. Three Tier-A polish + two Round-11-planned items that turned out cheap-to-ship-now.
+
+**R11-1 — Lane CLI discoverability in workflow prose (`workflows/code-review.md::scope_check`, `workflows/code-review-parallel.md::partition_lanes`).** Both review workflows now carry a `> **Pre-known partition shortcut**` note pointing operators at `state register-lanes --from=<lanes.yaml> && dispatch render-lanes` when the lane breakdown is already known. Closes the discoverability gap that drove greenfield's 62-raw_dispatch bypass — Tier C primitives shipped in Round 8 but were undiscoverable from the workflow files themselves.
+
+**R11-2 — Axes-shape default in `agents/code-reviewer.md` output template (D1 protection).** Revised the example output template from topic-shape (`### Critical / Important / Minor`) to axes-shape (`## Axis A — Scope coverage / Axis B — Specificity / ...`) matching the rubric. Topic-shape preserved as a fallback for single-domain lanes but requires the lane to ALSO emit `## Axis Coverage Map` so the verifier's `assert-verifier-graded-all-axes` gate can grade axis-walk coverage. Field signal: greenfield's D1 evidence-cycle close was conditional on the lane reviewer being attentive enough to override the topic-shape example; axes-shape default makes the win robust against less-attentive future lanes.
+
+**R11-4 — `dispatch render-filled --rules-exclude` auto-wire via `.devt/config.json::rules.exclude_sections` (`bin/modules/dispatch.cjs`).** New `_mergeConfigRulesExclude(flagList)` helper reads `cfg.rules.exclude_sections: []` from merged config and merges with the CLI flag list (deduped). `render-lanes` also threads the merged list through to `cmdRenderFilled`. Field signal: greenfield never used the flag because it was unadvertised; project-level config makes the 18.1KB-per-dispatch saving accrue automatically without per-call plumbing. Verified: config-only (2 sections) + flag merge (2+1=3) + dedupe (same in both → still 2) + silence (no config, no flag → no trailer).
+
+**D-2 — `memory.preflight_mode` added to session-start config-drift banner (`hooks/workflow-context-injector.sh`).** The banner introduced in R10-3 watched `dispatch_hygiene_mode / claim_check_mode / graphify_decision_mode` but missed `memory.preflight_mode` (default `block` per `state.cjs::DEFAULTS`). Now covered. Verified: `memory.preflight_mode=warn` in project config fires the banner standalone (idle session) with `safety floor weakened: memory.preflight_mode=warn` line.
+
+**D-3 — Walk-up project-root resolution in `workflow-context-injector.sh`.** Hook previously used `process.cwd()` for `.devt/config.json` + `.devt/state/dispatch-warnings.jsonl` + `git status` cwd, which silently misbehaved when Claude Code was launched from a subdirectory of the project (e.g. `cd tools/X && claude code`). Added inline `_hookFindProjectRoot()` mirroring `config.cjs::findProjectRoot` semantics (walks up looking for `.devt/` or `.git/`; falls back to cwd). All 4 path resolutions now use the resolved root. Verified: hook invoked from `tools/subdir/` correctly finds project-root config and emits the drift banner.
+
+**Self-review polish (during round 10)**:
+- `state.cjs::assertNoRawDispatchesThisSession` reason field dedupes repeated agent names (`devt:code-reviewer ×5` vs listing 5×). Programmatic `agents[]` array unchanged.
+- `bin/devt-tools.cjs` help text documents `--skip-gates` (state update) and `--all` (dispatch warnings).
+
+**Validated-but-deferred** (recorded for next session):
+- **D-1 memoize `_phase-gates.yaml` registry** — most CLI invocations are single-shot processes; memo only helps within ONE process which runs runPhaseGates at most once. Marginal value.
+- **D-5 intermediate-phase gate coverage** — v0.73 design intent is terminal-only per `_phase-gates.yaml` header comment; expanding needs separate design pass.
+- **D-6 expand recursive gitignore to more paths** — no field evidence for `.devt/memory/index.db` or `graphify-out/cache/`; could mask intentional sharing.
+- **D-7 lock-protected aggregateKnowledgeCandidates** — theoretical race; matches stop.sh's existing best-effort convention.
+- **R11-3 `<envelope_health>` block** — bigger work; needs envelope-shape design pass.
+
 ## [0.95.0] - 2026-06-16
 
 ### Cal #23 docs sync — rounds 5-9 surfaces documented across operator + internals docs

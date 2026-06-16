@@ -29,6 +29,15 @@ fi
 # Read workflow state
 STATE_JSON=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null || echo '{}')
 
+# R10-5 (cal #24 round 10): unconditional knowledge-candidate harvest at
+# every workflow exit. Field signal: aggregate-knowledge-candidates only
+# fires inside present_findings; orchestrators that bypass the workflow
+# (62 raw_dispatch in greenfield's last session) never reach it →
+# scratchpad.md candidates never propagate → curator never sees them.
+# Fire-and-forget: the aggregator early-returns on absent sources, never
+# overwrites existing scratchpad entries, never blocks shutdown.
+node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
+
 # Parse state and extract fields in a single node call
 IFS=$'\n' read -r IS_WORKFLOW_ACTIVE IS_COMPLETE PHASE TASK <<< "$(node -e "
   const s = JSON.parse(process.argv[1]);

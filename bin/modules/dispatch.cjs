@@ -702,10 +702,12 @@ function cmdWarnings(args) {
   let limitRaw = null;
   let sinceTs = null;
   let raw = false;
+  let includeAll = false;  // R10-6: --all opts back into the full series (incl. healthy task_output_bytes noise)
   for (const a of args) {
     if (a === "--by-source") mode = "by-source";
     else if (a === "--by-agent") mode = "by-agent";
     else if (a === "--raw") raw = true;
+    else if (a === "--all") includeAll = true;
     else if (a.startsWith("--limit=")) {
       limitRaw = a.slice(8);
       limit = parseInt(limitRaw, 10);
@@ -736,10 +738,26 @@ function cmdWarnings(args) {
     try { entries.push(JSON.parse(line)); }
     catch { parseErrors++; }
   }
-  const filtered = sinceTs ? entries.filter((e) => e.ts && e.ts >= sinceTs) : entries;
+  let filtered = sinceTs ? entries.filter((e) => e.ts && e.ts >= sinceTs) : entries;
+  // R10-6 (cal #24 round 10): default-filter healthy task_output_bytes noise.
+  // Field signal: greenfield session emitted 246 task_output_bytes events,
+  // 0 actionable (all signal:healthy) — drowning the actionable raw_dispatch
+  // count in the summary view. The full series stays available for the
+  // stuck-detector consumer at state.cjs:3000 (reads the file directly,
+  // bypasses this CLI). Opt back into full series with --all.
+  const filteredNoise = includeAll
+    ? 0
+    : filtered.reduce((n, e) => n + ((e.source === "task_output_bytes" && e.signal === "healthy") ? 1 : 0), 0);
+  if (!includeAll) {
+    filtered = filtered.filter((e) => !(e.source === "task_output_bytes" && e.signal === "healthy"));
+  }
+  // R10-6: surface filtered-noise count when non-zero so operators see how
+  // much was hidden by the default filter. Spread keeps the field absent
+  // when the count is 0 (avoids JSON noise on every call).
+  const noiseField = filteredNoise > 0 ? { filtered_noise_count: filteredNoise, filter_hint: "pass --all to include task_output_bytes signal=healthy events" } : {};
   if (raw) {
     const slice = limit ? filtered.slice(-limit) : filtered;
-    return { entries: slice, total: filtered.length, parse_errors: parseErrors };
+    return { entries: slice, total: filtered.length, parse_errors: parseErrors, ...noiseField };
   }
   if (mode === "by-source") {
     const counts = {};
@@ -747,7 +765,7 @@ function cmdWarnings(args) {
       const k = e.source || "unknown";
       counts[k] = (counts[k] || 0) + 1;
     }
-    return { mode: "by-source", total: filtered.length, parse_errors: parseErrors, counts };
+    return { mode: "by-source", total: filtered.length, parse_errors: parseErrors, counts, ...noiseField };
   }
   if (mode === "by-agent") {
     const counts = {};
@@ -756,7 +774,7 @@ function cmdWarnings(args) {
       counts[k] = (counts[k] || 0) + 1;
     }
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    return { mode: "by-agent", total: filtered.length, parse_errors: parseErrors, counts: Object.fromEntries(sorted) };
+    return { mode: "by-agent", total: filtered.length, parse_errors: parseErrors, counts: Object.fromEntries(sorted), ...noiseField };
   }
   const bySource = {};
   const byAgent = {};
@@ -781,6 +799,7 @@ function cmdWarnings(args) {
     by_source: bySource,
     top_agents: Object.fromEntries(topAgents),
     recent,
+    ...noiseField,
   };
 }
 
@@ -813,10 +832,16 @@ function run(subcommand, args) {
       }
       // --rules-exclude=<comma-separated heading list>: opt-in section strip
       // from governing_rules.content. Matches by exact `## Heading` title.
+      // R11-4 (cal #24 round 10 follow-up): config-driven auto-wire. Reads
+      // `.devt/config.json::rules.exclude_sections: []` and merges with the
+      // CLI flag list (dedupe). Field signal: greenfield never used the flag
+      // because it was unadvertised; project-level config makes the 18.1KB/
+      // dispatch saving accrue automatically without per-call plumbing.
       const excludeArg = args.find(a => a.startsWith("--rules-exclude="));
-      const rulesExclude = excludeArg
+      const flagList = excludeArg
         ? excludeArg.slice("--rules-exclude=".length).split(",").map(s => s.trim()).filter(Boolean)
         : [];
+      const rulesExclude = _mergeConfigRulesExclude(flagList);
       let out;
       try { out = cmdRenderFilled(target, { rulesExclude }); }
       catch (err) {
@@ -895,6 +920,24 @@ function run(subcommand, args) {
 // specific output path override. When outDir is set, writes one file per
 // lane and returns a JSON summary; otherwise returns concatenated text with
 // <!-- LANE: <id> --> separators.
+// R11-4 (cal #24 round 10 follow-up): merge config-level `rules.exclude_sections`
+// with the CLI flag list. Returns deduped array. Empty when neither source
+// has entries. Safe on missing config / missing nested key — returns the flag
+// list unchanged.
+function _mergeConfigRulesExclude(flagList) {
+  let configList = [];
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    if (cfg && cfg.rules && Array.isArray(cfg.rules.exclude_sections)) {
+      configList = cfg.rules.exclude_sections.filter(s => typeof s === "string" && s.trim()).map(s => s.trim());
+    }
+  } catch { /* config read failure — fall back to flag-only list */ }
+  if (configList.length === 0) return flagList;
+  if (flagList.length === 0) return configList;
+  return Array.from(new Set([...configList, ...flagList]));
+}
+
 function cmdRenderLanes(target, options) {
   options = options || {};
   const stateMod = require("./state.cjs");
@@ -904,9 +947,14 @@ function cmdRenderLanes(target, options) {
   if (!lanes || lanes.length === 0) {
     return { lane_count: 0, text: "", lanes: [], reason: "no lanes registered in workflow.yaml::lanes[]" };
   }
+  // R11-4: pass config-merged rules-exclude through to the base envelope.
+  // Per-lane envelopes inherit the same rules.exclude_sections — the project-
+  // wide cut applies uniformly across all lanes (no per-lane override needed
+  // since lanes are scope-partitioned, not rules-partitioned).
+  const baseRulesExclude = _mergeConfigRulesExclude(options.rulesExclude || []);
   // Render base envelope once (substitution is identical across lanes — the
   // per-lane variation is injected on top, not re-substituted).
-  const base = cmdRenderFilled(target);
+  const base = cmdRenderFilled(target, baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : undefined);
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
   const out = [];

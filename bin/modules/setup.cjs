@@ -324,12 +324,23 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // USER-DECIDES (commented hints — not auto-added):
   // .devt/memory/_suggestions.md (some teams commit for review history)
   const gitignorePath = path.join(projectRoot, ".gitignore");
+  // R10-2 (cal #24 round 10): patterns use **/ recursive prefix where field
+  // evidence shows sub-tree devt invocations leak. Greenfield committed 6
+  // transient files from tools/hurl-dashboard/.devt/state/ + tests/hurl/.devt/
+  // state/ because the prior flat `.devt/state/` pattern only matched the
+  // root-level directory. Recursive patterns catch nested .devt/ trees
+  // without requiring per-subdirectory .gitignore additions.
+  // Backward-compat: existing projects with flat `.devt/state/` get the
+  // recursive pattern APPENDED (content.includes check is substring-based —
+  // recursive entry doesn't match flat one, so both coexist). `devt setup
+  // --mode=upgrade-gitignore` runs only this block for projects that want
+  // the migration without a full re-init.
   const requiredIgnores = [
-    { path: ".devt/state/", header: "# devt workflow state" },
+    { path: "**/.devt/state/", header: "# devt workflow state (recursive — catches sub-tree devt invocations)" },
     { path: ".claude/agent-memory/", header: "# devt agent persistent memory (per-project)" },
     { path: ".devt/memory/index.db", header: "# devt memory FTS5 index (regenerable from markdown)" },
     { path: ".devt/memory/.auto-index-stamp", header: "# devt memory auto-index debounce marker (transient)" },
-    { path: ".devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace" },
+    { path: "**/.devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace (recursive)" },
     { path: ".devt/memory/export-*.json", header: "# devt memory export bundles (transient — share via explicit channel)" },
     { path: "graphify-out/cache/", header: "# Graphify ephemeral cache" },
     { path: "graphify-out/manifest.json", header: "# Graphify per-machine manifest" },
@@ -641,10 +652,57 @@ function run(args, pluginRoot) {
         detected_git: detectGitRemote(projectRoot),
         available_templates: AVAILABLE_TEMPLATES,
       };
+    } else if (args[i] === "--upgrade-gitignore") {
+      // R10-2 (cal #24 round 10): focused gitignore migration for existing
+      // projects. Appends recursive **/.devt/state/ alongside any existing
+      // flat `.devt/state/` entry (preserves backward compat). Idempotent —
+      // safe to re-run. Doesn't require choosing a template.
+      return upgradeGitignore();
     }
   }
 
   return setupProject(templateName, pluginRoot, extraConfig, { mode });
+}
+
+// R10-2: standalone gitignore upgrade — appends any missing recursive
+// patterns from the canonical requiredIgnores list. Uses substring `includes`
+// match, so existing flat entries don't suppress the recursive variant from
+// being appended. Returns a focused result shape so the CLI surface is
+// distinguishable from full setup.
+function upgradeGitignore() {
+  const projectRoot = findProjectRoot();
+  const gitignorePath = path.join(projectRoot, ".gitignore");
+  const recursiveIgnores = [
+    { path: "**/.devt/state/", header: "# devt workflow state (recursive — catches sub-tree devt invocations)" },
+    { path: "**/.devt/memory/_mcp-trace.jsonl", header: "# devt MCP tool-call trace (recursive)" },
+  ];
+  const result = { project_root: projectRoot, appended: [], already_present: [], created: false };
+  let content = "";
+  let exists = false;
+  try {
+    content = fs.readFileSync(gitignorePath, "utf8");
+    exists = true;
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  if (!exists) {
+    const lines = recursiveIgnores.flatMap(({ path: p, header }) => [header, p, ""]);
+    atomicWriteFileSync(gitignorePath, lines.join("\n"));
+    result.created = true;
+    result.appended = recursiveIgnores.map(r => r.path);
+    return result;
+  }
+  for (const { path: ignorePath, header } of recursiveIgnores) {
+    if (content.includes(ignorePath)) {
+      result.already_present.push(ignorePath);
+    } else {
+      const block = `\n${header}\n${ignorePath}\n`;
+      fs.appendFileSync(gitignorePath, block);
+      content += block;
+      result.appended.push(ignorePath);
+    }
+  }
+  return result;
 }
 
 module.exports = { run, AVAILABLE_TEMPLATES, reconcileMcpServers };

@@ -12988,6 +12988,38 @@ else
   fail "K120: trim broken — before=$K120_BEFORE after=$K120_AFTER anchor_preserved=$K120_ANCHOR_PRESERVED"
 fi
 
+# K121 (cal #24 round 10 R10-1): state update phase=X status=DONE fires
+# phase-gates from _phase-gates.yaml; --skip-gates opts out. Field signal:
+# 99:7 update-vs-advance call ratio in shipped workflows → gates were dead
+# for ~93% of phase transitions until this round. K121 locks the contract:
+# default-block on gate failure, opt-out via --skip-gates, state unchanged
+# on refusal.
+K121_TMP=$(mktemp -d)
+mkdir -p "$K121_TMP/.devt/state"
+# Active code_review_parallel workflow at context_init (gates for .complete
+# include assert-no-raw-dispatches + assert-claim-checks + assert-verifier-ran
+# — all will fail in this empty fixture so the gate is guaranteed to block).
+(cd "$K121_TMP" && node "$CLI" state update active=true workflow_type=code_review_parallel phase=context_init status=DONE --skip-gates >/dev/null 2>&1) || true
+# Test 1: state update phase=complete status=DONE should refuse (exit non-zero).
+K121_REFUSED="no"
+if ! (cd "$K121_TMP" && node "$CLI" state update phase=complete status=DONE active=false >/dev/null 2>&1); then
+  K121_REFUSED="yes"
+fi
+# Test 2: state must remain at IN_PROGRESS / context_init / active=true after refusal.
+K121_STATE_AFTER_REFUSAL=$(set +eo pipefail; cd "$K121_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.phase+'/'+o.active);}catch{console.log('parse-err');}})") || K121_STATE_AFTER_REFUSAL="parse-err"
+# Test 3: state update phase=complete --skip-gates should succeed.
+K121_SKIPPED="no"
+if (cd "$K121_TMP" && node "$CLI" state update phase=complete status=DONE active=false --skip-gates >/dev/null 2>&1); then
+  K121_SKIPPED="yes"
+fi
+K121_STATE_AFTER_SKIP=$(set +eo pipefail; cd "$K121_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.phase+'/'+o.active);}catch{console.log('parse-err');}})") || K121_STATE_AFTER_SKIP="parse-err"
+rm -rf "$K121_TMP"
+if [ "$K121_REFUSED" = "yes" ] && [ "$K121_STATE_AFTER_REFUSAL" = "context_init/true" ] && [ "$K121_SKIPPED" = "yes" ] && [ "$K121_STATE_AFTER_SKIP" = "complete/false" ]; then
+  pass "K121: state update phase=complete status=DONE fires phase-gates (default-block); --skip-gates opts out; state preserved on refusal"
+else
+  fail "K121: R10-1 contract broken — refused=$K121_REFUSED after_refusal=$K121_STATE_AFTER_REFUSAL skipped=$K121_SKIPPED after_skip=$K121_STATE_AFTER_SKIP"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

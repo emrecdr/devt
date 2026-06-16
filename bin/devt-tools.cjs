@@ -179,7 +179,7 @@ devt-tools — CLI for the devt plugin
 
 Commands:
   init <workflow|review> [task]  Compound init — returns JSON context blob
-  state read|update|reset   Manage .devt/state/ workflow state
+  state read|update|reset   Manage .devt/state/ workflow state (update fires _phase-gates.yaml when phase=X status=DONE; pass --skip-gates to opt out)
   state audit               Classify .devt/state/ files: canonical | pattern_allowed | ephemeral | ad_hoc
   state cleanup [--apply] [--stale-days=N]
                             Archive ad_hoc + ephemeral + stale pattern_allowed files to .archive/cleanup-<ts>/
@@ -229,7 +229,7 @@ Commands:
   dispatch compile --check  Diff would-be-rendered vs committed marker regions; exit 1 on drift
   dispatch compile --write  Re-render marker regions atomically (manual pre-release step)
   dispatch decompose <a>:<w|auto>  Static/dynamic byte breakdown of the rendered envelope; surfaces which blocks dominate per-dispatch cache_creation cost
-  dispatch warnings          Summarize .devt/state/dispatch-warnings.jsonl (raw_dispatch incidents). Flags: --by-source, --by-agent, --limit=N, --since=ISO, --raw
+  dispatch warnings          Summarize .devt/state/dispatch-warnings.jsonl (raw_dispatch incidents). Flags: --by-source, --by-agent, --limit=N, --since=ISO, --raw, --all (include task_output_bytes signal=healthy events; default filters them as noise)
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
   preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md

@@ -890,8 +890,68 @@ function releaseLock(lockFile) {
   }
 }
 
-function updateState(keyValues) {
+function updateState(keyValues, opts = {}) {
   ensureStateDir();
+  // Round 10 R10-1: detect phase=X status=DONE update intent BEFORE acquiring
+  // the lock. Gates fire OUTSIDE the lock to avoid recursive lock attempts
+  // from any future gate that calls readState/updateState. Field-evidenced:
+  // 99:7 update-vs-advance call ratio across shipped workflows; gates were
+  // dead for ~93% of phase transitions. opts.skipGates is set by advanceState
+  // (gates already ran there) and by --skip-gates CLI flag (explicit opt-out
+  // for ad-hoc callers that don't want the enforcement layer).
+  const skipGates = !!opts.skipGates;
+  let phaseGateRun = null;
+  if (!skipGates && Array.isArray(keyValues)) {
+    const phaseKv = keyValues.find(k => typeof k === "string" && k.startsWith("phase="));
+    const statusKv = keyValues.find(k => typeof k === "string" && k.startsWith("status="));
+    if (phaseKv && statusKv) {
+      const stripQuotes = (s) => (s.startsWith('"') && s.endsWith('"')) ? s.slice(1, -1) : s;
+      const targetPhase = stripQuotes(phaseKv.slice("phase=".length));
+      const statusVal = stripQuotes(statusKv.slice("status=".length));
+      if (targetPhase && statusVal === "DONE") {
+        // Resolve workflow_type from current state — could be set BY this
+        // update (workflow_type=X in same call) so check keyValues too.
+        let workflowType = null;
+        const wfTypeKv = keyValues.find(k => typeof k === "string" && k.startsWith("workflow_type="));
+        if (wfTypeKv) {
+          workflowType = stripQuotes(wfTypeKv.slice("workflow_type=".length));
+        } else {
+          try {
+            const snap = readState();
+            workflowType = snap && snap.workflow_type;
+          } catch { /* leave null — runPhaseGates handles it */ }
+        }
+        try {
+          phaseGateRun = runPhaseGates(workflowType, targetPhase, { tracePrefix: "state-update" });
+        } catch (e) {
+          // Registry load failures propagate — preserves advanceState semantics.
+          throw e;
+        }
+        if (phaseGateRun.fired && phaseGateRun.blockedBy.length > 0) {
+          // Refuse the write. State stays at IN_PROGRESS (or whatever its
+          // current status is). Reason includes alternative-command guidance
+          // when applicable so the orchestrator has a recovery path.
+          const altHints = phaseGateRun.blockedBy
+            .map(b => {
+              if (/raw_dispatch/i.test(b.reason)) {
+                return `  → try: state register-lanes --from=<lanes.yaml> && dispatch render-lanes (canonical parallel-lane path)`;
+              }
+              if (/knowledge.candidate/i.test(b.reason)) {
+                return `  → try: state aggregate-knowledge-candidates`;
+              }
+              return null;
+            })
+            .filter(Boolean);
+          throw new Error(
+            `[devt state update] ${phaseGateRun.blockedBy.length} gate(s) blocked transition to ${workflowType}.${targetPhase}:\n` +
+            phaseGateRun.blockedBy.map(b => `  - ${b.gate}: ${b.reason}`).join("\n") +
+            (altHints.length ? `\n${altHints.join("\n")}` : "") +
+            `\n  → opt out: pass --skip-gates if this bypass is intentional (loud flag for audit).`
+          );
+        }
+      }
+    }
+  }
   const lockFile = acquireLock();
 
   try {
@@ -4360,36 +4420,25 @@ function parsePhaseGatesYaml(content) {
 // Every gate firing logs to gate-trace.jsonl via persistGateTrace, with
 // gate name prefixed by "advance-phase:" so cal #19+ can distinguish
 // transition-time gates from manual one-off gate runs.
-function advanceState(targetPhase, kvUpdates) {
-  if (typeof targetPhase !== "string" || !targetPhase) {
-    throw new Error("advance-phase: missing target phase argument (Usage: state advance-phase <phase> [key=value ...])");
-  }
-  let current;
-  try { current = readState(); }
-  catch (e) { throw new Error(`advance-phase: state read failed: ${e.message}`); }
-  const workflowType = current.workflow_type;
-  const baseUpdates = [`phase=${targetPhase}`, "status=DONE", ...(Array.isArray(kvUpdates) ? kvUpdates : [])];
-  if (!workflowType) {
-    // No workflow_type → fall through to plain update (workflow may be
-    // pre-init or in a non-typed state).
-    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: null, gates_run: [], note: "no workflow_type set — plain phase update", update: updateState(baseUpdates) };
-  }
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const yamlPath = path.join(__dirname, "..", "..", "workflows", "_phase-gates.yaml");
-  if (!fs.existsSync(yamlPath)) {
-    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: [], note: "_phase-gates.yaml absent — plain phase update", update: updateState(baseUpdates) };
-  }
-  let registry;
-  try { registry = parsePhaseGatesYaml(fs.readFileSync(yamlPath, "utf8")); }
-  catch (e) { throw new Error(`advance-phase: registry load failed: ${e.message}`); }
-  const phaseEntry = registry.workflow_types[workflowType] && registry.workflow_types[workflowType][targetPhase];
-  const gates = (phaseEntry && Array.isArray(phaseEntry.gates)) ? phaseEntry.gates : [];
-  if (gates.length === 0) {
-    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: [], note: `no gates declared for ${workflowType}.${targetPhase} — plain phase update`, update: updateState(baseUpdates) };
-  }
-  // Dispatch gate name → assert function. Centralizes the mapping so YAML
-  // entries are validated against this registry; unknown names block.
-  const GATE_FNS = {
+// Round 10 R10-1: shared phase-gate runner. Extracted from advanceState so
+// `updateState` can fire gates when `state update phase=X status=DONE` is
+// called directly (field-evidenced: 99:7 update-vs-advance call ratio across
+// devt's own workflow files — gates defined in _phase-gates.yaml were dead
+// for ~93% of phase transitions). Pure: reads YAML + dispatches GATE_FNS;
+// caller decides what to do with blockedBy.
+//
+// Returns one of:
+//   {fired:false, note:"<reason>"}  — workflow_type missing / YAML absent /
+//                                     no gates declared for (workflow_type,
+//                                     targetPhase); caller should proceed
+//                                     with plain write
+//   {fired:true, gateResults:[...], blockedBy:[...]} — gates ran; caller
+//                                     decides whether to refuse the write
+//                                     based on blockedBy.length
+const PHASE_GATE_FNS_MEMO = { value: null };
+function _phaseGateFns() {
+  if (PHASE_GATE_FNS_MEMO.value) return PHASE_GATE_FNS_MEMO.value;
+  PHASE_GATE_FNS_MEMO.value = {
     "assert-claim-checks-resolved": assertClaimChecksResolved,
     "assert-no-raw-dispatches-this-session": assertNoRawDispatchesThisSession,
     "assert-knowledge-candidates-tagged": assertKnowledgeCandidatesTagged,
@@ -4403,10 +4452,24 @@ function advanceState(targetPhase, kvUpdates) {
     "assert-consolidator-dispatched": assertConsolidatorDispatched,
     "assert-reuse-analyzed": assertReuseAnalyzed,
   };
+  return PHASE_GATE_FNS_MEMO.value;
+}
+function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase" } = {}) {
+  if (!workflowType) return { fired: false, note: "no workflow_type set" };
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const yamlPath = path.join(__dirname, "..", "..", "workflows", "_phase-gates.yaml");
+  if (!fs.existsSync(yamlPath)) return { fired: false, note: "_phase-gates.yaml absent" };
+  let registry;
+  try { registry = parsePhaseGatesYaml(fs.readFileSync(yamlPath, "utf8")); }
+  catch (e) { throw new Error(`runPhaseGates: registry load failed: ${e.message}`); }
+  const phaseEntry = registry.workflow_types[workflowType] && registry.workflow_types[workflowType][targetPhase];
+  const gates = (phaseEntry && Array.isArray(phaseEntry.gates)) ? phaseEntry.gates : [];
+  if (gates.length === 0) return { fired: false, note: `no gates declared for ${workflowType}.${targetPhase}` };
+  const fns = _phaseGateFns();
   const gateResults = [];
   const blockedBy = [];
   for (const gateName of gates) {
-    const fn = GATE_FNS[gateName];
+    const fn = fns[gateName];
     let result;
     if (!fn) {
       result = { ok: false, reason: `unknown gate name in registry: ${gateName} (typo in _phase-gates.yaml or missing GATE_FNS entry)` };
@@ -4414,18 +4477,39 @@ function advanceState(targetPhase, kvUpdates) {
       try { result = fn(); }
       catch (e) { result = { ok: false, reason: `gate ${gateName} threw: ${e.message}` }; }
     }
-    persistGateTrace(`advance-phase:${gateName}`, result);
+    persistGateTrace(`${tracePrefix}:${gateName}`, result);
     gateResults.push({ gate: gateName, ok: !!result.ok, reason: result.reason || "" });
     if (result.ok === false) blockedBy.push({ gate: gateName, reason: result.reason || "" });
   }
-  if (blockedBy.length > 0) {
+  return { fired: true, gateResults, blockedBy };
+}
+
+function advanceState(targetPhase, kvUpdates) {
+  if (typeof targetPhase !== "string" || !targetPhase) {
+    throw new Error("advance-phase: missing target phase argument (Usage: state advance-phase <phase> [key=value ...])");
+  }
+  let current;
+  try { current = readState(); }
+  catch (e) { throw new Error(`advance-phase: state read failed: ${e.message}`); }
+  const workflowType = current.workflow_type;
+  const baseUpdates = [`phase=${targetPhase}`, "status=DONE", ...(Array.isArray(kvUpdates) ? kvUpdates : [])];
+  const gateRun = runPhaseGates(workflowType, targetPhase, { tracePrefix: "advance-phase" });
+  if (!gateRun.fired) {
+    // Pass skipGates so updateState doesn't re-fire the same gates we just
+    // confirmed don't apply (workflow_type unset / YAML absent / no gates).
+    return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType || null, gates_run: [], note: gateRun.note, update: updateState(baseUpdates, { skipGates: true }) };
+  }
+  if (gateRun.blockedBy.length > 0) {
     throw new Error(
-      `[devt advance-phase] ${blockedBy.length} gate(s) blocked transition to ${workflowType}.${targetPhase}: ` +
-      blockedBy.map(b => `${b.gate} (${b.reason})`).join(" | ")
+      `[devt advance-phase] ${gateRun.blockedBy.length} gate(s) blocked transition to ${workflowType}.${targetPhase}: ` +
+      gateRun.blockedBy.map(b => `${b.gate} (${b.reason})`).join(" | ")
     );
   }
-  const updateResult = updateState(baseUpdates);
-  return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: gateResults, update: updateResult };
+  // Gates fired and passed — proceed with the write. skipGates avoids a
+  // duplicate gate run inside updateState (which now also fires gates on
+  // phase=X status=DONE per R10-1).
+  const updateResult = updateState(baseUpdates, { skipGates: true });
+  return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: gateRun.gateResults, update: updateResult };
 }
 
 function persistGateTrace(name, result) {
@@ -4642,7 +4726,15 @@ function assertNoRawDispatchesThisSession() {
   // Honor the same config knob the PreToolUse hook reads. When mode is "warn"
   // or "off", this gate returns ok:true with the count surfaced so consumers
   // can choose to log it without blocking.
+  // R10-4 (cal #24 round 10): hard kill-threshold bypasses dispatch_hygiene_mode.
+  // Field signal: greenfield session accumulated 62 raw_dispatch warnings in
+  // warn mode with zero enforcement. The kill-threshold is a hard-limit
+  // safety (not a soft hygiene reminder) — runaway-pattern at 3+ dispatches
+  // is a different failure class from intentional 1-2-off ad-hoc dispatches.
+  // Mode-bypass for the kill check preserves "warn mode allows ad-hoc" while
+  // catching runaway. Set to null to disable.
   let mode = "block";
+  let killThreshold = 3;
   try {
     const { findProjectRoot, getMergedConfig } = require("./config.cjs");
     void findProjectRoot;
@@ -4650,7 +4742,10 @@ function assertNoRawDispatchesThisSession() {
     if (cfg && typeof cfg.dispatch_hygiene_mode === "string") {
       mode = cfg.dispatch_hygiene_mode.toLowerCase();
     }
-  } catch { /* keep default 'block' on any failure */ }
+    if (cfg && (typeof cfg.dispatch_hygiene_kill_threshold === "number" || cfg.dispatch_hygiene_kill_threshold === null)) {
+      killThreshold = cfg.dispatch_hygiene_kill_threshold;
+    }
+  } catch { /* keep defaults on any failure */ }
 
   // Read workflow anchor — only count dispatches from the CURRENT workflow.
   // S1-v2: `created_at` (rotates on init *) not `first_created_at` (immutable
@@ -4690,6 +4785,34 @@ function assertNoRawDispatchesThisSession() {
   if (rawDispatchCount === 0) {
     return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this workflow's window" };
   }
+  // R10-4: kill-threshold runs BEFORE the mode check — hard-limit safety
+  // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
+  // warn-mode warnings accumulated with zero action).
+  // Dedupe agent names for human-readable summary (count-suffixed when
+  // duplicates exist). The raw `agents` array stays in the response so
+  // programmatic consumers see the unfiltered sequence.
+  const _agentSummary = (() => {
+    const counts = {};
+    for (const a of agents) counts[a] = (counts[a] || 0) + 1;
+    return Object.entries(counts).map(([a, c]) => c > 1 ? `${a} ×${c}` : a).join(", ");
+  })();
+  if (typeof killThreshold === "number" && killThreshold > 0 && rawDispatchCount >= killThreshold) {
+    return {
+      ok: false,
+      killed: true,
+      raw_dispatch_count: rawDispatchCount,
+      kill_threshold: killThreshold,
+      agents,
+      mode,
+      reason:
+        `KILL: ${rawDispatchCount} raw devt:* dispatches in this workflow ≥ kill-threshold ${killThreshold} ` +
+        `(dispatch_hygiene_kill_threshold). This is hard-limit safety — overrides dispatch_hygiene_mode=${mode}. ` +
+        `Agents bypassed: ${_agentSummary}. ` +
+        `Recovery: re-dispatch via /devt:review / /devt:workflow / /devt:debug (canonical envelope path) ` +
+        `OR pre-register lanes for parallel review: state register-lanes --from=<lanes.yaml> && dispatch render-lanes. ` +
+        `Suppress by raising dispatch_hygiene_kill_threshold in .devt/config.json (loud audit signal) or set null to disable.`,
+    };
+  }
   if (mode === "warn" || mode === "off") {
     return {
       ok: true,
@@ -4697,7 +4820,7 @@ function assertNoRawDispatchesThisSession() {
       raw_dispatch_count: rawDispatchCount,
       agents,
       mode,
-      reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this workflow (${agents.join(", ")}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
+      reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this workflow (${_agentSummary}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
     };
   }
   return {
@@ -5337,8 +5460,15 @@ function run(subcommand, args) {
       const name = (args && args.length && !args[0].startsWith("--")) ? args[0] : _getFlag(args, "--name");
       return truncateArtifact(name);
     }
-    case "update":
-      return updateState(args);
+    case "update": {
+      // Round 10 R10-1: --skip-gates opt-out for explicit ad-hoc callers who
+      // don't want phase-gate enforcement on phase=X status=DONE updates.
+      // Loud flag name keeps the bypass auditable. Filtered out of the
+      // key=value args so it doesn't poison the merge.
+      const skipGates = args.includes("--skip-gates");
+      const cleanArgs = args.filter(a => a !== "--skip-gates");
+      return updateState(cleanArgs, { skipGates });
+    }
     case "reset":
       return resetState();
     case "release":

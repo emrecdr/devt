@@ -39,6 +39,14 @@ const DEFAULTS = {
   // Soft warning lost to perceived urgency. block-default makes ceremony
   // involuntary — friction beats protocol.
   dispatch_hygiene_mode: "block",
+  // R10-4 (cal #24 round 10): hard kill-threshold for cumulative raw-dispatch
+  // count in a single workflow window. When count >= this threshold,
+  // assertNoRawDispatchesThisSession returns ok:false REGARDLESS of
+  // dispatch_hygiene_mode (hard-limit safety, not soft hygiene). Field signal:
+  // greenfield accumulated 62 warn-mode warnings in one session with zero
+  // enforcement. Set null to disable. Set higher (e.g. 10) for projects that
+  // intentionally fan out beyond /devt:* — loud audit signal either way.
+  dispatch_hygiene_kill_threshold: 3,
   // Layer-2 claim-check enforcement (greenfield cal #16+#17). Mirrors
   // dispatch_hygiene_mode pattern. Workflow Layer-1 (state assert-artifact-
   // present) prints [BLOCKED] inline; Layer-2 (state assert-claim-checks-

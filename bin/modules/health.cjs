@@ -26,6 +26,7 @@ const CHECKS = {
   W003: { severity: "warning", message: "quality-gates.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
   W004: { severity: "warning", message: "architecture.md missing from .devt/rules/", repairable: false, fix: "Run /devt:setup --init --mode update to add missing template files" },
   W005: { severity: "warning", message: ".devt/state/ not in .gitignore", repairable: true, fix: "Run /devt:setup --health --repair to add .devt/state/ to .gitignore" },
+  W015: { severity: "warning", message: ".gitignore has flat .devt/state/ but not recursive **/.devt/state/ — sub-tree devt invocations (e.g. tools/X/, tests/Y/) will leak state files into PR diffs", repairable: true, fix: "Run /devt:setup --upgrade-gitignore to append recursive pattern (preserves the existing flat entry)" },
   W006: { severity: "warning", message: "Stale workflow — active=true with old stopped_at", repairable: true, fix: "Run /devt:setup --health --repair to clear stale state, or /devt:workflow --cancel" },
   W007: { severity: "warning", message: "VERSION and plugin.json version mismatch", repairable: false, fix: "Update VERSION or plugin.json to match" },
   W008: { severity: "warning", message: "Hook script not executable", repairable: true, fix: "Run /devt:setup --health --repair to fix permissions, or: chmod +x hooks/<script>" },
@@ -207,12 +208,17 @@ function runChecks(pluginRoot) {
     add("E005");
   }
 
-  // W005: .gitignore
+  // W005: .gitignore lacks any .devt/state form
+  // W015: .gitignore has flat form but not recursive (R10-2 — sub-tree leak risk)
   const gitignorePath = path.join(projectRoot, ".gitignore");
   try {
     const content = fs.readFileSync(gitignorePath, "utf8");
-    if (!content.includes(".devt/state")) {
+    const hasRecursive = content.includes("**/.devt/state/");
+    const hasFlat = content.includes(".devt/state");
+    if (!hasFlat && !hasRecursive) {
       add("W005");
+    } else if (hasFlat && !hasRecursive) {
+      add("W015");
     }
   } catch {
     add("W005");
@@ -530,12 +536,23 @@ function runRepairs(pluginRoot, checkResult) {
         case "W005": {
           const gitignorePath = path.join(result.project_root, ".gitignore");
           try {
-            fs.appendFileSync(gitignorePath, "\n# devt workflow state\n.devt/state/\n");
+            // R10-2: bootstrap with recursive pattern (catches sub-tree devt invocations).
+            fs.appendFileSync(gitignorePath, "\n# devt workflow state (recursive — catches sub-tree devt invocations)\n**/.devt/state/\n");
           } catch {
-            // File doesn't exist (or unappendable) — bootstrap atomically.
-            atomicWriteFileSync(gitignorePath, "# devt workflow state\n.devt/state/\n");
+            atomicWriteFileSync(gitignorePath, "# devt workflow state (recursive — catches sub-tree devt invocations)\n**/.devt/state/\n");
           }
-          repairs.push({ code: issue.code, action: "Added .devt/state/ to .gitignore", success: true });
+          repairs.push({ code: issue.code, action: "Added **/.devt/state/ (recursive) to .gitignore", success: true });
+          break;
+        }
+
+        case "W015": {
+          // R10-2: append recursive **/.devt/state/ alongside existing flat
+          // entry. Reuses the setup module's upgradeGitignore helper so the
+          // append shape stays canonical.
+          const { run: setupRun } = require("./setup.cjs");
+          const r = setupRun(["--upgrade-gitignore"]);
+          const appended = (r && Array.isArray(r.appended) ? r.appended : []).join(", ") || "(none)";
+          repairs.push({ code: issue.code, action: `Appended recursive .gitignore patterns: ${appended}`, success: true });
           break;
         }
 

@@ -414,18 +414,42 @@ N / 100
 
 ## Findings
 
-### Critical (if any)
+> **Output-shape contract (cal #24 R11-2 — D1 protection):** Default to axes-shape (`## Axis A — ...`, `## Axis B — ...`, ...) matching the rubric headings. Each finding tagged with `<axis-letter>-<seq>` id (A-1, B-3, etc.) so the verifier's axis-walk check (`assert-verifier-graded-all-axes`) can grade coverage. Field evidence (greenfield D1 cycle 2026-06-16): canonical-envelope delivery makes axes-shape the natural output; less-attentive lanes default to topic-shape only when the envelope's `Walk EVERY declared axis` instruction is missing or weak. Axes-shape is the safer default.
+
+### Axis A — Scope coverage (if any)
+
+| #   | File | Line | Finding          | Rule Violated | Impact           |
+| --- | ---- | ---- | ---------------- | ------------- | ---------------- |
+| A-1 | path | L42  | <specific issue> | <rule ref>    | <why it matters> |
+
+### Axis B — Finding specificity (if any)
+
+| #   | File | Line | Finding | Rule Violated | Impact |
+| --- | ---- | ---- | ------- | ------------- | ------ |
+
+### Axis C — Severity calibration (if any)
+
+| #   | File | Line | Finding | Rule Violated | Impact |
+| --- | ---- | ---- | ------- | ------------- | ------ |
+
+<!-- Continue with axes D — Remediation concreteness, E — ADR Compliance, F — Documentation cohesion, G — Reuse Discipline, H — Dispatch warnings acknowledgment, per the rubric file referenced in <rubric_path>. Skip axes with no findings. -->
+
+#### Topic-shape fallback (use ONLY when emitting `## Axis Coverage Map`)
+
+If reviewing a single-domain lane where the axes-shape doesn't fit (e.g., a hurl-syntax-only lane), the legacy topic-shape is acceptable IF the review also emits a `## Axis Coverage Map` section mapping each finding's `(<id>, <axis-letter>)` so the verifier's `assert-verifier-graded-all-axes` gate can still validate coverage.
+
+##### Critical (legacy shape — requires Axis Coverage Map)
 
 | #   | File | Line | Finding          | Rule Violated | Impact           |
 | --- | ---- | ---- | ---------------- | ------------- | ---------------- |
 | 1   | path | L42  | <specific issue> | <rule ref>    | <why it matters> |
 
-### Important (if any)
+##### Important (legacy shape)
 
 | #   | File | Line | Finding | Rule Violated | Impact |
 | --- | ---- | ---- | ------- | ------------- | ------ |
 
-### Minor (if any)
+##### Minor (legacy shape)
 
 | #   | File | Line | Finding | Rule Violated | Impact |
 | --- | ---- | ---- | ------- | ------------- | ------ |
