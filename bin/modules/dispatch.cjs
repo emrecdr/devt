@@ -486,15 +486,15 @@ function cmdRenderFilled(target, options) {
     out += `\n<!-- rules-excluded: ${totalSectionsCut} sections (${kb} KB saved) -->\n`;
   }
 
-  // R11-3: inject <envelope_health> block before </context>. Surfaces (not
-  // gates) the substantive payload state of 5 monitored context blocks so
-  // the receiving agent can compensate for degraded inputs. Field signal
-  // (greenfield cal #24 Q8): workflow_context_assertion at code-reviewer.md:91
-  // is presence-only ("forgiving" by design) — even `{}` empty payloads pass
-  // the presence check. Lane reviewers couldn't tell when context was
-  // degraded (e.g., Bitbucket + stale brief → empty memory_signal/scope_trust
-  // but envelope LOOKS healthy). envelope_health makes the degradation
-  // explicit; consumer reads + notes [context_degraded] in review.md when
+  // Inject <envelope_health> block before </context>. Surfaces (not gates)
+  // the substantive payload state of 5 monitored context blocks so the
+  // receiving agent can compensate for degraded inputs. The presence check
+  // at code-reviewer.md::workflow_context_assertion is "forgiving" by
+  // design — even `{}` empty payloads pass it. Field-observed: lane
+  // reviewers can't tell when context is degraded (Bitbucket + stale brief
+  // → empty memory_signal/scope_trust but envelope LOOKS healthy because
+  // the tags are present). envelope_health makes the degradation explicit;
+  // the consumer reads it and notes [context_degraded] in review.md when
   // status=degraded. Computed AFTER substitution so placeholder detection
   // catches missing inline_rubrics substitution etc.
   const health = computeEnvelopeHealth(out);
@@ -516,7 +516,7 @@ function cmdRenderFilled(target, options) {
   return out;
 }
 
-// R11-3: classify the substantive payload state of each monitored context
+// Classify the substantive payload state of each monitored context
 // block. Returns {populated:[names], empty:[names], placeholder:[names],
 // status:"healthy"|"degraded"} where status is "healthy" when ≥3 of 5 are
 // populated. Returns null when the envelope is too short to meaningfully
@@ -541,7 +541,7 @@ function computeEnvelopeHealth(rendered) {
     const body = (m[1] || "").trim();
     // Placeholder: unsubstituted {foo} or {foo.X} or {foo_json} literal
     // remains. Indicates substitution failure (init didn't populate the
-    // sub-table for this key — round 10 R11-2 confirmed inline_rubrics
+    // sub-table for this key — inline_rubrics
     // substitution can fail when render-lanes runs outside a full init path).
     if (/^\{[\w.\-\[\]"]+\}$/.test(body) || body === `{inline_rubrics.code_review}` || body === `{inline_rubrics.dev}`) {
       placeholder.push(name);
@@ -774,7 +774,7 @@ function cmdWarnings(args) {
   let limitRaw = null;
   let sinceTs = null;
   let raw = false;
-  let includeAll = false;  // R10-6: --all opts back into the full series (incl. healthy task_output_bytes noise)
+  let includeAll = false;  // --all opts back into the full series (incl. healthy task_output_bytes noise)
   for (const a of args) {
     if (a === "--by-source") mode = "by-source";
     else if (a === "--by-agent") mode = "by-agent";
@@ -811,7 +811,7 @@ function cmdWarnings(args) {
     catch { parseErrors++; }
   }
   let filtered = sinceTs ? entries.filter((e) => e.ts && e.ts >= sinceTs) : entries;
-  // R10-6 (cal #24 round 10): default-filter healthy task_output_bytes noise.
+  // Default-filter healthy task_output_bytes noise.
   // Field signal: greenfield session emitted 246 task_output_bytes events,
   // 0 actionable (all signal:healthy) — drowning the actionable raw_dispatch
   // count in the summary view. The full series stays available for the
@@ -823,7 +823,7 @@ function cmdWarnings(args) {
   if (!includeAll) {
     filtered = filtered.filter((e) => !(e.source === "task_output_bytes" && e.signal === "healthy"));
   }
-  // R10-6: surface filtered-noise count when non-zero so operators see how
+  // Surface filtered-noise count when non-zero so operators see how
   // much was hidden by the default filter. Spread keeps the field absent
   // when the count is 0 (avoids JSON noise on every call).
   const noiseField = filteredNoise > 0 ? { filtered_noise_count: filteredNoise, filter_hint: "pass --all to include task_output_bytes signal=healthy events" } : {};
@@ -904,7 +904,7 @@ function run(subcommand, args) {
       }
       // --rules-exclude=<comma-separated heading list>: opt-in section strip
       // from governing_rules.content. Matches by exact `## Heading` title.
-      // R11-4 (cal #24 round 10 follow-up): config-driven auto-wire. Reads
+      // Config-driven auto-wire. Reads
       // `.devt/config.json::rules.exclude_sections: []` and merges with the
       // CLI flag list (dedupe). Field signal: greenfield never used the flag
       // because it was unadvertised; project-level config makes the 18.1KB/
@@ -992,7 +992,7 @@ function run(subcommand, args) {
 // specific output path override. When outDir is set, writes one file per
 // lane and returns a JSON summary; otherwise returns concatenated text with
 // <!-- LANE: <id> --> separators.
-// R11-4 (cal #24 round 10 follow-up): merge config-level `rules.exclude_sections`
+// Merge config-level `rules.exclude_sections`
 // with the CLI flag list. Returns deduped array. Empty when neither source
 // has entries. Safe on missing config / missing nested key — returns the flag
 // list unchanged.
@@ -1019,7 +1019,7 @@ function cmdRenderLanes(target, options) {
   if (!lanes || lanes.length === 0) {
     return { lane_count: 0, text: "", lanes: [], reason: "no lanes registered in workflow.yaml::lanes[]" };
   }
-  // R11-4: pass config-merged rules-exclude through to the base envelope.
+  // Pass config-merged rules-exclude through to the base envelope.
   // Per-lane envelopes inherit the same rules.exclude_sections — the project-
   // wide cut applies uniformly across all lanes (no per-lane override needed
   // since lanes are scope-partitioned, not rules-partitioned).

@@ -23,15 +23,15 @@
 # Untracked phases auto-pass — advance-phase falls through to a plain phase
 # update without running any gates, preserving backwards compatibility.
 #
-# Scope extension (Round 11 D-5): every INTERMEDIATE phase under each
-# workflow_type now gates `assert-no-raw-dispatches-this-session`. Field
-# signal (greenfield cal #24): 62 raw_dispatches accumulated across
-# dispatch_lanes → substance_check_lanes → redispatch_lanes → consolidate
-# mid-workflow with no enforcement until terminal `complete`. Combined with
-# R10-1's `state update phase=X status=DONE` gate-firing + R10-4's
-# kill-threshold, the bypass pattern now trips at the THIRD raw_dispatch on
-# whatever intermediate phase boundary the orchestrator hits next — not at
-# finalize.
+# Scope extension: every INTERMEDIATE phase under each workflow_type gates
+# `assert-no-raw-dispatches-this-session`. Field-observed: raw_dispatches
+# can accumulate across dispatch_lanes → substance_check_lanes →
+# redispatch_lanes → consolidate mid-workflow with no enforcement until
+# terminal `complete` if intermediate phases are ungated. Combined with the
+# `state update phase=X status=DONE` gate-firing path and the kill-threshold
+# (config: dispatch_hygiene_kill_threshold), the bypass pattern now trips at
+# the threshold count on whatever intermediate phase boundary the
+# orchestrator hits next — not deferred to finalize.
 #
 # Why intermediate phases get ONLY the raw-dispatch gate (not the full
 # terminal set): the other terminal gates (assert-knowledge-candidates-tagged,
@@ -44,7 +44,7 @@
 
 workflow_types:
   code_review:
-    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    # Intermediate phases — raw-dispatch gate only
     scope_check:
       gates:
         - assert-no-raw-dispatches-this-session
@@ -70,7 +70,7 @@ workflow_types:
         - assert-verifier-ran
 
   code_review_parallel:
-    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    # Intermediate phases — raw-dispatch gate only
     context_init:
       gates:
         - assert-no-raw-dispatches-this-session
@@ -99,7 +99,7 @@ workflow_types:
         - assert-verifier-ran
 
   dev:
-    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    # Intermediate phases — raw-dispatch gate only
     assess:
       gates:
         - assert-no-raw-dispatches-this-session
@@ -151,7 +151,7 @@ workflow_types:
         - assert-auto-curator-considered
 
   quick_implement:
-    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    # Intermediate phases — raw-dispatch gate only
     context_init:
       gates:
         - assert-no-raw-dispatches-this-session
@@ -179,7 +179,7 @@ workflow_types:
         - assert-auto-curator-considered
 
   debug:
-    # Intermediate phase — raw-dispatch gate only (R11 D-5)
+    # Intermediate phase — raw-dispatch gate only
     report:
       gates:
         - assert-no-raw-dispatches-this-session

@@ -12988,10 +12988,11 @@ else
   fail "K120: trim broken — before=$K120_BEFORE after=$K120_AFTER anchor_preserved=$K120_ANCHOR_PRESERVED"
 fi
 
-# K121 (cal #24 round 10 R10-1): state update phase=X status=DONE fires
-# phase-gates from _phase-gates.yaml; --skip-gates opts out. Field signal:
-# 99:7 update-vs-advance call ratio in shipped workflows → gates were dead
-# for ~93% of phase transitions until this round. K121 locks the contract:
+# K121: state update phase=X status=DONE fires phase-gates from
+# _phase-gates.yaml; --skip-gates opts out. Field-observed: workflows
+# overwhelmingly call `state update phase=X` rather than `state advance-phase`,
+# so gating only the advance-phase path leaves the registry effectively dead
+# for the majority of phase transitions. K121 locks the unified contract:
 # default-block on gate failure, opt-out via --skip-gates, state unchanged
 # on refusal.
 K121_TMP=$(mktemp -d)
@@ -13017,16 +13018,17 @@ rm -rf "$K121_TMP"
 if [ "$K121_REFUSED" = "yes" ] && [ "$K121_STATE_AFTER_REFUSAL" = "context_init/true" ] && [ "$K121_SKIPPED" = "yes" ] && [ "$K121_STATE_AFTER_SKIP" = "complete/false" ]; then
   pass "K121: state update phase=complete status=DONE fires phase-gates (default-block); --skip-gates opts out; state preserved on refusal"
 else
-  fail "K121: R10-1 contract broken — refused=$K121_REFUSED after_refusal=$K121_STATE_AFTER_REFUSAL skipped=$K121_SKIPPED after_skip=$K121_STATE_AFTER_SKIP"
+  fail "K121: phase-gate-on-state-update contract broken — refused=$K121_REFUSED after_refusal=$K121_STATE_AFTER_REFUSAL skipped=$K121_SKIPPED after_skip=$K121_STATE_AFTER_SKIP"
 fi
 
-# K122 (cal #24 round 11 D-5): _phase-gates.yaml now gates every INTERMEDIATE
-# phase with assert-no-raw-dispatches-this-session (not just terminal). Field
-# signal (greenfield): 62 raw_dispatches accumulated across dispatch_lanes →
-# substance_check_lanes → redispatch_lanes → consolidate before terminal
-# `complete` could enforce. Combined with R10-4 kill-threshold=3, the bypass
-# pattern now trips at the THIRD raw_dispatch on whatever intermediate phase
-# boundary the orchestrator hits next. K122 locks that contract.
+# K122: _phase-gates.yaml gates every INTERMEDIATE phase with
+# assert-no-raw-dispatches-this-session (not just terminal). Field-observed:
+# raw_dispatches can accumulate across dispatch_lanes → substance_check_lanes
+# → redispatch_lanes → consolidate before terminal `complete` enforces.
+# Combined with the kill-threshold (config: dispatch_hygiene_kill_threshold,
+# default 3), the bypass pattern now trips at the threshold count on
+# whatever intermediate phase boundary the orchestrator hits next. K122
+# locks that contract.
 K122_TMP=$(mktemp -d)
 mkdir -p "$K122_TMP/.devt/state"
 # Active dev workflow at phase=scan (intermediate phase, has a gate per the
@@ -13054,20 +13056,19 @@ rm -rf "$K122_TMP"
 if [ "$K122_REFUSED" = "yes" ] && [ "$K122_STATE_AFTER_REFUSAL" = "scan" ] && [ "$K122_SKIPPED" = "yes" ] && [ "$K122_STATE_AFTER_SKIP" = "plan" ]; then
   pass "K122: intermediate-phase gates fire on state update phase=<intermediate> status=DONE (kill-threshold trips at 3 raw_dispatches; state preserved on refusal; --skip-gates opts out)"
 else
-  fail "K122: D-5 contract broken — refused=$K122_REFUSED after_refusal=$K122_STATE_AFTER_REFUSAL skipped=$K122_SKIPPED after_skip=$K122_STATE_AFTER_SKIP"
+  fail "K122: intermediate-phase gate contract broken — refused=$K122_REFUSED after_refusal=$K122_STATE_AFTER_REFUSAL skipped=$K122_SKIPPED after_skip=$K122_STATE_AFTER_SKIP"
 fi
 
-# K123 (cal #24 round 12 Q3): cliff-counter at workflow-context-injector.sh
-# must read r.signal field — only count records with signal in (near_cliff,
-# low_output, mid_task). Pre-R12 the counter incremented for EVERY
-# task_output_bytes record regardless of signal, producing the "247 cliff
-# signals" cry-wolf greenfield cal #24 surfaced (actually 0 actionable
-# signals; 247/254 records were signal=null or signal=healthy noise).
-# K123 fixes by reading the bash hook's node-eval logic, dropping a fake
+# K123: cliff-counter at workflow-context-injector.sh must read r.signal
+# field — only count records with signal in (near_cliff, low_output,
+# mid_task). Counting every task_output_bytes record regardless of signal
+# produces cry-wolf — field-observed at ~247-of-254 false alarms in a
+# single session — and trains operators to ignore the banner. K123
+# validates by reading the bash hook's node-eval logic, dropping a fake
 # JSONL fixture, and asserting cliff count matches signal-aware semantics.
 K123_HOOK=$(cat "$ROOT/hooks/workflow-context-injector.sh")
 # Assert the corrected predicate is present (defensive — catches regressions
-# that revert R12 Q3 without breaking the runtime path).
+# that revert the signal-aware check without breaking the runtime path).
 if echo "$K123_HOOK" | grep -q "r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy'"; then
   K123_PREDICATE="present"
 else
@@ -13090,16 +13091,16 @@ K123_FUNCTIONAL=$(node -e "
   console.log(cliff);
 " 2>/dev/null)
 if [ "$K123_PREDICATE" = "present" ] && [ "$K123_FUNCTIONAL" = "1" ]; then
-  pass "K123: workflow-context-injector cliff-counter reads r.signal (only counts actionable signals; healthy/null filtered as noise per R10-6 discriminator)"
+  pass "K123: workflow-context-injector cliff-counter reads r.signal (only counts actionable signals; healthy/null filtered as noise)"
 else
-  fail "K123: R12 Q3 contract broken — predicate=$K123_PREDICATE functional_cliff_count=$K123_FUNCTIONAL (expected present/1)"
+  fail "K123: signal-aware cliff-counter contract broken — predicate=$K123_PREDICATE functional_cliff_count=$K123_FUNCTIONAL (expected present/1)"
 fi
 
-# K124 (cal #24 round 12 Q4): blast_radius MCP schema maxItems raised
-# 32 → 256 (8x). Field signal (greenfield cal #24): 92-symbol PR review
-# silently dropped 60 symbols (65%) to the 32 cap. Cap was arbitrary
-# JSONSchema literal with no underlying transport constraint; CLI handles
-# unlimited. K124 locks the raised value and prevents accidental shrink.
+# K124: blast_radius MCP schema maxItems=256 (raised from a prior 32-cap).
+# Prior cap was an arbitrary JSONSchema literal with no underlying transport
+# constraint; the CLI wrapper handles unlimited input. Field-observed: a
+# 32-cap silently dropped ~65% of topic symbols on PRs with wider domain
+# surfaces. K124 locks the raised value and prevents accidental shrink.
 K124_MAX_ITEMS=$(grep -oE 'maxItems:\s*[0-9]+' "$ROOT/bin/devt-graphify-mcp.cjs" | grep -oE '[0-9]+' | head -1)
 # Functional test: parse the schema literal and confirm a 100-symbol input
 # would pass validation (the 32-cap would have failed).
@@ -13112,9 +13113,9 @@ K124_VALIDATES=$(node -e "
   console.log(cap >= 100 ? 'pass' : 'fail');
 " 2>/dev/null)
 if [ "$K124_MAX_ITEMS" = "256" ] && [ "$K124_VALIDATES" = "pass" ]; then
-  pass "K124: blast_radius MCP schema maxItems=256 (R12 Q4 raise from 32; 100-symbol input now validates; field signal: greenfield 65% symbol drop fix)"
+  pass "K124: blast_radius MCP schema maxItems=256 (100-symbol input validates; prevents the silent symbol-drop pattern field-observed at 32-cap)"
 else
-  fail "K124: R12 Q4 contract broken — maxItems=$K124_MAX_ITEMS validates_100=$K124_VALIDATES (expected 256/pass)"
+  fail "K124: MCP cap contract broken — maxItems=$K124_MAX_ITEMS validates_100=$K124_VALIDATES (expected 256/pass)"
 fi
 
 echo

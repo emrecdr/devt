@@ -7,7 +7,7 @@
 # advisory is surfaced to the orchestrator.
 #
 # Threshold default: 40KB; override via .devt/config.json::telemetry.task_truncation_warn_bytes.
-# After greenfield calibration (June 2026) shipped enough field data to confirm
+# After field data confirmed
 # the cliff sits well above the typical sub-agent return, this hook only writes
 # when a cliff triggers — the calibration-mode emit-every-return was 93% noise.
 #
@@ -92,7 +92,7 @@ node -e "
 
   const nearCliff = outputBytes >= threshold;
 
-  // WI-3b (greenfield calibration #17): LOW-output cliff detection. Greenfield's
+  // LOW-output cliff detection. Field signal:
   // 'Now B.5' case returned 140 bytes from a programmer at the 91-tool wall;
   // the existing 40KB near_cliff didn't fire because the byte count was tiny.
   // A suspiciously SMALL return often signals mid-task truncation just as much
@@ -119,7 +119,7 @@ node -e "
     stopReason = resp.stop_reason;
   }
 
-  // WI-5b / M9 (greenfield calibration #16/#17 H section): mid-task language
+  // Mid-task language
   // backup signal. Catches agents that hit a budget wall and returned a short
   // continuation message ('Now B.5', 'continuing with phase 2', 'paused after
   // step 3') instead of emitting Status: PARTIAL explicitly per the Q8 contract.
@@ -177,11 +177,12 @@ node -e "
     try {
       const fs = require('fs');
       const path = require('path');
-      // R10-6 (cal #24 round 10): signal discriminator added so downstream
-      // consumers (dispatch warnings CLI, telemetry filters) can filter
-      // noise-floor events at READ time without breaking the stuck-detector
-      // (state.cjs:3000) which still needs every event in the stream.
-      // Greenfield session evidence: 246 cliff signals, 0 actionable.
+      // Signal discriminator lets downstream consumers (dispatch warnings
+      // CLI, telemetry filters) filter noise-floor events at READ time
+      // without breaking the stuck-detector (state.cjs:3000) which still
+      // needs every event in the stream. Field signal: ~246-of-254 cliff
+      // records were unactionable noise (signal=healthy) — counting them
+      // all produces cry-wolf training operators to ignore the channel.
       // 'healthy' = neither cliff fired and no mid-task language match.
       // Note: avoid backticks in this hook — they trigger bash command
       // substitution inside the surrounding double-quoted heredoc.

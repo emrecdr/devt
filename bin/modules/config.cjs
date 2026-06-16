@@ -39,7 +39,7 @@ const DEFAULTS = {
   // Soft warning lost to perceived urgency. block-default makes ceremony
   // involuntary — friction beats protocol.
   dispatch_hygiene_mode: "block",
-  // R10-4 (cal #24 round 10): hard kill-threshold for cumulative raw-dispatch
+  // Hard kill-threshold for cumulative raw-dispatch
   // count in a single workflow window. When count >= this threshold,
   // assertNoRawDispatchesThisSession returns ok:false REGARDLESS of
   // dispatch_hygiene_mode (hard-limit safety, not soft hygiene). Field signal:

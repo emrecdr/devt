@@ -46,10 +46,10 @@ RESULT=$(node -e "
   const path = require('path');
   const { execSync } = require('child_process');
 
-  // D-3 (cal #24 round 10 follow-up): walk-up project-root resolution so the
-  // hook works correctly when Claude Code is launched from a subdirectory of
-  // the project. Matches config.cjs::findProjectRoot semantics (walks up
-  // looking for .devt/ or .git/; falls back to cwd if no marker found).
+  // Walk-up project-root resolution so the hook works correctly when Claude
+  // Code is launched from a subdirectory of the project. Matches
+  // config.cjs::findProjectRoot semantics (walks up looking for .devt/ or
+  // .git/; falls back to cwd if no marker found).
   function _hookFindProjectRoot() {
     let dir = process.cwd();
     while (dir !== path.dirname(dir)) {
@@ -62,14 +62,14 @@ RESULT=$(node -e "
   }
   const _projectRoot = _hookFindProjectRoot();
 
-  // R10-3 (cal #24 round 10): config-drift banner. Greenfield's session
-  // demonstrated that a project's .devt/config.json overriding
-  // dispatch_hygiene_mode=warn was silently inherited — operator could not
-  // recall when or why it was set. Fires on every UserPromptSubmit (active
-  // OR idle) so the safety-floor weakening is visible at the moment the
-  // operator decides what to dispatch. Cheap: one shallow JSON read per
-  // prompt, only the explicit project overrides (not the merged config).
-  // D-2 (round 10 follow-up): memory.preflight_mode also watched (defaults
+  // Config-drift banner. Field-observed: a project's .devt/config.json
+  // overriding dispatch_hygiene_mode=warn (or similar safety mode) can be
+  // silently inherited — operators have no way to recall when or why a
+  // mode was flipped from the fail-secure default. Banner fires on every
+  // UserPromptSubmit (active OR idle) so safety-floor weakening is visible
+  // at the moment the operator decides what to dispatch. Cheap: one
+  // shallow JSON read per prompt, only the explicit project overrides
+  // (not the merged config). memory.preflight_mode also watched (defaults
   // to 'block' per state.cjs; warn/off means the PreToolUse PREFLIGHT-line
   // check is downgraded).
   const configAlertLines = [];
@@ -116,28 +116,26 @@ RESULT=$(node -e "
     const flagStr = flags.length > 0 ? '·' + flags.join('+') : '';
     const lines = ['[devt] ' + tier + '/' + phase + (iter > 1 ? '·i' + iter : '') + flagStr + ' · \"' + task + '\"'];
 
-    // G1 (cal #21 round 5 V6): session-scoped telemetry push. Greenfield's
-    // V6 honest answer revealed A2/A2b/A4 infrastructure works but discovery
-    // surfaces are too passive for an LLM operator — operators forget the
-    // CLIs exist when head-down in a workflow. UserPromptSubmit injection
-    // surfaces the same signals without requiring the operator to ask.
-    // All probes fail-open: any error path → no signal line, no broken hook.
+    // Session-scoped telemetry push. Field-observed: telemetry CLIs exist
+    // but operators forget them when head-down in a workflow — discovery
+    // surfaces are too passive for an LLM operator. UserPromptSubmit
+    // injection surfaces the same signals without requiring the operator
+    // to ask. All probes fail-open: any error path → no signal line, no
+    // broken hook.
     const workflowStart = state.first_created_at || state.created_at || null;
     if (workflowStart) {
       const startMs = new Date(workflowStart).getTime();
       const signals = [];
 
       // Probe 1: dispatch-warnings.jsonl session-scoped counts.
-      // Inline JSONL scan — same pattern as A2b in task-truncation-detector.sh.
-      // D-3: uses resolved _projectRoot so subdir invocations still find the
-      // canonical state file.
-      // R12 Q3: cliff++ must read r.signal (R10-6 discriminator).
-      // task-truncation-detector tags every record signal in {healthy,
-      // near_cliff, low_output, mid_task}. Prior code counted ALL
-      // task_output_bytes records as cliff signals, training operators
-      // to ignore the banner (greenfield cal #24 reported 247 alerts;
-      // actually 0 actionable — all signal=null or signal=healthy).
-      // Pre-R10-6 records lack the signal field — treat as noise.
+      // Inline JSONL scan — uses resolved _projectRoot so subdir invocations
+      // still find the canonical state file. cliff++ only on actionable
+      // signals: task-truncation-detector tags every record signal in
+      // {healthy, near_cliff, low_output, mid_task}. Counting ALL
+      // task_output_bytes records (regardless of signal) produces cry-wolf
+      // noise — field-observed at ~247-of-254 false alarms per session,
+      // training operators to ignore the channel. Records predating the
+      // discriminator lack the signal field; treated as noise.
       try {
         const dispatchPath = path.join(_projectRoot, '.devt', 'state', 'dispatch-warnings.jsonl');
         if (fs.existsSync(dispatchPath)) {
@@ -160,7 +158,7 @@ RESULT=$(node -e "
 
       // Probe 2: inherited source edits via git status, scoped to mtime >
       // workflow start. 1-second timeout caps hook latency cost.
-      // D-3: git invocation uses _projectRoot so git status reflects the
+      // git invocation uses _projectRoot so git status reflects the
       // canonical repo's working tree (matches the dispatch-warnings probe
       // above).
       try {
@@ -190,7 +188,7 @@ RESULT=$(node -e "
       }
     }
 
-    // R10-3: prepend config-drift banner ABOVE the workflow status so the
+    // Prepend config-drift banner ABOVE the workflow status so the
     // safety-floor weakening is the topmost signal the operator sees.
     const allLines = configAlertLines.concat(lines);
     const output = {
@@ -201,7 +199,7 @@ RESULT=$(node -e "
     };
     process.stdout.write(JSON.stringify(output));
   } else if (configAlertLines.length > 0) {
-    // R10-3: idle session BUT config is drifted — emit the banner standalone.
+    // Idle session BUT config is drifted — emit the banner standalone.
     // Idle-state activity is otherwise silent (per the comment below) but
     // safety-floor weakening is too important to hide; if the operator is
     // about to dispatch ANYTHING off-script, they should know first.

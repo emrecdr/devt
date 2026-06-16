@@ -209,7 +209,7 @@ function runChecks(pluginRoot) {
   }
 
   // W005: .gitignore lacks any .devt/state form
-  // W015: .gitignore has flat form but not recursive (R10-2 — sub-tree leak risk)
+  // W015: .gitignore has flat form but not recursive (sub-tree leak risk)
   const gitignorePath = path.join(projectRoot, ".gitignore");
   try {
     const content = fs.readFileSync(gitignorePath, "utf8");
@@ -536,7 +536,7 @@ function runRepairs(pluginRoot, checkResult) {
         case "W005": {
           const gitignorePath = path.join(result.project_root, ".gitignore");
           try {
-            // R10-2: bootstrap with recursive pattern (catches sub-tree devt invocations).
+            // Bootstrap with recursive pattern (catches sub-tree devt invocations).
             fs.appendFileSync(gitignorePath, "\n# devt workflow state (recursive — catches sub-tree devt invocations)\n**/.devt/state/\n");
           } catch {
             atomicWriteFileSync(gitignorePath, "# devt workflow state (recursive — catches sub-tree devt invocations)\n**/.devt/state/\n");
@@ -546,7 +546,7 @@ function runRepairs(pluginRoot, checkResult) {
         }
 
         case "W015": {
-          // R10-2: append recursive **/.devt/state/ alongside existing flat
+          // Append recursive **/.devt/state/ alongside existing flat
           // entry. Reuses the setup module's upgradeGitignore helper so the
           // append shape stays canonical.
           const { run: setupRun } = require("./setup.cjs");

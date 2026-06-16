@@ -892,7 +892,7 @@ function releaseLock(lockFile) {
 
 function updateState(keyValues, opts = {}) {
   ensureStateDir();
-  // Round 10 R10-1: detect phase=X status=DONE update intent BEFORE acquiring
+  // Detect phase=X status=DONE update intent BEFORE acquiring
   // the lock. Gates fire OUTSIDE the lock to avoid recursive lock attempts
   // from any future gate that calls readState/updateState. Field-evidenced:
   // 99:7 update-vs-advance call ratio across shipped workflows; gates were
@@ -4420,7 +4420,7 @@ function parsePhaseGatesYaml(content) {
 // Every gate firing logs to gate-trace.jsonl via persistGateTrace, with
 // gate name prefixed by "advance-phase:" so cal #19+ can distinguish
 // transition-time gates from manual one-off gate runs.
-// Round 10 R10-1: shared phase-gate runner. Extracted from advanceState so
+// Shared phase-gate runner. Extracted from advanceState so
 // `updateState` can fire gates when `state update phase=X status=DONE` is
 // called directly (field-evidenced: 99:7 update-vs-advance call ratio across
 // devt's own workflow files — gates defined in _phase-gates.yaml were dead
@@ -4507,7 +4507,7 @@ function advanceState(targetPhase, kvUpdates) {
   }
   // Gates fired and passed — proceed with the write. skipGates avoids a
   // duplicate gate run inside updateState (which now also fires gates on
-  // phase=X status=DONE per R10-1).
+  // phase=X status=DONE through the same runner).
   const updateResult = updateState(baseUpdates, { skipGates: true });
   return { ok: true, advanced: true, target_phase: targetPhase, workflow_type: workflowType, gates_run: gateRun.gateResults, update: updateResult };
 }
@@ -4726,7 +4726,7 @@ function assertNoRawDispatchesThisSession() {
   // Honor the same config knob the PreToolUse hook reads. When mode is "warn"
   // or "off", this gate returns ok:true with the count surfaced so consumers
   // can choose to log it without blocking.
-  // R10-4 (cal #24 round 10): hard kill-threshold bypasses dispatch_hygiene_mode.
+  // Hard kill-threshold bypasses dispatch_hygiene_mode.
   // Field signal: greenfield session accumulated 62 raw_dispatch warnings in
   // warn mode with zero enforcement. The kill-threshold is a hard-limit
   // safety (not a soft hygiene reminder) — runaway-pattern at 3+ dispatches
@@ -4785,7 +4785,7 @@ function assertNoRawDispatchesThisSession() {
   if (rawDispatchCount === 0) {
     return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this workflow's window" };
   }
-  // R10-4: kill-threshold runs BEFORE the mode check — hard-limit safety
+  // Kill-threshold runs BEFORE the mode check — hard-limit safety
   // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
   // warn-mode warnings accumulated with zero action).
   // Dedupe agent names for human-readable summary (count-suffixed when
@@ -5461,7 +5461,7 @@ function run(subcommand, args) {
       return truncateArtifact(name);
     }
     case "update": {
-      // Round 10 R10-1: --skip-gates opt-out for explicit ad-hoc callers who
+      // --skip-gates opt-out for explicit ad-hoc callers who
       // don't want phase-gate enforcement on phase=X status=DONE updates.
       // Loud flag name keeps the bypass auditable. Filtered out of the
       // key=value args so it doesn't poison the merge.

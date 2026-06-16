@@ -433,7 +433,7 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 
 Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
 
-> **Pre-known partition shortcut (R10 + R8 Tier C):** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical C7-7 rubric directive + scope blocks. This silences `dispatch-hygiene-guard.sh` raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple and avoids the bypass-pattern that field-evidenced 62 raw_dispatches in greenfield's pre-v0.96 session.
+> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. This silences `dispatch-hygiene-guard.sh` raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple and avoids the bypass-pattern field-observed when long sessions accumulate unbounded raw-dispatch counts.
 
 ```bash
 SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)

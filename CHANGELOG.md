@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #24 round 12 follow-up — strip round/cal/ID refs from codebase
+
+Codebase is not the changelog. Stripped round numbers, calibration IDs, ticket refs, and other provenance markers introduced during R10-R12 across 14 files (`hooks/*`, `bin/modules/*`, `bin/devt-graphify-mcp.cjs`, `workflows/_phase-gates.yaml`, `workflows/code-review*.md`, `agents/code-reviewer.md`, `scripts/smoke-test.sh`). Replaced provenance with rule/invariant phrasing or field-observed framing; the WHY signal stays load-bearing, the time-pinned context decays out. Net: +135 / −134 lines (information density preserved). Smoke 869/0, gate 16/0, locking 3/0, envelope-compile 22/0. K-gate self-IDs (K121-K124 inside their own pass/fail messages) intentionally retained as self-referential.
+
+Memory rule reinforced via `feedback_no_version_refs_in_code` (slug: `feedback-no-version-refs-in-code`): rounds, calibration IDs, wave/option/tier labels, ticket refs, K-gate cross-refs, and session timestamps are CHANGELOG-only. Legacy refs predating R10 (~195 remaining `cal #N` / `greenfield calibration` / `D-NN` markers from earlier rounds) intentionally left — per the rule's "clean up when nearby code is being modified" guidance; dedicated legacy sweep deferred as a candidate round.
+
 ### Cal #24 round 12 — stop wasting signal
 
 Two field-evidenced fixes; both single-line where they matter.

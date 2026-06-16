@@ -159,15 +159,14 @@ const TOOLS = {
       type: "object",
       required: ["symbols"],
       properties: {
-        // R12 Q4: maxItems raised 32 → 256 (8x). The 32 cap was an
-        // unjustified defensive literal — no underlying transport
-        // constraint. Field signal: greenfield cal #24 PR review had
-        // 92 topic symbols; the cap silently dropped 60 (65%), losing
-        // exactly the GFBUGS-294/325/327 domain surface. The CLI wrapper
-        // (graphify.blastRadius) accepts unlimited input; only this MCP
-        // schema constrained. 256 covers GF's case 2.8x; revisit only
-        // if a real response-size overflow is observed (none today).
-        symbols: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 256, description: "Subject symbols (cap 256 — R12 raise from 32, see schema comment)" },
+        // maxItems=256: schema-level cap with no underlying transport
+        // constraint. The CLI wrapper (graphify.blastRadius) accepts
+        // unlimited input; only this MCP schema constrained. Prior
+        // cap (32) silently dropped 65% of topic symbols on PRs with
+        // wider domain surfaces — field-observed losing exactly the
+        // most-reviewable symbols. 256 covers realistic PR scope;
+        // revisit only if a real response-size overflow is observed.
+        symbols: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 256, description: "Subject symbols (cap 256, see schema comment)" },
       },
     },
     handler: ({ symbols }) => {
@@ -192,7 +191,7 @@ const TOOLS = {
   },
 
   // get_community removed from MCP advertised tool surface. Field signal
-  // (greenfield calibration thread): zero agent invocations across 50+ raw-
+  // Field signal: zero agent invocations across 50+ raw-
   // dispatched lane reviews — no workflow tells an agent to reach for it.
   // The JS function `graphify.getCommunity()` (bin/modules/graphify.cjs) is
   // the canonical contract + remains in active use via `graphify lane-

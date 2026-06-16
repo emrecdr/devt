@@ -137,7 +137,7 @@ After writing both files, STOP — emit a final user-visible message: `Code-revi
 
 This assertion is intentionally strict: even one of the three blocks being present means you're workflow-dispatched (the heuristic is forgiving). All three missing is the unambiguous "rogue orchestration" signal — exactly the failure mode the greenfield-api pass-9 evidence surfaced where 6 parallel slice agents ran with no context injection and silently fell back to grep-first review.
 
-**Envelope-health soft signal (R11-3).** When `<envelope_health>` is present in the dispatch (round 11 onward), parse its JSON `status` field:
+**Envelope-health soft signal.** When `<envelope_health>` is present in the dispatch, parse its JSON `status` field:
 - `status="healthy"` (≥3 of 5 monitored blocks populated) → proceed normally.
 - `status="degraded"` (≥3 of 5 empty/placeholder) → still proceed (not a hard block — degraded contexts are legitimate: Bitbucket projects without GitHub pr_scoped, stale preflight briefs, graphify-disabled projects), BUT add a `## Envelope Health` section to review.md noting:
   - Which blocks were `populated` / `empty` / `placeholder` (verbatim from envelope_health JSON)
@@ -425,7 +425,7 @@ N / 100
 
 ## Findings
 
-> **Output-shape contract (cal #24 R11-2 — D1 protection):** Default to axes-shape (`## Axis A — ...`, `## Axis B — ...`, ...) matching the rubric headings. Each finding tagged with `<axis-letter>-<seq>` id (A-1, B-3, etc.) so the verifier's axis-walk check (`assert-verifier-graded-all-axes`) can grade coverage. Field evidence (greenfield D1 cycle 2026-06-16): canonical-envelope delivery makes axes-shape the natural output; less-attentive lanes default to topic-shape only when the envelope's `Walk EVERY declared axis` instruction is missing or weak. Axes-shape is the safer default.
+> **Output-shape contract:** Default to axes-shape (`## Axis A — ...`, `## Axis B — ...`, ...) matching the rubric headings. Each finding tagged with `<axis-letter>-<seq>` id (A-1, B-3, etc.) so the verifier's axis-walk check (`assert-verifier-graded-all-axes`) can grade coverage. Field-observed: canonical-envelope delivery makes axes-shape the natural output; less-attentive lanes default to topic-shape only when the envelope's `Walk EVERY declared axis` instruction is missing or weak. Axes-shape is the safer default.
 
 ### Axis A — Scope coverage (if any)
 

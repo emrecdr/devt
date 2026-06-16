@@ -324,7 +324,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // USER-DECIDES (commented hints — not auto-added):
   // .devt/memory/_suggestions.md (some teams commit for review history)
   const gitignorePath = path.join(projectRoot, ".gitignore");
-  // R10-2 (cal #24 round 10): patterns use **/ recursive prefix where field
+  // Patterns use **/ recursive prefix where field
   // evidence shows sub-tree devt invocations leak. Greenfield committed 6
   // transient files from tools/hurl-dashboard/.devt/state/ + tests/hurl/.devt/
   // state/ because the prior flat `.devt/state/` pattern only matched the
@@ -653,7 +653,7 @@ function run(args, pluginRoot) {
         available_templates: AVAILABLE_TEMPLATES,
       };
     } else if (args[i] === "--upgrade-gitignore") {
-      // R10-2 (cal #24 round 10): focused gitignore migration for existing
+      // Focused gitignore migration for existing
       // projects. Appends recursive **/.devt/state/ alongside any existing
       // flat `.devt/state/` entry (preserves backward compat). Idempotent —
       // safe to re-run. Doesn't require choosing a template.
@@ -664,7 +664,7 @@ function run(args, pluginRoot) {
   return setupProject(templateName, pluginRoot, extraConfig, { mode });
 }
 
-// R10-2: standalone gitignore upgrade — appends any missing recursive
+// Standalone gitignore upgrade — appends any missing recursive
 // patterns from the canonical requiredIgnores list. Uses substring `includes`
 // match, so existing flat entries don't suppress the recursive variant from
 // being appended. Returns a focused result shape so the CLI surface is
