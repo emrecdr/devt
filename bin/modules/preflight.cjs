@@ -701,6 +701,19 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
     }
   } catch { /* findProjectRoot may throw in tests — skip the check */ }
 
+  // Round 7 W6b — surface Leiden-absent state so operators know parallel-
+  // review partitioning will route via service-boundary (R7-W6) or path-based
+  // fallback rather than Leiden communities. Cheap probe: graphStats() reuses
+  // the loader cache. Silent when graph isn't ready (other gates surface
+  // that) or when communities are present.
+  try {
+    const gs = graphify.graphStats();
+    if (gs && gs.state === "ready" && gs.has_communities === false) {
+      lines.push("> ℹ️ **Graphify has no Leiden community labels** — parallel review (`/devt:review` >10-file scope) will auto-detect service-boundary groups (`app/services/X/`, `packages/X/`, etc.) when ≥80% of files match, otherwise fall back to path-based partition. To enable community-driven lanes, re-graphify with Leiden clustering enabled.");
+      lines.push("");
+    }
+  } catch { /* graphStats best-effort — never block the brief */ }
+
   lines.push("## Topic Extracted");
   lines.push(`- **Domains:** ${topic.domains.length ? topic.domains.join(", ") : "_(none)_"}`);
   lines.push(`- **Symbols:** ${topic.symbols.length ? topic.symbols.join(", ") : "_(none)_"}`);

@@ -88,7 +88,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 <step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
-Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, or `mode: "fallback"` when the graph is missing / has no community labels / leaves diff files uncovered. The fallback case is the legacy path partition — field-validated when graphify's blast_radius response doesn't emit community labels (greenfield's graph-impact.md had zero `## Affected Communities` sections after a 58-file blast_radius call). The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
+Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise tries service-boundary auto-detect (R7-W6), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, `mode: "service_boundary"` when the graph has no community labels but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `packages/X/`, etc. — community field carries the service name), or `mode: "fallback"` when neither applies. The fallback case is the legacy path partition. The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
 ```bash
 SCOPE_FILES_PATH=".devt/state/code-review-input.md"
@@ -115,16 +115,20 @@ LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}
 LANE_MODE=$(echo "$LANE_SUG" | jq -r '.mode // "fallback"')
 
 GROUPS_FILE=$(mktemp)
-if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ]; then
-  # Community partition: each group becomes one lane. The prefix label is
-  # "community-N" for covered files; "ungrouped" for partial-mode uncovered
-  # files (those without graph nodes — tests, migrations, docs). The
-  # downstream slug generation handles both labels (NEW-6).
+if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MODE" = "service_boundary" ]; then
+  # Community / partial / service-boundary partition: each group becomes one
+  # lane. The prefix label is "community-N" for Leiden-numbered groups,
+  # "community-<service>" for service-boundary groups (R7-W6 — the community
+  # field carries the service name string), or "ungrouped" for partial-mode
+  # uncovered files. The downstream slug generation handles all three labels.
   echo "$LANE_SUG" | jq -r '.groups[] | (if .community == null then "ungrouped" else "community-" + (.community|tostring) end) as $c | .files[] | $c + "|" + .' | sort > "$GROUPS_FILE"
   if [ "$LANE_MODE" = "partial" ]; then
     COVERED=$(echo "$LANE_SUG" | jq -r '.covered_count')
     UNCOVERED=$(echo "$LANE_SUG" | jq -r '.uncovered_count')
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED}) (NEW-6)"
+  elif [ "$LANE_MODE" = "service_boundary" ]; then
+    SB_REASON=$(echo "$LANE_SUG" | jq -r '.reason')
+    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → service-boundary partition (${SB_REASON}) (R7-W6)"
   else
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
   fi

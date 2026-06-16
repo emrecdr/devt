@@ -1087,6 +1087,47 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
 // keep top-N by file count as anchors, merge remaining groups into the
 // anchor whose files share the longest common directory prefix. Result has
 // exactly `target_lanes` super-groups (or fewer if input had fewer raw groups).
+
+// Round 7 W6 — service-boundary auto-detect. When the graph carries no
+// Leiden community labels, scan diff files for common 2-segment service
+// prefix patterns and group by service name. Patterns are ordered by
+// specificity so a file matching both `app/services/X/` and the generic
+// `apps/X/` lands in the more specific bucket via first-wins. Anchor
+// check (`idx === 0 || prev === "/"`) prevents `vendor/app/services/X/`
+// from matching the bare prefix. Returns null when coverage falls below
+// 80% — caller falls through to the legacy fallback.
+const _SERVICE_PREFIXES = [
+  "app/services/", "services/", "internal/",
+  "packages/", "apps/", "pkg/", "cmd/",
+];
+function detectServiceBoundary(diffFiles) {
+  let best = null;
+  for (const prefix of _SERVICE_PREFIXES) {
+    const groups = new Map();
+    let matches = 0;
+    for (const f of diffFiles) {
+      const idx = f.indexOf(prefix);
+      if (idx === -1) continue;
+      if (idx !== 0 && f[idx - 1] !== "/") continue;
+      const rest = f.slice(idx + prefix.length);
+      const slashAt = rest.indexOf("/");
+      if (slashAt <= 0) continue;
+      const service = rest.slice(0, slashAt);
+      const key = `${prefix}${service}`;
+      if (!groups.has(key)) groups.set(key, { service: key, files: [] });
+      groups.get(key).files.push(f);
+      matches++;
+    }
+    if (!best || matches > best.matches) {
+      best = { pattern: prefix, matches, groups: Array.from(groups.values()) };
+    }
+  }
+  if (!best || diffFiles.length === 0) return null;
+  const coverage = best.matches / diffFiles.length;
+  if (coverage < 0.8) return null;
+  return { ...best, coverage };
+}
+
 function laneSuggestions(diffFiles, options) {
   options = options || {};
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
@@ -1094,6 +1135,21 @@ function laneSuggestions(diffFiles, options) {
   }
   const loaded = loadGraph();
   if (!loaded.ok) {
+    // Round 7 W6 — service-boundary works without a graph (purely path-
+    // based heuristic). Projects with graphify disabled OR graphify enabled
+    // but graph.json absent still benefit from semantic lane partitions
+    // for service-oriented layouts. Falls through to legacy path-based
+    // fallback when no service prefix matches >=80% of the diff.
+    const sb = detectServiceBoundary(diffFiles);
+    if (sb) {
+      return {
+        mode: "service_boundary",
+        groups: sb.groups.map(g => ({ community: g.service, files: g.files })),
+        reason: `graph not loaded — service-boundary heuristic (${sb.pattern}, ${(sb.coverage * 100).toFixed(0)}% coverage)`,
+        covered_count: sb.matches,
+        uncovered_count: diffFiles.length - sb.matches,
+      };
+    }
     return { mode: "fallback", groups: [], reason: "graph not loaded" };
   }
   const { nodeMap } = loaded.cache.adj;
@@ -1109,6 +1165,23 @@ function laneSuggestions(diffFiles, options) {
     if (++nodesScanned >= 100) break;
   }
   if (!sawCommunity) {
+    // Round 7 W6 — try service-boundary auto-detect before falling back.
+    // Field signal: greenfield's graph carries zero community attributes
+    // (Q5 receipts: Client/AppError/etc. all returned degree-only schema).
+    // Every parallel review reverted to legacy path-based partition, which
+    // produced semantically broken lanes for service-oriented layouts. The
+    // 80% coverage gate preserves graceful degradation for polyglot diffs
+    // that don't fit a single prefix.
+    const sb = detectServiceBoundary(diffFiles);
+    if (sb) {
+      return {
+        mode: "service_boundary",
+        groups: sb.groups.map(g => ({ community: g.service, files: g.files })),
+        reason: `graph has no community attributes — service-boundary heuristic (${sb.pattern}, ${(sb.coverage * 100).toFixed(0)}% coverage)`,
+        covered_count: sb.matches,
+        uncovered_count: diffFiles.length - sb.matches,
+      };
+    }
     return { mode: "fallback", groups: [], reason: "graph has no community attributes" };
   }
   // Per-file: collect community counts across all matching nodes, pick the
@@ -1590,6 +1663,7 @@ function graphStats() {
       edge_count: 0,
       density: null,
       trust: "empty",
+      has_communities: null,
     };
   }
   const nodeCount = loaded.cache.adj.nodeMap.size;
@@ -1599,7 +1673,22 @@ function graphStats() {
   if (nodeCount === 0) trust = "empty";
   else if (nodeCount < 50 || density < 1) trust = "sparse";
   else trust = "dense";
-  return { state: "ready", node_count: nodeCount, edge_count: edgeCount, density, trust };
+  // Round 7 W6b — probe first 100 nodes for any non-null `community`
+  // attribute. Same probe as laneSuggestions so surfaces stay consistent.
+  // null when graph not loaded; false when probed and absent; true when
+  // present. Preflight surfaces a Brief warning when ready+false so
+  // operators know parallel-review will route via service-boundary or
+  // path-based fallback rather than Leiden communities.
+  let hasCommunities = false;
+  let scanned = 0;
+  for (const [, node] of loaded.cache.adj.nodeMap) {
+    if (node && node.community !== undefined && node.community !== null) {
+      hasCommunities = true;
+      break;
+    }
+    if (++scanned >= 100) break;
+  }
+  return { state: "ready", node_count: nodeCount, edge_count: edgeCount, density, trust, has_communities: hasCommunities };
 }
 
 // ---------------------------------------------------------------------------

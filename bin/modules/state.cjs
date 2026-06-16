@@ -341,6 +341,15 @@ const PHASE_ARTIFACT_MAP = {
 
 const VALID_TIERS = new Set(["TRIVIAL", "SIMPLE", "STANDARD", "COMPLEX", null]);
 
+// Round 7 W5 — tier ordering for deterministic floor enforcement. Matches the
+// workflows/dev-workflow.md::Quick Classification Heuristic table (TRIVIAL≤3
+// files; SIMPLE≤2 files; COMPLEX≥10 files). updateState() consults this to
+// auto-elevate when the agent-judged tier falls below the file-count floor.
+// Field signal: greenfield's 180-file review was seeded SIMPLE by detectTier()
+// (init.cjs:536 — task-text only) and never re-evaluated against the scope
+// list. Floor enforcement closes the loop regardless of caller.
+const TIER_RANK = { TRIVIAL: 0, SIMPLE: 1, STANDARD: 2, COMPLEX: 3 };
+
 // Always preserved by prune — cross-workflow inputs not tied to a single phase.
 const INPUT_ARTIFACTS = ["spec.md", "plan.md", "research.md", "decisions.md", "handoff.json", "continue-here.md"];
 
@@ -558,6 +567,39 @@ function validateStateEntry(key, value) {
   if (key === "complexity") {
     warnState(`"complexity" is deprecated — use "tier" instead`);
   }
+}
+
+// Round 7 W5 — count actual file paths in the canonical scope list. The file
+// has `## Files` headers + bullets + blank lines + a `## Source` provenance
+// block; `wc -l` overcounts. We parse `- <path>` lines only. Returns null
+// when no scope file exists (e.g. dev-workflow not at scope_check yet).
+function getScopeFileCount() {
+  try {
+    const scopePath = path.join(getStateDir(), "code-review-input.md");
+    if (!fs.existsSync(scopePath)) return null;
+    const content = fs.readFileSync(scopePath, "utf8");
+    let count = 0;
+    for (const line of content.split("\n")) {
+      // Bullet items at column 0 with a non-empty token after `- ` count
+      // as one file path. Tolerates leading spaces on continuation lines.
+      if (/^\-\s+\S/.test(line)) count++;
+    }
+    return count;
+  } catch {
+    return null;
+  }
+}
+
+// Round 7 W5 — derive the deterministic minimum tier from observable scope
+// signals. Today the only signal is file_count; future signals (services
+// touched, infra changes, schema migrations) can extend this without
+// changing the caller contract. Null result → no floor; keep agent's choice.
+function computeTierFloor() {
+  const count = getScopeFileCount();
+  if (count === null) return null;
+  if (count >= 10) return "COMPLEX";  // dev-workflow.md:399 heuristic: 10+ files → COMPLEX
+  if (count >= 4) return "STANDARD";  // SIMPLE requires ≤2, TRIVIAL requires ≤3
+  return null;
 }
 
 function readState() {
@@ -884,6 +926,24 @@ function updateState(keyValues) {
       else if (/^\d+$/.test(value)) value = parseInt(value, 10);
       validateStateEntry(key, value);
       current[key] = value;
+    }
+    // Round 7 W5 — deterministic tier-floor enforcement. Runs after every
+    // merge (not gated on `tier` being in keyValues) because scope-files can
+    // grow AFTER tier is seeded — e.g. init.cjs:536 seeds tier via detectTier
+    // (task-text only) long before code-review.md::identify_scope writes
+    // 180 paths. Any subsequent state update re-evaluates and elevates as
+    // needed. No-op when scope-list absent (dev-workflow pre-scope_check).
+    if (current.tier && VALID_TIERS.has(current.tier)) {
+      const floor = computeTierFloor();
+      if (floor && TIER_RANK[current.tier] < TIER_RANK[floor]) {
+        const count = getScopeFileCount();
+        warnState(
+          `tier="${current.tier}" elevated to "${floor}" by deterministic floor ` +
+          `(${count} files in .devt/state/code-review-input.md; ` +
+          `workflows/dev-workflow.md:399 heuristic)`
+        );
+        current.tier = floor;
+      }
     }
     // Auto-stamp session metadata on first activation. Idempotent — subsequent updates
     // preserve the stamp; resetState() clears workflow.yaml, so the next active=true
