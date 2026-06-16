@@ -136,6 +136,17 @@ Before you do ANYTHING else, inspect your dispatch task prompt for the workflow-
 After writing both files, STOP — emit a final user-visible message: `Code-reviewer dispatched without workflow context. See review.md for the BLOCKED finding. Re-run via /devt:review to invoke the full workflow.`
 
 This assertion is intentionally strict: even one of the three blocks being present means you're workflow-dispatched (the heuristic is forgiving). All three missing is the unambiguous "rogue orchestration" signal — exactly the failure mode the greenfield-api pass-9 evidence surfaced where 6 parallel slice agents ran with no context injection and silently fell back to grep-first review.
+
+**Envelope-health soft signal (R11-3).** When `<envelope_health>` is present in the dispatch (round 11 onward), parse its JSON `status` field:
+- `status="healthy"` (≥3 of 5 monitored blocks populated) → proceed normally.
+- `status="degraded"` (≥3 of 5 empty/placeholder) → still proceed (not a hard block — degraded contexts are legitimate: Bitbucket projects without GitHub pr_scoped, stale preflight briefs, graphify-disabled projects), BUT add a `## Envelope Health` section to review.md noting:
+  - Which blocks were `populated` / `empty` / `placeholder` (verbatim from envelope_health JSON)
+  - One-line compensation directive matching the degradation pattern, e.g.:
+    - `empty: ["memory_signal"]` → "review proceeded without memory affects-paths signal — grep-first on REJ tombstones recommended for any Critical finding"
+    - `empty: ["graph_impact"]` → "graphify did not run — caller-set verification used Read/Grep rather than blast_radius"
+    - `placeholder: ["rubric_content"]` → "inline_rubrics substitution failed — fell back to Read <rubric_path>"
+
+The soft signal lets verifiers + maintainers see WHICH inputs degraded the review, separate from the review's verdict. NOT a gate — don't refuse the dispatch on degradation.
 </step>
 
 <step name="spec_compliance">

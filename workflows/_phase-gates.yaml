@@ -22,9 +22,45 @@
 # removes them once cal #19+ confirms the YAML path catches everything.
 # Untracked phases auto-pass — advance-phase falls through to a plain phase
 # update without running any gates, preserving backwards compatibility.
+#
+# Scope extension (Round 11 D-5): every INTERMEDIATE phase under each
+# workflow_type now gates `assert-no-raw-dispatches-this-session`. Field
+# signal (greenfield cal #24): 62 raw_dispatches accumulated across
+# dispatch_lanes → substance_check_lanes → redispatch_lanes → consolidate
+# mid-workflow with no enforcement until terminal `complete`. Combined with
+# R10-1's `state update phase=X status=DONE` gate-firing + R10-4's
+# kill-threshold, the bypass pattern now trips at the THIRD raw_dispatch on
+# whatever intermediate phase boundary the orchestrator hits next — not at
+# finalize.
+#
+# Why intermediate phases get ONLY the raw-dispatch gate (not the full
+# terminal set): the other terminal gates (assert-knowledge-candidates-tagged,
+# assert-auto-curator-considered, assert-verifier-ran, assert-claim-checks-
+# resolved) check work-products that don't exist mid-workflow — e.g.,
+# assert-verifier-ran is meaningless until verify phase produces
+# verification.json. Gating those mid-workflow would block every intermediate
+# transition with false positives. The raw-dispatch gate is the one signal
+# universally relevant at every phase boundary.
 
 workflow_types:
   code_review:
+    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    scope_check:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    context_init:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    review:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    verify:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    present_findings:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    # Terminal phase — full gate set
     complete:
       gates:
         - assert-claim-checks-resolved
@@ -34,6 +70,26 @@ workflow_types:
         - assert-verifier-ran
 
   code_review_parallel:
+    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    context_init:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    partition_lanes:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    dispatch_lanes:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    consolidate:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    verify:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    present_findings:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    # Terminal phase — full gate set
     complete:
       gates:
         - assert-claim-checks-resolved
@@ -43,6 +99,50 @@ workflow_types:
         - assert-verifier-ran
 
   dev:
+    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    assess:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    scan:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    plan:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    architect:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    implement:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    test:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    simplify:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    review:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    verify:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    docs:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    retro:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    autoskill:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    curate:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    finalize:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    # Terminal phase — full gate set
     complete:
       gates:
         - assert-claim-checks-resolved
@@ -51,6 +151,26 @@ workflow_types:
         - assert-auto-curator-considered
 
   quick_implement:
+    # Intermediate phases — raw-dispatch gate only (R11 D-5)
+    context_init:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    scan:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    implement:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    test:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    review:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    finalize:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    # Terminal phase — full gate set
     complete:
       gates:
         - assert-claim-checks-resolved
@@ -59,6 +179,11 @@ workflow_types:
         - assert-auto-curator-considered
 
   debug:
+    # Intermediate phase — raw-dispatch gate only (R11 D-5)
+    report:
+      gates:
+        - assert-no-raw-dispatches-this-session
+    # Terminal phase — full gate set
     debug:
       gates:
         - assert-claim-checks-resolved

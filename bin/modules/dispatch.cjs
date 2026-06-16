@@ -485,7 +485,79 @@ function cmdRenderFilled(target, options) {
     const kb = (totalSaved / 1024).toFixed(1);
     out += `\n<!-- rules-excluded: ${totalSectionsCut} sections (${kb} KB saved) -->\n`;
   }
+
+  // R11-3: inject <envelope_health> block before </context>. Surfaces (not
+  // gates) the substantive payload state of 5 monitored context blocks so
+  // the receiving agent can compensate for degraded inputs. Field signal
+  // (greenfield cal #24 Q8): workflow_context_assertion at code-reviewer.md:91
+  // is presence-only ("forgiving" by design) — even `{}` empty payloads pass
+  // the presence check. Lane reviewers couldn't tell when context was
+  // degraded (e.g., Bitbucket + stale brief → empty memory_signal/scope_trust
+  // but envelope LOOKS healthy). envelope_health makes the degradation
+  // explicit; consumer reads + notes [context_degraded] in review.md when
+  // status=degraded. Computed AFTER substitution so placeholder detection
+  // catches missing inline_rubrics substitution etc.
+  const health = computeEnvelopeHealth(out);
+  if (health) {
+    const healthJson = JSON.stringify(health);
+    // Inject before the LAST </context> (governing_rules and other inlined
+    // content can mention </context> in prose; first-occurrence replace would
+    // misplace the injection inside the inlined CLAUDE.md content).
+    const lastIdx = out.lastIndexOf("</context>");
+    if (lastIdx >= 0) {
+      out = out.slice(0, lastIdx) +
+            `    <envelope_health>${healthJson}</envelope_health>\n  ` +
+            out.slice(lastIdx);
+    } else {
+      out += `\n<envelope_health>${healthJson}</envelope_health>\n`;
+    }
+  }
+
   return out;
+}
+
+// R11-3: classify the substantive payload state of each monitored context
+// block. Returns {populated:[names], empty:[names], placeholder:[names],
+// status:"healthy"|"degraded"} where status is "healthy" when ≥3 of 5 are
+// populated. Returns null when the envelope is too short to meaningfully
+// classify (e.g., a stub render). The 5 monitored blocks are the ones whose
+// emptiness materially degrades a lane reviewer's discovery quality: scope
+// signal (scope_trust/scope_hint), memory anchor (memory_signal), graph
+// anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
+function computeEnvelopeHealth(rendered) {
+  if (!rendered || typeof rendered !== "string" || rendered.length < 200) return null;
+  const MONITORED = ["scope_trust", "scope_hint", "memory_signal", "graph_impact", "rubric_content"];
+  const populated = [];
+  const empty = [];
+  const placeholder = [];
+  for (const name of MONITORED) {
+    const re = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`);
+    const m = rendered.match(re);
+    if (!m) {
+      // Block not present in envelope — neither populated nor empty;
+      // skip (some envelopes legitimately omit certain blocks per agent).
+      continue;
+    }
+    const body = (m[1] || "").trim();
+    // Placeholder: unsubstituted {foo} or {foo.X} or {foo_json} literal
+    // remains. Indicates substitution failure (init didn't populate the
+    // sub-table for this key — round 10 R11-2 confirmed inline_rubrics
+    // substitution can fail when render-lanes runs outside a full init path).
+    if (/^\{[\w.\-\[\]"]+\}$/.test(body) || body === `{inline_rubrics.code_review}` || body === `{inline_rubrics.dev}`) {
+      placeholder.push(name);
+      continue;
+    }
+    // Empty: literal {}, [], "", or fallback notice text
+    if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
+      empty.push(name);
+      continue;
+    }
+    populated.push(name);
+  }
+  // Nothing recognized — envelope shape too unusual to classify
+  if (populated.length + empty.length + placeholder.length === 0) return null;
+  const status = populated.length >= 3 ? "healthy" : "degraded";
+  return { populated, empty, placeholder, status };
 }
 
 // STATIC_TAGS / DYNAMIC_TAGS — empirically classified per the envelope

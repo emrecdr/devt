@@ -13020,6 +13020,43 @@ else
   fail "K121: R10-1 contract broken — refused=$K121_REFUSED after_refusal=$K121_STATE_AFTER_REFUSAL skipped=$K121_SKIPPED after_skip=$K121_STATE_AFTER_SKIP"
 fi
 
+# K122 (cal #24 round 11 D-5): _phase-gates.yaml now gates every INTERMEDIATE
+# phase with assert-no-raw-dispatches-this-session (not just terminal). Field
+# signal (greenfield): 62 raw_dispatches accumulated across dispatch_lanes →
+# substance_check_lanes → redispatch_lanes → consolidate before terminal
+# `complete` could enforce. Combined with R10-4 kill-threshold=3, the bypass
+# pattern now trips at the THIRD raw_dispatch on whatever intermediate phase
+# boundary the orchestrator hits next. K122 locks that contract.
+K122_TMP=$(mktemp -d)
+mkdir -p "$K122_TMP/.devt/state"
+# Active dev workflow at phase=scan (intermediate phase, has a gate per the
+# new YAML entry). Seed 3 raw_dispatch records to trip kill-threshold (=3).
+(cd "$K122_TMP" && node "$CLI" state update active=true workflow_type=dev phase=scan status=DONE --skip-gates >/dev/null 2>&1) || true
+cat > "$K122_TMP/.devt/state/dispatch-warnings.jsonl" <<'EOF'
+{"ts":"2099-01-01T00:00:00Z","source":"raw_dispatch","agent":"devt:programmer"}
+{"ts":"2099-01-01T00:00:01Z","source":"raw_dispatch","agent":"devt:tester"}
+{"ts":"2099-01-01T00:00:02Z","source":"raw_dispatch","agent":"devt:code-reviewer"}
+EOF
+# Test 1: state update phase=plan (intermediate) should refuse due to kill-threshold.
+K122_REFUSED="no"
+if ! (cd "$K122_TMP" && node "$CLI" state update phase=plan status=DONE >/dev/null 2>&1); then
+  K122_REFUSED="yes"
+fi
+# Test 2: state must remain at phase=scan after refusal.
+K122_STATE_AFTER_REFUSAL=$(set +eo pipefail; cd "$K122_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.phase);}catch{console.log('parse-err');}})") || K122_STATE_AFTER_REFUSAL="parse-err"
+# Test 3: --skip-gates should bypass intermediate-phase gate.
+K122_SKIPPED="no"
+if (cd "$K122_TMP" && node "$CLI" state update phase=plan status=DONE --skip-gates >/dev/null 2>&1); then
+  K122_SKIPPED="yes"
+fi
+K122_STATE_AFTER_SKIP=$(set +eo pipefail; cd "$K122_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.phase);}catch{console.log('parse-err');}})") || K122_STATE_AFTER_SKIP="parse-err"
+rm -rf "$K122_TMP"
+if [ "$K122_REFUSED" = "yes" ] && [ "$K122_STATE_AFTER_REFUSAL" = "scan" ] && [ "$K122_SKIPPED" = "yes" ] && [ "$K122_STATE_AFTER_SKIP" = "plan" ]; then
+  pass "K122: intermediate-phase gates fire on state update phase=<intermediate> status=DONE (kill-threshold trips at 3 raw_dispatches; state preserved on refusal; --skip-gates opts out)"
+else
+  fail "K122: D-5 contract broken — refused=$K122_REFUSED after_refusal=$K122_STATE_AFTER_REFUSAL skipped=$K122_SKIPPED after_skip=$K122_STATE_AFTER_SKIP"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

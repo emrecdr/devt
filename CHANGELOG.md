@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #24 round 11 — intermediate-phase gate coverage (D-5) + envelope_health substance signal (R11-3)
+
+Two Tier A items from the round 10 deferred list, both field-evidenced. Round 10 closed the enforcement gap for terminal-phase transitions; round 11 extends that to intermediate phases and surfaces context degradation that R10's presence-only check missed.
+
+**D-5 — intermediate-phase gate coverage (`workflows/_phase-gates.yaml` + `scripts/smoke-test.sh`).** Field signal (greenfield cal #24): the 62 raw_dispatches accumulated across `dispatch_lanes` → `substance_check_lanes` → `redispatch_lanes` → `consolidate` mid-workflow with no enforcement until terminal `complete`. Round 10's R10-1 wired `state update phase=X status=DONE` to fire phase-gates, but `_phase-gates.yaml` was scope-limited to terminal phases only (v0.73 design intent — *"the FINAL-DEACTIVATION phase per workflow_type"*). Round 11 extends the registry to gate every INTERMEDIATE phase per workflow_type with the minimum gate set: `assert-no-raw-dispatches-this-session`. Combined with R10-4's kill-threshold=3, the bypass pattern now trips at the THIRD raw_dispatch on whatever intermediate phase boundary the orchestrator hits next — no longer accumulates 62 before any enforcement fires.
+
+- 33 intermediate phases gated across 5 workflow_types (code_review, code_review_parallel, dev, quick_implement, debug)
+- Terminal phases (`complete` / `debug` / `arch_health_scan`) retain their full gate set (claim-checks-resolved + knowledge-candidates-tagged + auto-curator-considered + verifier-ran where applicable)
+- Why intermediate phases get ONLY the raw-dispatch gate (not the full terminal set): the other terminal gates check work-products that don't exist mid-workflow (e.g., `assert-verifier-ran` is meaningless until verify phase produces `verification.json`). Gating those mid-workflow would block every intermediate transition with false positives. Raw-dispatch is the one signal universally relevant at every phase boundary.
+- New smoke gate **K122** locks the contract: fixture seeds 3 raw_dispatches → `state update phase=<intermediate> status=DONE` refuses with state preserved at IN_PROGRESS → `--skip-gates` bypasses → clean fixture advances cleanly. Drift-guard stack now **29-deep K94-K122**.
+
+**R11-3 — `<envelope_health>` substance signal (`bin/modules/dispatch.cjs` + `agents/code-reviewer.md`).** Field signal (greenfield cal #24 Q8): `workflow_context_assertion` at `agents/code-reviewer.md:91` is presence-only — even `{}` empty payloads pass the presence check (forgiving by design). Lane reviewers couldn't tell when context was degraded (e.g., Bitbucket + stale brief → empty memory_signal/scope_trust but envelope LOOKS healthy because the tags are present).
+
+- `dispatch.cjs::computeEnvelopeHealth(rendered)` classifies 5 monitored blocks (`scope_trust`, `scope_hint`, `memory_signal`, `graph_impact`, `rubric_content`) as `populated` / `empty` / `placeholder`; status="healthy" when ≥3 of 5 populated, "degraded" otherwise.
+- Injected as `<envelope_health>{JSON}</envelope_health>` before the LAST `</context>` in cmdRenderFilled output (lastIndexOf preserves correctness when inlined CLAUDE.md prose mentions `</context>`).
+- `agents/code-reviewer.md::workflow_context_assertion` now reads envelope_health and adds a `## Envelope Health` section to review.md when status=degraded, with per-block compensation directives (e.g., `empty: ["memory_signal"]` → "grep-first on REJ tombstones recommended for any Critical finding"; `placeholder: ["rubric_content"]` → "inline_rubrics substitution failed — fell back to Read <rubric_path>").
+- NOT gating — surfaces degradation without blocking legitimately-degraded contexts (Bitbucket, stale brief, graphify-disabled). Verifiers + maintainers can now see WHICH inputs degraded a review, separate from the review's verdict.
+
+**Validation:** 867/867 smoke (K122 added), 16/16 gate tests, 35/35 graphify tests, 3/3 locking, 22 envelope-compile regions / 0 drift. Live-tested both healthy (4-of-5 populated → status=healthy) and degraded (0-of-5 populated → status=degraded) fixtures.
+
 ### Cal #24 round 10 — enforcement-gap close (phase-gates fire on state update, kill-threshold, recursive gitignore, config-drift banner, knowledge-candidate harvest at exit, signal discriminator)
 
 Greenfield's first v0.95.0 field evaluation surfaced the single highest-leverage gap in cal #24: **gates defined in `workflows/_phase-gates.yaml` were functionally dead for ~93% of phase transitions in shipped workflows** (99 `state update phase=X` call sites vs. 7 `state advance-phase` calls — and only `state advance-phase` fired the gate registry). Round 10 closes that gap end-to-end plus the field-validated supporting items.
