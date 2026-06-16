@@ -99,6 +99,8 @@ node bin/devt-tools.cjs init review "task"
 node bin/devt-tools.cjs state read|update|reset|validate|sync|prune
 node bin/devt-tools.cjs state read-section --file plan.md --section "Phase 2"
 node bin/devt-tools.cjs state cleanup [--apply] [--stale-days=N]
+node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py
+node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
 
 # Config + agent/model profiles
 node bin/devt-tools.cjs config get|set
@@ -111,6 +113,11 @@ node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|cle
 
 # Memory layer (multi-root, FTS5)
 node bin/devt-tools.cjs memory init|index|query|get|affects|list|links|active|rejected-keywords|validate|suggest
+node bin/devt-tools.cjs memory candidates-footer
+
+# Dispatch — envelope render + per-lane fan-out
+node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list]
+node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>]
 
 # Semantic search + reports
 node bin/devt-tools.cjs semantic sync|query|compact|status
@@ -171,6 +178,21 @@ node bin/devt-tools.cjs dispatch render-filled <agent>:auto                # res
 **Recipe 4 — Standalone post-workflow retro.** Use `/devt:workflow --retro` (one-shot slash) — wraps `workflows/lesson-extraction.md` which dispatches `devt:retro` + `devt:curator`.
 
 If none of these fit your case, raise the gap — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.
+
+**Recipe 5 — Multi-lane parallel review with a hand-rolled partition (formal alternative to raw dispatch).** When you already know the per-lane file partition (you don't need `code-review.md::partition_lanes` to compute it via `graphify lane-suggestions` or path-based fallback) — register each lane formally so the dispatch envelope carries the canonical C7-7 self-grade directive, files persist to a per-lane sidecar, and the hygiene guard sees the lane registry instead of raw dispatches. Two-step flow:
+
+```bash
+# 1. Register lanes — either incrementally or in bulk from a YAML file
+node bin/devt-tools.cjs state register-lane --id=L1 --scope=identity --files=app/services/identity/auth.py,app/services/identity/middleware.py
+# or, for the common "I have all N lanes mapped" case:
+node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml
+
+# 2. Emit one envelope per registered lane (canonical code-reviewer:code_review template — carries C7-7)
+node bin/devt-tools.cjs dispatch render-lanes --out=/tmp/lane-envelopes/
+# Each lane gets its own envelope with <lane_id>, <lane_community>, <lane_files> injected, and `Write review to .devt/state/review.md` overridden to the lane's review_file.
+```
+
+Paste each `/tmp/lane-envelopes/lane-L*.txt` into a parallel `Task()` call (one message, N Task tools). Lanes get the full canonical envelope + C7-7 directive without the orchestrator hand-rolling task text. Greenfield calibration Q12-Q13 receipts: hand-rolled raw-dispatch task text consistently omitted C7-7; this path makes the bypass structurally impossible.
 
 ### Agent + Workflow Contracts (full reference)
 

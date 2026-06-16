@@ -31,6 +31,12 @@ node bin/devt-tools.cjs state list-lane-outputs
 node bin/devt-tools.cjs state update-lane <id> status=<status>
 # Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
 
+node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py [--overwrite]
+# Formal registration shortcut for orchestrators with a hand-rolled partition (round 8 W1). Writes the canonical lane entry into workflow.yaml::lanes[] with derived metadata (slug via slugifyLaneName, file_count, est_loc, oversized) + new `registered_at` ISO timestamp. Per-lane files persist to .devt/state/lane-files/<id>.json sidecar (canonical subdir per round 9 #1; not flagged by state cleanup). Validates id matches /^L\d+$/; rejects duplicates without --overwrite. Lock-aware read-modify-write. Replaces the 50-raw_dispatch hygiene-warnings escape hatch greenfield calibration Q3 surfaced
+
+node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
+# Bulk wrapper (round 8 W2). YAML inline-array files: form + JSON both accepted. Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?}], errors:[]}
+
 node bin/devt-tools.cjs state assert-knowledge-candidates-tagged
 # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
 
@@ -67,6 +73,26 @@ node bin/devt-tools.cjs state new-instance [--tag=<label>]
 
 node bin/devt-tools.cjs state list-instances
 # Enumerate all instance subdirectories under .devt/state/. Returns {wf_id, created_at, last_active, phase, tag, file_count} per instance, sorted by last_active descending. Use when returning to a project the next session and need to find your previous instance: `devt-tools state list-instances | jq -r '.instances[] | "\(.wf_id) phase=\(.phase) tag=\(.tag)"'`
+```
+
+### Dispatch — envelope render + compile
+
+```bash
+node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list]
+# Render an envelope with state-driven placeholder substitution. Defaults from active workflow.yaml when :auto. Opt-in --rules-exclude (round 6 W7) strips matching `## Heading` sections from inlined governing_rules.content before substitution — exact title match, predictable. Field signal: 3 CLAUDE.md sections were cited 0 times across both lanes in greenfield's review (~15-20% per-dispatch saving). Envelope carries a trailing `<!-- rules-excluded: N sections (X.X KB saved) -->` marker for audit. Measured ~34% byte reduction on programmer:dev with 2 sections excluded
+
+node bin/devt-tools.cjs dispatch render-lanes [target] [--target=<agent>:<workflow>] [--out=<dir>]
+# Round 8 W3 — emit per-lane envelopes for every entry in workflow.yaml::lanes[]. Default target is code-reviewer:code_review (the canonical per-file review template carrying the C7-7 self-grade directive in its task body — Q12 root-cause fix: hand-rolled raw-dispatch task text consistently omitted C7-7, so emitting envelopes from the canonical template by default makes the bypass structurally impossible). Each lane gets the base envelope + injected <lane_id>, <lane_community>, <lane_files> before </context>; canonical "Write review to .devt/state/review.md" trailer is overridden per-lane to lane.review_file so concurrent lanes don't clobber one path. Stdout mode: concatenated with `<!-- LANE: <id> -->` separators. --out=dir mode: writes one file per lane + returns JSON summary with byte counts. Empty-state path (round 9 #4): clear stderr message + usage hint before exit 2
+
+node bin/devt-tools.cjs dispatch compile --check|--write
+# Verifies (or rewrites) every <!-- BEGIN dispatch:agent:workflow_id --> region in workflows/*.md against its template at templates/dispatch/envelopes/. Returns regions_checked + drift array. --check exits 1 when drift exists; --write atomically rewrites drifted bodies
+```
+
+### Memory — surface helpers (operator-runnable)
+
+```bash
+node bin/devt-tools.cjs memory candidates-footer
+# Round 5 — finalize-footer convenience wrapper. Replaces the 7-line bash block previously inlined in 4 workflows (code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize). Silent (no stdout) when not ready; emits the canonical `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.` line + leading blank line when ready_to_surface, then touches the cooldown. Always exits 0 — surface failure is best-effort. workflows/next.md keeps the lower-level candidates-status primitive because its variant uses ready_to_surface as a shell variable to gate a downstream AskUserQuestion
 ```
 
 ### Build steps (maintainer-only)

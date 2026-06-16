@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 docs sync — rounds 5-9 surfaces documented across operator + internals docs
+
+Doc-only sync covering all CLI surfaces, architecture, and state-contract changes shipped across rounds 5-9. Six files updated, +75 / −1 lines. No code change.
+
+- **`docs/operator-guide/CLI-REFERENCE.md`** — full inventory entries for `state register-lane`, `state register-lanes` (round 8 Tier C); `dispatch render-filled --rules-exclude` flag (round 6 W7); `dispatch render-lanes [--out=]` with C7-7 auto-injection rationale (round 8 W3); `dispatch compile --check|--write`; `memory candidates-footer` finalize wrapper (round 5).
+- **`CLAUDE.md`** — Dev Commands section adds `state register-lane[s]`, `memory candidates-footer`, `dispatch render-filled --rules-exclude`, `dispatch render-lanes`. New escape-hatch recipe 5 documenting the formal lane-orchestration alternative to raw dispatch (Q12 root-cause fix).
+- **`docs/STATE-RULES.md`** — `lane-files/` listed in the canonical-subdir table (alongside `.archive/`) so the round 9 #1 fix is discoverable in the contract doc.
+- **`docs/INTERNALS.md`** — state.cjs section gains W5 deterministic tier floor + Tier C `registerLane`/`registerLanesFromYaml` paragraphs. New dispatch.cjs section covers `cmdRenderLanes` (C7-7 default + per-lane injection + path override) and the opt-in `--rules-exclude` mechanism.
+- **`docs/GRAPHIFY.md`** — Lane-Suggestions section expanded from 2 modes (community/partial) to 4 (adds `service_boundary` per round 7 W6 + `fallback`). New "Leiden-Absent Surfacing in Preflight (W6b)" section documenting `graphStats.has_communities` + the preflight `ℹ️` advisory.
+- **`docs/MEMORY.md`** — CLI Surface section adds the candidate-surface helper trio (`candidates-status` + `candidates-touch-surface` + `candidates-footer`) with the workflow consumer mapping.
+
+README spot-checked — no stale CLI / version / counts. Smoke 865/865, envelope-compile 22/0.
+
 ### Cal #23 round 9 — Tier A bug fix + Tier B test-coverage gaps closed
 
 Four gaps surfaced by post-Round 8 deep validation pass — one active bug and three test-coverage holes from rounds 6-8 that would have silently regressed without coverage.

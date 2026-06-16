@@ -317,6 +317,11 @@ node bin/devt-tools.cjs memory suggest           # writes _suggestions.md
 node bin/devt-tools.cjs discovery harvest        # full discovery sweep
 node bin/devt-tools.cjs discovery wiki-links     # just wiki-link enrichment
 
+# Candidate-surface helpers — read _suggestions.md + emit/gate user hints
+node bin/devt-tools.cjs memory candidates-status         # JSON: {count, threshold, cooldown_passed, ready_to_surface}
+node bin/devt-tools.cjs memory candidates-touch-surface  # set the cooldown timestamp (after the consumer surfaces the hint)
+node bin/devt-tools.cjs memory candidates-footer         # one-shot finalize-footer: status + threshold + cooldown + emit + touch in one call. Used by code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize (replaces a 7-line inline bash block previously duplicated across all four — round 5 cut). workflows/next.md keeps the lower-level candidates-status primitive because its variant uses ready_to_surface as a shell variable to gate a downstream AskUserQuestion
+
 # Pre-Flight
 node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius; auto-loads ~/.claude/plans/*.md referenced in <task>
 node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction (returns extraction_confidence)

@@ -235,10 +235,12 @@ The helper `_diffSymbolCounts(candidates)` returns a `Map<symbol, count>`; calle
 
 ## Lane-Suggestions Archetype Classifier (B1)
 
-`bin/modules/graphify.cjs::laneSuggestions(diffFiles, options)` partitions a multi-file review into coherent lanes. Two modes:
+`bin/modules/graphify.cjs::laneSuggestions(diffFiles, options)` partitions a multi-file review into coherent lanes. Four modes:
 
 - **`community`** — every file has a graph community label (clustering ran successfully). Files group by dominant community.
 - **`partial`** — some files have community labels, some don't (no graph node OR cluster-id missing). Covered files group by community; uncovered files used to collapse into a single `community: null` mega-bucket.
+- **`service_boundary`** (round 7 W6) — graph has no Leiden community attributes (or graph not loaded at all), but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `internal/X/`, `packages/X/`, `apps/X/`, `pkg/X/`, `cmd/X/` — first-wins anchoring, column-0 or `/`-preceded to prevent `vendor/app/services/X/` false matches). Each lane's `community` field carries the service path (e.g. `app/services/identity`); reason field reports which prefix matched + coverage %. Field signal: greenfield's graph carries zero `community` attrs on every probed node — every parallel review reverted to legacy path-based partition that semantically broke service boundaries. Service-boundary mode is shape-compatible with community mode so the consumer at `code-review-parallel.md::partition_lanes` is one bash condition.
+- **`fallback`** — neither path matches (no graph, no service prefix at threshold). Caller bash falls through to the legacy top-2-level path partition.
 
 **Archetype sub-classifier.** Greenfield 2026-06-07 calibration: 24 of 42 files (57%) in a real PR landed in the mega-bucket — mostly hurl/docs/config files with no graph nodes. The orchestrator manually reshaped to coherent lanes every review.
 
@@ -252,6 +254,14 @@ The new `_archetype(f)` helper sub-classifies uncovered files by extension + pat
 | `other` | residual ungrouped bucket (preserves the legacy fallback) |
 
 Groups expose an `archetype` field when the bucket comes from the classifier (community-labeled groups don't). Downstream consolidation to `target_lanes` super-groups operates on the archetype-split result, so prose-only lanes consolidate together rather than getting force-merged with code lanes.
+
+---
+
+## Leiden-Absent Surfacing in Preflight (W6b)
+
+`graphStats()` (graphify.cjs) probes the first 100 nodes for any non-null `community` attribute and surfaces the result as a boolean `has_communities` field on its response. `bin/modules/preflight.cjs::renderBrief` consumes that field — when `state==="ready" && has_communities===false`, the preflight brief emits an `ℹ️` advisory: *"Graphify has no Leiden community labels — parallel review (`/devt:review` >10-file scope) will auto-detect service-boundary groups (`app/services/X/`, `packages/X/`, etc.) when ≥80% of files match, otherwise fall back to path-based partition. To enable community-driven lanes, re-graphify with Leiden clustering enabled."*
+
+Operators learn at preflight time that parallel review will route via service-boundary or path-based fallback rather than Leiden communities. Cheap — graphStats reuses the loader cache. Sibling to the existing "Memory index not built" preflight warning. Test coverage: `scripts/test-graphify.cjs` (W6b graphStats has_communities=false on fixture).
 
 ---
 
