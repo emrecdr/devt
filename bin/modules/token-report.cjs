@@ -414,9 +414,23 @@ function run(subcommand, args) {
   //     filtered.slice(0, "garbage") coerces to slice(0, 0) → 0 sessions.
   //   --sessions=-5 → filtered.slice(0, -5) → removed last 5 sessions
   //     (silent unexpected behavior).
-  if (opts.since !== undefined && opts.since !== "" && isNaN(Date.parse(opts.since))) {
-    process.stderr.write(`[token-report] invalid --since value "${opts.since}" (expected ISO date like 2026-06-01 or full timestamp)\n`);
-    return 2;
+  if (opts.since !== undefined && opts.since !== "") {
+    // Accept duration shorthand (Nd|Nh|Nm|Ns) alongside ISO date — CI scripts
+    // and operators reach for `--since=7d` more often than computing an ISO
+    // floor. Matches the grammar used by mcp-stats.cjs::parseDuration so
+    // --since semantics stay uniform across CLIs. Normalize to ISO string
+    // before downstream consumption (new Date(opts.since)) so callers don't
+    // need to branch on input form.
+    const durMatch = String(opts.since).trim().match(/^(\d+)([dhms])$/);
+    if (durMatch) {
+      const n = parseInt(durMatch[1], 10);
+      const unit = durMatch[2];
+      const unitMs = unit === "d" ? 86400e3 : unit === "h" ? 3600e3 : unit === "m" ? 60e3 : 1e3;
+      opts.since = new Date(Date.now() - n * unitMs).toISOString();
+    } else if (isNaN(Date.parse(opts.since))) {
+      process.stderr.write(`[token-report] invalid --since value "${opts.since}" (expected ISO date like 2026-06-01, full timestamp, or duration shorthand Nd|Nh|Nm|Ns e.g. 7d)\n`);
+      return 2;
+    }
   }
   if (opts.sessions !== undefined) {
     const n = Number(opts.sessions);
