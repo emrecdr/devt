@@ -842,10 +842,110 @@ function run(subcommand, args) {
       try { json(cmdDecompose(target)); return 0; }
       catch (err) { process.stderr.write(err.message + "\n"); return 2; }
     }
+    case "render-lanes": {
+      // Render per-lane envelopes for every lane registered in
+      // workflow.yaml::lanes[]. Default target is code-reviewer:code_review
+      // — the canonical per-file review template that already carries the
+      // C7-7 self-grade directive in its task body. Greenfield calibration
+      // thread Q12 receipts: hand-rolled raw-dispatch task text consistently
+      // omits C7-7, so emitting envelopes from the canonical template by
+      // default makes the bypass structurally impossible.
+      //
+      // Args: [target] [--target=agent:workflow] [--out=dir]
+      const positional = args.filter(a => !a.startsWith("--"));
+      const targetFlag = args.find(a => a.startsWith("--target="));
+      let target = targetFlag
+        ? targetFlag.slice("--target=".length)
+        : (positional[0] && positional[0].includes(":") ? positional[0] : "code-reviewer:code_review");
+      const outFlag = args.find(a => a.startsWith("--out="));
+      const outDir = outFlag ? outFlag.slice("--out=".length) : null;
+      try {
+        const result = cmdRenderLanes(target, { outDir });
+        if (outDir) {
+          json(result);
+        } else {
+          process.stdout.write(result.text + (result.text.endsWith("\n") ? "" : "\n"));
+        }
+        return result.lane_count > 0 ? 0 : 2;
+      } catch (err) {
+        process.stderr.write(err.message + "\n");
+        return 2;
+      }
+    }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|compile|decompose|warnings>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|compile|decompose|warnings>\n");
       return 2;
   }
 }
 
-module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdDecompose, cmdWarnings };
+// Render per-lane envelopes for every lane registered in workflow.yaml::lanes[].
+// Each lane gets the canonical template body (with C7-7 directive baked in)
+// plus injected <lane_id>, <lane_community>, <lane_files> blocks and a lane-
+// specific output path override. When outDir is set, writes one file per
+// lane and returns a JSON summary; otherwise returns concatenated text with
+// <!-- LANE: <id> --> separators.
+function cmdRenderLanes(target, options) {
+  options = options || {};
+  const stateMod = require("./state.cjs");
+  const fsLocal = require("fs");
+  const pathLocal = require("path");
+  const { lanes } = stateMod.listLaneOutputs();
+  if (!lanes || lanes.length === 0) {
+    return { lane_count: 0, text: "", lanes: [], reason: "no lanes registered in workflow.yaml::lanes[]" };
+  }
+  // Render base envelope once (substitution is identical across lanes — the
+  // per-lane variation is injected on top, not re-substituted).
+  const base = cmdRenderFilled(target);
+  const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
+  const sidecarDir = pathLocal.join(stateDir, "lane-files");
+  const out = [];
+  const summary = [];
+  for (const lane of lanes) {
+    let files = [];
+    let community = lane.community || "";
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const sidecarPath = pathLocal.join(sidecarDir, `${lane.id}.json`);
+      if (fsLocal.existsSync(sidecarPath)) {
+        const data = JSON.parse(fsLocal.readFileSync(sidecarPath, "utf8"));
+        files = Array.isArray(data.files) ? data.files : [];
+        if (data.community) community = data.community;
+      }
+    } catch { /* sidecar missing or malformed — emit envelope without files block */ }
+    const laneBlocks = [
+      `    <lane_id>${lane.id}</lane_id>`,
+      `    <lane_community>${community}</lane_community>`,
+      `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
+    ].join("\n");
+    // Inject lane context blocks right before the closing </context> tag.
+    let injected = base.replace(/(\n\s*<\/context>)/, "\n" + laneBlocks + "$1");
+    // Override the canonical "Write review to .devt/state/review.md" trailer
+    // so each lane writes to its own review_file. Without this, all lanes
+    // would clobber the same path.
+    if (lane.review_file) {
+      injected = injected.replace(
+        /Write review to \.devt\/state\/review\.md/g,
+        `Write review to ${lane.review_file}`,
+      );
+    }
+    if (options.outDir) {
+      if (!fsLocal.existsSync(options.outDir)) fsLocal.mkdirSync(options.outDir, { recursive: true });
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      const outPath = pathLocal.join(options.outDir, `lane-${lane.id}.txt`);
+      fsLocal.writeFileSync(outPath, injected + (injected.endsWith("\n") ? "" : "\n"));
+      summary.push({ id: lane.id, community, files: files.length, path: outPath, bytes: injected.length });
+    } else {
+      out.push(`<!-- LANE: ${lane.id} (community=${community}, files=${files.length}) -->`);
+      out.push(injected);
+      out.push("");
+    }
+  }
+  return {
+    lane_count: lanes.length,
+    text: out.join("\n"),
+    lanes: summary,
+    target,
+  };
+}
+
+module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdRenderLanes, cmdDecompose, cmdWarnings };

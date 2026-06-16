@@ -4864,6 +4864,162 @@ function listLaneOutputs() {
   return { lanes };
 }
 
+// Round 8 W1 — formal lane registration shortcut. Greenfield calibration
+// thread Q3: orchestrators with a hand-rolled partition (knew the 7 lanes
+// up front, didn't need lane-suggestions to compute them) were forced into
+// raw-dispatch territory because no CLI accepts the partition directly. 50
+// raw_dispatch hygiene warnings fired in one PR session. This CLI is the
+// formal alternative — it writes the canonical lane entry into
+// workflow.yaml::lanes[] and persists the per-lane files list in a
+// sidecar at .devt/state/lane-files/<id>.json. The sidecar split avoids
+// extending parseSimpleYaml + serializeSimpleYaml's lane round-trip
+// (which today handles primitive values only; arrays would corrupt).
+//
+// Returns {ok, lane: {...full metadata}} or {ok: false, reason}.
+function registerLane({ id, scope, files, allowOverwrite }) {
+  if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
+    return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
+  }
+  if (!scope || typeof scope !== "string") {
+    return { ok: false, reason: "scope required (non-empty string)" };
+  }
+  if (!Array.isArray(files) || files.length === 0) {
+    return { ok: false, reason: "files required (non-empty array of paths)" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { ok: false, reason: "no workflow.yaml — initialize a workflow first" };
+  }
+  // Lock so concurrent register-lane calls don't lose entries on the
+  // read-modify-write cycle. acquireLock() defaults to getStateDir() —
+  // matches updateState/resetState/syncState/pruneState's lock idiom.
+  const lockFile = acquireLock();
+  try {
+    const state = parseSimpleYaml(fs.readFileSync(wfPath, "utf8"));
+    const lanes = Array.isArray(state.lanes) ? state.lanes : [];
+    const existing = lanes.findIndex(l => l && l.id === id);
+    if (existing !== -1 && !allowOverwrite) {
+      return { ok: false, reason: `lane id "${id}" already registered; pass --overwrite to replace` };
+    }
+    const slug = slugifyLaneName(scope);
+    let estLoc = 0;
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(f, "utf8");
+        estLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
+      } catch { /* file missing or unreadable — counts as 0 LOC */ }
+    }
+    const fileCount = files.length;
+    const oversized = fileCount > 15 || estLoc > 800;
+    const reviewFile = path.join(dir, `review-lane-${slug}.md`);
+    const registeredAt = new Date().toISOString();
+    const laneEntry = {
+      id,
+      community: scope,
+      slug,
+      review_file: reviewFile,
+      status: "in_flight",
+      redispatch_count: 0,
+      registered_at: registeredAt,
+      file_count: fileCount,
+      est_loc: estLoc,
+      oversized,
+    };
+    if (existing !== -1) {
+      lanes[existing] = laneEntry;
+    } else {
+      lanes.push(laneEntry);
+    }
+    state.lanes = lanes;
+    atomicWriteFileSync(wfPath, serializeSimpleYaml(state));
+    // Per-lane files sidecar. Atomic per-lane write. Read by render-lanes
+    // (dispatch.cjs) and any future consumer that needs the file list
+    // without re-parsing the orchestrator's partition input.
+    const sidecarDir = path.join(dir, "lane-files");
+    if (!fs.existsSync(sidecarDir)) fs.mkdirSync(sidecarDir, { recursive: true });
+    atomicWriteFileSync(
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      path.join(sidecarDir, `${id}.json`),
+      JSON.stringify({ id, community: scope, files, registered_at: registeredAt }, null, 2) + "\n",
+    );
+    return { ok: true, lane: { ...laneEntry, files } };
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+// Round 8 W2 — bulk-register from a YAML/JSON partition file. Format:
+//   lanes:
+//     - id: L1
+//       scope: identity
+//       files: [app/services/identity/auth.py, ...]
+//     - id: L2
+//       ...
+// JSON shape (same key names) also accepted. Loops registerLane per entry.
+function registerLanesFromYaml(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { ok: false, reason: `partition file not found: ${filePath}` };
+  }
+  const raw = fs.readFileSync(filePath, "utf8");
+  let parsed = null;
+  // JSON-first: cheaper than the YAML branch and tolerates either format.
+  try { parsed = JSON.parse(raw); } catch { /* fall through to YAML */ }
+  if (!parsed) {
+    // Minimal YAML parse for the lanes:[] shape. Each lane is a dash-prefixed
+    // block. Reuses the existing parseSimpleYaml lanes round-trip when files
+    // is absent, then falls through to a focused multi-line files parse.
+    const lines = raw.split("\n");
+    const lanes = [];
+    let current = null;
+    let inFiles = false;
+    for (const line of lines) {
+      if (/^\s*-\s+id:/.test(line)) {
+        if (current) lanes.push(current);
+        current = { files: [] };
+        inFiles = false;
+        const m = line.match(/id:\s*"?([^"\n]+)"?\s*$/);
+        if (m) current.id = m[1].trim();
+      } else if (current && /^\s+scope:/.test(line)) {
+        inFiles = false;
+        const m = line.match(/scope:\s*"?([^"\n]+)"?\s*$/);
+        if (m) current.scope = m[1].trim();
+      } else if (current && /^\s+files:\s*\[/.test(line)) {
+        // Inline array form: files: [a.py, b.py]
+        inFiles = false;
+        const m = line.match(/files:\s*\[(.+)\]\s*$/);
+        if (m) current.files = m[1].split(",").map(s => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
+      } else if (current && /^\s+files:\s*$/.test(line)) {
+        inFiles = true;
+      } else if (current && inFiles && /^\s+-\s+/.test(line)) {
+        current.files.push(line.replace(/^\s+-\s+/, "").trim().replace(/^"|"$/g, ""));
+      } else if (/^[a-z_]/.test(line)) {
+        inFiles = false;
+      }
+    }
+    if (current) lanes.push(current);
+    parsed = { lanes };
+  }
+  const lanes = (parsed && Array.isArray(parsed.lanes)) ? parsed.lanes : [];
+  if (lanes.length === 0) {
+    return { ok: false, reason: "no lanes found in partition file (expected `lanes: [...]` at top level)" };
+  }
+  const results = [];
+  const errors = [];
+  for (const entry of lanes) {
+    const r = registerLane({
+      id: entry.id,
+      scope: entry.scope,
+      files: entry.files,
+      allowOverwrite: true, // bulk register is idempotent — re-runs replace
+    });
+    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null });
+    if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
+  }
+  return { ok: errors.length === 0, registered: results, errors };
+}
+
 function updateLane(laneId, kvPairs) {
   if (!laneId || typeof laneId !== "string") {
     return { ok: false, reason: "no lane-id provided" };
@@ -5310,6 +5466,33 @@ function run(subcommand, args) {
       return listLaneOutputs();
     case "update-lane":
       return updateLane(args[0], args.slice(1));
+    case "register-lane": {
+      // Args: --id=L1 --scope=identity --files=a.py,b.py [--overwrite]
+      const getFlag = (name) => {
+        const inline = args.find(a => a.startsWith(`--${name}=`));
+        if (inline) return inline.slice(`--${name}=`.length);
+        const idx = args.findIndex(a => a === `--${name}`);
+        return idx >= 0 && args[idx + 1] ? args[idx + 1] : undefined;
+      };
+      const filesRaw = getFlag("files");
+      return registerLane({
+        id: getFlag("id"),
+        scope: getFlag("scope"),
+        files: filesRaw ? filesRaw.split(",").map(s => s.trim()).filter(Boolean) : [],
+        allowOverwrite: args.includes("--overwrite"),
+      });
+    }
+    case "register-lanes": {
+      // Args: --from=lanes.yaml (or --from=lanes.json)
+      const fromInline = args.find(a => a.startsWith("--from="));
+      const fromIdx = args.findIndex(a => a === "--from");
+      const from = fromInline ? fromInline.slice("--from=".length)
+                              : (fromIdx >= 0 && args[fromIdx + 1] ? args[fromIdx + 1] : undefined);
+      if (!from) {
+        return { ok: false, reason: "Usage: state register-lanes --from=<lanes.yaml|lanes.json>" };
+      }
+      return registerLanesFromYaml(from);
+    }
     case "history": {
       const limitArg = _getFlag(args, "--limit");
       const lim = limitArg ? parseInt(limitArg, 10) : 20;
@@ -5317,7 +5500,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

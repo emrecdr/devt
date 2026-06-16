@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #23 round 8 — Tier C lane orchestration: register-lane[s] + render-lanes
+
+Three new CLIs that turn the field-evidenced raw-dispatch escape hatch (greenfield calibration thread Q12-Q13: 50 raw_dispatch hygiene warnings in one PR session because orchestrators with a hand-rolled partition had no formal registration path) into a structurally-enforced canonical path.
+
+**W1 — `state register-lane` (`bin/modules/state.cjs`).** Primitive CLI for orchestrators who already know the partition. Validates id (`/^L\d+$/`), scope (non-empty), files (non-empty array). Computes derived metadata (slug via existing `slugifyLaneName`, `file_count`, `est_loc` via wc-l on each existing file, `oversized` per 15-files/800-LOC thresholds). Lock-aware read-modify-write of `workflow.yaml::lanes[]`; rejects duplicate ids unless `--overwrite`. Files persisted to per-lane sidecar `.devt/state/lane-files/<id>.json` rather than embedded in YAML — avoids extending `serializeSimpleYaml`'s lane round-trip which today handles primitive values only (arrays would corrupt). New schema field `registered_at` distinguishes formally-registered lanes from `partition_lanes` bash-written ones.
+
+**W2 — `state register-lanes --from=<file>` (same module).** Bulk wrapper for the common case (greenfield's 7-lane hand-rolled partition). Parses YAML inline-array form (`files: [a.py, b.py]`) and JSON, loops `registerLane` per entry with `allowOverwrite=true` so bulk re-runs are idempotent. Returns aggregate `{ok, registered: [...], errors: [...]}`.
+
+**W3 — `dispatch render-lanes [target] [--out=dir]` (`bin/modules/dispatch.cjs`).** Emits per-lane envelopes for every entry in `workflow.yaml::lanes[]`. Default target is `code-reviewer:code_review` — the canonical per-file review template that already carries the C7-7 self-grade directive in its task body. **This is the structural fix for Q12's root cause**: hand-rolled raw-dispatch task text consistently omitted C7-7; rendering from the canonical template by default makes the bypass impossible. Each lane gets the base envelope (rendered once, substitution-cached) plus injected `<lane_id>`, `<lane_community>`, `<lane_files>` blocks before `</context>`, and the canonical "Write review to .devt/state/review.md" trailer is overridden per-lane to `lane.review_file` so concurrent lanes don't clobber one path. Stdout mode emits all envelopes with `<!-- LANE: <id> -->` separators; `--out=dir` mode writes one file per lane and returns a JSON summary with byte counts.
+
+**Behavioural verification on temp fixture** (2 lanes registered, render-lanes invoked):
+- 2 `<!-- LANE: -->` separators emitted
+- 2 C7-7 directives present (one per lane, from canonical template)
+- 2 `<lane_id>`, 2 `<lane_files>` injected blocks
+- 2 per-lane output path overrides; **0 default-trailer leakage**
+- `--out=dir` produces `lane-L1.txt` (5287 bytes) + `lane-L2.txt` (5244 bytes)
+
+**Validation:** 864/864 smoke, 3/3 locking, 22 envelope regions / 0 drift, 16/16 gate tests.
+
+**W4 (hygiene-warning silence at lane-id × scope-hint × file-set tuple) deliberately deferred** — touches `hooks/dispatch-hygiene-guard.sh` which has broader blast radius. Tier C ships without it; the C7-7 auto-injection in W3 closes the actual root cause without needing the silence rule. W4 becomes a follow-up only if registered-but-silenced-via-hook becomes felt friction.
+
 ### Tier B — Gate unit tests + shared fixture helper
 
 Closes the substance-byte-threshold regression class Greenfield flagged in Cal #23 Wave 2 Q11. The 200-byte drill-down floor in `assertGraphifyDecision` was load-bearing prose with zero JS coverage — a future tweak from 200 → 150 would silently change drill-down acceptance across every code review. Five named gates now have direct unit coverage with synthetic fixtures.
