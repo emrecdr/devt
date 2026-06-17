@@ -255,21 +255,52 @@ node -e "
 
   // Warn mode (or non-investigative agent in block mode) — emit advisory, allow.
   // Attach the canonical envelope as a structured <canonical_envelope> block
-  // (Choice C2) so the orchestrator can copy-paste rather than hand-compose
+  // so the orchestrator can copy-paste rather than hand-compose
   // <scope_trust>/<scope_hint>/<memory_signal>/governing_rules/guardrails_inline
-  // tags from cached state. Fail-open: any error (no active workflow, no
-  // template for this agent, plugin root missing) falls back to advisory-only.
+  // tags from cached state. Two silent-failure paths were field-observed:
+  // (1) CLAUDE_PLUGIN_ROOT not set in CC's hook env → require() never ran;
+  // (2) cmdRenderFilled(':auto') threw because no active workflow → caught silently.
+  // Both now surface a specific reason in the advisory so the operator knows
+  // WHY the envelope wasn't attached (and what to do about it).
   let envelope = null;
-  try {
-    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-    if (pluginRoot) {
+  let envelopeUnavailableReason = null;
+
+  // Resolve plugin root via env var OR walk-up (mirror state-find pattern
+  // above). Hooks invoked outside CC's typical env may lack CLAUDE_PLUGIN_ROOT.
+  let pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) {
+    let probe = __dirname;
+    for (let i = 0; i < 6; i++) {
+      if (fs.existsSync(path.join(probe, '.claude-plugin', 'plugin.json'))) {
+        pluginRoot = probe;
+        break;
+      }
+      const parent = path.dirname(probe);
+      if (parent === probe) break;
+      probe = parent;
+    }
+  }
+
+  if (!pluginRoot) {
+    envelopeUnavailableReason = 'plugin root not resolvable (CLAUDE_PLUGIN_ROOT unset and walk-up found no .claude-plugin/plugin.json)';
+  } else {
+    try {
       const dispatchPath = path.join(pluginRoot, 'bin', 'modules', 'dispatch.cjs');
-      if (fs.existsSync(dispatchPath)) {
+      if (!fs.existsSync(dispatchPath)) {
+        envelopeUnavailableReason = 'dispatch.cjs not found at ' + dispatchPath;
+      } else {
         const dispatch = require(dispatchPath);
         envelope = dispatch.cmdRenderFilled(subagentName + ':auto');
       }
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      if (msg.includes('no active workflow')) {
+        envelopeUnavailableReason = 'no active devt workflow — run /devt:workflow or /devt:review first to bootstrap context, then re-dispatch';
+      } else {
+        envelopeUnavailableReason = 'envelope render failed: ' + msg;
+      }
     }
-  } catch { /* fall back to advisory-only — envelope rendering is best-effort */ }
+  }
 
   const advisoryParts = [];
   if (scopeAdvisory) advisoryParts.push(scopeAdvisory);
@@ -281,6 +312,12 @@ node -e "
       '<canonical_envelope>',
       envelope,
       '</canonical_envelope>'
+    );
+  } else if (envelopeUnavailableReason) {
+    advisoryParts.push(
+      '',
+      'Canonical envelope not attached: ' + envelopeUnavailableReason + '.',
+      'Manual recovery: invoke the relevant /devt:* slash command (or run node bin/devt-tools.cjs dispatch render-filled AGENT:auto once a workflow is active).'
     );
   }
   const output = JSON.stringify({

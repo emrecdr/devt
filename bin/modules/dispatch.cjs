@@ -922,6 +922,64 @@ function run(subcommand, args) {
       process.stdout.write(out + (out.endsWith("\n") ? "" : "\n"));
       return 0;
     }
+    case "run": {
+      // Generic devt-agent launcher: render canonical envelope + substitute
+      // task text, emit paste-ready Task() block. Closes the bypass
+      // justification for cases where no /devt:* slash command matches the
+      // intended agent dispatch (e.g., devt:tester for a one-shot rewrite
+      // that has no matching skill). The operator copies the output verbatim
+      // into a Task() call; the envelope satisfies the workflow contract
+      // (dispatch-hygiene-guard passes; all context blocks present).
+      //
+      // Args: <agent> --task="..."   OR   <agent>:<workflow_id|auto> --task="..."
+      const positional = args.filter(a => !a.startsWith("--"));
+      const agentArg = positional[0];
+      if (!agentArg) {
+        process.stderr.write("Usage: dispatch run <agent>[:auto] --task=\"...\"\n");
+        return 2;
+      }
+      const target = agentArg.includes(":") ? agentArg : agentArg + ":auto";
+
+      const taskFlag = args.find(a => a.startsWith("--task="));
+      if (!taskFlag) {
+        process.stderr.write("dispatch run: --task=\"...\" required (the task text to inject into the envelope's <task> block)\n");
+        return 2;
+      }
+      const taskText = taskFlag.slice("--task=".length);
+      if (!taskText.trim()) {
+        process.stderr.write("dispatch run: --task= cannot be empty\n");
+        return 2;
+      }
+
+      const excludeArg = args.find(a => a.startsWith("--rules-exclude="));
+      const flagList = excludeArg
+        ? excludeArg.slice("--rules-exclude=".length).split(",").map(s => s.trim()).filter(Boolean)
+        : [];
+      const rulesExclude = _mergeConfigRulesExclude(flagList);
+
+      let envelope;
+      try { envelope = cmdRenderFilled(target, { rulesExclude }); }
+      catch (err) {
+        process.stderr.write(err.message + "\n");
+        return 2;
+      }
+
+      // Substitute the rendered <task>...</task> block content with the
+      // user-provided task text. Match across newlines (template tasks span
+      // multiple lines). When the template has no <task> block (uncommon
+      // for investigative agents but possible for docs-writer / curator),
+      // fall through and emit the envelope as-is with a stderr advisory so
+      // the user knows the --task content wasn't injected.
+      const taskBlockRe = /<task>[\s\S]*?<\/task>/;
+      if (taskBlockRe.test(envelope)) {
+        envelope = envelope.replace(taskBlockRe, "<task>\n" + taskText + "\n</task>");
+      } else {
+        process.stderr.write("dispatch run: warning — template for " + agentArg + " has no <task> block; --task content not injected. Envelope emitted as-is.\n");
+      }
+
+      process.stdout.write(envelope + (envelope.endsWith("\n") ? "" : "\n"));
+      return 0;
+    }
     case "compile": {
       const mode = args.includes("--write") ? "write" : "check";
       const result = cmdCompile(mode);

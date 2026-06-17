@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #26 — constraint-aware bypass response (4 hooks + 1 CLI)
+
+Five field-evidenced fixes shipped after validating each against existing code and reproducing the GF-observed pattern locally. **Validation revealed two items from the initial Tier A were already shipped** (R6 scope filter at `hooks/dispatch-hygiene-guard.sh:132`; A2' envelope auto-staging at `hooks/dispatch-hygiene-guard.sh:262-291`) — those dropped from scope. The remaining work shipped as five mechanical fixes that interlock.
+
+**Architectural honesty**: cal #26 cannot mechanically block raw dispatch because Claude Code's harness doesn't honor PreToolUse `decision: "deny"` on the Task tool (documented at `docs/HOOKS.md:147` + `state.cjs:2778`). This release ships maximum-ergonomics + scope-correctness + recovery-mechanics instead of an unachievable hard block.
+
+**A2' silent-failure fix** (`hooks/dispatch-hygiene-guard.sh`). The existing envelope auto-staging at warn-mode had two silent-drop paths: (1) `CLAUDE_PLUGIN_ROOT` unset → `require()` never ran; (2) no active workflow → `cmdRenderFilled(':auto')` threw and was swallowed. Both reproduced locally via synthetic hook input. Now: hook walks up to find `.claude-plugin/plugin.json` if env var unset; catches the no-workflow throw and surfaces "no active devt workflow — run /devt:workflow or /devt:review first to bootstrap context, then re-dispatch" in the advisory. Operators see WHY the envelope wasn't attached.
+
+**A4 silent PreFlight for ungoverned edits** (`hooks/pre-flight-guard.sh`). Field signal: ~50 noise events per session when every edit demanded manually-written `:: ungoverned` PREFLIGHT line. When memory layer exists AND no doc's `affects_paths` matches the file, auto-write the `:: ungoverned` line silently and allow. Projects WITHOUT a memory layer keep existing warn behavior — the nudge to set up governance is load-bearing for those.
+
+**Dual-window session-signal counter** (`hooks/workflow-context-injector.sh`). Field signal: long-running workflows (`first_created_at` days/weeks old) accumulated `dispatch-warnings.jsonl` entries the cumulative counter treated as current — "74 raw_dispatch" was actually 7 days of activity, not actionable. Now: count last-1h primarily; silent when last-1h=0 regardless of cumulative. When workflow age > 24h AND cumulative differs, append `; total this workflow (Xd): N raw + N cliff` tail. Banner-blindness root cause addressed at the noise source. Reproduced with synthetic fixture before shipping.
+
+**C2 inline `--by-source` output** (same hook). When recent raw_dispatch count > 0, top-3 agent sources inline as `[devt:code-reviewer=2, devt:tester=1]`. Discoverability fix — operators see the data shape immediately, not a CLI command they'd need to learn and run.
+
+**A7-min `dispatch run` CLI** (`bin/modules/dispatch.cjs`). New subcommand: `node bin/devt-tools.cjs dispatch run <agent> --task="..."`. Renders the canonical envelope for the specified agent + substitutes the user-supplied task text into the `<task>` block + emits paste-ready `Task()` invocation. Closes the "no matching skill" bypass justification (e.g., dispatching `devt:tester` for a one-shot rewrite with no `/devt:test-rewrite` skill). Input validation: requires `<agent>` + non-empty `--task=`; surfaces usage on misuse.
+
+**Smoke gates K125-K128** lock all four behaviors:
+- K125: pre-flight-guard silent auto-write when memory exists + no doc matches
+- K126: dispatch-hygiene-guard surfaces envelope-unavailable reasons (both no-workflow + no-plugin-root paths)
+- K127: workflow-context-injector dual-window counter (silent on stale-only, recent count + workflow-age tail + by-source inline)
+- K128: dispatch run CLI surface input validation
+
+Drift-guard stack now **35-deep K94-K128**. CLAUDE.md + README.md updated for new count.
+
+**Validated rejects** (recorded for audit):
+- **A1 PreToolUse hard-block** — Claude Code doesn't enforce `decision:deny` on Task tool. Replace via A2' carrot + A7-min ergonomics + R6 scope filter (already shipped).
+- **R6 scope filter** — already shipped at `dispatch-hygiene-guard.sh:132`. The field-observed "74 raw_dispatch" was workflow-staleness counter accumulation, not scope-filter absence. Dual-window counter is the correct fix.
+- **A2'-minimal envelope auto-staging** — already shipped (warn-mode + investigative agent). Silent-failure paths were the actual gap; addressed via A2'-silent-failure-fix above.
+- **Narrative redirect at threshold** — field signal confirmed text-only redirect joins banner-blindness within 5 fires. Mechanical ergonomics (A7-min) ships instead.
+- **A5 banner rotation** — without a working hard-block, more banner noise doesn't help. Dual-window counter eliminates the noise source instead.
+
+**New backlog item surfaced**: `/devt:implement` keeps prompting operators at each phase to choose between continuing with devt agents vs direct execution. Not in any workflow body — this is the orchestrator (main-thread LLM) freelancing mid-workflow. Different bypass pattern than what cal #26 addresses. Fix shapes (deferred to next round): (a) workflow bodies become explicit "MUST dispatch via Task() — direct execution bypasses verifier loop + sidecar contract + telemetry"; (b) config knob `orchestrator.always_dispatch_devt_agents: true`; (c) hook detection on Edit/Write during active dev/quick_implement workflow when prior tool call wasn't a Task dispatch.
+
+**Validation**: smoke 873/873, gate 16/16, locking 3/3, graphify 35/35, envelope-compile 22/0 drift.
+
 ## [0.96.0] - 2026-06-16
 
 ### Cal #25 — doc slim + ephemeral-ref sweep + stale-plans cleanup

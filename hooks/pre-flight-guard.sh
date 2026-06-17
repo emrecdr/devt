@@ -112,6 +112,34 @@ node -e "
 
     if (covered) process.exit(0);
 
+    // Governance check — only short-circuit when a memory layer EXISTS and
+    // no doc's affects_paths matches this file. That's the field-observed
+    // noise pattern: project has governance set up, edit is on a path no
+    // doc covers, hook nags operator to manually write \":: ungoverned\".
+    // Auto-write silently instead.
+    //
+    // Projects WITHOUT a memory layer keep the existing warn behavior — the
+    // nudge to set up governance is load-bearing for those. The check uses
+    // .devt/memory/index.db as the proxy for \"memory layer initialized\"
+    // (same proxy memory.cjs uses for its lookups).
+    try {
+      const memoryDbPath = path.join(dir, '.devt', 'memory', 'index.db');
+      if (fs.existsSync(memoryDbPath)) {
+        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+        if (pluginRoot) {
+          const memMod = require(path.join(pluginRoot, 'bin', 'modules', 'memory.cjs'));
+          const matches = memMod.getByPath(fp);
+          if (!Array.isArray(matches) || matches.length === 0) {
+            const ts = new Date().toISOString();
+            const action = (d.tool_name || 'edit').toLowerCase();
+            const line = 'PREFLIGHT ' + ts + ' ' + action + ' ' + fp + ' :: ungoverned\\n';
+            try { fs.appendFileSync(scratch, line); } catch { /* best-effort */ }
+            process.exit(0);
+          }
+        }
+      }
+    } catch { /* fall through — default to warn-as-before on lookup failure */ }
+
     // Build the advisory / block message. Compact — agents with the
     // memory-pre-flight skill loaded already know the protocol; the message
     // needs the action cue + literal format hint for recovery, not the full

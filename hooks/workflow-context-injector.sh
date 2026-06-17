@@ -127,31 +127,67 @@ RESULT=$(node -e "
       const startMs = new Date(workflowStart).getTime();
       const signals = [];
 
-      // Probe 1: dispatch-warnings.jsonl session-scoped counts.
+      // Probe 1: dispatch-warnings.jsonl — dual-window scan.
       // Inline JSONL scan — uses resolved _projectRoot so subdir invocations
       // still find the canonical state file. cliff++ only on actionable
       // signals: task-truncation-detector tags every record signal in
       // {healthy, near_cliff, low_output, mid_task}. Counting ALL
       // task_output_bytes records (regardless of signal) produces cry-wolf
-      // noise — field-observed at ~247-of-254 false alarms per session,
-      // training operators to ignore the channel. Records predating the
-      // discriminator lack the signal field; treated as noise.
+      // noise. Records predating the discriminator lack the signal field;
+      // treated as noise.
+      //
+      // Window design: count records since workflow start (cumulative) AND
+      // in the last hour (recent activity). Display recent count primarily;
+      // surface cumulative only when workflow age > 24h to avoid noise from
+      // long-running workflows where 'since workflow start' has drifted
+      // from operator's mental model of 'this session'.
+      const oneHourMs = 60 * 60 * 1000;
+      const recentCutoffMs = Date.now() - oneHourMs;
+      const workflowAgeMs = Date.now() - startMs;
+      const STALE_WORKFLOW_MS = 24 * 60 * 60 * 1000;
       try {
         const dispatchPath = path.join(_projectRoot, '.devt', 'state', 'dispatch-warnings.jsonl');
         if (fs.existsSync(dispatchPath)) {
           const content = fs.readFileSync(dispatchPath, 'utf8');
-          let raw = 0, cliff = 0;
+          let rawRecent = 0, cliffRecent = 0, rawCumulative = 0, cliffCumulative = 0;
+          const sourceCounts = {};  // for C2 inline --by-source output
           for (const ln of content.split('\n')) {
             if (!ln) continue;
             try {
               const r = JSON.parse(ln);
-              if (!r.ts || new Date(r.ts).getTime() < startMs) continue;
-              if (r.source === 'raw_dispatch') raw++;
-              else if (r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy') cliff++;
+              if (!r.ts) continue;
+              const tsMs = new Date(r.ts).getTime();
+              if (tsMs < startMs) continue;
+              const isRaw = r.source === 'raw_dispatch';
+              const isCliff = r.source === 'task_output_bytes' && r.signal && r.signal !== 'healthy';
+              if (isRaw) {
+                rawCumulative++;
+                if (tsMs >= recentCutoffMs) {
+                  rawRecent++;
+                  const agent = r.agent || 'unknown';
+                  sourceCounts[agent] = (sourceCounts[agent] || 0) + 1;
+                }
+              } else if (isCliff) {
+                cliffCumulative++;
+                if (tsMs >= recentCutoffMs) cliffRecent++;
+              }
             } catch { /* malformed line */ }
           }
-          if (raw > 0 || cliff > 0) {
-            signals.push(raw + ' raw_dispatch + ' + cliff + ' cliff signal(s)');
+          if (rawRecent > 0 || cliffRecent > 0) {
+            let signal = rawRecent + ' raw_dispatch + ' + cliffRecent + ' cliff signal(s) (last 1h)';
+            if (workflowAgeMs >= STALE_WORKFLOW_MS && (rawCumulative > rawRecent || cliffCumulative > cliffRecent)) {
+              const ageDays = Math.floor(workflowAgeMs / (24 * 60 * 60 * 1000));
+              signal += '; total this workflow (' + ageDays + 'd): ' + rawCumulative + ' raw + ' + cliffCumulative + ' cliff';
+            }
+            if (rawRecent > 0) {
+              const topAgents = Object.entries(sourceCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([a, n]) => a + '=' + n)
+                .join(', ');
+              signal += ' [' + topAgents + ']';
+            }
+            signals.push(signal);
           }
         }
       } catch { /* fs error — silent */ }

@@ -13118,6 +13118,115 @@ else
   fail "K124: MCP cap contract broken — maxItems=$K124_MAX_ITEMS validates_100=$K124_VALIDATES (expected 256/pass)"
 fi
 
+# K125: pre-flight-guard silent auto-write for ungoverned edits when memory
+# layer exists but no governing doc matches the path. Field signal: project
+# with memory governance set up + edit on a path no ADR/CON/FLOW covers
+# nagged the operator to manually write "PREFLIGHT ... :: ungoverned" (~50
+# noise events per session). Auto-write silently instead. Projects WITHOUT
+# memory layer keep existing warn behavior (the nudge to set up governance
+# is load-bearing for those — covered by adjacent assertions above).
+K125_TMP=$(mktemp -d)
+mkdir -p "$K125_TMP/.devt/state"
+# Initialize memory layer (init + index) — empty memory, no docs match anything
+(cd "$K125_TMP" && node "$ROOT/bin/devt-tools.cjs" memory init >/dev/null 2>&1)
+(cd "$K125_TMP" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+echo '{"memory":{"preflight_mode":"warn"}}' > "$K125_TMP/.devt/config.json"
+echo 'active: true' > "$K125_TMP/.devt/state/workflow.yaml"
+touch "$K125_TMP/test.py"
+if [ -f "$K125_TMP/.devt/memory/index.db" ]; then
+  K125_OUT=$(cd "$K125_TMP" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$K125_TMP"'/test.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh" 2>&1)
+  K125_SCRATCH=$(cat "$K125_TMP/.devt/state/scratchpad.md" 2>/dev/null || echo "")
+  if [ -z "$K125_OUT" ] && echo "$K125_SCRATCH" | /usr/bin/grep -q ":: ungoverned"; then
+    pass "K125: pre-flight-guard silent auto-write when memory exists + no doc matches (no prompt-channel warning + scratchpad ungoverned line appended)"
+  else
+    fail "K125: ungoverned auto-write broken (out=${K125_OUT:0:200} scratch=$K125_SCRATCH)"
+  fi
+else
+  fail "K125: memory init failed — index.db not created in fixture"
+fi
+rm -rf "$K125_TMP"
+
+# K126: dispatch-hygiene-guard surfaces envelope-unavailable reason.
+# Two silent-failure paths were field-observed: CLAUDE_PLUGIN_ROOT unset (the
+# require() never ran) AND no active workflow (cmdRenderFilled threw). Both
+# now surface a specific reason in the advisory so the operator knows WHY the
+# envelope wasn't attached. Locks both reason paths.
+K126_TMP=$(mktemp -d)
+mkdir -p "$K126_TMP/.devt/state"
+echo '{"dispatch_hygiene_mode":"warn"}' > "$K126_TMP/.devt/config.json"
+# Path A: no active workflow → reason mentions "no active devt workflow"
+K126_INPUT='{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review file X. No envelope."}}'
+K126_OUT_A=$(cd "$K126_TMP" && echo "$K126_INPUT" | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+# Path B: no CLAUDE_PLUGIN_ROOT → reason mentions "plugin root not resolvable"
+K126_OUT_B=$(cd "$K126_TMP" && echo "$K126_INPUT" | env -u CLAUDE_PLUGIN_ROOT bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
+rm -rf "$K126_TMP"
+if echo "$K126_OUT_A" | /usr/bin/grep -q "no active devt workflow" && echo "$K126_OUT_B" | /usr/bin/grep -q "plugin root not resolvable"; then
+  pass "K126: dispatch-hygiene-guard surfaces envelope-unavailable reasons (no-workflow + no-plugin-root both explicit)"
+else
+  fail "K126: envelope-reason surfacing broken — workflow-path=${K126_OUT_A:0:80} plugin-path=${K126_OUT_B:0:80}"
+fi
+
+# K127: workflow-context-injector dual-window session-signal counter.
+# Field signal: long-running workflows (first_created_at days/weeks old)
+# accumulated dispatch-warnings.jsonl entries that the cumulative counter
+# treated as current — producing banner-blindness ("74 raw_dispatch" stale).
+# Dual-window: count last-1h primarily; silent when last-1h=0 even if
+# cumulative > 0. Adds cumulative tail "; total this workflow (Xd): N raw"
+# only when workflow age > 24h AND counts differ.
+K127_TMP=$(mktemp -d)
+mkdir -p "$K127_TMP/.devt/state"
+cat > "$K127_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k127-test
+workflow_type: dev
+tier: STANDARD
+phase: implement
+status: IN_PROGRESS
+iteration: 1
+task: "k127 test"
+first_created_at: "2026-06-10T08:00:00.000Z"
+created_at: "2026-06-17T08:00:00.000Z"
+EOF
+# Case A: only old records → silent (no session signal line)
+cat > "$K127_TMP/.devt/state/dispatch-warnings.jsonl" <<EOF
+{"ts":"2026-06-11T08:00:00.000Z","source":"raw_dispatch","agent":"devt:tester"}
+{"ts":"2026-06-12T08:00:00.000Z","source":"raw_dispatch","agent":"devt:tester"}
+EOF
+K127_OUT_A=$(cd "$K127_TMP" && echo '{"hook_event_name":"UserPromptSubmit","prompt":"test"}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1)
+# Case B: 1 old + 1 recent → signal fires, recent count = 1
+RECENT_TS=$(date -u -v-15M +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%S.000Z)
+cat > "$K127_TMP/.devt/state/dispatch-warnings.jsonl" <<EOF
+{"ts":"2026-06-11T08:00:00.000Z","source":"raw_dispatch","agent":"devt:tester"}
+{"ts":"$RECENT_TS","source":"raw_dispatch","agent":"devt:code-reviewer"}
+EOF
+K127_OUT_B=$(cd "$K127_TMP" && echo '{"hook_event_name":"UserPromptSubmit","prompt":"test"}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1)
+rm -rf "$K127_TMP"
+K127_A_SILENT=$(echo "$K127_OUT_A" | /usr/bin/grep -c "session signal" || true)
+K127_B_FIRES=$(echo "$K127_OUT_B" | /usr/bin/grep -c "1 raw_dispatch.*last 1h" || true)
+K127_B_TOTAL=$(echo "$K127_OUT_B" | /usr/bin/grep -c "total this workflow" || true)
+K127_B_BYSRC=$(echo "$K127_OUT_B" | /usr/bin/grep -c "devt:code-reviewer=1" || true)
+if [ "$K127_A_SILENT" = "0" ] && [ "$K127_B_FIRES" = "1" ] && [ "$K127_B_TOTAL" = "1" ] && [ "$K127_B_BYSRC" = "1" ]; then
+  pass "K127: workflow-context-injector dual-window counter (silent on stale-only; recent count + workflow-age tail + by-source inline when recent activity)"
+else
+  fail "K127: dual-window counter broken — A_silent=$K127_A_SILENT B_recent=$K127_B_FIRES B_total=$K127_B_TOTAL B_bysrc=$K127_B_BYSRC"
+fi
+
+# K128: dispatch run CLI subcommand surface + task injection.
+# A7-min: generic devt-agent launcher closes the bypass justification when
+# no /devt:* skill matches the intended dispatch (e.g., devt:tester for a
+# one-shot rewrite). CLI emits paste-ready Task() block with envelope +
+# user-supplied task injected.
+K128_USAGE=$(node "$ROOT/bin/devt-tools.cjs" dispatch run 2>&1 | head -1 || true)
+K128_TASK_REQ=$(node "$ROOT/bin/devt-tools.cjs" dispatch run code-reviewer 2>&1 | head -1 || true)
+K128_EMPTY_TASK=$(node "$ROOT/bin/devt-tools.cjs" dispatch run code-reviewer --task="" 2>&1 | head -1 || true)
+if echo "$K128_USAGE" | /usr/bin/grep -q "Usage: dispatch run" && \
+   echo "$K128_TASK_REQ" | /usr/bin/grep -q "task.*required" && \
+   echo "$K128_EMPTY_TASK" | /usr/bin/grep -q "cannot be empty"; then
+  pass "K128: dispatch run CLI surface (usage on no-args, --task required, --task empty rejected — input validation locks the contract)"
+else
+  fail "K128: dispatch run CLI surface broken — usage=$K128_USAGE task_req=$K128_TASK_REQ empty=$K128_EMPTY_TASK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
