@@ -13227,6 +13227,46 @@ else
   fail "K128: dispatch run CLI surface broken — usage=$K128_USAGE task_req=$K128_TASK_REQ empty=$K128_EMPTY_TASK"
 fi
 
+# K129: dispatch-helpers SKILL.md broadened trigger phrases + documents `dispatch run`.
+# Field signal: skill existed but description targeted only parallel fan-out; single
+# raw-dispatch scenarios didn't trigger Skill load, so the canonical envelope CLI
+# stayed undiscovered. Updated description covers single + fan-out + recovery patterns
+# AND documents the `dispatch run` ergonomic launcher alongside the older
+# `dispatch render-filled` advanced path.
+K129_DESC_BROAD=$(/usr/bin/grep -c "single OR parallel" "$ROOT/skills/dispatch-helpers/SKILL.md" 2>/dev/null || echo 0)
+K129_RUN_HEADER=$(/usr/bin/grep -c "One-off dispatch (the common case)" "$ROOT/skills/dispatch-helpers/SKILL.md" 2>/dev/null || echo 0)
+K129_RUN_BLOCK=$(/usr/bin/grep -c 'dispatch run <agent> --task' "$ROOT/skills/dispatch-helpers/SKILL.md" 2>/dev/null || echo 0)
+if [ "${K129_DESC_BROAD:-0}" -ge 1 ] && [ "${K129_RUN_HEADER:-0}" -ge 1 ] && [ "${K129_RUN_BLOCK:-0}" -ge 1 ]; then
+  pass "K129: dispatch-helpers SKILL.md broadens triggers + documents dispatch run (discoverable for single + fan-out cases)"
+else
+  fail "K129: dispatch-helpers SKILL.md missing discoverability updates — desc_broad=$K129_DESC_BROAD run_header=$K129_RUN_HEADER run_block=$K129_RUN_BLOCK"
+fi
+
+# K130: agent resume CLI surface + auto-detect PARTIAL fixture.
+# A3' partial — replaces the 4-step manual recovery (find sidecar → infer
+# next_section → construct continuation prompt → remember SendMessage) with
+# one CLI call. Locks: (a) usage on bad subcommand; (b) clear errors on missing
+# sidecar / unknown agent_id; (c) success path emits SendMessage block with
+# <continue_from_section> filled from sidecar.
+K130_USAGE=$(node "$ROOT/bin/devt-tools.cjs" agent 2>&1 | head -1 || true)
+K130_MISSING=$(node "$ROOT/bin/devt-tools.cjs" agent resume --sidecar=/nonexistent 2>&1 | head -1 || true)
+# Fixture: synthetic PARTIAL sidecar in tmp project, verify auto-detect + emission
+K130_TMP=$(mktemp -d)
+mkdir -p "$K130_TMP/.devt/state"
+cat > "$K130_TMP/.devt/state/impl-summary.json" <<EOF
+{"status":"PARTIAL","agent_id":"k130-test-id","next_section":"B.5","sections_completed":["B.1","B.2"],"task":"k130 fixture"}
+EOF
+K130_RESUME=$(cd "$K130_TMP" && node "$ROOT/bin/devt-tools.cjs" agent resume 2>/dev/null || true)
+rm -rf "$K130_TMP"
+if echo "$K130_USAGE" | /usr/bin/grep -q "Usage: agent resume" && \
+   echo "$K130_MISSING" | /usr/bin/grep -q "sidecar not readable" && \
+   echo "$K130_RESUME" | /usr/bin/grep -q 'SendMessage(to="k130-test-id"' && \
+   echo "$K130_RESUME" | /usr/bin/grep -q "<continue_from_section>B.5</continue_from_section>"; then
+  pass "K130: agent resume CLI surface (usage on bad subcommand, missing-sidecar error explicit, auto-detect PARTIAL emits filled SendMessage block)"
+else
+  fail "K130: agent resume CLI surface broken — usage=$K130_USAGE missing=$K130_MISSING resume=${K130_RESUME:0:120}"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

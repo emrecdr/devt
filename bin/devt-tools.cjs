@@ -146,6 +146,16 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "agent": {
+        // agent resume — paste-ready SendMessage continuation for walled
+        // agents. Reads sidecar's next_section + emits the SendMessage block
+        // with <continue_from_section> filled in. Replaces a 4-step manual
+        // recovery (find sidecar → infer next_section → construct prompt →
+        // remember SendMessage vs Agent) with one CLI call.
+        const code = require("./modules/agent-resume.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "report":
         console.log(
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),

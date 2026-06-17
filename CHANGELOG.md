@@ -6,6 +6,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Cal #28-A — dispatch-helpers discoverability + agent resume CLI
+
+Two of Greenfield's field-evidenced top-3 highest-ROI items shipped. Item #2 (validation-as-hook) deferred to cal #28-B for its own design pass — it's the bigger one and combining muddied scope.
+
+**dispatch-helpers skill discoverability** (`skills/dispatch-helpers/SKILL.md`). GF report: "I never figured out how to invoke `dispatch render-filled` cleanly" despite the skill existing. Root cause: skill description and trigger phrases targeted only parallel fan-out (`"fan out review across files X,Y,Z"`, `"dispatch programmer in lanes"`), so the Skill never loaded into context when the orchestrator was about to do a SINGLE raw dispatch (the common case). Updated:
+- Description broadened to cover single + parallel + recovery patterns with explicit trigger phrases for each shape ("dispatch devt:code-reviewer to review X", "run devt:programmer for Y", "re-dispatch programmer with continuation")
+- Body restructured: leads with the one-off `dispatch run agent --task="..."` ergonomic launcher (cal #26 A7-min), then advanced `dispatch render-filled` for fan-out, then companion `state refresh-scope-context`
+- Worked example added for the one-off case — replacing a typical raw `Agent(subagent_type="devt:code-reviewer", ...)` call
+- Description trimmed to 766 chars (under F19's 800-char budget)
+
+**`agent resume` CLI** (`bin/modules/agent-resume.cjs`). GF item #3: "SendMessage-resume contract is heavyweight... a one-command `devt agent resume <id>` that reads the sidecar's next_section would have made this trivial." Shipped:
+- `node bin/devt-tools.cjs agent resume [agent_id] [--section=NAME] [--sidecar=PATH]`
+- Auto-detects newest PARTIAL sidecar in `.devt/state/` when no agent_id given (scans `impl-summary*.json`, `review*.json`, `test-summary*.json`, `verification*.json`, `debug-summary.json`)
+- Emits paste-ready `SendMessage(to="<id>", content="<continue_from_section>...")` block with sections_completed context
+- Graceful degradation when `next_section` is absent (mid-section wall before agent could write it): emits `<continue_from_checkpoint/>` with scan-and-continue task + stderr advisory
+- Input validation: usage on no subcommand, clear errors on missing sidecar / unknown agent_id (exit 2)
+
+Note: agent body protocol change to PRE-write `next_section` (vs current post-section write) is deferred to cal #28-B alongside the validation-hook design. Currently the CLI handles both populated and absent `next_section` gracefully.
+
+**Smoke gates K129-K130** lock both behaviors. Drift-guard stack now **37-deep K94-K130**. CLAUDE.md + README.md updated for new count.
+
+**Cal #28-B (next round) — validation-as-hook design pass**. Field-evidenced 55% wall rate at validation step (agent's response budget eaten by implementation work, "all tests passed" doesn't fit). Design needs: sidecar schema addition for `validation_gates[]` + PostToolUse/Stop hook that runs the declared gates + sidecar patch + workflow logic to consume aggregate verdict + agent body protocol change (pre-section next_section). ~3-4 hours focused work.
+
+**Validation**: smoke 875/875 (2 new K-gates), gate 16/16, locking 3/3, graphify 35/35, envelope-compile 22/0 drift.
+
 ### Cal #26 — constraint-aware bypass response (4 hooks + 1 CLI)
 
 Five field-evidenced fixes shipped after validating each against existing code and reproducing the GF-observed pattern locally. **Validation revealed two items from the initial Tier A were already shipped** (R6 scope filter at `hooks/dispatch-hygiene-guard.sh:132`; A2' envelope auto-staging at `hooks/dispatch-hygiene-guard.sh:262-291`) — those dropped from scope. The remaining work shipped as five mechanical fixes that interlock.

@@ -1,6 +1,6 @@
 ---
 name: dispatch-helpers
-description: Use when the orchestrator decides parallelism — when about to issue raw Agent() / Task() dispatches to devt:* subagents instead of routing through /devt:review or /devt:workflow. Surfaces the `dispatch render-filled` CLI so canonical context blocks (scope_trust, scope_hint, memory_signal, governing_rules, guardrails_inline, agent_skills) are never silently dropped. Trigger phrases include "fan out review across files X,Y,Z", "dispatch programmer in lanes", "parallel reviewer across communities", or any pattern where the orchestrator constructs a Task() prompt for a devt:* agent outside a /devt:* workflow.
+description: Use whenever the orchestrator is about to issue a raw Agent() / Task() dispatch to a devt:* subagent (single OR parallel) instead of routing through /devt:review or /devt:workflow. Surfaces two CLIs that build the canonical envelope so context blocks (scope_trust, scope_hint, memory_signal, governing_rules) are never silently dropped — `dispatch run agent --task=...` for one-off single dispatches, `dispatch render-filled agent:auto` for advanced cases (lane fan-out, pre-computation, custom edits). Trigger phrases include single dispatches like "dispatch devt:code-reviewer to review X", "run devt:programmer for Y"; fan-out like "fan out review across files", "parallel reviewer across communities"; recovery like "re-dispatch programmer with continuation".
 allowed-tools: Bash Read
 user-invocable: false
 ---
@@ -13,29 +13,54 @@ The devt CLAUDE.md "Critical Agent + Workflow Contracts" section says:
 
 > Never raw-dispatch devt agents. Orchestrators MUST route through devt slash commands (/devt:review, /devt:workflow, …). Direct Task(subagent_type="devt:*", prompt=…) calls bypass the workflow's dispatch template — losing <scope_trust>, <scope_hint>, <memory_signal>, the graph-impact map injection, the impact-plan, the verifier loop, and the telemetry surface.
 
-This skill exists for the edge case where the canonical workflow path genuinely doesn't fit — typically **parallel fan-out across multiple file groups or feature lanes** where the orchestrator wants to control slicing manually. Without ergonomic envelope generation, orchestrators default to raw dispatches with prose context, dropping every workflow protection.
+**Prefer `/devt:review` / `/devt:workflow` / `/devt:debug` when applicable.** This skill is for the genuine edge cases where the canonical path doesn't fit: ad-hoc single dispatches that don't match a slash command's shape, parallel fan-out across file groups, or recovery / second-pass scenarios on existing artifacts.
 
-Prefer `/devt:review`, `/devt:workflow`, or `/devt:debug` when applicable. This skill is for the narrow case requiring ad-hoc parallelism that the workflow doesn't support directly.
+The cost of bypassing canonical paths without this skill: orchestrators construct prose context by hand, drop the structured blocks, and the agent runs in degraded mode (grep-first discovery, no caller verification, no telemetry). The CLIs below eliminate that cost.
 
-## The CLI surface
+## CLI surface — pick by shape
+
+### One-off dispatch (the common case) — `dispatch run`
+
+Use for ONE devt agent invocation that doesn't fit a `/devt:*` slash command. Example: dispatching `devt:tester` to rewrite a hurl spec file when no slash command matches that intent.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch run <agent> --task="..."
+```
+
+- `<agent>` — `programmer | tester | code-reviewer | verifier | researcher | debugger | architect | curator | docs-writer | retro`
+- `--task="..."` — your task text; gets injected verbatim into the envelope's `<task>` block
+- Output: paste-ready `Task(subagent_type="devt:<agent>", model="...", prompt="...")` invocation with the canonical envelope filled and your task substituted
+- Errors loudly when no active workflow exists (because `:auto` workflow-id resolution needs one)
+
+**Worked example** — replacing a raw `Agent(subagent_type="devt:code-reviewer", prompt="review my new tests")` call:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch run code-reviewer --task="Review the new tests/contacts/test_exporter.py — focus on the row-limit pre-flight gate + the soft-deleted org filter"
+```
+
+Copy the emitted block into your next Task() call. Done. Every context block (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<governing_rules>`, `<guardrails_inline>`, `<rubric_content>`, agent skills) is filled from current state — no manual block composition.
+
+### Advanced — `dispatch render-filled`
+
+Use for parallel fan-out (multiple lanes, each needs its own envelope), pre-computing envelopes for orchestration planning, or when the envelope needs editing before dispatch (e.g., custom rules-exclude, model override).
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled <agent>:<workflow_id|auto>
 ```
 
-- `<agent>` — one of: `programmer`, `tester`, `code-reviewer`, `verifier`, `researcher`, `debugger`, `architect`, `curator`, `docs-writer`, `retro`
-- `<workflow_id>` — either an explicit workflow_id (from `.devt/state/workflow.yaml::workflow_id`) or the literal `auto` to resolve from active state
-- Output: a complete `Task(subagent_type="devt:<agent>", model="...", prompt="...")` envelope with every placeholder substituted from current state, governing rules, guardrails, and config
+- `<workflow_id>` — explicit id from `.devt/state/workflow.yaml::workflow_id` OR the literal `auto`
+- Output: the same envelope shape as `dispatch run`, but with the template's default `<task>` block (no `--task=` substitution)
+- Use case: you'll customize each lane's `<task>` block manually after rendering
 
-Companion CLI for keeping `scope_trust` fresh during long sessions:
+### Companion — `state refresh-scope-context`
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context
 ```
 
-This re-derives `scope_trust` from the current `preflight-brief.json::graph_stats + staleness` and persists to `workflow.yaml::scope_trust_json`. Cost: ~50ms. Idempotent. Run this BEFORE invoking `dispatch render-filled` if the session has spanned multiple commits or extensive code reading.
+Re-derives `scope_trust` from `preflight-brief.json::graph_stats + staleness` and persists to `workflow.yaml::scope_trust_json`. Cost ~50ms, idempotent. Run BEFORE `dispatch run` / `dispatch render-filled` if the session spans many commits or extensive code reading — keeps the rendered envelope's scope-trust signal fresh.
 
-## Worked example — parallel code-reviewer fan-out
+## Advanced — parallel code-reviewer fan-out
 
 Scenario: a review scope of 24 files split into 3 file-group lanes (8 files each). `/devt:review` would dispatch ONE code-reviewer with the community-filter; the orchestrator wants three reviewers in parallel.
 
