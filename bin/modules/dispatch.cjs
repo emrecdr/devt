@@ -1038,7 +1038,7 @@ function run(subcommand, args) {
       }
     }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|compile|decompose|warnings>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|run|compile|decompose|warnings>\n");
       return 2;
   }
 }

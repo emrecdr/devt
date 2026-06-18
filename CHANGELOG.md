@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.97.0] - 2026-06-18
+
+### Cal #29 — three validated bugs surfaced by field-receipt validation
+
+Field calibration receipts forced re-validation of three claimed Tier-A issues. **All three original diagnoses were wrong**; validation surfaced the actual bugs underneath:
+
+| Original (wrong) diagnosis | Receipt | Actual bug |
+|---|---|---|
+| Memory retrieval broken — CON-002 doesn't surface | `memory query "bitbucket"` returns CON-002 perfectly; only fails when query has zero keyword overlap with doc content | **Preflight query construction doesn't include project-context tokens** — Bitbucket project's CON-002 misses when task description doesn't say "bitbucket" |
+| Dispatch-hygiene counter all-time-scoped | Code at `state.cjs:4731` uses `created_at` (workflow-scoped). 39 dispatches WERE in current workflow window (open 3 days) | **Long workflows accumulate counts across many sessions** — counter is correct but operator's mental model differs |
+| Fresh release needed — cal #26 not in field | Cache install at `604a02a` HAS cal #26 commit | **dispatch usage message at line 1041 wasn't updated to list `run`** — operators conclude `run` doesn't exist |
+
+Three small fixes shipped:
+
+**A3' — Dispatch usage message includes `run`** (`bin/modules/dispatch.cjs:1041`). One-line fix. Cal #26's `dispatch run` ergonomic launcher (A7-min) had been silently un-discoverable since June 17. Operators running `dispatch` with no args saw an 8-subcommand list missing `run`. Now lists all 9. Smoke gate **K132** locks the subcommand inventory.
+
+**A2' — Workflow-staleness warning at >24h** (`hooks/workflow-context-injector.sh`). When `workflow.yaml::created_at` is more than 24h old, the session-start banner appends `[devt] workflow open Xd (since YYYY-MM-DD); long-running — consider /devt:workflow --cancel`. No auto-reset (operator decides). Bridges the gap between operator's per-session mental model and the counter's per-workflow-window semantics. Smoke gate **K133** verifies staleness fires on >24h workflows, silent on <24h.
+
+**A1' — Project-context token enrichment for preflight memory query** (`bin/modules/preflight.cjs`). New **laneG** queries the FTS index with project-shape tokens (currently `.devt/config.json::git.provider`) per-token independently, unions results into the governing pool. Effect: docs whose content matches the project shape (e.g., CON-002 "Bitbucket projects permanently lose pr_scoped tier") surface in `memory_signal` for every Bitbucket project's preflight, regardless of the task vocabulary. Verified against Greenfield's actual case: `preflight.generate("export wizard mobile 2FA bypass")` on Bitbucket project now surfaces CON-002 (lane_g=1, CON-002 in brief). Smoke gate **K134** seeds a Bitbucket-only test doc + queries with unrelated task → confirms laneG surfaces the doc.
+
+**Drift-guard stack now 41-deep K94-K134.** CLAUDE.md + README updated for new count.
+
+**Validation track record**: three claims investigated, three corrections made before shipping. Per the standing "validate before implementing" rule, this is the pattern paying off — original cal #29 scope would have shipped fixes that didn't address the actual bugs.
+
+**Cal #29 explicit defers** (validated as not-the-right-fix-yet):
+- ~~Memory retrieval fix~~ — works correctly; query enrichment is the actual gap (shipped as A1')
+- ~~Counter scoping refactor~~ — works correctly; workflow lifecycle is the actual gap (shipped as A2' warning)
+- ~~Fresh release for cal #26 visibility~~ — cal #26 is in field; discoverability bug is the actual gap (shipped as A3')
+
+**Cal #30 candidates (validated, deferred for focused rounds)**:
+- **B1** — Default Graphify MCP to summarized output (server-side change, coordinate with graphify maintainer)
+- **C1 — Wrap-not-compete architecture** — GF's strongest single ask. devt agents internally invoke project specialists, add envelope + telemetry + sidecar. ~8-12 hr design pass.
+
+**Validation**: smoke 879/879 (3 new K-gates), gate 16/16, locking 3/3, graphify 35/35, envelope-compile 22/0 drift.
+
 ### Cal #28-A — dispatch-helpers discoverability + agent resume CLI
 
 Two of Greenfield's field-evidenced top-3 highest-ROI items shipped. Item #2 (validation-as-hook) deferred to cal #28-B for its own design pass — it's the bigger one and combining muddied scope.

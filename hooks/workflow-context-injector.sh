@@ -116,6 +116,24 @@ RESULT=$(node -e "
     const flagStr = flags.length > 0 ? '·' + flags.join('+') : '';
     const lines = ['[devt] ' + tier + '/' + phase + (iter > 1 ? '·i' + iter : '') + flagStr + ' · \"' + task + '\"'];
 
+    // Workflow staleness warning. The dispatch-hygiene kill-counter scopes
+    // by workflow.yaml::created_at, so a 3+ day workflow accumulates raw
+    // dispatches across many sessions and trips the threshold. Operator's
+    // mental model is per-session; counter's is per-workflow. Bridge the
+    // gap with an actionable warning when the workflow has been open >24h
+    // — operator decides whether to /devt:workflow --cancel (no auto-reset).
+    if (state.created_at) {
+      const wfStartMs = new Date(state.created_at).getTime();
+      if (Number.isFinite(wfStartMs)) {
+        const ageMs = Date.now() - wfStartMs;
+        const dayMs = 24 * 60 * 60 * 1000;
+        if (ageMs >= dayMs) {
+          const ageDays = Math.floor(ageMs / dayMs);
+          lines.push('[devt] workflow open ' + ageDays + 'd (since ' + state.created_at.slice(0, 10) + '); long-running — consider /devt:workflow --cancel');
+        }
+      }
+    }
+
     // Session-scoped telemetry push. Field-observed: telemetry CLIs exist
     // but operators forget them when head-down in a workflow — discovery
     // surfaces are too passive for an LLM operator. UserPromptSubmit

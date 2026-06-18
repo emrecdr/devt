@@ -13290,6 +13290,113 @@ else
   fail "K131: version drift — VERSION=$K131_VERSION_FILE plugin.json=$K131_PLUGIN_VER marketplace.json=$K131_MARKET_VER"
 fi
 
+# K132: dispatch usage message includes `run` subcommand.
+# Field signal: operators doing due-diligence ran `dispatch` with no args, saw
+# the usage list with 8 subcommands but not `run`, and concluded `run` doesn't
+# exist (the case statement at line 925 was added in cal #26 but the default
+# usage message at line 1041 wasn't updated). Discoverability for cal #26's
+# headline ergonomics fix was silently broken until A3'.
+K132_USAGE=$(node "$ROOT/bin/devt-tools.cjs" dispatch 2>&1 | head -1 || true)
+if echo "$K132_USAGE" | /usr/bin/grep -q '\brun\b'; then
+  pass "K132: dispatch usage message includes 'run' subcommand (cal #26 A7-min discoverability)"
+else
+  fail "K132: dispatch usage message missing 'run' — operators can't discover the ergonomic launcher: $K132_USAGE"
+fi
+
+# K133: workflow-context-injector emits staleness warning when workflow > 24h old.
+# Field signal: a 3-day workflow accumulated 39 raw_dispatches across many
+# sessions and tripped the kill-threshold. Counter semantics are correct
+# (workflow-scoped per created_at) — issue is the operator's mental model is
+# per-session while counter's is per-workflow-window. Bridge with actionable
+# warning when workflow age > 24h. No auto-reset (operator decides).
+# Separate tmpdirs per case — the hook's mtime-keyed state cache hashes on
+# $(pwd); if both tests reused the same path, the cache populated by the
+# first test could be reused (within mtime resolution) for the second.
+K133_STALE_TMP=$(mktemp -d)
+mkdir -p "$K133_STALE_TMP/.devt/state"
+cat > "$K133_STALE_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k133-stale
+workflow_type: dev
+tier: STANDARD
+phase: implement
+iteration: 1
+status: IN_PROGRESS
+task: "stale-test"
+first_created_at: "$(date -u -v-3d +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%S.000Z)"
+created_at: "$(date -u -v-3d +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%S.000Z)"
+EOF
+K133_STALE=$(cd "$K133_STALE_TMP" && echo '{"hook_event_name":"UserPromptSubmit","prompt":"test"}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1)
+rm -rf "$K133_STALE_TMP"
+
+K133_FRESH_TMP=$(mktemp -d)
+mkdir -p "$K133_FRESH_TMP/.devt/state"
+cat > "$K133_FRESH_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k133-fresh
+workflow_type: dev
+tier: STANDARD
+phase: implement
+iteration: 1
+status: IN_PROGRESS
+task: "fresh-test"
+first_created_at: "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S.000Z)"
+created_at: "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S.000Z)"
+EOF
+K133_FRESH=$(cd "$K133_FRESH_TMP" && echo '{"hook_event_name":"UserPromptSubmit","prompt":"test"}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>&1)
+rm -rf "$K133_FRESH_TMP"
+K133_STALE_WARN=$(echo "$K133_STALE" | /usr/bin/grep -c "workflow open.*d.*long-running" || true)
+K133_FRESH_QUIET=$(echo "$K133_FRESH" | /usr/bin/grep -c "workflow open.*d.*long-running" || true)
+if [ "${K133_STALE_WARN:-0}" -ge 1 ] && [ "${K133_FRESH_QUIET:-0}" = "0" ]; then
+  pass "K133: workflow-staleness warning fires on >24h workflow + silent on <24h workflow"
+else
+  fail "K133: staleness warning broken — stale_fires=$K133_STALE_WARN fresh_silent=$K133_FRESH_QUIET"
+fi
+
+# K134: preflight laneG project-context enrichment surfaces project-shape docs.
+# Field signal: a Bitbucket project's CON-002 ("Bitbucket projects permanently
+# lose pr_scoped tier") never surfaced in memory_signal for a task whose scope
+# string had zero keyword overlap with the doc. laneG queries memory by
+# project-context tokens (.devt/config.json::git.provider) and unions into
+# the governing pool so project-shape docs surface regardless of task vocabulary.
+K134_TMP=$(mktemp -d)
+mkdir -p "$K134_TMP/.devt/state"
+echo '{"git":{"provider":"bitbucket"}}' > "$K134_TMP/.devt/config.json"
+# Initialize memory + seed a Bitbucket-scoped doc
+(cd "$K134_TMP" && node "$ROOT/bin/devt-tools.cjs" memory init >/dev/null 2>&1)
+mkdir -p "$K134_TMP/.devt/memory/concepts"
+# Use CON-999 (numeric ID required to pass concept-id pattern validation)
+cat > "$K134_TMP/.devt/memory/concepts/CON-999-bitbucket-test.md" <<EOF
+---
+id: CON-999
+title: "K134 test — Bitbucket-only constraint"
+doc_type: concept
+domain: "tooling"
+status: candidate
+confidence: explicit
+summary: "Bitbucket projects on devt cannot use feature X (a doc whose only project-context anchor is the word 'bitbucket')."
+affects_paths: [".devt/**"]
+created_at: "2026-06-18T00:00:00Z"
+created_by: curator
+schema_version: 1
+---
+Body content here.
+EOF
+(cd "$K134_TMP" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+# Query that has ZERO overlap with the doc — only the project context (bitbucket) should surface it
+K134_RESULT=$(cd "$K134_TMP" && node -e "
+  const pf = require('$ROOT/bin/modules/preflight.cjs');
+  const r = pf.generate('unrelated task with no bitbucket keyword', { depth: 1 });
+  console.log(JSON.stringify({lane_g: r.counts.lane_g, governing: r.counts.governing}));
+" 2>/dev/null)
+rm -rf "$K134_TMP"
+K134_LANE_G=$(echo "$K134_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).lane_g)}catch{console.log(0)}});" 2>/dev/null)
+if [ "${K134_LANE_G:-0}" -ge 1 ]; then
+  pass "K134: preflight laneG project-context enrichment surfaces docs via .devt/config.json::git.provider token"
+else
+  fail "K134: laneG broken — project-context token (bitbucket) didn't surface a directly-matching doc: $K134_RESULT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

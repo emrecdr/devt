@@ -670,6 +670,42 @@ function laneF(dedupedUnion, limit = 8) {
 }
 
 /**
+ * Lane G — project-context match. Surfaces docs whose content matches
+ * project metadata (provider, language tokens) regardless of task vocabulary.
+ *
+ * Closes the "task scope shares no keywords with relevant project-shape doc"
+ * gap. Field-observed: a Bitbucket project's CON-002 ("Bitbucket projects
+ * permanently lose pr_scoped tier") never surfaced during a 2FA-export review
+ * because the task scope string had zero keyword overlap with the doc. laneB's
+ * AND-joined FTS query never matches when task and doc vocabularies disjoint.
+ *
+ * Strategy: per-token independent FTS queries (each project token returns its
+ * own hits), then union. Doesn't displace laneB results — adds in parallel.
+ *
+ * Tokens currently derived: .devt/config.json::git.provider. Future extensions
+ * may add detected language/framework (carefully — every token broadens noise).
+ */
+function getProjectContextTokens(cfg) {
+  const tokens = [];
+  if (cfg && cfg.git && typeof cfg.git.provider === "string" && cfg.git.provider.trim()) {
+    tokens.push(cfg.git.provider.trim().toLowerCase());
+  }
+  return tokens;
+}
+
+function laneG(cfg, limit = 10) {
+  const tokens = getProjectContextTokens(cfg);
+  if (tokens.length === 0) return [];
+  const out = [];
+  for (const token of tokens) {
+    try {
+      out.push(...asArray(memory.queryFTS(token, { limit })));
+    } catch { /* per-token FTS error — skip; other tokens still run */ }
+  }
+  return dedupSortById(out);
+}
+
+/**
  * Compute blast radius via Graphify when available; emit degraded payload otherwise.
  */
 function blastRadius(topic) {
@@ -1009,7 +1045,7 @@ function generate(taskText, opts) {
       reason: "memory.enabled=false in .devt/config.json",
       brief_path: null,
       topic: null,
-      counts: { lane_a: 0, lane_b: 0, lane_c: 0, lane_d: 0, lane_e: 0, lane_f: 0, governing: 0, triples: 0 },
+      counts: { lane_a: 0, lane_b: 0, lane_c: 0, lane_d: 0, lane_e: 0, lane_f: 0, lane_g: 0, governing: 0, triples: 0 },
       blast: { effect_size: 0, source: null, god_node_match: false, ambiguous_bindings: 0 },
       generated_at: null,
     };
@@ -1076,9 +1112,15 @@ function generate(taskText, opts) {
   const C = laneC(topic);
   const D = laneD(dedupSortById([...A, ...B, ...C]), opts.depth || 2);
   const E = laneE(topic);
+  // Lane G — project-context tokens (provider, etc) folded into governing
+  // union BEFORE laneD's link traversal would have been wasteful, but folding
+  // post-D keeps laneG's docs in the governing pool without inflating laneD's
+  // depth-2 expansion. Effect: project-shape docs (e.g., CON-002 on Bitbucket)
+  // always surface in memory_signal, regardless of task vocabulary.
+  const G = laneG(cfg);
   // Hoist the deduped union once: laneF filters it for lessons, renderBrief reuses
   // it for the governing docs section. Avoids two separate dedupSortById passes.
-  const governingUnion = dedupSortById([...A, ...B, ...C, ...D]);
+  const governingUnion = dedupSortById([...A, ...B, ...C, ...D, ...G]);
   const F = laneF(governingUnion);
 
   // Blast radius
@@ -1354,6 +1396,7 @@ function generate(taskText, opts) {
     counts: {
       lane_a: A.length, lane_b: B.length, lane_c: C.length,
       lane_d: D.length, lane_e: E.length, lane_f: F.length,
+      lane_g: G.length,
       governing: governingUnion.length,
       triples: triples.length,
       suggested_reading: suggestedReading.length,
