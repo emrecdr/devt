@@ -13441,6 +13441,130 @@ else
   fail "K136: diff-base behavior unexpected — merge-base=$K136_MERGE_BASE_DIFF head1=$K136_HEAD1_DIFF"
 fi
 
+# K137: state reset-soft clears per-workflow accumulators while preserving
+# session anchors. Field calibration: greenfield receipt #4 — operator ran
+# /devt:review on stale workflow with 51 raw_dispatch entries from prior 20-day
+# workflow chain. KILL gate fired on first state.update call, blocking the
+# entire review. Reset-soft is the surgical escape hatch.
+K137_TMP=$(mktemp -d)
+mkdir -p "$K137_TMP/.devt/state"
+cat > "$K137_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k137-prev-id
+original_workflow_id: k137-original-id
+workflow_type: dev
+task: "prior task"
+tier: COMPLEX
+phase: implement
+status: IN_PROGRESS
+verify_iteration: 3
+redispatch_count: 5
+first_created_at: "2026-06-01T00:00:00.000Z"
+created_at: "2026-06-01T00:00:00.000Z"
+EOF
+echo '{"ts":"2026-06-01","source":"raw_dispatch"}' > "$K137_TMP/.devt/state/dispatch-warnings.jsonl"
+K137_RESULT=$(cd "$K137_TMP" && node "$ROOT/bin/devt-tools.cjs" state reset-soft 2>/dev/null)
+K137_NEW_ID=$(echo "$K137_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.new_workflow_id&&o.new_workflow_id!=='k137-prev-id'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K137_HISTORY=$(cd "$K137_TMP" && /usr/bin/grep -c "k137-prev-id" .devt/state/workflow.yaml 2>/dev/null || true)
+K137_ANCHOR=$(cd "$K137_TMP" && /usr/bin/grep -c "k137-original-id" .devt/state/workflow.yaml 2>/dev/null || true)
+K137_ROTATED=$(ls "$K137_TMP/.devt/state/" 2>/dev/null | /usr/bin/grep -c "dispatch-warnings.archive" || true)
+K137_TASK_CLEARED=$(/usr/bin/grep -c "^task:" "$K137_TMP/.devt/state/workflow.yaml" 2>/dev/null || true)
+rm -rf "$K137_TMP"
+if [ "${K137_NEW_ID:-0}" = "1" ] && [ "${K137_HISTORY:-0}" -ge 1 ] && [ "${K137_ANCHOR:-0}" -ge 1 ] && [ "${K137_ROTATED:-0}" -ge 1 ] && [ "${K137_TASK_CLEARED:-0}" = "0" ]; then
+  pass "K137: state reset-soft clears accumulators (task), generates new workflow_id, preserves history+original_workflow_id, rotates dispatch-warnings.jsonl"
+else
+  fail "K137: reset-soft broken — new_id=$K137_NEW_ID history=$K137_HISTORY anchor=$K137_ANCHOR rotated=$K137_ROTATED task_cleared=$K137_TASK_CLEARED"
+fi
+
+# K138: state staleness-check enforces AND semantics — task changed AND age
+# > 1h. Task-mismatch-but-fresh = not stale (typo retry). Task-match-stale =
+# not stale (legitimate resume). Both required = stale.
+K138_TMP=$(mktemp -d)
+mkdir -p "$K138_TMP/.devt/state"
+# Case 1: task changed AND age > 1h → stale=true
+cat > "$K138_TMP/.devt/state/workflow.yaml" <<EOF
+task: "old task"
+created_at: "2026-06-01T00:00:00.000Z"
+EOF
+K138_BOTH=$(cd "$K138_TMP" && node "$ROOT/bin/devt-tools.cjs" state staleness-check --task="new task" 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# Case 2: task changed AND age < 1h → stale=false (typo retry guard)
+cat > "$K138_TMP/.devt/state/workflow.yaml" <<EOF
+task: "old task"
+created_at: "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+EOF
+K138_FRESH_MISMATCH=$(cd "$K138_TMP" && node "$ROOT/bin/devt-tools.cjs" state staleness-check --task="new task" 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# Case 3: task match AND age > 1h → stale=false (legitimate resume guard)
+cat > "$K138_TMP/.devt/state/workflow.yaml" <<EOF
+task: "same task"
+created_at: "2026-06-01T00:00:00.000Z"
+EOF
+K138_STALE_MATCH=$(cd "$K138_TMP" && node "$ROOT/bin/devt-tools.cjs" state staleness-check --task="same task" 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+rm -rf "$K138_TMP"
+if [ "${K138_BOTH:-0}" = "1" ] && [ "${K138_FRESH_MISMATCH:-1}" = "0" ] && [ "${K138_STALE_MATCH:-1}" = "0" ]; then
+  pass "K138: state staleness-check enforces AND semantics (task-changed+age>1h stale; typo-retry and legitimate-resume both NOT stale)"
+else
+  fail "K138: staleness-check broken — both=$K138_BOTH fresh_mismatch=$K138_FRESH_MISMATCH stale_match=$K138_STALE_MATCH"
+fi
+
+# K139: dispatch render-lanes emits <correlation_id>cid_ tag per envelope.
+# Field calibration: greenfield receipt #4 — operator followed register-lanes
+# + render-lanes canonical path, but dispatch-hygiene-guard.sh still flagged
+# all 6 dispatches as raw_dispatch because matcher only recognized literal
+# envelope tags. correlation_id is the short tag operators can preserve when
+# customizing other envelope content.
+K139_TMP=$(mktemp -d)
+mkdir -p "$K139_TMP/.devt/state"
+cat > "$K139_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k139abcd-test-id
+workflow_type: code_review
+task: "k139 test"
+EOF
+(cd "$K139_TMP" && node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=test --files=a.py,b.py >/dev/null 2>&1)
+K139_RENDER=$(cd "$K139_TMP" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>&1 || true)
+rm -rf "$K139_TMP"
+K139_HAS_CID=$(echo "$K139_RENDER" | /usr/bin/grep -cE "<correlation_id>cid_k139abcd_L1</correlation_id>" || true)
+if [ "${K139_HAS_CID:-0}" -ge 1 ]; then
+  pass "K139: dispatch render-lanes stamps <correlation_id>cid_<workflow_prefix>_<lane_id></correlation_id> per envelope"
+else
+  fail "K139: render-lanes missing correlation_id tag — render output: $(echo "$K139_RENDER" | head -3)"
+fi
+
+# K140: dispatch-hygiene-guard.sh matcher recognizes correlation_id-only
+# envelope (operator customized other content but preserved the short tag).
+# Two cases: (a) prompt with only <correlation_id>cid_*</correlation_id> →
+# silenced; (b) prompt with neither correlation_id nor other envelope tags →
+# flagged as raw_dispatch.
+K140_TMP=$(mktemp -d)
+mkdir -p "$K140_TMP/.devt/state"
+# Note: hook needs CLAUDE_PLUGIN_ROOT to load envelope helpers; set explicitly.
+export CLAUDE_PLUGIN_ROOT="$ROOT"
+# Case (a): correlation_id present → exit_silently (no raw_dispatch write).
+PRIOR_WARNINGS_A=0
+if [ -f "$K140_TMP/.devt/state/dispatch-warnings.jsonl" ]; then
+  PRIOR_WARNINGS_A=$(wc -l < "$K140_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null || echo 0)
+fi
+(cd "$K140_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"## Task\n\nCustom prose\n\n<correlation_id>cid_test1234_L1</correlation_id>\n\nMore prose"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" >/dev/null 2>&1)
+NEW_WARNINGS_A=0
+if [ -f "$K140_TMP/.devt/state/dispatch-warnings.jsonl" ]; then
+  NEW_WARNINGS_A=$(wc -l < "$K140_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null || echo 0)
+fi
+# Case (b): no envelope tags + no correlation_id → raw_dispatch write.
+K140_TMP2=$(mktemp -d)
+mkdir -p "$K140_TMP2/.devt/state"
+(cd "$K140_TMP2" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"## Task\n\nJust prose, no envelope tags at all"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" >/dev/null 2>&1)
+NEW_WARNINGS_B=0
+if [ -f "$K140_TMP2/.devt/state/dispatch-warnings.jsonl" ]; then
+  NEW_WARNINGS_B=$(wc -l < "$K140_TMP2/.devt/state/dispatch-warnings.jsonl" 2>/dev/null || echo 0)
+fi
+rm -rf "$K140_TMP" "$K140_TMP2"
+# Case (a) should NOT have written a raw_dispatch entry; case (b) SHOULD have
+if [ "${NEW_WARNINGS_A:-0}" = "${PRIOR_WARNINGS_A:-0}" ] && [ "${NEW_WARNINGS_B:-0}" -ge 1 ]; then
+  pass "K140: dispatch-hygiene-guard.sh matcher accepts <correlation_id>cid_*</correlation_id> as envelope-managed (silent); no-envelope prompt still flagged raw_dispatch"
+else
+  fail "K140: matcher behavior wrong — correlation_id silent=$NEW_WARNINGS_A (expected 0); no-envelope flagged=$NEW_WARNINGS_B (expected >=1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

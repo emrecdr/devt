@@ -162,9 +162,16 @@ node -e "
   const hasGodNode = /<god_node_warnings>/.test(prompt);
   const hasPriorOutputs = /<prior_outputs>/.test(prompt);
   const hasProvenance = /<provenance_protocol>/.test(prompt);
+  // correlation_id tag stamped by dispatch render-lanes per emitted envelope
+  // (cid_<workflow_id_prefix>_<lane_id>). Operators customizing other envelope
+  // content can preserve this short tag to retain hygiene credit on
+  // registered-lane dispatches. Field-evidenced fix: prior matcher only recognized
+  // full envelope-tag preservation, so customized envelopes from render-lanes
+  // got flagged as raw_dispatch despite originating from canonical orchestration.
+  const hasCorrelationId = /<correlation_id>cid_/.test(prompt);
   if (hasScope || hasHint || hasMemSig || hasContext || hasGraphImpact ||
       hasOriginalReview || hasLaneScope || hasGodNode || hasPriorOutputs ||
-      hasProvenance) {
+      hasProvenance || hasCorrelationId) {
     // Envelope-managed dispatch — hygiene passes. Surface scope advisory if any.
     if (scopeAdvisory) {
       process.stdout.write(JSON.stringify({
@@ -248,7 +255,10 @@ node -e "
     const denyReason =
       '[devt dispatch hygiene — BLOCKED] ' + advisory +
       ' Remediation: dispatch via the workflow (/devt:review, /devt:workflow, /devt:debug) which injects the required context blocks, ' +
-      'OR set dispatch_hygiene_mode to \"warn\" in .devt/config.json if intentional raw dispatch.';
+      'OR set dispatch_hygiene_mode to \"warn\" in .devt/config.json if intentional raw dispatch. ' +
+      'If this is a NEW review starting against a stale workflow.yaml (accumulated raw_dispatch counts from a prior unrelated workflow), ' +
+      'run \"node bin/devt-tools.cjs state reset-soft\" from the project root to clear per-workflow accumulators ' +
+      '(preserves workflow_id_history + .devt/memory/ + phase artifacts; rotates dispatch-warnings.jsonl; assigns fresh workflow_id + first_created_at).';
     process.stdout.write(JSON.stringify({ decision: 'deny', reason: denyReason }));
     process.exit(0);
   }

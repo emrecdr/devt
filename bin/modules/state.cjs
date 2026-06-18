@@ -1368,6 +1368,159 @@ function resetState() {
   return { ok: true, cleaned: dir, archived_to: archivedTo };
 }
 
+// Per-workflow accumulator fields cleared by resetSoft. Excludes session
+// anchors (workflow_id_history, original_workflow_id, first_created_at — but
+// reset-soft DOES rotate workflow_id + first_created_at so the dispatch-hygiene
+// KILL gate doesn't fire on stale accumulated counts from a prior review).
+const RESET_SOFT_CLEAR_KEYS = [
+  "task", "complexity", "tier", "community", "slug",
+  "phase", "status", "verdict", "repair", "verify_iteration",
+  "redispatch_count", "lanes", "review_file", "dispatched_at",
+  "stopped_at", "stopped_phase", "resume_context",
+  "memory_signal_json", "scope_hint_json", "scope_trust_json",
+];
+
+// Logs rotated by resetSoft. Cross-workflow accumulators that the KILL gate +
+// claim-check gate read MUST be rotated, else gates re-fire immediately on the
+// preserved counts. Field receipt: greenfield's 51-raw-dispatch KILL gate from
+// a 20-day-old workflow blocked a brand-new review's first state.update call.
+const RESET_SOFT_ROTATE_LOGS = [
+  "dispatch-warnings.jsonl",
+  "claim-check-failures.jsonl",
+];
+
+/**
+ * Soft-reset workflow state for a new review starting against a stale workflow.yaml.
+ *
+ * Surgical: clears per-workflow accumulator fields + rotates dispatch-warnings
+ * and claim-check logs + assigns fresh workflow_id and first_created_at (so
+ * KILL/claim-check gates start counting from zero). Preserves session anchors
+ * (workflow_id_history with prev appended, original_workflow_id), the memory
+ * layer, and all phase artifacts (impl-summary.md, graph-impact.md, review.md,
+ * test-summary.md) — operators resuming legitimate prior phases retain their work.
+ *
+ * Field motivation: greenfield receipt #4 — operator ran /devt:review on a fresh
+ * task, the workflow.yaml carried 51 raw_dispatch entries + 6-deep workflow_id_history
+ * from a 20-day-old prior workflow chain, KILL gate fired on the first state.update
+ * call, agent had to bypass the state machine entirely. /devt:review context_init
+ * substep 1 explicitly says "do NOT reset .devt/state/" — correct for resume cases,
+ * wrong for new-review-against-stale cases. resetSoft is the missing surgical reset.
+ */
+function resetSoft() {
+  const filePath = getWorkflowPath();
+  const stateDir = getStateDir();
+  const lockFile = acquireLock();
+  try {
+    const prev = fs.existsSync(filePath)
+      ? parseSimpleYaml(fs.readFileSync(filePath, "utf8"))
+      : {};
+    const prevWorkflowId = prev.workflow_id || null;
+    const newWorkflowId = require("crypto").randomUUID();
+    const nowIso = new Date().toISOString();
+
+    const history = Array.isArray(prev.workflow_id_history)
+      ? [...prev.workflow_id_history]
+      : [];
+    if (prevWorkflowId && !history.includes(prevWorkflowId)) {
+      history.push(prevWorkflowId);
+    }
+
+    const next = {};
+    for (const k of Object.keys(prev)) {
+      if (RESET_SOFT_CLEAR_KEYS.includes(k)) continue;
+      next[k] = prev[k];
+    }
+    next.workflow_id = newWorkflowId;
+    next.first_created_at = nowIso;
+    next.created_at = nowIso;
+    next.original_workflow_id = prev.original_workflow_id || prevWorkflowId || newWorkflowId;
+    next.workflow_id_history = history;
+    next.active = false;
+    next.iteration = 0;
+
+    atomicWriteFileSync(filePath, serializeSimpleYaml(next));
+
+    const rotated = [];
+    const archiveTs = nowIso.replace(/[:.]/g, "-");
+    for (const logName of RESET_SOFT_ROTATE_LOGS) {
+      const src = path.join(stateDir, logName);
+      if (!fs.existsSync(src)) continue;
+      const archived = `${logName.replace(/\.jsonl$/, "")}.archive-${archiveTs}.jsonl`;
+      const dst = path.join(stateDir, archived);
+      try {
+        fs.renameSync(src, dst);
+        rotated.push({ from: logName, to: archived });
+      } catch (e) {
+        rotated.push({ from: logName, to: null, error: String(e && e.message) });
+      }
+    }
+
+    return {
+      ok: true,
+      new_workflow_id: newWorkflowId,
+      prev_workflow_id: prevWorkflowId,
+      new_first_created_at: nowIso,
+      cleared_fields: RESET_SOFT_CLEAR_KEYS,
+      rotated_logs: rotated,
+      preserved: {
+        workflow_id_history_depth: history.length,
+        original_workflow_id: next.original_workflow_id,
+        memory_layer: ".devt/memory/ untouched",
+        phase_artifacts: "impl-summary.md / graph-impact.md / review.md / test-summary.md untouched",
+      },
+    };
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+/**
+ * Detect whether the current workflow.yaml is stale relative to a new task.
+ *
+ * Returns {stale, reason, age_hours, task_changed, prior_task}. Stale iff
+ * BOTH conditions hold:
+ *   1. The proposed task differs from workflow.yaml::task (strict !==)
+ *   2. workflow.yaml::created_at is more than 1 hour old
+ *
+ * AND semantics (not OR) — task-match-but-stale = legitimate resume; reset
+ * would destroy the operator's prior-phase artifacts. Task-mismatch-but-fresh
+ * = possible typo retry on the same session; wait for clearer signal.
+ *
+ * Consumed by workflows/code-review.md and workflows/dev-workflow.md
+ * context_init substep 0 — if stale, AskUserQuestion offers reset-soft.
+ */
+function stalenessCheck({ task } = {}) {
+  const filePath = getWorkflowPath();
+  if (!fs.existsSync(filePath)) {
+    return { stale: false, reason: "no prior workflow.yaml — fresh start", age_hours: null, task_changed: false, prior_task: null };
+  }
+  const prev = parseSimpleYaml(fs.readFileSync(filePath, "utf8"));
+  const priorTask = prev.task || null;
+  const priorCreatedAt = prev.created_at || prev.first_created_at || null;
+
+  const taskChanged = Boolean(typeof task === "string" && task.length > 0 && priorTask && priorTask !== task);
+
+  let ageHours = null;
+  if (priorCreatedAt) {
+    const ms = Date.now() - new Date(priorCreatedAt).getTime();
+    if (Number.isFinite(ms) && ms >= 0) ageHours = ms / (60 * 60 * 1000);
+  }
+
+  const ageStale = ageHours !== null && ageHours > 1;
+  const stale = Boolean(taskChanged && ageStale);
+
+  let reason = "fresh";
+  if (stale) {
+    reason = `task changed ('${priorTask}' → '${task}') and prior workflow is ${ageHours.toFixed(1)}h old; raw_dispatch/claim-check counters carry from prior session and may fire KILL gate on first state update`;
+  } else if (taskChanged && !ageStale) {
+    reason = `task changed but prior workflow is <1h old — may be typo retry, not resetting`;
+  } else if (!taskChanged && ageStale) {
+    reason = `task matches prior workflow (${ageHours.toFixed(1)}h old) — legitimate resume`;
+  }
+
+  return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask };
+}
+
 /**
  * Read a single section from a state-dir markdown file.
  *
@@ -5450,6 +5603,13 @@ function run(subcommand, args) {
     }
     case "reset":
       return resetState();
+    case "reset-soft":
+      return resetSoft();
+    case "staleness-check": {
+      const taskArg = args.find(a => a.startsWith("--task="));
+      const task = taskArg ? taskArg.slice("--task=".length) : "";
+      return stalenessCheck({ task });
+    }
     case "release":
       return releaseWorkflow();
     case "validate":

@@ -1076,6 +1076,16 @@ function cmdRenderLanes(target, options) {
   if (!lanes || lanes.length === 0) {
     return { lane_count: 0, text: "", lanes: [], reason: "no lanes registered in workflow.yaml::lanes[]" };
   }
+  // Per-lane correlation_id for dispatch-hygiene matcher. Stamped into each
+  // envelope as <correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>
+  // and recognized by hooks/dispatch-hygiene-guard.sh, so registered-lane
+  // dispatches don't get flagged as raw_dispatch even when the operator
+  // customizes other envelope content. Field-evidenced gap: the matcher
+  // previously only recognized full envelope-tag preservation (<scope_trust>,
+  // <context>, etc.); operators customizing prose lost hygiene credit.
+  const currentState = stateMod.readState();
+  const workflowId = currentState.workflow_id || "noworkflow";
+  const workflowIdPrefix = String(workflowId).split("-")[0];
   // Pass config-merged rules-exclude through to the base envelope.
   // Per-lane envelopes inherit the same rules.exclude_sections — the project-
   // wide cut applies uniformly across all lanes (no per-lane override needed
@@ -1100,9 +1110,11 @@ function cmdRenderLanes(target, options) {
         if (data.community) community = data.community;
       }
     } catch { /* sidecar missing or malformed — emit envelope without files block */ }
+    const correlationId = `cid_${workflowIdPrefix}_${lane.id}`;
     const laneBlocks = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
+      `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
     ].join("\n");
     // Inject lane context blocks right before the closing </context> tag.
@@ -1121,9 +1133,9 @@ function cmdRenderLanes(target, options) {
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       const outPath = pathLocal.join(options.outDir, `lane-${lane.id}.txt`);
       fsLocal.writeFileSync(outPath, injected + (injected.endsWith("\n") ? "" : "\n"));
-      summary.push({ id: lane.id, community, files: files.length, path: outPath, bytes: injected.length });
+      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length });
     } else {
-      out.push(`<!-- LANE: ${lane.id} (community=${community}, files=${files.length}) -->`);
+      out.push(`<!-- LANE: ${lane.id} (community=${community}, correlation_id=${correlationId}, files=${files.length}) -->`);
       out.push(injected);
       out.push("");
     }

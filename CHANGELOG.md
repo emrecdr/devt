@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.99.0] - 2026-06-18
+
+### Cal #30.1 — unblock stale workflows + stop deceiving operators (urgency-first ordering, 2 fixes from greenfield receipt #4)
+
+Greenfield receipt #4 surfaced two failures that blocked the canonical /devt:review flow on a long-lived project: (1) accumulated raw_dispatch counts from a 20-day-old prior workflow chain tripped the KILL gate on the first state.update call of a brand-new review; (2) workflows/code-review.md prose at scope_check claimed lane registration "silences raw_dispatch warnings on the registered tuple" but the dispatch-hygiene-guard.sh matcher is purely content-based on envelope tags — operators following the canonical path with customized prompts still got flagged. Per Option E urgency-first ordering (validated against the field receipt), unblock + stop deceiving ship FIRST, before signal-quality fixes (cal #30.2) and architectural absorption (cal #30.3+).
+
+**F3 — `state reset-soft` + `state staleness-check` + workflow context_init integration** (`bin/modules/state.cjs`, `workflows/code-review.md`, `hooks/dispatch-hygiene-guard.sh`). Surgical reset for new reviews against stale workflows. Clears per-workflow accumulators (task, complexity, tier, community, slug, phase, status, verdict, repair, verify_iteration, redispatch_count, lanes, review_file, dispatched_at, stopped_at, stopped_phase, resume_context, memory_signal_json, scope_hint_json, scope_trust_json); rotates dispatch-warnings.jsonl + claim-check-failures.jsonl to `.archive-<ts>.jsonl`; assigns fresh workflow_id + first_created_at so KILL/claim-check gates start counting from zero. Preserves session anchors (workflow_id_history with prev appended, original_workflow_id), .devt/memory/, and all phase artifacts (impl-summary.md, graph-impact.md, review.md, test-summary.md). `state staleness-check --task=<text>` returns `{stale, reason, age_hours, task_changed, prior_task}` with AND-semantics: stale iff task differs AND prior workflow > 1h old (task-match-but-stale = legitimate resume, NOT stale; task-mismatch-but-fresh = typo retry, NOT stale). code-review.md::context_init Substep 0 (new) runs staleness-check; if stale, AskUserQuestion offers reset. dispatch-hygiene-guard.sh KILL-gate refusal message now includes the actionable reset-soft hint. Smoke gates **K137** (reset-soft clears accumulators + rotates logs + preserves history+anchor), **K138** (staleness-check AND-semantics across all 3 cases).
+
+**F6 — `dispatch render-lanes` correlation_id stamping + dispatch-hygiene matcher recognition + FALSE workflow doc claim fix** (`bin/modules/dispatch.cjs`, `hooks/dispatch-hygiene-guard.sh`, `workflows/code-review.md`). Each rendered lane envelope now carries `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` — a short, copy-paste-friendly tag operators can preserve when customizing other envelope content. The matcher at hooks/dispatch-hygiene-guard.sh:155-167 now accepts `/<correlation_id>cid_/` alongside the existing envelope-tag list, so registered-lane dispatches don't get flagged as raw_dispatch even when prose is customized. Field-evidenced operator-mistake pattern: greenfield's reviewer followed register-lanes + render-lanes canonical path but wrote customized prose prompts; all 6 dispatches got raw_dispatch warnings despite originating from the correct workflow. Documentation fix at workflows/code-review.md:434 — replaces the FALSE claim that lane registration "silences raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple" with accurate description of correlation_id content matching. Smoke gates **K139** (render-lanes emits correlation_id tag per envelope), **K140** (matcher accepts correlation_id-only envelope as silent; no-envelope prompt still flagged raw_dispatch).
+
+**Drift-guard stack now 47-deep K94-K140.** CLAUDE.md + README updated for new count.
+
+**Cal #30.2 candidates (validated, ship next per Option E ordering)**:
+- **F1** — MCP `get_neighbors` `max_bytes` schema exposure (code exists at graphify.cjs:519, gated off by MCP schema; ExportService drill-down overflowed on this run)
+- **F2** — `getNeighbors` noise filter extension (D1's `_isBlastNoise` not applied to getNeighbors loop) + source_file test-path heuristic
+- **F4** — `graphify status` count surfacing (status() never calls freshness()/loadGraph(); preflight-brief.json has the real data)
+- **F5** — D1 docstring threshold rider (lower whitespace threshold from ≥3 → ≥2 + Test/Tests/ends-with-. heuristic to catch "Test successful login."-class slips)
+
+**Cal #30.3 candidates (Opus 4.8 absorption, ship after cal #30.2)**:
+- **M1** — Effort schema in model profiles (active silent regression: Opus 4.8 default flipped to high)
+- **M2** — Verifier-hardening (sidecar self_flagged_uncertainties + short-circuit + hard-refusal)
+- **M7** — Refusal stop_details routing (half-shipped infra at hooks/task-truncation-detector.sh:113)
+
+**Cal #30.4 (telemetry-driven calibration) + Cal #30.5 (`dispatch run-lanes` with 4 directive shapes)** carried over.
+
+**Validation**: smoke 883/883 (4 new K-gates), graphify 37/37, locking 3/3.
+
 ## [0.98.0] - 2026-06-18
 
 ### Cal #30.0 — graphify signal-quality + canonical diff-base + docs honesty (3 validated fixes from greenfield field receipts)

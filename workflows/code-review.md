@@ -55,11 +55,30 @@ If not configured, omit the block.
 
 <step name="context_init" gate="compound init succeeds">
 
-> Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with dev-workflow.md::context_init.
+> Context_init runs 9 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with dev-workflow.md::context_init.
+
+### Substep 0: Stale-workflow pre-flight (reset-soft on demand)
+
+Before any state update, detect whether `workflow.yaml` is stale relative to this new review (task changed AND prior workflow > 1h old). If stale, KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Field-evidenced failure mode: a 51-raw-dispatch counter from a 20-day-old workflow blocked a brand-new review at substep 1.
+
+```bash
+STALENESS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state staleness-check --task="${REVIEW_SCOPE}" 2>/dev/null || echo '{}')
+IS_STALE=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+STALE_REASON=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).reason||'')}catch{console.log('')}});" 2>/dev/null)
+```
+
+If `IS_STALE=1`, use AskUserQuestion with three options:
+
+- Question: `Stale workflow state detected: ${STALE_REASON}. Reset accumulators? (preserves workflow_id_history + .devt/memory/ + phase artifacts like impl-summary.md / graph-impact.md / review.md; rotates dispatch-warnings.jsonl + claim-check-failures.jsonl; assigns fresh workflow_id + first_created_at so KILL gate counts from zero)`
+- Options: `Reset` (recommended for new reviews on stale state) / `Continue without reset` (proceed — KILL gate may fire on subsequent state updates) / `Cancel`
+
+If user picks `Reset`: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset-soft` and continue to substep 1. If `Continue`: proceed (operator accepts the KILL-gate risk). If `Cancel`: STOP with BLOCKED.
+
+If `IS_STALE=0`: continue to substep 1 silently (no prompt, no overhead).
 
 ### Substep 1: Compound init + project context
 
-Initialize the workflow (read-only — do NOT reset .devt/state/ as it may contain artifacts from a prior workflow that this review depends on):
+Initialize the workflow (read-only — do NOT reset .devt/state/ here; substep 0 handled the on-demand soft-reset for stale workflows. This step preserves prior-phase artifacts that a legitimate resumed review may depend on):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init review
@@ -431,7 +450,7 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 
 Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
 
-> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. This silences `dispatch-hygiene-guard.sh` raw_dispatch warnings on the registered (lane_id × scope_hint × file_set) tuple and avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
+> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. Each rendered envelope carries a `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` tag that `dispatch-hygiene-guard.sh` recognizes — preserve this short tag in your dispatch prompt (even when customizing other envelope content) to silence `raw_dispatch` warnings on registered-lane dispatches. The matcher is content-based: any one of the recognized envelope tags (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<correlation_id>cid_*`, etc.) is sufficient. This avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
 
 ```bash
 SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
