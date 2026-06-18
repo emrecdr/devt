@@ -490,10 +490,14 @@ fi
 Determine which files to review. Use ONE of these strategies (in priority order):
 
 1. **User-specified files**: If the user provided specific file paths or patterns, use those.
-2. **Git diff**: If no files were specified, detect changed files:
+2. **Git diff**: If no files were specified, detect changed files. Use the merge-base-aware triple-dot pattern (commits on HEAD not on the primary branch) — matches the canonical pattern at `scope_check` (L207/L252) and avoids the silent wrong-range bug on multi-commit feature branches where `HEAD~1` only captures the latest commit:
    ```bash
-   git diff --name-only HEAD~1 2>/dev/null || git diff --name-only --staged 2>/dev/null || echo "NO_DIFF"
+   git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null \
+     || git diff --name-only HEAD~1 2>/dev/null \
+     || git diff --name-only --staged 2>/dev/null \
+     || echo "NO_DIFF"
    ```
+   Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review.
 3. **Impl-summary**: If `.devt/state/impl-summary.md` exists from a prior workflow, extract the file list from it.
 4. **User prompt**: If none of the above yields results, ask the user which files to review.
 

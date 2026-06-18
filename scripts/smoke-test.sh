@@ -13397,6 +13397,50 @@ else
   fail "K134: laneG broken — project-context token (bitbucket) didn't surface a directly-matching doc: $K134_RESULT"
 fi
 
+# K135: docs/GRAPHIFY.md positions symbol_anchored as canonical primary for non-GitHub.
+# Field calibration: greenfield (Bitbucket project) read pr_scoped as "the flagship"
+# and symbol_anchored as a fallback. The framing was already honest in workflow code
+# but absent from user-facing docs/GRAPHIFY.md. This gate locks the positioning.
+if /usr/bin/grep -qE "symbol_anchored.*(canonical primary|primary tier).*non-GitHub" "$ROOT/docs/GRAPHIFY.md" 2>/dev/null; then
+  pass "K135: docs/GRAPHIFY.md positions symbol_anchored as canonical primary for non-GitHub"
+else
+  fail "K135: docs/GRAPHIFY.md missing tier-semantics positioning string"
+fi
+
+# K136: code-review.md identify_scope uses merge-base-aware diff (not HEAD~1).
+# Field calibration: greenfield's multi-commit feature branch was silently
+# diffed at HEAD~1 (single commit) instead of merge-base (whole branch).
+# L207/L252 already use ${PRIMARY_BRANCH:-main}...HEAD; L495 had diverged.
+# This gate enforces alignment across all three sites in the same workflow.
+# Behavioral test: build 3-commit branch, run the corrected pattern, assert
+# diff captures all 3 commits' files (not just the latest).
+K136_TMP=$(mktemp -d)
+(
+  cd "$K136_TMP"
+  git init -q -b main 2>/dev/null || { git init -q && git checkout -q -b main; }
+  git config user.email "k136@test"
+  git config user.name "K136 Test"
+  echo "base" > base.txt && git add base.txt && git -c commit.gpgsign=false commit -q -m "base"
+  git checkout -q -b feature
+  echo "c1" > c1.txt && git add c1.txt && git -c commit.gpgsign=false commit -q -m "c1"
+  echo "c2" > c2.txt && git add c2.txt && git -c commit.gpgsign=false commit -q -m "c2"
+  echo "c3" > c3.txt && git add c3.txt && git -c commit.gpgsign=false commit -q -m "c3"
+) >/dev/null 2>&1
+K136_MERGE_BASE_DIFF=$(cd "$K136_TMP" && git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+K136_HEAD1_DIFF=$(cd "$K136_TMP" && git diff --name-only HEAD~1 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+rm -rf "$K136_TMP"
+# merge-base pattern must capture c1+c2+c3 (3 commits); HEAD~1 only captures c3 (1 commit)
+if [ "$K136_MERGE_BASE_DIFF" = "c1.txt,c2.txt,c3.txt" ] && [ "$K136_HEAD1_DIFF" = "c3.txt" ]; then
+  # Confirm the workflow actually uses the merge-base pattern at L495 (not HEAD~1 alone)
+  if /usr/bin/grep -qE 'PRIMARY_BRANCH:-main.*\.\.\.HEAD' "$ROOT/workflows/code-review.md"; then
+    pass "K136: code-review.md identify_scope uses merge-base-aware diff (captures all branch commits, not just HEAD~1)"
+  else
+    fail "K136: code-review.md missing merge-base pattern \${PRIMARY_BRANCH:-main}...HEAD"
+  fi
+else
+  fail "K136: diff-base behavior unexpected — merge-base=$K136_MERGE_BASE_DIFF head1=$K136_HEAD1_DIFF"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

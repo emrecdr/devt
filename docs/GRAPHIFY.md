@@ -189,6 +189,21 @@ The orchestrator owns the MCP boundary; sub-agents are MCP-blind by design (see 
 
 ---
 
+## Tier Semantics: pr_scoped, symbol_anchored, bulk_scoped
+
+The graph-impact tier order in `workflows/code-review.md::context_init`:
+
+1. **`pr_scoped`** — calls `mcp__graphify__get_pr_impact` with a PR number. **GitHub-only** (the upstream tool requires the GitHub PR REST API). On Bitbucket, GitLab, or any non-GitHub provider, this tier is correctly skipped with `pr_scoped_skip_reason: "provider=<x>; PR-scoped requires GitHub"` written to `graphify-impact-plan.json`. No error, no degraded output.
+2. **`symbol_anchored`** — calls `mcp__plugin_devt_devt-graphify__blast_radius` with diff-derived symbols. **Universal — works on every provider.** This is the **canonical primary tier for non-GitHub repos.** It is not a fallback or degraded path; it is the documented default when `pr_scoped` is unavailable.
+3. **`bulk_scoped`** — calls `query_graph` + `get_neighbors` when the diff is too large or symbols are not extractable. Triggered when symbol extraction returns empty.
+4. **`skip`** — graphify-skip-reason.txt written, no MCP call. The reviewer falls back to `<scope_hint>` plus raw file list; graph-impact analysis is correctly absent.
+
+For non-GitHub providers, **`symbol_anchored` carries the full graph-impact payload** — `direct_dependents`, `indirect_dependents`, `modules_touched`, `effect_size`, `god_node_match`. The orchestrator writes `graph-impact.md` from this payload identically to the pr_scoped case. Reviewers cannot tell the difference at consumption time.
+
+The signal-quality of `symbol_anchored` depends on graph-extraction quality (label cleanliness, noise filtering). See `bin/modules/graphify.cjs::blastRadius` for the noise filter that excludes file nodes, concept nodes, JSON-key nodes, primitive type labels, and docstring-shaped labels from `direct_dependents` / `indirect_dependents` before counting toward `effect_size`. Projects with project-specific noise labels can extend via `graphify.blast_radius_extra_noise: string[]` in `.devt/config.json`.
+
+---
+
 ## MCP Trace correlation_id
 
 Each `tools/call` against `bin/devt-graphify-mcp.cjs` generates an 8-char hex correlation_id (`crypto.randomBytes(4).toString("hex")`) at entry into `callTool`. The id appears in two places:

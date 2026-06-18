@@ -290,6 +290,77 @@ function setupFixture(opts = {}) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── blast-radius noise filter (D1) ─────────────────────────────────────────
+// Field calibration: upstream graphify emits primitive types (int, str,
+// BaseModel) and docstring text as first-class nodes. Without filtering,
+// blast_radius surfaces them as "dependents" of every queried symbol —
+// accurate to the graph topology, useless as signal. The filter excludes
+// known-noise labels before counting toward direct/indirect/modules.
+{
+  const noisy = {
+    built_at_commit: "noise123",
+    nodes: [
+      { id: "svc_target", label: "TargetService", source_file: "src/svc.py", file_type: "code", confidence_score: 1.0 },
+      { id: "real_caller", label: "real_caller_func", source_file: "src/caller.py", file_type: "code", confidence_score: 1.0 },
+      { id: "prim_int", label: "int", source_file: "<builtin>", file_type: "code", confidence_score: 1.0 },
+      { id: "prim_str", label: "str", source_file: "<builtin>", file_type: "code", confidence_score: 1.0 },
+      { id: "prim_basemodel", label: "BaseModel", source_file: "site-packages/pydantic/main.py", file_type: "code", confidence_score: 1.0 },
+      { id: "docstring_node", label: "Stringify value for streaming CSV output, with formula-escape applied.", source_file: "src/util.py", file_type: "code", confidence_score: 1.0 },
+    ],
+    links: [
+      { source: "real_caller", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+      { source: "prim_int", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+      { source: "prim_str", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+      { source: "prim_basemodel", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+      { source: "docstring_node", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+    ],
+    hyperedges: [], input_tokens: 0, output_tokens: 0,
+  };
+  const { tmp } = setupFixture({ graph: noisy });
+  const r = run(tmp, "blast-radius", "TargetService");
+  const j = parseJson(r.stdout);
+  const deps = (j && j.direct_dependents) || [];
+  const hasReal = deps.includes("real_caller_func");
+  const hasPrimitive = deps.includes("int") || deps.includes("str") || deps.includes("BaseModel");
+  const hasDocstring = deps.some(d => typeof d === "string" && d.length > 60);
+  if (hasReal && !hasPrimitive && !hasDocstring && deps.length === 1) {
+    pass("blast-radius D1 filter: primitives (int/str/BaseModel) + docstring labels excluded from direct_dependents");
+  } else {
+    fail("blast-radius D1 filter", `expected only real_caller_func; got ${JSON.stringify(deps)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  const noisyPlusExtra = {
+    built_at_commit: "noise456",
+    nodes: [
+      { id: "svc_target", label: "TargetService", source_file: "src/svc.py", file_type: "code", confidence_score: 1.0 },
+      { id: "real_caller", label: "real_caller_func", source_file: "src/caller.py", file_type: "code", confidence_score: 1.0 },
+      { id: "proj_noise", label: "MyProjectSpecificNoise", source_file: "src/local.py", file_type: "code", confidence_score: 1.0 },
+    ],
+    links: [
+      { source: "real_caller", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+      { source: "proj_noise", target: "svc_target", relation: "calls", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0 },
+    ],
+    hyperedges: [], input_tokens: 0, output_tokens: 0,
+  };
+  const { tmp } = setupFixture({ graph: noisyPlusExtra });
+  // Overwrite config to add project-extra noise label
+  fs.writeFileSync(path.join(tmp, ".devt", "config.json"), JSON.stringify({
+    graphify: { enabled: true, command: "graphify-not-on-path", blast_radius_extra_noise: ["MyProjectSpecificNoise"] },
+  }, null, 2));
+  const r = run(tmp, "blast-radius", "TargetService");
+  const j = parseJson(r.stdout);
+  const deps = (j && j.direct_dependents) || [];
+  if (deps.length === 1 && deps[0] === "real_caller_func") {
+    pass("blast-radius D1 filter: graphify.blast_radius_extra_noise[] config excludes project-specific labels");
+  } else {
+    fail("blast-radius D1 extra-noise", `expected only real_caller_func; got ${JSON.stringify(deps)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── legacy 'edges' field name compatibility ────────────────────────────────
 // graph.json from older NetworkX uses 'edges' instead of 'links'
 {

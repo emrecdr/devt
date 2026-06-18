@@ -624,6 +624,7 @@ function blastRadius(symbols, _options) {
   const indirect = new Set();
   const modules = new Set();
   const ambiguous = [];
+  const extraNoise = _getExtraNoiseSet();
 
   for (const sym of symbols) {
     const seedId = _resolveOne(adj, sym);
@@ -634,6 +635,11 @@ function blastRadius(symbols, _options) {
       if (id === seedId) continue;
       const node = adj.nodeMap.get(id);
       const label = node && node.label ? node.label : id;
+      // Skip noise: primitives, docstrings, file/concept/JSON-key nodes, +
+      // project-configured extras. Without filtering, blast_radius reports
+      // `int`/`str`/docstring fragments as "dependents" of every queried
+      // symbol — accurate to the graph topology, useless as signal.
+      if (_isBlastNoise(node, label, extraNoise)) continue;
       if (info.depth === 1) direct.add(label);
       else if (info.depth === 2) indirect.add(label);
       if (node && node.source_file) modules.add(path.dirname(node.source_file));
@@ -718,6 +724,69 @@ function _isJsonKeyNode(node) {
   if (!src.endsWith(".json")) return false;
   const label = ((node && node.label) || "").trim().toLowerCase();
   return _JSON_NOISE_LABELS.has(label);
+}
+
+// Primitive + universal type-system labels surfaced by upstream graphify as
+// first-class nodes. They accumulate edges from every typed signature in the
+// codebase, so depth-1/depth-2 incoming BFS treats them as "dependents" of
+// every queried symbol. Filtering them out of blast_radius results restores
+// signal — `direct_dependents` should contain real call sites, not the fact
+// that the function returns `int`.
+const _PRIMITIVE_TYPE_LABELS = new Set([
+  // Python scalars
+  "int", "str", "bool", "bytes", "float", "complex", "None", "NoneType", "NoReturn",
+  // Python typing module
+  "Any", "Optional", "Union", "List", "Dict", "Tuple", "Set", "FrozenSet",
+  "Type", "Callable", "Awaitable", "Iterable", "Iterator", "Generator", "AsyncGenerator",
+  "Sequence", "Mapping", "MutableMapping", "Literal", "Final", "ClassVar",
+  // Universal Python bases
+  "object", "BaseException", "Exception",
+  // Common framework infrastructure that bridges every typed signature
+  "BaseModel", "UUID", "Session", "datetime", "date", "time", "timedelta",
+  // JavaScript/TypeScript primitives (graph may include JS projects)
+  "number", "string", "boolean", "undefined", "null", "void", "never", "unknown",
+  // Common JS/TS bases
+  "Object", "Array", "Promise", "Error",
+]);
+
+function _isPrimitiveTypeNode(label) {
+  if (typeof label !== "string") return false;
+  return _PRIMITIVE_TYPE_LABELS.has(label);
+}
+
+// Upstream graphify emits some docstrings as first-class nodes (observed in
+// the wild: `"Stringify value for streaming CSV output, with formula-escape
+// applied."`). They survive as labels because the extractor doesn't classify
+// them. Heuristic: real symbol labels are <= 80 chars and have <= 2 whitespace
+// chars; sentence-shaped labels exceed both. False positives on legitimate
+// long-named functions are tolerable — the alternative is hundreds of
+// docstring fragments listed as dependents.
+function _isDocstringNode(label) {
+  if (typeof label !== "string") return false;
+  if (label.length > 80) return true;
+  const whitespaceCount = (label.match(/\s/g) || []).length;
+  return whitespaceCount >= 3;
+}
+
+// Composed noise filter for blast_radius BFS. Combines existing file/concept/
+// json-key filters with primitive-type + docstring detection + project-extra
+// labels from `.devt/config.json::graphify.blast_radius_extra_noise[]`.
+function _isBlastNoise(node, label, extraNoiseSet) {
+  if (_isPrimitiveTypeNode(label)) return true;
+  if (_isDocstringNode(label)) return true;
+  if (extraNoiseSet && extraNoiseSet.has(label)) return true;
+  if (node) {
+    if (_isFileNode(node, 0)) return true;
+    if (_isConceptNode(node)) return true;
+    if (_isJsonKeyNode(node)) return true;
+  }
+  return false;
+}
+
+function _getExtraNoiseSet() {
+  const cfg = getConfig();
+  const list = cfg && Array.isArray(cfg.blast_radius_extra_noise) ? cfg.blast_radius_extra_noise : [];
+  return new Set(list.filter(s => typeof s === "string" && s.length > 0));
 }
 
 /**

@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.98.0] - 2026-06-18
+
+### Cal #30.0 — graphify signal-quality + canonical diff-base + docs honesty (3 validated fixes from greenfield field receipts)
+
+Two greenfield calibration receipts (one on devt-flow adherence, one on devt+graphify integration depth) surfaced concrete cal #30 candidates. Three were validated against the codebase as ship-ready single-session fixes; the rest moved to cal #30.1+ scoping. Pattern matches cal #29's "small validated fixes with smoke gates."
+
+**D1 — `blast_radius` node-type filter** (`bin/modules/graphify.cjs`). Field calibration: upstream graphify emits primitive types (`int`, `str`, `bool`, `BaseModel`) and docstring text as first-class nodes. Without filtering, `blast_radius` returned `direct_dependents: [..., "int", "str", "BaseModel", "Stringify value for streaming CSV output..."]` — accurate to graph topology, useless as signal. Existing filter functions `_isFileNode` / `_isConceptNode` / `_isJsonKeyNode` were only applied to god-node detection, not to the BFS visitor in `blastRadius()`. Added `_PRIMITIVE_TYPE_LABELS` set (Python scalars, typing module, framework infra) + `_isDocstringNode` heuristic (label length > 80 OR ≥3 whitespace chars) + `_isBlastNoise` composer + project-extra config via `graphify.blast_radius_extra_noise: string[]` in `.devt/config.json`. Filter applied at BFS visitor before `direct.add` / `indirect.add` / `modules.add`. Deflates noise from `effect_size` count AND `modules_touched` simultaneously. 2 new `test-graphify.cjs` assertions (graphify suite 35 → 37).
+
+**D4 — `docs/GRAPHIFY.md` tier-semantics positioning section**. Field calibration: a greenfield reviewer (Bitbucket project) read `pr_scoped` as "the flagship" and `symbol_anchored` as "the noisy fallback." The framing was already honest in workflow code (`code-review.md:235`, `docs/INTERNALS.md:284`) but absent from user-facing `docs/GRAPHIFY.md`. New "Tier Semantics" section explicitly documents `symbol_anchored` as the canonical primary tier for non-GitHub repos — not a fallback, not degraded. Smoke gate **K135** locks the positioning string.
+
+**D7 — Canonical diff-base resolution at `identify_scope`** (`workflows/code-review.md:495`). Field calibration: greenfield's multi-commit feature branch was silently diffed at `HEAD~1` (single commit) instead of merge-base (whole branch). The same workflow file ALREADY used the correct `${PRIMARY_BRANCH:-main}...HEAD` triple-dot pattern at `scope_check` (L207, L252) — L495 had diverged in `identify_scope`. Fix: align L495 with the existing pattern. Fallback chain: merge-base → HEAD~1 → --staged → NO_DIFF. Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is). Smoke gate **K136** behavioral test — builds a 3-commit branch fixture and asserts merge-base captures all 3 commits while HEAD~1 captures only 1, then confirms the workflow file uses the merge-base pattern.
+
+**Drift-guard stack now 43-deep K94-K136.** CLAUDE.md + README updated for new count.
+
+**Cal #30.1+ candidates** (validated, deferred for focused rounds):
+- **D2** — verifier-on-canonical enforcement strengthening: ADR-compliance axis is real and load-bearing (Q9 evidence — ADR-001 sits on the top audit finding on the greenfield receipt); needs a hard refusal path when orchestrator skips verifier with "fan-out is already verifier-grade" rationalization
+- **D3** — `dispatch run-lanes` CLI with 4 directive shapes (`--lane-N-focus`, `--partition=<file>`, `--base=<ref>`, `--task-suffix=<file>`) per Q10. Customization expressiveness, not step count, is the canonical-path friction.
+- **D5 upstream** — file detect_incremental false-positive issue with graphify maintainer (261 phantom deletions on FD-exhausted run; devt-side audit confirmed devt does NOT expose dangerous `force=True`)
+- **D8** — god-node edge-discounting in community detection (Q11 evidence — PScope/AppError/EventBusProtocol bridges guarantee 2-3 mega-communities under modularity-maximizing cut; required before `dispatch run-lanes --auto-partition=community` can default-on)
+- **C1'/C2'/C3'** from first receipt (parallel-canonical banner; artifact staleness; dispatch-hygiene per-workflow canonical message)
+- **Option B** wrap-not-compete architecture — cal #31 design pass
+
+**Reclassified during validation**:
+- ~~D5 devt-side force=True audit~~ — devt's `--force` at `graphify.cjs:781` is freshness-skip only; calls `graphify update .` via `spawnSync` with NO `--force` passthrough. Does not cascade to dangerous `build_merge force=True`. No devt code change needed; reduces to upstream filing only.
+- ~~D6 reviewer MCP access~~ — Q4 confirmed Grep won every call-graph question on greenfield review; orchestrator-owns-MCP contract holds.
+
+**Validation track record**: two greenfield receipts → 8 clarifying questions → answers triggered 3 voluntary corrections from the reviewer + 1 reclassification on devt side → 3 ship-ready fixes. Per the standing "validate before implementing" rule, two findings (D5 devt-side, D6) would have been wasted work without the validation pass.
+
+**Validation**: smoke 881/881 (2 new K-gates), graphify 37/37 (2 new D1 assertions), locking 3/3, gate 16/16.
+
 ## [0.97.0] - 2026-06-18
 
 ### Cal #29 — three validated bugs surfaced by field-receipt validation
