@@ -13267,6 +13267,29 @@ else
   fail "K130: agent resume CLI surface broken — usage=$K130_USAGE missing=$K130_MISSING resume=${K130_RESUME:0:120}"
 fi
 
+# K131: three-way version coherence — VERSION ↔ plugin.json ↔ marketplace.json.
+# Drift between marketplace.json's plugins[0].version and the actual plugin
+# version is invisible from the source tree but visible in CC's plugin UI
+# (which reads marketplace.json::plugins[0].version for display). Field signal:
+# 84 versions of drift accumulated before this check existed (marketplace.json
+# stuck at 0.12.0 from April while plugin.json advanced through 0.96.0).
+K131_VERSION_FILE=$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || echo "")
+K131_PLUGIN_VER=$(node -e "
+  try { console.log(JSON.parse(require('fs').readFileSync('$ROOT/.claude-plugin/plugin.json','utf8')).version || ''); }
+  catch { console.log(''); }
+" 2>/dev/null)
+K131_MARKET_VER=$(node -e "
+  try {
+    const m = JSON.parse(require('fs').readFileSync('$ROOT/.claude-plugin/marketplace.json','utf8'));
+    console.log((m.plugins && m.plugins[0] && m.plugins[0].version) || '');
+  } catch { console.log(''); }
+" 2>/dev/null)
+if [ -n "$K131_VERSION_FILE" ] && [ "$K131_VERSION_FILE" = "$K131_PLUGIN_VER" ] && [ "$K131_VERSION_FILE" = "$K131_MARKET_VER" ]; then
+  pass "K131: VERSION + plugin.json + marketplace.json version coherence ($K131_VERSION_FILE)"
+else
+  fail "K131: version drift — VERSION=$K131_VERSION_FILE plugin.json=$K131_PLUGIN_VER marketplace.json=$K131_MARKET_VER"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

@@ -38,6 +38,33 @@ if ! grep -q "^## \[${VERSION}\]" CHANGELOG.md; then
   exit 1
 fi
 
+# Version coherence — marketplace.json::plugins[0].version must match VERSION.
+# Drift here is invisible from the source tree but visible in CC's plugin UI
+# (which reads the marketplace.json display version). 84 versions of drift
+# accumulated before this check existed.
+MARKET_VER=$(node -e "
+  const fs = require('fs');
+  const m = JSON.parse(fs.readFileSync('.claude-plugin/marketplace.json', 'utf8'));
+  console.log((m.plugins && m.plugins[0] && m.plugins[0].version) || '');
+" 2>/dev/null)
+if [ "$MARKET_VER" != "$VERSION" ]; then
+  echo "ERROR: marketplace.json::plugins[0].version is '$MARKET_VER', expected '$VERSION'."
+  echo "       Fix: sed -i '' 's/\"version\": \"$MARKET_VER\"/\"version\": \"$VERSION\"/' .claude-plugin/marketplace.json"
+  echo "       (Then re-stage + re-commit before re-running release.)"
+  exit 1
+fi
+
+PLUGIN_VER=$(node -e "
+  const fs = require('fs');
+  const p = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf8'));
+  console.log(p.version || '');
+" 2>/dev/null)
+if [ "$PLUGIN_VER" != "$VERSION" ]; then
+  echo "ERROR: plugin.json::version is '$PLUGIN_VER', expected '$VERSION'."
+  echo "       Fix: bump .claude-plugin/plugin.json version to match VERSION before release."
+  exit 1
+fi
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: gh CLI not installed. Install: https://cli.github.com/"
   exit 1
