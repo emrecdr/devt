@@ -6,6 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.102.0] - 2026-06-18
+
+### Cal #30.4 — telemetry-driven calibration (M4, infrastructure + first findings)
+
+devt accumulates `.devt/state/hook-trace/run-hook.jsonl` + `gate-trace.jsonl` + `dispatch-warnings.jsonl` across all sessions but had no analyzer surface — recalibrating guard thresholds + cap sizes meant manually grepping jsonl. M4 ships the analyzer CLI + runs it against devt's own 554KB hook-trace to surface the first data-driven calibration findings.
+
+**M4a — `bin/modules/telemetry-calibrate.cjs` + `node bin/devt-tools.cjs telemetry calibrate` CLI** (~3hr). Single-pass aggregator over four telemetry sources:
+- `hook-trace/run-hook.jsonl` → per-script {count, exit_zero, exit_nonzero, stdin_bytes/stdout_bytes/stderr_bytes summaries with p50/p95/p99/max}
+- `gate-trace.jsonl` → per-gate {count, pass, fail} (accepts both `ok:boolean` and `verdict:string` shapes for backward compat)
+- `dispatch-warnings.jsonl` → {total, by_source, by_agent}
+- `claim-check-failures.jsonl` → {total}
+
+Recommendation engine emits actionable findings:
+- **`hook_low_value`** — hook fired ≥20 times with exit=0 AND stdout=0 on ≥95% of fires (silent + always-succeed = candidate for disable/reduce)
+- **`hook_error_pattern`** — hook fired ≥50 times with non-zero exit on ≥10% (consistent failure mode worth investigating)
+- **`gate_always_pass`** — gate fired ≥100 times with 100% pass (low-signal-to-cost; caveat: may be project-shape-specific)
+- **`gate_always_fail`** — gate fired ≥100 times with 100% fail (likely broken)
+
+Conservative thresholds chosen to minimize false positives. Note: hook stdout caps are Claude Code hook-contract-sized (not devt-configurable), so the recommender does NOT emit cap_shrink_candidate on hook stdout — that target reserves for genuine devt-configurable caps (graph-impact 32KB, governing_rules 96KB, inline_guardrails 64KB) which need separate telemetry sources.
+
+**M4b — first analyzer run against devt repo telemetry** (3423 hook-trace records, 78 gate records, 55 dispatch warnings). Findings:
+
+| Finding | Surface | Disposition |
+|---|---|---|
+| `subagent-status.sh` 14% non-zero exit (30/212 fires, identical 722B stderr) | `hook_error_pattern` | **Deferred follow-up** — real bug, identical error signature across all 30 failures; investigate in cal #30.4.1 |
+| `memory-auto-index.sh` always silent (104 fires, stdout=0) | `hook_low_value` | **Validated as expected** — hook runs silently in normal mode, only writes output on indexable changes; no action |
+| `assert-graphify-decision` 100% pass over 39 fires | (below 100-fire floor — not flagged) | Trivially passes when graphify disabled (devt project's own config); validates the floor-100 caveat works |
+
+**M4c — applied refinements**: recommender's gate-fire floor raised 20→100 to suppress project-shape false positives; gate aggregator now accepts both `ok:boolean` and `verdict:string` record shapes (older `assertGraphifyDecision` + `assertPreflightFresh` use verdict). Removed misleading hook-stdout `cap_shrink_candidate` recommender — hook stdout sizes are Claude Code hook-contract-sized, not devt-configurable.
+
+**Smoke gates K149-K150**: K149 (analyzer aggregates hook-trace + emits hook_error_pattern recommendation on synthetic flaky-hook fixture), K150 (hook_low_value recommendation emitted on synthetic always-silent fixture).
+
+**Drift-guard stack now 57-deep K94-K150.** CLAUDE.md + README updated.
+
+**Cal #30.4.1 candidate (deferred)**: investigate `subagent-status.sh` 14% failure pattern — 30 identical 722B-stderr failures concentrated in one period, suggests a real bug rather than environmental noise.
+
+**Cal #30.5 candidate (next per Option E roadmap)**: M3 `dispatch run-lanes` with 4 directive shapes (~6-8hr).
+
+**Validation**: smoke (target 895/895), graphify 37/37, locking 3/3.
+
 ## [0.101.0] - 2026-06-18
 
 ### Cal #30.3 — graphify signal quality (F1+F2+F4+F5, 4 fixes from greenfield receipt #4)

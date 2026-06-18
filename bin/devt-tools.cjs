@@ -161,6 +161,11 @@ function main() {
           JSON.stringify(require("./modules/weekly-report.cjs").run(subcommand, args.slice(2))),
         );
         break;
+      case "telemetry":
+        console.log(
+          JSON.stringify(require("./modules/telemetry-calibrate.cjs").run(subcommand, args.slice(2))),
+        );
+        break;
       case "health":
         console.log(JSON.stringify(require("./modules/health.cjs").run(args.slice(1), PLUGIN_ROOT)));
         break;

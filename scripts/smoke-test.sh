@@ -13716,6 +13716,48 @@ else
   fail "K148: F2 filter broken — only_real=$K148_ONLY_REAL telemetry=$K148_TELEMETRY result=$K148_RESULT"
 fi
 
+# K149: telemetry calibrate CLI mines hook-trace + emits structured report
+# with aggregates + recommendations. Field motivation: cal #30.4 M4 — data-
+# driven recalibration of guards/caps requires a single CLI mining the
+# accumulated .devt/state/hook-trace/run-hook.jsonl + gate-trace.jsonl +
+# dispatch-warnings.jsonl. Fixture seeds known data; assertion checks
+# aggregator shape + at least one recommendation kind fires.
+K149_TMP=$(mktemp -d)
+mkdir -p "$K149_TMP/.devt/state/hook-trace"
+# Hook with high non-zero exit rate (should trip hook_error_pattern recommendation)
+for i in $(seq 1 60); do
+  echo '{"ts":"2026-06-01T00:00:00Z","script":"flaky-hook.sh","profile":"standard","enabled":true,"stdin_bytes":100,"stdout_bytes":50,"stderr_bytes":500,"exit":1}' >> "$K149_TMP/.devt/state/hook-trace/run-hook.jsonl"
+done
+for i in $(seq 1 40); do
+  echo '{"ts":"2026-06-01T00:00:00Z","script":"flaky-hook.sh","profile":"standard","enabled":true,"stdin_bytes":100,"stdout_bytes":50,"stderr_bytes":0,"exit":0}' >> "$K149_TMP/.devt/state/hook-trace/run-hook.jsonl"
+done
+K149_RESULT=$(cd "$K149_TMP" && node "$ROOT/bin/devt-tools.cjs" telemetry calibrate 2>/dev/null)
+rm -rf "$K149_TMP"
+K149_HAS_HOOKS=$(echo "$K149_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.hooks && o.hooks['flaky-hook.sh'] && o.hooks['flaky-hook.sh'].count===100?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K149_HAS_ERROR_REC=$(echo "$K149_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log((o.recommendations||[]).some(r=>r.kind==='hook_error_pattern'&&r.target==='flaky-hook.sh')?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+if [ "${K149_HAS_HOOKS:-0}" = "1" ] && [ "${K149_HAS_ERROR_REC:-0}" = "1" ]; then
+  pass "K149: telemetry calibrate CLI aggregates hook-trace + emits hook_error_pattern recommendation when nonzero rate >10% over >=50 fires"
+else
+  fail "K149: telemetry analyzer broken — has_hooks=$K149_HAS_HOOKS has_error_rec=$K149_HAS_ERROR_REC"
+fi
+
+# K150: telemetry calibrate flags hook_low_value when hook always silent
+# (exit=0 + stdout=0 on >=95% of fires). Catches hooks that quietly do
+# nothing — disable candidates or evidence of broken instrumentation.
+K150_TMP=$(mktemp -d)
+mkdir -p "$K150_TMP/.devt/state/hook-trace"
+for i in $(seq 1 50); do
+  echo '{"ts":"2026-06-01T00:00:00Z","script":"silent-hook.sh","profile":"standard","enabled":true,"stdin_bytes":50,"stdout_bytes":0,"stderr_bytes":0,"exit":0}' >> "$K150_TMP/.devt/state/hook-trace/run-hook.jsonl"
+done
+K150_RESULT=$(cd "$K150_TMP" && node "$ROOT/bin/devt-tools.cjs" telemetry calibrate 2>/dev/null)
+rm -rf "$K150_TMP"
+K150_HAS_LOW_VALUE=$(echo "$K150_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log((o.recommendations||[]).some(r=>r.kind==='hook_low_value'&&r.target==='silent-hook.sh')?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+if [ "${K150_HAS_LOW_VALUE:-0}" = "1" ]; then
+  pass "K150: telemetry calibrate flags hook_low_value when hook exits 0 with stdout=0 on >=95% of fires"
+else
+  fail "K150: hook_low_value recommendation not emitted on always-silent fixture"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
