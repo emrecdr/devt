@@ -86,7 +86,28 @@ node bin/devt-tools.cjs dispatch render-lanes [target] [--target=<agent>:<workfl
 
 node bin/devt-tools.cjs dispatch compile --check|--write
 # Verifies (or rewrites) every <!-- BEGIN dispatch:agent:workflow_id --> region in workflows/*.md against its template at templates/dispatch/envelopes/. Returns regions_checked + drift array. --check exits 1 when drift exists; --write atomically rewrites drifted bodies
+
+node bin/devt-tools.cjs dispatch run <agent> --task="<text>" [--workflow=<id|auto>] [--rules-exclude=<headings>]
+# Single-dispatch ergonomic launcher. Builds the canonical envelope (scope_trust, scope_hint, memory_signal, governing_rules) and prints it Task-tool-ready, so an orchestrator doing ONE devt:* dispatch can stay on the canonical path without the 3-step lanes.yaml → register-lanes → render-lanes boilerplate. Compresses single-agent dispatch to one CLI call. For parallel fan-out, still use render-lanes (run is single-agent only by design). --task is required; empty task rejected at input validation
 ```
+
+### Agent — recovery + resume
+
+```bash
+node bin/devt-tools.cjs agent resume [auto|--sidecar=<path>]
+# Walled-agent recovery: reads an agent's sidecar (impl-summary.json / test-summary.json / verification.json) and emits a SendMessage-ready resume block — bridges the gap where a dispatched agent returned PARTIAL status and the orchestrator needs to continue without re-dispatching from scratch. `auto` mode walks state-dir for the most-recent PARTIAL sidecar; explicit --sidecar=<path> targets a specific one. Missing sidecar fails loudly with the canonical fallback hint
+```
+
+### Workflow overrides — env vars
+
+| Env var | Default | Effect |
+|---|---|---|
+| `PRIMARY_BRANCH` | `main` | Base branch for `git diff --name-only ${PRIMARY_BRANCH:-main}...HEAD` in `workflows/code-review.md` `scope_check` + `identify_scope`. Set per-project (`export PRIMARY_BRANCH=development` for trunk-based or non-main projects) so multi-commit feature branches diff against merge-base instead of `HEAD~1` |
+| `DEVT_HOOK_PROFILE` | `standard` | Hook tier — `minimal` / `standard` / `full`. See CLAUDE.md hook profiles table |
+| `DEVT_DISABLED_HOOKS` | (empty) | CSV of hook script names to disable regardless of profile |
+| `DEVT_WORKFLOW_ID` | (unset) | Multi-instance isolation — when set, `getStateDir()` returns `.devt/state/<id>/` for per-terminal workflow concurrency |
+| `DEVT_HOOK_TRACE` | `1` | Universal hook invocation trace at `.devt/state/hook-trace/run-hook.jsonl`. Kill switch: `DEVT_HOOK_TRACE=0` |
+| `DEVT_MCP_ALLOW_WRITES` | (unset) | Permits `memory_upsert_doc` MCP write surface — default-deny safety floor for project-shape doc writes |
 
 ### Memory — surface helpers (operator-runnable)
 
