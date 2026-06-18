@@ -91,7 +91,7 @@ const TOOLS = {
   },
 
   get_neighbors: {
-    description: "BFS the graph from a symbol. direction: 'in' (callers), 'out' (callees), 'both' (default). depth: 1-3 (default 1). relation_filter: optional edge-type whitelist (e.g. 'calls'). Returns up to 200 neighbors with edge relation + confidence. Use for caller-set enumeration before declaring a change safe.",
+    description: "BFS the graph from a symbol. direction: 'in' (callers), 'out' (callees), 'both' (default). depth: 1-3 (default 1). relation_filter: optional edge-type whitelist (e.g. 'calls'). max_bytes caps the serialized response size (default 60000); when exceeded the response carries truncated:true + the closest-by-depth neighbors retained. Returns up to 200 neighbors with edge relation + confidence. Use for caller-set enumeration before declaring a change safe.",
     inputSchema: {
       type: "object",
       required: ["symbol"],
@@ -100,14 +100,19 @@ const TOOLS = {
         direction: { type: "string", enum: ["in", "out", "both"], description: "Edge direction (default 'both')" },
         depth: { type: "integer", minimum: 1, maximum: 3, description: "BFS depth (default 1)" },
         relation_filter: { type: "string", description: "Optional edge-type filter, e.g. 'calls', 'imports'" },
+        max_bytes: { type: "integer", minimum: 1024, maximum: 524288, description: "Cap serialized response size in bytes (default 60000). When exceeded, response includes truncated:true and neighbors sorted depth-asc + label-alpha so closest neighbors retained." },
       },
     },
-    handler: ({ symbol, direction, depth, relation_filter }) => {
+    handler: ({ symbol, direction, depth, relation_filter, max_bytes }) => {
       if (typeof symbol !== "string" || symbol.length === 0) return { error: "symbol required (string)" };
       const opts = {};
       if (direction) opts.direction = direction;
       if (depth) opts.depth = depth;
       if (relation_filter) opts.relation_filter = relation_filter;
+      // Server-side default 60KB. Without this, drill-downs on big hubs
+      // (ExportService-class symbols with 8000+ inbound edges) overflowed the
+      // MCP transport — field-evidenced gap. Caller can override up to 512KB.
+      opts.max_bytes = Number.isInteger(max_bytes) && max_bytes >= 1024 ? max_bytes : 60000;
       try { return graphify.getNeighbors(symbol, opts); }
       catch (e) { return { error: e.message }; }
     },

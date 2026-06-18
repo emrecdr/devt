@@ -13628,6 +13628,94 @@ else
   fail "K144: refusal routing broken — has_hint=$K144_HAS_HINT no_hint_on_end_turn=$K144_NO_HINT"
 fi
 
+# K145: F5 _isDocstringNode catches short test-description sentence slips that
+# escaped cal #30.0's >=3 whitespace threshold. "Test successful login." (2
+# whitespace) was the field-evidenced miss class. Two gates:
+#   (a) lowered whitespace threshold (>=2) catches 2-word labels
+#   (b) "Test/Tests/Test methods/...ends with ." heuristic catches the
+#       narrower class operators recognize as test docstrings.
+K145_TEST_SHORT=$(node -e '
+const fs=require("fs");
+const src=fs.readFileSync("'"$ROOT"'/bin/modules/graphify.cjs","utf8");
+// Strip the function signature + closing brace; eval the body in a Function shell.
+const m=src.match(/function _isDocstringNode\(label\) \{([\s\S]*?)\n\}/);
+if(!m){console.log("notfound");process.exit(1);}
+const f=new Function("label", m[1]);
+const cases=[
+  ["Test successful login.", true],
+  ["Tests for ExportService.list_exports.", true],
+  ["Stringify value for streaming CSV output, with formula-escape applied.", true],
+  ["AuthService", false],
+  ["api_login_handler", false],
+  ["foo_bar_baz", false],
+];
+let ok=true;
+for(const [label, want] of cases){
+  if(f(label) !== want){ ok=false; console.log("MISS:", label, "expected", want, "got", f(label)); }
+}
+console.log(ok?"1":"0");
+' 2>/dev/null | tail -1)
+if [ "${K145_TEST_SHORT:-0}" = "1" ]; then
+  pass "K145: F5 _isDocstringNode threshold change catches 'Test X.' (2-whitespace) + 'Tests for X.' patterns; real symbols (AuthService/snake_case) still excluded"
+else
+  fail "K145: F5 docstring threshold broken — see output"
+fi
+
+# K146: F4 graphify status surfaces lag_commits by default; --full surfaces
+# node_count/edge_count/trust. Reconciles the source of truth so operators
+# don't see {state:ready, out_dir:..., graph_path:...} from `graphify status`
+# while preflight-brief.json carries the real freshness data.
+K146_TMP=$(mktemp -d)
+mkdir -p "$K146_TMP/.devt" "$K146_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify-not-on-path"}}' > "$K146_TMP/.devt/config.json"
+# Minimal fixture graph.json — node_count/edge_count surface with --full.
+cat > "$K146_TMP/graphify-out/graph.json" <<EOF
+{"built_at_commit":"abc1234","nodes":[{"id":"a","label":"A","source_file":"a.py","file_type":"code"},{"id":"b","label":"B","source_file":"b.py","file_type":"code"}],"links":[{"source":"a","target":"b","relation":"calls","confidence":"EXTRACTED"}]}
+EOF
+K146_DEFAULT=$(cd "$K146_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify status 2>/dev/null)
+K146_HAS_LAG=$(echo "$K146_DEFAULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(Object.prototype.hasOwnProperty.call(o,'lag_commits')?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K146_FULL=$(cd "$K146_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify status --full 2>/dev/null)
+K146_HAS_COUNTS=$(echo "$K146_FULL" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.node_count===2 && o.edge_count>=1?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+rm -rf "$K146_TMP"
+if [ "${K146_HAS_LAG:-0}" = "1" ] && [ "${K146_HAS_COUNTS:-0}" = "1" ]; then
+  pass "K146: F4 graphify status surfaces lag_commits by default + --full surfaces node_count/edge_count"
+else
+  fail "K146: F4 status surfacing broken — has_lag=$K146_HAS_LAG has_counts=$K146_HAS_COUNTS"
+fi
+
+# K147: F1 MCP get_neighbors schema declares max_bytes. Without this, the
+# graphify-side max_bytes truncation code (graphify.cjs:519) is unreachable
+# from the MCP path — field-evidenced bug: ExportService drill-down (8500
+# lines / 293KB) overflowed MCP transport because the operator-facing schema
+# didn't expose the truncation knob.
+K147_HAS_MAX_BYTES=$(/usr/bin/grep -cE 'max_bytes:\s*\{\s*type:\s*"integer"' "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || true)
+K147_HAS_DEFAULT=$(/usr/bin/grep -cE 'max_bytes\s*:\s*60000|max_bytes\s+default\s+60000' "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || true)
+if [ "${K147_HAS_MAX_BYTES:-0}" -ge 1 ] && [ "${K147_HAS_DEFAULT:-0}" -ge 1 ]; then
+  pass "K147: F1 MCP get_neighbors schema declares max_bytes property + server-side default 60000 applied"
+else
+  fail "K147: F1 MCP max_bytes wiring incomplete — has_schema=$K147_HAS_MAX_BYTES has_default=$K147_HAS_DEFAULT"
+fi
+
+# K148: F2 getNeighbors filters primitives + test-path nodes. Without this,
+# caller-set drill-downs surface ~95% noise (test methods + docstring nodes
+# + primitives) burying the production-caller signal operators need. Field
+# motivation: AuthenticationService incoming edges receipt #4.
+K148_TMP=$(mktemp -d)
+mkdir -p "$K148_TMP/.devt" "$K148_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify-not-on-path"}}' > "$K148_TMP/.devt/config.json"
+cat > "$K148_TMP/graphify-out/graph.json" <<'EOF'
+{"built_at_commit":"abc","nodes":[{"id":"svc","label":"AuthSvc","source_file":"src/auth.py","file_type":"code"},{"id":"prod","label":"real_login","source_file":"src/login.py","file_type":"code"},{"id":"tst","label":"test_login_success","source_file":"tests/test_auth.py","file_type":"code"},{"id":"prim","label":"int","source_file":"<builtin>","file_type":"code"},{"id":"doc","label":"Test successful login.","source_file":"src/foo.py","file_type":"code"}],"links":[{"source":"prod","target":"svc","relation":"calls","confidence":"EXTRACTED"},{"source":"tst","target":"svc","relation":"calls","confidence":"EXTRACTED"},{"source":"prim","target":"svc","relation":"calls","confidence":"EXTRACTED"},{"source":"doc","target":"svc","relation":"rationale_for","confidence":"EXTRACTED"}]}
+EOF
+K148_RESULT=$(cd "$K148_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs'); const r=g.getNeighbors('AuthSvc',{direction:'in'}); console.log(JSON.stringify({labels:r.results.map(x=>x.label),fn:r.filtered_noise,ftp:r.filtered_test_path}));" 2>/dev/null)
+rm -rf "$K148_TMP"
+K148_ONLY_REAL=$(echo "$K148_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.labels.length===1 && o.labels[0]==='real_login'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K148_TELEMETRY=$(echo "$K148_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.fn>=1 && o.ftp>=1?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+if [ "${K148_ONLY_REAL:-0}" = "1" ] && [ "${K148_TELEMETRY:-0}" = "1" ]; then
+  pass "K148: F2 getNeighbors filters primitives + test-path + docstring nodes; only production caller surfaces; filter_noise/filter_test_path telemetry emitted"
+else
+  fail "K148: F2 filter broken — only_real=$K148_ONLY_REAL telemetry=$K148_TELEMETRY result=$K148_RESULT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

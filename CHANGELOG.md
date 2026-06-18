@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.101.0] - 2026-06-18
+
+### Cal #30.3 — graphify signal quality (F1+F2+F4+F5, 4 fixes from greenfield receipt #4)
+
+Greenfield receipt #4 surfaced four graphify-side signal-quality gaps that survived cal #30.0's D1 blast_radius filter: (1) MCP get_neighbors path overflowed on big hubs because max_bytes was code-side-only, not exposed in schema; (2) getNeighbors caller-set drill-downs were ~95% noise (test methods + docstrings + primitives) — D1's filter applied to blastRadius only, not getNeighbors; (3) `graphify status` returned `{state, out_dir, graph_path}` while preflight-brief.json had the real freshness data — two sources of truth, one broken; (4) D1's whitespace-≥3 threshold slipped short test-description docstrings like "Test successful login." (2 ws). All four fixed devt-side; no graphify-upstream blockers.
+
+**F1 — MCP `get_neighbors` max_bytes schema exposure** (`bin/devt-graphify-mcp.cjs`). Code at `graphify.cjs:519` already handled `options.max_bytes` (deterministic depth-asc + label-alpha sort, returns `truncated:true`). MCP schema didn't declare the property, so the truncation knob was unreachable from MCP callers. Schema now declares `max_bytes: {type: integer, minimum: 1024, maximum: 524288}`; handler forwards to graphify with server-side default 60000 bytes when caller omits. Description updated. Field motivation: greenfield's ExportService drill-down returned 293K chars / 8509 lines, overflowing MCP transport to a saved file with zero usable signal.
+
+**F2 — `getNeighbors` noise filter + test-path heuristic** (`bin/modules/graphify.cjs`). Cal #30.0's D1 filter `_isBlastNoise` only applied inside `blastRadius()`; the parallel `getNeighbors()` loop pushed every visited node unfiltered. Composes `_isBlastNoise` into getNeighbors BFS visitor (filters primitives + docstrings + file/concept/json-key nodes) PLUS new `_isTestPathNode` source_file regex heuristic. Universal `_DEFAULT_TEST_PATH_PATTERNS` covers Python (tests/, test_*.py, *_test.py, conftest.py), JavaScript/TypeScript (__tests__/, *.spec.*, *.test.*), Go (*_test.go), Ruby (*_test.rb), Java/Kotlin (src/test/). Project override via new config `graphify.test_path_patterns[]`. Response envelope carries `filtered_noise` + `filtered_test_path` telemetry so consumers can audit filter aggressiveness. Field motivation: AuthenticationService caller-set was ~95% test methods + `rationale_for` docstring fragments, burying production-caller signal.
+
+**F4 — `graphify status` count surfacing** (`bin/modules/graphify.cjs`). `status()` previously returned only `{state, out_dir, graph_path}` — operators had to derive freshness from `preflight-brief.json` (which had the real data via a different code path). Extends `status()` to call `freshness()` by default (cheap regex on graph.json head/tail), surfacing `lag_commits` + `built_at_commit`. New `--full` flag opts into `loadGraph()` parse cost — surfaces `node_count`, `edge_count`, `trust`, `has_communities`. Default stays O(1) so the "is graphify ready?" check on 50MB+ graphs doesn't pay parse cost. Reconciles the two code paths to one source of truth.
+
+**F5 — `_isDocstringNode` threshold rider** (`bin/modules/graphify.cjs`). Cal #30.0 D1 set whitespace threshold ≥3 to detect sentence-shaped labels. Field receipt: "Test successful login." (2 whitespace) and "Tests for ExportService.list_exports." (3 ws but the period+Test prefix is more distinctive) slipped through. Lowers threshold to ≥2 AND adds explicit "starts with Test/Tests/Tests for + ends with period" pattern. Catches the test-docstring conventional shape without over-broadening to legitimate multi-word labels.
+
+**Drift-guard stack now 55-deep K94-K148.** CLAUDE.md + README updated.
+
+**Smoke gates K145-K148**: K145 (F5 threshold catches "Test X." class + retains real symbols), K146 (F4 status surfaces lag_commits + --full surfaces counts), K147 (F1 MCP schema declares max_bytes + server default 60000), K148 (F2 getNeighbors filters noise + test-path nodes + emits filter telemetry).
+
+**Cal #30.4 (telemetry-driven calibration: M4) + cal #30.5 (dispatch run-lanes with 4 directive shapes: M3)** carried over per Option E roadmap.
+
+**Validation**: smoke (target 893/893), graphify 37/37, locking 3/3.
+
 ## [0.100.0] - 2026-06-18
 
 ### Cal #30.2 — devt absorbs Opus 4.8 (M1+M2+M7, 3 fixes)

@@ -61,7 +61,7 @@ function getGraphifyOutDir() {
  * The graphify binary is needed only to *generate* the graph; devt's read
  * path does not invoke it, so binary presence does not gate "ready".
  */
-function status() {
+function status(options = {}) {
   const cfg = getConfig();
   if (!cfg.enabled) return { state: "disabled", reason: "graphify.enabled is false in .devt/config.json" };
 
@@ -73,25 +73,61 @@ function status() {
       reason: `${graphPath} not found. Run: ${cfg.command || "graphify"} update . to extract`,
     };
   }
-  return { state: "ready", out_dir: outDir, graph_path: graphPath };
+  // Cheap freshness call surfaces lag_commits without parsing graph.json.
+  // _freshnessForPath reads built_at_commit via regex on file head/tail
+  // (~8KB+16KB) — bounded cost even on 50MB+ graphs. Uses _freshnessForPath
+  // (not freshness()) to avoid the recursion freshness→status→freshness
+  // that would otherwise hang in spawnSync. Field-evidenced gap: status()
+  // used to return only {state, out_dir, graph_path}, leaving operators to
+  // derive freshness from preflight-brief.json which had the real data.
+  // This unifies the source of truth.
+  let lagCommits = null;
+  let builtAt = null;
+  try {
+    const fr = _freshnessForPath(graphPath);
+    if (fr && typeof fr.lag_commits === "number") lagCommits = fr.lag_commits;
+    if (fr && typeof fr.built_at === "string") builtAt = fr.built_at;
+  } catch { /* freshness probe failure non-fatal */ }
+
+  const base = { state: "ready", out_dir: outDir, graph_path: graphPath, lag_commits: lagCommits, built_at_commit: builtAt };
+
+  // --full opts into loadGraph() parse cost. On a 50MB+ graph this can take
+  // 200-500ms — not free. Defaults to off so the common "is graphify ready?"
+  // check stays O(1). With --full surfaces node_count + edge_count + trust
+  // classification (sparse/dense per density threshold).
+  if (!options.full) return base;
+
+  try {
+    const stats = graphStats();
+    if (stats && stats.node_count !== undefined) {
+      base.node_count = stats.node_count;
+      base.edge_count = stats.edge_count;
+      base.trust = stats.trust;
+      if (stats.has_communities !== undefined) base.has_communities = stats.has_communities;
+    }
+  } catch (e) {
+    base.full_probe_error = String(e && e.message);
+  }
+  return base;
 }
 
 /**
  * Read graph.json's `built_at_commit` and compare to current HEAD.
  * Returns { fresh: bool, built_at: string|null, head: string|null, lag_commits: number|null }.
  */
-function freshness() {
-  const s = status();
-  if (s.state !== "ready") return { state: s.state, fresh: false, built_at: null, head: null };
-
+// Inner freshness probe given an already-resolved graph.json path. Extracted
+// so status() can reuse it without recursing back through freshness()->status()
+// (the recursion previously caused spawnSync timeouts after F4 added a
+// freshness call to status()).
+function _freshnessForPath(graphPath) {
   // graphify emits built_at_commit as a JSON trailer (end of file) in current
   // versions; older versions emitted it near the start. Scan both head (8KB)
   // and tail (16KB) — full parse on a 50MB+ graph would dominate freshness() cost.
   const BUILT_AT_RE = /"built_at_commit"\s*:\s*"([0-9a-fA-F]{4,64})"/;
   let builtAt = null;
   try {
-    const stat = fs.statSync(s.graph_path);
-    const fd = fs.openSync(s.graph_path, "r");
+    const stat = fs.statSync(graphPath);
+    const fd = fs.openSync(graphPath, "r");
     const headLen = Math.min(8192, stat.size);
     const headBuf = Buffer.alloc(headLen);
     fs.readSync(fd, headBuf, 0, headLen, 0);
@@ -138,6 +174,26 @@ function freshness() {
   }
 
   return { state: "ready", fresh, built_at: builtAt, head, lag_commits: lagCommits };
+}
+
+function freshness() {
+  const s = _statusBare();
+  if (s.state !== "ready") return { state: s.state, fresh: false, built_at: null, head: null };
+  return _freshnessForPath(s.graph_path);
+}
+
+// Bare existence/state check without freshness probe — keeps status() and
+// freshness() from recursing. Status() callers get the freshness-enriched
+// output; this internal probe is just "is graphify ready?".
+function _statusBare() {
+  const cfg = getConfig();
+  if (!cfg.enabled) return { state: "disabled", reason: "graphify.enabled is false in .devt/config.json" };
+  const outDir = getGraphifyOutDir();
+  const graphPath = path.join(outDir, "graph.json");
+  if (!fs.existsSync(graphPath)) {
+    return { state: "graph_missing", reason: `${graphPath} not found. Run: ${cfg.command || "graphify"} update . to extract` };
+  }
+  return { state: "ready", out_dir: outDir, graph_path: graphPath };
 }
 
 // ---------------------------------------------------------------------------
@@ -503,12 +559,24 @@ function getNeighbors(symbol, options) {
   // impact analysis). When truncation fires, the response carries
   // `truncated: true` + counts so consumers can flag the partial result
   // instead of trusting it as complete.
+  // Compose noise filters. Without these, getNeighbors caller-set drill-downs
+  // surface primitives, docstrings, file/concept/json-key nodes, and test code
+  // as legitimate neighbors. Field-evidenced gap (cal #30.0 D1 was blastRadius-
+  // only): AuthenticationService incoming ~95% test methods + rationale_for
+  // docstrings, burying the production-caller signal.
+  const extraNoise = _getExtraNoiseSet();
+  const testPathPatterns = _getTestPathPatterns();
   const items = [];
+  let filteredNoiseCount = 0;
+  let filteredTestPathCount = 0;
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
+    const label = node.label || id;
+    if (_isBlastNoise(node, label, extraNoise)) { filteredNoiseCount++; continue; }
+    if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
     items.push({
       id,
-      label: node.label || id,
+      label,
       source_file: node.source_file || "",
       relation: info.edge ? info.edge.relation : "",
       confidence: info.edge ? info.edge.confidence : "",
@@ -516,8 +584,18 @@ function getNeighbors(symbol, options) {
     });
   }
   items.sort((a, b) => a.depth - b.depth || (a.label || "").localeCompare(b.label || ""));
+  // Filter telemetry exposed in envelope so callers can audit how aggressive
+  // the noise+test-path filtering was. Empty objects when nothing filtered.
+  const filterTelemetry = (filteredNoiseCount || filteredTestPathCount) ? {
+    filtered_noise: filteredNoiseCount,
+    filtered_test_path: filteredTestPathCount,
+  } : null;
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
-  if (!maxBytes) return { source: "graphify", results: items };
+  if (!maxBytes) {
+    const base = { source: "graphify", results: items };
+    if (filterTelemetry) Object.assign(base, filterTelemetry);
+    return base;
+  }
   const totalCount = items.length;
   const results = [];
   let runningBytes = 0;
@@ -530,7 +608,7 @@ function getNeighbors(symbol, options) {
     runningBytes += itemBytes;
   }
   if (results.length < totalCount) {
-    return {
+    const base = {
       source: "graphify",
       results,
       truncated: true,
@@ -539,8 +617,12 @@ function getNeighbors(symbol, options) {
       max_bytes: maxBytes,
       truncation_reason: `${totalCount - results.length} neighbor(s) dropped to fit max_bytes=${maxBytes}; results sorted depth-asc + label-alpha so closest neighbors retained`,
     };
+    if (filterTelemetry) Object.assign(base, filterTelemetry);
+    return base;
   }
-  return { source: "graphify", results };
+  const ok = { source: "graphify", results };
+  if (filterTelemetry) Object.assign(ok, filterTelemetry);
+  return ok;
 }
 
 /**
@@ -756,16 +838,24 @@ function _isPrimitiveTypeNode(label) {
 
 // Upstream graphify emits some docstrings as first-class nodes (observed in
 // the wild: `"Stringify value for streaming CSV output, with formula-escape
-// applied."`). They survive as labels because the extractor doesn't classify
-// them. Heuristic: real symbol labels are <= 80 chars and have <= 2 whitespace
-// chars; sentence-shaped labels exceed both. False positives on legitimate
-// long-named functions are tolerable — the alternative is hundreds of
-// docstring fragments listed as dependents.
+// applied."`, `"Test successful login."`, `"Tests for ExportService.list_exports."`).
+// They survive as labels because the extractor doesn't classify them.
+// Heuristic combines three sentence-shape detectors:
+//   - length > 80 chars (long descriptive sentences)
+//   - whitespace count >= 2 (multi-word labels — real symbols are
+//     CamelCase/snake_case/dot.notation with zero internal spaces)
+//   - starts with "Test " / "Tests for " / "Tests " AND ends with "."
+//     (test-description docstring conventional shape; catches short slips
+//      below the whitespace threshold like "Test login." which has 1 ws)
+// False positives on legitimate long-named functions are tolerable — the
+// alternative is hundreds of docstring fragments listed as dependents.
 function _isDocstringNode(label) {
   if (typeof label !== "string") return false;
   if (label.length > 80) return true;
   const whitespaceCount = (label.match(/\s/g) || []).length;
-  return whitespaceCount >= 3;
+  if (whitespaceCount >= 2) return true;
+  if (/^Test(s)?( for)? /.test(label) && label.endsWith(".")) return true;
+  return false;
 }
 
 // Composed noise filter for blast_radius BFS. Combines existing file/concept/
@@ -787,6 +877,40 @@ function _getExtraNoiseSet() {
   const cfg = getConfig();
   const list = cfg && Array.isArray(cfg.blast_radius_extra_noise) ? cfg.blast_radius_extra_noise : [];
   return new Set(list.filter(s => typeof s === "string" && s.length > 0));
+}
+
+// Universal source_file patterns that mark test code. Project can override
+// via .devt/config.json::graphify.test_path_patterns[]. Used by getNeighbors
+// to filter test-code nodes from caller-set drill-downs — field-evidenced
+// gap: AuthenticationService incoming edges were ~95% test methods + docstring
+// fragments, burying the production-caller signal the operator actually needed.
+const _DEFAULT_TEST_PATH_PATTERNS = [
+  "(^|/)tests?/",                  // tests/ or test/
+  "(^|/)__tests__/",               // JavaScript Jest convention
+  "(^|/)test_[^/]+\\.py$",         // Python: test_foo.py
+  "(^|/)[^/]+_test\\.(py|go|rb)$", // Python/Go/Ruby: foo_test.py / foo_test.go
+  "\\.spec\\.[jt]sx?$",            // JS/TS Jasmine/Jest: foo.spec.ts
+  "\\.test\\.[jt]sx?$",            // JS/TS Jest: foo.test.ts
+  "(^|/)conftest\\.py$",           // pytest shared fixtures
+  "(^|/)src/test/",                // Java/Kotlin Maven/Gradle layout
+];
+
+function _getTestPathPatterns() {
+  const cfg = getConfig();
+  const projectPatterns = cfg && Array.isArray(cfg.test_path_patterns) ? cfg.test_path_patterns : [];
+  const all = [..._DEFAULT_TEST_PATH_PATTERNS, ...projectPatterns.filter(s => typeof s === "string" && s.length > 0)];
+  return all.map(p => {
+    try { return new RegExp(p); } catch { return null; }
+  }).filter(Boolean);
+}
+
+function _isTestPathNode(node, patterns) {
+  if (!node || typeof node.source_file !== "string" || !node.source_file) return false;
+  const src = node.source_file;
+  for (const re of patterns) {
+    if (re.test(src)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1807,9 +1931,11 @@ function run(subcommand, args) {
   };
 
   switch (subcommand) {
-    case "status":
-      json(status());
+    case "status": {
+      const full = args.includes("--full");
+      json(status({ full }));
       return 0;
+    }
     case "freshness":
       json(freshness());
       return 0;
