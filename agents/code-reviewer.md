@@ -382,11 +382,16 @@ Then proceed with the analysis. As your LAST Write, replace the sidecar with the
   "score": 87,                                              // optional, matches the ## Score section
   "critical_count": 0,                                      // optional, count of Critical findings
   "important_count": 2,                                     // optional, count of Important findings
+  "self_flagged_uncertainties": [                           // proactive uncertainty signal — empty = no uncertainties
+    {"file": "src/foo.ts", "line": 42, "concern": "rubric axis E coverage uncertain — caller chain too deep to trace cleanly", "severity": "med"}
+  ],
   "timestamp": "<ISO 8601 of final write>"
 }
 ```
 
 The `verdict` field in the JSON MUST agree with the `## Verdict` value in the markdown. Mismatches surface as state-validation warnings.
+
+**`self_flagged_uncertainties`** is your proactive uncertainty signal — populate when you're materially unsure about a finding's severity, an axis's coverage, an ADR-compliance claim, or an architectural read that didn't crystallize. **Always include the field — use `[]` for "no uncertainties."** When empty AND status is DONE, the orchestrator's verifier short-circuit gate (`state assert-verifier-short-circuit --agent=code-reviewer`) skips the verifier LLM dispatch entirely — saving 3-5K tokens per clean iteration. When non-empty, the verifier re-dispatches with structured revisions mapping each flagged uncertainty to a coverage check. Empty is a meaningful negative claim that you actively considered uncertainty and found none — don't under-report just to skip the verifier.
 
 Now write `.devt/state/review.md` with:
 

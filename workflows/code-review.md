@@ -687,6 +687,32 @@ fi
 
 When this gate trips, surface the substance reason to the user and recommend `/devt:review` re-dispatch — verifier loop cannot recover from an empty upstream artifact.
 
+**Verifier short-circuit gate**: when the code-reviewer's review.json carries `status=DONE` AND `self_flagged_uncertainties=[]`, skip the verifier LLM dispatch entirely. The agent itself self-certified no coverage gaps; re-grading clean self-reports burns 3-5K tokens per iteration with no signal. This gate is consumer-aware: it only short-circuits when the upstream agent provided BOTH substance signals (status=DONE/DONE_WITH_CONCERNS AND empty self_flagged_uncertainties). Opus 4.8 made empty self-flags a meaningful negative claim — the model proactively flags uncertainty at far higher fidelity than prior versions, so empty IS a signal rather than a non-signal.
+
+```bash
+SHORT_CIRCUIT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer)
+if echo "$SHORT_CIRCUIT" | jq -e '.short_circuit == true' >/dev/null 2>&1; then
+  # Write a synthetic verification.json so the downstream assert-verifier-ran
+  # gate accepts the skip. Audit trail preserved via source=short_circuit.
+  cat > .devt/state/verification.json <<EOF
+{
+  "status": "DONE",
+  "verdict": "PASS",
+  "agent": "verifier",
+  "source": "short_circuit",
+  "reason": "$(echo "$SHORT_CIRCUIT" | jq -r '.reason')",
+  "sidecar_consulted": "$(echo "$SHORT_CIRCUIT" | jq -r '.sidecar_path')",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=DONE verdict=PASS
+  echo "VERIFIER SHORT-CIRCUITED: $(echo "$SHORT_CIRCUIT" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+If short-circuit fires, the verify step is complete — skip the rest of this step and proceed to `present_findings`. Otherwise the verifier LLM dispatches normally below.
+
 **Orchestrator-prep — read cached memory signal**. Cached at context_init; re-read here so the verifier doesn't burn 3–4 per-doc `memory query` round trips on its initial scan:
 
 ```bash

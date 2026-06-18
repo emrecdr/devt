@@ -12,9 +12,10 @@
  * Update this constant when Anthropic releases new model versions.
  */
 const MODEL_ALIAS_MAP = {
-  opus: "claude-opus-4-6",
+  opus: "claude-opus-4-8",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",
+  fable: "claude-fable-5",
 };
 
 /**
@@ -77,7 +78,75 @@ const PROFILES = {
   },
 };
 
+/**
+ * Per-agent effort settings parallel to PROFILES. Calibrated to agent role:
+ *   - architect/verifier always benefit from high (design + rubric grading)
+ *   - code-reviewer/debugger benefit from medium-to-high (analysis-heavy)
+ *   - programmer/researcher medium for balanced (synthesis tasks)
+ *   - retro/tester/docs-writer/curator can drop to low for budget (mechanical)
+ *
+ * Why this exists: Opus 4.8 flipped the API-level effort default from `medium`
+ * to `high`. Without explicit per-agent settings, every devt dispatch silently
+ * spends 30-50% more tokens than necessary. Operators consuming these via
+ * dispatch envelopes (effort="{efforts.<agent>}") opt out of the silent
+ * regression on a per-role basis.
+ *
+ * effort values follow Anthropic's Claude API surface: `low`, `medium`, `high`
+ * (plus `inherit` for the inherit profile, which defers to the caller's env).
+ */
+const EFFORTS = {
+  quality: {
+    programmer: "high",
+    tester: "medium",
+    "code-reviewer": "high",
+    "docs-writer": "medium",
+    architect: "high",
+    retro: "medium",
+    curator: "medium",
+    debugger: "high",
+    verifier: "high",
+    researcher: "high",
+  },
+  balanced: {
+    programmer: "medium",
+    tester: "low",
+    "code-reviewer": "medium",
+    "docs-writer": "low",
+    architect: "high",
+    retro: "medium",
+    curator: "low",
+    debugger: "medium",
+    verifier: "high",
+    researcher: "medium",
+  },
+  budget: {
+    programmer: "low",
+    tester: "low",
+    "code-reviewer": "low",
+    "docs-writer": "low",
+    architect: "medium",
+    retro: "low",
+    curator: "low",
+    debugger: "low",
+    verifier: "medium",
+    researcher: "low",
+  },
+  inherit: {
+    programmer: "inherit",
+    tester: "inherit",
+    "code-reviewer": "inherit",
+    "docs-writer": "inherit",
+    architect: "inherit",
+    retro: "inherit",
+    curator: "inherit",
+    debugger: "inherit",
+    verifier: "inherit",
+    researcher: "inherit",
+  },
+};
+
 const VALID_AGENTS = new Set(Object.keys(PROFILES.balanced));
+const VALID_EFFORTS = new Set(["low", "medium", "high", "inherit"]);
 
 function getModels(profileName, overrides) {
   const profile = PROFILES[profileName];
@@ -101,6 +170,42 @@ function getModels(profileName, overrides) {
         JSON.stringify({
           warning: `Unknown agent(s) in model_overrides: ${warnings.join(", ")}. Valid agents: ${[...VALID_AGENTS].join(", ")}`,
         }) + "\n",
+      );
+    }
+    return { ...profile, ...validOverrides };
+  }
+  return { ...profile };
+}
+
+/**
+ * Resolve per-agent effort settings for a profile. Mirrors getModels()'s shape:
+ * accepts optional overrides via .devt/config.json::effort_overrides.
+ */
+function getEfforts(profileName, overrides) {
+  const profile = EFFORTS[profileName];
+  if (!profile) {
+    throw new Error(
+      `Unknown profile: ${profileName}. Available: ${Object.keys(EFFORTS).join(", ")}`,
+    );
+  }
+  if (overrides && typeof overrides === "object") {
+    const warnings = [];
+    const validOverrides = {};
+    for (const key of Object.keys(overrides)) {
+      if (!VALID_AGENTS.has(key)) {
+        warnings.push(`unknown agent: ${key}`);
+        continue;
+      }
+      const v = overrides[key];
+      if (typeof v !== "string" || !VALID_EFFORTS.has(v)) {
+        warnings.push(`invalid effort for ${key}: ${v} (valid: low, medium, high, inherit)`);
+        continue;
+      }
+      validOverrides[key] = v;
+    }
+    if (warnings.length > 0) {
+      process.stderr.write(
+        JSON.stringify({ warning: `effort_overrides issues: ${warnings.join("; ")}` }) + "\n",
       );
     }
     return { ...profile, ...validOverrides };
@@ -150,11 +255,19 @@ function run(subcommand, args) {
       const profileName = args[0] || "balanced";
       return { table: formatAsTable(getModels(profileName)) };
     }
+    case "efforts": {
+      const profileName = args[0] || "balanced";
+      return getEfforts(profileName);
+    }
+    case "efforts-table": {
+      const profileName = args[0] || "balanced";
+      return { table: formatAsTable(getEfforts(profileName)) };
+    }
     default:
       throw new Error(
-        `Unknown models subcommand: ${subcommand}. Use: get, resolve, list, table`,
+        `Unknown models subcommand: ${subcommand}. Use: get, resolve, list, table, efforts, efforts-table`,
       );
   }
 }
 
-module.exports = { run, getModels, resolveModelId, resolveAll, formatAsTable, PROFILES, MODEL_ALIAS_MAP };
+module.exports = { run, getModels, getEfforts, resolveModelId, resolveAll, formatAsTable, PROFILES, EFFORTS, MODEL_ALIAS_MAP };

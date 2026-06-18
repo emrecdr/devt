@@ -475,13 +475,16 @@ If reuse-analysis.md was inapplicable (no candidates, graphify unavailable), not
     "lint":      {"ran": true, "passed": true,  "errors": 0, "warnings": 0},
     "typecheck": {"ran": true, "passed": true,  "errors": 0},
     "test":      {"ran": true, "passed": true,  "passed_count": 0, "failed_count": 0, "skipped_count": 0}
-  }
+  },
+  "self_flagged_uncertainties": [{"file": "src/foo.ts", "line": 42, "concern": "edge case X may not be handled", "severity": "med"}]
 }
 ```
 
 The `verdict` is your own assessment of whether the implementation matches the spec/plan — separate from `status` which is about whether you finished the work. Use `requirements_covered` / `requirements_missing` to declare which numbered requirements from `<scope_requirements>` you addressed; the verifier reads these directly for coverage checks instead of parsing the markdown narrative.
 
 Populate `gates` from the actual command outputs you captured in `<step name="validate">` and `<self_check>` — the deterministic grader inspects these fields to decide whether to dispatch the LLM verifier or short-circuit straight back to a re-dispatch. For each subkey, set `ran: false` if the gate doesn't apply to this project (e.g. no linter configured); never invent green values. Omit the entire `gates` block only when running outside a workflow that exercises quality gates.
+
+**`self_flagged_uncertainties`** is your proactive uncertainty signal — populate when materially unsure (coverage gap, untested edge case, assumption that may not hold). Always include the field; `[]` is a meaningful negative claim that you actively considered uncertainty and found none. When empty AND status=DONE, the verifier short-circuit gate (`state assert-verifier-short-circuit --agent=programmer`) skips the verifier LLM dispatch (saves 3-5K tokens). When non-empty, verifier re-dispatches with structured revisions per item.
 
 </output_format>
 

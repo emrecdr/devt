@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.100.0] - 2026-06-18
+
+### Cal #30.2 — devt absorbs Opus 4.8 (M1+M2+M7, 3 fixes)
+
+Opus 4.8 introduced three behavior changes that demanded devt-side absorption: (1) effort default flipped from medium to high — silent token regression on every dispatch; (2) 4x reduction in silent code flaws with proactive uncertainty flagging — agents now self-report uncertainty far more reliably; (3) refusal responses carry structured `stop_details.category` — categorical routing now possible. This cal absorbs all three with three small validated fixes plus per-K-gate enforcement.
+
+**M1 — Effort schema in model profiles** (`bin/modules/model-profiles.cjs`, `bin/modules/dispatch.cjs`). New `EFFORTS` map parallel to `PROFILES`, calibrated per agent role: architect/verifier=high (design + rubric grading), code-reviewer/debugger=medium (analysis), programmer/researcher=medium (synthesis), retro/tester/docs-writer/curator=low for budget profile (mechanical). New `getEfforts(profileName, overrides)` function with `effort_overrides` config support. New CLI subcommands `models efforts` and `models efforts-table`. Dispatch substitution adds `{efforts.<agent>}` parallel to `{models.<agent>}` for envelope wiring. Also updates `MODEL_ALIAS_MAP`: `opus → claude-opus-4-8` (was 4-6), adds `fable → claude-fable-5`. Smoke gate **K141** (architect=high, tester=low, opus resolves to claude-opus-4-8).
+
+**M2 — Verifier-hardening: sidecar self-flag schema + short-circuit gate** (`bin/modules/state.cjs`, `agents/programmer.md`, `agents/tester.md`, `agents/code-reviewer.md`, `workflows/code-review.md`). New CLI `node bin/devt-tools.cjs state assert-verifier-short-circuit --agent=<name>` reads upstream sidecar (impl-summary.json / test-summary.json / review.json) and returns `{short_circuit, reason, sidecar_path, self_flagged_count}`. Short-circuit fires when: (a) sidecar exists + parseable, (b) status is DONE or DONE_WITH_CONCERNS, (c) `self_flagged_uncertainties[]` is empty. When fired, workflows/code-review.md verify step writes a synthetic `verification.json` with `source: short_circuit` (audit trail preserved) and skips the verifier LLM dispatch — saves 3-5K tokens per clean iteration. The existing `assert-verifier-ran` gate accepts the synthetic verification.json so downstream contracts hold. Sidecar schema documentation added to all three writer agents with explicit prompt: "Always include the field — use `[]` for no uncertainties. Empty IS a meaningful negative claim that you actively considered uncertainty and found none." Smoke gates **K142** (short-circuit fires on clean sidecar; blocks on non-empty self_flags AND on PARTIAL status), **K143** (self_flag prompt language present in all three writer agents).
+
+**M7 — Refusal stop_details category routing** (`hooks/task-truncation-detector.sh`). Extends opportunistic stop_reason capture (existing) to also read `stop_details.category` (Opus 4.7+). Four categories routed with category-specific actionable hints: `unclear_instruction` → re-dispatch with clarification block; `policy_violation` → log + DO NOT retry (terminal); `content_safety` → escalate to user; generic fallback for unknown categories. Refusal hints prepend the advisory (highest-priority signal) and bypass the cliff-fired short-circuit so refusals always surface. Forensic record now carries `stop_category` and `refusal_routed` fields. Smoke gate **K144** (unclear_instruction routed; end_turn does NOT trigger refusal hint).
+
+**Drift-guard stack now 51-deep K94-K144.** CLAUDE.md + README updated.
+
+**Cal #30.3 candidates (graphify signal quality, ships next per Option E roadmap)**: F1 (MCP get_neighbors max_bytes), F2 (getNeighbors noise filter + test-path heuristic), F4 (graphify status counts), F5 (D1 docstring rider).
+
+**Cal #30.4** (telemetry calibration: M4) and **cal #30.5** (`dispatch run-lanes` with 4 directive shapes: M3) carried over.
+
+**Validation**: smoke (target 887/887), graphify 37/37, locking 3/3.
+
 ## [0.99.0] - 2026-06-18
 
 ### Cal #30.1 — unblock stale workflows + stop deceiving operators (urgency-first ordering, 2 fixes from greenfield receipt #4)

@@ -350,9 +350,14 @@ Write `.devt/state/test-summary.md` with:
   ],
   "concerns": [
     {"severity": "high|med|low", "msg": "...", "ref": "[Rule N - Type]"}
+  ],
+  "self_flagged_uncertainties": [
+    {"file": "tests/foo.test.ts", "line": 88, "concern": "edge case Y not yet covered", "severity": "med"}
   ]
 }
 ```
+
+**`self_flagged_uncertainties`** is your proactive uncertainty signal — populate when you're materially unsure about test coverage, flakiness, or whether an assertion catches the actual failure mode. **Always include the field — use `[]` for "no uncertainties."** When empty AND status is DONE, the orchestrator's verifier short-circuit gate (`state assert-verifier-short-circuit --agent=tester`) skips the verifier LLM dispatch entirely. When non-empty, each entry guides verifier re-dispatch revisions. Don't under-report — empty is a meaningful claim that you considered uncertainty and found none.
 
 The `verdict` is your assessment of whether the test run was successful (`PASS` = all green, `FAIL` = one or more failures, `INDETERMINATE` = test runner crashed / couldn't determine). It's separate from `status` which is about whether YOU finished the tester work (`DONE` = test suite ran to completion, `BLOCKED` = couldn't run the tests at all, `NEEDS_CONTEXT` = missing info to write tests, `DONE_WITH_CONCERNS` = ran but flagged production-code issues per Rules 1-3). Populate `tests.{added,passed,failed,skipped}_count` from the actual test-runner output — these counts feed the Phase 3 deterministic grader directly.
 

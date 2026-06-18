@@ -13565,6 +13565,69 @@ else
   fail "K140: matcher behavior wrong — correlation_id silent=$NEW_WARNINGS_A (expected 0); no-envelope flagged=$NEW_WARNINGS_B (expected >=1)"
 fi
 
+# K141: model profiles carry per-agent effort settings (M1, cal #30.2).
+# Opus 4.8's default effort flipped medium→high; without explicit per-agent
+# settings, every devt dispatch silently spends 30-50% more tokens. EFFORTS
+# map + getEfforts() + {efforts.X} dispatch substitution surfaces the lever.
+K141_RESULT=$(node "$ROOT/bin/devt-tools.cjs" models efforts balanced 2>/dev/null)
+K141_HAS_ARCHITECT=$(echo "$K141_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.architect==='high'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K141_HAS_TESTER=$(echo "$K141_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.tester==='low'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+K141_OPUS_RESOLVED=$(node -e 'const {resolveModelId}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(resolveModelId("opus")==="claude-opus-4-8"?"1":"0");' 2>/dev/null)
+if [ "${K141_HAS_ARCHITECT:-0}" = "1" ] && [ "${K141_HAS_TESTER:-0}" = "1" ] && [ "${K141_OPUS_RESOLVED:-0}" = "1" ]; then
+  pass "K141: model profiles carry per-agent effort (architect=high, tester=low) + opus alias resolves to claude-opus-4-8"
+else
+  fail "K141: effort schema broken — architect_high=$K141_HAS_ARCHITECT tester_low=$K141_HAS_TESTER opus_resolved=$K141_OPUS_RESOLVED"
+fi
+
+# K142: state assert-verifier-short-circuit fires on substantive clean sidecar.
+# Field motivation: Opus 4.8 self-flagging makes empty self_flagged_uncertainties
+# a meaningful negative claim — verifier LLM dispatch can be skipped when the
+# upstream agent self-certified no coverage gaps.
+K142_TMP=$(mktemp -d)
+mkdir -p "$K142_TMP/.devt/state"
+echo '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer","self_flagged_uncertainties":[]}' > "$K142_TMP/.devt/state/review.json"
+K142_CLEAN=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).short_circuit===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# Negative case: non-empty self_flagged_uncertainties → MUST NOT short-circuit
+echo '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer","self_flagged_uncertainties":[{"file":"x.ts","line":1,"concern":"y","severity":"high"}]}' > "$K142_TMP/.devt/state/review.json"
+K142_FLAGGED=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).short_circuit===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# PARTIAL status MUST NOT short-circuit (verifier needs to judge)
+echo '{"status":"PARTIAL","verdict":"INDETERMINATE","agent":"code-reviewer","self_flagged_uncertainties":[]}' > "$K142_TMP/.devt/state/review.json"
+K142_PARTIAL=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).short_circuit===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+rm -rf "$K142_TMP"
+if [ "${K142_CLEAN:-0}" = "1" ] && [ "${K142_FLAGGED:-1}" = "0" ] && [ "${K142_PARTIAL:-1}" = "0" ]; then
+  pass "K142: assert-verifier-short-circuit fires on substantive clean sidecar (DONE + empty self_flags); blocks on non-empty self_flags AND on PARTIAL status"
+else
+  fail "K142: short-circuit broken — clean=$K142_CLEAN flagged=$K142_FLAGGED partial=$K142_PARTIAL"
+fi
+
+# K143: M2 sidecar schema documentation present in agent files.
+# Locks the prompt language that asks agents to populate self_flagged_uncertainties.
+K143_PROG=$(/usr/bin/grep -c "self_flagged_uncertainties" agents/programmer.md 2>/dev/null || true)
+K143_TESTER=$(/usr/bin/grep -c "self_flagged_uncertainties" agents/tester.md 2>/dev/null || true)
+K143_REVIEWER=$(/usr/bin/grep -c "self_flagged_uncertainties" agents/code-reviewer.md 2>/dev/null || true)
+if [ "${K143_PROG:-0}" -ge 1 ] && [ "${K143_TESTER:-0}" -ge 1 ] && [ "${K143_REVIEWER:-0}" -ge 1 ]; then
+  pass "K143: self_flagged_uncertainties prompt language present in programmer.md + tester.md + code-reviewer.md"
+else
+  fail "K143: self-flag prompts missing — programmer=$K143_PROG tester=$K143_TESTER reviewer=$K143_REVIEWER"
+fi
+
+# K144: M7 stop_details.category routing — hook surfaces category-specific
+# refusal hints. Field-evidenced gap: prior to M7 devt only captured stop_reason
+# (refusal vs end_turn) but not the structured stop_details.category that Opus 4.7+
+# exposes — so all refusals were undifferentiated noise. M7 routes each category.
+K144_INPUT='{"tool_name":"Task","tool_input":{"prompt":"test","subagent_type":"devt:programmer"},"tool_response":{"stop_reason":"refusal","stop_details":{"category":"unclear_instruction"}}}'
+K144_OUT=$(echo "$K144_INPUT" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>/dev/null || true)
+K144_HAS_HINT=$(echo "$K144_OUT" | /usr/bin/grep -c "devt refusal=unclear_instruction" || true)
+# Negative case: stop_reason=end_turn → no refusal hint emitted
+K144_INPUT_OK='{"tool_name":"Task","tool_input":{"prompt":"test","subagent_type":"devt:programmer"},"tool_response":{"stop_reason":"end_turn"}}'
+K144_OUT_OK=$(echo "$K144_INPUT_OK" | bash "$ROOT/hooks/task-truncation-detector.sh" 2>/dev/null || true)
+K144_NO_HINT=$(echo "$K144_OUT_OK" | /usr/bin/grep -c "devt refusal=" || true)
+if [ "${K144_HAS_HINT:-0}" -ge 1 ] && [ "${K144_NO_HINT:-1}" = "0" ]; then
+  pass "K144: task-truncation-detector surfaces category-specific refusal hint (unclear_instruction routed); end_turn does NOT trigger refusal hint"
+else
+  fail "K144: refusal routing broken — has_hint=$K144_HAS_HINT no_hint_on_end_turn=$K144_NO_HINT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

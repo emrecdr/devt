@@ -303,6 +303,14 @@ function applySubstitutions(template, subs) {
     const v = subs.models && subs.models[key];
     return v !== undefined ? v : m;
   });
+  // {efforts.<agent>} mirrors {models.<agent>} — per-agent effort level
+  // (low/medium/high/inherit) consumed by workflow Task() invocations.
+  // Stops Opus 4.8's silent token regression where the API default flipped
+  // from medium to high; explicit per-role settings opt out per agent profile.
+  out = out.replace(/\{efforts\.([\w-]+)\}/g, (m, key) => {
+    const v = subs.efforts && subs.efforts[key];
+    return v !== undefined ? v : m;
+  });
 
   // Simple data refs. Each key maps 1:1 to a placeholder shape `{key}`.
   // Three distinct task-description aliases all map to state.task — the
@@ -339,7 +347,7 @@ function buildSubstitutionTable(agent) {
   const { findProjectRoot } = require("./config.cjs");
   const { getMergedConfig } = require("./config.cjs");
   const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars } = require("./init.cjs");
-  const { getModels } = require("./model-profiles.cjs");
+  const { getModels, getEfforts } = require("./model-profiles.cjs");
   const state = require("./state.cjs");
 
   let projectRoot;
@@ -348,6 +356,7 @@ function buildSubstitutionTable(agent) {
 
   const config = getMergedConfig();
   const models = getModels(config.model_profile || "balanced", config.model_overrides);
+  const efforts = getEfforts(config.model_profile || "balanced", config.effort_overrides);
 
   // loadGoverningRules / loadInlineGuardrails return { content, ... } shapes;
   // we hoist `content` to the top level so the regex substitution can index
@@ -397,6 +406,7 @@ function buildSubstitutionTable(agent) {
     provenance_protocol: provenanceProtocol,
     rubrics: config.rubrics || {},
     models: models || {},
+    efforts: efforts || {},
     scope_trust_json: s.scope_trust_json,
     scope_hint_json: s.scope_hint_json,
     memory_signal_json: s.memory_signal_json,

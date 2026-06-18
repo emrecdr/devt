@@ -119,6 +119,32 @@ node -e "
     stopReason = resp.stop_reason;
   }
 
+  // M7 — opportunistic stop_details.category capture (Opus 4.7+). When the
+  // model refuses or otherwise halts with a structured category, capture
+  // it as a structured signal. Categories observed: policy_violation,
+  // unclear_instruction, content_safety, recitation. Surfaces a routing
+  // hint to the orchestrator when present + category-specific:
+  //   - unclear_instruction -> suggest re-dispatch with clarification
+  //   - policy_violation    -> log + do NOT retry (terminal)
+  //   - content_safety      -> escalate to user via additionalContext
+  let stopCategory = null;
+  let refusalHint = null;
+  if (resp && typeof resp === 'object' && resp.stop_details && typeof resp.stop_details === 'object') {
+    if (typeof resp.stop_details.category === 'string' && resp.stop_details.category.length > 0) {
+      stopCategory = resp.stop_details.category;
+      const cat = stopCategory.toLowerCase();
+      if (cat === 'unclear_instruction') {
+        refusalHint = '[devt refusal=unclear_instruction] Re-dispatch the agent with an explicit clarification block — the prior prompt was ambiguous to the model. Consider adding concrete examples or sharpening the success criteria.';
+      } else if (cat === 'policy_violation') {
+        refusalHint = '[devt refusal=policy_violation] Terminal refusal — do NOT retry with the same prompt. The request shape conflicts with model policy; rephrase the task or split into sub-tasks that avoid the policy boundary.';
+      } else if (cat === 'content_safety') {
+        refusalHint = '[devt refusal=content_safety] Content safety refusal — escalating to user. The task involves content the model declines to produce. Operator decision required: rephrase or abort.';
+      } else {
+        refusalHint = '[devt refusal=' + stopCategory + '] Refusal with structured category. Inspect the response payload for category-specific guidance.';
+      }
+    }
+  }
+
   // Mid-task language
   // backup signal. Catches agents that hit a budget wall and returned a short
   // continuation message ('Now B.5', 'continuing with phase 2', 'paused after
@@ -170,7 +196,7 @@ node -e "
     } catch { /* read failure must not break hook */ }
   }
 
-  if (!cliffFired && !logAll && !rawDispatchHint) process.exit(0);
+  if (!cliffFired && !logAll && !rawDispatchHint && !refusalHint) process.exit(0);
 
   // Forensic append — best-effort, never fails the hook.
   if (stateDir) {
@@ -201,6 +227,8 @@ node -e "
         low_output: lowOutput,
         low_output_threshold: LOW_OUTPUT_THRESHOLD,
         stop_reason: stopReason,
+        stop_category: stopCategory,
+        refusal_routed: refusalHint ? true : false,
         mid_task_language: midTaskLanguage,
       });
       // stateDir is derived from a process.cwd() walk locating .devt/state — not user input.
@@ -242,6 +270,13 @@ node -e "
   // (or stand alone as the entire advisory when no cliff fired).
   if (rawDispatchHint) {
     advisory = advisory ? advisory + '\n\n' + rawDispatchHint : rawDispatchHint;
+  }
+
+  // M7: refusal routing — append/replace advisory with category-specific
+  // refusal guidance. Refusals are always actionable signal — surfaces first
+  // so the operator sees it regardless of other cliffs that fired.
+  if (refusalHint) {
+    advisory = advisory ? refusalHint + '\n\n' + advisory : refusalHint;
   }
 
   const output = JSON.stringify({

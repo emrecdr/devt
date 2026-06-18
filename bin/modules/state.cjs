@@ -2377,6 +2377,82 @@ function assertVerifierRan() {
   };
 }
 
+// Map from upstream-agent to the sidecar that carries its self-flagged
+// uncertainty signal. Verifier short-circuit reads this sidecar to decide
+// whether the verifier LLM dispatch can be skipped — when the upstream agent
+// emitted Status: DONE AND self_flagged_uncertainties[] is empty, the agent
+// itself is the strongest signal that there are no coverage gaps worth a
+// re-grade. Opus 4.8 made this signal load-bearing: the model self-reports
+// uncertainty far more reliably than prior versions, so empty self-flags
+// from a substantive Opus 4.8 agent IS a meaningful negative claim.
+const SELF_FLAG_SIDECAR_FOR_AGENT = Object.freeze({
+  programmer: "impl-summary.json",
+  tester: "test-summary.json",
+  "code-reviewer": "review.json",
+});
+
+/**
+ * Verifier short-circuit gate. Returns {short_circuit, reason, sidecar_path,
+ * self_flagged_count}. When the upstream agent's sidecar is substantive (status
+ * DONE) AND self_flagged_uncertainties[] is empty, skip the verifier LLM
+ * dispatch — re-grading work the agent already self-certified saves 3-5K
+ * tokens per clean iteration. Verifier still runs when:
+ *   - sidecar absent or unparseable (defensive — verifier is the safety net)
+ *   - sidecar status != DONE (PARTIAL/BLOCKED need verifier judgment)
+ *   - self_flagged_uncertainties[] non-empty (re-dispatch with structured
+ *     revisions[] mapping each flagged uncertainty to a coverage gap)
+ *
+ * Field motivation: Opus 4.8 is 4x less likely than 4.7 to silently ship
+ * code defects; the model now proactively flags issues. devt's verifier was
+ * burning tokens re-grading work where the agent itself reported "no gaps."
+ */
+function assertVerifierShortCircuit({ agent } = {}) {
+  if (!agent || typeof agent !== "string") {
+    return { short_circuit: false, reason: "missing --agent argument (required)" };
+  }
+  const sidecarName = SELF_FLAG_SIDECAR_FOR_AGENT[agent];
+  if (!sidecarName) {
+    return { short_circuit: false, reason: `agent '${agent}' has no self-flag sidecar registered (valid: ${Object.keys(SELF_FLAG_SIDECAR_FOR_AGENT).join(", ")})` };
+  }
+  const sidecarPath = path.join(getStateDir(), sidecarName);
+  if (!fs.existsSync(sidecarPath)) {
+    return { short_circuit: false, reason: `${sidecarName} absent — verifier must run as safety net`, sidecar_path: sidecarPath };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+  } catch (e) {
+    return { short_circuit: false, reason: `${sidecarName} unparseable: ${e.message} — verifier must run`, sidecar_path: sidecarPath };
+  }
+  const status = parsed && parsed.status;
+  if (status !== "DONE" && status !== "DONE_WITH_CONCERNS") {
+    return {
+      short_circuit: false,
+      reason: `${sidecarName} status='${status}' (not DONE/DONE_WITH_CONCERNS) — verifier judgment required`,
+      sidecar_path: sidecarPath,
+      sidecar_status: status,
+    };
+  }
+  const flagged = Array.isArray(parsed.self_flagged_uncertainties) ? parsed.self_flagged_uncertainties : [];
+  if (flagged.length > 0) {
+    return {
+      short_circuit: false,
+      reason: `${sidecarName} self_flagged_uncertainties=${flagged.length} — verifier should re-dispatch with structured revisions mapping each flagged item`,
+      sidecar_path: sidecarPath,
+      sidecar_status: status,
+      self_flagged_count: flagged.length,
+      self_flagged_uncertainties: flagged,
+    };
+  }
+  return {
+    short_circuit: true,
+    reason: `${sidecarName} status='${status}' AND self_flagged_uncertainties is empty — agent self-certified no coverage gaps; verifier LLM dispatch may be skipped to save tokens`,
+    sidecar_path: sidecarPath,
+    sidecar_status: status,
+    self_flagged_count: 0,
+  };
+}
+
 // Verifier-axis-coverage gate. Without this, a verifier can walk rubric
 // axes A–G and stop, silently skipping axis H ("## Axis H — Dispatch warnings
 // acknowledgment"). Same [[CON-001]] substance-vs-form failure mode: the
@@ -5665,6 +5741,11 @@ function run(subcommand, args) {
     }
     case "assert-verifier-graded-all-axes":
       return traceGate("assert-verifier-graded-all-axes", () => assertVerifierGradedAllAxes());
+    case "assert-verifier-short-circuit": {
+      const agentArg = args.find(a => a.startsWith("--agent="));
+      const agent = agentArg ? agentArg.slice("--agent=".length) : "";
+      return assertVerifierShortCircuit({ agent });
+    }
     case "assert-verifier-ran":
       return traceGate("assert-verifier-ran", () => assertVerifierRan());
     case "assert-scope-check-handled":
