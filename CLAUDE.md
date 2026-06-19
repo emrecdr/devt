@@ -36,7 +36,6 @@ The `DEVT_HOOK_PROFILE` env var (default `standard`) controls which hooks fire:
 | `pre-flight-guard.sh` | – | ✓ | ✓ |
 | `memory-auto-index.sh` | – | ✓ | ✓ |
 | `bash-guard.sh` | – | ✓ | ✓ |
-| `dispatch-scope-guard.sh` | – | ✓ | ✓ |
 | `dispatch-hygiene-guard.sh` | – | ✓ | ✓ |
 | `task-truncation-detector.sh` | – | ✓ | ✓ |
 | `context-monitor.sh` | – | – | ✓ |
