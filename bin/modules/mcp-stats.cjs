@@ -373,4 +373,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration, getWorkflowCreatedAt, normalizeToolName };
+module.exports = { run, loadEntries, summarize, pruneOlderThan, getTracePath, parseDuration, getWorkflowCreatedAt, normalizeToolName, readJsonlLines, percentile };

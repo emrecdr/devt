@@ -2378,18 +2378,23 @@ function assertVerifierRan() {
 }
 
 // Map from upstream-agent to the sidecar that carries its self-flagged
-// uncertainty signal. Verifier short-circuit reads this sidecar to decide
-// whether the verifier LLM dispatch can be skipped — when the upstream agent
-// emitted Status: DONE AND self_flagged_uncertainties[] is empty, the agent
-// itself is the strongest signal that there are no coverage gaps worth a
-// re-grade. Opus 4.8 made this signal load-bearing: the model self-reports
-// uncertainty far more reliably than prior versions, so empty self-flags
-// from a substantive Opus 4.8 agent IS a meaningful negative claim.
-const SELF_FLAG_SIDECAR_FOR_AGENT = Object.freeze({
-  programmer: "impl-summary.json",
-  tester: "test-summary.json",
-  "code-reviewer": "review.json",
-});
+// uncertainty signal. Derived by inverting JSON_SIDECAR_SCHEMAS::agent so
+// adding a new self-flag-bearing agent requires editing only the schema
+// registry (single source of truth). Excludes verifier itself — verifier's
+// own sidecar isn't the upstream consulted by short-circuit logic.
+// Verifier short-circuit reads this sidecar to decide whether the verifier
+// LLM dispatch can be skipped — when the upstream agent emitted Status: DONE
+// AND self_flagged_uncertainties[] is empty, the agent itself is the
+// strongest signal that there are no coverage gaps worth a re-grade. Opus
+// 4.8 made this signal load-bearing: the model self-reports uncertainty far
+// more reliably than prior versions.
+const SELF_FLAG_SIDECAR_FOR_AGENT = Object.freeze(
+  Object.entries(JSON_SIDECAR_SCHEMAS).reduce((acc, [sidecar, schema]) => {
+    if (sidecar === "verification.json") return acc;
+    for (const agent of (schema.agent || [])) acc[agent] = sidecar;
+    return acc;
+  }, {})
+);
 
 /**
  * Verifier short-circuit gate. Returns {short_circuit, reason, sidecar_path,

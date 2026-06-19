@@ -115,11 +115,32 @@ function status(options = {}) {
  * Read graph.json's `built_at_commit` and compare to current HEAD.
  * Returns { fresh: bool, built_at: string|null, head: string|null, lag_commits: number|null }.
  */
+// Per-process memo for _freshnessForPath. Keyed on (graphPath, mtimeMs) so
+// graph rebuild invalidates the cache automatically. Without this, F4's
+// status()→freshness call spawns git rev-parse + git rev-list (up to 2x
+// 10-30ms) on EVERY status() invocation. Workflows hit status() in
+// context_init + scan-prep + several preflight checks — cumulative
+// ~20-60ms per workflow run. Module-scope cache survives the workflow.
+const _FRESHNESS_CACHE = new Map();
+
 // Inner freshness probe given an already-resolved graph.json path. Extracted
 // so status() can reuse it without recursing back through freshness()->status()
 // (the recursion previously caused spawnSync timeouts after F4 added a
 // freshness call to status()).
 function _freshnessForPath(graphPath) {
+  let mtimeKey = null;
+  try {
+    const stat = fs.statSync(graphPath);
+    mtimeKey = `${graphPath}|${stat.mtimeMs}`;
+    const cached = _FRESHNESS_CACHE.get(mtimeKey);
+    if (cached) return cached;
+  } catch { /* fall through to fresh compute; cache miss is non-fatal */ }
+  const result = _computeFreshnessForPath(graphPath);
+  if (mtimeKey) _FRESHNESS_CACHE.set(mtimeKey, result);
+  return result;
+}
+
+function _computeFreshnessForPath(graphPath) {
   // graphify emits built_at_commit as a JSON trailer (end of file) in current
   // versions; older versions emitted it near the start. Scan both head (8KB)
   // and tail (16KB) — full parse on a 50MB+ graph would dominate freshness() cost.
@@ -894,14 +915,21 @@ const _DEFAULT_TEST_PATH_PATTERNS = [
   "(^|/)conftest\\.py$",           // pytest shared fixtures
   "(^|/)src/test/",                // Java/Kotlin Maven/Gradle layout
 ];
+// Module-load compile — patterns are static. Project overrides via config
+// still compile per-call (rare path, small list).
+const _COMPILED_DEFAULT_TEST_PATH_PATTERNS = _DEFAULT_TEST_PATH_PATTERNS
+  .map(p => { try { return new RegExp(p); } catch { return null; } })
+  .filter(Boolean);
 
 function _getTestPathPatterns() {
   const cfg = getConfig();
   const projectPatterns = cfg && Array.isArray(cfg.test_path_patterns) ? cfg.test_path_patterns : [];
-  const all = [..._DEFAULT_TEST_PATH_PATTERNS, ...projectPatterns.filter(s => typeof s === "string" && s.length > 0)];
-  return all.map(p => {
-    try { return new RegExp(p); } catch { return null; }
-  }).filter(Boolean);
+  if (projectPatterns.length === 0) return _COMPILED_DEFAULT_TEST_PATH_PATTERNS;
+  const compiled = projectPatterns
+    .filter(s => typeof s === "string" && s.length > 0)
+    .map(p => { try { return new RegExp(p); } catch { return null; } })
+    .filter(Boolean);
+  return [..._COMPILED_DEFAULT_TEST_PATH_PATTERNS, ...compiled];
 }
 
 function _isTestPathNode(node, patterns) {

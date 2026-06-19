@@ -1059,15 +1059,16 @@ function run(subcommand, args) {
       // Args: [target] [--target=agent:workflow] [--partition=<file>]
       //       [--lane-N-focus=<text>]... [--base=<ref>] [--task-suffix=<file>]
       //       [--out=<dir>]
+      const flag = (name) => {
+        const a = args.find(x => x.startsWith(`--${name}=`));
+        return a ? a.slice(name.length + 3) : null;
+      };
       const positional = args.filter(a => !a.startsWith("--"));
-      const targetFlag = args.find(a => a.startsWith("--target="));
-      const target = targetFlag
-        ? targetFlag.slice("--target=".length)
-        : (positional[0] && positional[0].includes(":") ? positional[0] : "code-reviewer:code_review");
-      const partitionFlag = args.find(a => a.startsWith("--partition="));
-      const baseFlag = args.find(a => a.startsWith("--base="));
-      const suffixFlag = args.find(a => a.startsWith("--task-suffix="));
-      const outFlag = args.find(a => a.startsWith("--out="));
+      const target = flag("target")
+        || (positional[0] && positional[0].includes(":") ? positional[0] : "code-reviewer:code_review");
+      const partitionPath = flag("partition");
+      const suffixPath = flag("task-suffix");
+      const outDir = flag("out");
       // --lane-<id>-focus=<text> — parse all occurrences. The <id> segment
       // matches the lane id registered in workflow.yaml::lanes[].id.
       const focusByLane = new Map();
@@ -1078,9 +1079,8 @@ function run(subcommand, args) {
 
       // Register lanes from --partition file (if provided) BEFORE rendering.
       // File format: same YAML/JSON shape as `state register-lanes --from`.
-      if (partitionFlag) {
+      if (partitionPath) {
         try {
-          const partitionPath = partitionFlag.slice("--partition=".length);
           const stateMod = require("./state.cjs");
           const r = stateMod.registerLanesFromYaml(partitionPath);
           if (r && r.errors && r.errors.length > 0) {
@@ -1093,17 +1093,28 @@ function run(subcommand, args) {
         }
       }
 
-      // Diff base resolution mirrors workflows/code-review.md L495:
-      // --base=<ref> > $PRIMARY_BRANCH > "main".
-      const diffBase = baseFlag
-        ? baseFlag.slice("--base=".length)
-        : (process.env.PRIMARY_BRANCH || "main");
+      // Diff base resolution: --base flag > .devt/config.json::git.primary_branch
+      // (auto-detected by setup.cjs) > $PRIMARY_BRANCH env > "main". Matches
+      // preflight.cjs::L284 source ordering — operators who configured
+      // primary_branch="development" via setup get that value automatically
+      // instead of the env fallback silently shadowing the config.
+      const baseOverride = flag("base");
+      let diffBase = baseOverride;
+      if (!diffBase) {
+        try {
+          const { getMergedConfig } = require("./config.cjs");
+          const cfg = getMergedConfig();
+          if (cfg && cfg.git && typeof cfg.git.primary_branch === "string" && cfg.git.primary_branch) {
+            diffBase = cfg.git.primary_branch;
+          }
+        } catch { /* config read failure non-fatal — fall through */ }
+      }
+      if (!diffBase) diffBase = process.env.PRIMARY_BRANCH || "main";
 
       // --task-suffix=<file> — read file content for global injection.
       let taskSuffix = "";
-      if (suffixFlag) {
+      if (suffixPath) {
         try {
-          const suffixPath = suffixFlag.slice("--task-suffix=".length);
           taskSuffix = require("fs").readFileSync(suffixPath, "utf8").trim();
         } catch (e) {
           process.stderr.write(`dispatch run-lanes: --task-suffix load failed: ${e.message}\n`);
@@ -1111,7 +1122,6 @@ function run(subcommand, args) {
         }
       }
 
-      const outDir = outFlag ? outFlag.slice("--out=".length) : null;
       try {
         const result = cmdRenderLanes(target, { outDir, focusByLane, taskSuffix, diffBase });
         if (result.lane_count === 0) {
@@ -1218,15 +1228,13 @@ function cmdRenderLanes(target, options) {
     // canonical paths can't carry custom directives. These blocks let
     // `dispatch run-lanes` inject per-lane focus + global task suffix + diff
     // base WITHOUT requiring the operator to rewrite envelope prose.
-    if (options.focusByLane) {
-      const focus = options.focusByLane.get && options.focusByLane.get(lane.id);
-      if (focus) blockLines.push(`    <lane_focus>${focus}</lane_focus>`);
-    }
-    if (typeof options.taskSuffix === "string" && options.taskSuffix.length > 0) {
-      blockLines.push(`    <task_suffix>${options.taskSuffix}</task_suffix>`);
-    }
-    if (typeof options.diffBase === "string" && options.diffBase.length > 0) {
-      blockLines.push(`    <diff_base>${options.diffBase}</diff_base>`);
+    const directives = [
+      ["lane_focus", options.focusByLane && options.focusByLane.get && options.focusByLane.get(lane.id)],
+      ["task_suffix", options.taskSuffix],
+      ["diff_base", options.diffBase],
+    ];
+    for (const [tag, val] of directives) {
+      if (typeof val === "string" && val.length > 0) blockLines.push(`    <${tag}>${val}</${tag}>`);
     }
     const laneBlocks = blockLines.join("\n");
     // Inject lane context blocks right before the closing </context> tag.

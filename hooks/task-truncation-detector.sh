@@ -127,21 +127,18 @@ node -e "
   //   - unclear_instruction -> suggest re-dispatch with clarification
   //   - policy_violation    -> log + do NOT retry (terminal)
   //   - content_safety      -> escalate to user via additionalContext
+  const REFUSAL_HINTS = {
+    unclear_instruction: '[devt refusal=unclear_instruction] Re-dispatch the agent with an explicit clarification block — the prior prompt was ambiguous to the model. Consider adding concrete examples or sharpening the success criteria.',
+    policy_violation: '[devt refusal=policy_violation] Terminal refusal — do NOT retry with the same prompt. The request shape conflicts with model policy; rephrase the task or split into sub-tasks that avoid the policy boundary.',
+    content_safety: '[devt refusal=content_safety] Content safety refusal — escalating to user. The task involves content the model declines to produce. Operator decision required: rephrase or abort.',
+  };
   let stopCategory = null;
   let refusalHint = null;
   if (resp && typeof resp === 'object' && resp.stop_details && typeof resp.stop_details === 'object') {
     if (typeof resp.stop_details.category === 'string' && resp.stop_details.category.length > 0) {
       stopCategory = resp.stop_details.category;
-      const cat = stopCategory.toLowerCase();
-      if (cat === 'unclear_instruction') {
-        refusalHint = '[devt refusal=unclear_instruction] Re-dispatch the agent with an explicit clarification block — the prior prompt was ambiguous to the model. Consider adding concrete examples or sharpening the success criteria.';
-      } else if (cat === 'policy_violation') {
-        refusalHint = '[devt refusal=policy_violation] Terminal refusal — do NOT retry with the same prompt. The request shape conflicts with model policy; rephrase the task or split into sub-tasks that avoid the policy boundary.';
-      } else if (cat === 'content_safety') {
-        refusalHint = '[devt refusal=content_safety] Content safety refusal — escalating to user. The task involves content the model declines to produce. Operator decision required: rephrase or abort.';
-      } else {
-        refusalHint = '[devt refusal=' + stopCategory + '] Refusal with structured category. Inspect the response payload for category-specific guidance.';
-      }
+      refusalHint = REFUSAL_HINTS[stopCategory.toLowerCase()]
+        || ('[devt refusal=' + stopCategory + '] Refusal with structured category. Inspect the response payload for category-specific guidance.');
     }
   }
 

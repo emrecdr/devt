@@ -26,43 +26,28 @@
  * Single-pass over each file; bounded memory (per-key aggregates only).
  */
 
-const fs = require("fs");
 const path = require("path");
 const { findProjectRoot } = require("./config.cjs");
+const { readJsonlLines, percentile } = require("./mcp-stats.cjs");
 
 function _stateDir() {
   try { return path.join(findProjectRoot(), ".devt", "state"); }
   catch { return path.join(process.cwd(), ".devt", "state"); }
 }
 
-function _readJsonlSafe(filePath) {
-  if (!fs.existsSync(filePath)) return [];
-  const text = fs.readFileSync(filePath, "utf8");
-  const out = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try { out.push(JSON.parse(trimmed)); } catch { /* skip malformed line */ }
-  }
-  return out;
-}
-
-function _percentile(sortedNums, p) {
-  if (!sortedNums.length) return null;
-  const idx = Math.min(sortedNums.length - 1, Math.floor(sortedNums.length * p));
-  return sortedNums[idx];
-}
-
+// Aggregator buffers (agg.stdin/stdout/stderr) are write-once and only consumed
+// by this function — safe to sort in place rather than clone. Saves transient
+// allocation when summarizing 3000+ stdout values across many hook scripts.
 function _summarizeNums(nums) {
   if (!nums.length) return { count: 0, min: null, p50: null, p95: null, p99: null, max: null };
-  const sorted = [...nums].sort((a, b) => a - b);
+  nums.sort((a, b) => a - b);
   return {
-    count: sorted.length,
-    min: sorted[0],
-    p50: _percentile(sorted, 0.5),
-    p95: _percentile(sorted, 0.95),
-    p99: _percentile(sorted, 0.99),
-    max: sorted[sorted.length - 1],
+    count: nums.length,
+    min: nums[0],
+    p50: percentile(nums, 50),
+    p95: percentile(nums, 95),
+    p99: percentile(nums, 99),
+    max: nums[nums.length - 1],
   };
 }
 
@@ -206,22 +191,22 @@ function calibrate(options = {}) {
   const dispatchWarnFile = path.join(dir, "dispatch-warnings.jsonl");
   const claimCheckFile = path.join(dir, "claim-check-failures.jsonl");
 
-  const hookRecords = _readJsonlSafe(hookTraceFile);
-  const gateRecords = _readJsonlSafe(gateTraceFile);
-  const dispatchRecords = _readJsonlSafe(dispatchWarnFile);
-  const claimCheckRecords = _readJsonlSafe(claimCheckFile);
+  const hook = readJsonlLines(hookTraceFile);
+  const gate = readJsonlLines(gateTraceFile);
+  const dispatch = readJsonlLines(dispatchWarnFile);
+  const claimCheck = readJsonlLines(claimCheckFile);
 
   const report = {
     sources: {
-      hook_trace: { file: hookTraceFile, records: hookRecords.length, exists: fs.existsSync(hookTraceFile) },
-      gate_trace: { file: gateTraceFile, records: gateRecords.length, exists: fs.existsSync(gateTraceFile) },
-      dispatch_warnings: { file: dispatchWarnFile, records: dispatchRecords.length, exists: fs.existsSync(dispatchWarnFile) },
-      claim_check_failures: { file: claimCheckFile, records: claimCheckRecords.length, exists: fs.existsSync(claimCheckFile) },
+      hook_trace: { file: hookTraceFile, records: hook.entries.length, exists: hook.exists, parse_errors: hook.parseErrors },
+      gate_trace: { file: gateTraceFile, records: gate.entries.length, exists: gate.exists, parse_errors: gate.parseErrors },
+      dispatch_warnings: { file: dispatchWarnFile, records: dispatch.entries.length, exists: dispatch.exists, parse_errors: dispatch.parseErrors },
+      claim_check_failures: { file: claimCheckFile, records: claimCheck.entries.length, exists: claimCheck.exists, parse_errors: claimCheck.parseErrors },
     },
-    hooks: _aggregateHookTrace(hookRecords),
-    gates: _aggregateGateTrace(gateRecords),
-    dispatch_warnings: _aggregateDispatchWarnings(dispatchRecords),
-    claim_check_failures: { total: claimCheckRecords.length },
+    hooks: _aggregateHookTrace(hook.entries),
+    gates: _aggregateGateTrace(gate.entries),
+    dispatch_warnings: _aggregateDispatchWarnings(dispatch.entries),
+    claim_check_failures: { total: claimCheck.entries.length },
   };
   report.recommendations = _generateRecommendations(report);
   return report;
