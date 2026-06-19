@@ -1047,8 +1047,94 @@ function run(subcommand, args) {
         return 2;
       }
     }
+    case "run-lanes": {
+      // M3 (cal #30.5) — ergonomic launcher for canonical-path parallel
+      // lane dispatch. Bundles register-lanes (from --partition) + render-lanes
+      // + directive injection (per-lane focus + global task suffix + diff
+      // base) into one CLI call. Per [[feedback_canonical_path_expressiveness]]:
+      // without these directive shapes, operators hand-roll the dispatch
+      // because the canonical path can't carry custom directives, and devt's
+      // hygiene gates miss legitimate fan-outs as raw_dispatch.
+      //
+      // Args: [target] [--target=agent:workflow] [--partition=<file>]
+      //       [--lane-N-focus=<text>]... [--base=<ref>] [--task-suffix=<file>]
+      //       [--out=<dir>]
+      const positional = args.filter(a => !a.startsWith("--"));
+      const targetFlag = args.find(a => a.startsWith("--target="));
+      const target = targetFlag
+        ? targetFlag.slice("--target=".length)
+        : (positional[0] && positional[0].includes(":") ? positional[0] : "code-reviewer:code_review");
+      const partitionFlag = args.find(a => a.startsWith("--partition="));
+      const baseFlag = args.find(a => a.startsWith("--base="));
+      const suffixFlag = args.find(a => a.startsWith("--task-suffix="));
+      const outFlag = args.find(a => a.startsWith("--out="));
+      // --lane-<id>-focus=<text> — parse all occurrences. The <id> segment
+      // matches the lane id registered in workflow.yaml::lanes[].id.
+      const focusByLane = new Map();
+      for (const a of args) {
+        const m = a.match(/^--lane-([\w-]+)-focus=(.*)$/);
+        if (m) focusByLane.set(m[1], m[2]);
+      }
+
+      // Register lanes from --partition file (if provided) BEFORE rendering.
+      // File format: same YAML/JSON shape as `state register-lanes --from`.
+      if (partitionFlag) {
+        try {
+          const partitionPath = partitionFlag.slice("--partition=".length);
+          const stateMod = require("./state.cjs");
+          const r = stateMod.registerLanesFromYaml(partitionPath);
+          if (r && r.errors && r.errors.length > 0) {
+            process.stderr.write(`dispatch run-lanes: partition file errors: ${r.errors.join("; ")}\n`);
+            return 2;
+          }
+        } catch (e) {
+          process.stderr.write(`dispatch run-lanes: --partition load failed: ${e.message}\n`);
+          return 2;
+        }
+      }
+
+      // Diff base resolution mirrors workflows/code-review.md L495:
+      // --base=<ref> > $PRIMARY_BRANCH > "main".
+      const diffBase = baseFlag
+        ? baseFlag.slice("--base=".length)
+        : (process.env.PRIMARY_BRANCH || "main");
+
+      // --task-suffix=<file> — read file content for global injection.
+      let taskSuffix = "";
+      if (suffixFlag) {
+        try {
+          const suffixPath = suffixFlag.slice("--task-suffix=".length);
+          taskSuffix = require("fs").readFileSync(suffixPath, "utf8").trim();
+        } catch (e) {
+          process.stderr.write(`dispatch run-lanes: --task-suffix load failed: ${e.message}\n`);
+          return 2;
+        }
+      }
+
+      const outDir = outFlag ? outFlag.slice("--out=".length) : null;
+      try {
+        const result = cmdRenderLanes(target, { outDir, focusByLane, taskSuffix, diffBase });
+        if (result.lane_count === 0) {
+          process.stderr.write(
+            `dispatch run-lanes: ${result.reason || "no lanes available"}\n` +
+            `Provide --partition=<lanes.yaml|.json> to register lanes first,\n` +
+            `or run 'state register-lane --id=L1 --scope=<X> --files=a.py,b.py' beforehand.\n`,
+          );
+          return 2;
+        }
+        if (outDir) {
+          json(result);
+        } else {
+          process.stdout.write(result.text + (result.text.endsWith("\n") ? "" : "\n"));
+        }
+        return 0;
+      } catch (err) {
+        process.stderr.write(err.message + "\n");
+        return 2;
+      }
+    }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|run|compile|decompose|warnings>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|run-lanes|run|compile|decompose|warnings>\n");
       return 2;
   }
 }
@@ -1121,12 +1207,28 @@ function cmdRenderLanes(target, options) {
       }
     } catch { /* sidecar missing or malformed — emit envelope without files block */ }
     const correlationId = `cid_${workflowIdPrefix}_${lane.id}`;
-    const laneBlocks = [
+    const blockLines = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
-    ].join("\n");
+    ];
+    // M3 (cal #30.5) — optional directive blocks. Per
+    // [[feedback_canonical_path_expressiveness]]: operators hand-roll when
+    // canonical paths can't carry custom directives. These blocks let
+    // `dispatch run-lanes` inject per-lane focus + global task suffix + diff
+    // base WITHOUT requiring the operator to rewrite envelope prose.
+    if (options.focusByLane) {
+      const focus = options.focusByLane.get && options.focusByLane.get(lane.id);
+      if (focus) blockLines.push(`    <lane_focus>${focus}</lane_focus>`);
+    }
+    if (typeof options.taskSuffix === "string" && options.taskSuffix.length > 0) {
+      blockLines.push(`    <task_suffix>${options.taskSuffix}</task_suffix>`);
+    }
+    if (typeof options.diffBase === "string" && options.diffBase.length > 0) {
+      blockLines.push(`    <diff_base>${options.diffBase}</diff_base>`);
+    }
+    const laneBlocks = blockLines.join("\n");
     // Inject lane context blocks right before the closing </context> tag.
     let injected = base.replace(/(\n\s*<\/context>)/, "\n" + laneBlocks + "$1");
     // Override the canonical "Write review to .devt/state/review.md" trailer

@@ -13758,6 +13758,70 @@ else
   fail "K150: hook_low_value recommendation not emitted on always-silent fixture"
 fi
 
+# K151-K154: M3 (cal #30.5) — `dispatch run-lanes` ergonomic launcher
+# bundles register-lanes (from --partition) + render-lanes + 4 directive
+# shapes (per-lane focus, global task suffix, diff base) into one CLI call.
+# Per [[feedback_canonical_path_expressiveness]]: without these, operators
+# hand-roll dispatches and devt loses canonical-path adoption.
+K151_TMP=$(mktemp -d)
+mkdir -p "$K151_TMP/.devt/state"
+cat > "$K151_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k151abcd-x
+workflow_type: code_review
+task: "k151 test"
+EOF
+cat > "$K151_TMP/partition.yaml" <<EOF
+lanes:
+  - id: L1
+    scope: auth
+    files: [src/auth.py]
+  - id: L2
+    scope: reports
+    files: [src/reports.py]
+EOF
+echo "Check: ADR-001 + CON-002" > "$K151_TMP/suffix.txt"
+K151_OUT=$(cd "$K151_TMP" && PRIMARY_BRANCH=develop node "$ROOT/bin/devt-tools.cjs" dispatch run-lanes \
+  --partition=partition.yaml \
+  --lane-L1-focus="trace event chain" \
+  --lane-L2-focus="check p20 coverage" \
+  --task-suffix=suffix.txt \
+  --base=feature/x 2>&1)
+rm -rf "$K151_TMP"
+
+# K151: --partition file registers lanes that render-lanes consumes
+K151_HAS_BOTH_LANES=$(echo "$K151_OUT" | /usr/bin/grep -cE "<lane_id>L[12]</lane_id>" || true)
+if [ "${K151_HAS_BOTH_LANES:-0}" = "2" ]; then
+  pass "K151: dispatch run-lanes --partition=<file> registers + renders both lanes from partition YAML"
+else
+  fail "K151: --partition did not produce both lane envelopes (got $K151_HAS_BOTH_LANES <lane_id> blocks)"
+fi
+
+# K152: --lane-N-focus injects per-lane focus into the matching envelope only
+K152_L1_FOCUS=$(echo "$K151_OUT" | /usr/bin/grep -c "<lane_focus>trace event chain</lane_focus>" || true)
+K152_L2_FOCUS=$(echo "$K151_OUT" | /usr/bin/grep -c "<lane_focus>check p20 coverage</lane_focus>" || true)
+if [ "${K152_L1_FOCUS:-0}" = "1" ] && [ "${K152_L2_FOCUS:-0}" = "1" ]; then
+  pass "K152: --lane-N-focus injects each focus directive into its matching lane envelope (no cross-contamination)"
+else
+  fail "K152: --lane-N-focus broken — L1_focus=$K152_L1_FOCUS L2_focus=$K152_L2_FOCUS"
+fi
+
+# K153: --task-suffix file content injected globally (every lane envelope)
+K153_SUFFIX_COUNT=$(echo "$K151_OUT" | /usr/bin/grep -c "<task_suffix>Check: ADR-001 + CON-002</task_suffix>" || true)
+if [ "${K153_SUFFIX_COUNT:-0}" = "2" ]; then
+  pass "K153: --task-suffix=<file> content injected into every lane envelope (2 lanes → 2 occurrences)"
+else
+  fail "K153: --task-suffix not global — got $K153_SUFFIX_COUNT occurrences, expected 2"
+fi
+
+# K154: --base=<ref> overrides PRIMARY_BRANCH env in <diff_base> block
+K154_BASE_COUNT=$(echo "$K151_OUT" | /usr/bin/grep -c "<diff_base>feature/x</diff_base>" || true)
+if [ "${K154_BASE_COUNT:-0}" = "2" ]; then
+  pass "K154: --base=<ref> overrides PRIMARY_BRANCH env in <diff_base> block (2 lanes → 2 occurrences of feature/x)"
+else
+  fail "K154: --base override broken — got $K154_BASE_COUNT occurrences of feature/x, expected 2"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

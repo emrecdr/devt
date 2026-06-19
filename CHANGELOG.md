@@ -6,6 +6,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.103.0] - 2026-06-19
+
+### Cal #30.5 — `dispatch run-lanes` canonical-path ergonomics (M3, 4 directive shapes)
+
+Closing Option E roadmap. Greenfield receipt #2 Q5 diagnosed the canonical-path adoption gap as **customization expressiveness, not step count** — operators hand-rolled lane dispatches because `register-lanes → render-lanes` couldn't inject custom directives. Receipt #4 Q10 ranked the 4 directive shapes that would flip the hand-roll decision. Cal #30.5 ships all four.
+
+**M3 — `node bin/devt-tools.cjs dispatch run-lanes`** (`bin/modules/dispatch.cjs`, `bin/modules/state.cjs`). Ergonomic launcher that bundles partition registration + render-lanes + directive injection in one CLI call. Flags:
+
+| Flag | Effect | Greenfield Q10 priority |
+|---|---|---|
+| `--partition=<file>` | Register lanes from YAML/JSON file (delegates to existing `state.cjs::registerLanesFromYaml`) before rendering | Q10 #2 (manual partition beats auto) |
+| `--lane-<id>-focus=<text>` | Per-lane directive injected as `<lane_focus>` envelope tag (matched by lane id) | **Q10 #1 highest** — the actual driver of hand-rolling |
+| `--task-suffix=<file>` | Global checklist content injected as `<task_suffix>` tag into every lane envelope | Q10 #4 |
+| `--base=<ref>` | Diff base override injected as `<diff_base>` tag (defaults to `$PRIMARY_BRANCH` env, then `main`) | Q10 #3 (silent wrong-range fix per D7) |
+| `--out=<dir>` | Write lane envelopes to per-lane files (inherits render-lanes semantics) | — |
+| `--target=<agent>:<workflow>` | Override default `code-reviewer:code_review` template | — |
+
+Per-lane directive injection extends the existing `cmdRenderLanes` lane-block composer at the same insertion point as `<lane_id>` / `<lane_community>` / `<correlation_id>` / `<lane_files>` — directives slot in before `</context>` so investigative agents reading the envelope see them alongside their canonical context. The injection is opt-in: lanes without a matching `--lane-N-focus` get no `<lane_focus>` block; envelopes without `--task-suffix` get no `<task_suffix>` block. Default-off keeps backward-compat with existing `dispatch render-lanes` invocations.
+
+Auto-partition (graphify-community-derived lane split) intentionally deferred per Q11 evidence: god-node bridges (PScope, AppError, EventBusProtocol with 600-1100 edges) guarantee 2-3 mega-communities under any modularity-maximizing cut. Default-on auto-partition needs the D8 god-node-edge-discounting upstream graphify fix first; until then operators provide manual `--partition=<file>`.
+
+Also added to `state.cjs::module.exports`: `resetSoft`, `stalenessCheck`, `registerLane`, `registerLanesFromYaml` (previously not exported; required for cross-module use from `dispatch.cjs::cmdRunLanes`).
+
+**Smoke gates K151-K154**: K151 (partition file registers + renders both lanes), K152 (per-lane focus injects into matching envelope without cross-contamination), K153 (task-suffix injects globally into all envelopes), K154 (`--base=<ref>` overrides `PRIMARY_BRANCH` env in `<diff_base>` block).
+
+**Drift-guard stack now 61-deep K94-K154.** CLAUDE.md + README updated.
+
+**Cal #30 series closure**: Option E roadmap fully shipped across 5 cals (cal #30.0 → cal #30.5) per greenfield's 4-receipt validation chain.
+
+- cal #30.0 → graphify D1 filter + Bitbucket positioning + merge-base diff
+- cal #30.1 → state reset-soft + dispatch correlation_id matcher + doc-lie fix
+- cal #30.2 → Opus 4.8 absorption (effort + verifier short-circuit + refusal routing)
+- cal #30.3 → graphify signal quality (MCP max_bytes + getNeighbors filter + status counts + docstring rider)
+- cal #30.4 → telemetry calibrate analyzer + first findings
+- cal #30.5 → dispatch run-lanes with 4 directive shapes (this release)
+
+**Deferred follow-ups** (not part of cal #30 closure):
+- **Cal #30.4.1** — investigate `subagent-status.sh` 14% non-zero exit pattern (30 identical 722B-stderr failures clustered) surfaced by M4 analyzer
+- **D8** — god-node edge-discounting (graphify-upstream prerequisite for `--auto-partition` default-on)
+- **D5 upstream** — file `detect_incremental` false-positive issue with graphify maintainer
+- **C1'/C2'/C3'** from receipt #2 — parallel-canonical banner, artifact staleness banner, dispatch-hygiene per-workflow canonical message
+- **M5** (mid-conv system messages), **M6** (claude-mem delegation audit) — cal #31 architectural
+
+**Validation**: smoke (target 899/899), graphify 37/37, locking 3/3.
+
 ## [0.102.0] - 2026-06-18
 
 ### Cal #30.4 — telemetry-driven calibration (M4, infrastructure + first findings)
