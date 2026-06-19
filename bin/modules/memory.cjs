@@ -1861,6 +1861,7 @@ function run(subcommand, args) {
         `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
         `       validate | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
         `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
+        `       paths | diff | export | import |\n` +
         `       promote (via /devt:memory) | reject (via /devt:memory)\n`
       );
       return 2;
