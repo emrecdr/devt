@@ -13829,6 +13829,33 @@ else
   fail "K154: --base override broken — got $K154_BASE_COUNT occurrences of feature/x, expected 2"
 fi
 
+# K155: CLAUDE.md hook profile table is in sync with hooks/hooks.json.
+# Field-evidenced drift: dispatch-scope-guard.sh was merged into
+# dispatch-hygiene-guard.sh on 2026-06-15 (commit 4057666); the CLAUDE.md
+# hook-profile table at L39 still listed the deleted script 4 days later,
+# surfaced only by manual audit. Meta-gate compares the canonical
+# registered-hooks set (hooks/hooks.json) against the documented set
+# (markdown table rows in CLAUDE.md) and fails on either-direction drift.
+K155_REGISTERED=$(node -e "
+  const h = JSON.parse(require('fs').readFileSync('$ROOT/hooks/hooks.json','utf8'));
+  const scripts = new Set();
+  function walk(o){
+    if (Array.isArray(o)) o.forEach(walk);
+    else if (o && typeof o === 'object') for (const v of Object.values(o)) walk(v);
+    else if (typeof o === 'string') { const m = o.match(/([a-z-]+\.sh)\b/); if (m) scripts.add(m[1]); }
+  }
+  walk(h);
+  console.log([...scripts].sort().join('\n'));
+")
+K155_DOCUMENTED=$(/usr/bin/grep -oE '^\| \`[a-z-]+\.sh\`' "$ROOT/CLAUDE.md" | tr -d '\`' | sed 's/^| //' | sort -u)
+K155_MISSING_FROM_DOCS=$(comm -23 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") | tr '\n' ',' | sed 's/,$//')
+K155_STALE_IN_DOCS=$(comm -13 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") | tr '\n' ',' | sed 's/,$//')
+if [ -z "$K155_MISSING_FROM_DOCS" ] && [ -z "$K155_STALE_IN_DOCS" ]; then
+  pass "K155: CLAUDE.md hook profile table matches hooks/hooks.json registered scripts (no drift)"
+else
+  fail "K155: hook table drift — missing_from_docs=[$K155_MISSING_FROM_DOCS] stale_in_docs=[$K155_STALE_IN_DOCS]"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
