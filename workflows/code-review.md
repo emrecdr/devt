@@ -694,10 +694,13 @@ SHORT_CIRCUIT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-ver
 if echo "$SHORT_CIRCUIT" | jq -e '.short_circuit == true' >/dev/null 2>&1; then
   # Write a synthetic verification.json so the downstream assert-verifier-ran
   # gate accepts the skip. Audit trail preserved via source=short_circuit.
+  # Schema enums per JSON_SIDECAR_SCHEMAS::verification.json — VERIFICATION_STATUSES
+  # uses "VERIFIED" (not workflow-level "DONE") and VERIFICATION_VERDICTS uses
+  # "satisfied" (not workflow-level "PASS"). Validation gates enforce the enum.
   cat > .devt/state/verification.json <<EOF
 {
-  "status": "DONE",
-  "verdict": "PASS",
+  "status": "VERIFIED",
+  "verdict": "satisfied",
   "agent": "verifier",
   "source": "short_circuit",
   "reason": "$(echo "$SHORT_CIRCUIT" | jq -r '.reason')",

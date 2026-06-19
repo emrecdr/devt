@@ -13593,11 +13593,18 @@ K142_FLAGGED=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-ve
 # PARTIAL status MUST NOT short-circuit (verifier needs to judge)
 echo '{"status":"PARTIAL","verdict":"INDETERMINATE","agent":"code-reviewer","self_flagged_uncertainties":[]}' > "$K142_TMP/.devt/state/review.json"
 K142_PARTIAL=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).short_circuit===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# self_flagged_uncertainties FIELD-ABSENT MUST NOT short-circuit (legacy/external
+# agents that don't engage with the self-flag contract; verifier safety net).
+# Requires the operator's empty [] to be an EXPLICIT negative claim, not the
+# default for omission. Without this check, a pre-cal-#30.2 sidecar would
+# silently bypass the verifier.
+echo '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer"}' > "$K142_TMP/.devt/state/review.json"
+K142_ABSENT=$(cd "$K142_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).short_circuit===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
 rm -rf "$K142_TMP"
-if [ "${K142_CLEAN:-0}" = "1" ] && [ "${K142_FLAGGED:-1}" = "0" ] && [ "${K142_PARTIAL:-1}" = "0" ]; then
-  pass "K142: assert-verifier-short-circuit fires on substantive clean sidecar (DONE + empty self_flags); blocks on non-empty self_flags AND on PARTIAL status"
+if [ "${K142_CLEAN:-0}" = "1" ] && [ "${K142_FLAGGED:-1}" = "0" ] && [ "${K142_PARTIAL:-1}" = "0" ] && [ "${K142_ABSENT:-1}" = "0" ]; then
+  pass "K142: assert-verifier-short-circuit fires on substantive clean sidecar (DONE + empty self_flags); blocks on non-empty self_flags, PARTIAL status, AND field-absent (legacy/external agent safety net)"
 else
-  fail "K142: short-circuit broken — clean=$K142_CLEAN flagged=$K142_FLAGGED partial=$K142_PARTIAL"
+  fail "K142: short-circuit broken — clean=$K142_CLEAN flagged=$K142_FLAGGED partial=$K142_PARTIAL absent=$K142_ABSENT"
 fi
 
 # K143: M2 sidecar schema documentation present in agent files.

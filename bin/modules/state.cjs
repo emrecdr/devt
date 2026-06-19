@@ -2433,7 +2433,29 @@ function assertVerifierShortCircuit({ agent } = {}) {
       sidecar_status: status,
     };
   }
-  const flagged = Array.isArray(parsed.self_flagged_uncertainties) ? parsed.self_flagged_uncertainties : [];
+  // Field-absent must NOT short-circuit. Agents updated for cal #30.2 always
+  // populate self_flagged_uncertainties (empty array means "no uncertainties");
+  // older/external agents omit it entirely. Treating absence as "empty" would
+  // silently bypass the verifier safety net for any sidecar produced before
+  // the contract existed. Require an EXPLICIT empty array as the negative
+  // claim — anything else (undefined, null, non-array) → verifier runs.
+  if (!Object.prototype.hasOwnProperty.call(parsed, "self_flagged_uncertainties")) {
+    return {
+      short_circuit: false,
+      reason: `${sidecarName} does not declare self_flagged_uncertainties — agent did not engage with the self-flag contract; verifier must run as safety net (use [] to explicitly assert no uncertainties)`,
+      sidecar_path: sidecarPath,
+      sidecar_status: status,
+    };
+  }
+  if (!Array.isArray(parsed.self_flagged_uncertainties)) {
+    return {
+      short_circuit: false,
+      reason: `${sidecarName} self_flagged_uncertainties is not an array (got ${typeof parsed.self_flagged_uncertainties}) — schema violation; verifier must run`,
+      sidecar_path: sidecarPath,
+      sidecar_status: status,
+    };
+  }
+  const flagged = parsed.self_flagged_uncertainties;
   if (flagged.length > 0) {
     return {
       short_circuit: false,
@@ -2446,7 +2468,7 @@ function assertVerifierShortCircuit({ agent } = {}) {
   }
   return {
     short_circuit: true,
-    reason: `${sidecarName} status='${status}' AND self_flagged_uncertainties is empty — agent self-certified no coverage gaps; verifier LLM dispatch may be skipped to save tokens`,
+    reason: `${sidecarName} status='${status}' AND self_flagged_uncertainties is explicitly empty [] — agent self-certified no coverage gaps; verifier LLM dispatch may be skipped to save tokens`,
     sidecar_path: sidecarPath,
     sidecar_status: status,
     self_flagged_count: 0,
