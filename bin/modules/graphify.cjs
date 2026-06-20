@@ -2148,7 +2148,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions | adaptive-threshold\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions | adaptive-threshold | maybe-refresh | rebuild | write-memory\n`
       );
       return 2;
   }
