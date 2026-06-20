@@ -31,7 +31,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <review_feedback>
       If this is a fix iteration, read feedback from whichever upstream gate failed:
       - Code-review retry: read `.devt/state/review.md` (full quality findings)
-      - Verifier retry: read `.devt/state/verification.json` and address each entry in `revisions[]` by AC id. The structured `revisions[]` list IS the contract — each entry contains `id`, `criterion`, `gap`, and `evidence`. Address the gap directly; do not re-parse `verification.md`. The verifier rubric (`references/rubrics/dev.md`) defines the verdict semantics.
+      - Verifier retry: read `.devt/state/verification.json` and address each entry in `revisions[]` by AC id. The structured `revisions[]` list IS the contract — each entry contains `id`, `criterion`, `gap`, and `evidence`. Address the gap directly; do not re-parse `verification.md`. The verifier rubric (`references/rubrics/dev.v1.md`) defines the verdict semantics.
       - Both: address review findings first, then verification gaps.
     </review_feedback>
     <scope_requirements>
