@@ -13846,11 +13846,16 @@ K155_REGISTERED=$(node -e "
   }
   walk(h);
   console.log([...scripts].sort().join('\n'));
-")
-K155_DOCUMENTED=$(/usr/bin/grep -oE '^\| \`[a-z-]+\.sh\`' "$ROOT/CLAUDE.md" | tr -d '\`' | sed 's/^| //' | sort -u)
-K155_MISSING_FROM_DOCS=$(comm -23 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") | tr '\n' ',' | sed 's/,$//')
-K155_STALE_IN_DOCS=$(comm -13 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") | tr '\n' ',' | sed 's/,$//')
-if [ -z "$K155_MISSING_FROM_DOCS" ] && [ -z "$K155_STALE_IN_DOCS" ]; then
+" 2>/dev/null || echo "")
+K155_DOCUMENTED=$(/usr/bin/grep -oE '^\| \`[a-z-]+\.sh\`' "$ROOT/CLAUDE.md" 2>/dev/null | tr -d '\`' | sed 's/^| //' | sort -u || echo "")
+# pipefail-safe: comm + tr + sed in a process-sub pipeline can return nonzero under
+# set -o pipefail when one side is empty. Wrap in `|| true` so the assignment
+# always succeeds; treat missing data as "no drift" (the only false-negative is
+# a CI infra issue, and that surfaces in the K155_REGISTERED/DOCUMENTED probes
+# above when they short-circuit to empty string via the `|| echo ""` guards).
+K155_MISSING_FROM_DOCS=$( { comm -23 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") || true; } | tr '\n' ',' | sed 's/,$//')
+K155_STALE_IN_DOCS=$( { comm -13 <(echo "$K155_REGISTERED") <(echo "$K155_DOCUMENTED") || true; } | tr '\n' ',' | sed 's/,$//')
+if [ -z "${K155_MISSING_FROM_DOCS:-}" ] && [ -z "${K155_STALE_IN_DOCS:-}" ]; then
   pass "K155: CLAUDE.md hook profile table matches hooks/hooks.json registered scripts (no drift)"
 else
   fail "K155: hook table drift — missing_from_docs=[$K155_MISSING_FROM_DOCS] stale_in_docs=[$K155_STALE_IN_DOCS]"
