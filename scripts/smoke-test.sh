@@ -13847,7 +13847,7 @@ K155_REGISTERED=$(node -e "
   walk(h);
   console.log([...scripts].sort().join('\n'));
 " 2>/dev/null || echo "")
-K155_DOCUMENTED=$(/usr/bin/grep -oE '^\| \`[a-z-]+\.sh\`' "$ROOT/CLAUDE.md" 2>/dev/null | tr -d '\`' | sed 's/^| //' | sort -u || echo "")
+K155_DOCUMENTED=$(/usr/bin/grep -oE '^\| `[a-z-]+\.sh`' "$ROOT/CLAUDE.md" 2>/dev/null | tr -d '`' | sed 's/^| //' | sort -u || echo "")
 # pipefail-safe: comm + tr + sed in a process-sub pipeline can return nonzero under
 # set -o pipefail when one side is empty. Wrap in `|| true` so the assignment
 # always succeeds; treat missing data as "no drift" (the only false-negative is
