@@ -5892,7 +5892,6 @@ module.exports = {
   truncateArtifact,
   updateState,
   resetState,
-  registerLane,
   registerLanesFromYaml,
   releaseWorkflow,
   syncState,
