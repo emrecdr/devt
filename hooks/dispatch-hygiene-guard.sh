@@ -258,6 +258,10 @@ node -e "
     // generic 3-command list. Field receipt #2: operators saw the generic
     // multi-command suggestion and chose /devt:workflow when /devt:review
     // was the actual canonical path.
+    // Only INVESTIGATIVE agents reach this deny path; curator/retro/docs-writer/
+    // devt-coordinator are early-exited via ENVELOPE_NOT_REQUIRED above. Map
+    // entries for those agents would be dead code — listed in the
+    // ENVELOPE_NOT_REQUIRED set, not here.
     const CANONICAL_FOR_AGENT = {
       'code-reviewer': '/devt:review (single-dispatch) OR dispatch run-lanes --partition=FILE (parallel canonical)',
       'programmer': '/devt:workflow (full dev cycle) OR /devt:implement (skip docs+retro)',
@@ -266,9 +270,6 @@ node -e "
       'debugger': '/devt:debug (full investigation protocol)',
       'researcher': '/devt:research (codebase pattern investigation)',
       'verifier': '/devt:workflow (verifier fires during verify phase) — running standalone is rarely intended',
-      'curator': '/devt:memory promote (canonical curator dispatch)',
-      'retro': '/devt:workflow --retro (lesson extraction)',
-      'docs-writer': '/devt:workflow --mode=docs (docs extraction)',
     };
     const canonicalCli = CANONICAL_FOR_AGENT[subagentName]
       || '/devt:review, /devt:workflow, /devt:debug';
