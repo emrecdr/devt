@@ -13861,6 +13861,99 @@ else
   fail "K155: hook table drift — missing_from_docs=[$K155_MISSING_FROM_DOCS] stale_in_docs=[$K155_STALE_IN_DOCS]"
 fi
 
+# K156: case-handler ⊃ default-case enumeration drift gate.
+# Empirically validated drift class: 4 incidents in 48 hours during the cal #30
+# series (cal #29 dispatch, c26b9ed state, f299a99 memory, 0c2bbff graphify) —
+# each a case handler shipped without updating its sibling "Unknown <mod>
+# subcommand. Use: A | B | C" enumeration. Operators running `<mod> <typo>`
+# get a stale subcommand list and can't discover the new handler.
+#
+# Gate walks every bin/modules/*.cjs containing both `^\s+case "X":` patterns
+# AND a matching "Unknown <mod>" enumeration line; extracts both sets;
+# asserts handlers ⊆ enumeration. Fails on any missing handler with the
+# module name + the gap. The 4 prior cal #30-cleanup fixes would have been
+# automatic if this gate had existed.
+K156_DRIFT=$(node -e "
+const fs = require('fs');
+const path = require('path');
+const dir = '$ROOT/bin/modules';
+const drifts = [];
+for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.cjs'))) {
+  const src = fs.readFileSync(path.join(dir, f), 'utf8');
+  // Extract every 'case \"X\":' handler
+  const caseMatches = src.matchAll(/\n\s+case \"([a-z0-9-]+)\":/g);
+  const handlers = new Set();
+  for (const m of caseMatches) handlers.add(m[1]);
+  if (handlers.size === 0) continue;
+  // Locate the 'Unknown <mod> subcommand' enumeration line(s)
+  const unknownIdx = src.search(/Unknown [a-z-]+ subcommand/);
+  if (unknownIdx === -1) continue;
+  // Capture the multi-line string spanning the next ~10 lines (typical Use:/Valid: block)
+  const enumBlock = src.slice(unknownIdx, unknownIdx + 2000);
+  // Stop at the closing backtick + semicolon of the template literal
+  const enumEnd = enumBlock.search(/\`,\s*\)?\s*;|\`\s*\n\s*\)/);
+  const enumText = enumEnd === -1 ? enumBlock : enumBlock.slice(0, enumEnd);
+  // Extract enumerated subcommand tokens (kebab-case identifiers)
+  const enumTokens = new Set();
+  for (const m of enumText.matchAll(/[a-z][a-z0-9-]+/g)) enumTokens.add(m[0]);
+  // Find handlers not in the enumeration
+  const missing = [...handlers].filter(h => !enumTokens.has(h)).sort();
+  if (missing.length > 0) {
+    drifts.push({ module: f, handlers: handlers.size, missing });
+  }
+}
+console.log(JSON.stringify(drifts));
+")
+K156_DRIFT_COUNT=$(echo "$K156_DRIFT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).length)}catch{console.log(-1)}});" 2>/dev/null)
+if [ "${K156_DRIFT_COUNT:-1}" = "0" ]; then
+  pass "K156: case-handler ⊃ default-case enumeration drift gate (all bin/modules/*.cjs aligned)"
+else
+  fail "K156: case-handler drift in ${K156_DRIFT_COUNT} module(s) — $K156_DRIFT"
+fi
+
+# K157 (C5 C2'): preflight-brief.json staleness banner fires when artifact mtime
+# is >4h older than workflow.yaml::created_at. Field receipt #2 Q3: operator
+# cited preflight-brief.json from a prior workflow as fresh; A2 staleness covers
+# workflow.yaml age but NOT .devt/state/ artifact age.
+K157_TMP=$(mktemp -d)
+mkdir -p "$K157_TMP/.devt/state"
+cat > "$K157_TMP/.devt/state/workflow.yaml" <<EOF
+active: true
+workflow_id: k157
+workflow_type: dev
+task: "k157 test"
+created_at: "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+EOF
+echo '{}' > "$K157_TMP/.devt/state/preflight-brief.json"
+# Backdate brief by 8h (cross-platform: BSD touch -t vs GNU touch -d)
+touch -t "$(date -v-8H +%Y%m%d%H%M 2>/dev/null || date -d '8 hours ago' +%Y%m%d%H%M 2>/dev/null)" "$K157_TMP/.devt/state/preflight-brief.json" 2>/dev/null
+K157_OUT=$(cd "$K157_TMP" && echo '{"hook_event_name":"UserPromptSubmit","prompt":"x"}' | bash "$ROOT/hooks/workflow-context-injector.sh" 2>/dev/null || true)
+rm -rf "$K157_TMP"
+K157_HAS_STALE=$(echo "$K157_OUT" | /usr/bin/grep -c "preflight-brief\.json STALE" || true)
+if [ "${K157_HAS_STALE:-0}" -ge 1 ]; then
+  pass "K157: workflow-context-injector emits preflight-brief STALE banner when artifact mtime > 4h older than workflow.yaml::created_at"
+else
+  fail "K157: C2' preflight staleness banner not emitted on 8h-stale fixture"
+fi
+
+# K158 (C5 C3'): dispatch-hygiene-guard KILL message carries per-subagent
+# canonical CLI suggestion (precise alternative, not generic 3-command list).
+# Field receipt #2: operators saw the generic suggestion and chose
+# /devt:workflow when /devt:review was the actual canonical path.
+K158_TMP=$(mktemp -d)
+mkdir -p "$K158_TMP/.devt/state" "$K158_TMP/.devt"
+echo '{"dispatch_hygiene_mode":"block"}' > "$K158_TMP/.devt/config.json"
+K158_PROGRAMMER=$(cd "$K158_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"bare prose"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>/dev/null || true)
+K158_REVIEWER=$(cd "$K158_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"bare prose"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>/dev/null || true)
+rm -rf "$K158_TMP"
+K158_HAS_PROG=$(echo "$K158_PROGRAMMER" | /usr/bin/grep -c "canonical path for devt:programmer" || true)
+K158_HAS_REV=$(echo "$K158_REVIEWER" | /usr/bin/grep -c "canonical path for devt:code-reviewer" || true)
+if [ "${K158_HAS_PROG:-0}" -ge 1 ] && [ "${K158_HAS_REV:-0}" -ge 1 ]; then
+  pass "K158: dispatch-hygiene-guard KILL message includes per-subagent canonical CLI (programmer + code-reviewer routes emitted)"
+else
+  fail "K158: per-agent canonical CLI not surfaced — prog=$K158_HAS_PROG rev=$K158_HAS_REV"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

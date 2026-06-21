@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.104.0] - 2026-06-21
+
+### Cal #31.A — Wave A tightening (drift meta-gate + 2 UX fixes)
+
+Three small validated cleanups from the cal #31 candidate roster (Wave A only — quick-win drift+UX class). Per "tighten don't add" directive: no new features, only converging existing surfaces.
+
+**C1 — K156 case-handler ⊃ default-case enumeration drift gate** (`scripts/smoke-test.sh`). Walks every `bin/modules/*.cjs`, extracts `case "X":` handlers + the multi-line "Unknown <mod> subcommand. Use: A | B | C" enumeration block; asserts handlers ⊆ enumeration. Empirically validated drift class: 4 incidents in 48 hours during the cal #30 audit arc (cal #29 dispatch, c26b9ed state, f299a99 memory, 0c2bbff graphify) — each a case handler shipped without updating its sibling enumeration. K156 prevents all future incidents of this class automatically. Adversarially verified: injecting a `case "fake-test-xyz":` handler into state.cjs makes K156 flag the missing enumeration entry.
+
+**C2' — K157 preflight-brief.json staleness banner** (`hooks/workflow-context-injector.sh`). Field receipt #2 Q3: operator cited preflight-brief.json data from a prior workflow run as fresh. A2 staleness banner covers `workflow.yaml::created_at` age but NOT `.devt/state/` artifact age. New check: when `preflight-brief.json` mtime is >4h older than workflow.yaml::created_at, emit `[devt] preflight-brief.json STALE (Xh older than workflow start) — run /devt:preflight before relying on memory_signal/governing-doc data`. Closes the artifact-age gap.
+
+**C3' — K158 dispatch-hygiene-guard per-subagent canonical CLI** (`hooks/dispatch-hygiene-guard.sh`). Field receipt #2: operators saw the generic "/devt:review, /devt:workflow, /devt:debug" suggestion and chose the wrong workflow. KILL-gate message now derives a precise per-subagent canonical CLI from a 10-entry map (programmer→/devt:workflow, code-reviewer→/devt:review OR dispatch run-lanes, debugger→/devt:debug, etc.). Falls back to the generic list for unknown agents.
+
+**C4 — `subagent-status.sh` 14% failure investigation** (M4 analyzer follow-up). Pulled the failure cluster: all 30 failures clustered on 2026-06-10 in a ~6-hour window (06:40-13:14); zero failures since. The bug is historical, not current. Hook unchanged since the cluster; all recent runs exit=0. No code fix needed — documenting the closure validates the M4 telemetry infrastructure.
+
+**C1' — parallel-canonical banner** scoped + deferred. Receipt #2 Q5 surfaced operator hand-rolling lane dispatches because canonical paths weren't surfaced. Implementation requires reading the UserPromptSubmit event's `input.prompt` from stdin, but `workflow-context-injector.sh` only receives `state` via `process.argv[1]` — not the event JSON. Adding stdin handling for one banner is larger than Wave A's "tighten" scope. Deferred for cal #31.B; would need either a separate UserPromptSubmit hook OR plumbing stdin into the existing injector.
+
+**Drift-guard stack now 65-deep K94-K158.** CLAUDE.md + README updated.
+
+**Smoke gates**: K156 (drift meta-gate self-test + adversarial-injection-catches-drift), K157 (8h-stale preflight fixture emits banner), K158 (programmer + code-reviewer routes emit per-agent CLI).
+
+**Wave B + C cal #31 candidates carried over** (per cal #31 candidate roster): C2 M6 claude-mem audit (research), C3 M1 effort wiring completion (PREREQUISITE: verify Task tool effort param), C6 M5 mid-conv system messages (architectural), C7 Option B wrap-not-compete (architectural), C8/C9 D8/D5 upstream filings.
+
+**Validation**: smoke (target 902/902), graphify 37/37, locking 3/3.
+
 ## [0.103.0] - 2026-06-19
 
 ### Cal #30.5 — `dispatch run-lanes` canonical-path ergonomics (M3, 4 directive shapes)

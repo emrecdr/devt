@@ -252,9 +252,29 @@ node -e "
     // Reason includes remediation guidance so orchestrator can fix and retry.
     // Scope advisory is dropped here — would have been advisory-only and the
     // block message takes priority.
+    //
+    // C3' (cal #31.A): per-subagent canonical CLI suggestion. The subagent
+    // name encodes the workflow intent; emit a precise CLI rather than a
+    // generic 3-command list. Field receipt #2: operators saw the generic
+    // multi-command suggestion and chose /devt:workflow when /devt:review
+    // was the actual canonical path.
+    const CANONICAL_FOR_AGENT = {
+      'code-reviewer': '/devt:review (single-dispatch) OR dispatch run-lanes --partition=FILE (parallel canonical)',
+      'programmer': '/devt:workflow (full dev cycle) OR /devt:implement (skip docs+retro)',
+      'tester': '/devt:workflow (full dev cycle — test phase fires after implement)',
+      'architect': '/devt:review --focus=arch (single-dispatch arch review)',
+      'debugger': '/devt:debug (full investigation protocol)',
+      'researcher': '/devt:research (codebase pattern investigation)',
+      'verifier': '/devt:workflow (verifier fires during verify phase) — running standalone is rarely intended',
+      'curator': '/devt:memory promote (canonical curator dispatch)',
+      'retro': '/devt:workflow --retro (lesson extraction)',
+      'docs-writer': '/devt:workflow --mode=docs (docs extraction)',
+    };
+    const canonicalCli = CANONICAL_FOR_AGENT[subagentName]
+      || '/devt:review, /devt:workflow, /devt:debug';
     const denyReason =
       '[devt dispatch hygiene — BLOCKED] ' + advisory +
-      ' Remediation: dispatch via the workflow (/devt:review, /devt:workflow, /devt:debug) which injects the required context blocks, ' +
+      ' Remediation: dispatch via the canonical path for ' + subagent + ' — ' + canonicalCli + '. ' +
       'OR set dispatch_hygiene_mode to \"warn\" in .devt/config.json if intentional raw dispatch. ' +
       'If this is a NEW review starting against a stale workflow.yaml (accumulated raw_dispatch counts from a prior unrelated workflow), ' +
       'run \"node bin/devt-tools.cjs state reset-soft\" from the project root to clear per-workflow accumulators ' +

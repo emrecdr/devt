@@ -134,6 +134,31 @@ RESULT=$(node -e "
       }
     }
 
+    // C1' (cal #31.A) parallel-canonical banner was scoped here but skipped:
+    // this hook receives state-only via process.argv[1], not the UserPromptSubmit
+    // event JSON with input.prompt. Adding stdin handling for one banner is
+    // larger than the C5 "tighten" scope. C1' deferred — would need to fire
+    // from a separate UserPromptSubmit hook OR plumb stdin into this one.
+
+    // C2' (cal #31.A) — preflight-brief staleness banner. Receipt #2 Q3:
+    // operator cited preflight-brief.json data from a prior workflow run as
+    // fresh; A2 staleness banner covers workflow.yaml age but NOT .devt/
+    // state/ artifact age. When preflight-brief.json mtime is >4h older
+    // than workflow.yaml::created_at, the brief is from a prior session
+    // — emit STALE banner with re-run hint.
+    try {
+      const briefPath = path.join(_projectRoot, '.devt/state/preflight-brief.json');
+      if (fs.existsSync(briefPath) && state.created_at) {
+        const briefMtimeMs = fs.statSync(briefPath).mtimeMs;
+        const wfStartMs = new Date(state.created_at).getTime();
+        const staleThresholdMs = 4 * 60 * 60 * 1000;
+        if (Number.isFinite(wfStartMs) && briefMtimeMs < wfStartMs - staleThresholdMs) {
+          const ageH = Math.round((wfStartMs - briefMtimeMs) / (60 * 60 * 1000));
+          lines.push('[devt] preflight-brief.json STALE (' + ageH + 'h older than workflow start) — run /devt:preflight before relying on memory_signal/governing-doc data');
+        }
+      }
+    } catch { /* fs probe failure non-fatal */ }
+
     // Session-scoped telemetry push. Field-observed: telemetry CLIs exist
     // but operators forget them when head-down in a workflow — discovery
     // surfaces are too passive for an LLM operator. UserPromptSubmit
