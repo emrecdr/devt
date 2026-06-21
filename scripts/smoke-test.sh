@@ -13873,53 +13873,54 @@ fi
 # asserts handlers ⊆ enumeration. Fails on any missing handler with the
 # module name + the gap. The 4 prior cal #30-cleanup fixes would have been
 # automatic if this gate had existed.
-K156_DRIFT=$(node -e "
+# K156's ALLOW_NO_ENUM list — modules with case handlers but NO subcommand
+# enumeration by design (top-level dispatchers, not subcommand routers).
+# Any *.cjs module with handlers + no enum that is NOT in this set fails
+# K156. Inversion fix: silent-skip would re-introduce the original
+# drift class (handler added, enum forgotten). Explicit allow-list makes
+# the exception visible.
+K156_RESULT=$(node -e "
 const fs = require('fs');
 const path = require('path');
 const dir = '$ROOT/bin/modules';
+const ALLOW_NO_ENUM = new Set(['init.cjs']); // top-level dispatcher; subcommands live in callee modules
 const drifts = [];
+const missingEnum = [];
 for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.cjs'))) {
   const src = fs.readFileSync(path.join(dir, f), 'utf8');
-  // Extract every 'case \"X\":' handler
-  const caseMatches = src.matchAll(/\n\s+case \"([a-z0-9-]+)\":/g);
   const handlers = new Set();
-  for (const m of caseMatches) handlers.add(m[1]);
+  for (const m of src.matchAll(/\n\s+case \"([a-z0-9-]+)\":/g)) handlers.add(m[1]);
   if (handlers.size === 0) continue;
-  // Locate the enumeration line(s) — two canonical patterns in devt modules:
-  //   (a) 'Unknown <mod> subcommand. Use: A | B | C' — state.cjs, memory.cjs,
-  //       graphify.cjs, model-profiles.cjs, deferred.cjs, preflight.cjs,
-  //       update.cjs, telemetry-calibrate.cjs
-  //   (b) 'Usage: <mod> <A|B|C>' (pipe-delimited inside angle brackets) —
-  //       dispatch.cjs (which has its own dispatcher-style help format)
-  // Both serve the same operator-discoverability purpose.
-  let unknownIdx = src.search(/Unknown [a-z-]+ subcommand/);
+  // Single alternation regex covers both canonical enumeration shapes:
+  //   (a) 'Unknown <mod> subcommand' — state/memory/graphify/etc.
+  //   (b) 'Usage: <mod> <a|b|c>' (pipe-delimited) — dispatch.cjs
+  const unknownIdx = src.search(/Unknown [a-z-]+ subcommand|Usage: [a-z-]+ <[a-z|-]+>/);
   if (unknownIdx === -1) {
-    // Pattern (b) — top-level Usage: line with pipe-delimited subcommands
-    unknownIdx = src.search(/Usage: [a-z-]+ <[a-z|-]+>/);
+    if (!ALLOW_NO_ENUM.has(f)) missingEnum.push(f);
+    continue;
   }
-  if (unknownIdx === -1) continue;
-  // Capture the multi-line string spanning the next ~10 lines (typical Use:/Valid: block)
   const enumBlock = src.slice(unknownIdx, unknownIdx + 2000);
-  // Stop at the closing backtick + semicolon of the template literal,
-  // OR the closing > of the angle-bracket Usage pattern, whichever comes first.
-  const enumEnd = enumBlock.search(/\`,\s*\)?\s*;|\`\s*\n\s*\)|>\\n|>\\\\n/);
+  // Stop at the closing backtick + semicolon of the template literal
+  // (the two trailing >\\\\n alternatives in the prior version were dead —
+  // dispatch.cjs's Usage is a single-line string and template-literal
+  // terminator hits first; dropped them).
+  const enumEnd = enumBlock.search(/\`,\s*\)?\s*;|\`\s*\n\s*\)/);
   const enumText = enumEnd === -1 ? enumBlock : enumBlock.slice(0, enumEnd);
-  // Extract enumerated subcommand tokens (kebab-case identifiers)
   const enumTokens = new Set();
   for (const m of enumText.matchAll(/[a-z][a-z0-9-]+/g)) enumTokens.add(m[0]);
-  // Find handlers not in the enumeration
   const missing = [...handlers].filter(h => !enumTokens.has(h)).sort();
-  if (missing.length > 0) {
-    drifts.push({ module: f, handlers: handlers.size, missing });
-  }
+  if (missing.length > 0) drifts.push({ module: f, handlers: handlers.size, missing });
 }
-console.log(JSON.stringify(drifts));
+// Emit single JSON with both drift kinds so we don't need a second node spawn to count.
+console.log(JSON.stringify({ drifts, missingEnum }));
 ")
-K156_DRIFT_COUNT=$(echo "$K156_DRIFT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).length)}catch{console.log(-1)}});" 2>/dev/null)
-if [ "${K156_DRIFT_COUNT:-1}" = "0" ]; then
-  pass "K156: case-handler ⊃ default-case enumeration drift gate (all bin/modules/*.cjs aligned)"
+K156_DRIFTS=$(echo "$K156_RESULT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.drifts.length+'|'+o.missingEnum.length+'|'+JSON.stringify(o))}catch{console.log('-1|-1|parse-error')}});" 2>/dev/null)
+K156_DRIFT_COUNT=$(echo "$K156_DRIFTS" | cut -d'|' -f1)
+K156_MISSING_ENUM_COUNT=$(echo "$K156_DRIFTS" | cut -d'|' -f2)
+if [ "${K156_DRIFT_COUNT:-1}" = "0" ] && [ "${K156_MISSING_ENUM_COUNT:-1}" = "0" ]; then
+  pass "K156: case-handler ⊃ default-case enumeration drift gate (all bin/modules/*.cjs aligned; ALLOW_NO_ENUM covers init.cjs only)"
 else
-  fail "K156: case-handler drift in ${K156_DRIFT_COUNT} module(s) — $K156_DRIFT"
+  fail "K156: drift_count=$K156_DRIFT_COUNT missing_enum_count=$K156_MISSING_ENUM_COUNT — $(echo "$K156_DRIFTS" | cut -d'|' -f3-)"
 fi
 
 # K157 (C5 C2'): preflight-brief.json staleness banner fires when artifact mtime
@@ -13954,15 +13955,16 @@ fi
 K158_TMP=$(mktemp -d)
 mkdir -p "$K158_TMP/.devt/state" "$K158_TMP/.devt"
 echo '{"dispatch_hygiene_mode":"block"}' > "$K158_TMP/.devt/config.json"
-K158_PROGRAMMER=$(cd "$K158_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:programmer","prompt":"bare prose"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>/dev/null || true)
-K158_REVIEWER=$(cd "$K158_TMP" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"bare prose"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>/dev/null || true)
+K158_HITS=0
+for agent in programmer code-reviewer; do
+  out=$(cd "$K158_TMP" && echo "{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"devt:${agent}\",\"prompt\":\"bare prose\"}}" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>/dev/null || true)
+  if echo "$out" | /usr/bin/grep -q "canonical path for devt:${agent}"; then K158_HITS=$((K158_HITS+1)); fi
+done
 rm -rf "$K158_TMP"
-K158_HAS_PROG=$(echo "$K158_PROGRAMMER" | /usr/bin/grep -c "canonical path for devt:programmer" || true)
-K158_HAS_REV=$(echo "$K158_REVIEWER" | /usr/bin/grep -c "canonical path for devt:code-reviewer" || true)
-if [ "${K158_HAS_PROG:-0}" -ge 1 ] && [ "${K158_HAS_REV:-0}" -ge 1 ]; then
+if [ "$K158_HITS" = "2" ]; then
   pass "K158: dispatch-hygiene-guard KILL message includes per-subagent canonical CLI (programmer + code-reviewer routes emitted)"
 else
-  fail "K158: per-agent canonical CLI not surfaced — prog=$K158_HAS_PROG rev=$K158_HAS_REV"
+  fail "K158: per-agent canonical CLI not surfaced — hits=$K158_HITS/2"
 fi
 
 echo

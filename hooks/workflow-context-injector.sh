@@ -42,6 +42,7 @@ fi
 # Parse state and build context using node (proper JSON handling)
 RESULT=$(node -e "
   const state = JSON.parse(process.argv[1]);
+  const _pluginRoot = process.argv[2] || '';
   const fs = require('fs');
   const path = require('path');
   const { execSync } = require('child_process');
@@ -143,21 +144,29 @@ RESULT=$(node -e "
     // C2' (cal #31.A) — preflight-brief staleness banner. Receipt #2 Q3:
     // operator cited preflight-brief.json data from a prior workflow run as
     // fresh; A2 staleness banner covers workflow.yaml age but NOT .devt/
-    // state/ artifact age. When preflight-brief.json mtime is >4h older
-    // than workflow.yaml::created_at, the brief is from a prior session
-    // — emit STALE banner with re-run hint.
+    // state/ artifact age. Delegates to state.cjs::isArtifactFresh which
+    // already prefers first_created_at (immutable session anchor) over
+    // created_at (rotates on workflow_type transitions) — using the inline
+    // arithmetic would false-fire on every dev→debug rotation.
     try {
       const briefPath = path.join(_projectRoot, '.devt/state/preflight-brief.json');
-      if (fs.existsSync(briefPath) && state.created_at) {
-        const briefMtimeMs = fs.statSync(briefPath).mtimeMs;
-        const wfStartMs = new Date(state.created_at).getTime();
-        const staleThresholdMs = 4 * 60 * 60 * 1000;
-        if (Number.isFinite(wfStartMs) && briefMtimeMs < wfStartMs - staleThresholdMs) {
-          const ageH = Math.round((wfStartMs - briefMtimeMs) / (60 * 60 * 1000));
-          lines.push('[devt] preflight-brief.json STALE (' + ageH + 'h older than workflow start) — run /devt:preflight before relying on memory_signal/governing-doc data');
-        }
+      // state.cjs lives in PLUGIN_ROOT (the devt repo), not _projectRoot
+      // (the consumer project) — the plugin can be installed anywhere.
+      const stateMod = require(path.join(_pluginRoot, 'bin/modules/state.cjs'));
+      // isArtifactFresh's getStateDir() walks from process.cwd() — chdir into
+      // _projectRoot so it finds the consumer's workflow.yaml, not the plugin's.
+      const prevCwd = process.cwd();
+      process.chdir(_projectRoot);
+      let f;
+      try { f = stateMod.isArtifactFresh(briefPath); }
+      finally { process.chdir(prevCwd); }
+      // 4h staleness threshold — older than that is a prior session, not just slow rotation.
+      const staleThresholdSeconds = 4 * 60 * 60;
+      if (!f.fresh && typeof f.age_seconds === 'number' && f.age_seconds > staleThresholdSeconds) {
+        const ageH = Math.round(f.age_seconds / 3600);
+        lines.push('[devt] preflight-brief.json STALE (' + ageH + 'h older than workflow start) — run /devt:preflight before relying on memory_signal/governing-doc data');
       }
-    } catch { /* fs probe failure non-fatal */ }
+    } catch { /* fs probe / state module load failure non-fatal */ }
 
     // Session-scoped telemetry push. Field-observed: telemetry CLIs exist
     // but operators forget them when head-down in a workflow — discovery
@@ -294,7 +303,7 @@ RESULT=$(node -e "
   // via explicit /devt:status or /devt:next; pinning it into every prompt
   // costs tokens long after the workflow ended without adding load-bearing
   // context.
-" "$STATE_JSON" 2>/dev/null) || exit 0
+" "$STATE_JSON" "$PLUGIN_ROOT" 2>/dev/null) || exit 0
 
 # printf avoids echo's flag interpretation (-n, -e) regardless of JSON content
 [ -n "$RESULT" ] && printf '%s\n' "$RESULT"
