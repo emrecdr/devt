@@ -13885,13 +13885,24 @@ for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.cjs'))) {
   const handlers = new Set();
   for (const m of caseMatches) handlers.add(m[1]);
   if (handlers.size === 0) continue;
-  // Locate the 'Unknown <mod> subcommand' enumeration line(s)
-  const unknownIdx = src.search(/Unknown [a-z-]+ subcommand/);
+  // Locate the enumeration line(s) — two canonical patterns in devt modules:
+  //   (a) 'Unknown <mod> subcommand. Use: A | B | C' — state.cjs, memory.cjs,
+  //       graphify.cjs, model-profiles.cjs, deferred.cjs, preflight.cjs,
+  //       update.cjs, telemetry-calibrate.cjs
+  //   (b) 'Usage: <mod> <A|B|C>' (pipe-delimited inside angle brackets) —
+  //       dispatch.cjs (which has its own dispatcher-style help format)
+  // Both serve the same operator-discoverability purpose.
+  let unknownIdx = src.search(/Unknown [a-z-]+ subcommand/);
+  if (unknownIdx === -1) {
+    // Pattern (b) — top-level Usage: line with pipe-delimited subcommands
+    unknownIdx = src.search(/Usage: [a-z-]+ <[a-z|-]+>/);
+  }
   if (unknownIdx === -1) continue;
   // Capture the multi-line string spanning the next ~10 lines (typical Use:/Valid: block)
   const enumBlock = src.slice(unknownIdx, unknownIdx + 2000);
-  // Stop at the closing backtick + semicolon of the template literal
-  const enumEnd = enumBlock.search(/\`,\s*\)?\s*;|\`\s*\n\s*\)/);
+  // Stop at the closing backtick + semicolon of the template literal,
+  // OR the closing > of the angle-bracket Usage pattern, whichever comes first.
+  const enumEnd = enumBlock.search(/\`,\s*\)?\s*;|\`\s*\n\s*\)|>\\n|>\\\\n/);
   const enumText = enumEnd === -1 ? enumBlock : enumBlock.slice(0, enumEnd);
   // Extract enumerated subcommand tokens (kebab-case identifiers)
   const enumTokens = new Set();
