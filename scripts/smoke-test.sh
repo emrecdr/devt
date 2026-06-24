@@ -14092,6 +14092,83 @@ else
   fail "K162: laneH bridge not working — got: $K162_OUT"
 fi
 
+# K163 (cal #31.D G4): state auto-reset-if-stale fires when task+workflow_type
+# differ AND age > 24h. Receipt #5 Q2: KILL gates fired on 57-counter from
+# 9-day-old workflow blocked new review at substep 1. Auto-reset closes this
+# friction class without prompting (resetSoft is non-destructive of valuable
+# state). Tests: synthetic 30d-old workflow.yaml with task+type mismatch →
+# auto-reset fires; same input with matching type → no auto-fire.
+K163_TMP=$(mktemp -d)
+mkdir -p "$K163_TMP/.devt/state"
+cat > "$K163_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_id: old_wf
+first_created_at: "2026-05-26T00:00:00.000Z"
+created_at: "2026-05-26T00:00:00.000Z"
+task: "old debug task"
+workflow_type: "debug"
+workflow_id_history: ["old_wf"]
+raw_dispatch_count: 57
+YEOF
+K163_AUTO=$(cd "$K163_TMP" && node "$ROOT/bin/devt-tools.cjs" state auto-reset-if-stale --task="new review" --workflow-type="code_review" 2>/dev/null | tail -1)
+ACTED=$(echo "$K163_AUTO" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).acted===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# Reset workflow for second test
+cat > "$K163_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_id: old_wf2
+first_created_at: "2026-05-26T00:00:00.000Z"
+created_at: "2026-05-26T00:00:00.000Z"
+task: "old debug task"
+workflow_type: "debug"
+YEOF
+K163_NOAUTO=$(cd "$K163_TMP" && node "$ROOT/bin/devt-tools.cjs" state auto-reset-if-stale --task="new debug task" --workflow-type="debug" 2>/dev/null | tail -1)
+NOACTED=$(echo "$K163_NOAUTO" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).acted===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+rm -rf "$K163_TMP"
+if [ "$ACTED" = "1" ] && [ "$NOACTED" = "0" ]; then
+  pass "K163: state auto-reset-if-stale fires on task+type+age unambiguous-new-session, skips when workflow_type unchanged"
+else
+  fail "K163: auto-reset trigger not working — acted=$ACTED (expected 1), noActed=$NOACTED (expected 0)"
+fi
+
+# K164 (cal #31.D G6): init review --bundle attaches post-init context-build
+# steps (preflight + memory + graphify impact-plan) into one CLI call. Receipt
+# #5 Q7b: setup friction was 12-14 CLI round-trips before Wave 1. Tests:
+# init review (no flag) returns NO bundle field; init review --bundle returns
+# bundle field with 4 expected sub-fields.
+K164_TMP=$(mktemp -d)
+mkdir -p "$K164_TMP/.devt"
+echo '{}' > "$K164_TMP/.devt/config.json"
+K164_NOBUNDLE=$(cd "$K164_TMP" && node "$ROOT/bin/devt-tools.cjs" init review "test review" 2>/dev/null)
+K164_BUNDLE=$(cd "$K164_TMP" && node "$ROOT/bin/devt-tools.cjs" init review --bundle "test review" 2>/dev/null)
+HAS_BUNDLE_NO=$(echo "$K164_NOBUNDLE" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log('bundle' in JSON.parse(s)?'1':'0')}catch{console.log('error')}});" 2>/dev/null)
+HAS_BUNDLE_YES=$(echo "$K164_BUNDLE" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.bundle && typeof o.bundle.preflight_generated === 'boolean' && Array.isArray(o.bundle.errors)?'1':'0')}catch{console.log('error')}});" 2>/dev/null)
+rm -rf "$K164_TMP"
+if [ "$HAS_BUNDLE_NO" = "0" ] && [ "$HAS_BUNDLE_YES" = "1" ]; then
+  pass "K164: init review --bundle attaches bundle field (default unchanged: no bundle; --bundle: bundle with preflight_generated + errors[])"
+else
+  fail "K164: bundle flag not working — hasBundleDefault=$HAS_BUNDLE_NO (expected 0), hasBundleFlag=$HAS_BUNDLE_YES (expected 1)"
+fi
+
+# K165 (cal #31.D G7): graphify compose-drilldowns emits markdown-ready
+# drill-down sections for top-N symbols. Receipt #5 Q7a: orchestrator-
+# discipline failure forgot to append drill-downs to graph-impact.md, gate
+# correctly flagged but caused re-run. This CLI emits ready-to-pipe markdown.
+# Tests: synthetic graph + 1 target with 2 callers → output contains
+# "## Drill-down:" header + both caller labels.
+K165_TMP=$(mktemp -d)
+mkdir -p "$K165_TMP/.devt" "$K165_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K165_TMP/.devt/config.json"
+cat > "$K165_TMP/graphify-out/graph.json" <<EOF
+{"built_at_commit":"abc","nodes":[{"id":"svc","label":"TargetService","source_file":"src/svc.py","file_type":"code"},{"id":"c1","label":"RealCaller1","source_file":"src/c1.py","file_type":"code"},{"id":"c2","label":"RealCaller2","source_file":"src/c2.py","file_type":"code"}],"links":[{"source":"c1","target":"svc","relation":"calls","confidence":"EXTRACTED"},{"source":"c2","target":"svc","relation":"calls","confidence":"EXTRACTED"}]}
+EOF
+K165_OUT=$(cd "$K165_TMP" && node "$ROOT/bin/devt-tools.cjs" graphify compose-drilldowns TargetService --direction=in --limit=1 2>/dev/null)
+rm -rf "$K165_TMP"
+if echo "$K165_OUT" | /usr/bin/grep -q "## Drill-down: TargetService" && echo "$K165_OUT" | /usr/bin/grep -q "RealCaller1" && echo "$K165_OUT" | /usr/bin/grep -q "RealCaller2"; then
+  pass "K165: graphify compose-drilldowns emits markdown drill-down with header + all neighbors"
+else
+  fail "K165: compose-drilldowns not emitting expected markdown — got: $K165_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

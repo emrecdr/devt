@@ -57,17 +57,36 @@ If not configured, omit the block.
 
 > Context_init runs 9 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with dev-workflow.md::context_init.
 
-### Substep 0: Stale-workflow pre-flight (reset-soft on demand)
+### Substep 0: Stale-workflow pre-flight (auto-reset for unambiguous cases; prompt otherwise)
 
-Before any state update, detect whether `workflow.yaml` is stale relative to this new review (task changed AND prior workflow > 1h old). If stale, KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Field-evidenced failure mode: a 51-raw-dispatch counter from a 20-day-old workflow blocked a brand-new review at substep 1.
+Before any state update, detect whether `workflow.yaml` is stale relative to this new review. KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Field-evidenced failure mode (receipt #1): a 51-raw-dispatch counter from a 20-day-old workflow blocked a brand-new review at substep 1; receipt #5 saw the same with a 57-counter from a 9-day-old workflow.
+
+**Auto-reset path** (cal #31.D G4): when ALL hold — task changed AND prior workflow > 24h old AND workflow_type changed — this is unambiguously a new working session. Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value.
+
+**Operator-override path**: if the operator types `/devt:review --fresh` (or includes `--fresh` in the task), skip the staleness check and unconditionally call `state reset-soft` before substep 1. This is the operator-explicit form of "I know it's stale, just reset and go."
 
 ```bash
-STALENESS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state staleness-check --task="${REVIEW_SCOPE}" 2>/dev/null || echo '{}')
-IS_STALE=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
-STALE_REASON=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).reason||'')}catch{console.log('')}});" 2>/dev/null)
+# Operator-override path: --fresh flag in args triggers unconditional reset.
+if [[ " ${REVIEW_SCOPE} " == *" --fresh "* ]] || [[ " $ARGUMENTS " == *" --fresh "* ]]; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset-soft 2>&1 | head -1
+  echo "[review] --fresh: state reset-soft applied; proceeding to substep 1"
+else
+  AUTO_RESET=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state auto-reset-if-stale --task="${REVIEW_SCOPE}" --workflow-type="code_review" 2>&1)
+  ACTED=$(echo "$AUTO_RESET" | tail -1 | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).acted===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+  if [ "$ACTED" = "1" ]; then
+    echo "[review] auto-reset fired (task+type+age unambiguous new session); proceeding to substep 1"
+  else
+    # Not auto-resettable — fall back to standard staleness-check prompt
+    STALENESS=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state staleness-check --task="${REVIEW_SCOPE}" --workflow-type="code_review" 2>/dev/null || echo '{}')
+    IS_STALE=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).stale===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+    STALE_REASON=$(echo "$STALENESS" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).reason||'')}catch{console.log('')}});" 2>/dev/null)
+  fi
+fi
 ```
 
-If `IS_STALE=1`, use AskUserQuestion with three options:
+If auto-reset fired OR `--fresh` was used: continue to substep 1.
+
+If `IS_STALE=1` (stale but not auto-resettable — e.g., same workflow_type, or task changed but <24h old), use AskUserQuestion with three options:
 
 - Question: `Stale workflow state detected: ${STALE_REASON}. Reset accumulators? (preserves workflow_id_history + .devt/memory/ + phase artifacts like impl-summary.md / graph-impact.md / review.md; rotates dispatch-warnings.jsonl + claim-check-failures.jsonl; assigns fresh workflow_id + first_created_at so KILL gate counts from zero)`
 - Options: `Reset` (recommended for new reviews on stale state) / `Continue without reset` (proceed — KILL gate may fire on subsequent state updates) / `Cancel`

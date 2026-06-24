@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.107.0] - 2026-06-25
+
+### Cal #31.D — Setup-friction ergonomics (3 fixes)
+
+Three devt-side fixes from receipt #5 Q2/Q7 targeting setup friction (12-14 CLI round-trips before Wave 1 dispatch) + orchestrator-discipline failure modes (drill-down step easy to forget).
+
+**G4 — Auto-staleness-reset + `/devt:review --fresh` flag** (`bin/modules/state.cjs` + `workflows/code-review.md`). Receipt #5 Q2: KILL gates fired on accumulated raw_dispatch/claim-check counters from a 9-day-old workflow blocked a brand-new review at substep 1, requiring manual `reset-soft` detour. Two-part fix:
+
+- New `state auto-reset-if-stale --task=X --workflow-type=Y` CLI: deterministic auto-fire when ALL hold — task changed AND age > 24h AND workflow_type changed (unambiguous new working session). resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting in this case adds friction without value. Loud stderr message on fire so operator sees what was cleared.
+- New `/devt:review --fresh` operator-override flag: explicit "I know it's stale, just reset and go" shortcut. Bypasses staleness check, calls reset-soft unconditionally. Useful when operator already knows the workflow is stale and wants to skip the prompt round-trip.
+- `state staleness-check` extended with `--workflow-type=Y` parameter + `workflow_type_changed` / `auto_reset_recommended` fields in output.
+
+**G6 — `init review --bundle` opt-in CLI bundling** (`bin/modules/init.cjs`). Receipt #5 Q7b: setup friction is dominated by CLI calls (12-14 before Wave 1), not MCP or file reads. New `--bundle` flag attaches the 3 most common post-init context-build steps in one CLI call: preflight-generate, memory-signal count, graphify impact-plan (when graph is ready). Best-effort — any sub-step failure aggregates into `bundle.errors[]` so init.workflow_id always succeeds. Default behavior unchanged — `init review` without `--bundle` returns the same shape as before, preserving all existing callers.
+
+**G7 — `graphify compose-drilldowns` markdown emitter** (`bin/modules/graphify.cjs`). Receipt #5 Q7a: graphify-decision gate correctly flagged that orchestrator wrote graph-impact.md without drill-down sections, but the failure-mode (orchestrator discipline) is recurring. New CLI emits ready-to-concatenate markdown (`## Drill-down: <symbol>` header + per-neighbor bullets + filter telemetry) for the top-N symbols. The workflow can pipe `compose-drilldowns | tee -a graph-impact.md` to remove the "did I remember to drill?" failure class entirely.
+
+**Drift-guard stack now 72-deep K94-K165.** CLAUDE.md + README updated.
+
+**Smoke gates**: K163 (G4 — synthetic 30d-old workflow.yaml with task+type mismatch → auto-fires; same workflow with matching type → no-op), K164 (G6 — `init review` default vs `--bundle` shape diff: bundle field absent vs present with `preflight_generated` + `errors[]`), K165 (G7 — synthetic graph + 1 target with 2 callers → output contains `## Drill-down:` header + both caller labels).
+
+**Cal #31 series complete** (B + C + D shipped across v0.105.0 → v0.107.0). Receipt #6 target: code-review value rating ≥ 7.0 (up from 6.5/10 baseline) after all 3 cals integrated. If rating stays at 6.5, lift came from elsewhere (memory bridge G2 or ergonomics G4/G6/G7) — useful diagnostic signal even on partial validation.
+
+**Remaining**: Q1 (DI/dispatch edges) deferred to graphify-upstream filing — generalizes to FastAPI/Spring/Django/.NET/Express; not devt-side reimplementation.
+
 ## [0.106.0] - 2026-06-25
 
 ### Cal #31.C — Memory read-path bridge (G2 laneH)

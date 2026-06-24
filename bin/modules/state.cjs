@@ -1489,16 +1489,18 @@ function resetSoft() {
  * Consumed by workflows/code-review.md and workflows/dev-workflow.md
  * context_init substep 0 — if stale, AskUserQuestion offers reset-soft.
  */
-function stalenessCheck({ task } = {}) {
+function stalenessCheck({ task, workflowType } = {}) {
   const filePath = getWorkflowPath();
   if (!fs.existsSync(filePath)) {
-    return { stale: false, reason: "no prior workflow.yaml — fresh start", age_hours: null, task_changed: false, prior_task: null };
+    return { stale: false, reason: "no prior workflow.yaml — fresh start", age_hours: null, task_changed: false, prior_task: null, workflow_type_changed: false, prior_workflow_type: null, auto_reset_recommended: false };
   }
   const prev = parseSimpleYaml(fs.readFileSync(filePath, "utf8"));
   const priorTask = prev.task || null;
   const priorCreatedAt = prev.created_at || prev.first_created_at || null;
+  const priorWorkflowType = prev.workflow_type || null;
 
   const taskChanged = Boolean(typeof task === "string" && task.length > 0 && priorTask && priorTask !== task);
+  const workflowTypeChanged = Boolean(typeof workflowType === "string" && workflowType.length > 0 && priorWorkflowType && priorWorkflowType !== workflowType);
 
   let ageHours = null;
   if (priorCreatedAt) {
@@ -1509,8 +1511,21 @@ function stalenessCheck({ task } = {}) {
   const ageStale = ageHours !== null && ageHours > 1;
   const stale = Boolean(taskChanged && ageStale);
 
+  // G4 (cal #31.D) — auto-reset recommendation. Receipt #5 Q2c: auto-fire is
+  // safe (resetSoft is non-destructive of valuable state) when ALL hold:
+  // task_changed AND age>24h AND workflow_type_changed. Conservative —
+  // task-change alone is too aggressive (typo retry), age>24h alone is too
+  // aggressive (legitimate long-running workflow), workflow_type-change alone
+  // is too aggressive (mode flip mid-session). All three together is
+  // unambiguous "new working session" — orchestrator can call
+  // `state auto-reset-if-stale` instead of prompting the operator.
+  const ageVeryStale = ageHours !== null && ageHours > 24;
+  const autoResetRecommended = Boolean(taskChanged && ageVeryStale && workflowTypeChanged);
+
   let reason = "fresh";
-  if (stale) {
+  if (autoResetRecommended) {
+    reason = `auto-reset recommended: task changed ('${priorTask}' → '${task}'), workflow_type changed ('${priorWorkflowType}' → '${workflowType}'), prior workflow ${ageHours.toFixed(1)}h old — unambiguous new working session`;
+  } else if (stale) {
     reason = `task changed ('${priorTask}' → '${task}') and prior workflow is ${ageHours.toFixed(1)}h old; raw_dispatch/claim-check counters carry from prior session and may fire KILL gate on first state update`;
   } else if (taskChanged && !ageStale) {
     reason = `task changed but prior workflow is <1h old — may be typo retry, not resetting`;
@@ -1518,7 +1533,28 @@ function stalenessCheck({ task } = {}) {
     reason = `task matches prior workflow (${ageHours.toFixed(1)}h old) — legitimate resume`;
   }
 
-  return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask };
+  return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask, workflow_type_changed: workflowTypeChanged, prior_workflow_type: priorWorkflowType, auto_reset_recommended: autoResetRecommended };
+}
+
+// G4 (cal #31.D) — auto-reset-if-stale orchestration helper. Combines
+// stalenessCheck + resetSoft in one call when auto-reset conditions are met.
+// Returns { acted: true, ...resetSoftResult, staleness } when reset fired,
+// or { acted: false, staleness } when conditions weren't met (orchestrator
+// then decides whether to AskUserQuestion the operator). Loud stderr message
+// emitted on auto-fire so the operator sees what was cleared without having
+// to inspect JSON.
+function autoResetIfStale({ task, workflowType } = {}) {
+  const staleness = stalenessCheck({ task, workflowType });
+  if (!staleness.auto_reset_recommended) {
+    return { acted: false, staleness };
+  }
+  const resetResult = resetSoft();
+  // Loud stderr: operator typically sees CLI output; stderr is the surface
+  // that survives JSON-only stdout consumers (jq pipelines, etc.).
+  process.stderr.write(`[devt] AUTO-RESET fired: ${staleness.reason}\n`);
+  process.stderr.write(`[devt] preserved: workflow_id_history (${(resetResult.preserved && resetResult.preserved.workflow_id_history_depth) || 0} entries), session anchors, .devt/memory, phase artifacts\n`);
+  process.stderr.write(`[devt] cleared: per-workflow counters (raw_dispatch, claim-check, etc.) rotated to fresh workflow_id\n`);
+  return { acted: true, ...resetResult, staleness };
 }
 
 /**
@@ -5710,8 +5746,17 @@ function run(subcommand, args) {
       return resetSoft();
     case "staleness-check": {
       const taskArg = args.find(a => a.startsWith("--task="));
+      const wfTypeArg = args.find(a => a.startsWith("--workflow-type="));
       const task = taskArg ? taskArg.slice("--task=".length) : "";
-      return stalenessCheck({ task });
+      const workflowType = wfTypeArg ? wfTypeArg.slice("--workflow-type=".length) : "";
+      return stalenessCheck({ task, workflowType });
+    }
+    case "auto-reset-if-stale": {
+      const taskArg = args.find(a => a.startsWith("--task="));
+      const wfTypeArg = args.find(a => a.startsWith("--workflow-type="));
+      const task = taskArg ? taskArg.slice("--task=".length) : "";
+      const workflowType = wfTypeArg ? wfTypeArg.slice("--workflow-type=".length) : "";
+      return autoResetIfStale({ task, workflowType });
     }
     case "release":
       return releaseWorkflow();
@@ -5877,7 +5922,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

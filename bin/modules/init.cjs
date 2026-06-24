@@ -722,13 +722,97 @@ function run(subcommand, args, pluginRoot) {
   switch (subcommand) {
     case "workflow":
       return initWorkflow(args.join(" "), pluginRoot, "workflow");
-    case "review":
-      return initWorkflow(args.join(" ") || "code review", pluginRoot, "review");
+    case "review": {
+      // G6 (cal #31.D) — opt-in compound bundling. `--bundle` attaches the
+      // post-init context-build steps (preflight, memory signal, graphify
+      // impact-plan) so the orchestrator gets all setup data in one CLI call
+      // instead of 4-6 sequential round-trips. Receipt #5 Q7b: setup friction
+      // was dominated by CLI calls (12-14 before Wave 1), not MCP or files.
+      // Bundle is best-effort — any sub-step failure returns a partial result
+      // with `bundle.errors[]` populated; init.workflow_id always succeeds.
+      const wantBundle = args.includes("--bundle");
+      const cleanArgs = args.filter(a => a !== "--bundle");
+      const baseResult = initWorkflow(cleanArgs.join(" ") || "code review", pluginRoot, "review");
+      if (!wantBundle) return baseResult;
+      const bundle = runReviewBundle(cleanArgs.join(" "));
+      return { ...baseResult, bundle };
+    }
     default:
       throw new Error(
         `Unknown init type: ${subcommand}. Use: workflow, review`,
       );
   }
+}
+
+// G6 (cal #31.D) — review-context bundling helper. Runs the 3 most common
+// post-init data-fetch steps in one shot. Each step is wrapped so one
+// failure doesn't sink the whole bundle; errors aggregate into bundle.errors
+// for orchestrator visibility. Skips graphify steps when graphify is not
+// enabled (cheap probe via graphify.status()).
+function runReviewBundle(taskText) {
+  const errors = [];
+  let preflightOk = false;
+  let memorySignalCount = 0;
+  let graphifyImpactPlan = null;
+  let graphifyEnabled = false;
+
+  // Step 1: preflight generate (writes .devt/state/preflight-brief.{md,json})
+  try {
+    const preflight = require("./preflight.cjs");
+    preflight.generate(taskText || "code review", {});
+    preflightOk = true;
+  } catch (e) {
+    errors.push(`preflight: ${e.message || String(e)}`);
+  }
+
+  // Step 2: memory signal count (cheap probe — full query happens via existing
+  // memory query CLI when needed; bundle just confirms FTS index exists +
+  // returns top-line count). Skip if memory module fails.
+  try {
+    const memory = require("./memory.cjs");
+    const sig = memory.queryFTS(taskText || "review", { limit: 50 });
+    if (Array.isArray(sig)) memorySignalCount = sig.length;
+  } catch (e) {
+    errors.push(`memory: ${e.message || String(e)}`);
+  }
+
+  // Step 3: graphify impact-plan emit (only when graphify is enabled +
+  // graph.json exists). status() short-circuits cheaply when not ready.
+  try {
+    const graphify = require("./graphify.cjs");
+    const status = graphify.status();
+    if (status && status.state === "ready") {
+      graphifyEnabled = true;
+      // Best-effort impact-plan: read the preflight-brief.json that step 1
+      // just wrote, extract topic.symbols, attempt blast_radius. Cheap because
+      // both files are now hot in cache.
+      const fs = require("fs");
+      const path = require("path");
+      const briefPath = path.join(process.cwd(), ".devt", "state", "preflight-brief.json");
+      if (fs.existsSync(briefPath)) {
+        const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
+        const symbols = brief && brief.topic && Array.isArray(brief.topic.symbols) ? brief.topic.symbols.slice(0, 5) : [];
+        if (symbols.length > 0) {
+          const blast = graphify.blastRadius(symbols);
+          graphifyImpactPlan = {
+            symbols,
+            effect_size: blast && blast.effect_size ? blast.effect_size : null,
+            source: blast && blast.source ? blast.source : "unknown",
+          };
+        }
+      }
+    }
+  } catch (e) {
+    errors.push(`graphify: ${e.message || String(e)}`);
+  }
+
+  return {
+    preflight_generated: preflightOk,
+    memory_signal_count: memorySignalCount,
+    graphify_enabled: graphifyEnabled,
+    graphify_impact_plan: graphifyImpactPlan,
+    errors,
+  };
 }
 
 module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars };

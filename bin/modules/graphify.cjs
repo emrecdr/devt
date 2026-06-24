@@ -1412,6 +1412,63 @@ function detectServiceBoundary(diffFiles) {
   return { ...best, coverage };
 }
 
+// G7 (cal #31.D) — Compose markdown-ready drill-down sections for top-N
+// symbols. The graphify-impact-plan workflow step requires drill-down
+// sections in graph-impact.md; orchestrator-discipline can drop them.
+// This emits ready-to-concatenate markdown that the workflow can pipe
+// directly into the impact file, removing the "did I remember to drill?"
+// failure mode receipt #5 Q7a flagged.
+//
+// Format per symbol:
+//   ## Drill-down: <symbol> (direction=<dir>, depth=<n>)
+//
+//   - <neighbor> (relation=<rel>, depth=<d>, source_file=<sf>)
+//   - ...
+//
+//   _(filtered: noise=<n>, test_path=<n>, di_aggregation=<n>)_
+function composeDrilldowns(symbols, options) {
+  options = options || {};
+  const direction = options.direction || "in";
+  const depth = options.depth || 1;
+  const limit = options.limit || 3;
+  const targets = symbols.slice(0, limit);
+  const lines = [];
+  for (const sym of targets) {
+    lines.push(`## Drill-down: ${sym} (direction=${direction}, depth=${depth})`);
+    lines.push("");
+    let r;
+    try {
+      r = getNeighbors(sym, { direction, depth });
+    } catch (e) {
+      lines.push(`_(error: ${e.message || String(e)})_`);
+      lines.push("");
+      continue;
+    }
+    if (!r || !Array.isArray(r.results) || r.results.length === 0) {
+      lines.push(`_(no neighbors found in direction=${direction})_`);
+    } else {
+      for (const item of r.results) {
+        const tags = [`relation=${item.relation || "?"}`, `depth=${item.depth}`];
+        if (item.source_file) tags.push(`source_file=${item.source_file}`);
+        if (item.di_aggregation_collapsed_count !== undefined) {
+          tags.push(`+${item.di_aggregation_collapsed_count} DI-collapsed`);
+        }
+        lines.push(`- **${item.label}** (${tags.join(", ")})`);
+      }
+    }
+    const filters = [];
+    if (r && r.filtered_noise) filters.push(`noise=${r.filtered_noise}`);
+    if (r && r.filtered_test_path) filters.push(`test_path=${r.filtered_test_path}`);
+    if (r && r.filtered_di_aggregation) filters.push(`di_aggregation=${r.filtered_di_aggregation}`);
+    if (filters.length > 0) {
+      lines.push("");
+      lines.push(`_(filtered: ${filters.join(", ")})_`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 function laneSuggestions(diffFiles, options) {
   options = options || {};
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
@@ -2272,6 +2329,36 @@ function run(subcommand, args) {
       json(symbolsInFiles(files, limit));
       return 0;
     }
+    case "compose-drilldowns": {
+      // G7 (cal #31.D) — emit drill-down markdown for top-N symbols. The
+      // graphify-impact-plan workflow step requires drill-down sections in
+      // graph-impact.md, but the orchestrator easily forgets to append them
+      // after writing the impact-plan envelope — receipt #5 saw the gate
+      // (correctly) flag the omission and require a re-run. This CLI emits
+      // ready-to-concatenate markdown so the workflow can pipe its output
+      // directly into graph-impact.md without forgetting the step.
+      const limitArg = args.find(a => a.startsWith("--limit="));
+      const dirArg = args.find(a => a.startsWith("--direction="));
+      const depthArg = args.find(a => a.startsWith("--depth="));
+      let limit = 3;
+      if (limitArg) {
+        const n = Number(limitArg.split("=")[1]);
+        if (!Number.isInteger(n) || n < 1) {
+          process.stderr.write(`graphify compose-drilldowns: invalid --limit "${limitArg.split("=")[1]}" (expected positive integer)\n`);
+          return 2;
+        }
+        limit = n;
+      }
+      const direction = dirArg ? dirArg.split("=")[1] : "in";
+      const depth = depthArg ? Math.max(1, Number(depthArg.split("=")[1])) : 1;
+      const symbols = args.filter(a => !a.startsWith("--"));
+      if (symbols.length === 0) {
+        process.stderr.write("Usage: graphify compose-drilldowns <symbol>... [--direction=in|out|both] [--depth=1] [--limit=3]\n");
+        return 2;
+      }
+      process.stdout.write(composeDrilldowns(symbols, { direction, depth, limit }));
+      return 0;
+    }
     case "lane-suggestions": {
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>... [--target-lanes=N]\n"); return 2; }
@@ -2298,7 +2385,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | lane-suggestions | adaptive-threshold | maybe-refresh | rebuild | write-memory\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | compose-drilldowns | lane-suggestions | adaptive-threshold | maybe-refresh | rebuild | write-memory\n`
       );
       return 2;
   }
