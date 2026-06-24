@@ -13967,6 +13967,93 @@ else
   fail "K158: per-agent canonical CLI not surfaced — hits=$K158_HITS/2"
 fi
 
+# K159 (cal #31.B G1): graphify getNeighbors DI-aggregation collapse. Receipt #5 Q3:
+# when many result nodes share one DI-pattern source_file (dependencies.py,
+# wiring.py, container.py, etc.), collapse to single representative + counter
+# instead of fanning out. Tests: 8 DI-pattern nodes + 1 real caller →
+# survivors=2 (1 collapse rep + 1 real), filtered_di_aggregation=7.
+K159_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k159-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true});
+fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+const nodes = [
+  {id: 'svc', label: 'TargetService', source_file: 'src/svc.py', file_type: 'code'},
+  {id: 'real_caller', label: 'RealCaller', source_file: 'src/caller.py', file_type: 'code'},
+];
+const links = [{source: 'real_caller', target: 'svc', relation: 'calls', confidence: 'EXTRACTED'}];
+for (let i = 1; i <= 8; i++) {
+  nodes.push({id: 'di' + i, label: 'DIWire' + i, source_file: 'src/dependencies.py', file_type: 'code'});
+  links.push({source: 'di' + i, target: 'svc', relation: 'uses', confidence: 'EXTRACTED'});
+}
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({built_at_commit: 'abc', nodes, links}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.getNeighbors('TargetService', {direction: 'in'});
+const survivor = r.results.find(x => x.di_aggregation_collapsed_count !== undefined);
+console.log('count=' + r.results.length + ',filtered=' + (r.filtered_di_aggregation || 0) + ',collapsed_count=' + (survivor ? survivor.di_aggregation_collapsed_count : 0));
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K159_OUT" | /usr/bin/grep -qE "count=2,filtered=7,collapsed_count=7"; then
+  pass "K159: graphify getNeighbors collapses DI-aggregation fan (8 dependencies.py nodes → 1 rep + 7 collapsed)"
+else
+  fail "K159: DI-aggregation collapse not working — got: $K159_OUT"
+fi
+
+# K160 (cal #31.B G3): preflight extractTopic demotes config-enum symbols.
+# Receipt #5 Q6: 19/19 noise samples were config infrastructure (Settings,
+# *Config, *Backend, *Profile, LogLevel, Environment, OrderBy, etc.). Tests:
+# 2 real + 4 config diff symbols → real symbols rank top, config demoted to
+# end, config_demoted field present.
+K160_OUT=$(node -e "
+const p = require('$ROOT/bin/modules/preflight.cjs');
+const r = p.extractTopic('add tablet RBAC',
+  { gitDiffSymbols: ['UserService', 'AuthHandler', 'Settings', 'EmailBackend', 'LogLevel', 'OrderBy'] });
+const topReal = r.symbols.slice(0, 2).every(s => s === 'UserService' || s === 'AuthHandler');
+const allConfigDemoted = r.symbols.slice(2).every(s => ['Settings', 'EmailBackend', 'LogLevel', 'OrderBy'].includes(s));
+const fieldOk = Array.isArray(r.config_demoted) && r.config_demoted.length === 4;
+console.log('topReal=' + topReal + ',allConfigDemoted=' + allConfigDemoted + ',fieldOk=' + fieldOk);
+" 2>/dev/null)
+if echo "$K160_OUT" | /usr/bin/grep -q "topReal=true,allConfigDemoted=true,fieldOk=true"; then
+  pass "K160: preflight extractTopic demotes config-enum symbols to end + emits config_demoted field"
+else
+  fail "K160: config-enum demotion not working — got: $K160_OUT"
+fi
+
+# K161 (cal #31.B G5): graphify symbolsInFiles diff-hunk fallback for
+# un-indexed (newly added) files. Receipt #5 Q4: symbols-in-files returns []
+# on added files, forcing fallback to noisy topic-text symbols. Tests:
+# empty graph + .py file with 2 classes + 1 def → 3 symbols extracted with
+# source="diff-hunk", reason mentions "fallback".
+K161_TMP=$(mktemp -d)
+mkdir -p "$K161_TMP/.devt" "$K161_TMP/graphify-out" "$K161_TMP/src"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K161_TMP/.devt/config.json"
+echo '{"built_at_commit":"abc","nodes":[],"links":[]}' > "$K161_TMP/graphify-out/graph.json"
+cat > "$K161_TMP/src/new_module.py" <<'PYEOF'
+class Alpha:
+    pass
+
+class Beta:
+    pass
+
+def gamma():
+    return 42
+PYEOF
+K161_OUT=$(cd "$K161_TMP" && node -e "
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.symbolsInFiles(['src/new_module.py']);
+const labels = r.symbols.map(s => s.symbol).filter(s => ['Alpha', 'Beta', 'gamma'].includes(s));
+const allDiffHunk = r.symbols.filter(s => labels.includes(s.symbol)).every(s => s.source === 'diff-hunk');
+console.log('labels=' + labels.length + ',allDiffHunk=' + allDiffHunk + ',reasonOk=' + (r.reason && r.reason.includes('fallback') ? 'yes' : 'no'));
+" 2>/dev/null)
+rm -rf "$K161_TMP"
+if echo "$K161_OUT" | /usr/bin/grep -q "labels=3,allDiffHunk=true,reasonOk=yes"; then
+  pass "K161: graphify symbolsInFiles diff-hunk fallback extracts symbols from un-indexed files (3 symbols, source=diff-hunk, reason mentions fallback)"
+else
+  fail "K161: diff-hunk fallback not working — got: $K161_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

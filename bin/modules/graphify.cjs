@@ -587,14 +587,55 @@ function getNeighbors(symbol, options) {
   // docstrings, burying the production-caller signal.
   const extraNoise = _getExtraNoiseSet();
   const testPathPatterns = _getTestPathPatterns();
+
+  // G1 (cal #31.B) — DI-aggregation collapse. Receipt #5 Q3: greenfield's
+  // `licences/dependencies.py` "imports everything" pattern produced a fan of
+  // 100+ result nodes all sharing one source_file via `imports`/`uses` edges,
+  // overwhelming legitimate call-graph signal. Detection is structural (per-
+  // source-file occurrence count + basename matches DI-pattern), NOT a pure
+  // node predicate — `factory.py` is often legitimate so basename-only is too
+  // aggressive. Threshold-gated: only collapses when >threshold nodes share
+  // a DI-pattern file (otherwise small DI wiring stays visible).
+  const DI_AGGREGATION_BASENAMES = _getDIAggregationPatterns();
+  const COLLAPSE_THRESHOLD = _getDIAggregationCollapseThreshold();
+  const sourceFileCounts = new Map();
+  for (const [id] of visited) {
+    const node = loaded.cache.adj.nodeMap.get(id);
+    const src = (node && node.source_file) || "";
+    if (src) sourceFileCounts.set(src, (sourceFileCounts.get(src) || 0) + 1);
+  }
+
   const items = [];
+  const seenDIAggregator = new Set(); // source_file paths where the representative has been emitted
   let filteredNoiseCount = 0;
   let filteredTestPathCount = 0;
+  let filteredDIAggregationCount = 0;
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
     const label = node.label || id;
     if (_isBlastNoise(node, label, extraNoise)) { filteredNoiseCount++; continue; }
     if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
+
+    // DI-aggregation collapse: when many nodes share one DI-pattern source_file,
+    // keep one representative + count the rest as collapsed. Marker field
+    // `di_aggregation_collapsed_count` tells consumers how many siblings were
+    // suppressed so they can drill down if needed.
+    const src = (node && node.source_file) || "";
+    if (src && DI_AGGREGATION_BASENAMES.test(src) && (sourceFileCounts.get(src) || 0) > COLLAPSE_THRESHOLD) {
+      if (seenDIAggregator.has(src)) { filteredDIAggregationCount++; continue; }
+      seenDIAggregator.add(src);
+      items.push({
+        id,
+        label,
+        source_file: src,
+        relation: info.edge ? info.edge.relation : "",
+        confidence: info.edge ? info.edge.confidence : "",
+        depth: info.depth,
+        di_aggregation_collapsed_count: (sourceFileCounts.get(src) || 1) - 1,
+      });
+      continue;
+    }
+
     items.push({
       id,
       label,
@@ -606,10 +647,11 @@ function getNeighbors(symbol, options) {
   }
   items.sort((a, b) => a.depth - b.depth || (a.label || "").localeCompare(b.label || ""));
   // Filter telemetry exposed in envelope so callers can audit how aggressive
-  // the noise+test-path filtering was. Empty objects when nothing filtered.
-  const filterTelemetry = (filteredNoiseCount || filteredTestPathCount) ? {
+  // the noise+test-path+DI-aggregation filtering was. Empty objects when nothing filtered.
+  const filterTelemetry = (filteredNoiseCount || filteredTestPathCount || filteredDIAggregationCount) ? {
     filtered_noise: filteredNoiseCount,
     filtered_test_path: filteredTestPathCount,
+    filtered_di_aggregation: filteredDIAggregationCount,
   } : null;
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
   if (!maxBytes) {
@@ -939,6 +981,29 @@ function _isTestPathNode(node, patterns) {
     if (re.test(src)) return true;
   }
   return false;
+}
+
+// G1 (cal #31.B) — DI-aggregation file basename patterns. Receipt #5 Q3:
+// FastAPI/Django/.NET projects commonly have one file (e.g. `dependencies.py`,
+// `wiring.py`, `container.py`) that imports/wires many services via DI. The
+// graph extractor sees these as many imports/uses edges from one source_file,
+// producing huge fans in get_neighbors that crowd out real call edges.
+// `factory.py` deliberately excluded — often legitimate (factory pattern,
+// test fixtures, etc.) — basename alone isn't sufficient; the collapse only
+// fires when ALSO above the threshold count.
+const _DI_AGGREGATION_BASENAMES_DEFAULT = /\/(dependencies|deps|wiring|container|providers)\.(py|ts|js|tsx|jsx)$/;
+
+function _getDIAggregationPatterns() {
+  const cfg = getConfig();
+  const projectPatterns = cfg && typeof cfg.di_aggregation_pattern === "string" ? cfg.di_aggregation_pattern : null;
+  if (!projectPatterns) return _DI_AGGREGATION_BASENAMES_DEFAULT;
+  try { return new RegExp(projectPatterns); } catch { return _DI_AGGREGATION_BASENAMES_DEFAULT; }
+}
+
+function _getDIAggregationCollapseThreshold() {
+  const cfg = getConfig();
+  const n = cfg && Number.isInteger(cfg.di_aggregation_collapse_threshold) ? cfg.di_aggregation_collapse_threshold : 5;
+  return n > 0 ? n : 5;
 }
 
 /**
@@ -1637,10 +1702,12 @@ function symbolsInFiles(diffFiles, limit = 10) {
   } catch { /* leave null */ }
   const { nodeMap, inc, out } = loaded.cache.adj;
   const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  const matchedBasenames = new Set();
   const results = [];
   for (const [id, node] of nodeMap) {
     const sf = node && node.source_file;
     if (!sf || !wantBasenames.has(path.basename(sf))) continue;
+    matchedBasenames.add(path.basename(sf));
     const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
     if (_isFileNode(node, degree)) continue;
     if (_isConceptNode(node)) continue;
@@ -1652,15 +1719,98 @@ function symbolsInFiles(diffFiles, limit = 10) {
     });
   }
   results.sort((a, b) => b.edge_count - a.edge_count);
-  const totalMatches = results.length;
+
+  // G5 (cal #31.B) — Diff-hunk symbol fallback. Receipt #5 Q4: when files in
+  // the diff are NEWLY ADDED, the graph (rebuilt at last commit) has no nodes
+  // for them, so symbols-in-files returns [] for the highest-risk subset —
+  // forcing the workflow to fall back to noisy topic-text symbols. The
+  // 80/20 fix per receipt: regex-extract symbol-introducing keywords from
+  // the file contents directly. No tree-sitter, no graph rebuild — just
+  // identifier-introducing keyword matches across Python/TS/JS/Go/Rust.
+  // Synthesized symbols carry source="diff-hunk" + edge_count=null so
+  // consumers can distinguish them from graph-derived results.
+  const fallbackSymbols = [];
+  let fallbackFilesScanned = 0;
+  for (const file of diffFiles) {
+    const base = path.basename(file);
+    if (matchedBasenames.has(base)) continue; // graph had nodes — no fallback needed
+    const extracted = _extractSymbolsFromFile(file);
+    if (extracted.length === 0) continue;
+    fallbackFilesScanned++;
+    for (const sym of extracted) {
+      fallbackSymbols.push({
+        symbol: sym,
+        source_file: file,
+        edge_count: null,
+        source: "diff-hunk",
+      });
+    }
+  }
+
+  const totalMatches = results.length + fallbackSymbols.length;
   const cap = Math.max(1, Math.min(limit, 200));
-  const symbols = results.slice(0, cap);
-  const reason = totalMatches === 0
-    ? (lagCommits !== null && lagCommits > 30
-        ? `no nodes in graph for these files (graph_lag_commits=${lagCommits} — likely stale; consider 'graphify update .')`
-        : "no nodes in graph for these files")
-    : (totalMatches > cap ? `truncated to limit=${cap} of ${totalMatches} total matches` : "ok");
+  // Graph-derived results rank first (have degree info); fallback last (no
+  // degree, but better than nothing). Within fallback, preserve file order.
+  const allSymbols = [...results, ...fallbackSymbols];
+  const symbols = allSymbols.slice(0, cap);
+  let reason;
+  if (totalMatches === 0) {
+    reason = lagCommits !== null && lagCommits > 30
+      ? `no nodes in graph for these files (graph_lag_commits=${lagCommits} — likely stale; consider 'graphify update .')`
+      : "no nodes in graph for these files";
+  } else if (results.length === 0) {
+    reason = `graph empty for these files — diff-hunk fallback extracted ${fallbackSymbols.length} symbols from ${fallbackFilesScanned} added/un-indexed file(s)`;
+  } else if (fallbackSymbols.length > 0) {
+    reason = totalMatches > cap
+      ? `truncated to limit=${cap} of ${totalMatches} total matches (${fallbackSymbols.length} from diff-hunk fallback)`
+      : `ok (${fallbackSymbols.length} from diff-hunk fallback for un-indexed files)`;
+  } else {
+    reason = totalMatches > cap ? `truncated to limit=${cap} of ${totalMatches} total matches` : "ok";
+  }
   return { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches };
+}
+
+// G5 (cal #31.B) — Identifier-introducing keyword extractor. Covers
+// Python/TS/JS/Go/Rust syntax for symbol-anchor lookup on un-indexed files.
+// Bounded reads (~50KB) keep latency negligible. Per-file symbol cap (20)
+// prevents one mega-file from dominating the fallback set. NOT meant to be
+// a full parser — false positives on identifiers in comments/strings are
+// acceptable; they're harmless extra blast_radius anchors.
+const _MAX_FILE_READ_BYTES = 50000;
+const _MAX_SYMBOLS_PER_FILE = 20;
+const _SYMBOL_INTRO_RE = /(?:^|\n)(?:\s{0,12})(?:export\s+)?(?:async\s+)?(?:public\s+|private\s+|protected\s+)?(?:class|function|interface|struct|enum|trait|fn|def|type)\s+([A-Za-z_]\w{2,})/g;
+
+function _extractSymbolsFromFile(filePath) {
+  try {
+    const fs = require("fs");
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return [];
+    const readBytes = Math.min(stat.size, _MAX_FILE_READ_BYTES);
+    const fd = fs.openSync(filePath, "r");
+    let content;
+    try {
+      const buf = Buffer.alloc(readBytes);
+      fs.readSync(fd, buf, 0, readBytes, 0);
+      content = buf.toString("utf-8");
+    } finally {
+      fs.closeSync(fd);
+    }
+    const seen = new Set();
+    const symbols = [];
+    let m;
+    _SYMBOL_INTRO_RE.lastIndex = 0;
+    while ((m = _SYMBOL_INTRO_RE.exec(content)) !== null) {
+      const name = m[1];
+      if (!seen.has(name)) {
+        seen.add(name);
+        symbols.push(name);
+        if (symbols.length >= _MAX_SYMBOLS_PER_FILE) break;
+      }
+    }
+    return symbols;
+  } catch {
+    return []; // ENOENT, permission denied, etc. — fallback gracefully
+  }
 }
 
 // Symbol-level companion to `checkLargeFilesGodNodes`. The file-level check

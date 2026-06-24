@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.105.0] - 2026-06-24
+
+### Cal #31.B — Graphify signal quality (3 receipt-validated fixes)
+
+Three devt-side fixes from greenfield-api receipt #5 (2026-06-23). Receipt rated graphify integration depth 8/10 but session value 6.5/10 with calibrated noise samples (19/19 config-enum noise dominating topic.symbols, `licences/dependencies.py` "imports everything" DI-aggregation flooding get_neighbors, `symbols-in-files` returning `[]` on newly-added files). Each fix addresses one named symptom with deterministic, code-grounded edits.
+
+**G1 — DI-aggregation collapse in `getNeighbors` BFS visitor** (`bin/modules/graphify.cjs`). When many result nodes share one DI-pattern source file (`dependencies.py` / `wiring.py` / `container.py` / `providers.py` / `deps.py` — extension-agnostic across Python/TS/JS), collapse to one representative + `di_aggregation_collapsed_count` marker instead of fanning out. Threshold-gated (default >5 occurrences) so small legitimate DI wiring stays visible. Configurable via `graphify.di_aggregation_pattern` + `graphify.di_aggregation_collapse_threshold`. Receipt evidence: greenfield review had 100+ nodes from one `dependencies.py` drowning out real call edges; with G1 those collapse to a single labeled marker.
+
+**G3 — Config-enum demotion in `extractTopic`** (`bin/modules/preflight.cjs`). When config/constants/settings files are in the diff, their enum/dataclass symbols (`Settings`, `*Config`, `*Backend`, `*Profile`, `LogLevel`, `Environment`, `OrderBy`, `ErrorCode`, etc.) flooded topic.symbols above real feature symbols. Receipt's 19 confirmed noise samples → 18/19 demoted (94.7% coverage; `UserLanguages` intentionally not matched — plural-noun is too weak a config signal). Demotion preserves recall (symbols stay in array, ranked last) while improving precision (downstream top-N truncation drops them first). New `topic.config_demoted` telemetry field surfaces demoted set so reviewers can audit.
+
+**G5 — Diff-hunk symbol fallback in `symbolsInFiles`** (`bin/modules/graphify.cjs`). When the graph (rebuilt at last commit) has no nodes for newly-added files, fall back to regex-extracted symbols from file contents via identifier-introducing-keyword pattern (Python/TS/JS/Go/Rust). Synthesized symbols carry `source: "diff-hunk"` + `edge_count: null` so consumers distinguish them from graph-derived results. Bounded reads (50KB/file, 20 symbols/file) keep latency negligible. Receipt evidence: symbols-in-files returned `[]` on greenfield's new `.py` files — exactly the highest-risk subset — forcing fallback to noisy topic-text symbols. With G5, symbol_anchored tier produces anchors even for additions the graph has never seen.
+
+**Drift-guard stack now 68-deep K94-K161.** CLAUDE.md + README updated.
+
+**Smoke gates**: K159 (G1 — 8 dependencies.py nodes collapse to 1 representative + filtered=7), K160 (G3 — real symbols rank above 4 mixed config-enums + config_demoted field present), K161 (G5 — 3 symbols extracted from un-indexed .py file with source=diff-hunk).
+
+**Receipt validation target**: receipt #6 should rate code-review value ≥ 7.0 (up from 6.5/10 baseline). If it stays at 6.5, the Q3/Q4/Q6 fixes weren't the right levers and cal #31.C (memory bridge) must carry the lift instead.
+
+**Carryover for cal #31.C/D**: G2 (MEMORY.md → preflight memory_signal via new laneH, Option Z confirmed by schema-incompatibility validation), G4 (auto-staleness-reset + `--fresh` flag), G6 (extend existing `init review` CLI to bundle 4 more steps, ~6-8 round-trip reduction), G7 (drill-down composition CLI to remove orchestrator-discipline-failure mode on graphify-decision gate). Q1 (DI/dispatch edges) deferred to upstream graphify filing — generalizes to all FastAPI/Spring/Django/.NET/Express DI patterns; not devt-side reimplementation.
+
 ## [0.104.0] - 2026-06-21
 
 ### Cal #31.A — Wave A tightening (drift meta-gate + 2 UX fixes)

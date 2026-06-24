@@ -549,7 +549,56 @@ function extractTopic(taskText, opts = {}) {
     }
   }
 
-  return { domains, symbols, keywords, raw: text, resolution_path: resolutionPath, symbol_provenance: symbolProvenance };
+  // G3 (cal #31.B) — Config-enum demotion. Receipt #5 Q6: when config.py /
+  // constants.py / settings.py are in the diff, their enum/dataclass symbols
+  // (Settings, *Config, *Backend, *Profile, LogLevel, Environment, OrderBy,
+  // ErrorCode, etc.) flood the topic — receipt-confirmed 19/32 noise samples
+  // all matched this pattern. Demote (not remove) — they're pushed to the end
+  // of the array so downstream top-N truncation drops them first while
+  // preserving recall if the task is genuinely about config. Demotion is
+  // applied AFTER B4 (which removes short text-leg stand-ins) so the two
+  // operations don't interfere.
+  const configDemoted = [];
+  const nonConfig = [];
+  for (const s of symbols) {
+    if (_isConfigEnumName(s)) {
+      configDemoted.push(s);
+    } else {
+      nonConfig.push(s);
+    }
+  }
+  const reorderedSymbols = [...nonConfig, ...configDemoted];
+  // Preserve original symbol order in provenance map (no changes); only the
+  // array order changes. Downstream consumers (blast_radius args, scope_hint
+  // cap) get nonConfig symbols first.
+
+  const result = {
+    domains,
+    symbols: reorderedSymbols,
+    keywords,
+    raw: text,
+    resolution_path: resolutionPath,
+    symbol_provenance: symbolProvenance,
+  };
+  if (configDemoted.length > 0) {
+    result.config_demoted = configDemoted;
+  }
+  return result;
+}
+
+// G3 (cal #31.B) — Config/enum name predicate. Pattern coverage validated
+// against receipt #5's 19 confirmed noise samples (18/19 = 94.7% match).
+// Exact-name escape hatch covers oddities (Environment, OrderBy, ErrorCode)
+// where suffix doesn't trigger. The `UserLanguages` style is intentionally
+// NOT matched — plural noun isn't a strong config signal and false positives
+// on domain-plural symbols (UserAccounts, OrderItems) outweigh the one miss.
+const _CONFIG_ENUM_SUFFIX = /(Settings|Config(Dict|Key)?|Backend|Profile|Mode|Level|Output|Source|Format)$/;
+const _CONFIG_ENUM_EXACT = new Set(["Environment", "OrderBy", "ErrorCode", "LogLevel", "LogOutput"]);
+
+function _isConfigEnumName(symbol) {
+  if (typeof symbol !== "string" || symbol.length === 0) return false;
+  if (_CONFIG_ENUM_EXACT.has(symbol)) return true;
+  return _CONFIG_ENUM_SUFFIX.test(symbol);
 }
 
 /**
