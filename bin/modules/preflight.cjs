@@ -755,6 +755,201 @@ function laneG(cfg, limit = 10) {
 }
 
 /**
+ * Lane H — auto-memory + claude-mem read path. Receipt #5 Q5: MEMORY.md +
+ * claude-mem observations don't auto-flow into preflight memory_signal
+ * because their frontmatter schemas (name/description/metadata.type) are
+ * incompatible with devt FTS's required fields (id/title/doc_type/...).
+ * Cal #29's harvestClaudeMemFromMcp is a WRITE path (→ _suggestions.md →
+ * curator → permanent doc); this lane is the missing READ path that surfaces
+ * those decisions in the CURRENT session's preflight brief without bypassing
+ * the curator (auto-memory is operator-owned; harvest is orchestrator-staged).
+ *
+ * Two sources, one normalized output shape:
+ *   1. Auto-memory dir (~/.claude/projects/<projHash>/memory/*.md by default,
+ *      overridable via cfg.memory.auto_memory_paths)
+ *   2. .devt/state/claude-mem-harvest.md if present (orchestrator-written)
+ *
+ * Returns: [{name, description, source, source_file, score, type}]
+ *   - source: "auto_memory" | "claude_mem_harvest"
+ *   - score: # of task-token matches (case-insensitive substring) in body
+ *   - type: feedback|project|reference|user (auto_memory) or "observation" (harvest)
+ */
+function laneH(cfg, taskText, limit = 8) {
+  if (!taskText || typeof taskText !== "string") return [];
+  const fs = require("fs");
+  const path = require("path");
+
+  const tokens = _tokensForLaneH(taskText);
+  if (tokens.length === 0) return [];
+
+  const candidates = [];
+
+  // Source 1: auto-memory dir. Default location mirrors Claude Code's
+  // per-project memory layout: ~/.claude/projects/<cwd-with-slashes-as-dashes>/memory/
+  const autoMemoryDirs = _getAutoMemoryDirs(cfg);
+  for (const dir of autoMemoryDirs) {
+    if (!_safeIsDir(dir)) continue;
+    let files;
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith(".md") && f !== "MEMORY.md"); }
+    catch { continue; }
+    for (const f of files) {
+      const fp = path.join(dir, f);
+      const rec = _parseAutoMemoryFile(fp, tokens);
+      if (rec) candidates.push(rec);
+    }
+  }
+
+  // Source 2: claude-mem-harvest.md (orchestrator-staged observations)
+  try {
+    const stateMod = require("./state.cjs");
+    const harvestPath = path.join(stateMod.getStateDir(), "claude-mem-harvest.md");
+    if (_safeIsFile(harvestPath)) {
+      const harvestRecs = _parseClaudeMemHarvest(harvestPath, tokens);
+      for (const rec of harvestRecs) candidates.push(rec);
+    }
+  } catch { /* state module / harvest unavailable — skip */ }
+
+  // Rank by score desc, then alphabetical for determinism. Cap at limit.
+  candidates.sort((a, b) => b.score - a.score || (a.name || "").localeCompare(b.name || ""));
+  return candidates.slice(0, Math.max(1, Math.min(limit, 50)));
+}
+
+// laneH support: tokenize task text into match candidates. Reuses
+// extractTopic's stop-word filtering. Lower-cased + deduped + length-bounded.
+function _tokensForLaneH(taskText) {
+  const words = (taskText.toLowerCase().match(/[a-z][a-z0-9_-]{2,30}/g) || []);
+  const seen = new Set();
+  const out = [];
+  for (const w of words) {
+    if (STOP_WORDS.has(w)) continue;
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+// laneH support: resolve auto-memory directory paths. Defaults to the
+// Claude Code per-project memory dir derived from cwd; configurable via
+// cfg.memory.auto_memory_paths (array of absolute paths).
+function _getAutoMemoryDirs(cfg) {
+  const path = require("path");
+  const os = require("os");
+  if (cfg && cfg.memory && Array.isArray(cfg.memory.auto_memory_paths)) {
+    return cfg.memory.auto_memory_paths
+      .filter(p => typeof p === "string" && p.length > 0)
+      .map(p => p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
+  }
+  // Default: mirror Claude Code's project-hash convention. cwd with slashes
+  // replaced by dashes; leading dash retained (e.g. /Users/x/proj →
+  // -Users-x-proj). Coupling note: this is Claude Code's internal layout,
+  // not a public API. If the layout changes, projects can override via
+  // cfg.memory.auto_memory_paths.
+  const cwd = process.cwd();
+  const projectHash = cwd.replace(/\//g, "-");
+  return [path.join(os.homedir(), ".claude", "projects", projectHash, "memory")];
+}
+
+function _safeIsDir(p) {
+  try { return require("fs").statSync(p).isDirectory(); } catch { return false; }
+}
+
+function _safeIsFile(p) {
+  try { return require("fs").statSync(p).isFile(); } catch { return false; }
+}
+
+// laneH support: parse one auto-memory file. Reads frontmatter + body,
+// scores body content against task tokens, returns record if score > 0.
+// Bounded read (50KB) — auto-memory files are typically <5KB.
+function _parseAutoMemoryFile(fp, tokens) {
+  const fs = require("fs");
+  let content;
+  try {
+    const stat = fs.statSync(fp);
+    const readBytes = Math.min(stat.size, 50000);
+    const buf = Buffer.alloc(readBytes);
+    const fd = fs.openSync(fp, "r");
+    try { fs.readSync(fd, buf, 0, readBytes, 0); } finally { fs.closeSync(fd); }
+    content = buf.toString("utf-8");
+  } catch { return null; }
+
+  // Frontmatter is the first --- ... --- block. Extract `name`, `description`,
+  // `metadata.type`. Body is everything after the closing ---.
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fmMatch) return null;
+  const fmText = fmMatch[1];
+  const body = fmMatch[2];
+
+  const nameMatch = fmText.match(/^name:\s*(.+)$/m);
+  const descMatch = fmText.match(/^description:\s*"?([^"\n]*)"?/m);
+  const typeMatch = fmText.match(/^\s*type:\s*(\w+)/m);
+  const name = nameMatch ? nameMatch[1].trim() : require("path").basename(fp, ".md");
+  const description = descMatch ? descMatch[1].trim() : "";
+  const type = typeMatch ? typeMatch[1].trim() : "unknown";
+
+  // Score: lowercase body, count token substring hits. Match on body to bias
+  // toward concrete decision text, not just metadata keywords.
+  const haystack = (body + " " + description).toLowerCase();
+  let score = 0;
+  for (const tok of tokens) {
+    if (haystack.includes(tok)) score++;
+  }
+  if (score === 0) return null;
+  return {
+    name,
+    description,
+    source: "auto_memory",
+    source_file: fp,
+    score,
+    type,
+  };
+}
+
+// laneH support: parse claude-mem-harvest.md. Format per
+// discovery.cjs::harvestClaudeMemFromMcp: `## Observation #NNNNN\n<body>\n`
+// blocks. Each observation scored against task tokens; matches surface as
+// records with type="observation".
+function _parseClaudeMemHarvest(fp, tokens) {
+  const fs = require("fs");
+  let content;
+  try {
+    const stat = fs.statSync(fp);
+    const readBytes = Math.min(stat.size, 100000);
+    const buf = Buffer.alloc(readBytes);
+    const fd = fs.openSync(fp, "r");
+    try { fs.readSync(fd, buf, 0, readBytes, 0); } finally { fs.closeSync(fd); }
+    content = buf.toString("utf-8");
+  } catch { return []; }
+
+  const blocks = content.split(/\n(?=## )/);
+  const out = [];
+  for (const block of blocks) {
+    const headerMatch = block.match(/^##\s+(.+?)\n/);
+    if (!headerMatch) continue;
+    const header = headerMatch[1].trim();
+    const body = block.slice(headerMatch[0].length);
+    const haystack = (body + " " + header).toLowerCase();
+    let score = 0;
+    for (const tok of tokens) {
+      if (haystack.includes(tok)) score++;
+    }
+    if (score === 0) continue;
+    // First line of body as the description (truncated to 200 chars).
+    const firstLine = body.split("\n").find(l => l.trim().length > 0) || "";
+    out.push({
+      name: header,
+      description: firstLine.trim().slice(0, 200),
+      source: "claude_mem_harvest",
+      source_file: fp,
+      score,
+      type: "observation",
+    });
+  }
+  return out;
+}
+
+/**
  * Compute blast radius via Graphify when available; emit degraded payload otherwise.
  */
 function blastRadius(topic) {
@@ -840,6 +1035,24 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   } else {
     for (const t of triples) {
       lines.push(`- ${t.source} → ${t.predicate} → ${t.target}`);
+    }
+  }
+  lines.push("");
+
+  // G2 (cal #31.C) — Auto-memory + claude-mem-harvest matches. Receipt #5 Q5:
+  // surfaces decisions captured in ~/.claude/projects/<projHash>/memory/*.md
+  // and claude-mem-harvest.md observations at READ time without depending on
+  // the curator gate. Empty section is intentional — operator sees the lane
+  // fired and nothing matched (vs. invisible failure).
+  const H = Array.isArray(lanes.H) ? lanes.H : [];
+  lines.push("## Auto-Memory + Claude-Mem (read-time)");
+  if (H.length === 0) {
+    lines.push("_No matching entries — either no auto-memory dir / harvest file, or no task-token matches._");
+  } else {
+    for (const rec of H) {
+      const srcLabel = rec.source === "claude_mem_harvest" ? "claude-mem" : rec.type;
+      lines.push(`- **${rec.name}** (${srcLabel}, score=${rec.score})`);
+      if (rec.description) lines.push(`  > ${rec.description}`);
     }
   }
   lines.push("");
@@ -1167,6 +1380,13 @@ function generate(taskText, opts) {
   // depth-2 expansion. Effect: project-shape docs (e.g., CON-002 on Bitbucket)
   // always surface in memory_signal, regardless of task vocabulary.
   const G = laneG(cfg);
+  // G2 (cal #31.C) — Lane H — auto-memory + claude-mem-harvest READ path.
+  // Surfaces user-curated decisions (~/.claude/projects/<projHash>/memory/*.md)
+  // and orchestrator-staged claude-mem observations in the brief, closing the
+  // memory-read-path gap from receipt #5 Q5. Records are returned with a
+  // different schema than laneG (no doc_type/id) — folded into the brief as
+  // a separate `auto_memory` sub-block instead of mixing with FTS results.
+  const H = laneH(cfg, taskText);
   // Hoist the deduped union once: laneF filters it for lessons, renderBrief reuses
   // it for the governing docs section. Avoids two separate dedupSortById passes.
   const governingUnion = dedupSortById([...A, ...B, ...C, ...D, ...G]);
@@ -1228,7 +1448,7 @@ function generate(taskText, opts) {
 
   const suggestedReading = dedupeCap([...wikiPaths, ...affectsPaths, ...directDeps], resolveScopeHintCap());
 
-  const lanes = { A, B, C, D, E, F };
+  const lanes = { A, B, C, D, E, F, H };
   const generatedAt = new Date().toISOString();
   const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
 
@@ -1435,6 +1655,14 @@ function generate(taskText, opts) {
     god_nodes: topGods,
     memory_index_missing: memoryIndexMissing,
     rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
+    // G2 (cal #31.C) — laneH auto-memory + claude-mem-harvest matches.
+    // Surfaces user-curated decisions (~/.claude/projects/<projHash>/memory/*.md)
+    // and orchestrator-staged observations (.devt/state/claude-mem-harvest.md)
+    // at read time. Empty array when no matches OR auto-memory dir absent —
+    // downstream consumers (workflow context_init) can distinguish "lane
+    // didn't fire" vs "lane found nothing" via the field presence (always
+    // present when generate() runs).
+    auto_memory: Array.isArray(lanes.H) ? lanes.H : [],
     generated_at: generatedAt,
   });
 
@@ -1777,7 +2005,7 @@ module.exports = {
   readBriefMeta,
   markStale,
   // Lanes exported for testing
-  laneA, laneB, laneC, laneD, laneE, laneF,
+  laneA, laneB, laneC, laneD, laneE, laneF, laneG, laneH,
   // Tier budget — exported for smoke-test gates and CLI override paths
   detectTier, resolveTripleBudget,
 };

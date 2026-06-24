@@ -14054,6 +14054,44 @@ else
   fail "K161: diff-hunk fallback not working — got: $K161_OUT"
 fi
 
+# K162 (cal #31.C G2): preflight laneH surfaces auto-memory + claude-mem-harvest
+# matches at READ time. Receipt #5 Q5: MEMORY.md decisions never reached
+# reviewers because memory_signal only consumed FTS results. Tests: synthetic
+# auto-memory dir + harvest file → laneH returns scored records with correct
+# source attribution.
+K162_TMP=$(mktemp -d)
+mkdir -p "$K162_TMP/auto-memory" "$K162_TMP/.devt/state"
+cat > "$K162_TMP/auto-memory/feedback_tablet_rbac.md" <<'AUTOEOF'
+---
+name: tablet-rbac-pattern
+description: "Use admin guard, not 404, for tablet RBAC denials."
+metadata:
+  type: feedback
+---
+
+When implementing tablet RBAC, deny via 403 not 404. The admin guard already enforces this.
+AUTOEOF
+cat > "$K162_TMP/.devt/state/claude-mem-harvest.md" <<'HARVEST'
+## Observation #99999
+
+Tablet RBAC decision: use admin guard, return 403 not 404.
+HARVEST
+K162_OUT=$(node -e "
+const p = require('$ROOT/bin/modules/preflight.cjs');
+const cfg = { memory: { auto_memory_paths: ['$K162_TMP/auto-memory'] } };
+process.chdir('$K162_TMP');
+const r = p.laneH(cfg, 'tablet RBAC admin guard');
+const auto = r.filter(x => x.source === 'auto_memory').length;
+const harvest = r.filter(x => x.source === 'claude_mem_harvest').length;
+console.log('total=' + r.length + ',auto=' + auto + ',harvest=' + harvest);
+" 2>/dev/null)
+rm -rf "$K162_TMP"
+if echo "$K162_OUT" | /usr/bin/grep -q "total=2,auto=1,harvest=1"; then
+  pass "K162: preflight laneH surfaces auto-memory + claude-mem-harvest matches (1 each, correctly attributed)"
+else
+  fail "K162: laneH bridge not working — got: $K162_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

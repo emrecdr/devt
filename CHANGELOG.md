@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.106.0] - 2026-06-25
+
+### Cal #31.C — Memory read-path bridge (G2 laneH)
+
+One receipt-#5-validated devt-side fix closing the architectural gap surfaced by receipt #5 Q5: MEMORY.md + claude-mem-harvest observations weren't reaching reviewers via preflight `memory_signal` because cal #29 shipped a WRITE path (claude-mem → `_suggestions.md` → curator → permanent doc) but no READ path. Receipt user had to hand-assemble `claude-mem-harvest.md` per dispatch.
+
+**G2 — Lane H auto-memory + claude-mem-harvest READ path** (`bin/modules/preflight.cjs`). New lane surfaces decisions at preflight time without bypassing the curator-write path:
+
+- **Source 1**: auto-memory dir (default `~/.claude/projects/<projHash>/memory/*.md`; override via `cfg.memory.auto_memory_paths`). Reads each `.md` file's frontmatter (`name`/`description`/`metadata.type`) + body, scores body content against task tokens, returns matched records sorted by score.
+- **Source 2**: `.devt/state/claude-mem-harvest.md` if present (orchestrator-staged observations from `discovery.cjs::harvestClaudeMemFromMcp`). Parses `## Observation #NNNNN` blocks, scores each against task tokens.
+- **Output**: normalized records `{name, description, source, source_file, score, type}` folded into the brief as a new `## Auto-Memory + Claude-Mem (read-time)` section AND a new `auto_memory: [...]` field in the JSON sidecar.
+
+Architectural decision (Option Z from receipt scoping): NOT folded into FTS index — auto-memory frontmatter schema (`name/description/metadata.type`) is incompatible with devt FTS schema (`id/title/doc_type/status/confidence/summary`). Options X (add 6th `doc_type: note`) and Y (repurpose `concept`) would require rewriting 38 user-curated files. Z (read-time grep, no FTS pollution) is the only viable path. No curator-bypass concern — auto-memory is operator-owned; harvest file is orchestrator-staged.
+
+**Drift-guard stack now 69-deep K94-K162.** CLAUDE.md + README updated.
+
+**Smoke gate**: K162 (synthetic auto-memory dir + harvest file → laneH returns 2 records, 1 each correctly attributed `source=auto_memory` and `source=claude_mem_harvest`).
+
+**Carryover for cal #31.D**: G4 (auto-staleness-reset + `--fresh` flag), G6 (extend existing `init review` CLI to bundle preflight + memory + scope-cache + impact-plan, ~6-8 round-trip reduction), G7 (drill-down composition CLI to remove orchestrator-discipline-failure mode on graphify-decision gate).
+
 ## [0.105.0] - 2026-06-24
 
 ### Cal #31.B — Graphify signal quality (3 receipt-validated fixes)
