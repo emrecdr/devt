@@ -2032,6 +2032,17 @@ function getHyperedgesContaining(symbols, options = {}) {
         confidence_score: h.confidence_score || null,
         source_file: h.source_file || null,
         relation: h.relation || null,
+        // Cal #32.A (greenfield receipt 2026-06-25 follow-up): hyperedge
+        // rationale was being silently dropped. graph.json::hyperedges[]
+        // carries it (alongside label) — graphify's standard query/MCP
+        // tools (DFS/BFS, query_graph, get_node) skip the hyperedges array
+        // entirely, so devt's direct-read bypass was the right approach
+        // for discoverability — but it dropped the rationale field at
+        // the projection. Surfacing it now means hyperedges_matched[]
+        // carries the "why these N files belong together" signal to
+        // reviewers without requiring the graphify-upstream fix
+        // (encoding rationale as rationale_for edges from each node).
+        rationale: h.rationale || null,
       });
     }
   }

@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.108.1] - 2026-06-25
+
+### Cal #32.A — Hyperedge rationale projection leakage (1 receipt-evidenced fix)
+
+Greenfield session (2026-06-25, late) observed that hyperedge rationale was durable in `graph.json::hyperedges[].rationale` but invisible to standard graphify query paths (DFS/BFS CLI, MCP `query_graph`, `get_node` — none traverse the hyperedges array). Devt's `getHyperedgesContaining` reads the array directly (bypassing the limitation correctly) but was silently dropping the `rationale` field at projection — capturing `id`, `label`, `member_count`, `members`, `members_in_scope`, `completeness`, `confidence`, `confidence_score`, `source_file`, `relation` but NOT `rationale`.
+
+**Fix** (`bin/modules/graphify.cjs::getHyperedgesContaining`): add `rationale: h.rationale || null` to the matches projection. Flows through automatically to `hyperedges_matched[]` in preflight-brief.json sidecar → envelope consumers see WHY N files belong together (e.g., "two threat models, one genuine re-guard — both layers required for defense in depth") without further changes.
+
+**Graphify-upstream item carried forward**: receipt suggested encoding hyperedge rationale as `rationale_for` edges from each participant node to a rationale node, which standard graphify traversal already prints. That's an upstream design change — devt's projection fix here is independent and doesn't require it.
+
+**Drift-guard stack now 79-deep K94-K172.** CLAUDE.md + README updated.
+
+**Smoke gate**: K172 (synthetic hyperedge with rationale → `getHyperedgesContaining` result includes rationale field — prevents future projection-leakage of newly-added hyperedge fields).
+
 ## [0.108.0] - 2026-06-25
 
 ### Cal #32 — Receipt #6 correctness + closing-loop fixes (4 ranked + G3 strengthening)

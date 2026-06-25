@@ -14351,6 +14351,38 @@ else
   fail "K171: config exclusion wrong — got: $K171_OUT"
 fi
 
+# K172 (cal #32.A follow-up — greenfield receipt 2026-06-25): graphify
+# getHyperedgesContaining surfaces hyperedge rationale field. Receipt:
+# rationale was durable in graph.json::hyperedges[].rationale but devt's
+# projection dropped it; standard graphify query/MCP tools don't traverse
+# hyperedges so devt's direct-read was the only discoverable path —
+# leakage at the projection meant reviewers couldn't see WHY N files
+# belonged together. Tests: synthetic hyperedge with rationale →
+# getHyperedgesContaining result includes rationale field.
+K172_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k172-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true});
+fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({
+  built_at_commit: 'abc',
+  nodes: [{id: 'a', label: 'NodeA', source_file: 'a.py', file_type: 'code'}],
+  links: [],
+  hyperedges: [{id: 'h1', label: 'Test grouping', nodes: ['a'], rationale: 'load-bearing rationale'}]
+}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.getHyperedgesContaining(['NodeA']);
+console.log('count=' + r.results.length + ',rationale=' + (r.results[0] ? r.results[0].rationale : 'none'));
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K172_OUT" | /usr/bin/grep -q "count=1,rationale=load-bearing rationale"; then
+  pass "K172: getHyperedgesContaining surfaces hyperedge rationale field (was being dropped at projection — receipt-evidenced discoverability gap)"
+else
+  fail "K172: rationale not surfaced — got: $K172_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
