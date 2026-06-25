@@ -2249,6 +2249,136 @@ function assertGraphifyDecision() {
   return result;
 }
 
+// Cal #33.A Rank #1 — Graphify ROI telemetry. Receipt #7 (greenfield
+// 2026-06-25): "graph drove zero findings" was the headline complaint, but
+// receipt user later self-corrected that the measurement was confounded —
+// substep 6 (drill-down execution) was skipped. The honest question: of
+// the drills that DID execute, how many produced a finding citation in
+// review.md? That's the actionable metric ("wasted-drill rate") — receipts
+// can use it to drive cal-N+ "drop drill direction X if waste >70%" levers.
+//
+// Inputs:
+//   - .devt/state/graph-impact.md → counts `^## Drill-down: <SYM> ...` headings
+//     (denominator: executed drills). Per-drill correlation_id extracted from
+//     either `[call: <id>]` suffix on heading (compose-drilldowns format) OR
+//     scanned from section body if present.
+//   - .devt/state/review.md → counts unique `(via call: <id>)` / `[via call: <id>]`
+//     citations. Each citation = downstream consumer (reviewer) actually
+//     traced a finding back to a specific graph drill.
+//
+// Output: { drills_executed, drills_with_citation, wasted_drill_count,
+//   wasted_drill_rate, status, ... }
+//
+// CRITICAL exclusion: when graph-impact.md is absent OR has 0 drill-down
+// sections, status="no_drills_executed" + waste rate = null (not 100%).
+// Receipt #7 explicitly required this — runs that skip substep 6 must NOT
+// be counted as 100% waste; that punishes graphify for the operator's skip.
+function graphifyRoi() {
+  const stateDir = getStateDir();
+  const impactPath = path.join(stateDir, "graph-impact.md");
+  const reviewPath = path.join(stateDir, "review.md");
+
+  if (!fs.existsSync(impactPath)) {
+    return {
+      status: "no_drills_executed",
+      reason: "graph-impact.md absent — substep 6 (drill-down execution) was skipped OR not applicable; metric undefined (NOT 100% waste)",
+      drills_executed: 0,
+      drills_with_citation: 0,
+      wasted_drill_count: null,
+      wasted_drill_rate: null,
+    };
+  }
+
+  let impactContent = "";
+  try { impactContent = fs.readFileSync(impactPath, "utf8"); }
+  catch (e) {
+    return { status: "error", reason: `graph-impact.md read failed: ${e.message}`, drills_executed: 0, drills_with_citation: 0, wasted_drill_count: null, wasted_drill_rate: null };
+  }
+
+  // Drill-down heading: `## Drill-down: <SYM> (direction=<dir>, depth=<n>)`
+  // Optional `[call: <8hex>]` suffix (compose-drilldowns / orchestrator stamp).
+  const drillHeadingRe = /^##\s+Drill-down:\s*([^\n(]+?)(?:\s*\(([^)]*)\))?(?:\s*\[call:\s*([0-9a-f]{8})\])?\s*$/gim;
+  const drillSections = [];
+  let m;
+  while ((m = drillHeadingRe.exec(impactContent)) !== null) {
+    drillSections.push({
+      symbol: (m[1] || "").trim(),
+      direction_meta: (m[2] || "").trim(),
+      heading_corr_id: m[3] || null,
+      heading_index: m.index,
+    });
+  }
+
+  if (drillSections.length === 0) {
+    return {
+      status: "no_drills_executed",
+      reason: "graph-impact.md present but contains 0 `## Drill-down:` sections; substep 6 wrote the file shell but no drills executed",
+      drills_executed: 0,
+      drills_with_citation: 0,
+      wasted_drill_count: null,
+      wasted_drill_rate: null,
+    };
+  }
+
+  // For each drill section, extract correlation_ids that appear within its
+  // body (between this heading and the next ## heading). Some drills carry
+  // the id in the heading itself; others embed it in body lines (varies by
+  // orchestrator format). Capture both.
+  const corrIdRe = /([0-9a-f]{8})/g;
+  for (let i = 0; i < drillSections.length; i++) {
+    const start = drillSections[i].heading_index;
+    const end = i + 1 < drillSections.length ? drillSections[i + 1].heading_index : impactContent.length;
+    const section = impactContent.slice(start, end);
+    const ids = new Set();
+    if (drillSections[i].heading_corr_id) ids.add(drillSections[i].heading_corr_id);
+    let im;
+    // Hex-id detection in body — bounded scan (sections are typically <2KB)
+    while ((im = corrIdRe.exec(section)) !== null) {
+      if (im[1] !== drillSections[i].heading_corr_id) ids.add(im[1]);
+      if (ids.size >= 5) break; // sanity cap — a drill rarely has >5 distinct ids
+    }
+    drillSections[i].corr_ids = Array.from(ids);
+  }
+
+  // Now scan review.md for citations. Both `(via call: <id>)` AND
+  // `[via call: <id>]` formats are documented in dispatch.cjs::
+  // provenanceProtocol; support both.
+  let citedIds = new Set();
+  let reviewExists = fs.existsSync(reviewPath);
+  if (reviewExists) {
+    let reviewContent = "";
+    try { reviewContent = fs.readFileSync(reviewPath, "utf8"); } catch { /* fall through with empty */ }
+    const citationRe = /[(\[]\s*via\s+call:\s*([0-9a-f]{8})\s*[)\]]/gi;
+    let cm;
+    while ((cm = citationRe.exec(reviewContent)) !== null) citedIds.add(cm[1]);
+  }
+
+  let drillsWithCitation = 0;
+  for (const d of drillSections) {
+    if (d.corr_ids.some(id => citedIds.has(id))) drillsWithCitation++;
+  }
+
+  const wastedCount = drillSections.length - drillsWithCitation;
+  const wastedRate = drillSections.length > 0 ? Number((wastedCount / drillSections.length).toFixed(3)) : null;
+
+  return {
+    status: reviewExists ? "measured" : "no_review_yet",
+    reason: reviewExists
+      ? `${drillsWithCitation}/${drillSections.length} drills cited in review.md (${citedIds.size} unique correlation_ids)`
+      : "review.md not yet written — consolidator may not have run; metric premature",
+    drills_executed: drillSections.length,
+    drills_with_citation: drillsWithCitation,
+    wasted_drill_count: wastedCount,
+    wasted_drill_rate: wastedRate,
+    unique_citations_in_review: citedIds.size,
+    per_drill: drillSections.map(d => ({
+      symbol: d.symbol,
+      corr_ids: d.corr_ids,
+      cited: d.corr_ids.some(id => citedIds.has(id)),
+    })),
+  };
+}
+
 // Substance check for agent output files. Lane sub-agent dispatches can
 // return status:completed with placeholder bodies like
 // "Stub written; analysis in progress." while the verifier approves on
@@ -5845,6 +5975,8 @@ function run(subcommand, args) {
       const workflowType = wfTypeArg ? wfTypeArg.slice("--workflow-type=".length) : "";
       return autoResetIfStale({ task, workflowType });
     }
+    case "graphify-roi":
+      return graphifyRoi();
     case "release":
       return releaseWorkflow();
     case "validate":
@@ -6009,7 +6141,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

@@ -214,24 +214,57 @@ SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d 
 IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
 
 # Decision tree — explicit, no implicit fallbacks. The recommended tier is the
-# first one whose preconditions all hold. Bitbucket projects skip PR-scoped
-# because the upstream mcp__graphify__get_pr_impact tool is GitHub-only and
-# returns "PR not found on GitHub" — the workflow would waste a call.
-# Observable PR-scoped skip telemetry: when a PR number was extracted but
-# the provider is non-GitHub (Bitbucket etc.), the existing tier chain
-# correctly skips pr_scoped and falls through to symbol_anchored/bulk_scoped.
-# Record the SKIP reason as a separate field in plan.json so post-hoc audits
-# can answer "why did this Bitbucket PR not use pr_scoped?" without re-deriving
-# from provider + tier. Empty string when pr_scoped fires OR no PR present.
+# first one whose preconditions all hold. Bitbucket/non-GitHub projects now
+# get a `pr_scoped_diff` equivalent tier (cal #33.A Rank #2) that wires
+# `git diff <primary>...HEAD → symbols-in-files → blast_radius` — receipt #7
+# found Bitbucket previously "permanently got the coarser fallback" because
+# the upstream `mcp__graphify__get_pr_impact` tool is GitHub-only. The new
+# tier uses devt-side CLIs on the as-built graph (G5 fallback handles
+# new-file symbols via regex), emits a caveat when new files lack edge data.
+# Record the original pr_scoped (GitHub-only) skip reason as a separate
+# field in plan.json so post-hoc audits can distinguish "no PR" vs
+# "non-GitHub PR routed via pr_scoped_diff." Empty when pr_scoped fires
+# (GitHub), populated when pr_scoped_diff fires (non-GitHub with PR).
 PR_SCOPED_SKIP_REASON=""
 if [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" != "github" ]; then
-  PR_SCOPED_SKIP_REASON="provider=$GIT_PROVIDER; PR-scoped requires GitHub"
+  PR_SCOPED_SKIP_REASON="provider=$GIT_PROVIDER; pr_scoped (GitHub get_pr_impact) skipped — pr_scoped_diff tier used instead"
 fi
 
 if [ "$GRAPHIFY_STATE" != "ready" ]; then
   TIER="skip"; SKIP_REASON="graphify state=$GRAPHIFY_STATE"; TOOL=""; ARGS_JSON='{}'
 elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
   TIER="pr_scoped"; SKIP_REASON=""; TOOL="mcp__graphify__get_pr_impact"; ARGS_JSON="$(jq -nc --arg n "$PR_NUM" '{pr_number: ($n|tonumber)}')"
+elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" != "github" ]; then
+  # Cal #33.A Rank #2 — Bitbucket / non-GitHub PR-scoped equivalent tier.
+  # Receipt #7 (greenfield 2026-06-25): "permanently gets the coarser
+  # fallback" — Bitbucket projects skip pr_scoped because get_pr_impact is
+  # GitHub-only, missing the richest analysis tier. Wire: git diff
+  # <primary>...HEAD → symbols-in-files (G5 fallback covers new-file
+  # symbols via diff-hunk regex) → blast_radius. As-built, no rebuild
+  # required. Caveat emitted for new files: blast_radius edge data is
+  # empty for them since the graph wasn't rebuilt — symbols extracted
+  # but caller analysis is partial.
+  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
+  NEW_FILES_COUNT=$(git diff --name-status --diff-filter=A "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  TOTAL_FILES_COUNT=$(echo "$DIFF_FILES" | wc -w | tr -d ' ')
+  PR_DIFF_SYMBOLS_JSON='[]'
+  if [ -n "$DIFF_FILES" ]; then
+    PR_DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=20 2>/dev/null | jq -c '[.symbols[]?.symbol]' 2>/dev/null || echo '[]')
+  fi
+  PR_DIFF_SYMBOL_COUNT=$(echo "$PR_DIFF_SYMBOLS_JSON" | jq 'length')
+  if [ "$PR_DIFF_SYMBOL_COUNT" -gt 0 ]; then
+    TIER="pr_scoped_diff"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$PR_DIFF_SYMBOLS_JSON" '{symbols: $s}')"
+    PR_SCOPED_SKIP_REASON=""  # tier DID activate — clear the prior skip-reason
+    if [ "$NEW_FILES_COUNT" -gt 0 ]; then
+      echo "pr_scoped_diff caveat: ${NEW_FILES_COUNT} of ${TOTAL_FILES_COUNT} files are new — symbols extracted via diff-hunk fallback (G5) but blast_radius edge data unavailable until \"graphify update .\" rebuild"
+    fi
+  elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
+    # No diff symbols (e.g. graph too sparse on the PR files) — fall through
+    # to topic-symbol blast_radius.
+    TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
+  else
+    TIER="skip"; SKIP_REASON="non-GitHub PR but no diff symbols extracted (graph sparse) AND no topic symbols"; TOOL=""; ARGS_JSON='{}'
+  fi
 elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
   TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
 elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then

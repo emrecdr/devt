@@ -14383,6 +14383,78 @@ else
   fail "K172: rationale not surfaced — got: $K172_OUT"
 fi
 
+# K173 (cal #33.A Rank #1): state graphify-roi computes wasted-drill rate
+# correctly across 3 scenarios. Receipt #7 explicit requirement:
+# runs where substep 6 was skipped (no graph-impact.md OR 0 drill sections)
+# MUST NOT be counted as 100% waste — wasted_drill_rate=null.
+K173_TMP=$(mktemp -d)
+mkdir -p "$K173_TMP/.devt/state"
+# Case A: no graph-impact.md → status=no_drills_executed, rate=null
+NO_DRILL=$(cd "$K173_TMP" && node "$ROOT/bin/devt-tools.cjs" state graphify-roi 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.status + ',' + o.wasted_drill_rate)}catch{console.log('err')}});" 2>/dev/null)
+# Case B: 3 drills with corr_ids, review.md cites 2 → rate=0.333
+cat > "$K173_TMP/.devt/state/graph-impact.md" <<EOF
+## Drill-down: ServiceA (direction=in, depth=1) [call: aaaa1111]
+neighbor X
+## Drill-down: ServiceB (direction=in, depth=1) [call: bbbb2222]
+neighbor Y
+## Drill-down: ServiceC (direction=in, depth=1) [call: cccc3333]
+neighbor Z
+EOF
+cat > "$K173_TMP/.devt/state/review.md" <<EOF
+- ServiceA bug (via call: aaaa1111)
+- ServiceC misuse [via call: cccc3333]
+EOF
+MEASURED=$(cd "$K173_TMP" && node "$ROOT/bin/devt-tools.cjs" state graphify-roi 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.status + ',' + o.drills_executed + ',' + o.drills_with_citation + ',' + o.wasted_drill_rate)}catch{console.log('err')}});" 2>/dev/null)
+rm -rf "$K173_TMP"
+if [ "$NO_DRILL" = "no_drills_executed,null" ] && [ "$MEASURED" = "measured,3,2,0.333" ]; then
+  pass "K173: graphify-roi correctly excludes skipped-substep-6 runs (null rate) AND computes 33% wasted-drill rate with 2/3 citations"
+else
+  fail "K173: ROI telemetry wrong — no_drill=$NO_DRILL (expected no_drills_executed,null), measured=$MEASURED (expected measured,3,2,0.333)"
+fi
+
+# K174 (cal #33.A Rank #2): code-review.md impact-plan tier registry includes
+# pr_scoped_diff branch for non-GitHub PRs. Receipt #7: Bitbucket projects
+# "permanently get the coarser fallback" — pr_scoped_diff closes that gap by
+# wiring diff-symbols + blast_radius through the new tier branch.
+K174_OUT=$(/usr/bin/grep -cE 'TIER="pr_scoped_diff"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "$K174_OUT" -ge "1" ]; then
+  pass "K174: code-review.md impact-plan decision tree includes pr_scoped_diff tier branch for non-GitHub PRs (Bitbucket gets pr_scoped-equivalent richness)"
+else
+  fail "K174: pr_scoped_diff tier missing — got count: $K174_OUT"
+fi
+
+# K175 (cal #33.A Rank #3): getSymbolCollisions filters ghost nodes
+# (empty source_file AND null location) + emits ghost_nodes_filtered counter.
+# Receipt #7: pure (c)-with-counter — silent filter would mask upstream
+# canonical-ID merge bug; visible counter keeps fix motivation alive.
+K175_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k175-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true});
+fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({
+  built_at_commit: 'abc',
+  nodes: [
+    {id: 'a.X', label: 'X', source_file: 'a.py', source_location: {line: 1}, file_type: 'code'},
+    {id: 'b.X', label: 'X', source_file: 'b.py', source_location: {line: 2}, file_type: 'code'},
+    {id: 'g1.X', label: 'X', source_file: '', source_location: null, file_type: 'code'},
+    {id: 'g2.X', label: 'X', source_file: '', source_location: null, file_type: 'code'},
+  ],
+  links: [],
+}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.getSymbolCollisions('X');
+console.log('count=' + r.count + ',ghosts=' + (r.ghost_nodes_filtered || 0));
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K175_OUT" | /usr/bin/grep -q "count=2,ghosts=2"; then
+  pass "K175: getSymbolCollisions filters ghost nodes (empty source_file + null location) + emits visible ghost_nodes_filtered counter"
+else
+  fail "K175: ghost-node filter wrong — got: $K175_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

@@ -2442,8 +2442,27 @@ function getSymbolCollisions(label) {
   if (!loaded.ok) return { source: "grep", collisions: [], count: 0, degraded: true, reason: loaded.degraded && loaded.degraded.reason };
   const targetLower = label.toLowerCase();
   const collisions = [];
+  // Cal #33.A Rank #3 — ghost-node defensive filter + visible counter.
+  // Receipt #7 (greenfield 2026-06-25): collision detection on
+  // PushNotifier/OutboundInitiator surfaced empty-source_file ghosts and
+  // null-location duplicate VicasaCallProvider entries; reviewer couldn't
+  // tell a real N-way collision from an AST↔semantic merge artifact.
+  // Upstream graphify is fixing the canonical-ID merge that creates these,
+  // but the bug has demonstrably recurred — defense-in-depth at the
+  // projection earns its few LOC.
+  //
+  // CRITICAL per receipt user's caveat: emit ghost_nodes_filtered counter
+  // (NOT silent), so upstream-fix motivation stays visible. A silent filter
+  // masks the root cause and removes the pressure to fix it upstream.
+  let ghostNodesFiltered = 0;
   for (const [id, node] of loaded.cache.adj.nodeMap) {
     if (typeof node.label === "string" && node.label.toLowerCase() === targetLower) {
+      const hasSourceFile = typeof node.source_file === "string" && node.source_file.length > 0;
+      const hasLocation = node.source_location !== null && node.source_location !== undefined;
+      if (!hasSourceFile && !hasLocation) {
+        ghostNodesFiltered++;
+        continue;
+      }
       collisions.push({
         id,
         label: node.label,
@@ -2455,7 +2474,9 @@ function getSymbolCollisions(label) {
       });
     }
   }
-  return { source: "graphify", collisions, count: collisions.length };
+  const result = { source: "graphify", collisions, count: collisions.length };
+  if (ghostNodesFiltered > 0) result.ghost_nodes_filtered = ghostNodesFiltered;
+  return result;
 }
 
 // When the locally-installed graphify skill bundle drifts from the binary

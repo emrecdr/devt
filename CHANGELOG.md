@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.109.0] - 2026-06-25
+
+### Cal #33.A — Receipt #7 measurement-first + Bitbucket-lift + ghost-dedup (3 ranked fixes)
+
+Receipt #7 (greenfield 2026-06-25 follow-up) delivered the most important calibration in the entire receipt arc: the receipt user self-corrected that BOTH receipts #6 and #7 measurements came from off-rail hand-rolled review runs where substep 6 (drill-down execution) was never run, making the "graph drove zero findings" / "6.5/10 score" claims hypothesis-not-finding. The explicit recommendation: ship measurement infrastructure FIRST, then wait for an on-rail receipt to actually measure outcome value.
+
+Cal #33.A follows that prescription — ships the 3 highest-leverage devt-side fixes from receipt #7 with measurement-first ordering. NO value-lift predictions per the [[mechanism-firing-neq-value-conversion]] discipline; cal #33.A enables future measurement (Rank #1), opens a previously-locked tier path (Rank #2), and hardens collision-detection signal quality (Rank #3).
+
+**Rank #1 — Graphify ROI telemetry (`state graphify-roi`)** (`bin/modules/state.cjs`). New CLI computes the wasted-drill rate (drills with no `review.md` citation / executed drills) by parsing `graph-impact.md`'s `## Drill-down: <SYM>` sections + extracting per-drill correlation_ids from heading `[call: <8hex>]` suffix and body, then scanning `review.md` for both `(via call: <id>)` and `[via call: <id>]` citation formats (per dispatch.cjs::provenanceProtocol contract). CRITICAL exclusion per receipt user's explicit caveat: when `graph-impact.md` is absent OR contains 0 drill sections, returns `status="no_drills_executed"` + `wasted_drill_rate=null` (NOT 100%). Runs that skip substep 6 are not punished as "100% waste" — that would punish graphify for the operator's skip. Output includes per-drill citation map so cal #34+ levers ("drop drills in direction X if waste >70%") can read structured input.
+
+**Rank #2 — Bitbucket / non-GitHub PR-scoped tier (`pr_scoped_diff`)** (`workflows/code-review.md`). Receipt #7: "permanently gets the coarser fallback" because the upstream `mcp__graphify__get_pr_impact` tool is GitHub-only. New tier branch activates when `PR_NUM` is set AND `GIT_PROVIDER != "github"`. Wires `git diff <primary>...HEAD → graphify symbols-in-files → blast_radius`. As-built (no rebuild needed); G5 (cal #31.B) diff-hunk fallback already extracts symbols from new files via regex. Emits per-run caveat: `"N of M files are new — symbols extracted via diff-hunk fallback but blast_radius edge data unavailable until 'graphify update .' rebuild"` so reviewers know which symbols have partial caller-analysis coverage. Reads `git.primary_branch` from existing config; uses established triple-dot merge-base pattern; no new config knobs.
+
+**Rank #3 — Ghost-node defensive filter + visible counter** (`bin/modules/graphify.cjs::getSymbolCollisions`). Receipt #7: collision data on PushNotifier/OutboundInitiator was polluted by empty-source_file ghosts + null-location duplicate VicasaCallProvider entries (AST↔semantic canonical-ID merge artifacts). Reviewer "can't tell a real 6-way collision from a merge artifact." Defense-in-depth: filter nodes where BOTH `source_file` is empty AND `source_location` is null (pure ghosts); preserve nodes with location-but-no-file (real binding, unparseable path). Emits `ghost_nodes_filtered` counter when non-zero so the upstream fix motivation stays visible — receipt user explicitly required `(c)-with-counter NOT (c)-silent` to prevent rug-sweeping the upstream bug.
+
+**Drift-guard stack now 82-deep K94-K175.** CLAUDE.md + README updated.
+
+**Smoke gates**: K173 (graphify-roi: 3-scenario coverage — no_drills_executed/null rate, no_review_yet, measured with 2/3 citations = 33% wasted), K174 (pr_scoped_diff tier branch in code-review.md), K175 (collision projection filters 2 pure ghosts + preserves 1 partial-ghost + emits counter).
+
+**Strategic framing per receipt #7's explicit recommendation:** cal #33.A is the measurement-and-foundation cal. Cal #33.B (ergonomics: Q1-(iii) scope_check short-circuit, claude-mem session-saturated bypass, suggested_reading split, built_at_commit consistency check) is HELD until an on-rail receipt #8 provides actual measurement of wasted-drill rate + finding citations. The discipline: stop iterating on confounded data; let the measurement infrastructure produce the next signal.
+
+**Carryover for cal #33.B (held)**: 4 ergonomics fixes from receipt #7 — wait for on-rail receipt #8 before committing to scope. **Q1 upstream graphify filing** still pending (DI/dispatch edges) — only fix that addresses the actual code-review value bottleneck per receipt #6 evidence (still holds even with #7 confound caveat).
+
 ## [0.108.1] - 2026-06-25
 
 ### Cal #32.A — Hyperedge rationale projection leakage (1 receipt-evidenced fix)
