@@ -5626,8 +5626,14 @@ echo "== Staleness gate: null lag_commits no longer silently disables =="
 # Field validation surfaced that 5 workflows skipped the staleness prompt when
 # lag_commits was null (e.g. unreachable SHA, shallow clone) — letting stale
 # graphs slip through. The fix lifts that skip ONLY when graphify is disabled.
+# Cal #34 #1: code-review.md rewrote this section into tiered policy
+# (lag==0 noop / 0<lag<threshold silent-warn / lag>=threshold prompt + null
+# lag_commits still routes to prompt-tier). The legacy literal-phrase check
+# stayed strict for the other 4 workflows that haven't been migrated. For
+# code-review.md the check validates the new tiered contract: BOTH the
+# null-lag prompt clause AND the silent-warn band are present.
 STALENESS_FAILURES=""
-for wf in code-review.md debug.md quick-implement.md research-task.md dev-workflow.md; do
+for wf in debug.md quick-implement.md research-task.md dev-workflow.md; do
   if ! /usr/bin/grep -q "now triggers the prompt instead of silently disabling" "workflows/$wf"; then
     STALENESS_FAILURES="${STALENESS_FAILURES}$wf "
   fi
@@ -5635,8 +5641,13 @@ for wf in code-review.md debug.md quick-implement.md research-task.md dev-workfl
     STALENESS_FAILURES="${STALENESS_FAILURES}$wf(legacy-phrase) "
   fi
 done
+# Cal #34 #1 — code-review.md tiered contract: null still triggers prompt
+# AND silent-warn band exists (the new policy that supersedes the legacy phrase).
+if ! /usr/bin/grep -qE 'lag_commits.*is.*null.*AskUserQuestion|silent-warn band' "workflows/code-review.md"; then
+  STALENESS_FAILURES="${STALENESS_FAILURES}code-review.md(missing-tiered-contract) "
+fi
 if [ -z "$STALENESS_FAILURES" ]; then
-  pass "all 5 staleness gates trigger on null lag_commits when state=ready"
+  pass "all 5 staleness gates trigger on null lag_commits when state=ready (code-review.md uses cal #34 #1 tiered policy)"
 else
   fail "staleness gate regression in: $STALENESS_FAILURES"
 fi
@@ -14538,6 +14549,103 @@ if [ "$VALID_RESULT" = "true" ] && [ "$GATE_VERDICT" = "true" ] && [ "$INVALID_R
   pass "K179: mark-claude-mem-skipped writes gate-compliant format (valid reason accepted + gate passes; invalid reason rejected)"
 else
   fail "K179: mark-claude-mem-skipped wrong — valid=$VALID_RESULT (true), gate=$GATE_VERDICT (true), invalid=$INVALID_RESULT (false)"
+fi
+
+# K180 (cal #34 #1): config.cjs default stale_threshold lowered 30→10 per
+# receipt #8 Q4 ("30 commits of drift is a lot of wrong caller-sets... 10 ≈
+# a sprint's drift"). Tiered policy presence in workflows/code-review.md.
+K180_DEFAULT=$(node -e "const c = require('$ROOT/bin/modules/config.cjs'); console.log((c.getMergedConfig().graphify || {}).stale_threshold)" 2>/dev/null)
+K180_TIERED=$(/usr/bin/grep -cE "silent-warn band|STALENESS_TIER" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "$K180_DEFAULT" = "10" ] && [ "$K180_TIERED" -ge "2" ]; then
+  pass "K180: stale_threshold default = 10 (receipt #8 Q4) + tiered policy + --no-refresh escape hatch wired into code-review.md"
+else
+  fail "K180: stale_threshold or tiered policy wrong — default=$K180_DEFAULT (expected 10), tiered_marker_count=$K180_TIERED (expected >=2)"
+fi
+
+# K181 (cal #34 #5b): blastRadius emits noise_telemetry + raw_direct_count +
+# raw_indirect_count when test-path / DI-aggregation filters fire. Receipt #8:
+# indirect_dependents had 150+ symbols dominated by test fixtures + DI noise.
+K181_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k181-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true});
+fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+const nodes = [
+  {id: 'svc', label: 'TargetService', source_file: 'src/svc.py', file_type: 'code'},
+  {id: 'rc1', label: 'RealCaller1', source_file: 'src/caller1.py', file_type: 'code'},
+  {id: 't1', label: 'TestSvc1', source_file: 'tests/test_svc.py', file_type: 'code'},
+];
+const links = [
+  {source: 'rc1', target: 'svc', relation: 'calls', confidence: 'EXTRACTED'},
+  {source: 't1', target: 'svc', relation: 'calls', confidence: 'EXTRACTED'},
+];
+for (let i = 1; i <= 8; i++) {
+  nodes.push({id: 'di' + i, label: 'DIWire' + i, source_file: 'src/dependencies.py', file_type: 'code'});
+  links.push({source: 'di' + i, target: 'svc', relation: 'uses', confidence: 'EXTRACTED'});
+}
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({built_at_commit: 'abc', nodes, links}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.blastRadius(['TargetService']);
+const nt = r.noise_telemetry || {};
+console.log('raw_direct=' + r.raw_direct_count + ',tp=' + (nt.filtered_test_path || 0) + ',di=' + (nt.filtered_di_aggregation || 0));
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K181_OUT" | /usr/bin/grep -q "raw_direct=10,tp=1,di=7"; then
+  pass "K181: blastRadius noise_telemetry (filtered_test_path + filtered_di_aggregation) + raw_direct_count (cal #34 #5b)"
+else
+  fail "K181: blastRadius noise filter wrong — got: $K181_OUT (expected raw_direct=11,tp=1,di=7)"
+fi
+
+# K182 (cal #34 #3): graphifyRoi emits 3-state citation + yielded_data +
+# wasted_drill_rate_weak + parse_failed_lines. Receipt #8 part 2: strict
+# 100% / weak 67% (1/3) reveals "citation plumbing is broken" diagnostic.
+K182_TMP=$(mktemp -d)
+mkdir -p "$K182_TMP/.devt/state"
+cat > "$K182_TMP/.devt/state/graph-impact.md" <<EOF
+## Drill-down: CallBackend (empty)
+get_neighbors returned results:[].
+## Drill-down: CallProvider (has data)
+useful neighbors found.
+## Drill-down: CallStateManagerInterface (empty)
+returned results:[].
+EOF
+cat > "$K182_TMP/.devt/state/review.md" <<EOF
+- I-4: CallBackend union-type port issue at \`external_calls/types.py:42\`
+- I-7: Migration issue.
+EOF
+K182_OUT=$(cd "$K182_TMP" && node "$ROOT/bin/devt-tools.cjs" state graphify-roi 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const cbDrill = (o.per_drill||[]).find(d => d.symbol==='CallBackend'); console.log('strict=' + o.wasted_drill_rate + ',weak=' + o.wasted_drill_rate_weak + ',cb_citation=' + (cbDrill && cbDrill.citation) + ',cb_yielded=' + (cbDrill && cbDrill.yielded_data))}catch{console.log('err')}});" 2>/dev/null)
+rm -rf "$K182_TMP"
+if echo "$K182_OUT" | /usr/bin/grep -q "strict=1,weak=0.667,cb_citation=weak,cb_yielded=false"; then
+  pass "K182: graphifyRoi 3-state citation + yielded_data + dual-rate (strict 1.0 / weak 0.667 reveals diagnostic delta)"
+else
+  fail "K182: ROI parser refinement wrong — got: $K182_OUT"
+fi
+
+# K183 (cal #34 #6): initWorkflow rotates dispatch-warnings.jsonl +
+# claim-check-failures.jsonl when closed prior workflow detected. Receipt #8
+# Q5: closes same-day-churn KILL-gate gap for block-mode users.
+K183_TMP=$(mktemp -d)
+mkdir -p "$K183_TMP/.devt/state" "$K183_TMP/.devt/rules"
+echo '{}' > "$K183_TMP/.devt/config.json"
+cat > "$K183_TMP/.devt/state/workflow.yaml" <<YEOF
+active: false
+workflow_id: old_wf
+first_created_at: "2026-06-25T00:00:00.000Z"
+task: "prior"
+YEOF
+echo '{"ts":"2026-06-25T01:00:00Z","source":"raw_dispatch"}' > "$K183_TMP/.devt/state/dispatch-warnings.jsonl"
+echo '{"ts":"2026-06-25T01:00:00Z","agent":"programmer","exists":false}' > "$K183_TMP/.devt/state/claim-check-failures.jsonl"
+cd "$K183_TMP" && node "$ROOT/bin/devt-tools.cjs" init review "new task" >/dev/null 2>&1
+LIVE_DW=$([ -f "$K183_TMP/.devt/state/dispatch-warnings.jsonl" ] && echo "present" || echo "rotated")
+LIVE_CC=$([ -f "$K183_TMP/.devt/state/claim-check-failures.jsonl" ] && echo "present" || echo "rotated")
+ARCHIVE_COUNT=$(ls "$K183_TMP/.devt/state"/*archive*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+cd "$ROOT"; rm -rf "$K183_TMP"
+if [ "$LIVE_DW" = "rotated" ] && [ "$LIVE_CC" = "rotated" ] && [ "$ARCHIVE_COUNT" = "2" ]; then
+  pass "K183: initWorkflow rotates counter logs (dispatch-warnings + claim-check-failures) on closed-workflow detection (cal #34 #6)"
+else
+  fail "K183: counter rotation wrong — dw=$LIVE_DW (rotated), cc=$LIVE_CC (rotated), archives=$ARCHIVE_COUNT (expected 2)"
 fi
 
 echo

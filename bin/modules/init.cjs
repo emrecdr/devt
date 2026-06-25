@@ -612,6 +612,31 @@ function initWorkflow(task, pluginRoot, initVerb) {
             // Strip both the bare-key marker (rare empty form) AND the
             // nested block ("lanes:\n  - id:..." with continuation lines).
             .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
+
+          // Cal #34 #6 — rotate JSONL counter logs on workflow_id change.
+          // Receipt #8 Q5(c): "the auto-reset is a patch over [counter
+          // accumulation]." Cal #31.D's auto-reset-if-stale only fires when
+          // task_changed AND age>24h AND workflow_type_changed — same-day
+          // workflow churn never triggers it, leaving raw_dispatch +
+          // claim_check_failures records from the closed workflow in the
+          // gate's scan window. On block-mode projects this triggers KILL-gate
+          // false-fire (dispatch_hygiene_kill_threshold=3 catches 3+
+          // accumulated). Mirror resetSoft's RESET_SOFT_ROTATE_LOGS rotation:
+          // when a closed workflow is being replaced, archive its counter
+          // logs so the fresh workflow starts at count=0. Best-effort —
+          // failure does not block init.
+          try {
+            const stateDirPath = path.join(projectRoot, ".devt", "state");
+            const COUNTER_LOGS = ["dispatch-warnings.jsonl", "claim-check-failures.jsonl"];
+            const archiveTs = new Date().toISOString().replace(/[:.]/g, "-");
+            for (const logName of COUNTER_LOGS) {
+              const src = path.join(stateDirPath, logName);
+              if (!fs.existsSync(src)) continue;
+              const archived = `${logName.replace(/\.jsonl$/, "")}.archive-${archiveTs}.jsonl`;
+              const dst = path.join(stateDirPath, archived);
+              try { fs.renameSync(src, dst); } catch { /* per-log non-fatal */ }
+            }
+          } catch { /* non-fatal: gate continues to work on whatever counts remain */ }
         }
         fs.writeFileSync(wfPath, yaml);
       }

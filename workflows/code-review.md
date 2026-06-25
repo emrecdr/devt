@@ -154,7 +154,41 @@ When `god_node_match=true`, the agent sees a structured warning ("you're about t
 
 ### Substep 4: Staleness gate + Graphify eviction
 
-**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the impact-map fetch and any agent dispatch: question "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
+**Staleness gate (tiered, cal #34 #1 from receipt #8 Q4).** Read `preflight-brief.json::staleness.lag_commits` + `graphify.stale_threshold` (default 10 — lowered 30→10 per receipt #8). Decision tree:
+
+- **Operator escape hatch (`--no-refresh` / `--stale-ok`)**: when the task text in `REVIEW_SCOPE` contains either flag, skip the staleness gate entirely + force `scope_trust.trust="sparse"` so reviewers downweight blast-radius signal. For emergency-review-on-known-broken-graph (graph build failing, CI runs accepting staleness). Cheap to add, real value.
+- **`lag_commits == 0`**: noop. Graph matches HEAD; proceed silently.
+- **`0 < lag_commits < stale_threshold`** (small-but-nonzero drift): **silent-warn band**. Emit one-line stderr `[staleness] graph N commits behind HEAD; caller-sets may be slightly stale (lag<threshold)` + set `scope_trust.fresh=false` in the sidecar so reviewers see the freshness signal. No prompt — small drift doesn't justify interrupting. Per receipt #8 Q4 reasoning: 28.5s `graphify update . --no-cluster` benchmark places auto-fire in the "operator-prompt-gated" band rather than always-silent-refresh.
+- **`lag_commits >= stale_threshold`** OR (`graph_stats.state` is `ready` AND `lag_commits` is `null`): AskUserQuestion BEFORE the impact-map fetch and any agent dispatch. Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD (threshold {threshold}); review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled.
+
+```bash
+# Operator escape hatch detection
+if [[ " ${REVIEW_SCOPE} " == *" --no-refresh "* ]] || [[ " ${REVIEW_SCOPE} " == *" --stale-ok "* ]] || [[ " $ARGUMENTS " == *" --no-refresh "* ]] || [[ " $ARGUMENTS " == *" --stale-ok "* ]]; then
+  echo "[staleness] --no-refresh / --stale-ok: skipping staleness gate; forcing scope_trust.trust=sparse"
+  STALENESS_GATE_BYPASS="1"
+else
+  STALENESS_GATE_BYPASS=""
+fi
+
+# Tiered staleness check (only when not bypassed)
+if [ -z "$STALENESS_GATE_BYPASS" ]; then
+  LAG_COMMITS=$(jq -r '.staleness.lag_commits // "null"' .devt/state/preflight-brief.json 2>/dev/null)
+  STALE_THRESHOLD=$(node -e "const c = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/config.cjs').getMergedConfig(); console.log((c.graphify && c.graphify.stale_threshold) || 10)")
+  if [ "$LAG_COMMITS" = "null" ]; then
+    # Treated as prompt-tier (unknown freshness)
+    STALENESS_TIER="prompt"
+  elif [ "$LAG_COMMITS" = "0" ]; then
+    STALENESS_TIER="noop"
+  elif [ "$LAG_COMMITS" -lt "$STALE_THRESHOLD" ]; then
+    STALENESS_TIER="silent_warn"
+    echo "[staleness] graph $LAG_COMMITS commits behind HEAD; caller-sets may be slightly stale (lag<threshold=$STALE_THRESHOLD)"
+  else
+    STALENESS_TIER="prompt"
+  fi
+fi
+```
+
+When `STALENESS_TIER=prompt`: issue the AskUserQuestion above. When `silent_warn`: continue silently (banner already emitted). When `noop`: proceed.
 
 **Evict any stale Graphify artifacts before regeneration.** A prior session's `graph-impact.md` or `graphify-skip-reason.txt` would otherwise look current and silently mask whether the orchestrator actually ran the plan this session. Targeted — never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The CLI is the single source of truth for the eviction set (also used by `dev-workflow`, `quick-implement`, `debug`, `research-task`):
 

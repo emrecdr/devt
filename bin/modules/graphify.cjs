@@ -794,21 +794,82 @@ function blastRadius(symbols, _options) {
   const modules = new Set();
   const ambiguous = [];
   const extraNoise = _getExtraNoiseSet();
+  // Cal #34 #5b — telemetry-on-reduction per [[telemetry-on-reduction]]
+  // standing principle: every filter / collapser tracks its own count + the
+  // raw (pre-filter) totals so reviewers can audit how aggressive each
+  // reduction was. Mirrors getNeighbors' filter-telemetry pattern.
+  const testPathPatterns = _getTestPathPatterns();
+  const DI_AGGREGATION_BASENAMES = _getDIAggregationPatterns();
+  const COLLAPSE_THRESHOLD = _getDIAggregationCollapseThreshold();
+  let rawDirectCount = 0;
+  let rawIndirectCount = 0;
+  let filteredNoiseCount = 0;
+  let filteredTestPathCount = 0;
+  let filteredDIAggregationCount = 0;
 
   for (const sym of symbols) {
     const seedId = _resolveOne(adj, sym);
     if (!seedId) continue;
     // depth-2 incoming: visited.depth in {1, 2}; direct = depth 1, indirect = depth 2
     const { visited } = _bfs(adj, seedId, "in", 2);
+
+    // Cal #34 #5b — DI-aggregation collapse pre-pass per receipt #8 Q7. Mirrors
+    // G1 (cal #31.B) collapse logic from getNeighbors: count occurrences per
+    // source_file FIRST, then collapse during the main pass when >threshold
+    // nodes share a DI-pattern file. Without the pre-pass, can't decide
+    // collapse-vs-keep until we know the count.
+    const sourceFileCountsDirect = new Map();
+    const sourceFileCountsIndirect = new Map();
+    for (const [id, info] of visited) {
+      if (id === seedId) continue;
+      const node = adj.nodeMap.get(id);
+      const src = (node && node.source_file) || "";
+      if (!src) continue;
+      const target = info.depth === 1 ? sourceFileCountsDirect : sourceFileCountsIndirect;
+      target.set(src, (target.get(src) || 0) + 1);
+    }
+    const seenDIDirect = new Set();
+    const seenDIIndirect = new Set();
+
     for (const [id, info] of visited) {
       if (id === seedId) continue;
       const node = adj.nodeMap.get(id);
       const label = node && node.label ? node.label : id;
+      // Raw-count tracking BEFORE any filter so receipt-#8-required raw_direct_count
+      // / raw_indirect_count telemetry stays auditable per cal #34 #5b spec.
+      if (info.depth === 1) rawDirectCount++;
+      else if (info.depth === 2) rawIndirectCount++;
+
       // Skip noise: primitives, docstrings, file/concept/JSON-key nodes, +
       // project-configured extras. Without filtering, blast_radius reports
       // `int`/`str`/docstring fragments as "dependents" of every queried
       // symbol — accurate to the graph topology, useless as signal.
-      if (_isBlastNoise(node, label, extraNoise)) continue;
+      if (_isBlastNoise(node, label, extraNoise)) { filteredNoiseCount++; continue; }
+
+      // Cal #34 #5b — test-path filter. Mirrors F2 (cal #30.3) from getNeighbors.
+      // Receipt #8: indirect_dependents had 150+ entries dominated by
+      // MagicMock/AsyncMock/test_inbound_push_failure_* — useful as test-coverage
+      // info but not as "what production code depends on this." F2 drops with
+      // telemetry so the reduction is auditable per [[telemetry-on-reduction]].
+      if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
+
+      // Cal #34 #5b — DI-aggregation collapse. Mirrors G1 (cal #31.B) from
+      // getNeighbors. Receipt #8: direct_dependents had Depends/Select/Page/
+      // get_*_repository entries — framework wiring + DI patterns where one
+      // source_file (factory.py, dependencies.py, etc.) contributes many edges.
+      // Collapse (not drop) to preserve signal at 1/N volume.
+      const src = (node && node.source_file) || "";
+      if (src && DI_AGGREGATION_BASENAMES.test(src)) {
+        const counts = info.depth === 1 ? sourceFileCountsDirect : sourceFileCountsIndirect;
+        const seen = info.depth === 1 ? seenDIDirect : seenDIIndirect;
+        if ((counts.get(src) || 0) > COLLAPSE_THRESHOLD) {
+          if (seen.has(src)) { filteredDIAggregationCount++; continue; }
+          seen.add(src);
+          // Keep the representative (one label) — the collapsed-count is
+          // surfaced via filteredDIAggregationCount in noise_telemetry.
+        }
+      }
+
       if (info.depth === 1) direct.add(label);
       else if (info.depth === 2) indirect.add(label);
       if (node && node.source_file) modules.add(path.dirname(node.source_file));
@@ -846,7 +907,18 @@ function blastRadius(symbols, _options) {
   else if (direct.size + indirect.size > 5 || modules.size >= 2) effect_size = "medium";
   else effect_size = "small";
 
-  return {
+  // Cal #34 #5b — surface noise_telemetry + raw counts per receipt #8 Q7
+  // explicit requirement: post-filter counts feed effect_size (above), but
+  // raw_*_count surfaces pre-filter totals so the shrink is auditable +
+  // doesn't silently re-route tiers. Empty telemetry object when nothing
+  // filtered (matches getNeighbors' null-telemetry-when-noop pattern).
+  const totalFiltered = filteredNoiseCount + filteredTestPathCount + filteredDIAggregationCount;
+  const noiseTelemetry = totalFiltered > 0 ? {
+    filtered_noise: filteredNoiseCount,
+    filtered_test_path: filteredTestPathCount,
+    filtered_di_aggregation: filteredDIAggregationCount,
+  } : null;
+  const base = {
     effect_size,
     direct_dependents: Array.from(direct),
     indirect_dependents: Array.from(indirect),
@@ -855,7 +927,11 @@ function blastRadius(symbols, _options) {
     ambiguous_bindings: ambiguous.length,
     ambiguous_details: ambiguous,
     source: "graphify",
+    raw_direct_count: rawDirectCount,
+    raw_indirect_count: rawIndirectCount,
   };
+  if (noiseTelemetry) base.noise_telemetry = noiseTelemetry;
+  return base;
 }
 
 // "JSON-key noise" labels excluded from god-node detection. Mirrors upstream

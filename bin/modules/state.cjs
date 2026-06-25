@@ -2295,16 +2295,33 @@ function graphifyRoi() {
     return { status: "error", reason: `graph-impact.md read failed: ${e.message}`, drills_executed: 0, drills_with_citation: 0, wasted_drill_count: null, wasted_drill_rate: null };
   }
 
-  // Drill-down heading: `## Drill-down: <SYM> (direction=<dir>, depth=<n>)`
-  // Optional `[call: <8hex>]` suffix (compose-drilldowns / orchestrator stamp).
-  const drillHeadingRe = /^##\s+Drill-down:\s*([^\n(]+?)(?:\s*\(([^)]*)\))?(?:\s*\[call:\s*([0-9a-f]{8})\])?\s*$/gim;
+  // Cal #34 #3 — heading parser refinement per receipt #8 part 2. The strict
+  // anchor in the prior `/...$/` was a false-negative source: headings with
+  // non-canonical trailing suffixes like `[in, depth2]` (operator deviation
+  // from canonical) silently failed to parse → 3 valid drills reported as
+  // `no_drills_executed`. New shape: lenient match captures ANY heading
+  // starting with `## Drill-down:`; separately try to extract the canonical
+  // `[call: <8hex>]` suffix; surface non-canonical headings via
+  // `parse_failed_lines` telemetry per [[telemetry-on-reduction]] so the
+  // "heading present but unparseable" class can't hide as "no drills written."
+  const drillHeadingLenientRe = /^##\s+Drill-down:\s*([^\n]+?)\s*$/gim;
+  const callSuffixRe = /\[call:\s*([0-9a-f]{8})\]/i;
   const drillSections = [];
+  let parseFailedLines = 0;
   let m;
-  while ((m = drillHeadingRe.exec(impactContent)) !== null) {
+  while ((m = drillHeadingLenientRe.exec(impactContent)) !== null) {
+    const fullTitle = (m[1] || "").trim();
+    // Extract optional [call: <hex>] suffix from anywhere in the title
+    const callMatch = fullTitle.match(callSuffixRe);
+    const corrId = callMatch ? callMatch[1] : null;
+    // Symbol = everything before the first `(` or `[` (paren-or-bracket metadata)
+    const symbolMatch = fullTitle.match(/^([^\s(\[]+)/);
+    const symbol = symbolMatch ? symbolMatch[1].trim() : fullTitle;
+    if (!symbol) { parseFailedLines++; continue; }
     drillSections.push({
-      symbol: (m[1] || "").trim(),
-      direction_meta: (m[2] || "").trim(),
-      heading_corr_id: m[3] || null,
+      symbol,
+      heading_full: fullTitle,
+      heading_corr_id: corrId,
       heading_index: m.index,
     });
   }
@@ -2317,14 +2334,22 @@ function graphifyRoi() {
       drills_with_citation: 0,
       wasted_drill_count: null,
       wasted_drill_rate: null,
+      wasted_drill_rate_weak: null,
+      parse_failed_lines: parseFailedLines,
     };
   }
 
-  // For each drill section, extract correlation_ids that appear within its
-  // body (between this heading and the next ## heading). Some drills carry
-  // the id in the heading itself; others embed it in body lines (varies by
-  // orchestrator format). Capture both.
+  // Cal #34 #3 — per-drill body analysis: corr_ids (existing) + yielded_data
+  // (NEW). yielded_data distinguishes "drill returned results: []" from
+  // "drill returned data nobody cited" — receipt #8 user: "current metric
+  // lumps two different wastes... they demand different fixes." Empty drills
+  // signal drill-selection problems (don't drill direction=in on interface
+  // symbols); uncited-non-empty signals drill-value problems.
   const corrIdRe = /([0-9a-f]{8})/g;
+  // Canonical empty marker from compose-drilldowns (cal #31.D G7) +
+  // explicit "results: []" + parenthetical "(empty ...)" + "no usable"
+  // patterns. If ANY match, drill yielded no data.
+  const emptyMarkerRe = /(_\(no neighbors found in direction=(?:in|out|both)\)_|results\s*:\s*\[\s*\]|\(empty\b|no usable caller set)/i;
   for (let i = 0; i < drillSections.length; i++) {
     const start = drillSections[i].heading_index;
     const end = i + 1 < drillSections.length ? drillSections[i + 1].heading_index : impactContent.length;
@@ -2332,49 +2357,96 @@ function graphifyRoi() {
     const ids = new Set();
     if (drillSections[i].heading_corr_id) ids.add(drillSections[i].heading_corr_id);
     let im;
-    // Hex-id detection in body — bounded scan (sections are typically <2KB)
     while ((im = corrIdRe.exec(section)) !== null) {
       if (im[1] !== drillSections[i].heading_corr_id) ids.add(im[1]);
-      if (ids.size >= 5) break; // sanity cap — a drill rarely has >5 distinct ids
+      if (ids.size >= 5) break;
     }
     drillSections[i].corr_ids = Array.from(ids);
+    drillSections[i].yielded_data = !emptyMarkerRe.test(section);
   }
 
-  // Now scan review.md for citations. Both `(via call: <id>)` AND
-  // `[via call: <id>]` formats are documented in dispatch.cjs::
-  // provenanceProtocol; support both.
+  // Cal #34 #3 — 3-state citation per receipt #8 Q6(c): "strong" (corr_id
+  // match) / "weak" (symbol-name code-identifier match in finding body) /
+  // "none" (neither). The weak path catches the case where the MCP didn't
+  // emit correlation_ids (the receipt #8 case) — without it every drill
+  // reads as "none" by construction and the metric is biased to 100% waste.
+  // Symbol-name match constrained to backtick-wrapped + CamelCase code
+  // identifiers to avoid the false-positive "I-4 mentions CallBackend only
+  // because the file path contains it" failure receipt user flagged.
   let citedIds = new Set();
-  let reviewExists = fs.existsSync(reviewPath);
+  let reviewContent = "";
+  const reviewExists = fs.existsSync(reviewPath);
   if (reviewExists) {
-    let reviewContent = "";
-    try { reviewContent = fs.readFileSync(reviewPath, "utf8"); } catch { /* fall through with empty */ }
+    try { reviewContent = fs.readFileSync(reviewPath, "utf8"); } catch { /* fall through */ }
     const citationRe = /[(\[]\s*via\s+call:\s*([0-9a-f]{8})\s*[)\]]/gi;
     let cm;
     while ((cm = citationRe.exec(reviewContent)) !== null) citedIds.add(cm[1]);
   }
 
-  let drillsWithCitation = 0;
+  // Cal #34 #3 — code-identifier-only weak match. Receipt #8 user concern:
+  // "I-4 mentions CallBackend only because the path contains it" false-
+  // positive. Solution: tighten the word-boundary regex to ALSO exclude
+  // path separators (`/`, `\`) and dots (`.`) in lookbehind/lookahead so
+  // `src/CallBackend.py` doesn't match `CallBackend` — the symbol must
+  // appear as a STANDALONE identifier, not as a path component. Backtick-
+  // wrapping (`CallBackend`) always matches. NO line-strip pre-pass —
+  // line-stripping over-fires on lines that mention the symbol legitimately
+  // AND a file path (separately) on the same line, which was the K182
+  // false-negative case.
+  let strongCount = 0;
+  let weakCount = 0;
   for (const d of drillSections) {
-    if (d.corr_ids.some(id => citedIds.has(id))) drillsWithCitation++;
+    if (d.corr_ids.some(id => citedIds.has(id))) {
+      d.citation = "strong";
+      strongCount++;
+    } else if (d.symbol && reviewContent) {
+      const escaped = d.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const codeIdRe = new RegExp(`(?:\`${escaped}\`|(?<![A-Za-z0-9_./\\\\])${escaped}(?![A-Za-z0-9_./\\\\]))`, "g");
+      if (codeIdRe.test(reviewContent)) {
+        d.citation = "weak";
+        weakCount++;
+      } else {
+        d.citation = "none";
+      }
+    } else {
+      d.citation = "none";
+    }
   }
 
+  // Dual rate per receipt #8 Q6(c): strict (corr_id only) vs weak (includes
+  // symbol-name matches). The DELTA between them is the diagnostic — strict
+  // 100% / weak 33% reads as "drills aren't useless, the citation plumbing
+  // is broken." Without both, the failure mode can't be diagnosed.
+  const drillsWithCitation = strongCount;
   const wastedCount = drillSections.length - drillsWithCitation;
   const wastedRate = drillSections.length > 0 ? Number((wastedCount / drillSections.length).toFixed(3)) : null;
+  const wastedRateWeak = drillSections.length > 0
+    ? Number(((drillSections.length - strongCount - weakCount) / drillSections.length).toFixed(3))
+    : null;
 
   return {
     status: reviewExists ? "measured" : "no_review_yet",
     reason: reviewExists
-      ? `${drillsWithCitation}/${drillSections.length} drills cited in review.md (${citedIds.size} unique correlation_ids)`
+      ? `${strongCount}/${drillSections.length} drills cited strong (corr_id); ${weakCount} weak (symbol-name); ${citedIds.size} unique correlation_ids` + (parseFailedLines > 0 ? `; ${parseFailedLines} unparseable heading line(s)` : "")
       : "review.md not yet written — consolidator may not have run; metric premature",
     drills_executed: drillSections.length,
     drills_with_citation: drillsWithCitation,
+    drills_with_weak_citation: weakCount,
     wasted_drill_count: wastedCount,
-    wasted_drill_rate: wastedRate,
+    wasted_drill_rate: wastedRate,           // strict: corr_id-only citations
+    wasted_drill_rate_weak: wastedRateWeak,  // permissive: includes symbol-name matches
     unique_citations_in_review: citedIds.size,
+    parse_failed_lines: parseFailedLines,
+    // Cal #34 #3 per-drill: refactored from {cited: bool} to richer shape.
+    // citation: "strong"|"weak"|"none" distinguishes corr_id-cited from
+    // symbol-name-matched from neither. yielded_data: distinguishes drills
+    // that returned data (could be cited) from drills that returned empty
+    // results (couldn't be cited regardless) — different waste classes.
     per_drill: drillSections.map(d => ({
       symbol: d.symbol,
       corr_ids: d.corr_ids,
-      cited: d.corr_ids.some(id => citedIds.has(id)),
+      citation: d.citation,            // "strong" | "weak" | "none"
+      yielded_data: d.yielded_data,    // false = drill returned results: [] OR canonical empty marker
     })),
   };
 }

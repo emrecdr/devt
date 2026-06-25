@@ -206,10 +206,17 @@ const DEFAULTS = {
     // (query_graph + get_neighbors). Below the threshold, the workflow falls
     // back to the symbol-anchored blast_radius tier.
     impact_threshold: 10,
-    // When freshness().lag_commits exceeds this, dispatch context_init prompts
-    // the user to refresh the graph before proceeding. Set to null to disable
-    // the staleness gate entirely (warning still surfaces in the Brief).
-    stale_threshold: 30,
+    // When freshness().lag_commits exceeds this, the workflow's staleness
+    // gate fires AskUserQuestion prompting refresh. Tiered policy (cal #34 #1,
+    // receipt #8 Q4): lag==0 noop / 0<lag<threshold silent-warn + scope_trust.
+    // fresh=false / lag>=threshold prompt. Lowered 30→10 per receipt #8:
+    // "30 commits of drift is a lot of wrong caller-sets... 10 ≈ a sprint's
+    // drift, the point where blast-radius reliability degrades enough to
+    // matter." Project-tunable; lower for high-velocity repos ONLY if refresh
+    // is verified cheap (the AST-only `graphify update . --no-cluster` path
+    // benchmarked 28.5s for 32k-node graph — receipt #8 Q3b). Set to null to
+    // disable the staleness gate entirely (warning still surfaces in Brief).
+    stale_threshold: 10,
     // When graphify's BFS-derived direct_dependents_count is ≥ N× the
     // literal git-grep caller count, emit a magnification advisory in the
     // brief. Default 3× catches typical interface-amplification cases
