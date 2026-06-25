@@ -14169,6 +14169,188 @@ else
   fail "K165: compose-drilldowns not emitting expected markdown — got: $K165_OUT"
 fi
 
+# K166 (cal #32 rank #1 part b): reset-soft evicts review*.md, review*.json,
+# review-lane-*.{md,json}. Receipt #6: stale review artifacts collided with
+# fresh run (Lane F couldn't claim canonical filename; 5 stale prior-pass
+# files sat in dir). Tests: plant 5 review artifacts + 3 phase artifacts →
+# reset-soft → review artifacts gone, phase artifacts preserved intact.
+K166_TMP=$(mktemp -d)
+mkdir -p "$K166_TMP/.devt/state"
+cat > "$K166_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_id: old
+first_created_at: "2026-06-01T00:00:00.000Z"
+YEOF
+echo "stale L1" > "$K166_TMP/.devt/state/review-lane-A.md"
+echo "{}" > "$K166_TMP/.devt/state/review-lane-A.json"
+echo "stale L2" > "$K166_TMP/.devt/state/review-lane-F.md"
+echo "stale consolidated" > "$K166_TMP/.devt/state/review.md"
+echo "{}" > "$K166_TMP/.devt/state/review.json"
+echo "preserved impl" > "$K166_TMP/.devt/state/impl-summary.md"
+echo "preserved test" > "$K166_TMP/.devt/state/test-summary.md"
+echo "preserved graph" > "$K166_TMP/.devt/state/graph-impact.md"
+cd "$K166_TMP" && node "$ROOT/bin/devt-tools.cjs" state reset-soft >/dev/null 2>&1
+EVICTED_OK="yes"
+for f in review-lane-A.md review-lane-A.json review-lane-F.md review.md review.json; do
+  if [ -f "$K166_TMP/.devt/state/$f" ]; then EVICTED_OK="no"; break; fi
+done
+PRESERVED_OK="yes"
+for f in impl-summary.md test-summary.md graph-impact.md; do
+  if [ ! -f "$K166_TMP/.devt/state/$f" ]; then PRESERVED_OK="no"; break; fi
+done
+cd "$ROOT"; rm -rf "$K166_TMP"
+if [ "$EVICTED_OK" = "yes" ] && [ "$PRESERVED_OK" = "yes" ]; then
+  pass "K166: reset-soft evicts review-*.{md,json} + review-lane-*.{md,json}; preserves impl-summary/test-summary/graph-impact"
+else
+  fail "K166: reset-soft eviction wrong — evicted=$EVICTED_OK preserved=$PRESERVED_OK"
+fi
+
+# K167 (cal #32 rank #1 part c): listLaneOutputs emits cid_match field per
+# lane (current/foreign/absent). Receipt #6: consolidator without cid-keying
+# nearly merged stale findings from rotated workflow (cid_68768a3d).
+K167_TMP=$(mktemp -d)
+mkdir -p "$K167_TMP/.devt/state"
+cat > "$K167_TMP/.devt/state/workflow.yaml" <<YEOF
+workflow_id: b13d604fffeeff00112233445566778899aa
+first_created_at: "2026-06-25T00:00:00.000Z"
+lanes:
+  - id: "L1"
+    review_file: ".devt/state/review-lane-L1.md"
+    status: "substance_pass"
+  - id: "L2"
+    review_file: ".devt/state/review-lane-L2.md"
+    status: "substance_pass"
+YEOF
+echo "<correlation_id>cid_b13d604f_L1</correlation_id>" > "$K167_TMP/.devt/state/review-lane-L1.md"
+echo "<correlation_id>cid_68768a3d_L2</correlation_id>" > "$K167_TMP/.devt/state/review-lane-L2.md"
+K167_OUT=$(cd "$K167_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null)
+rm -rf "$K167_TMP"
+L1_CID=$(echo "$K167_OUT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log((o.lanes.find(l=>l.id==='L1')||{}).cid_match)}catch{console.log('error')}});" 2>/dev/null)
+L2_CID=$(echo "$K167_OUT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log((o.lanes.find(l=>l.id==='L2')||{}).cid_match)}catch{console.log('error')}});" 2>/dev/null)
+if [ "$L1_CID" = "current" ] && [ "$L2_CID" = "foreign" ]; then
+  pass "K167: listLaneOutputs cid_match classifies lanes (cid_<currentprefix>=current, cid_68768a3d=foreign)"
+else
+  fail "K167: cid_match wrong — L1=$L1_CID (expected current), L2=$L2_CID (expected foreign)"
+fi
+
+# K168 (cal #32 rank #2): dispatch buildSubstitutionTable reads auto_memory
+# from preflight-brief.json. Receipt #6 Q2: G2/laneH produced 8 entries in
+# the brief but envelope template never referenced auto_memory_json, so
+# lanes never received structured. Tests: synthetic brief with auto_memory
+# → render-filled output includes the auto_memory_json values.
+K168_TMP=$(mktemp -d)
+mkdir -p "$K168_TMP/.devt/state"
+echo "active: true
+workflow_id: test
+first_created_at: \"2026-06-25T00:00:00.000Z\"
+task: \"test\"" > "$K168_TMP/.devt/state/workflow.yaml"
+cat > "$K168_TMP/.devt/state/preflight-brief.json" <<JEOF
+{"status":"FRESH","auto_memory":[{"name":"test-decision","description":"use admin guard","source":"auto_memory","score":5,"type":"feedback"}]}
+JEOF
+K168_OUT=$(cd "$K168_TMP" && node -e "
+const dispatch = require('$ROOT/bin/modules/dispatch.cjs');
+const tpl = '<auto_memory>{auto_memory_json}</auto_memory>';
+process.chdir('$K168_TMP');
+const subs = require('$ROOT/bin/modules/dispatch.cjs');
+// Use the substitutionTable to extract auto_memory_json
+const buildSubsExport = subs._buildSubsForTest || (() => null);
+" 2>/dev/null)
+# Better test: just render dispatch and look for auto_memory_json in the rendered output
+RENDERED=$(cd "$K168_TMP" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review 2>/dev/null || true)
+rm -rf "$K168_TMP"
+if echo "$RENDERED" | /usr/bin/grep -q "test-decision"; then
+  pass "K168: dispatch envelope propagates auto_memory from preflight-brief.json (test-decision name surfaces in rendered envelope)"
+else
+  fail "K168: auto_memory not in envelope — rendered head: $(echo "$RENDERED" | head -c 200)"
+fi
+
+# K169 (cal #32 rank #3): assertGraphifyDecision substance gate exempts
+# canonical empty marker. Receipt #6 Q4: gate forced operator to pad a
+# legitimately-empty drill-down section. Tests: graph-impact.md with short
+# drill-down containing empty marker → gate ok; without marker → gate flags.
+K169_TMP=$(mktemp -d)
+mkdir -p "$K169_TMP/.devt/state" "$K169_TMP/.devt" "$K169_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K169_TMP/.devt/config.json"
+echo '{"built_at_commit":"abc","nodes":[],"links":[]}' > "$K169_TMP/graphify-out/graph.json"
+cat > "$K169_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_id: test
+first_created_at: "2026-06-25T00:00:00.000Z"
+graphify_decision_required: true
+YEOF
+# Case A: drill-down with empty marker — short content (<200 bytes) should PASS
+cat > "$K169_TMP/.devt/state/graph-impact.md" <<EOF
+## Topic Block one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty
+## Drill-down: Target1 (direction=in, depth=1)
+_(no neighbors found in direction=in)_
+## Drill-down: Target2 (direction=in, depth=1)
+_(no neighbors found in direction=in)_
+## Drill-down: Target3 (direction=in, depth=1)
+_(no neighbors found in direction=in)_
+EOF
+EMPTY_OK=$(cd "$K169_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.thin_drill_down_sections||0);}catch{console.log('err')}});" 2>/dev/null)
+# Case B: drill-down without empty marker — short content should FAIL substance check
+cat > "$K169_TMP/.devt/state/graph-impact.md" <<EOF
+## Topic Block one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty
+## Drill-down: Target1 (direction=in, depth=1)
+tiny content
+## Drill-down: Target2 (direction=in, depth=1)
+tiny content
+## Drill-down: Target3 (direction=in, depth=1)
+tiny content
+EOF
+NO_MARKER_FAIL=$(cd "$K169_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.thin_drill_down_sections||0);}catch{console.log('err')}});" 2>/dev/null)
+rm -rf "$K169_TMP"
+if [ "$EMPTY_OK" = "0" ] && [ "$NO_MARKER_FAIL" = "3" ]; then
+  pass "K169: assert-graphify-decision exempts canonical empty marker (3 short drill-downs with marker → 0 thin; without marker → 3 thin)"
+else
+  fail "K169: empty marker exemption wrong — with_marker_thin=$EMPTY_OK (expected 0), without_marker_thin=$NO_MARKER_FAIL (expected 3)"
+fi
+
+# K170 (cal #32 rank #4): mcp-stats --strict-wid scopes to current workflow_id
+# only (default unions workflow_id_history chain). Receipt #6 Q6: union-by-
+# design × unbounded reset-soft chain reported 27 calls vs ~4 actual.
+K170_TMP=$(mktemp -d)
+mkdir -p "$K170_TMP/.devt/state" "$K170_TMP/.devt/memory"
+cat > "$K170_TMP/.devt/state/workflow.yaml" <<YEOF
+workflow_id: current_wf
+original_workflow_id: original_wf
+workflow_id_history: "[\"old1\", \"old2\", \"current_wf\"]"
+first_created_at: "2026-06-25T00:00:00.000Z"
+YEOF
+cat > "$K170_TMP/.devt/memory/_mcp-trace.jsonl" <<TRACE
+{"ts":"2026-06-25T00:00:00Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"current_wf","duration_ms":100}
+{"ts":"2026-06-25T00:00:01Z","tool":"mcp__devt-graphify__get_neighbors","workflow_id":"current_wf","duration_ms":50}
+{"ts":"2026-06-20T00:00:00Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"old1","duration_ms":80}
+{"ts":"2026-06-20T00:00:01Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"old1","duration_ms":90}
+{"ts":"2026-06-19T00:00:00Z","tool":"mcp__devt-graphify__get_neighbors","workflow_id":"old2","duration_ms":40}
+TRACE
+DEFAULT_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
+STRICT_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --strict-wid 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
+rm -rf "$K170_TMP"
+if [ "$DEFAULT_CALLS" = "5" ] && [ "$STRICT_CALLS" = "2" ]; then
+  pass "K170: mcp-stats --strict-wid scopes to current wid only (default chain union = 5; strict = 2)"
+else
+  fail "K170: strict-wid scope wrong — default_calls=$DEFAULT_CALLS (expected 5), strict_calls=$STRICT_CALLS (expected 2)"
+fi
+
+# K171 (cal #32 G3 strengthening): extractTopic excludes config_demoted from
+# topic.symbols when real-symbol count >= FLOOR (10). Receipt #6 Q1: cal #31
+# demotion was non-binding due to cap headroom; effect_size still inflated
+# by Settings/Environment god-node fan-out. Tests: 10 real + 4 config →
+# config_demoted_excluded=true; 3 real + 4 config → config_demoted_excluded=false.
+K171_OUT=$(node -e "
+const p = require('$ROOT/bin/modules/preflight.cjs');
+const strong = p.extractTopic('task', { gitDiffSymbols: ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta','Iota','Kappa','Settings','EmailBackend','LogLevel','Environment'] });
+const sparse = p.extractTopic('task', { gitDiffSymbols: ['Alpha','Beta','Gamma','Settings','EmailBackend','LogLevel','Environment'] });
+console.log('strong=' + strong.config_demoted_excluded + ',sparse=' + sparse.config_demoted_excluded + ',strongHasConfig=' + strong.symbols.some(s => ['Settings','EmailBackend','LogLevel','Environment'].includes(s)));
+" 2>/dev/null)
+if echo "$K171_OUT" | /usr/bin/grep -q "strong=true,sparse=false,strongHasConfig=false"; then
+  pass "K171: G3 strengthening excludes config_demoted when real-symbol count ≥ 10 (strong: excluded, no config in symbols; sparse: backfilled)"
+else
+  fail "K171: config exclusion wrong — got: $K171_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

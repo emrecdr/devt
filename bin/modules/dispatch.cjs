@@ -320,6 +320,7 @@ function applySubstitutions(template, subs) {
     scope_trust_json: () => JSON.stringify(subs.scope_trust_json || {}),
     scope_hint_json: () => JSON.stringify(subs.scope_hint_json || []),
     memory_signal_json: () => JSON.stringify(subs.memory_signal_json || {}),
+    auto_memory_json: () => JSON.stringify(subs.auto_memory_json || []),
     god_node_warnings_json: () => JSON.stringify(subs.god_node_warnings_json || {}),
     graphify_status_json: () => JSON.stringify(subs.graphify_status_json || {}),
     graph_impact_content: () => subs.graph_impact_content || "",
@@ -395,6 +396,25 @@ function buildSubstitutionTable(agent) {
       `</provenance_protocol>`
     : "";
 
+  // Cal #32 rank #2 — auto_memory bridge: read from preflight-brief.json
+  // sidecar instead of workflow.yaml. The sidecar carries laneH output
+  // (G2/cal #31.C: auto-memory + claude-mem-harvest matches) directly. Not
+  // written to state.yaml because (a) no workflow step converts brief→state
+  // for this field, and (b) reading once-per-dispatch is cheap. Best-effort:
+  // empty array on missing brief OR parse error preserves dispatch path.
+  let autoMemoryJson = [];
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const briefPath = path.join(projectRoot, ".devt", "state", "preflight-brief.json");
+    if (fs.existsSync(briefPath)) {
+      const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
+      if (brief && Array.isArray(brief.auto_memory)) {
+        autoMemoryJson = brief.auto_memory;
+      }
+    }
+  } catch { /* missing brief / parse error → empty (degrades to existing memory_signal path) */ }
+
   return {
     governing_rules: { content: gr.content || {}, rules_hash: gr.rules_hash || "" },
     inline_guardrails: ig.content || {},
@@ -410,6 +430,7 @@ function buildSubstitutionTable(agent) {
     scope_trust_json: s.scope_trust_json,
     scope_hint_json: s.scope_hint_json,
     memory_signal_json: s.memory_signal_json,
+    auto_memory_json: autoMemoryJson,
     god_node_warnings_json: s.god_node_warnings_json,
     graphify_status_json: s.graphify_status_json,
     task: s.task || s.task_description || "",

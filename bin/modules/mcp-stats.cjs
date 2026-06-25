@@ -166,31 +166,43 @@ function loadEntries(opts) {
   // union saw current ↔ original but missed everything in between.
   // Historical-id queries stay strict so a user citing a specific id gets
   // only that id's records.
+  //
+  // Cal #32 rank #4 — `--strict-wid` opt-in for narrow-scope surfaces.
+  // Receipt #6 Q6: workflow's present_findings "Graphify activity" surface
+  // reported 27 calls (full history chain union back to Jun 9) instead of
+  // ~4 (current-wid only) because unbounded reset-soft chain made the union
+  // semantic "every chained session back to the first reset." The union is
+  // correct-by-design for token-report / debug forensics; wrong-by-design
+  // for "what did THIS run actually do." `--strict-wid` flips this surface
+  // to current-wid only; default behavior (history chain union) preserved
+  // for token-report + debug telemetry consumers.
   let acceptedWorkflowIds = null;
   if (opts.workflow_id) {
     acceptedWorkflowIds = new Set([opts.workflow_id]);
-    try {
-      const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
-      if (fs.existsSync(wfPath)) {
-        const raw = fs.readFileSync(wfPath, "utf8");
-        const wfMatch = raw.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        if (wfMatch && wfMatch[1].trim() === opts.workflow_id) {
-          const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-          if (origMatch) acceptedWorkflowIds.add(origMatch[1].trim());
-          // workflow_id_history serializes as a JSON-stringified array via
-          // state.cjs::serializeSimpleYaml. Pull the raw quoted line and
-          // JSON.parse — avoids pulling in parseSimpleYaml from a peer
-          // module and keeps this filter self-contained.
-          const histMatch = raw.match(/^workflow_id_history:\s*"(.*)"\s*$/m);
-          if (histMatch) {
-            try {
-              const arr = JSON.parse(histMatch[1].replace(/\\"/g, '"'));
-              if (Array.isArray(arr)) for (const id of arr) if (typeof id === "string") acceptedWorkflowIds.add(id);
-            } catch { /* malformed history — fall through with original union only */ }
+    if (!opts.strict_wid) {
+      try {
+        const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
+        if (fs.existsSync(wfPath)) {
+          const raw = fs.readFileSync(wfPath, "utf8");
+          const wfMatch = raw.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+          if (wfMatch && wfMatch[1].trim() === opts.workflow_id) {
+            const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+            if (origMatch) acceptedWorkflowIds.add(origMatch[1].trim());
+            // workflow_id_history serializes as a JSON-stringified array via
+            // state.cjs::serializeSimpleYaml. Pull the raw quoted line and
+            // JSON.parse — avoids pulling in parseSimpleYaml from a peer
+            // module and keeps this filter self-contained.
+            const histMatch = raw.match(/^workflow_id_history:\s*"(.*)"\s*$/m);
+            if (histMatch) {
+              try {
+                const arr = JSON.parse(histMatch[1].replace(/\\"/g, '"'));
+                if (Array.isArray(arr)) for (const id of arr) if (typeof id === "string") acceptedWorkflowIds.add(id);
+              } catch { /* malformed history — fall through with original union only */ }
+            }
           }
         }
-      }
-    } catch { /* leave acceptedWorkflowIds as just the user-supplied id */ }
+      } catch { /* leave acceptedWorkflowIds as just the user-supplied id */ }
+    }
   }
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;

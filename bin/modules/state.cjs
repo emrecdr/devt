@@ -1389,6 +1389,31 @@ const RESET_SOFT_ROTATE_LOGS = [
   "claim-check-failures.jsonl",
 ];
 
+// Cal #32 rank #1 — review artifacts that MUST be evicted by resetSoft. Field
+// receipt #6 (greenfield, 2026-06-25): reset-soft preserved review-lane-*.md
+// and review.{md,json} from a prior session (cid_68768a3d), causing fresh-run
+// Lane F to fail to claim its canonical filename (wrote F-audit.md instead)
+// and leaving 5 stale prior-pass files in the dir. Without correlation-ID +
+// mtime discipline, the consolidator would have merged stale findings — a
+// silent-wrong-output hazard, not just untidy.
+//
+// Each pattern is a basename glob (anchored to .devt/state/ root, no
+// recursion). review-lane-*.md and review-lane-*.json cover canonical lane
+// outputs AND the F-audit.md / G-stale.json variants reviewers emit when
+// they can't claim the canonical name. The base review.{md,json} files are
+// per-run reviewer outputs; consolidator regenerates them each pass.
+//
+// SAFE-TO-EVICT rationale: these are review-instance outputs, not workflow-
+// spanning artifacts. impl-summary.md / graph-impact.md / test-summary.md
+// are NOT in this list — they legitimately survive across review re-runs of
+// the same implementation workflow.
+const RESET_SOFT_EVICT_PATTERNS = [
+  /^review\.md$/,
+  /^review\.json$/,
+  /^review-lane-.+\.md$/,
+  /^review-lane-.+\.json$/,
+];
+
 /**
  * Soft-reset workflow state for a new review starting against a stale workflow.yaml.
  *
@@ -1455,6 +1480,24 @@ function resetSoft() {
       }
     }
 
+    // Cal #32 rank #1 — evict review-instance artifacts that would otherwise
+    // collide with the fresh-run reviewer outputs (filename claim conflicts,
+    // stale-cid leakage into consolidation). See RESET_SOFT_EVICT_PATTERNS
+    // comment for safety rationale.
+    const evicted = [];
+    try {
+      for (const fname of fs.readdirSync(stateDir)) {
+        if (!RESET_SOFT_EVICT_PATTERNS.some(re => re.test(fname))) continue;
+        const fpath = path.join(stateDir, fname);
+        try {
+          fs.unlinkSync(fpath);
+          evicted.push(fname);
+        } catch (e) {
+          evicted.push({ file: fname, error: String(e && e.message) });
+        }
+      }
+    } catch { /* state dir read failure non-fatal — log entries already exist */ }
+
     return {
       ok: true,
       new_workflow_id: newWorkflowId,
@@ -1462,11 +1505,12 @@ function resetSoft() {
       new_first_created_at: nowIso,
       cleared_fields: RESET_SOFT_CLEAR_KEYS,
       rotated_logs: rotated,
+      evicted_artifacts: evicted,
       preserved: {
         workflow_id_history_depth: history.length,
         original_workflow_id: next.original_workflow_id,
         memory_layer: ".devt/memory/ untouched",
-        phase_artifacts: "impl-summary.md / graph-impact.md / review.md / test-summary.md untouched",
+        phase_artifacts: "impl-summary.md / graph-impact.md / test-summary.md untouched (review.md and review-lane-*.{md,json} evicted to prevent fresh-run collision — receipt #6 cal #32 rank #1)",
       },
     };
   } finally {
@@ -2003,6 +2047,14 @@ function assertGraphifyDecision() {
   // documents an oversized response was saved off-context for later reference.
   const DRILL_DOWN_MIN_BYTES = 200;
   const TRUNCATION_MARKER_RE = /(?:—\s*TRUNCATED\b|saved (?:to|at)\s+[/\w.-]+)/i;
+  // Cal #32 rank #3 — empty-marker exemption. Receipt #6 (greenfield 2026-06-25):
+  // gate forced operator to pad a legitimately-empty drill-down section
+  // (OAuthTokenService had 0 callers due to FastAPI DI blindness — see
+  // graphify-di-edge-gap). G7's `compose-drilldowns` CLI emits the canonical
+  // marker `_(no neighbors found in direction=in)_` for this case; the gate
+  // honors it as "validly considered, empty by data" — distinct from "skipped"
+  // (no section at all) and "fake" (prose padding to clear 200 bytes).
+  const EMPTY_MARKER_RE = /_\(no neighbors found in direction=(?:in|out|both)\)_/i;
   const thinDrillDowns = [];
   let thinDrillDownSections = 0;
   try {
@@ -2034,7 +2086,8 @@ function assertGraphifyDecision() {
           const body = lines.slice(1).join("\n").trim();
           const bodyBytes = Buffer.byteLength(body, "utf8");
           const hasTruncMarker = TRUNCATION_MARKER_RE.test(body);
-          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker) {
+          const hasEmptyMarker = EMPTY_MARKER_RE.test(body);
+          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker && !hasEmptyMarker) {
             thinDrillDownSections++;
             const symMatch = heading.match(/^##\s+Drill-down:\s*(.+?)\s*$/i);
             thinDrillDowns.push({
@@ -5204,6 +5257,16 @@ function listLaneOutputs() {
     const parsed = new Date(anchorMatch[1].trim()).getTime();
     if (Number.isFinite(parsed)) anchorMs = parsed;
   }
+  // Cal #32 rank #1 part (c) — cid-match correctness defense. Receipt #6
+  // (greenfield 2026-06-25): consolidator reading stale review-lane-*.md
+  // files from a prior session (cid_68768a3d) nearly merged stale findings
+  // into the fresh report; cid+mtime discipline kept them out manually. F6
+  // stamps `cid_<workflow_id_prefix>_<lane_id>` into the dispatch envelope —
+  // when the lane reviewer writes its review file, the cid surfaces in the
+  // body. By extracting it here, the consolidator (and downstream filters)
+  // can `select(.cid_match != "foreign")` to defend against eviction misses.
+  const wfIdMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+  const currentWorkflowIdPrefix = wfIdMatch ? wfIdMatch[1].trim().slice(0, 8) : null;
   // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
   // line-based parsing to avoid pulling in a YAML library (zero-deps rule).
   const lanes = [];
@@ -5242,6 +5305,29 @@ function listLaneOutputs() {
     // even though file_exists:false — consumers should treat absence as its
     // own signal.
     const stale = exists && anchorMs > 0 && mtimeMs < anchorMs;
+
+    // Cid-match extraction. Reads first 2KB of the lane file looking for
+    // a `cid_<8hex>` pattern (F6's correlation_id format). Three outcomes:
+    //   "current" — cid prefix matches workflow.yaml's workflow_id prefix
+    //   "foreign" — cid prefix differs (stale from a rotated workflow)
+    //   "absent"  — no cid found (legacy lane file pre-F6 OR file missing)
+    // Consumers (consolidator query, gate checks) select `cid_match != "foreign"`
+    // to defend against the eviction-misses-a-file case. Bounded 2KB read so
+    // huge review files don't slow listLaneOutputs.
+    let cidMatch = "absent";
+    if (exists && reviewFile && currentWorkflowIdPrefix) {
+      try {
+        const fd = fs.openSync(reviewFile, "r");
+        const buf = Buffer.alloc(2048);
+        try { fs.readSync(fd, buf, 0, 2048, 0); } finally { fs.closeSync(fd); }
+        const head = buf.toString("utf-8");
+        const cidM = head.match(/cid_([0-9a-f]{8})/);
+        if (cidM) {
+          cidMatch = cidM[1] === currentWorkflowIdPrefix ? "current" : "foreign";
+        }
+      } catch { /* read error — leave as "absent" */ }
+    }
+
     lanes.push({
       id: id ? id.trim() : null,
       community: community ? community.trim() : null,
@@ -5254,6 +5340,7 @@ function listLaneOutputs() {
       file_exists: exists,
       file_size_bytes: sizeBytes,
       stale,
+      cid_match: cidMatch,
     });
   }
   return { lanes };

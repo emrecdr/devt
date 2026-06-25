@@ -549,15 +549,26 @@ function extractTopic(taskText, opts = {}) {
     }
   }
 
-  // G3 (cal #31.B) — Config-enum demotion. Receipt #5 Q6: when config.py /
-  // constants.py / settings.py are in the diff, their enum/dataclass symbols
-  // (Settings, *Config, *Backend, *Profile, LogLevel, Environment, OrderBy,
-  // ErrorCode, etc.) flood the topic — receipt-confirmed 19/32 noise samples
-  // all matched this pattern. Demote (not remove) — they're pushed to the end
-  // of the array so downstream top-N truncation drops them first while
-  // preserving recall if the task is genuinely about config. Demotion is
-  // applied AFTER B4 (which removes short text-leg stand-ins) so the two
-  // operations don't interfere.
+  // G3 (cal #31.B + cal #32 strengthening) — Config-enum exclusion.
+  //
+  // Receipt #5 Q6 framing: config symbols (Settings, *Config, *Backend,
+  // *Profile, LogLevel, Environment, OrderBy, ErrorCode, etc.) flood
+  // topic.symbols when config.py / constants.py / settings.py are in the
+  // diff. Cal #31.B shipped DEMOTION-to-end ordering — assumed the
+  // downstream 32-cap would drop them.
+  //
+  // Receipt #6 Q1 correction: cap had headroom (22 real + 18 demoted = 40
+  // total → top-32 backfilled 10 demoted). Real harm wasn't budget-crowding
+  // (no real symbol displaced) — it was effect_size inflation: blast_radius
+  // expanded Settings/Environment god-nodes into ~30 phantom modules,
+  // turning "moderate PR fan-out" into reported "LARGE / 103 modules."
+  //
+  // Cal #32 fix: pre-cap EXCLUSION when real-symbol count is healthy.
+  // FLOOR=10 — above this, real signal is strong enough that config
+  // backfill harms more than helps. Below FLOOR, sparse real symbols mean
+  // we keep backfill (something is better than nothing for blast_radius
+  // anchoring on minimal diffs).
+  const REAL_SYMBOL_FLOOR = 10;
   const configDemoted = [];
   const nonConfig = [];
   for (const s of symbols) {
@@ -567,7 +578,10 @@ function extractTopic(taskText, opts = {}) {
       nonConfig.push(s);
     }
   }
-  const reorderedSymbols = [...nonConfig, ...configDemoted];
+  const configExcluded = nonConfig.length >= REAL_SYMBOL_FLOOR;
+  const reorderedSymbols = configExcluded
+    ? nonConfig                              // strong real signal — exclude demoted entirely
+    : [...nonConfig, ...configDemoted];      // sparse real signal — backfill from demoted
   // Preserve original symbol order in provenance map (no changes); only the
   // array order changes. Downstream consumers (blast_radius args, scope_hint
   // cap) get nonConfig symbols first.
@@ -582,6 +596,11 @@ function extractTopic(taskText, opts = {}) {
   };
   if (configDemoted.length > 0) {
     result.config_demoted = configDemoted;
+    // Telemetry: tells consumers whether the demoted symbols actually made
+    // it into topic.symbols (false = backfilled — sparse real signal) or
+    // were excluded entirely (true = strong real signal). Receipt #6
+    // measurement target: this should be true on most real diffs.
+    result.config_demoted_excluded = configExcluded;
   }
   return result;
 }

@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.108.0] - 2026-06-25
+
+### Cal #32 — Receipt #6 correctness + closing-loop fixes (4 ranked + G3 strengthening)
+
+Receipt #6 (greenfield, 2026-06-25) ran the first full validation of cal #31.B+C+D and surfaced 4 new devt-side findings PLUS a critical G3 self-correction (cal #31 demotion didn't prevent backfill because cap had headroom). Cal #32 ships per the receipt's ranked priority table — framed as correctness + closing loose ends, NOT value lift (Q1 upstream graphify DI-edges remains the only fix that demonstrably touches the bottleneck).
+
+**Rank #1 — `reset-soft` artifact eviction + consolidator cid-keying defense** (`bin/modules/state.cjs` + `workflows/code-review-parallel.md`). Highest correctness hazard: receipt evidence shows stale `review-lane-*.md` files from a rotated workflow (`cid_68768a3d`) nearly merged into the fresh report's consolidation; manual cid+mtime discipline was the only defense. Two-layer fix:
+
+- **(b) Eviction**: `RESET_SOFT_EVICT_PATTERNS` adds `review.{md,json}` + `review-lane-*.{md,json}` to reset-soft's clear list. Phase artifacts (`impl-summary.md` / `test-summary.md` / `graph-impact.md`) preserved intact — they legitimately span review re-runs.
+- **(c) cid-keying**: `state list-lane-outputs` emits per-lane `cid_match` field (`current` / `foreign` / `absent`) by extracting `cid_<8hex>` pattern from the first 2KB of each review file body and comparing to current `workflow_id` prefix. Consolidator workflow filters `select(.cid_match != "foreign")` to defend against eviction misses. `"absent"` preserves backward-compat with pre-F6 legacy files.
+
+**Rank #2 — Wire `auto_memory` into dispatch envelope template** (`bin/modules/dispatch.cjs` + `templates/dispatch/envelopes/code-reviewer-code_review.tmpl.md` + `workflows/code-review-parallel.md`). Cal #31.C/G2 shipped `laneH` which populates `auto_memory: [...]` in preflight-brief.json sidecar with 8+ entries from auto-memory dir + claude-mem-harvest. But the envelope never referenced the field — lanes received it only redundantly via claude-mem harvest. This closes the structural gap: dispatch reads `auto_memory` from preflight-brief.json (best-effort; empty array on missing brief), surfaces it as `<auto_memory>{auto_memory_json}</auto_memory>` block alongside `<memory_signal>`.
+
+**Rank #3 — Substance gate honors canonical empty marker** (`bin/modules/state.cjs::assertGraphifyDecision`). Receipt: gate forced operator to pad a legitimately-empty drill-down section (`OAuthTokenService` had 0 callers due to FastAPI DI blindness — not a skipped step). G7's `compose-drilldowns` already emits canonical marker `_(no neighbors found in direction=in)_`. New `EMPTY_MARKER_RE` exempts sections containing the marker from the 200-byte substance check. Distinct from TRUNCATION_MARKER_RE (which exempts saved-to-file truncation cases).
+
+**Rank #4 — `mcp-stats --strict-wid` scope-to-current-wid flag** (`bin/modules/mcp-stats.cjs`). Receipt: workflow's present_findings "Graphify activity" surface reported 27 calls cumulative since Jun 9 (full history chain union back to first reset-soft) instead of ~4 (current run). Union-by-design × unbounded reset-soft chain creates "every chained session" semantic when "what did this run actually do" is wanted. New `--strict-wid` flag suppresses the history chain union, returning current-wid-only stats. Default behavior preserved for token-report + debug forensics consumers.
+
+**G3 strengthening — pre-cap EXCLUSION when real-symbol count ≥ FLOOR** (`bin/modules/preflight.cjs::extractTopic`). Receipt #6 Q1 correction: cal #31.B G3 demotion-to-end was non-binding when cap (32) had headroom — config symbols (Settings, *Config, *Backend, Environment, etc.) backfilled and inflated blast_radius effect_size by ~30 phantom modules. Real harm wasn't budget-crowding (no real symbol displaced) — it was effect_size inflation. New behavior: when `nonConfig.length >= 10` (FLOOR), drop `config_demoted` entirely. When sparse < 10, keep backfill behavior. New `config_demoted_excluded` telemetry field surfaces which mode fired.
+
+**Drift-guard stack now 78-deep K94-K171.** CLAUDE.md + README updated.
+
+**Smoke gates**: K166 (reset-soft eviction matrix — 5 evicted, 3 preserved), K167 (cid_match classification: current/foreign/absent), K168 (auto_memory propagated from brief to envelope), K169 (substance gate exempts empty marker — 0 thin with marker, 3 thin without), K170 (--strict-wid scopes to current wid — default 5, strict 2), K171 (G3 exclusion when ≥10 real symbols vs backfill when sparse).
+
+**Strategic framing per [[mechanism-firing-neq-value-conversion]]**: cal #32 ships for correctness + closing G2/G3 loops, NOT for value lift. Receipt #6 made the framing explicit: code-review value stays DI-capped at ~6.5/10 until Q1 (DI-aware graphify extraction) lands upstream. K-gates here measure mechanism execution; outcome lift requires DI extraction or different architectural lever.
+
+**Remaining**: Q1 upstream graphify filing (DI/dispatch edges — non-devt code).
+
 ## [0.107.0] - 2026-06-25
 
 ### Cal #31.D — Setup-friction ergonomics (3 fixes)

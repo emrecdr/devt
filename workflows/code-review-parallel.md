@@ -418,13 +418,23 @@ Dispatch the code-reviewer in synthesis mode. The synthesis-mode handler (agents
 Build the lane files list (only `substance_pass` and `deferred` lanes — never include `in_flight` or `stub_redispatched`; those should have been resolved by now):
 
 ```bash
+# Cal #32 rank #1 part (c): cid_match != "foreign" filter prevents stale
+# review-lane-*.md files from a rotated workflow leaking into consolidation
+# (receipt #6 evidence: cid_68768a3d stale files nearly merged into fresh
+# report). "current" + "absent" both pass — "absent" preserves backward-
+# compat with legacy lanes pre-F6 cid stamping.
 LANE_FILES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
-  jq -r '.lanes[] | select(.status == "substance_pass" or .status == "deferred") | .review_file' | \
+  jq -r '.lanes[] | select(.status == "substance_pass" or .status == "deferred") | select(.cid_match != "foreign") | .review_file' | \
   /usr/bin/grep -v '^$' | paste -sd ',' -)
+FOREIGN_CID_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
+  jq '[.lanes[] | select(.cid_match == "foreign")] | length')
 DEFERRED_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
   jq '[.lanes[] | select(.status == "deferred")] | length')
 SUBSTANCE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
   jq '[.lanes[] | select(.status == "substance_pass")] | length')
+if [ "$FOREIGN_CID_COUNT" -gt 0 ]; then
+  echo "[consolidator] dropped $FOREIGN_CID_COUNT lane file(s) with foreign cid (stale from rotated workflow); reset-soft eviction should have cleared these — investigate if recurring"
+fi
 ```
 
 Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction:
