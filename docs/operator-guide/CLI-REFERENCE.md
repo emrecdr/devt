@@ -61,6 +61,21 @@ node bin/devt-tools.cjs state recover-partial-impl <agent>
 node bin/devt-tools.cjs state advance-phase <phase> [key=value ...]
 # Runtime gate-at-transition. Reads workflow_type from state, looks up required gates for target phase in workflows/_phase-gates.yaml, runs each gate via existing assert-* functions; throws on any failure → process exits 1. Phases NOT in registry fall through to plain update (backwards compat). Every gate firing logs to gate-trace.jsonl with name prefixed "advance-phase:<gate>". Migrated 4 workflows at finalize-deactivation (replaces `state update phase=X status=DONE active=false`)
 
+node bin/devt-tools.cjs state reset-soft
+# Cal #31.A — surgical reset for new-review-against-stale-workflow. Clears per-workflow accumulator fields (raw_dispatch_count, claim-check, dispatched_at, etc.), rotates dispatch-warnings.jsonl + claim-check-failures.jsonl logs, evicts review.{md,json} + review-lane-*.{md,json} (cal #32 rank #1; prevents cid_<prefix> stale-artifact collision in fresh runs), assigns fresh workflow_id + first_created_at. PRESERVES workflow_id_history (appends prev), .devt/memory/, impl-summary.md/test-summary.md/graph-impact.md (phase artifacts that legitimately span re-runs). Non-destructive of valuable state — safe to auto-fire for unambiguous new-session signals
+
+node bin/devt-tools.cjs state staleness-check --task=<text> [--workflow-type=<type>]
+# Cal #30.1 — detects whether current workflow.yaml is stale relative to a new task/type. Returns {stale, reason, age_hours, task_changed, workflow_type_changed, auto_reset_recommended}. Stale = task_changed AND age > 1h. auto_reset_recommended = task_changed AND age > 24h AND workflow_type_changed (deterministic "new working session" signal — see auto-reset-if-stale below)
+
+node bin/devt-tools.cjs state auto-reset-if-stale --task=<text> --workflow-type=<type>
+# Cal #31.D G4 — combined diagnose+act helper. Calls stalenessCheck; when auto_reset_recommended fires resetSoft inline + emits loud stderr message describing what was cleared/preserved. Returns {acted: true, ...resetSoftResult, staleness} OR {acted: false, staleness}. Orchestrators use this instead of prompting when the 3-condition auto-trigger holds; falls back to AskUserQuestion otherwise
+
+node bin/devt-tools.cjs state graphify-roi
+# Cal #33.A Rank #1 — falsifiable measurement of graphify drill-down value. Scans graph-impact.md for `## Drill-down: <SYM> [call: <8hex>]` sections (denominator: executed drills) + review.md for `(via call: <id>)` / `[via call: <id>]` citations (numerator: drills with downstream finding-citation). Returns {status, drills_executed, drills_with_citation, wasted_drill_count, wasted_drill_rate, per_drill: [{symbol, corr_ids, cited}]}. CRITICAL exclusion: when graph-impact.md is absent OR 0 drill sections, status="no_drills_executed" + rate=null (NOT 100% — receipt #7 explicit: runs that skip substep 6 must NOT punish graphify for operator skips). Use across receipts to track wasted-drill rate; cal-N+ levers (e.g. "drop drills in direction X if waste >70%") consume the per-drill structured output
+
+node bin/devt-tools.cjs state mark-claude-mem-skipped [--reason=<enum>] [--details=<text>]
+# Cal #33.B-4 — operator escape valve for the claude-mem harvest gate. assertClaudeMemHarvest already accepts claude-mem-skipped.txt as a satisfying marker IF its content matches `reason=<not_installed|mcp_unavailable|corpus_empty|task_unrelated_to_history>` + details= line (for task_unrelated_to_history). This CLI writes the gate-compliant format. Default --reason=task_unrelated_to_history + auto-fills --details="session memory already covers scope (operator-declared)". Use when session memory already covers the scope (operator just reviewed the same PR 5x) so the harvest's marginal value is ~0. Rejects invalid --reason values; refuses when claude-mem-harvest.md already exists (mutually exclusive per gate)
+
 node bin/devt-tools.cjs state refresh-scope-context
 # Alias for `preflight scope-cache`. Re-derives scope_trust from preflight-brief.json::graph_stats + staleness (with staleness-threshold override) and persists to workflow.yaml::scope_trust_json. Idempotent, ~50ms. Wired into each dispatch site so cached scope_trust always reflects current graph state, not the value computed at workflow start
 ```
@@ -124,6 +139,12 @@ node bin/devt-tools.cjs static-compress <path> [--restore]
 
 node bin/devt-tools.cjs graphify rebuild [--debounce=N] [--timeout=N]
 # Atomic O_CREAT|O_EXCL lock at .devt/state/.graphify-rebuild.lock; concurrent callers skip with reason=debounced inside the window; mtime past window unlinks + retries
+
+node bin/devt-tools.cjs graphify compose-drilldowns <symbol>... [--direction=in|out|both] [--depth=1] [--limit=3]
+# Cal #31.D G7 — emits markdown-ready `## Drill-down: <SYM> (direction=..., depth=...)` sections for top-N symbols. Each section includes per-neighbor bullets (label, relation, source_file, optional `+N DI-collapsed` marker from G1) + filter telemetry footer. Designed for pipeline use: `graphify compose-drilldowns CallOrchestrationService AuthService UserService | tee -a .devt/state/graph-impact.md` removes the "did I remember to append drill-downs?" failure mode that historically forced graphify-decision gate re-runs (receipt #5 Q7a evidence). Emits canonical empty marker `_(no neighbors found in direction=...)_` when get_neighbors returns 0 results — substance gate (cal #32 rank #3) exempts this marker so legitimately-empty DI-blind symbols don't force operator-pad workarounds
+
+node bin/devt-tools.cjs init review --bundle "<task>"
+# Cal #31.D G6 — opt-in compound CLI. Default `init review` returns the standard envelope-context payload. With `--bundle` flag, attaches the 3 most common post-init data-fetch steps in one call: preflight-generate, memory-signal count probe, graphify impact-plan computation (when graph is ready). Best-effort: any sub-step failure aggregates into bundle.errors[] so init.workflow_id always succeeds. Reduces 4-6 sequential CLI round-trips to 1; receipt #5 Q7b evidence: setup friction is dominated by CLI calls, not MCP or file reads
 ```
 
 ## Cross-references

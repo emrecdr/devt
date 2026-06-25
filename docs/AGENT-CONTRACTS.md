@@ -73,7 +73,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 **Wiring.** `dev-workflow.md`, `quick-implement.md`, `code-review.md`, `debug.md`, `research-task.md` all carry this — 11+ dispatch sites total.
 
-**Sidecar shape.** `suggested_reading` is the deduped union of governing docs' `affects_paths` (frontmatter-declared globs) and blast-radius `direct_dependents` (Graphify depth-1 incoming), capped at 8 entries. See `docs/MEMORY.md` (Pre-Flight JSON sidecar) for the full schema.
+**Sidecar shape.** `suggested_reading` is a `{files, symbols}` object (cal #33.B-2 split): `files` holds the deduped union of governing docs' `affects_paths` (frontmatter-declared globs) + wiki entry point; `symbols` holds blast-radius `direct_dependents` (Graphify depth-1 incoming — labels/ids, NOT paths). Each bucket dedupeCapped independently. Prior shape was a flat array that mixed paths with symbol labels — reviewers couldn't tell which entries to open vs query. Dispatch `<scope_hint>` reads `suggested_reading.files` (navigable paths); `topic.symbols` carries the symbol-query surface. See `docs/MEMORY.md` (Pre-Flight JSON sidecar) for the full schema.
 
 **Graceful empty.** Empty `[]` is fine — agents fall back to normal discovery when no governing docs match the topic or Graphify is disabled.
 
