@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.110.0] - 2026-06-25
+
+### Cal #33.B — Receipt #7 ergonomics + defensive correctness (4 fixes)
+
+Held cal #33.B items from receipt #7, shipped after cal #33.A landed the measurement infrastructure. Per receipt #7 framing + [[mechanism-firing-neq-value-conversion]] discipline: cal #33.B ships for correctness + friction reduction, NOT value lift. Cal #33.A's `graphify-roi` CLI is the measurement that will distinguish whether any of cal #31-#33 actually moves the workflow-outcome needle on the next on-rail receipt.
+
+**B-1 — `graphify freshness()` unverifiable-freshness defensive surface** (`bin/modules/graphify.cjs::freshness`). Receipt #7 finding #2: observed `built_at_commit: null` while `lag_commits: 0` — "staleness gate trusting a freshness it can't confirm." When `graph.json` lacks the `built_at_commit` anchor, freshness now returns `unverifiable_freshness: true` + reason text explicitly stating staleness cannot be verified against HEAD. Distinct from `fresh: false` (meaning "we verified it's not fresh") — `unverifiable_freshness` means "we cannot verify either way." Downstream staleness gates can refuse to trust the freshness verdict OR emit operator banners.
+
+**B-2 — `suggested_reading` split into `{files, symbols}` object** (`bin/modules/preflight.cjs`). Receipt #7 #5: previously flat-array shape mixed navigable file paths (from governing-doc `affects_paths` + wiki) with bare symbol labels (from `blast.direct_dependents` — which graphify.cjs:740 documents as "labels/ids, NOT paths"). Reviewers couldn't tell which entries to open vs query. The brief now renders two distinct sections (`**Files** (open these)` / `**Symbols** (drill via graphify get-neighbors when needed)`); sidecar emits `suggested_reading.{files, symbols}` (object, not array); internal consumers updated (`scopeCache` reads `.files` for scope_hint, `reuse-search` reads `.files` for expected_paths). Per-bucket dedupeCap prevents symbol overflow from crowding out paths and vice versa.
+
+**B-3 — `scope_check` operator-explicit short-circuit** (`workflows/code-review.md`). Receipt #7 Q1: "your prompt explicitly said 'split between multiple agents for parallel.' Asking would re-ask an answered question. Clean (iii)." Pre-AskUserQuestion regex detects parallel-intent (`parallel|split (across|between|into) (multiple|several)|per-lane|fan[ -]out|multiple agents|community lanes`) OR single-intent (`single (dispatch|agent|reviewer)|no parallel|no fan[ -]out`) in `REVIEW_SCOPE` text. When matched, auto-writes the answer to `scope-check-answer.txt` + skips the AskUserQuestion + logs the short-circuit. Falls through to the standard AskUserQuestion when no intent keywords present.
+
+**B-4 — `state mark-claude-mem-skipped` CLI helper** (`bin/modules/state.cjs`). Receipt #7 Q1(c): claude-mem harvest is `(iii)-conditional-on-session-state` — when session memory already covers scope (operator just reviewed the same PR 5x), marginal harvest value ≈ 0. The `assert-claude-mem-harvest` gate already accepted `claude-mem-skipped.txt` as a satisfying marker — this CLI surfaces that escape valve discoverably AND ensures gate-compliant content shape (`reason=<not_installed|mcp_unavailable|corpus_empty|task_unrelated_to_history>` + `details=` line for `task_unrelated_to_history`). Default `--reason=task_unrelated_to_history` + auto-fills sensible `--details="session memory already covers scope (operator-declared)"`. Rejects invalid `--reason` values so operators don't silently produce gate-rejected output.
+
+**Drift-guard stack now 86-deep K94-K179.** CLAUDE.md + README updated.
+
+**Smoke gates**: K176 (B-1 — synthetic graph.json without built_at_commit → freshness returns `unverifiable_freshness=true` + `lag_commits=null`), K177 (B-2 — preflight-brief.json::suggested_reading is `{files, symbols}` object with both Arrays), K178 (B-3 — code-review.md scope_check contains `SCOPE_CHECK_DECISION="parallel"` short-circuit marker), K179 (B-4 — valid reason writes gate-compliant content + assertion passes; invalid reason rejected). PLUS: pre-existing `preflight-brief.json shape validation` smoke test updated to expect the new `{files, symbols}` shape.
+
+**Strategic framing per [[mechanism-firing-neq-value-conversion]]**: cal #33.B fixes ergonomics + correctness gaps. None of these move the value-rating needle — receipt #7 was explicit that code-review value stays DI-capped at ~6.5/10 until Q1 (DI-aware graphify extraction) lands upstream. Cal #33.A's `graphify-roi` CLI is the falsifiable measurement that will distinguish whether on-rail receipt #8 sees ANY change.
+
+**Carryover**: Q1 upstream graphify filing remains the only known fix that addresses the actual code-review value bottleneck per receipts #6 + #7. Cal #33.A + #33.B close the receipt-evidenced devt-side gaps; further devt-side iteration without on-rail measurement risks more confounded-data scoping.
+
 ## [0.109.0] - 2026-06-25
 
 ### Cal #33.A — Receipt #7 measurement-first + Bitbucket-lift + ghost-dedup (3 ranked fixes)

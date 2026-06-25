@@ -516,7 +516,28 @@ fi
 
 If `SCOPE_FILE_COUNT ≤ 10` OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope creeps past 10 files without graphify.
 
-If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"`: ask the user:
+**Cal #33.B-3 operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question (receipt #7 Q1 classified this as clean (iii) dead-weight). Pre-detect the intent and auto-write the answer:
+
+```bash
+PARALLEL_INTENT_RE='(parallel|split (across|between|into) (multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
+SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|no parallel|no fan[ -]out|one[ -]reviewer)'
+SCOPE_LOWER=$(echo "${REVIEW_SCOPE}" | tr '[:upper:]' '[:lower:]')
+if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
+  echo "parallel" > .devt/state/scope-check-answer.txt
+  echo "[scope_check] operator-explicit short-circuit: parallel intent detected in task text — skipping AskUserQuestion"
+  SCOPE_CHECK_DECISION="parallel"
+elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
+  echo "single" > .devt/state/scope-check-answer.txt
+  echo "[scope_check] operator-explicit short-circuit: single intent detected in task text — skipping AskUserQuestion"
+  SCOPE_CHECK_DECISION="single"
+else
+  SCOPE_CHECK_DECISION=""
+fi
+```
+
+If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
+
+If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: ask the user:
 
 ```yaml
 question: "Review scope is {SCOPE_FILE_COUNT} files. Split into parallel lanes (one reviewer per graphify community, capped at 5)?"

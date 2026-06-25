@@ -177,6 +177,30 @@ function _computeFreshnessForPath(graphPath) {
 
   const fresh = !!(builtAt && head && builtAt === head);
 
+  // Cal #33.B-1 — built_at_commit consistency defensive surface. Receipt #7
+  // (greenfield 2026-06-25): observed graph.json with built_at_commit: null
+  // while lag_commits: 0 — internally inconsistent state where the
+  // staleness gate trusts a freshness it can't verify against HEAD. Even if
+  // the current freshness() math doesn't predict this combination (null
+  // built_at → fresh=false → lag_commits=null), the receipt-evidenced
+  // observation indicates either an upstream graphify regression OR a
+  // stale-cache path that bypasses the math. Defensive surface: when
+  // built_at is missing, return `unverifiable_freshness: true` so downstream
+  // staleness gates can refuse to trust the freshness verdict OR emit a
+  // banner. Distinct from `fresh: false` (which means "we verified it's not
+  // fresh") — unverifiable_freshness means "we cannot verify EITHER WAY."
+  if (!builtAt) {
+    return {
+      state: "ready",
+      fresh: false,
+      built_at: null,
+      head,
+      lag_commits: null,
+      unverifiable_freshness: true,
+      reason: "graph.json missing built_at_commit anchor — staleness cannot be verified against HEAD",
+    };
+  }
+
   // lag_commits stays null when count can't be computed (built_at/head missing,
   // shallow clone where built_at sha is unreachable, or git unavailable).
   let lagCommits = fresh ? 0 : null;

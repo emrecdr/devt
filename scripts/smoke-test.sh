@@ -949,12 +949,15 @@ if [ -f .devt/state/preflight-brief.json ]; then
   pass "preflight-brief.json sidecar created alongside .md"
   if node -e "
     const j = JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));
-    if (!Array.isArray(j.suggested_reading)) process.exit(1);
+    // Cal #33.B-2: suggested_reading is {files, symbols} object (not flat array)
+    if (!j.suggested_reading || typeof j.suggested_reading !== 'object') process.exit(1);
+    if (!Array.isArray(j.suggested_reading.files)) process.exit(1);
+    if (!Array.isArray(j.suggested_reading.symbols)) process.exit(1);
     if (!Array.isArray(j.governing_ids)) process.exit(1);
     if (typeof j.status !== 'string') process.exit(1);
     if (!j.blast || typeof j.blast.direct_dependents_count !== 'number') process.exit(1);
   " 2>/dev/null; then
-    pass "preflight-brief.json has expected shape (suggested_reading, governing_ids, status, blast.*)"
+    pass "preflight-brief.json has expected shape (suggested_reading.{files,symbols}, governing_ids, status, blast.*)"
   else
     fail "preflight-brief.json shape validation failed"
   fi
@@ -14453,6 +14456,88 @@ if echo "$K175_OUT" | /usr/bin/grep -q "count=2,ghosts=2"; then
   pass "K175: getSymbolCollisions filters ghost nodes (empty source_file + null location) + emits visible ghost_nodes_filtered counter"
 else
   fail "K175: ghost-node filter wrong — got: $K175_OUT"
+fi
+
+# K176 (cal #33.B-1): graphify freshness() emits unverifiable_freshness=true
+# when graph.json lacks built_at_commit anchor. Receipt #7 finding #3:
+# staleness gate was "trusting a freshness it can't confirm" — false-fresh
+# leak risk. Defensive surface so downstream gates can refuse to trust.
+K176_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k176-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true});
+fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({nodes: [], links: []}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const f = g.freshness();
+console.log('built_at=' + f.built_at + ',unverifiable=' + f.unverifiable_freshness + ',lag=' + f.lag_commits);
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K176_OUT" | /usr/bin/grep -q "built_at=null,unverifiable=true,lag=null"; then
+  pass "K176: freshness() emits unverifiable_freshness=true when built_at_commit missing (defensive surface against false-fresh leaks)"
+else
+  fail "K176: unverifiable_freshness not emitted — got: $K176_OUT"
+fi
+
+# K177 (cal #33.B-2): preflight-brief sidecar suggested_reading is {files,
+# symbols} object (split). Receipt #7 #5: previously flat array mixed
+# paths with bare symbol labels — split makes consumer-shape unambiguous.
+# Note: this gate is partially redundant with the preflight-brief shape
+# validator already updated above; K177 specifically asserts the split
+# contract independently as a discoverable Cal #33.B-2 marker.
+K177_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k177-' + Date.now());
+fs.mkdirSync(tmp + '/.devt/state', {recursive: true});
+fs.mkdirSync(tmp + '/.devt/memory', {recursive: true});
+fs.mkdirSync(tmp + '/.devt/rules', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', '{}');
+process.chdir(tmp);
+const p = require('$ROOT/bin/modules/preflight.cjs');
+p.generate('test split shape', {});
+const j = JSON.parse(fs.readFileSync(tmp + '/.devt/state/preflight-brief.json', 'utf8'));
+const sr = j.suggested_reading;
+console.log('isObject=' + (sr && typeof sr === 'object' && !Array.isArray(sr)) + ',hasFiles=' + Array.isArray(sr.files) + ',hasSymbols=' + Array.isArray(sr.symbols));
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K177_OUT" | /usr/bin/grep -q "isObject=true,hasFiles=true,hasSymbols=true"; then
+  pass "K177: preflight-brief.json suggested_reading is {files,symbols} object (cal #33.B-2 split)"
+else
+  fail "K177: suggested_reading shape wrong — got: $K177_OUT"
+fi
+
+# K178 (cal #33.B-3): code-review.md scope_check has operator-explicit
+# short-circuit branch. Receipt #7 Q1: "your prompt explicitly said
+# 'split between multiple agents for parallel.' Asking would re-ask an
+# answered question. Clean (iii)." Detect SCOPE_CHECK_DECISION variable
+# init as the canonical marker of the short-circuit logic existence.
+K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+if [ "$K178_OUT" -ge "1" ]; then
+  pass "K178: code-review.md scope_check has operator-explicit short-circuit (parallel/single intent detected pre-AskUserQuestion)"
+else
+  fail "K178: scope_check short-circuit missing — got count: $K178_OUT"
+fi
+
+# K179 (cal #33.B-4): state mark-claude-mem-skipped CLI writes gate-compliant
+# format (reason=<enum> [+ details=]). Receipt #7 Q1(c): claude-mem harvest
+# is (iii)-conditional-on-session-state; this CLI exposes the operator
+# escape valve with structured content. Test: valid reason writes file
+# + assertClaudeMemHarvest accepts it; invalid reason rejected.
+K179_TMP=$(mktemp -d)
+mkdir -p "$K179_TMP/.devt/state"
+echo "active: true" > "$K179_TMP/.devt/state/workflow.yaml"
+VALID_RESULT=$(cd "$K179_TMP" && node "$ROOT/bin/devt-tools.cjs" state mark-claude-mem-skipped --reason=task_unrelated_to_history --details="test" 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok)}catch{console.log('err')}});" 2>/dev/null)
+GATE_VERDICT=$(cd "$K179_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-claude-mem-harvest 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok)}catch{console.log('err')}});" 2>/dev/null)
+# Clean for invalid-reason test
+rm -f "$K179_TMP/.devt/state/claude-mem-skipped.txt"
+INVALID_RESULT=$(cd "$K179_TMP" && node "$ROOT/bin/devt-tools.cjs" state mark-claude-mem-skipped --reason=garbage 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok)}catch{console.log('err')}});" 2>/dev/null)
+rm -rf "$K179_TMP"
+if [ "$VALID_RESULT" = "true" ] && [ "$GATE_VERDICT" = "true" ] && [ "$INVALID_RESULT" = "false" ]; then
+  pass "K179: mark-claude-mem-skipped writes gate-compliant format (valid reason accepted + gate passes; invalid reason rejected)"
+else
+  fail "K179: mark-claude-mem-skipped wrong — valid=$VALID_RESULT (true), gate=$GATE_VERDICT (true), invalid=$INVALID_RESULT (false)"
 fi
 
 echo

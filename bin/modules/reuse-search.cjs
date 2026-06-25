@@ -158,7 +158,11 @@ function readExpectedPaths() {
     const briefPath = path.join(root, ".devt", "state", "preflight-brief.json");
     if (!fs.existsSync(briefPath)) return [];
     const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
-    return (brief.suggested_reading || []).map(String);
+    // Cal #33.B-2: suggested_reading is {files, symbols}; reuse-search
+    // expected_paths needs the files (caller-community paths for scoring).
+    const sr = brief.suggested_reading;
+    const files = sr && Array.isArray(sr.files) ? sr.files : [];
+    return files.map(String);
   } catch {
     return [];
   }

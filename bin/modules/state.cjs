@@ -5977,6 +5977,53 @@ function run(subcommand, args) {
     }
     case "graphify-roi":
       return graphifyRoi();
+    case "mark-claude-mem-skipped": {
+      // Cal #33.B-4 — operator-declarable skip. Receipt #7 Q1 part (c):
+      // claude-mem harvest is (iii)-conditional-on-session-state — when
+      // session memory already covers the scope (operator just reviewed
+      // the same PR 5x), marginal value of harvest is ~0. The
+      // assert-claude-mem-harvest gate already accepts `claude-mem-skipped.txt`
+      // as a satisfying marker; this CLI makes the operator escape valve
+      // discoverable and ensures the gate-compliant content shape
+      // (reason=<enum> [+ details=<explanation>]).
+      //
+      // Default --reason=task_unrelated_to_history (the session-saturated
+      // case maps here — operator's session memory makes the harvest
+      // redundant). Other valid reasons (not_installed/mcp_unavailable/
+      // corpus_empty) are gate-supported but operator-declared skip
+      // wouldn't typically use them.
+      const VALID_REASONS = new Set([
+        "not_installed", "mcp_unavailable", "corpus_empty", "task_unrelated_to_history",
+      ]);
+      const reasonArg = args.find(a => a.startsWith("--reason="));
+      const detailsArg = args.find(a => a.startsWith("--details="));
+      const reason = reasonArg ? reasonArg.slice("--reason=".length) : "task_unrelated_to_history";
+      const details = detailsArg ? detailsArg.slice("--details=".length) : "session memory already covers scope (operator-declared)";
+      if (!VALID_REASONS.has(reason)) {
+        return {
+          ok: false,
+          reason: `invalid --reason="${reason}". Valid: ${Array.from(VALID_REASONS).join(" | ")}`,
+        };
+      }
+      const dir = getStateDir();
+      const skippedPath = path.join(dir, "claude-mem-skipped.txt");
+      const harvestPath = path.join(dir, "claude-mem-harvest.md");
+      if (fs.existsSync(harvestPath)) {
+        // Mutually exclusive per assertClaudeMemHarvest contract — if harvest
+        // already exists, declaring skip would create a both-files conflict
+        // that the gate would then reject.
+        return { ok: false, reason: "claude-mem-harvest.md already exists; cannot mark skipped (mutually exclusive per gate)" };
+      }
+      // Gate-compliant format: `reason=<enum>` line + `details=` line for
+      // task_unrelated_to_history (other enums don't strictly require details
+      // per gate logic, but including it provides audit context).
+      const lines = [`reason=${reason}`];
+      if (reason === "task_unrelated_to_history" || details) {
+        lines.push(`details=${details}`);
+      }
+      atomicWriteFileSync(skippedPath, lines.join("\n") + "\n");
+      return { ok: true, path: skippedPath, reason, details };
+    }
     case "release":
       return releaseWorkflow();
     case "validate":
@@ -6141,7 +6188,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

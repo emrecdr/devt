@@ -1127,15 +1127,27 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   }
   lines.push("");
 
-  // Suggested Reading Set — paths derived from governing docs' affects_paths
-  // and blast-radius direct_dependents. Consumed by workflows via the JSON
-  // sidecar's `suggested_reading` field for <scope_hint> dispatch injection.
-  if (Array.isArray(suggestedReading) && suggestedReading.length > 0) {
+  // Suggested Reading Set — split into files (navigable paths) + symbols
+  // (graphify-derived labels for blast-radius drill-down). Consumed by
+  // workflows via the JSON sidecar's `suggested_reading.{files,symbols}`
+  // field for <scope_hint> dispatch injection. Receipt #7 (cal #33.B-2):
+  // the previous flat array mixed navigable paths with bare symbol labels,
+  // making it ambiguous which entries reviewers should open vs query.
+  const sr = suggestedReading || { files: [], symbols: [] };
+  const srFiles = Array.isArray(sr.files) ? sr.files : [];
+  const srSymbols = Array.isArray(sr.symbols) ? sr.symbols : [];
+  if (srFiles.length > 0 || srSymbols.length > 0) {
     lines.push("## Suggested Reading Set (auto-derived)");
-    for (const p of suggestedReading) {
-      lines.push(`- ${p}`);
+    if (srFiles.length > 0) {
+      lines.push("**Files** (open these):");
+      for (const p of srFiles) lines.push(`- ${p}`);
+      lines.push("");
     }
-    lines.push("");
+    if (srSymbols.length > 0) {
+      lines.push("**Symbols** (drill via graphify get-neighbors when needed):");
+      for (const s of srSymbols) lines.push(`- ${s}`);
+      lines.push("");
+    }
   }
 
   // Cross-Cutting Concerns — surfaces god-nodes / surprising-connections /
@@ -1465,7 +1477,23 @@ function generate(taskText, opts) {
     if (fs.existsSync(wikiIndex)) wikiPaths.push("graphify-out/wiki/index.md");
   } catch { /* findProjectRoot may throw — skip */ }
 
-  const suggestedReading = dedupeCap([...wikiPaths, ...affectsPaths, ...directDeps], resolveScopeHintCap());
+  // Cal #33.B-2 — suggested_reading split files vs symbols. Receipt #7 #5:
+  // direct_dependents are labels/ids (per graphify.cjs:740 comment), NOT file
+  // paths. Previously concatenated into a single flat array, mixing
+  // CallBackend/CallProvider (symbols) with src/foo.py (files). Reviewers
+  // couldn't tell which entries were navigable paths vs which were symbol
+  // hints. Split into typed sub-arrays at projection time so consumers
+  // (renderer, sidecar readers, reuse-search) get the right shape.
+  // dedupeCap applied per-bucket so symbol overflow doesn't crowd out paths
+  // and vice versa.
+  const cap = resolveScopeHintCap();
+  const suggestedReading = {
+    files: dedupeCap([...wikiPaths, ...affectsPaths], cap),
+    symbols: dedupeCap(directDeps, cap),
+  };
+  // Flat length for downstream confidence-band computation (preserves
+  // existing semantic: "did we generate ANY suggestions, of any kind").
+  const suggestedReadingTotal = suggestedReading.files.length + suggestedReading.symbols.length;
 
   const lanes = { A, B, C, D, E, F, H };
   const generatedAt = new Date().toISOString();
@@ -1615,8 +1643,8 @@ function generate(taskText, opts) {
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
   // V0.69 R3 will fold real signal here once G4's confidence data accrues.
-  const scopeHintConfidence = suggestedReading.length === 0
-    ? { score: 0.0, band: "none", reason: "no suggested_reading entries" }
+  const scopeHintConfidence = suggestedReadingTotal === 0
+    ? { score: 0.0, band: "none", reason: "no suggested_reading entries (files OR symbols)" }
     : { score: 1.0, band: "high", reason: "placeholder pending v0.69 R3 calibration" };
   const topicWithConfidence = {
     ...topic,
@@ -1695,7 +1723,9 @@ function generate(taskText, opts) {
       lane_g: G.length,
       governing: governingUnion.length,
       triples: triples.length,
-      suggested_reading: suggestedReading.length,
+      suggested_reading: suggestedReadingTotal,
+      suggested_reading_files: suggestedReading.files.length,
+      suggested_reading_symbols: suggestedReading.symbols.length,
     },
     blast: {
       effect_size: blast.effect_size,
@@ -1960,7 +1990,11 @@ function scopeCache() {
   try { brief = JSON.parse(fs.readFileSync(briefPath, "utf8")); }
   catch (e) { return { ok: false, error: `parse preflight-brief.json: ${e.message}`, scope_hint: [], scope_trust: {} }; }
 
-  const scope_hint = Array.isArray(brief.suggested_reading) ? brief.suggested_reading : [];
+  // Cal #33.B-2: suggested_reading is {files, symbols} object. scope_hint
+  // for dispatch envelope injection wants FILES (navigable paths agents
+  // open); symbols flow through topic.symbols already.
+  const sr = brief.suggested_reading;
+  const scope_hint = sr && Array.isArray(sr.files) ? sr.files : [];
   const scope_trust = {
     trust: (brief.graph_stats && brief.graph_stats.trust) || "empty",
     lag_commits: brief.staleness ? brief.staleness.lag_commits : null,
