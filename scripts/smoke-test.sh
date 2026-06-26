@@ -14732,6 +14732,27 @@ else
   fail "K188: laneG topic expansion not wired"
 fi
 
+# K189: workflow_id rotation audit log captures mutations (cal #37 #1 from
+# receipt #9 Q1 — the 1hr prerequisite that converts future "70% confident"
+# to "100% diagnosable" for subagent state isolation forensics). Asserts:
+# updateState first-activation + resetSoft each append one line; log survives
+# resetSoft (RESET_EXEMPT) and carries prev_id/new_id/source/pid/argv.
+K189_TMP=$(mktemp -d)
+mkdir -p "$K189_TMP/.devt/state"
+echo "{}" > "$K189_TMP/.devt/config.json"
+cd "$K189_TMP" && node "$ROOT/bin/devt-tools.cjs" state update task="initial" active=true workflow_type=code_review >/dev/null 2>&1
+cd "$K189_TMP" && node "$ROOT/bin/devt-tools.cjs" state reset-soft >/dev/null 2>&1
+AUDIT_LINES=$(wc -l < "$K189_TMP/.devt/state/workflow-id-rotations.jsonl" 2>/dev/null | tr -d ' ')
+AUDIT_HAS_FIRST=$(/usr/bin/grep -c "updateState:first_activation" "$K189_TMP/.devt/state/workflow-id-rotations.jsonl" 2>/dev/null || echo 0)
+AUDIT_HAS_RESET=$(/usr/bin/grep -c '"source":"resetSoft"' "$K189_TMP/.devt/state/workflow-id-rotations.jsonl" 2>/dev/null || echo 0)
+AUDIT_HAS_PID=$(/usr/bin/grep -c '"pid":' "$K189_TMP/.devt/state/workflow-id-rotations.jsonl" 2>/dev/null || echo 0)
+cd "$ROOT"; rm -rf "$K189_TMP"
+if [ "$AUDIT_LINES" = "2" ] && [ "$AUDIT_HAS_FIRST" = "1" ] && [ "$AUDIT_HAS_RESET" = "1" ] && [ "$AUDIT_HAS_PID" = "2" ]; then
+  pass "K189: workflow_id rotation audit log captures first_activation + resetSoft mutations with pid/argv/source forensics"
+else
+  fail "K189: audit log wrong — lines=$AUDIT_LINES (expect 2), first_act=$AUDIT_HAS_FIRST, resetSoft=$AUDIT_HAS_RESET, pid_lines=$AUDIT_HAS_PID"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

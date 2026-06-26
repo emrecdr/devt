@@ -602,6 +602,27 @@ function initWorkflow(task, pluginRoot, initVerb) {
         } else {
           // Closed (active: false) or missing active marker — strip stamps
           // and lanes so updateState treats this as a fresh activation.
+          // Cal #37 #1 — audit-log the pre-strip workflow_id so post-hoc
+          // forensics can pair "init stripped X" with the eventual
+          // updateState "created Y" entry. Without this, the strip-and-
+          // restamp pattern shows up in the audit log as `prev_id: null`
+          // because updateState reads the already-stripped state.
+          try {
+            const priorIdMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
+            const priorId = priorIdMatch ? priorIdMatch[1].trim() : null;
+            if (priorId) {
+              const stateDirPath = path.join(projectRoot, ".devt", "state");
+              const auditPath = path.join(stateDirPath, "workflow-id-rotations.jsonl");
+              fs.appendFileSync(auditPath, JSON.stringify({
+                ts: new Date().toISOString(),
+                prev_id: priorId,
+                new_id: null,
+                source: "initWorkflow:strip_closed_workflow",
+                pid: process.pid,
+                argv: (process.argv || []).slice(1, 6).join(" "),
+              }) + "\n");
+            }
+          } catch { /* audit best-effort */ }
           yaml = yaml
             .replace(/^created_at:.*\n?/gm, "")
             .replace(/^workflow_id:.*\n?/gm, "")

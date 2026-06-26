@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.114.0] - 2026-06-26
+
+### Cal #37 #1 — workflow_id rotation audit log (prerequisite for lane deny-list)
+
+Receipt #9 Q1 evidence: 8 parallel subagents rotated `workflow_id` mid-run (1f871314 → f67240bb) with no audit trail. Receipt user could only narrow the source to "lifecycle write surface, not status" at 70% confidence — "no rotation-audit record (nothing logs who rotated workflow_id, when, via which command). That absence is itself a finding." Receipt user explicitly asked this 1hr fix to ship FIRST before the architectural lane tool-surface deny-list (cal #37 #2) so the future debugging is "100% diagnosable."
+
+**Fix**: new `_logWorkflowIdRotation({prev_id, new_id, source})` helper in `state.cjs` appends one JSONL line per mutation to `.devt/state/workflow-id-rotations.jsonl`. Each entry carries `ts`, `prev_id`, `new_id`, `source`, `pid`, `argv` (capped to first 5 argv segments). RESET_EXEMPT — survives `resetSoft` precisely because rotations BY resetSoft are themselves the events being audited.
+
+Wired into 4 rotation sites:
+- `updateState:first_activation` (state.cjs ~L1027 — workflow_id created lazily on first state-update)
+- `updateState:type_transition` (state.cjs ~L1043 — workflow_type change while active)
+- `resetSoft` (state.cjs ~L1471 — surgical reset for new-review-against-stale)
+- `initWorkflow:strip_closed_workflow` (init.cjs — pre-strip log so the strip-and-restamp pattern doesn't show as `prev_id: null` in the eventual updateState entry; preserves attribution across the boundary)
+
+NOT wired: `newInstance` (creates an isolated subdir for multi-instance work, not a rotation in the conventional sense — there's no prev_id to compare against; logging it would clutter the trace with non-rotation events).
+
+**Carryover for next session** (cal #37 #2 + #3 deferred per scope discipline):
+- **Cal #37 #2 — lane tool-surface deny-list** (~5-7hr architectural): deny lane agents init/reset-soft/auto-reset-if-stale/any workflow.yaml mutation; status updates only via `state update-lane`; stamp workflow_id into lane envelopes as immutable. NOW unblocked — when the bug recurs after #2 ships, the audit log says exactly which subagent + CLI rotated the id.
+- **Cal #37 #3 — `devt review-context-init` wrapper CLI** (~3-4hr): sequences pure-bash work (staleness tier + memory_signal cache + scope-cache + god-node sidecar + impact-plan + claude-mem skip-decision) into one JSON-returning CLI. Removes ~80% of code-review.md's 1,152-line orchestration surface per receipt #9.
+
+**Drift-guard stack now 96-deep K94-K189.** CLAUDE.md + README updated.
+
+**Smoke gate**: K189 (synthetic: `state update + state reset-soft` → 2 audit lines captured with first_activation + resetSoft sources + pid telemetry; RESET_EXEMPT preserves log across the reset).
+
 ## [0.113.0] - 2026-06-26
 
 ### Cal #36 — Receipt #9 tactical fixes (6 items)

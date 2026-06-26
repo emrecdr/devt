@@ -887,6 +887,33 @@ function releaseLock(lockFile) {
   }
 }
 
+// Workflow-id rotation audit log. Receipt #9 evidence: 8 parallel subagents
+// rotated workflow_id mid-run (1f871314 → f67240bb) with no audit trail —
+// receipt user could only narrow to "lifecycle surface, not status" at 70%
+// confidence because no record exists of "who rotated, when, via which CLI."
+// Every mutation site now appends a JSONL line so post-hoc forensics can
+// pinpoint the source. RESET_EXEMPT — survives resetSoft (that's the whole
+// point: rotations BY resetSoft are themselves the events being audited).
+// Append-only + best-effort: any I/O failure is swallowed (audit logging
+// must NEVER prevent the underlying mutation from succeeding).
+function _logWorkflowIdRotation({ prev_id, new_id, source }) {
+  if (!new_id || prev_id === new_id) return; // no-rotation case (idempotent updates)
+  try {
+    const dir = getStateDir();
+    if (!fs.existsSync(dir)) return;
+    const logPath = path.join(dir, "workflow-id-rotations.jsonl");
+    const entry = {
+      ts: new Date().toISOString(),
+      prev_id: prev_id || null,
+      new_id,
+      source,
+      pid: process.pid,
+      argv: (process.argv || []).slice(1, 6).join(" "), // cap argv to avoid blowing line size
+    };
+    fs.appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  } catch { /* audit best-effort */ }
+}
+
 function updateState(keyValues, opts = {}) {
   ensureStateDir();
   // Detect phase=X status=DONE update intent BEFORE acquiring the lock.
@@ -1024,7 +1051,9 @@ function updateState(keyValues, opts = {}) {
     if (current.active === true && !current.created_at) {
       const now = new Date().toISOString();
       current.created_at = now;
+      const prevId = current.workflow_id || null;
       current.workflow_id = current.workflow_id || require("crypto").randomUUID();
+      _logWorkflowIdRotation({ prev_id: prevId, new_id: current.workflow_id, source: "updateState:first_activation" });
       // Freeze the immutable anchors on first activation only.
       if (!current.first_created_at) current.first_created_at = now;
       if (!current.original_workflow_id) current.original_workflow_id = current.workflow_id;
@@ -1039,8 +1068,10 @@ function updateState(keyValues, opts = {}) {
       // /devt:workflow would write trace records with the old workflow_id.
       // first_created_at + original_workflow_id are NOT touched here — they
       // anchor the session, not the logical workflow.
+      const prevId = current.workflow_id;
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
+      _logWorkflowIdRotation({ prev_id: prevId, new_id: current.workflow_id, source: `updateState:type_transition(${previousWorkflowType}->${current.workflow_type})` });
     }
     // Idempotent self-healing for workflow_id_history: ensure {original,
     // current} ⊆ history regardless of how history arrived. init.cjs strips
@@ -1208,6 +1239,7 @@ const RESET_EXEMPT = new Set([
   ".graphify-rebuild.lock",             // atomic O_CREAT|O_EXCL lock for graphify rebuild --debounce. Survives reset so a crashed prior holder doesn't deadlock a fresh workflow (the rebuild path also unlinks the lock when mtime exceeds the debounce window).
   "last-curator-run.txt",               // auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:workflow --cancel
   "graphify-impact-plan.json",          // args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
+  "workflow-id-rotations.jsonl",        // audit log of every workflow_id mutation (prev_id, new_id, source, pid, argv). RESET_EXEMPT because rotations BY resetSoft are themselves the events being audited — wiping the log on reset would erase the forensic trail for the bug that motivated it.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1260,6 +1292,7 @@ const STATE_FILE_CONTRACT = {
     "knowledge-candidates-none.txt", // declared-none artifact for assert-knowledge-candidates-tagged (escape hatch with structured reason)
     "topic-symbols-dropped.json",  // symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review step to emit truncation notice in graph-impact.md
     "probe-failures.jsonl",        // append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
+    "workflow-id-rotations.jsonl", // append-only audit log of workflow_id mutations (prev, new, source, pid, argv); RESET_EXEMPT for forensics
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1439,6 +1472,7 @@ function resetSoft() {
     const prevWorkflowId = prev.workflow_id || null;
     const newWorkflowId = require("crypto").randomUUID();
     const nowIso = new Date().toISOString();
+    _logWorkflowIdRotation({ prev_id: prevWorkflowId, new_id: newWorkflowId, source: "resetSoft" });
 
     const history = Array.isArray(prev.workflow_id_history)
       ? [...prev.workflow_id_history]
