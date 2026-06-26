@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const { findProjectRoot } = require("./config.cjs");
-const { atomicWriteFileSync } = require("./io.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 
 const STATE_DIR = path.join(".devt", "state");
 const WORKFLOW_FILE = "workflow.yaml";
@@ -2459,6 +2459,218 @@ function graphifyRoi() {
       yielded_data: d.yielded_data,    // false = drill returned results: [] OR canonical empty marker
     })),
   };
+}
+
+// Graphify impact-plan computation — orchestration wrapper for the
+// tier-decision tree previously inlined as ~115 lines of bash in
+// workflows/code-review.md substep 5. Returns the same JSON shape that the
+// workflow used to write to .devt/state/graphify-impact-plan.json:
+//   {tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason,
+//    pr_diff_caveat?, topic_symbols_dropped_count?}
+//
+// Inputs (all optional, defaulted from current state):
+//   - reviewScope: text of the current review task (used for PR# extraction
+//     + bulk_scoped query text). Defaults to workflow.yaml::task.
+//   - primaryBranch: git default branch for `<primary>...HEAD` triple-dot
+//     diff. Defaults to config.git.primary_branch || "main".
+//
+// Tier decision tree (preserved verbatim from workflow bash):
+//   1. graphify state != ready → tier="skip"
+//   2. PR# + github → tier="pr_scoped" (uses get_pr_impact)
+//   3. PR# + non-github → tier="pr_scoped_diff" (diff symbols + blast_radius)
+//      OR fallback to symbol_anchored on topic.symbols OR "skip"
+//   4. topic.symbols present → tier="symbol_anchored"
+//   5. scope >= IMPACT_THRESHOLD + dense graph → diff-symbol-driven
+//      symbol_anchored OR legacy bulk_scoped fallback
+//   6. else → tier="skip"
+//
+// SIDE EFFECTS: writes the same files the bash used to:
+//   - .devt/state/graphify-impact-plan.json (the returned object)
+//   - .devt/state/topic-symbols-dropped.json (when topic.symbols > 32)
+//     OR removes any stale topic-symbols-dropped.json
+//
+// MCP execution + AskUserQuestion remain orchestrator-side (architecturally
+// can't move into a CLI). This wrapper handles ONLY the pure-compute tier-
+// decision path.
+function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
+  // Resolve defaults from state + config
+  if (!reviewScope) {
+    try {
+      const s = readState();
+      reviewScope = (s && s.task) || "";
+    } catch { reviewScope = ""; }
+  }
+  if (!primaryBranch) {
+    try {
+      const { getMergedConfig } = require("./config.cjs");
+      const cfg = getMergedConfig();
+      primaryBranch = (cfg && cfg.git && cfg.git.primary_branch) || "main";
+    } catch { primaryBranch = "main"; }
+  }
+
+  const stateDir = getStateDir();
+  const briefPath = path.join(stateDir, "preflight-brief.json");
+  const droppedPath = path.join(stateDir, "topic-symbols-dropped.json");
+  const planPath = path.join(stateDir, "graphify-impact-plan.json");
+
+  // Read preflight-brief sidecar — source of truth for graph_stats + topic
+  let brief = null;
+  try { brief = JSON.parse(fs.readFileSync(briefPath, "utf8")); }
+  catch { brief = null; }
+  const graphifyState = (brief && brief.graph_stats && brief.graph_stats.state) || "not_ready";
+  const graphifyTrust = (brief && brief.graph_stats && brief.graph_stats.trust) || "empty";
+  const topicSymbolsRaw = Array.isArray(brief && brief.topic && brief.topic.symbols) ? brief.topic.symbols : [];
+  const topicSymbolsRawCount = topicSymbolsRaw.length;
+
+  // Pre-truncate topic.symbols to MCP blast_radius cap (32). The contract
+  // says "args VERBATIM" — exceeding 32 makes that mechanically impossible.
+  // Capture the dropped tail to a sidecar so reviewers can spot-check
+  // whether high-risk symbols were silently excluded.
+  const TOPIC_CAP = 32;
+  const topicSymbols = topicSymbolsRaw.slice(0, TOPIC_CAP);
+  const topicSymbolsCount = topicSymbols.length;
+  let topicSymbolsDroppedCount = 0;
+  if (topicSymbolsRawCount > TOPIC_CAP) {
+    const dropped = topicSymbolsRaw.slice(TOPIC_CAP);
+    topicSymbolsDroppedCount = dropped.length;
+    try { atomicWriteJsonSync(droppedPath, dropped); } catch { /* best-effort */ }
+  } else {
+    try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
+  }
+
+  // Config — graphify provider + impact threshold (single config read)
+  let gitProvider = "";
+  let impactThreshold = 10;
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    gitProvider = ((cfg && cfg.git && cfg.git.provider) || "").toLowerCase();
+    impactThreshold = (cfg && cfg.graphify && typeof cfg.graphify.impact_threshold === "number")
+      ? cfg.graphify.impact_threshold : 10;
+  } catch { /* defaults */ }
+
+  // PR# extraction from REVIEW_SCOPE: matches "PR #N" / "PR N" / "pull request #N"
+  const prMatch = (reviewScope || "").match(/(?:PR|pull request)\s*#?(\d+)/i);
+  const prNum = prMatch ? prMatch[1] : null;
+
+  // Scope file count from code-review-input.md (when present)
+  let scopeFileCount = 0;
+  try {
+    const inputPath = path.join(stateDir, "code-review-input.md");
+    if (fs.existsSync(inputPath)) {
+      scopeFileCount = fs.readFileSync(inputPath, "utf8").split("\n").filter(l => l.trim().length > 0).length;
+    }
+  } catch { /* default 0 */ }
+
+  // Provider-skip-reason for PR-scoped GitHub-only tier (cleared when
+  // pr_scoped_diff fires successfully — see branch below).
+  let prScopedSkipReason = "";
+  if (prNum && gitProvider !== "github") {
+    prScopedSkipReason = `provider=${gitProvider}; pr_scoped (GitHub get_pr_impact) skipped — pr_scoped_diff tier used instead`;
+  }
+
+  // Diff symbols extractor — wraps `graphify symbols-in-files` against
+  // the current diff. Only invoked on tier branches that need it.
+  const getDiffSymbols = (limit) => {
+    let symbols = [];
+    let newFilesCount = 0;
+    let totalFilesCount = 0;
+    try {
+      const { spawnSync } = require("child_process");
+      const proot = findProjectRoot();
+      const diffRes = spawnSync("git", ["diff", "--name-only", `${primaryBranch}...HEAD`], {
+        cwd: proot, encoding: "utf8", timeout: 5000,
+      });
+      if (diffRes.status === 0) {
+        const files = diffRes.stdout.split("\n").map(s => s.trim()).filter(Boolean);
+        totalFilesCount = files.length;
+        if (files.length > 0) {
+          const graphifyMod = require("./graphify.cjs");
+          const res = graphifyMod.symbolsInFiles(files, limit);
+          symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
+          // count "Added" files specifically for caveat
+          const addRes = spawnSync("git", ["diff", "--name-status", "--diff-filter=A", `${primaryBranch}...HEAD`], {
+            cwd: proot, encoding: "utf8", timeout: 5000,
+          });
+          if (addRes.status === 0) {
+            newFilesCount = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean).length;
+          }
+        }
+      }
+    } catch { /* defaults */ }
+    return { symbols, newFilesCount, totalFilesCount };
+  };
+
+  // Tier decision tree — explicit, no implicit fallbacks. Preserved
+  // verbatim from workflows/code-review.md substep 5.
+  let tier = "skip";
+  let tool = "";
+  let args = {};
+  let skipReason = "";
+  let prDiffCaveat = null;
+
+  if (graphifyState !== "ready") {
+    tier = "skip";
+    skipReason = `graphify state=${graphifyState}`;
+  } else if (prNum && gitProvider === "github") {
+    tier = "pr_scoped";
+    tool = "mcp__graphify__get_pr_impact";
+    args = { pr_number: Number(prNum) };
+  } else if (prNum && gitProvider !== "github") {
+    const ds = getDiffSymbols(20);
+    if (ds.symbols.length > 0) {
+      tier = "pr_scoped_diff";
+      tool = "mcp__plugin_devt_devt-graphify__blast_radius";
+      args = { symbols: ds.symbols };
+      prScopedSkipReason = ""; // tier activated — clear prior skip-reason
+      if (ds.newFilesCount > 0) {
+        prDiffCaveat = `${ds.newFilesCount} of ${ds.totalFilesCount} files are new — symbols extracted via diff-hunk fallback but blast_radius edge data unavailable until "graphify update ." rebuild`;
+      }
+    } else if (topicSymbolsCount > 0) {
+      tier = "symbol_anchored";
+      tool = "mcp__plugin_devt_devt-graphify__blast_radius";
+      args = { symbols: topicSymbols };
+    } else {
+      tier = "skip";
+      skipReason = "non-GitHub PR but no diff symbols extracted (graph sparse) AND no topic symbols";
+    }
+  } else if (topicSymbolsCount > 0) {
+    tier = "symbol_anchored";
+    tool = "mcp__plugin_devt_devt-graphify__blast_radius";
+    args = { symbols: topicSymbols };
+  } else if (scopeFileCount >= impactThreshold && graphifyTrust === "dense") {
+    // Prefer symbol_anchored driven from diff-file symbols over bulk_scoped
+    // text-search. blast_radius with symbols whose source_file is in the
+    // diff produces actual structural impact; query_graph(text=SCOPE) only
+    // returns keyword matches that don't reflect the call graph.
+    const ds = getDiffSymbols(10);
+    if (ds.symbols.length > 0) {
+      tier = "symbol_anchored";
+      tool = "mcp__plugin_devt_devt-graphify__blast_radius";
+      args = { symbols: ds.symbols };
+    } else {
+      tier = "bulk_scoped";
+      tool = "mcp__plugin_devt_devt-graphify__query_graph";
+      args = { text: reviewScope, limit: 20 };
+    }
+  } else {
+    tier = "skip";
+    skipReason = "no PR (or non-GitHub), no topic symbols, scope below threshold";
+  }
+
+  const plan = {
+    tier,
+    tool,
+    args,
+    skip_reason: skipReason,
+    git_provider: gitProvider,
+    pr_scoped_skip_reason: prScopedSkipReason,
+  };
+  if (prDiffCaveat) plan.pr_diff_caveat = prDiffCaveat;
+  if (topicSymbolsDroppedCount > 0) plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
+
+  try { atomicWriteJsonSync(planPath, plan); } catch { /* best-effort */ }
+  return plan;
 }
 
 // Substance check for agent output files. Lane sub-agent dispatches can
@@ -6119,6 +6331,13 @@ function run(subcommand, args) {
     }
     case "graphify-roi":
       return graphifyRoi();
+    case "compute-impact-plan": {
+      const scopeArg = args.find(a => a.startsWith("--scope="));
+      const branchArg = args.find(a => a.startsWith("--primary-branch="));
+      const reviewScope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
+      const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
+      return computeGraphifyImpactPlan({ reviewScope, primaryBranch });
+    }
     case "mark-claude-mem-skipped": {
       // Operator-declarable skip for claude-mem harvest. When session
       // memory already covers the scope, marginal value of harvest is ~0.
@@ -6325,7 +6544,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, compute-impact-plan, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

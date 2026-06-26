@@ -4834,9 +4834,9 @@ if grep -q "graphify-impact-plan.json" "$ROOT/workflows/code-review.md" && grep 
 else
   fail "code-review.md impact step still prose-only — orchestrator can skip without consequence"
 fi
-# Bitbucket awareness: the bash plan branches on git.provider
-if grep -q 'GIT_PROVIDER.*git\.provider' "$ROOT/workflows/code-review.md" && grep -q 'GIT_PROVIDER" = "github"' "$ROOT/workflows/code-review.md"; then
-  pass "code-review impact plan branches on git.provider — Bitbucket projects skip GitHub-only PR-scoped tier"
+# Bitbucket awareness: tier-decision CLI branches on git.provider
+if grep -qE 'gitProvider === "github"' "$ROOT/bin/modules/state.cjs" && grep -qE 'gitProvider !== "github"' "$ROOT/bin/modules/state.cjs"; then
+  pass "code-review impact plan (computeGraphifyImpactPlan) branches on git.provider — Bitbucket projects skip GitHub-only PR-scoped tier"
 else
   fail "code-review impact plan missing Bitbucket-aware provider check (PR-scoped tier would silently fail for non-GitHub projects)"
 fi
@@ -5609,16 +5609,18 @@ echo
 echo "== Graphify tier ordering: symbol_anchored before bulk_scoped =="
 # Field validation in greenfield-api (Bitbucket project) showed bulk_scoped was
 # firing even when topic.symbols was non-empty — symbol-anchored gives cleaner
-# signal so it must take precedence when symbols are available.
+# signal so it must take precedence when symbols are available. After cal #37
+# #3, the tier-decision tree lives in state.cjs::computeGraphifyImpactPlan;
+# verify the topicSymbolsCount branch fires BEFORE the scopeFileCount branch.
 ORDER_OK=$(awk '
-  /elif \[ "\$TOPIC_SYMBOLS_COUNT" -gt 0 \]/ && !sa { sa = NR }
-  /elif \[ "\$SCOPE_FILE_COUNT" -ge "\$IMPACT_THRESHOLD" \]/ && !bs { bs = NR }
+  /else if \(topicSymbolsCount > 0\)/ && !sa { sa = NR }
+  /else if \(scopeFileCount >= impactThreshold/ && !bs { bs = NR }
   END { if (sa && bs && sa < bs) print "OK"; else print "BAD" }
-' workflows/code-review.md)
+' bin/modules/state.cjs)
 if [ "$ORDER_OK" = "OK" ]; then
-  pass "workflows/code-review.md fires symbol_anchored BEFORE bulk_scoped"
+  pass "computeGraphifyImpactPlan fires symbol_anchored BEFORE bulk_scoped (topic.symbols branch precedes scope+threshold branch)"
 else
-  fail "workflows/code-review.md tier order regression — bulk_scoped fires before symbol_anchored"
+  fail "tier order regression — bulk_scoped fires before symbol_anchored in computeGraphifyImpactPlan"
 fi
 
 echo
@@ -6966,12 +6968,12 @@ else
 fi
 rm -rf "$F40_TMP"
 
-# F41: ARGS CONTRACT pre-truncation in code-review.md (greenfield 2026-05-27
-# PR #372 P2). Workflow body must cap topic.symbols at 32 BEFORE the args
-# object is built. Presence check — the bash idiom is the contract.
-if /usr/bin/grep -q "TOPIC_SYMBOLS_RAW" "$ROOT/workflows/code-review.md" \
-  && /usr/bin/grep -q 'jq -c .*\.\[:32\]' "$ROOT/workflows/code-review.md"; then
-  pass "F41a: code-review.md pre-truncates topic.symbols to 32 BEFORE building blast_radius args (P2 fix)"
+# F41: ARGS CONTRACT pre-truncation. After cal #37 #3, the contract lives in
+# state.cjs::computeGraphifyImpactPlan — TOPIC_CAP = 32 + slice(0, TOPIC_CAP)
+# before args is built. Presence check on the cap constant + slice idiom.
+if /usr/bin/grep -qE "TOPIC_CAP = 32" "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qE "topicSymbolsRaw\.slice\(0, TOPIC_CAP\)" "$ROOT/bin/modules/state.cjs"; then
+  pass "F41a: computeGraphifyImpactPlan pre-truncates topic.symbols to TOPIC_CAP=32 BEFORE building blast_radius args (P2 fix)"
 else
   fail "F41a: code-review.md missing ARGS-CONTRACT pre-truncation — VERBATIM contract still unimplementable at symbols > 32"
 fi
@@ -8757,19 +8759,18 @@ else
   fail "M11: C7-1 wiring incomplete. fallback-bash=${M11_BASH} header-marker=${M11_HEADER} signal-doc=${M11_SIGNAL}"
 fi
 
-# M12: C7-2 — substep 5 captures dropped symbols (.devt/state/topic-symbols-
-# dropped.json) when topic.symbols exceeds 32 and substep 7 emits the
-# truncation notice into graph-impact.md. Greenfield calibration #7:
-# NettieCalendarClientSetting was in the dropped 21 from a 53-symbol PR
-# and the absence affected C-2's structural risk assessment. Drift gates
-# verify the three touch points: capture bash, sidecar rm in non-truncated
-# path, emission bash in F17 step.
-M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-M12_RM=$(/usr/bin/grep -c 'rm -f .devt/state/topic-symbols-dropped' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+# M12: C7-2 — dropped-symbol capture. After cal #37 #3, the capture lives in
+# state.cjs::computeGraphifyImpactPlan (writes topic-symbols-dropped.json
+# when topic.symbols > TOPIC_CAP=32; deletes it otherwise). Workflow's
+# substep 7 still emits the truncation notice header. Drift gates verify
+# the touch points: capture+rm in state.cjs (atomicWriteJsonSync +
+# fs.unlinkSync), emission header in workflow, state registration.
+M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M12_RM=$(/usr/bin/grep -cE 'fs\.unlinkSync\(droppedPath\)' "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
 M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}' || true)
-if [ "${M12_CAPTURE:-0}" -ge 3 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
-  pass "M12: dropped-symbol capture + emit + state registration (capture refs=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state regs=${M12_REG})"
+if [ "${M12_CAPTURE:-0}" -ge 1 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
+  pass "M12: dropped-symbol capture (computeGraphifyImpactPlan: write+unlink) + workflow header + state registration (capture=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state=${M12_REG})"
 else
   fail "M12: C7-2 wiring incomplete. capture=${M12_CAPTURE} rm=${M12_RM} header=${M12_HEADER} state=${M12_REG}"
 fi
@@ -11904,9 +11905,12 @@ fi
 # updated to '.symbols[]?.symbol' (not bare '.[].symbol').
 K89_NO_INPUT_REASON=$(node -e "const m = require('$ROOT/bin/modules/graphify.cjs'); const r = m.symbolsInFiles([]); process.stdout.write(r.reason || '');" 2>/dev/null || true)
 K89_HAS_ENVELOPE=$(node -e "const m = require('$ROOT/bin/modules/graphify.cjs'); const r = m.symbolsInFiles([]); process.stdout.write(typeof r === 'object' && 'symbols' in r && 'reason' in r && 'graph_lag_commits' in r && 'total_matches' in r ? 'true' : 'false');" 2>/dev/null || true)
-K89_CONSUMER_UPDATED=$(grep -cF 'symbols[]?.symbol' "$ROOT/workflows/code-review.md" 2>/dev/null || true)
+# Consumer was migrated from inline workflow bash to state.cjs
+# computeGraphifyImpactPlan (cal #37 #3) — assert the consumer is updated
+# in the new location where graphify.symbolsInFiles is called.
+K89_CONSUMER_UPDATED=$(grep -cE 'graphifyMod\.symbolsInFiles' "$ROOT/bin/modules/state.cjs" 2>/dev/null || true)
 if [ "$K89_NO_INPUT_REASON" = "no input files" ] && [ "$K89_HAS_ENVELOPE" = "true" ] && [ "$K89_CONSUMER_UPDATED" -ge "1" ]; then
-  pass "K89: symbols-in-files envelope shape (reason/graph_lag_commits/total_matches keys present; consumer in code-review.md updated to .symbols[])"
+  pass "K89: symbols-in-files envelope shape (reason/graph_lag_commits/total_matches keys present; consumer in state.cjs::computeGraphifyImpactPlan uses .symbols[])"
 else
   fail "K89: envelope mismatch — no_input_reason='$K89_NO_INPUT_REASON' envelope=$K89_HAS_ENVELOPE consumer_updated=$K89_CONSUMER_UPDATED"
 fi
@@ -14406,9 +14410,9 @@ fi
 # K174: code-review.md impact-plan tier registry includes `pr_scoped_diff` tier
 # branch for non-GitHub PRs (Bitbucket pr_scoped equivalent — wires diff-symbols
 # + blast_radius). Asserts: TIER="pr_scoped_diff" literal exists in workflow.
-K174_OUT=$(/usr/bin/grep -cE 'TIER="pr_scoped_diff"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+K174_OUT=$(/usr/bin/grep -cE '"pr_scoped_diff"' "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
 if [ "$K174_OUT" -ge "1" ]; then
-  pass "K174: code-review.md impact-plan decision tree includes pr_scoped_diff tier branch for non-GitHub PRs (Bitbucket gets pr_scoped-equivalent richness)"
+  pass "K174: state.cjs::computeGraphifyImpactPlan tier-decision includes pr_scoped_diff branch for non-GitHub PRs (Bitbucket gets pr_scoped-equivalent richness)"
 else
   fail "K174: pr_scoped_diff tier missing — got count: $K174_OUT"
 fi
@@ -14751,6 +14755,36 @@ if [ "$AUDIT_LINES" = "2" ] && [ "$AUDIT_HAS_FIRST" = "1" ] && [ "$AUDIT_HAS_RES
   pass "K189: workflow_id rotation audit log captures first_activation + resetSoft mutations with pid/argv/source forensics"
 else
   fail "K189: audit log wrong — lines=$AUDIT_LINES (expect 2), first_act=$AUDIT_HAS_FIRST, resetSoft=$AUDIT_HAS_RESET, pid_lines=$AUDIT_HAS_PID"
+fi
+
+# K190: state compute-impact-plan CLI replaces the inline workflow bash for
+# the graphify impact-plan tier-decision tree. Asserts the CLI returns the
+# expected JSON shape across 3 representative inputs: (a) graphify not-ready
+# → skip, (b) GitHub + PR → pr_scoped, (c) topic.symbols → symbol_anchored.
+K190_TMP=$(mktemp -d)
+mkdir -p "$K190_TMP/.devt/state"
+echo '{"git":{"provider":"github","primary_branch":"main"}}' > "$K190_TMP/.devt/config.json"
+# Case A: not-ready
+echo '{"graph_stats":{"state":"not_ready"}}' > "$K190_TMP/.devt/state/preflight-brief.json"
+K190_A=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="x" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
+# Case B: GitHub + PR
+echo '{"graph_stats":{"state":"ready","trust":"dense"},"topic":{"symbols":[]}}' > "$K190_TMP/.devt/state/preflight-brief.json"
+K190_B=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review PR #123" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
+# Case C: topic.symbols
+echo '{"graph_stats":{"state":"ready","trust":"dense"},"topic":{"symbols":["Foo","Bar"]}}' > "$K190_TMP/.devt/state/preflight-brief.json"
+K190_C=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review services" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
+# Case D: > 32 topic.symbols → dropped sidecar written
+python3 -c "
+import json
+print(json.dumps({'graph_stats':{'state':'ready','trust':'dense'},'topic':{'symbols':['Sym'+str(i) for i in range(40)]}}))
+" > "$K190_TMP/.devt/state/preflight-brief.json"
+cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="x" >/dev/null 2>&1
+K190_DROPPED=$([ -f "$K190_TMP/.devt/state/topic-symbols-dropped.json" ] && echo "present" || echo "absent")
+rm -rf "$K190_TMP"
+if [ "$K190_A" = "skip" ] && [ "$K190_B" = "pr_scoped" ] && [ "$K190_C" = "symbol_anchored" ] && [ "$K190_DROPPED" = "present" ]; then
+  pass "K190: state compute-impact-plan CLI (cal #37 #3): tier-decision returns skip / pr_scoped / symbol_anchored + writes topic-symbols-dropped.json on > 32 symbols"
+else
+  fail "K190: compute-impact-plan wrong — A=$K190_A (expect skip), B=$K190_B (expect pr_scoped), C=$K190_C (expect symbol_anchored), dropped=$K190_DROPPED (expect present)"
 fi
 
 echo

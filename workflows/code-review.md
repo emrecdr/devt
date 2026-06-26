@@ -212,123 +212,36 @@ If the diff under review touches files that arch-scan has flagged (cross-referen
 
 ### Substep 5: Compute the Graphify impact-plan
 
-**Compute the Graphify impact-map plan.** This bash step decides which tier the orchestrator MUST execute next. It writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.
+**Compute the Graphify impact-map plan.** Single CLI computes the tier-decision tree + writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, topic_symbols_dropped_count?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.
 
 ```bash
-GIT_PROVIDER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get git.provider 2>/dev/null | jq -r '.value // ""')
-PR_NUM=$(echo "${REVIEW_SCOPE}" | grep -oE '(PR|pull request) ?#?[0-9]+' | grep -oE '[0-9]+' | head -1)
-GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
-GRAPHIFY_TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
-TOPIC_SYMBOLS_RAW=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-TOPIC_SYMBOLS_RAW_COUNT=$(echo "$TOPIC_SYMBOLS_RAW" | jq 'length')
-# Pre-truncate to the MCP blast_radius cap (32). Preflight orders symbols by
-# relevance (governing-doc anchors first, then diff symbols, then prose), so
-# slicing the first 32 preserves that ranking. Why: the prior contract said
-# "Use args VERBATIM" but topic.symbols can exceed 32, making the contract
-# mechanically unimplementable. Truncating in the bash that WRITES the plan
-# makes VERBATIM tractable.
-TOPIC_SYMBOLS=$(echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[:32]')
-TOPIC_SYMBOLS_COUNT=$(echo "$TOPIC_SYMBOLS" | jq 'length')
-if [ "$TOPIC_SYMBOLS_RAW_COUNT" -gt 32 ]; then
-  echo "topic.symbols pre-truncated: ${TOPIC_SYMBOLS_RAW_COUNT} → 32 (MCP blast_radius cap)"
-  # Capture the dropped symbols so the truncation isn't silent — a high-risk
-  # symbol silently dropped from a 53-symbol set can directly affect structural
-  # risk assessment. Sidecar is consumed by substep 7's god-node check which appends
-  # a "## Subject symbols dropped" notice to graph-impact.md (which doesn't
-  # exist yet at this point — substep 6 writes it fresh). Reviewers can
-  # spot-check whether high-risk symbols were silently excluded from the
-  # impact analysis.
-  echo "$TOPIC_SYMBOLS_RAW" | jq -c '.[32:]' > .devt/state/topic-symbols-dropped.json
-else
-  # Clear any stale dropped-list from a prior workflow so substep 7 doesn't
-  # emit a stale truncation notice on a fresh non-truncated run.
-  rm -f .devt/state/topic-symbols-dropped.json 2>/dev/null || true
-fi
-SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
-IMPACT_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.impact_threshold 2>/dev/null | jq -r '.value // 10')
-
-# Decision tree — explicit, no implicit fallbacks. The recommended tier is the
-# first one whose preconditions all hold. Bitbucket/non-GitHub projects now
-# get a `pr_scoped_diff` equivalent tier (cal #33.A Rank #2) that wires
-# `git diff <primary>...HEAD → symbols-in-files → blast_radius` — receipt #7
-# found Bitbucket previously "permanently got the coarser fallback" because
-# the upstream `mcp__graphify__get_pr_impact` tool is GitHub-only. The new
-# tier uses devt-side CLIs on the as-built graph (G5 fallback handles
-# new-file symbols via regex), emits a caveat when new files lack edge data.
-# Record the original pr_scoped (GitHub-only) skip reason as a separate
-# field in plan.json so post-hoc audits can distinguish "no PR" vs
-# "non-GitHub PR routed via pr_scoped_diff." Empty when pr_scoped fires
-# (GitHub), populated when pr_scoped_diff fires (non-GitHub with PR).
-PR_SCOPED_SKIP_REASON=""
-if [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" != "github" ]; then
-  PR_SCOPED_SKIP_REASON="provider=$GIT_PROVIDER; pr_scoped (GitHub get_pr_impact) skipped — pr_scoped_diff tier used instead"
-fi
-
-if [ "$GRAPHIFY_STATE" != "ready" ]; then
-  TIER="skip"; SKIP_REASON="graphify state=$GRAPHIFY_STATE"; TOOL=""; ARGS_JSON='{}'
-elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" = "github" ]; then
-  TIER="pr_scoped"; SKIP_REASON=""; TOOL="mcp__graphify__get_pr_impact"; ARGS_JSON="$(jq -nc --arg n "$PR_NUM" '{pr_number: ($n|tonumber)}')"
-elif [ -n "$PR_NUM" ] && [ "$GIT_PROVIDER" != "github" ]; then
-  # Cal #33.A Rank #2 — Bitbucket / non-GitHub PR-scoped equivalent tier.
-  # Receipt #7 (greenfield 2026-06-25): "permanently gets the coarser
-  # fallback" — Bitbucket projects skip pr_scoped because get_pr_impact is
-  # GitHub-only, missing the richest analysis tier. Wire: git diff
-  # <primary>...HEAD → symbols-in-files (G5 fallback covers new-file
-  # symbols via diff-hunk regex) → blast_radius. As-built, no rebuild
-  # required. Caveat emitted for new files: blast_radius edge data is
-  # empty for them since the graph wasn't rebuilt — symbols extracted
-  # but caller analysis is partial.
-  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
-  NEW_FILES_COUNT=$(git diff --name-status --diff-filter=A "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | wc -l | tr -d ' ')
-  TOTAL_FILES_COUNT=$(echo "$DIFF_FILES" | wc -w | tr -d ' ')
-  PR_DIFF_SYMBOLS_JSON='[]'
-  if [ -n "$DIFF_FILES" ]; then
-    PR_DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=20 2>/dev/null | jq -c '[.symbols[]?.symbol]' 2>/dev/null || echo '[]')
-  fi
-  PR_DIFF_SYMBOL_COUNT=$(echo "$PR_DIFF_SYMBOLS_JSON" | jq 'length')
-  if [ "$PR_DIFF_SYMBOL_COUNT" -gt 0 ]; then
-    TIER="pr_scoped_diff"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$PR_DIFF_SYMBOLS_JSON" '{symbols: $s}')"
-    PR_SCOPED_SKIP_REASON=""  # tier DID activate — clear the prior skip-reason
-    if [ "$NEW_FILES_COUNT" -gt 0 ]; then
-      echo "pr_scoped_diff caveat: ${NEW_FILES_COUNT} of ${TOTAL_FILES_COUNT} files are new — symbols extracted via diff-hunk fallback (G5) but blast_radius edge data unavailable until \"graphify update .\" rebuild"
-    fi
-  elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
-    # No diff symbols (e.g. graph too sparse on the PR files) — fall through
-    # to topic-symbol blast_radius.
-    TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
-  else
-    TIER="skip"; SKIP_REASON="non-GitHub PR but no diff symbols extracted (graph sparse) AND no topic symbols"; TOOL=""; ARGS_JSON='{}'
-  fi
-elif [ "$TOPIC_SYMBOLS_COUNT" -gt 0 ]; then
-  TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$TOPIC_SYMBOLS" '{symbols: $s}')"
-elif [ "$SCOPE_FILE_COUNT" -ge "$IMPACT_THRESHOLD" ] && [ "$GRAPHIFY_TRUST" = "dense" ]; then
-  # Prefer symbol_anchored driven from diff-file symbols over bulk_scoped
-  # text-search. Why: for bitbucket + dense + >10 files,
-  # query_graph(text=REVIEW_SCOPE) returns keyword hits that don't reflect
-  # the call graph. blast_radius with symbols whose source_file is in the
-  # diff produces actual structural impact. Falls back to legacy bulk_scoped
-  # only when no symbols can be extracted from the diff files (graph too
-  # sparse, diff is all new files not yet indexed, etc.).
-  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | tr '\n' ' ')
-  DIFF_SYMBOLS_JSON='[]'
-  if [ -n "$DIFF_FILES" ]; then
-    DIFF_SYMBOLS_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify symbols-in-files $DIFF_FILES --limit=10 2>/dev/null | jq -c '[.symbols[]?.symbol]' 2>/dev/null || echo '[]')
-  fi
-  DIFF_SYMBOL_COUNT=$(echo "$DIFF_SYMBOLS_JSON" | jq 'length')
-  if [ "$DIFF_SYMBOL_COUNT" -gt 0 ]; then
-    TIER="symbol_anchored"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__blast_radius"; ARGS_JSON="$(jq -nc --argjson s "$DIFF_SYMBOLS_JSON" '{symbols: $s}')"
-  else
-    TIER="bulk_scoped"; SKIP_REASON=""; TOOL="mcp__plugin_devt_devt-graphify__query_graph"; ARGS_JSON="$(jq -nc --arg t "$REVIEW_SCOPE" '{text: $t, limit: 20}')"
-  fi
-else
-  TIER="skip"; SKIP_REASON="no PR (or non-GitHub), no topic symbols, scope below threshold"; TOOL=""; ARGS_JSON='{}'
-fi
-
-jq -nc --arg tier "$TIER" --arg tool "$TOOL" --arg skip_reason "$SKIP_REASON" --arg provider "$GIT_PROVIDER" --arg pr_skip "$PR_SCOPED_SKIP_REASON" --argjson args "$ARGS_JSON" \
-  '{tier: $tier, tool: $tool, args: $args, skip_reason: $skip_reason, git_provider: $provider, pr_scoped_skip_reason: $pr_skip}' \
-  > .devt/state/graphify-impact-plan.json
+PLAN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state compute-impact-plan --scope="${REVIEW_SCOPE}" --primary-branch="${PRIMARY_BRANCH:-main}")
+TIER=$(echo "$PLAN" | jq -r '.tier')
+TOOL=$(echo "$PLAN" | jq -r '.tool')
+GIT_PROVIDER=$(echo "$PLAN" | jq -r '.git_provider')
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
+# Echo the pr_diff_caveat (if any) so reviewers see the new-files-not-indexed signal in stdout.
+PR_DIFF_CAVEAT=$(echo "$PLAN" | jq -r '.pr_diff_caveat // empty')
+[ -n "$PR_DIFF_CAVEAT" ] && echo "pr_scoped_diff caveat: $PR_DIFF_CAVEAT"
+# Echo the topic-symbol pre-truncation signal so reviewers see the dropped-list sidecar exists.
+DROPPED_COUNT=$(echo "$PLAN" | jq -r '.topic_symbols_dropped_count // empty')
+[ -n "$DROPPED_COUNT" ] && echo "topic.symbols pre-truncated: $DROPPED_COUNT symbols dropped → .devt/state/topic-symbols-dropped.json"
 ```
+
+**Tier decision tree (preserved by `compute-impact-plan` CLI — identical semantics to the prior inline bash):**
+
+| Precondition | Tier | Tool | Args |
+|---|---|---|---|
+| graphify state ≠ ready | `skip` | — | `{skip_reason: "graphify state=…"}` |
+| PR# + github | `pr_scoped` | `mcp__graphify__get_pr_impact` | `{pr_number: N}` |
+| PR# + non-github + diff-symbols | `pr_scoped_diff` | `blast_radius` | `{symbols: [diff symbols]}` (+ `pr_diff_caveat` when new files) |
+| PR# + non-github + topic.symbols | `symbol_anchored` | `blast_radius` | `{symbols: topic[:32]}` |
+| topic.symbols | `symbol_anchored` | `blast_radius` | `{symbols: topic[:32]}` |
+| scope ≥ threshold + dense + diff-symbols | `symbol_anchored` | `blast_radius` | `{symbols: [diff symbols]}` |
+| scope ≥ threshold + dense + no diff-symbols | `bulk_scoped` | `query_graph` | `{text: REVIEW_SCOPE, limit: 20}` |
+| else | `skip` | — | `{skip_reason: "no PR…"}` |
+
+Side-effects (same as prior bash): writes `.devt/state/graphify-impact-plan.json`; writes `.devt/state/topic-symbols-dropped.json` when `topic.symbols > 32` (consumed by substep 7's god-node check); removes any stale dropped-list sidecar otherwise.
 
 ### Substep 6: Execute the impact-plan + multi-tier drill-down
 

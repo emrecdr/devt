@@ -6,6 +6,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.115.0] - 2026-06-26
+
+### Cal #37 #3 — devt state compute-impact-plan wrapper CLI
+
+Receipt #9 Q2(c) framing: the graphify impact-plan tier-decision was inlined as ~115 lines of fragile bash in `workflows/code-review.md` substep 5. Receipt user described this as "the 1,152-line file is the biggest mis-execution risk" with "lots of defensive code for rare cases." New `state compute-impact-plan --scope=<text> [--primary-branch=<ref>]` CLI collapses it into a single JSON-returning call.
+
+**What moved into the CLI** (state.cjs::computeGraphifyImpactPlan):
+- Provider + PR# extraction from REVIEW_SCOPE
+- Graphify state + trust reads from `preflight-brief.json`
+- `topic.symbols` pre-truncation to TOPIC_CAP=32 + dropped-list sidecar write/cleanup
+- Scope file count + impact threshold reads
+- 7-branch tier-decision tree (skip / pr_scoped / pr_scoped_diff / symbol_anchored ×3 / bulk_scoped)
+- Diff-symbol extraction via `git diff <primary>...HEAD` + `graphify symbolsInFiles`
+- New-files-count for `pr_diff_caveat` surface
+- Output JSON to `.devt/state/graphify-impact-plan.json`
+
+**What deliberately stayed in workflow** (architecturally cannot move — per receipt #9 Q2 evidence):
+- Substeps 0 + 4 AskUserQuestion gates (CLIs cannot prompt)
+- Substep 6 MCP `blast_radius` / `get_neighbors` execution (CLIs cannot reach `mcp__*` tools)
+- Substep 0 conditional reset-soft (needs operator-mediated decision)
+
+**Workflow surface reduction**: `workflows/code-review.md` 1152 → 1064 lines (−88 lines, −7.6%). Substep 5 collapsed from ~115 lines of inline bash to ~15 lines + a tier-decision table for orchestrator-visible semantics. The output JSON contract is preserved verbatim so downstream substeps (6 EXECUTE-THE-PLAN, 7 god-node check that consumes `topic-symbols-dropped.json`) unchanged.
+
+**6 smoke gates migrated** to verify the CLI tier-decision semantics instead of the obsolete inline bash:
+- K174 (pr_scoped_diff branch presence) → checks state.cjs
+- F41a (TOPIC_CAP=32 pre-truncation) → checks state.cjs
+- M12 (topic-symbols-dropped capture) → checks state.cjs unlinkSync + workflow header
+- K89 (symbolsInFiles envelope consumer) → checks state.cjs::computeGraphifyImpactPlan
+- Bitbucket-aware provider branch → checks state.cjs `gitProvider === "github"` / `!== "github"`
+- Tier-order regression (symbol_anchored before bulk_scoped) → checks state.cjs branch order
+
+**New smoke gate K190**: 3-scenario tier-decision (not_ready → skip / GitHub PR → pr_scoped / topic.symbols → symbol_anchored) + dropped-sidecar emission test (40 symbols > 32 cap → file written).
+
+**Drift-guard stack now 97-deep K94-K190.** CLAUDE.md + README updated.
+
+**Cal #37 carryover** (deferred to next session):
+- **Cal #37 #2** (~5-7hr architectural) — lane tool-surface deny-list for workflow.yaml writes. Now unblocked by cal #37 #1 audit log (v0.114.0) — when subagent concurrency rotation recurs, the audit log says exactly which CLI rotated the id. Ready to scope when next on-rail receipt confirms cal #37 #1+#3 didn't introduce regressions.
+
 ## [0.114.0] - 2026-06-26
 
 ### Cal #37 #1 — workflow_id rotation audit log (prerequisite for lane deny-list)
