@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.113.0] - 2026-06-26
+
+### Cal #36 — Receipt #9 tactical fixes (6 items)
+
+Receipt #9 (greenfield, 2026-06-26) was an on-rail review run that delivered the most positive calibration yet (graphify A−, devt workflow B+) AND surfaced 6 ranked tactical fixes. Receipt user followed up with precise Q1+Q2+Q3 answers locking design forks. All 6 ship under [[telemetry-on-reduction]] discipline.
+
+**#1 — Test-class god-node filter** (`bin/modules/graphify.cjs::godNodes`). Extends `_topByDegree` filter pipeline to strip `^Test[A-Z]` symbol-prefix + test-path source files. Receipt evidence: TestMappingExtractors ranked top-12 with 591 edges, polluting the constitutional-abstraction list reviewers consult. Over-fetches 3× before filter so post-filter `limit` still hits target. Reuses existing `_isTestPathNode` helper (no duplication).
+
+**#2 — mcp-stats --workflow-id default-strict** (`bin/modules/mcp-stats.cjs`). Reverses cal #32 #4 default: `--workflow-id` alone is now STRICT (current-wid only); `--include-chain` opts INTO the workflow_id_history union. Receipt evidence: greenfield observed default behavior over-counted (27 calls vs ~4 actual) because operators reach for `--workflow-id` expecting per-run scope. `--strict-wid` retained as deprecated alias matching default (preserves K170 fixture). K170 + M9 + N8 migrated to `--include-chain` opt-in.
+
+**#3 — Verifier substance check** (`bin/modules/state.cjs::assertVerifierRan`). Existing existence+freshness gate accepted a synthetic `verification.json` with only `{"status":"DONE"}`. Receipt evidence: greenfield wrote one and the gate passed. New substance check: sidecar must carry verdict/findings/revisions/axes/criteria_total in non-empty form OR markdown must be ≥600 substance-bytes (frontmatter + stub-marker lines stripped). Same [[CON-001]] form-vs-substance failure mode the verifier exists to prevent at the agent layer.
+
+**#4 — DI-aware drill-down fallback** (`bin/modules/graphify.cjs::composeDrilldowns`). When `getNeighbors(X, direction)` returns 0 results AND filter telemetry shows `filtered_di_aggregation > 0`, the new `_findDIFactorySiteHint` re-walks the BFS visited set to identify the DI-pattern source_file with the most edges. Emits `_(no direct neighbors found in direction=X; DI factory site: <path> (+N DI-wired edges))_` instead of bare "empty". Defensive fallback for the rare case where cal #31.B G1 collapse doesn't preserve a representative (heterogeneous DI edges, sub-threshold counts).
+
+**#5 — register-lanes envelope auto_memory injection** (`bin/modules/dispatch.cjs::cmdRenderLanes`). Receipt evidence: G2 laneH populated 8 auto_memory entries in preflight-brief.json but hand-rolled `register-lanes` + ad-hoc Agent() dispatches dropped them; only the cmdRenderFilled base envelope path inherited `{auto_memory_json}` substitution. New `<auto_memory>` lane-context block injected with top-N "name (type, score)" summary so the bridge's output reaches each lane regardless of how operators customize prose. Falls back to no-emit when laneH found no matches.
+
+**#6 — laneG FTS under-retrieval** (`bin/modules/preflight.cjs::laneG`). Receipt evidence: bare `cfg.git.provider` token under-retrieved CON-002 (bitbucket-pr-scoped-tier-unavailable) + REJ-002 (graphify-god-node-mechanical-con-proposals) on a Bitbucket+graphify review even though both docs were squarely relevant. New optional `topic` param expands the FTS query token set with `topic.domains` so domain-relevant CON/REJ docs surface when the project-context token alone misses them. `generate()` updated to pass topic through.
+
+**Drift-guard stack now 95-deep K94-K188.** CLAUDE.md + README updated.
+
+**Smoke gates**: K184 (#1 godNodes test-class filter), K185 (#3 verifier substance check on synthetic vs graded bodies), K186 (#4 DI-aware fallback function present), K187 (#5 cmdRenderLanes auto_memory block injection), K188 (#6 laneG topic param wired). K170 + M9 + N8 updated for #2's reversed default. Total 933 smoke + 3/3 locking + 37/37 graphify.
+
+**Receipt-#9 carryover to cal #37** (architectural, separate scoping): workflow_id rotation audit log (~1hr prerequisite) → lane tool-surface deny-list for workflow.yaml writes (~5-7hr) → `devt review-context-init` wrapper CLI (~3-4hr). Plus Q1 upstream graphify DI-edges filing (user action).
+
 ## [0.112.0] - 2026-06-26
 
 ### Cal #35.A — Historical-attribution comment strip (R1 only)

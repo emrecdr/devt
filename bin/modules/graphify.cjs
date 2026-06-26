@@ -1396,10 +1396,34 @@ function writeMemoryEntry(payload) {
   return { ok: true, action: "written", path: dest };
 }
 
+// Test-class symbol prefix — pytest classes use TestX naming convention; when
+// they accumulate edges (fixtures, parametrize wiring, shared helpers) they
+// rank as god-nodes and pollute the surface that reviewers consult for
+// "constitutional abstractions." Field receipt: TestMappingExtractors hit
+// 591 edges and ranked top-12, drowning out actual god-nodes like PScope.
+// Filter on label only (source_file alone isn't enough — some test classes
+// live in tests/ AND some prod classes are mis-classified into tests/ via
+// monorepo layout).
+const _TEST_CLASS_PREFIX_RE = /^Test[A-Z]/;
+function _isTestClassSymbol(label) {
+  return typeof label === "string" && _TEST_CLASS_PREFIX_RE.test(label);
+}
+
 function godNodes(limit = 10) {
   const loaded = loadGraph();
   if (!loaded.ok) return [];
-  return _topByDegree(loaded.cache.adj, limit).map(item => ({
+  const testPathPatterns = _getTestPathPatterns();
+  // Over-fetch (3×) before filter so we still hit `limit` after stripping
+  // test-class + test-path nodes. _topByDegree is O(n log n) in node count
+  // regardless — the slice is the cheap part.
+  const overFetch = Math.max(limit * 3, 30);
+  const survivors = _topByDegree(loaded.cache.adj, overFetch).filter(item => {
+    const label = (item.node && item.node.label) || item.id;
+    if (_isTestClassSymbol(label)) return false;
+    if (_isTestPathNode(item.node, testPathPatterns)) return false;
+    return true;
+  });
+  return survivors.slice(0, limit).map(item => ({
     symbol: (item.node && item.node.label) || item.id,
     edge_count: item.degree,
   }));
@@ -1526,6 +1550,42 @@ function detectServiceBoundary(diffFiles) {
 //   - ...
 //
 //   _(filtered: noise=<n>, test_path=<n>, di_aggregation=<n>)_
+// DI factory site hint — when getNeighbors returned empty AND
+// filtered_di_aggregation > 0, the symbol's incoming edges were collapsed
+// because they come from a DI-pattern file. Re-walk the BFS visited set
+// directly to identify which DI source_file contributed the most edges so
+// the drill-down points at a useful starting place instead of "empty."
+// Returns the source_file path with collapsed-count, or null when no DI
+// signal exists. Bounded: walks at most the same depth-2 visited set
+// getNeighbors already populated.
+function _findDIFactorySiteHint(symbol, direction, depth, neighborsResult) {
+  if (!neighborsResult || !neighborsResult.filtered_di_aggregation) return null;
+  try {
+    const loaded = loadGraph();
+    if (!loaded.ok) return null;
+    const seedId = _resolveOne(loaded.cache.adj, symbol);
+    if (!seedId) return null;
+    const { visited } = _bfs(loaded.cache.adj, seedId, direction, depth);
+    const DI_RE = _getDIAggregationPatterns();
+    const diCounts = new Map();
+    for (const [id, info] of visited) {
+      if (id === seedId) continue;
+      void info;
+      const node = loaded.cache.adj.nodeMap.get(id);
+      const src = node && node.source_file;
+      if (!src || !DI_RE.test(src)) continue;
+      diCounts.set(src, (diCounts.get(src) || 0) + 1);
+    }
+    if (diCounts.size === 0) return null;
+    let topFile = null;
+    let topCount = 0;
+    for (const [file, count] of diCounts) {
+      if (count > topCount) { topFile = file; topCount = count; }
+    }
+    return topFile ? `${topFile} (+${topCount} DI-wired edges)` : null;
+  } catch { return null; }
+}
+
 function composeDrilldowns(symbols, options) {
   options = options || {};
   const direction = options.direction || "in";
@@ -1545,7 +1605,21 @@ function composeDrilldowns(symbols, options) {
       continue;
     }
     if (!r || !Array.isArray(r.results) || r.results.length === 0) {
-      lines.push(`_(no neighbors found in direction=${direction})_`);
+      // DI-aware fallback (cal #36 #4 from receipt #9): when 0 results
+      // survived but filter telemetry shows DI-aggregation entries were
+      // collapsed, the symbol IS reached — just via DI factory wiring
+      // that the noise+collapse filters strip. Surface the DI factory
+      // site explicitly instead of "empty" so reviewers know where to
+      // look. Re-query the same neighbors with a higher max_bytes cap
+      // AND no DI collapse for a moment, find the source_file with the
+      // most edges matching DI patterns, and report it. Falls back to
+      // the original "no neighbors" marker when no DI signal exists.
+      const diHint = _findDIFactorySiteHint(sym, direction, depth, r);
+      if (diHint) {
+        lines.push(`_(no direct neighbors found in direction=${direction}; DI factory site: ${diHint})_`);
+      } else {
+        lines.push(`_(no neighbors found in direction=${direction})_`);
+      }
     } else {
       for (const item of r.results) {
         const tags = [`relation=${item.relation || "?"}`, `depth=${item.depth}`];

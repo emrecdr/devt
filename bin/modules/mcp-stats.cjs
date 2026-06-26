@@ -158,28 +158,22 @@ function loadEntries(opts) {
   // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
   // returning 0 entries for every wildcard query and breaking the telemetry surface.
   const toolMatcher = opts.tool ? buildToolMatcher(opts.tool) : null;
-  // When --workflow-id is supplied AND matches the current workflow,
-  // union with the entire workflow_id_history[] chain — not just the
-  // 1-hop original anchor. Sessions that chain through three or more
-  // workflow_types (e.g. dev → code_review → debug → quick_implement)
-  // accumulate trace records tagged with each intermediate id; the 1-hop
-  // union saw current ↔ original but missed everything in between.
-  // Historical-id queries stay strict so a user citing a specific id gets
-  // only that id's records.
-  //
-  // Cal #32 rank #4 — `--strict-wid` opt-in for narrow-scope surfaces.
-  // Receipt #6 Q6: workflow's present_findings "Graphify activity" surface
-  // reported 27 calls (full history chain union back to Jun 9) instead of
-  // ~4 (current-wid only) because unbounded reset-soft chain made the union
-  // semantic "every chained session back to the first reset." The union is
-  // correct-by-design for token-report / debug forensics; wrong-by-design
-  // for "what did THIS run actually do." `--strict-wid` flips this surface
-  // to current-wid only; default behavior (history chain union) preserved
-  // for token-report + debug telemetry consumers.
+  // `--workflow-id` filter semantics (default = STRICT, current-wid only):
+  // returns trace records stamped with the exact supplied id. To union
+  // across the workflow_id_history[] chain (covers reset-soft rotations +
+  // workflow_type transitions through dev → code_review → debug), pass
+  // `--include-chain`. Operators reaching for `--workflow-id` typically
+  // want "what did THIS run do" — unbounded chain-union over-counts on
+  // long-running sessions with multiple reset-soft rotations, which biases
+  // the telemetry surface in field use. `--strict-wid` retained as
+  // deprecated alias so existing K170 smoke fixture + caller scripts
+  // continue to resolve (it now matches default behavior).
   let acceptedWorkflowIds = null;
   if (opts.workflow_id) {
     acceptedWorkflowIds = new Set([opts.workflow_id]);
-    if (!opts.strict_wid) {
+    // strict_wid is a deprecated no-op alias (default IS strict now);
+    // include_chain opts INTO the union behavior.
+    if (opts.include_chain && !opts.strict_wid) {
       try {
         const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
         if (fs.existsSync(wfPath)) {

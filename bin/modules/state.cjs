@@ -2636,6 +2636,69 @@ function assertVerifierRan() {
       age_seconds: freshness.age_seconds,
     };
   }
+  // Substance check (cal #36 #3 from receipt #9): existence-only gate
+  // accepted a synthetic verification.json with `{"status":"DONE"}` and
+  // nothing else. Verifier outputs MUST carry actual grade evidence —
+  // either substantive markdown (≥600 bytes after frontmatter, sentinel
+  // markers stripped) OR sidecar with non-empty axis grades / verdict
+  // structure. Without this, the gate fires "ok" on a well-formed empty
+  // shell — same [[CON-001]] form-vs-substance failure mode the verifier
+  // exists to prevent at the agent layer.
+  const SUBSTANCE_MIN_MD_BYTES = 600;
+  const STUB_RE = /\b(stub written|analysis in progress|placeholder|TODO\b)/i;
+  let substanceOk = false;
+  let substanceReason = "";
+  if (haveSidecar) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+      // Sidecar substance: either explicit axis grades OR findings OR
+      // revisions OR criteria_total > 0 (graded any axes). One of these
+      // must be a non-empty signal that the verifier actually ran a grade.
+      const hasGrades = parsed && (
+        (Array.isArray(parsed.findings) && parsed.findings.length > 0) ||
+        (Array.isArray(parsed.revisions) && parsed.revisions.length > 0) ||
+        (Array.isArray(parsed.axes) && parsed.axes.length > 0) ||
+        (typeof parsed.criteria_total === "number" && parsed.criteria_total > 0) ||
+        (typeof parsed.verdict === "string" && parsed.verdict.length > 0)
+      );
+      if (hasGrades) {
+        substanceOk = true;
+      } else {
+        substanceReason = "verification.json carries status but no grade evidence (findings/revisions/axes/criteria_total/verdict all absent or empty)";
+      }
+    } catch (e) {
+      substanceReason = `verification.json unparseable: ${e.message}`;
+    }
+  }
+  if (!substanceOk && haveMd) {
+    try {
+      const mdContent = fs.readFileSync(mdPath, "utf8");
+      // Strip YAML frontmatter + stub-marker lines, then check byte size
+      const stripped = mdContent
+        .replace(/^---\n[\s\S]*?\n---\n/, "")
+        .split("\n")
+        .filter(line => !STUB_RE.test(line))
+        .join("\n")
+        .trim();
+      if (Buffer.byteLength(stripped, "utf8") >= SUBSTANCE_MIN_MD_BYTES) {
+        substanceOk = true;
+      } else {
+        substanceReason = substanceReason
+          || `verification.md substance-stripped size ${Buffer.byteLength(stripped, "utf8")} < ${SUBSTANCE_MIN_MD_BYTES} bytes — verifier output is a stub/skeleton, not a grade`;
+      }
+    } catch (e) {
+      substanceReason = substanceReason || `verification.md unreadable: ${e.message}`;
+    }
+  }
+  if (!substanceOk) {
+    return {
+      ok: false,
+      verification_enabled: true,
+      sidecar_present: haveSidecar,
+      markdown_present: haveMd,
+      reason: `verification artifact exists but lacks substance: ${substanceReason}. Re-dispatch the verifier — a synthetic skeleton bypasses the safety net.`,
+    };
+  }
   return {
     ok: true,
     verification_enabled: true,

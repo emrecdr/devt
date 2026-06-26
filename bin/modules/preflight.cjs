@@ -761,8 +761,20 @@ function getProjectContextTokens(cfg) {
   return tokens;
 }
 
-function laneG(cfg, limit = 10) {
+function laneG(cfg, limit = 10, topic = null) {
+  // Token expansion (cal #36 #6 from receipt #9): the bare `cfg.git.provider`
+  // token under-retrieved CON-002 (bitbucket-pr-scoped-tier-unavailable) and
+  // REJ-002 (graphify-god-node-mechanical-con-proposals) on a Bitbucket +
+  // graphify review even though both docs were squarely relevant. FTS
+  // single-token recall is too narrow. Expand the query token set with
+  // topic.domains when available so domain-relevant CON/REJ surface even
+  // when the project-context token alone misses them.
   const tokens = getProjectContextTokens(cfg);
+  if (topic && Array.isArray(topic.domains)) {
+    for (const dom of topic.domains) {
+      if (typeof dom === "string" && dom.length > 0 && !tokens.includes(dom)) tokens.push(dom);
+    }
+  }
   if (tokens.length === 0) return [];
   const out = [];
   for (const token of tokens) {
@@ -1410,7 +1422,7 @@ function generate(taskText, opts) {
   // post-D keeps laneG's docs in the governing pool without inflating laneD's
   // depth-2 expansion. Effect: project-shape docs (e.g., CON-002 on Bitbucket)
   // always surface in memory_signal, regardless of task vocabulary.
-  const G = laneG(cfg);
+  const G = laneG(cfg, 10, topic);
   // G2 (cal #31.C) — Lane H — auto-memory + claude-mem-harvest READ path.
   // Surfaces user-curated decisions (~/.claude/projects/<projHash>/memory/*.md)
   // and orchestrator-staged claude-mem observations in the brief, closing the

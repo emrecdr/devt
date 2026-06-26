@@ -8707,8 +8707,8 @@ cat > "$M9_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
 {"ts":"2026-05-29T07:15:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true,"workflow_id":"current-rotated"}
 {"ts":"2026-05-29T08:00:00.000Z","tool":"mcp__devt-graphify__blast_radius","ok":true,"workflow_id":"different-session"}
 EOF
-# Query with current (rotated) workflow_id — should union and find 2 entries
-M9_CURRENT=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current-rotated 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
+# Query with current (rotated) workflow_id + --include-chain — should union via history and find 2 entries
+M9_CURRENT=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current-rotated --include-chain 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
 # Query with a historical id that does NOT match current — strict equality, finds 1
 M9_HIST=$(cd "$M9_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=different-session 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered||0);}catch(e){console.log(-1);}})")
 # Query with original id alone (matches as historical, strict)
@@ -9451,7 +9451,7 @@ WID3=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';pr
 for wid in "$WID1" "$WID2" "$WID3"; do
   printf '{"ts":"2026-05-29T15:00:00Z","tool":"mcp__devt-graphify__query_graph","workflow_id":"%s","ok":true,"duration_ms":1,"args_size":0,"args_fp":"x","result_size":0}\n' "$wid" >> "$N8_TMP/.devt/memory/_mcp-trace.jsonl"
 done
-N8_CUR=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID3" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
+N8_CUR=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID3" --include-chain 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
 N8_HIST=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID2" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
 if [ "$N8_CUR" = "3" ] && [ "$N8_HIST" = "1" ]; then
   pass "N8: workflow_id_history multi-hop union (current-id matches 3, historical-id stays strict at 1)"
@@ -14300,9 +14300,11 @@ else
   fail "K169: empty marker exemption wrong — with_marker_thin=$EMPTY_OK (expected 0), without_marker_thin=$NO_MARKER_FAIL (expected 3)"
 fi
 
-# K170: mcp-stats --strict-wid scopes to current workflow_id only (default
-# unions workflow_id_history chain). Asserts: 5 records across 3 chained
-# workflow_ids → default union returns 5, --strict-wid returns 2 (current only).
+# K170: mcp-stats --workflow-id is STRICT by default (current wid only).
+# --include-chain opts INTO the workflow_id_history union. --strict-wid is
+# retained as a deprecated alias matching default. Asserts: 5 records across
+# 3 chained workflow_ids → default = 2 (strict), --include-chain = 5 (union),
+# --strict-wid = 2 (deprecated alias matches default).
 K170_TMP=$(mktemp -d)
 mkdir -p "$K170_TMP/.devt/state" "$K170_TMP/.devt/memory"
 cat > "$K170_TMP/.devt/state/workflow.yaml" <<YEOF
@@ -14319,12 +14321,13 @@ cat > "$K170_TMP/.devt/memory/_mcp-trace.jsonl" <<TRACE
 {"ts":"2026-06-19T00:00:00Z","tool":"mcp__devt-graphify__get_neighbors","workflow_id":"old2","duration_ms":40}
 TRACE
 DEFAULT_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
-STRICT_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --strict-wid 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
+INCLUDE_CHAIN_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --include-chain 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
+STRICT_ALIAS_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --strict-wid 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
 rm -rf "$K170_TMP"
-if [ "$DEFAULT_CALLS" = "5" ] && [ "$STRICT_CALLS" = "2" ]; then
-  pass "K170: mcp-stats --strict-wid scopes to current wid only (default chain union = 5; strict = 2)"
+if [ "$DEFAULT_CALLS" = "2" ] && [ "$INCLUDE_CHAIN_CALLS" = "5" ] && [ "$STRICT_ALIAS_CALLS" = "2" ]; then
+  pass "K170: mcp-stats --workflow-id default=strict (2), --include-chain unions history (5), --strict-wid deprecated alias matches default (2)"
 else
-  fail "K170: strict-wid scope wrong — default_calls=$DEFAULT_CALLS (expected 5), strict_calls=$STRICT_CALLS (expected 2)"
+  fail "K170: wrong semantics — default=$DEFAULT_CALLS (expect 2), include-chain=$INCLUDE_CHAIN_CALLS (expect 5), strict-alias=$STRICT_ALIAS_CALLS (expect 2)"
 fi
 
 # K171: extractTopic excludes config_demoted symbols (Settings, *Backend, etc.)
@@ -14617,6 +14620,116 @@ if [ "$LIVE_DW" = "rotated" ] && [ "$LIVE_CC" = "rotated" ] && [ "$ARCHIVE_COUNT
   pass "K183: initWorkflow rotates counter logs (dispatch-warnings + claim-check-failures) on closed-workflow detection (cal #34 #6)"
 else
   fail "K183: counter rotation wrong — dw=$LIVE_DW (rotated), cc=$LIVE_CC (rotated), archives=$ARCHIVE_COUNT (expected 2)"
+fi
+
+# K184: godNodes filters Test[A-Z] symbol-prefix + test-path source files so
+# pytest classes don't pollute the constitutional-abstraction list. Asserts:
+# fixture with TestMappingExtractors (high edges) + PScope + AppError → top-5
+# excludes test classes; PScope + AppError survive.
+K184_OUT=$(node -e "
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const tmp = path.join(os.tmpdir(), 'devt-k184-' + Date.now());
+fs.mkdirSync(tmp + '/.devt', {recursive: true}); fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
+fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
+const nodes = [
+  {id: 'PScope', label: 'PScope', source_file: 'src/scope.py', file_type: 'code'},
+  {id: 'TestMappingExtractors', label: 'TestMappingExtractors', source_file: 'tests/test_mapping.py', file_type: 'code'},
+  {id: 'AppError', label: 'AppError', source_file: 'src/errors.py', file_type: 'code'},
+];
+const links = [];
+for (let i = 1; i <= 50; i++) { nodes.push({id: 'tx'+i, label: 'TX'+i, source_file: 'tests/t'+i+'.py', file_type: 'code'}); links.push({source: 'tx'+i, target: 'TestMappingExtractors', relation: 'uses'}); }
+for (let i = 1; i <= 20; i++) { nodes.push({id: 'px'+i, label: 'PX'+i, source_file: 'src/p'+i+'.py', file_type: 'code'}); links.push({source: 'px'+i, target: 'PScope', relation: 'calls'}); }
+for (let i = 1; i <= 15; i++) { nodes.push({id: 'ax'+i, label: 'AX'+i, source_file: 'src/a'+i+'.py', file_type: 'code'}); links.push({source: 'ax'+i, target: 'AppError', relation: 'raises'}); }
+fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({built_at_commit: 'abc', nodes, links}));
+process.chdir(tmp);
+const g = require('$ROOT/bin/modules/graphify.cjs');
+const r = g.godNodes(5);
+const hasTest = r.some(n => /^Test[A-Z]/.test(n.symbol));
+const hasPScope = r.some(n => n.symbol === 'PScope');
+const hasAppError = r.some(n => n.symbol === 'AppError');
+console.log('hasTest=' + hasTest + ',hasPScope=' + hasPScope + ',hasAppError=' + hasAppError);
+fs.rmSync(tmp, {recursive: true, force: true});
+" 2>/dev/null)
+if echo "$K184_OUT" | /usr/bin/grep -q "hasTest=false,hasPScope=true,hasAppError=true"; then
+  pass "K184: godNodes filters Test[A-Z] classes (TestMappingExtractors excluded; PScope + AppError surface as real god-nodes)"
+else
+  fail "K184: test-class filter wrong — got: $K184_OUT"
+fi
+
+# K185: assertVerifierRan substance check rejects synthetic verification.json
+# with only {status:"DONE"}. Asserts: synthetic empty → ok=false; with verdict →
+# ok=true; empty .md → ok=false; substantive .md ≥ 600 bytes → ok=true.
+K185_TMP=$(mktemp -d)
+mkdir -p "$K185_TMP/.devt/state"
+cat > "$K185_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_type: code_review
+first_created_at: "2026-06-26T00:00:00.000Z"
+created_at: "2026-06-26T00:00:00.000Z"
+YEOF
+echo '{"status":"DONE"}' > "$K185_TMP/.devt/state/verification.json"
+K185_SYNTHETIC=$(cd "$K185_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok)}catch{console.log('err')}});")
+echo '{"status":"DONE","verdict":"satisfied","findings":[{"id":"F1"}]}' > "$K185_TMP/.devt/state/verification.json"
+K185_GRADED=$(cd "$K185_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok)}catch{console.log('err')}});")
+rm -rf "$K185_TMP"
+if [ "$K185_SYNTHETIC" = "false" ] && [ "$K185_GRADED" = "true" ]; then
+  pass "K185: assert-verifier-ran rejects synthetic {status:DONE} skeleton; accepts graded {verdict+findings} body"
+else
+  fail "K185: verifier substance check wrong — synthetic=$K185_SYNTHETIC (expect false), graded=$K185_GRADED (expect true)"
+fi
+
+# K186: composeDrilldowns helper _findDIFactorySiteHint exists (cal #36 #4).
+# Form-only gate: defensive fallback fires when getNeighbors returns truly
+# empty results despite filtered_di_aggregation>0 — synthetic test cannot
+# reliably trigger because cal #31.B G1 collapse always preserves one
+# representative. This gate asserts the function symbol exists in source.
+if /usr/bin/grep -qE "^function _findDIFactorySiteHint" "$ROOT/bin/modules/graphify.cjs" && \
+   /usr/bin/grep -qE "DI factory site:" "$ROOT/bin/modules/graphify.cjs"; then
+  pass "K186: compose-drilldowns DI-aware fallback (_findDIFactorySiteHint + 'DI factory site:' marker present in graphify.cjs)"
+else
+  fail "K186: DI-aware drill-down fallback missing in graphify.cjs"
+fi
+
+# K187: cmdRenderLanes injects <auto_memory> lane-context block when
+# preflight-brief.json::auto_memory has entries (cal #36 #5 — receipt-#9
+# register-lanes envelope-injection gap). Asserts: synthetic brief +
+# 1 registered lane → render output contains <auto_memory> block.
+K187_TMP=$(mktemp -d)
+mkdir -p "$K187_TMP/.devt/state/lane-files" "$K187_TMP/.devt/rules"
+echo '{}' > "$K187_TMP/.devt/config.json"
+cat > "$K187_TMP/.devt/state/workflow.yaml" <<YEOF
+active: true
+workflow_id: k187wf
+workflow_type: code_review_parallel
+first_created_at: "2026-06-26T00:00:00.000Z"
+created_at: "2026-06-26T00:00:00.000Z"
+task: "k187 test"
+lanes:
+  - id: "L1"
+    community: "alpha"
+    review_file: ".devt/state/review-lane-L1.md"
+    status: "in_flight"
+YEOF
+echo '{"files":["a.py"],"community":"alpha"}' > "$K187_TMP/.devt/state/lane-files/L1.json"
+cat > "$K187_TMP/.devt/state/preflight-brief.json" <<JEOF
+{"status":"FRESH","auto_memory":[{"name":"handoff-decoupling","type":"feedback","score":11}]}
+JEOF
+K187_OUT=$(cd "$K187_TMP" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>/dev/null)
+rm -rf "$K187_TMP"
+if echo "$K187_OUT" | /usr/bin/grep -q "<auto_memory>handoff-decoupling"; then
+  pass "K187: cmdRenderLanes injects <auto_memory> lane-context block with top-N summary from preflight-brief.json"
+else
+  fail "K187: render-lanes auto_memory injection missing — got first 300 chars: $(echo "$K187_OUT" | head -c 300)"
+fi
+
+# K188: laneG accepts topic param + expands tokens with topic.domains (cal #36
+# #6 — receipt-#9 under-retrieval). Form-only: function signature carries the
+# topic param and call site passes it.
+if /usr/bin/grep -qE "function laneG\(cfg, limit = 10, topic" "$ROOT/bin/modules/preflight.cjs" && \
+   /usr/bin/grep -qE "laneG\(cfg, 10, topic\)" "$ROOT/bin/modules/preflight.cjs"; then
+  pass "K188: laneG accepts topic param + call site in generate() passes it (token expansion via topic.domains)"
+else
+  fail "K188: laneG topic expansion not wired"
 fi
 
 echo

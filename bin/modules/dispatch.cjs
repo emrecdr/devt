@@ -1194,6 +1194,28 @@ function _mergeConfigRulesExclude(flagList) {
   return Array.from(new Set([...configList, ...flagList]));
 }
 
+// Read preflight-brief.json::auto_memory and return a compact top-N
+// "name (type, score)" comma-joined summary suitable for an envelope tag.
+// Returns null when the brief is absent OR has no auto_memory entries.
+// Bounded length (top N entries, descriptions truncated) keeps the lane
+// envelope under the dispatch hygiene matcher's content budget.
+function _laneAutoMemorySummary(topN) {
+  try {
+    const fsLocal = require("fs");
+    const pathLocal = require("path");
+    const { findProjectRoot } = require("./config.cjs");
+    const briefPath = pathLocal.join(findProjectRoot(), ".devt", "state", "preflight-brief.json");
+    if (!fsLocal.existsSync(briefPath)) return null;
+    const brief = JSON.parse(fsLocal.readFileSync(briefPath, "utf8"));
+    const entries = Array.isArray(brief.auto_memory) ? brief.auto_memory : [];
+    if (entries.length === 0) return null;
+    const cap = Math.max(1, topN || 3);
+    return entries.slice(0, cap)
+      .map(e => `${e.name || "(unnamed)"} (${e.type || "?"}, score=${e.score || 0})`)
+      .join("; ");
+  } catch { return null; }
+}
+
 function cmdRenderLanes(target, options) {
   options = options || {};
   const stateMod = require("./state.cjs");
@@ -1238,12 +1260,24 @@ function cmdRenderLanes(target, options) {
       }
     } catch { /* sidecar missing or malformed — emit envelope without files block */ }
     const correlationId = `cid_${workflowIdPrefix}_${lane.id}`;
+    // Compact auto_memory summary injected per-lane (cal #36 #5 from
+    // receipt #9). The full auto_memory_json is already substituted via
+    // cmdRenderFilled in the base envelope (cal #32 Rank #2), but lanes
+    // produced via the hand-rolled register-lanes shortcut may discard
+    // base-envelope placeholders. Surfacing a top-N name+score summary in
+    // the lane-context block guarantees the bridge's output reaches each
+    // lane regardless of how operators customize the prose. Falls back
+    // to empty string when laneH found no matches.
+    const autoMemorySummary = _laneAutoMemorySummary(3);
     const blockLines = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
     ];
+    if (autoMemorySummary) {
+      blockLines.push(`    <auto_memory>${autoMemorySummary}</auto_memory>`);
+    }
     // M3 (cal #30.5) — optional directive blocks. Per
     // [[feedback_canonical_path_expressiveness]]: operators hand-roll when
     // canonical paths can't carry custom directives. These blocks let
