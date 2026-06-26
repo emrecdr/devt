@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.112.0] - 2026-06-26
+
+### Cal #35.A — Historical-attribution comment strip (R1 only)
+
+Slim-down pass on the K156-K183 smoke-gate preambles + cal #31-#34 state.cjs function header comments. Strips `cal #N` / `receipt #N` / `Wave X` / `G[0-9]+` attribution sentences from comment bodies while preserving WHY rationale, K-gate IDs, assertion shape, ADR references, and load-bearing technical context. Receipt #9 cited the "receipt #N cal #M" calibration history embedded in workflow + module bodies as both token-heavy and hard to execute correctly.
+
+**Files**: `scripts/smoke-test.sh` (-29 lines, 14,665 → 14,636); `bin/modules/state.cjs` (-32 lines, 6,325 → 6,293). Combined -61 lines (~0.3% of the 21K combined).
+
+**Scope discipline**: Limited to cal #31-#34 K-gates (K156-K183) + cal #31-#34 state.cjs function headers I added this session. Older comments (cal #1-#28 K-gates + older state.cjs functions) NOT touched — preserving context where I lack the confidence to draw the slim-down line safely. The author's own `feedback_no_version_refs_in_code` rule justifies the deletions; CHANGELOG + git history retain provenance.
+
+**Scope dropped from initial plan**:
+- R2 (collapse older verbose K-gate preambles): older K-gates outside cal #31-#34 range touch code I don't fully own; risk of context loss exceeded value
+- R3 (hoist nosemgrep comments to file-level): requires semgrep scanner-syntax verification I can't perform
+- K184 (anti-regression gate forbidding `cal #N` in comments): would itself flag the 40 remaining older-K-gate patterns I deliberately left; overkill for the value
+
+**Smoke**: 928 passed, 0 failed (unchanged). Locking 3/3 + graphify 37/37.
+
+**Cal #36 + #37 scoped from receipt #9 follow-up** (carryover): 4 tactical fixes (test-class god-node filter, DI-aware drill-down, mcp-stats default-strict, verifier substance check) + 2 dispatch-side fixes from Q3 (envelope auto_memory injection on register-lanes path, laneG FTS under-retrieval). Plus cal #37 architectural (workflow_id rotation audit log → lane tool-surface deny-list → review-context-init wrapper CLI).
+
 ## [0.111.0] - 2026-06-25
 
 ### Cal #34 — Receipt #8 on-rail validation + 4 evidence-driven refinements

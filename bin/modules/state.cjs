@@ -1389,13 +1389,10 @@ const RESET_SOFT_ROTATE_LOGS = [
   "claim-check-failures.jsonl",
 ];
 
-// Cal #32 rank #1 — review artifacts that MUST be evicted by resetSoft. Field
-// receipt #6 (greenfield, 2026-06-25): reset-soft preserved review-lane-*.md
-// and review.{md,json} from a prior session (cid_68768a3d), causing fresh-run
-// Lane F to fail to claim its canonical filename (wrote F-audit.md instead)
-// and leaving 5 stale prior-pass files in the dir. Without correlation-ID +
-// mtime discipline, the consolidator would have merged stale findings — a
-// silent-wrong-output hazard, not just untidy.
+// Review artifacts evicted by resetSoft. Without correlation-ID + mtime
+// discipline, stale review-lane-*.md / review.{md,json} from a prior
+// session would survive reset and the consolidator could merge stale
+// findings — silent-wrong-output hazard, not just untidy.
 //
 // Each pattern is a basename glob (anchored to .devt/state/ root, no
 // recursion). review-lane-*.md and review-lane-*.json cover canonical lane
@@ -1480,10 +1477,9 @@ function resetSoft() {
       }
     }
 
-    // Cal #32 rank #1 — evict review-instance artifacts that would otherwise
-    // collide with the fresh-run reviewer outputs (filename claim conflicts,
-    // stale-cid leakage into consolidation). See RESET_SOFT_EVICT_PATTERNS
-    // comment for safety rationale.
+    // Evict review-instance artifacts to prevent fresh-run collision
+    // (filename claim conflicts + stale-cid leakage into consolidation).
+    // See RESET_SOFT_EVICT_PATTERNS comment for safety rationale.
     const evicted = [];
     try {
       for (const fname of fs.readdirSync(stateDir)) {
@@ -1510,7 +1506,7 @@ function resetSoft() {
         workflow_id_history_depth: history.length,
         original_workflow_id: next.original_workflow_id,
         memory_layer: ".devt/memory/ untouched",
-        phase_artifacts: "impl-summary.md / graph-impact.md / test-summary.md untouched (review.md and review-lane-*.{md,json} evicted to prevent fresh-run collision — receipt #6 cal #32 rank #1)",
+        phase_artifacts: "impl-summary.md / graph-impact.md / test-summary.md untouched (review.md and review-lane-*.{md,json} evicted to prevent fresh-run collision)",
       },
     };
   } finally {
@@ -1555,14 +1551,11 @@ function stalenessCheck({ task, workflowType } = {}) {
   const ageStale = ageHours !== null && ageHours > 1;
   const stale = Boolean(taskChanged && ageStale);
 
-  // G4 (cal #31.D) — auto-reset recommendation. Receipt #5 Q2c: auto-fire is
-  // safe (resetSoft is non-destructive of valuable state) when ALL hold:
-  // task_changed AND age>24h AND workflow_type_changed. Conservative —
-  // task-change alone is too aggressive (typo retry), age>24h alone is too
-  // aggressive (legitimate long-running workflow), workflow_type-change alone
-  // is too aggressive (mode flip mid-session). All three together is
-  // unambiguous "new working session" — orchestrator can call
-  // `state auto-reset-if-stale` instead of prompting the operator.
+  // Auto-reset recommendation — non-destructive resetSoft auto-fire when
+  // ALL hold: task_changed AND age>24h AND workflow_type_changed. Any one
+  // alone is too aggressive (typo retry / long-running workflow / mid-
+  // session mode flip respectively). All three = unambiguous "new working
+  // session" — orchestrator can fire without prompting the operator.
   const ageVeryStale = ageHours !== null && ageHours > 24;
   const autoResetRecommended = Boolean(taskChanged && ageVeryStale && workflowTypeChanged);
 
@@ -1580,7 +1573,7 @@ function stalenessCheck({ task, workflowType } = {}) {
   return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask, workflow_type_changed: workflowTypeChanged, prior_workflow_type: priorWorkflowType, auto_reset_recommended: autoResetRecommended };
 }
 
-// G4 (cal #31.D) — auto-reset-if-stale orchestration helper. Combines
+// auto-reset-if-stale orchestration helper. Combines
 // stalenessCheck + resetSoft in one call when auto-reset conditions are met.
 // Returns { acted: true, ...resetSoftResult, staleness } when reset fired,
 // or { acted: false, staleness } when conditions weren't met (orchestrator
@@ -2047,11 +2040,10 @@ function assertGraphifyDecision() {
   // documents an oversized response was saved off-context for later reference.
   const DRILL_DOWN_MIN_BYTES = 200;
   const TRUNCATION_MARKER_RE = /(?:—\s*TRUNCATED\b|saved (?:to|at)\s+[/\w.-]+)/i;
-  // Cal #32 rank #3 — empty-marker exemption. Receipt #6 (greenfield 2026-06-25):
-  // gate forced operator to pad a legitimately-empty drill-down section
-  // (OAuthTokenService had 0 callers due to FastAPI DI blindness — see
-  // graphify-di-edge-gap). G7's `compose-drilldowns` CLI emits the canonical
-  // marker `_(no neighbors found in direction=in)_` for this case; the gate
+  // Empty-marker exemption. Without it, the gate forces operators to pad
+  // legitimately-empty drill-down sections (e.g. interface symbols with 0
+  // callers due to FastAPI DI blindness — see graphify-di-edge-gap).
+  // `compose-drilldowns` emits the canonical marker for this case; the gate
   // honors it as "validly considered, empty by data" — distinct from "skipped"
   // (no section at all) and "fake" (prose padding to clear 200 bytes).
   const EMPTY_MARKER_RE = /_\(no neighbors found in direction=(?:in|out|both)\)_/i;
@@ -2249,13 +2241,7 @@ function assertGraphifyDecision() {
   return result;
 }
 
-// Cal #33.A Rank #1 — Graphify ROI telemetry. Receipt #7 (greenfield
-// 2026-06-25): "graph drove zero findings" was the headline complaint, but
-// receipt user later self-corrected that the measurement was confounded —
-// substep 6 (drill-down execution) was skipped. The honest question: of
-// the drills that DID execute, how many produced a finding citation in
-// review.md? That's the actionable metric ("wasted-drill rate") — receipts
-// can use it to drive cal-N+ "drop drill direction X if waste >70%" levers.
+// Graphify ROI telemetry — wasted-drill rate metric.
 //
 // Inputs:
 //   - .devt/state/graph-impact.md → counts `^## Drill-down: <SYM> ...` headings
@@ -2270,9 +2256,9 @@ function assertGraphifyDecision() {
 //   wasted_drill_rate, status, ... }
 //
 // CRITICAL exclusion: when graph-impact.md is absent OR has 0 drill-down
-// sections, status="no_drills_executed" + waste rate = null (not 100%).
-// Receipt #7 explicitly required this — runs that skip substep 6 must NOT
-// be counted as 100% waste; that punishes graphify for the operator's skip.
+// sections, status="no_drills_executed" + waste rate = null (NOT 100%).
+// Runs that skip the drill-down phase must not be counted as waste — that
+// would punish graphify for the operator's skip, biasing the metric.
 function graphifyRoi() {
   const stateDir = getStateDir();
   const impactPath = path.join(stateDir, "graph-impact.md");
@@ -2295,15 +2281,12 @@ function graphifyRoi() {
     return { status: "error", reason: `graph-impact.md read failed: ${e.message}`, drills_executed: 0, drills_with_citation: 0, wasted_drill_count: null, wasted_drill_rate: null };
   }
 
-  // Cal #34 #3 — heading parser refinement per receipt #8 part 2. The strict
-  // anchor in the prior `/...$/` was a false-negative source: headings with
-  // non-canonical trailing suffixes like `[in, depth2]` (operator deviation
-  // from canonical) silently failed to parse → 3 valid drills reported as
-  // `no_drills_executed`. New shape: lenient match captures ANY heading
-  // starting with `## Drill-down:`; separately try to extract the canonical
-  // `[call: <8hex>]` suffix; surface non-canonical headings via
-  // `parse_failed_lines` telemetry per [[telemetry-on-reduction]] so the
-  // "heading present but unparseable" class can't hide as "no drills written."
+  // Heading parser — lenient match captures ANY heading starting with
+  // `## Drill-down:`, separately extracts the canonical `[call: <8hex>]`
+  // suffix when present, and surfaces non-canonical headings via
+  // `parse_failed_lines` telemetry. Prior strict `\s*$` anchor silently
+  // dropped headings with arbitrary trailing suffixes, hiding
+  // "heading present but unparseable" inside "no drills written."
   const drillHeadingLenientRe = /^##\s+Drill-down:\s*([^\n]+?)\s*$/gim;
   const callSuffixRe = /\[call:\s*([0-9a-f]{8})\]/i;
   const drillSections = [];
@@ -2339,14 +2322,12 @@ function graphifyRoi() {
     };
   }
 
-  // Cal #34 #3 — per-drill body analysis: corr_ids (existing) + yielded_data
-  // (NEW). yielded_data distinguishes "drill returned results: []" from
-  // "drill returned data nobody cited" — receipt #8 user: "current metric
-  // lumps two different wastes... they demand different fixes." Empty drills
-  // signal drill-selection problems (don't drill direction=in on interface
-  // symbols); uncited-non-empty signals drill-value problems.
+  // Per-drill body analysis: corr_ids + yielded_data. yielded_data
+  // distinguishes "drill returned results: []" from "drill returned data
+  // nobody cited" — they're different waste classes demanding different
+  // fixes (drill-selection vs drill-value). Collapsing them hides the lever.
   const corrIdRe = /([0-9a-f]{8})/g;
-  // Canonical empty marker from compose-drilldowns (cal #31.D G7) +
+  // Canonical empty marker from compose-drilldowns +
   // explicit "results: []" + parenthetical "(empty ...)" + "no usable"
   // patterns. If ANY match, drill yielded no data.
   const emptyMarkerRe = /(_\(no neighbors found in direction=(?:in|out|both)\)_|results\s*:\s*\[\s*\]|\(empty\b|no usable caller set)/i;
@@ -2365,14 +2346,12 @@ function graphifyRoi() {
     drillSections[i].yielded_data = !emptyMarkerRe.test(section);
   }
 
-  // Cal #34 #3 — 3-state citation per receipt #8 Q6(c): "strong" (corr_id
-  // match) / "weak" (symbol-name code-identifier match in finding body) /
-  // "none" (neither). The weak path catches the case where the MCP didn't
-  // emit correlation_ids (the receipt #8 case) — without it every drill
-  // reads as "none" by construction and the metric is biased to 100% waste.
-  // Symbol-name match constrained to backtick-wrapped + CamelCase code
-  // identifiers to avoid the false-positive "I-4 mentions CallBackend only
-  // because the file path contains it" failure receipt user flagged.
+  // 3-state citation: "strong" (corr_id match) / "weak" (symbol-name
+  // code-identifier match in finding body) / "none" (neither). The weak
+  // path catches MCPs that don't emit correlation_ids — without it the
+  // metric is biased to 100% waste by construction. Symbol-name match
+  // constrained to backtick-wrapped + CamelCase code identifiers (path-
+  // separator-aware boundaries) to avoid file-path false-positives.
   let citedIds = new Set();
   let reviewContent = "";
   const reviewExists = fs.existsSync(reviewPath);
@@ -2383,16 +2362,13 @@ function graphifyRoi() {
     while ((cm = citationRe.exec(reviewContent)) !== null) citedIds.add(cm[1]);
   }
 
-  // Cal #34 #3 — code-identifier-only weak match. Receipt #8 user concern:
-  // "I-4 mentions CallBackend only because the path contains it" false-
-  // positive. Solution: tighten the word-boundary regex to ALSO exclude
-  // path separators (`/`, `\`) and dots (`.`) in lookbehind/lookahead so
-  // `src/CallBackend.py` doesn't match `CallBackend` — the symbol must
-  // appear as a STANDALONE identifier, not as a path component. Backtick-
-  // wrapping (`CallBackend`) always matches. NO line-strip pre-pass —
-  // line-stripping over-fires on lines that mention the symbol legitimately
-  // AND a file path (separately) on the same line, which was the K182
-  // false-negative case.
+  // Code-identifier-only weak match. Tighten the word-boundary regex to
+  // ALSO exclude path separators (`/`, `\`) and dots in lookbehind/
+  // lookahead so `src/CallBackend.py` doesn't match symbol `CallBackend` —
+  // symbol must appear as a STANDALONE identifier, not as a path component.
+  // Backtick-wrapping always matches. NO line-strip pre-pass: line-strip
+  // over-fires when a line mentions the symbol legitimately AND contains
+  // a file path on the same line.
   let strongCount = 0;
   let weakCount = 0;
   for (const d of drillSections) {
@@ -2437,7 +2413,7 @@ function graphifyRoi() {
     wasted_drill_rate_weak: wastedRateWeak,  // permissive: includes symbol-name matches
     unique_citations_in_review: citedIds.size,
     parse_failed_lines: parseFailedLines,
-    // Cal #34 #3 per-drill: refactored from {cited: bool} to richer shape.
+    // Per-drill output: refactored from {cited: bool} to richer shape.
     // citation: "strong"|"weak"|"none" distinguishes corr_id-cited from
     // symbol-name-matched from neither. yielded_data: distinguishes drills
     // that returned data (could be cited) from drills that returned empty
@@ -5459,14 +5435,11 @@ function listLaneOutputs() {
     const parsed = new Date(anchorMatch[1].trim()).getTime();
     if (Number.isFinite(parsed)) anchorMs = parsed;
   }
-  // Cal #32 rank #1 part (c) — cid-match correctness defense. Receipt #6
-  // (greenfield 2026-06-25): consolidator reading stale review-lane-*.md
-  // files from a prior session (cid_68768a3d) nearly merged stale findings
-  // into the fresh report; cid+mtime discipline kept them out manually. F6
-  // stamps `cid_<workflow_id_prefix>_<lane_id>` into the dispatch envelope —
-  // when the lane reviewer writes its review file, the cid surfaces in the
-  // body. By extracting it here, the consolidator (and downstream filters)
-  // can `select(.cid_match != "foreign")` to defend against eviction misses.
+  // Cid-match correctness defense. Dispatch envelope stamps
+  // `cid_<workflow_id_prefix>_<lane_id>` and the lane reviewer's file body
+  // surfaces it. Extracting the prefix here lets the consolidator filter
+  // `select(.cid_match != "foreign")` to defend against eviction misses
+  // (stale review-lane-*.md from a rotated workflow leaking into a fresh run).
   const wfIdMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
   const currentWorkflowIdPrefix = wfIdMatch ? wfIdMatch[1].trim().slice(0, 8) : null;
   // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
@@ -6050,18 +6023,13 @@ function run(subcommand, args) {
     case "graphify-roi":
       return graphifyRoi();
     case "mark-claude-mem-skipped": {
-      // Cal #33.B-4 — operator-declarable skip. Receipt #7 Q1 part (c):
-      // claude-mem harvest is (iii)-conditional-on-session-state — when
-      // session memory already covers the scope (operator just reviewed
-      // the same PR 5x), marginal value of harvest is ~0. The
-      // assert-claude-mem-harvest gate already accepts `claude-mem-skipped.txt`
-      // as a satisfying marker; this CLI makes the operator escape valve
-      // discoverable and ensures the gate-compliant content shape
-      // (reason=<enum> [+ details=<explanation>]).
-      //
+      // Operator-declarable skip for claude-mem harvest. When session
+      // memory already covers the scope, marginal value of harvest is ~0.
+      // assert-claude-mem-harvest already accepts `claude-mem-skipped.txt`
+      // as a marker; this CLI makes the escape valve discoverable and
+      // ensures the gate-compliant content shape (reason=<enum> [+ details=]).
       // Default --reason=task_unrelated_to_history (the session-saturated
-      // case maps here — operator's session memory makes the harvest
-      // redundant). Other valid reasons (not_installed/mcp_unavailable/
+      // case). Other valid reasons (not_installed/mcp_unavailable/
       // corpus_empty) are gate-supported but operator-declared skip
       // wouldn't typically use them.
       const VALID_REASONS = new Set([

@@ -13875,24 +13875,15 @@ else
   fail "K155: hook table drift — missing_from_docs=[$K155_MISSING_FROM_DOCS] stale_in_docs=[$K155_STALE_IN_DOCS]"
 fi
 
-# K156: case-handler ⊃ default-case enumeration drift gate.
-# Empirically validated drift class: 4 incidents in 48 hours during the cal #30
-# series (cal #29 dispatch, c26b9ed state, f299a99 memory, 0c2bbff graphify) —
-# each a case handler shipped without updating its sibling "Unknown <mod>
-# subcommand. Use: A | B | C" enumeration. Operators running `<mod> <typo>`
-# get a stale subcommand list and can't discover the new handler.
-#
-# Gate walks every bin/modules/*.cjs containing both `^\s+case "X":` patterns
-# AND a matching "Unknown <mod>" enumeration line; extracts both sets;
-# asserts handlers ⊆ enumeration. Fails on any missing handler with the
-# module name + the gap. The 4 prior cal #30-cleanup fixes would have been
-# automatic if this gate had existed.
-# K156's ALLOW_NO_ENUM list — modules with case handlers but NO subcommand
-# enumeration by design (top-level dispatchers, not subcommand routers).
-# Any *.cjs module with handlers + no enum that is NOT in this set fails
-# K156. Inversion fix: silent-skip would re-introduce the original
-# drift class (handler added, enum forgotten). Explicit allow-list makes
-# the exception visible.
+# K156: case-handler ⊃ default-case enumeration drift gate. Walks every
+# bin/modules/*.cjs; extracts `case "X":` handlers + the sibling "Unknown
+# <mod> subcommand. Use: A | B | C" enumeration; asserts handlers ⊆ enum.
+# Catches the class where a new handler ships without updating its enum,
+# so `<mod> <typo>` returns a stale subcommand list missing the new entry.
+# ALLOW_NO_ENUM: modules with handlers but NO enumeration by design
+# (top-level dispatchers, not subcommand routers — init.cjs only).
+# Inversion: silent-skip would re-introduce the drift class; explicit
+# allow-list makes the exception visible.
 K156_RESULT=$(node -e "
 const fs = require('fs');
 const path = require('path');
@@ -13937,10 +13928,9 @@ else
   fail "K156: drift_count=$K156_DRIFT_COUNT missing_enum_count=$K156_MISSING_ENUM_COUNT — $(echo "$K156_DRIFTS" | cut -d'|' -f3-)"
 fi
 
-# K157 (C5 C2'): preflight-brief.json staleness banner fires when artifact mtime
-# is >4h older than workflow.yaml::created_at. Field receipt #2 Q3: operator
-# cited preflight-brief.json from a prior workflow as fresh; A2 staleness covers
-# workflow.yaml age but NOT .devt/state/ artifact age.
+# K157: preflight-brief.json staleness banner fires when artifact mtime is >4h
+# older than workflow.yaml::created_at (closes .devt/state/ artifact-age gap
+# beyond workflow.yaml-age check). Asserts: 8h-stale fixture → banner emitted.
 K157_TMP=$(mktemp -d)
 mkdir -p "$K157_TMP/.devt/state"
 cat > "$K157_TMP/.devt/state/workflow.yaml" <<EOF
@@ -13962,10 +13952,10 @@ else
   fail "K157: C2' preflight staleness banner not emitted on 8h-stale fixture"
 fi
 
-# K158 (C5 C3'): dispatch-hygiene-guard KILL message carries per-subagent
-# canonical CLI suggestion (precise alternative, not generic 3-command list).
-# Field receipt #2: operators saw the generic suggestion and chose
-# /devt:workflow when /devt:review was the actual canonical path.
+# K158: dispatch-hygiene-guard KILL message carries per-subagent canonical CLI
+# suggestion (precise alternative, not generic 3-command list). Asserts:
+# programmer + code-reviewer bare-prose dispatches → "canonical path for X"
+# string in KILL message.
 K158_TMP=$(mktemp -d)
 mkdir -p "$K158_TMP/.devt/state" "$K158_TMP/.devt"
 echo '{"dispatch_hygiene_mode":"block"}' > "$K158_TMP/.devt/config.json"
@@ -14106,12 +14096,9 @@ else
   fail "K162: laneH bridge not working — got: $K162_OUT"
 fi
 
-# K163 (cal #31.D G4): state auto-reset-if-stale fires when task+workflow_type
-# differ AND age > 24h. Receipt #5 Q2: KILL gates fired on 57-counter from
-# 9-day-old workflow blocked new review at substep 1. Auto-reset closes this
-# friction class without prompting (resetSoft is non-destructive of valuable
-# state). Tests: synthetic 30d-old workflow.yaml with task+type mismatch →
-# auto-reset fires; same input with matching type → no auto-fire.
+# K163: state auto-reset-if-stale fires when task+workflow_type differ AND age > 24h.
+# Asserts: synthetic 30d-old workflow.yaml with task+type mismatch → auto-reset fires;
+# same input with matching type → no auto-fire.
 K163_TMP=$(mktemp -d)
 mkdir -p "$K163_TMP/.devt/state"
 cat > "$K163_TMP/.devt/state/workflow.yaml" <<YEOF
@@ -14144,11 +14131,9 @@ else
   fail "K163: auto-reset trigger not working — acted=$ACTED (expected 1), noActed=$NOACTED (expected 0)"
 fi
 
-# K164 (cal #31.D G6): init review --bundle attaches post-init context-build
-# steps (preflight + memory + graphify impact-plan) into one CLI call. Receipt
-# #5 Q7b: setup friction was 12-14 CLI round-trips before Wave 1. Tests:
-# init review (no flag) returns NO bundle field; init review --bundle returns
-# bundle field with 4 expected sub-fields.
+# K164: init review --bundle attaches post-init context-build steps (preflight +
+# memory + graphify impact-plan) into one CLI call. Asserts: init review (no flag)
+# has NO bundle field; --bundle returns bundle with preflight_generated + errors[].
 K164_TMP=$(mktemp -d)
 mkdir -p "$K164_TMP/.devt"
 echo '{}' > "$K164_TMP/.devt/config.json"
@@ -14163,11 +14148,8 @@ else
   fail "K164: bundle flag not working — hasBundleDefault=$HAS_BUNDLE_NO (expected 0), hasBundleFlag=$HAS_BUNDLE_YES (expected 1)"
 fi
 
-# K165 (cal #31.D G7): graphify compose-drilldowns emits markdown-ready
-# drill-down sections for top-N symbols. Receipt #5 Q7a: orchestrator-
-# discipline failure forgot to append drill-downs to graph-impact.md, gate
-# correctly flagged but caused re-run. This CLI emits ready-to-pipe markdown.
-# Tests: synthetic graph + 1 target with 2 callers → output contains
+# K165: graphify compose-drilldowns emits markdown drill-down sections for top-N
+# symbols. Asserts: synthetic graph + 1 target with 2 callers → output contains
 # "## Drill-down:" header + both caller labels.
 K165_TMP=$(mktemp -d)
 mkdir -p "$K165_TMP/.devt" "$K165_TMP/graphify-out"
@@ -14183,11 +14165,9 @@ else
   fail "K165: compose-drilldowns not emitting expected markdown — got: $K165_OUT"
 fi
 
-# K166 (cal #32 rank #1 part b): reset-soft evicts review*.md, review*.json,
-# review-lane-*.{md,json}. Receipt #6: stale review artifacts collided with
-# fresh run (Lane F couldn't claim canonical filename; 5 stale prior-pass
-# files sat in dir). Tests: plant 5 review artifacts + 3 phase artifacts →
-# reset-soft → review artifacts gone, phase artifacts preserved intact.
+# K166: reset-soft evicts review*.{md,json} + review-lane-*.{md,json}. Asserts:
+# plant 5 review artifacts + 3 phase artifacts → reset-soft → review artifacts
+# gone, phase artifacts (impl-summary/test-summary/graph-impact) preserved intact.
 K166_TMP=$(mktemp -d)
 mkdir -p "$K166_TMP/.devt/state"
 cat > "$K166_TMP/.devt/state/workflow.yaml" <<YEOF
@@ -14219,9 +14199,9 @@ else
   fail "K166: reset-soft eviction wrong — evicted=$EVICTED_OK preserved=$PRESERVED_OK"
 fi
 
-# K167 (cal #32 rank #1 part c): listLaneOutputs emits cid_match field per
-# lane (current/foreign/absent). Receipt #6: consolidator without cid-keying
-# nearly merged stale findings from rotated workflow (cid_68768a3d).
+# K167: listLaneOutputs emits cid_match field per lane (current/foreign/absent)
+# so consolidator can filter stale-cid lane files. Asserts: 2 lanes with current
+# + foreign prefixes → cid_match=current and =foreign respectively.
 K167_TMP=$(mktemp -d)
 mkdir -p "$K167_TMP/.devt/state"
 cat > "$K167_TMP/.devt/state/workflow.yaml" <<YEOF
@@ -14247,11 +14227,10 @@ else
   fail "K167: cid_match wrong — L1=$L1_CID (expected current), L2=$L2_CID (expected foreign)"
 fi
 
-# K168 (cal #32 rank #2): dispatch buildSubstitutionTable reads auto_memory
-# from preflight-brief.json. Receipt #6 Q2: G2/laneH produced 8 entries in
-# the brief but envelope template never referenced auto_memory_json, so
-# lanes never received structured. Tests: synthetic brief with auto_memory
-# → render-filled output includes the auto_memory_json values.
+# K168: dispatch envelope propagates auto_memory from preflight-brief.json so
+# lanes receive memory-bridge content structurally (not just via claude-mem).
+# Asserts: synthetic brief with auto_memory entry → render-filled output
+# includes the entry's name.
 K168_TMP=$(mktemp -d)
 mkdir -p "$K168_TMP/.devt/state"
 echo "active: true
@@ -14278,10 +14257,10 @@ else
   fail "K168: auto_memory not in envelope — rendered head: $(echo "$RENDERED" | head -c 200)"
 fi
 
-# K169 (cal #32 rank #3): assertGraphifyDecision substance gate exempts
-# canonical empty marker. Receipt #6 Q4: gate forced operator to pad a
-# legitimately-empty drill-down section. Tests: graph-impact.md with short
-# drill-down containing empty marker → gate ok; without marker → gate flags.
+# K169: assertGraphifyDecision substance gate exempts the canonical empty
+# marker `_(no neighbors found in direction=...)_` so legitimately-empty
+# DI-blind drills don't force operator-padded prose. Asserts: 3 short drills
+# WITH marker → 0 thin sections; without marker → 3 thin sections flagged.
 K169_TMP=$(mktemp -d)
 mkdir -p "$K169_TMP/.devt/state" "$K169_TMP/.devt" "$K169_TMP/graphify-out"
 echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K169_TMP/.devt/config.json"
@@ -14321,9 +14300,9 @@ else
   fail "K169: empty marker exemption wrong — with_marker_thin=$EMPTY_OK (expected 0), without_marker_thin=$NO_MARKER_FAIL (expected 3)"
 fi
 
-# K170 (cal #32 rank #4): mcp-stats --strict-wid scopes to current workflow_id
-# only (default unions workflow_id_history chain). Receipt #6 Q6: union-by-
-# design × unbounded reset-soft chain reported 27 calls vs ~4 actual.
+# K170: mcp-stats --strict-wid scopes to current workflow_id only (default
+# unions workflow_id_history chain). Asserts: 5 records across 3 chained
+# workflow_ids → default union returns 5, --strict-wid returns 2 (current only).
 K170_TMP=$(mktemp -d)
 mkdir -p "$K170_TMP/.devt/state" "$K170_TMP/.devt/memory"
 cat > "$K170_TMP/.devt/state/workflow.yaml" <<YEOF
@@ -14348,11 +14327,10 @@ else
   fail "K170: strict-wid scope wrong — default_calls=$DEFAULT_CALLS (expected 5), strict_calls=$STRICT_CALLS (expected 2)"
 fi
 
-# K171 (cal #32 G3 strengthening): extractTopic excludes config_demoted from
-# topic.symbols when real-symbol count >= FLOOR (10). Receipt #6 Q1: cal #31
-# demotion was non-binding due to cap headroom; effect_size still inflated
-# by Settings/Environment god-node fan-out. Tests: 10 real + 4 config →
-# config_demoted_excluded=true; 3 real + 4 config → config_demoted_excluded=false.
+# K171: extractTopic excludes config_demoted symbols (Settings, *Backend, etc.)
+# entirely when real-symbol count >= FLOOR (10), backfills when sparse. Prevents
+# config-enum effect_size inflation. Asserts: 10 real + 4 config →
+# config_demoted_excluded=true (no config in symbols); 3 real + 4 → backfilled.
 K171_OUT=$(node -e "
 const p = require('$ROOT/bin/modules/preflight.cjs');
 const strong = p.extractTopic('task', { gitDiffSymbols: ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta','Iota','Kappa','Settings','EmailBackend','LogLevel','Environment'] });
@@ -14365,14 +14343,10 @@ else
   fail "K171: config exclusion wrong — got: $K171_OUT"
 fi
 
-# K172 (cal #32.A follow-up — greenfield receipt 2026-06-25): graphify
-# getHyperedgesContaining surfaces hyperedge rationale field. Receipt:
-# rationale was durable in graph.json::hyperedges[].rationale but devt's
-# projection dropped it; standard graphify query/MCP tools don't traverse
-# hyperedges so devt's direct-read was the only discoverable path —
-# leakage at the projection meant reviewers couldn't see WHY N files
-# belonged together. Tests: synthetic hyperedge with rationale →
-# getHyperedgesContaining result includes rationale field.
+# K172: graphify getHyperedgesContaining surfaces hyperedge `rationale` field
+# at the projection (was being silently dropped despite being durable in
+# graph.json::hyperedges[]). Asserts: synthetic hyperedge with rationale →
+# getHyperedgesContaining result includes the rationale string.
 K172_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k172-' + Date.now());
@@ -14397,10 +14371,10 @@ else
   fail "K172: rationale not surfaced — got: $K172_OUT"
 fi
 
-# K173 (cal #33.A Rank #1): state graphify-roi computes wasted-drill rate
-# correctly across 3 scenarios. Receipt #7 explicit requirement:
-# runs where substep 6 was skipped (no graph-impact.md OR 0 drill sections)
-# MUST NOT be counted as 100% waste — wasted_drill_rate=null.
+# K173: state graphify-roi computes wasted-drill rate. CRITICAL: runs that
+# skipped the drill phase (no graph-impact.md OR 0 drill sections) MUST return
+# wasted_drill_rate=null (NOT 100% — confound-safe design). Asserts: no
+# graph-impact.md → no_drills_executed/null; 3 drills + 2/3 citations → 0.333.
 K173_TMP=$(mktemp -d)
 mkdir -p "$K173_TMP/.devt/state"
 # Case A: no graph-impact.md → status=no_drills_executed, rate=null
@@ -14426,10 +14400,9 @@ else
   fail "K173: ROI telemetry wrong — no_drill=$NO_DRILL (expected no_drills_executed,null), measured=$MEASURED (expected measured,3,2,0.333)"
 fi
 
-# K174 (cal #33.A Rank #2): code-review.md impact-plan tier registry includes
-# pr_scoped_diff branch for non-GitHub PRs. Receipt #7: Bitbucket projects
-# "permanently get the coarser fallback" — pr_scoped_diff closes that gap by
-# wiring diff-symbols + blast_radius through the new tier branch.
+# K174: code-review.md impact-plan tier registry includes `pr_scoped_diff` tier
+# branch for non-GitHub PRs (Bitbucket pr_scoped equivalent — wires diff-symbols
+# + blast_radius). Asserts: TIER="pr_scoped_diff" literal exists in workflow.
 K174_OUT=$(/usr/bin/grep -cE 'TIER="pr_scoped_diff"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "$K174_OUT" -ge "1" ]; then
   pass "K174: code-review.md impact-plan decision tree includes pr_scoped_diff tier branch for non-GitHub PRs (Bitbucket gets pr_scoped-equivalent richness)"
@@ -14437,10 +14410,10 @@ else
   fail "K174: pr_scoped_diff tier missing — got count: $K174_OUT"
 fi
 
-# K175 (cal #33.A Rank #3): getSymbolCollisions filters ghost nodes
-# (empty source_file AND null location) + emits ghost_nodes_filtered counter.
-# Receipt #7: pure (c)-with-counter — silent filter would mask upstream
-# canonical-ID merge bug; visible counter keeps fix motivation alive.
+# K175: getSymbolCollisions filters ghost nodes (empty source_file AND null
+# location) + emits VISIBLE ghost_nodes_filtered counter (silent filter would
+# mask upstream AST↔semantic merge bug). Asserts: 4 collisions (2 real + 2
+# ghosts) → count=2, ghosts=2.
 K175_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k175-' + Date.now());
@@ -14469,10 +14442,10 @@ else
   fail "K175: ghost-node filter wrong — got: $K175_OUT"
 fi
 
-# K176 (cal #33.B-1): graphify freshness() emits unverifiable_freshness=true
-# when graph.json lacks built_at_commit anchor. Receipt #7 finding #3:
-# staleness gate was "trusting a freshness it can't confirm" — false-fresh
-# leak risk. Defensive surface so downstream gates can refuse to trust.
+# K176: graphify freshness() emits unverifiable_freshness=true when graph.json
+# lacks built_at_commit anchor (defensive surface against false-fresh leaks
+# in staleness gates). Asserts: graph.json without built_at_commit →
+# built_at=null, unverifiable=true, lag=null.
 K176_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k176-' + Date.now());
@@ -14492,12 +14465,10 @@ else
   fail "K176: unverifiable_freshness not emitted — got: $K176_OUT"
 fi
 
-# K177 (cal #33.B-2): preflight-brief sidecar suggested_reading is {files,
-# symbols} object (split). Receipt #7 #5: previously flat array mixed
-# paths with bare symbol labels — split makes consumer-shape unambiguous.
-# Note: this gate is partially redundant with the preflight-brief shape
-# validator already updated above; K177 specifically asserts the split
-# contract independently as a discoverable Cal #33.B-2 marker.
+# K177: preflight-brief sidecar suggested_reading is {files, symbols} object
+# (split from flat array that mixed paths with bare symbol labels). Asserts:
+# generate() output has suggested_reading.files + suggested_reading.symbols
+# as separate arrays.
 K177_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k177-' + Date.now());
@@ -14519,11 +14490,10 @@ else
   fail "K177: suggested_reading shape wrong — got: $K177_OUT"
 fi
 
-# K178 (cal #33.B-3): code-review.md scope_check has operator-explicit
-# short-circuit branch. Receipt #7 Q1: "your prompt explicitly said
-# 'split between multiple agents for parallel.' Asking would re-ask an
-# answered question. Clean (iii)." Detect SCOPE_CHECK_DECISION variable
-# init as the canonical marker of the short-circuit logic existence.
+# K178: code-review.md scope_check has operator-explicit short-circuit
+# (parallel/single intent in REVIEW_SCOPE text → auto-writes answer, skips
+# redundant AskUserQuestion). Asserts: SCOPE_CHECK_DECISION="parallel"
+# literal exists in workflow.
 K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "$K178_OUT" -ge "1" ]; then
   pass "K178: code-review.md scope_check has operator-explicit short-circuit (parallel/single intent detected pre-AskUserQuestion)"
@@ -14531,11 +14501,9 @@ else
   fail "K178: scope_check short-circuit missing — got count: $K178_OUT"
 fi
 
-# K179 (cal #33.B-4): state mark-claude-mem-skipped CLI writes gate-compliant
-# format (reason=<enum> [+ details=]). Receipt #7 Q1(c): claude-mem harvest
-# is (iii)-conditional-on-session-state; this CLI exposes the operator
-# escape valve with structured content. Test: valid reason writes file
-# + assertClaudeMemHarvest accepts it; invalid reason rejected.
+# K179: state mark-claude-mem-skipped CLI writes gate-compliant content format
+# (reason=<enum> + optional details=). Asserts: valid reason writes file +
+# assertClaudeMemHarvest accepts it; invalid reason rejected with error.
 K179_TMP=$(mktemp -d)
 mkdir -p "$K179_TMP/.devt/state"
 echo "active: true" > "$K179_TMP/.devt/state/workflow.yaml"
@@ -14551,9 +14519,9 @@ else
   fail "K179: mark-claude-mem-skipped wrong — valid=$VALID_RESULT (true), gate=$GATE_VERDICT (true), invalid=$INVALID_RESULT (false)"
 fi
 
-# K180 (cal #34 #1): config.cjs default stale_threshold lowered 30→10 per
-# receipt #8 Q4 ("30 commits of drift is a lot of wrong caller-sets... 10 ≈
-# a sprint's drift"). Tiered policy presence in workflows/code-review.md.
+# K180: config.cjs default stale_threshold = 10 (lowered from 30 — "a sprint's
+# drift" — point where blast-radius reliability degrades) + workflows/code-review.md
+# carries tiered policy + --no-refresh escape hatch.
 K180_DEFAULT=$(node -e "const c = require('$ROOT/bin/modules/config.cjs'); console.log((c.getMergedConfig().graphify || {}).stale_threshold)" 2>/dev/null)
 K180_TIERED=$(/usr/bin/grep -cE "silent-warn band|STALENESS_TIER" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "$K180_DEFAULT" = "10" ] && [ "$K180_TIERED" -ge "2" ]; then
@@ -14562,9 +14530,10 @@ else
   fail "K180: stale_threshold or tiered policy wrong — default=$K180_DEFAULT (expected 10), tiered_marker_count=$K180_TIERED (expected >=2)"
 fi
 
-# K181 (cal #34 #5b): blastRadius emits noise_telemetry + raw_direct_count +
-# raw_indirect_count when test-path / DI-aggregation filters fire. Receipt #8:
-# indirect_dependents had 150+ symbols dominated by test fixtures + DI noise.
+# K181: blastRadius emits noise_telemetry (filtered_test_path +
+# filtered_di_aggregation) + raw_direct_count + raw_indirect_count so tier-
+# routing-shrink is auditable. Asserts: 10-node fixture → raw_direct=10,
+# filtered_test_path=1, filtered_di_aggregation=7.
 K181_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k181-' + Date.now());
@@ -14598,9 +14567,10 @@ else
   fail "K181: blastRadius noise filter wrong — got: $K181_OUT (expected raw_direct=11,tp=1,di=7)"
 fi
 
-# K182 (cal #34 #3): graphifyRoi emits 3-state citation + yielded_data +
-# wasted_drill_rate_weak + parse_failed_lines. Receipt #8 part 2: strict
-# 100% / weak 67% (1/3) reveals "citation plumbing is broken" diagnostic.
+# K182: graphifyRoi emits 3-state per-drill citation (strong/weak/none) +
+# yielded_data + dual rate (strict + weak) so the diagnostic delta is visible.
+# Asserts: 3 drills with 1 cited-by-name → strict=1.0, weak=0.667,
+# cb_citation=weak, cb_yielded_data=false.
 K182_TMP=$(mktemp -d)
 mkdir -p "$K182_TMP/.devt/state"
 cat > "$K182_TMP/.devt/state/graph-impact.md" <<EOF
@@ -14623,9 +14593,10 @@ else
   fail "K182: ROI parser refinement wrong — got: $K182_OUT"
 fi
 
-# K183 (cal #34 #6): initWorkflow rotates dispatch-warnings.jsonl +
-# claim-check-failures.jsonl when closed prior workflow detected. Receipt #8
-# Q5: closes same-day-churn KILL-gate gap for block-mode users.
+# K183: initWorkflow rotates dispatch-warnings.jsonl + claim-check-failures.jsonl
+# when closed prior workflow detected (closes same-day-churn KILL-gate gap for
+# block-mode users). Asserts: closed workflow + 2 counter logs → init rotates
+# both to archive sidecars.
 K183_TMP=$(mktemp -d)
 mkdir -p "$K183_TMP/.devt/state" "$K183_TMP/.devt/rules"
 echo '{}' > "$K183_TMP/.devt/config.json"
