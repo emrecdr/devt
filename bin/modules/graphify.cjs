@@ -1916,7 +1916,111 @@ function _avgPrefixSimilarity(filesA, filesB) {
 // empty when it is, graph_lag_commits lets the orchestrator decide whether
 // to re-index before trusting the answer, and total_matches preserves the
 // "limit truncated" signal.
-function symbolsInFiles(diffFiles, limit = 10) {
+// Normalize a path for cross-source matching: backslash→slash, strip leading
+// "./", collapse repeated slashes. Used by _pathSuffixMatch.
+function _normPath(p) {
+  return String(p || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
+}
+
+// Segment-boundary suffix match. True when a===b OR one is a path-segment
+// suffix of the other — so `app/services/x/models.py` matches the graph's
+// `x/models.py` (package-relative) and `/abs/app/services/x/models.py`
+// (absolute), but NOT `app/services/y/models.py` (different module). Replaces
+// the prior `path.basename()` match that pulled symbols from EVERY same-named
+// file across the repo. graphify source_file rooting is uncontrolled (varies
+// by graphify version: repo-relative / absolute / package-relative), so an
+// exact full-path compare would break matching on absolute-path graphs — see
+// the devt-stays-general guardrail.
+function _pathSuffixMatch(a, b) {
+  const na = _normPath(a);
+  const nb = _normPath(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.endsWith("/" + nb)) return true;
+  if (nb.endsWith("/" + na)) return true;
+  return false;
+}
+
+// Defensive source_location → line-number parse. graphify versions emit
+// varying shapes ("L33", "33", 33, {line:33}, {start_line:33}, {start:33},
+// nested). Returns the line number, or null when unparseable. Callers MUST
+// treat null as "unknown — keep the symbol" (never drop a symbol just because
+// its location couldn't be parsed; that would silently lose real targets).
+function _parseSourceLine(loc) {
+  if (loc == null) return null;
+  if (typeof loc === "number") return Number.isFinite(loc) ? loc : null;
+  if (typeof loc === "string") {
+    const m = loc.match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+  if (typeof loc === "object") {
+    for (const k of ["line", "start_line", "start", "lineno", "row", "begin"]) {
+      const v = loc[k];
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string") { const m = v.match(/(\d+)/); if (m) return parseInt(m[1], 10); }
+      if (v && typeof v === "object") { const inner = _parseSourceLine(v); if (inner != null) return inner; }
+    }
+  }
+  return null;
+}
+
+// Parse `git diff -U0 <baseRef>...HEAD` into per-file new-file changed-line
+// ranges: Map<normalizedPath, Array<[startLine, endLine]>>. Hunk-scoping uses
+// this so only symbols DEFINED on changed lines anchor blast_radius — not
+// every symbol in a touched file (the root cause of god-node burial: a 1-line
+// tweak to errors.py surfaced AppError because AppError is defined there).
+// Best-effort: git failure / no baseRef → empty map → callers degrade to
+// no hunk-scoping (full-path-matched set, still far better than basename).
+function _changedHunkRanges(baseRef) {
+  const ranges = new Map();
+  if (!baseRef || !/^[A-Za-z0-9_./~^@-]{1,100}$/.test(baseRef)) return ranges;
+  try {
+    const { execFileSync } = require("child_process");
+    const out = execFileSync("git", ["diff", "-U0", `${baseRef}...HEAD`], {
+      cwd: findProjectRoot(), encoding: "utf8", timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"], maxBuffer: 8 * 1024 * 1024,
+    });
+    let curFile = null;
+    for (const line of out.split("\n")) {
+      if (line.startsWith("+++ ")) {
+        const p = line.slice(4).replace(/^b\//, "").trim();
+        curFile = (p === "/dev/null") ? null : _normPath(p);
+        if (curFile && !ranges.has(curFile)) ranges.set(curFile, []);
+      } else if (curFile && line.startsWith("@@")) {
+        // "@@ -a,b +c,d @@" → new-file changed range [c, c+d-1]; d defaults to 1
+        const m = line.match(/\+(\d+)(?:,(\d+))?/);
+        if (m) {
+          const start = parseInt(m[1], 10);
+          const count = m[2] !== undefined ? parseInt(m[2], 10) : 1;
+          if (count > 0) ranges.get(curFile).push([start, start + count - 1]);
+        }
+      }
+    }
+  } catch { /* git unavailable / no diff → empty map (no hunk-scoping) */ }
+  return ranges;
+}
+
+// Find changed-line ranges for a graph source_file path, tolerant of rooting
+// differences between the graph path and the diff path (same suffix-match
+// logic as node matching). Returns the ranges array or null.
+function _hunkRangesForFile(nsf, hunkRanges) {
+  if (hunkRanges.has(nsf)) return hunkRanges.get(nsf);
+  for (const [k, v] of hunkRanges) {
+    if (_pathSuffixMatch(nsf, k)) return v;
+  }
+  return null;
+}
+
+function _lineInRanges(line, rangesForFile, slack) {
+  if (line == null || !Array.isArray(rangesForFile)) return false;
+  const s = slack || 0;
+  for (const [lo, hi] of rangesForFile) {
+    if (line >= lo - s && line <= hi + s) return true;
+  }
+  return false;
+}
+
+function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
   if (!Array.isArray(diffFiles) || diffFiles.length === 0) {
     return { symbols: [], reason: "no input files", graph_lag_commits: null, total_matches: 0 };
   }
@@ -1932,19 +2036,47 @@ function symbolsInFiles(diffFiles, limit = 10) {
     lagCommits = (f && typeof f.lag_commits === "number") ? f.lag_commits : null;
   } catch { /* leave null */ }
   const { nodeMap, inc, out } = loaded.cache.adj;
-  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
-  const matchedBasenames = new Set();
+  const wantPaths = diffFiles.map(f => _normPath(f));
+  const matchedFiles = new Set();   // normalized graph source_file paths that matched a diff file
+  // Hunk-scoping: when a base ref is supplied, restrict to symbols whose
+  // definition line falls in a changed hunk. Graceful degradation throughout:
+  // empty hunk map (no baseRef / git failure) → no scoping; per-file no-hunks
+  // → keep all that file's symbols; unparseable source_location → keep symbol.
+  const hunkRanges = opts.baseRef ? _changedHunkRanges(opts.baseRef) : new Map();
+  const hunkScopingActive = hunkRanges.size > 0;
+  const HUNK_SLACK = 5;   // decorators/multi-line def signatures above the def line
+  const seen = new Set(); // dedup by symbol label (blast_radius args are names)
+  let hunkFilteredCount = 0;
   const results = [];
   for (const [id, node] of nodeMap) {
     const sf = node && node.source_file;
-    if (!sf || !wantBasenames.has(path.basename(sf))) continue;
-    matchedBasenames.add(path.basename(sf));
+    if (!sf) continue;
+    const nsf = _normPath(sf);
+    if (!wantPaths.some(wp => _pathSuffixMatch(nsf, wp))) continue;
+    matchedFiles.add(nsf);
     const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
     if (_isFileNode(node, degree)) continue;
     if (_isConceptNode(node)) continue;
     if (_isJsonKeyNode(node)) continue;
+    // Hunk-scope: keep the symbol only if its def-line is in a changed hunk.
+    // When the file has changed-line ranges AND the symbol's line is known
+    // AND it's outside every range → drop (it's "in a touched file" but not
+    // "what changed"). Otherwise keep.
+    if (hunkScopingActive) {
+      const fileRanges = _hunkRangesForFile(nsf, hunkRanges);
+      if (fileRanges && fileRanges.length > 0) {
+        const ln = _parseSourceLine(node.source_location);
+        if (ln != null && !_lineInRanges(ln, fileRanges, HUNK_SLACK)) {
+          hunkFilteredCount++;
+          continue;
+        }
+      }
+    }
+    const label = node.label || id;
+    if (seen.has(label)) continue;   // dedup (fixes EventBusDep-twice)
+    seen.add(label);
     results.push({
-      symbol: node.label || id,
+      symbol: label,
       source_file: sf,
       edge_count: degree,
     });
@@ -1963,12 +2095,19 @@ function symbolsInFiles(diffFiles, limit = 10) {
   const fallbackSymbols = [];
   let fallbackFilesScanned = 0;
   for (const file of diffFiles) {
-    const base = path.basename(file);
-    if (matchedBasenames.has(base)) continue; // graph had nodes — no fallback needed
+    const nf = _normPath(file);
+    // Skip files the graph already covered (any matched source_file
+    // suffix-matches this diff file). For a genuinely new/un-indexed file,
+    // no graph node matched → regex-extract its declared symbols.
+    let covered = false;
+    for (const mf of matchedFiles) { if (_pathSuffixMatch(mf, nf)) { covered = true; break; } }
+    if (covered) continue;
     const extracted = _extractSymbolsFromFile(file);
     if (extracted.length === 0) continue;
     fallbackFilesScanned++;
     for (const sym of extracted) {
+      if (seen.has(sym)) continue;   // dedup across graph-results + fallback
+      seen.add(sym);
       fallbackSymbols.push({
         symbol: sym,
         source_file: file,
@@ -1998,7 +2137,19 @@ function symbolsInFiles(diffFiles, limit = 10) {
   } else {
     reason = totalMatches > cap ? `truncated to limit=${cap} of ${totalMatches} total matches` : "ok";
   }
-  return { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches };
+  const envelope = { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches };
+  // matched_files: normalized graph source_file paths that suffix-matched a
+  // diff file. Consumed by computeGraphifyImpactPlan to reconcile the
+  // "N files not indexed" caveat against reality (a diff file is genuinely
+  // un-indexed only if NO graph node matched it — not just because git flags
+  // it as added). hunk telemetry surfaced per the telemetry-on-reduction
+  // principle: never drop symbols silently.
+  envelope.matched_files = Array.from(matchedFiles);
+  if (hunkScopingActive) {
+    envelope.hunk_scoped = true;
+    if (hunkFilteredCount > 0) envelope.hunk_filtered = hunkFilteredCount;
+  }
+  return envelope;
 }
 
 // G5 (cal #31.B) — Identifier-introducing keyword extractor. Covers

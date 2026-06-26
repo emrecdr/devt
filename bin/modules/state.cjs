@@ -2571,7 +2571,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
 
   // Diff symbols extractor — wraps `graphify symbols-in-files` against
   // the current diff. Only invoked on tier branches that need it.
-  const getDiffSymbols = (limit) => {
+  const getDiffSymbols = () => {
     let symbols = [];
     let newFilesCount = 0;
     let totalFilesCount = 0;
@@ -2586,14 +2586,35 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
         totalFilesCount = files.length;
         if (files.length > 0) {
           const graphifyMod = require("./graphify.cjs");
-          const res = graphifyMod.symbolsInFiles(files, limit);
+          // Pass baseRef → enables hunk-scoping (keep only symbols DEFINED on
+          // changed lines, so god-nodes in touched files don't bury the
+          // actually-changed providers). limit=25: with hunk-scoping the
+          // candidate set is small, but the bump protects against truncation
+          // when a large changed set survives scoping.
+          const res = graphifyMod.symbolsInFiles(files, 25, { baseRef: primaryBranch });
           symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
-          // count "Added" files specifically for caveat
+          // Q2 caveat reconciliation: an added file is "not indexed" ONLY when
+          // NO graph node matched it — not merely because git flags it added.
+          // The prior static --diff-filter=A count overstated ~37× (receipt
+          // #10: 37/38 added .py files WERE indexed at HEAD; only an
+          // ignore-patterned migration was genuinely absent). Reconcile the
+          // added-file list against the actual matched_files the extractor
+          // returned.
+          const matched = Array.isArray(res && res.matched_files) ? res.matched_files : [];
           const addRes = spawnSync("git", ["diff", "--name-status", "--diff-filter=A", `${primaryBranch}...HEAD`], {
             cwd: proot, encoding: "utf8", timeout: 5000,
           });
           if (addRes.status === 0) {
-            newFilesCount = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean).length;
+            const added = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean)
+              .map(l => l.replace(/^A\s+/, "").trim()).filter(Boolean);
+            const norm = (p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "");
+            const matchedNorm = matched.map(norm);
+            const suffixMatch = (a, b) => a === b || a.endsWith("/" + b) || b.endsWith("/" + a);
+            // Count added files NOT covered by any matched graph source_file.
+            newFilesCount = added.filter(a => {
+              const na = norm(a);
+              return !matchedNorm.some(m => suffixMatch(m, na));
+            }).length;
           }
         }
       }
@@ -2617,7 +2638,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     tool = "mcp__graphify__get_pr_impact";
     args = { pr_number: Number(prNum) };
   } else if (prNum && gitProvider !== "github") {
-    const ds = getDiffSymbols(20);
+    const ds = getDiffSymbols();
     if (ds.symbols.length > 0) {
       tier = "pr_scoped_diff";
       tool = "mcp__plugin_devt_devt-graphify__blast_radius";
@@ -2643,7 +2664,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     // text-search. blast_radius with symbols whose source_file is in the
     // diff produces actual structural impact; query_graph(text=SCOPE) only
     // returns keyword matches that don't reflect the call graph.
-    const ds = getDiffSymbols(10);
+    const ds = getDiffSymbols();
     if (ds.symbols.length > 0) {
       tier = "symbol_anchored";
       tool = "mcp__plugin_devt_devt-graphify__blast_radius";

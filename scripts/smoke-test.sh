@@ -14787,6 +14787,47 @@ else
   fail "K190: compute-impact-plan wrong — A=$K190_A (expect skip), B=$K190_B (expect pr_scoped), C=$K190_C (expect symbol_anchored), dropped=$K190_DROPPED (expect present)"
 fi
 
+# K191: symbolsInFiles signal-quality overhaul (cal #38.A from receipt #10).
+# Three asserts in one synthetic graph: (1) full-path suffix match kills
+# cross-module basename pollution — a same-named symbol in a DIFFERENT module
+# does not leak in; (2) dedup — a duplicate label appears once; (3) hunk-scoping
+# via a real git diff — a god-node defined OUTSIDE the changed hunk is dropped
+# while the changed symbol survives.
+K191_TMP=$(mktemp -d)
+mkdir -p "$K191_TMP/.devt" "$K191_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K191_TMP/.devt/config.json"
+cd "$K191_TMP"
+git init -q; git config user.email t@t.t; git config user.name t
+printf 'class Foo:\n    pass\n# f\n# f\n# f\n# f\n# f\n# f\nclass AppError:\n    pass\n' > models.py
+git add -A; git commit -qm base >/dev/null 2>&1
+K191_BASE=$(git rev-parse HEAD)
+printf 'class Foo:\n    x = 1\n# f\n# f\n# f\n# f\n# f\n# f\nclass AppError:\n    pass\n' > models.py
+git add -A; git commit -qm change >/dev/null 2>&1
+node -e "
+const fs=require('fs');
+const nodes=[
+  {id:'a.Foo',label:'Foo',source_file:'svc/external/models.py',source_location:'L1',file_type:'code'},
+  {id:'b.Foo',label:'Foo',source_file:'svc/agenda/models.py',source_location:'L1',file_type:'code'},
+  {id:'AppError',label:'AppError',source_file:'models.py',source_location:'L9',file_type:'code'},
+  {id:'FooLocal',label:'FooLocal',source_file:'models.py',source_location:'L1',file_type:'code'},
+  {id:'Dup',label:'Dup',source_file:'models.py',source_location:'L2',file_type:'code'},
+  {id:'Dup2',label:'Dup',source_file:'models.py',source_location:'L2',file_type:'code'},
+];
+const links=[];
+for(let i=0;i<200;i++){nodes.push({id:'e'+i,label:'E'+i,source_file:'z.py',file_type:'code'});links.push({source:'e'+i,target:'AppError',relation:'raises'});}
+fs.writeFileSync('graphify-out/graph.json',JSON.stringify({built_at_commit:'abc',nodes,links}));
+"
+# Test cross-module + dedup (no baseRef): query svc/external/models.py → only that Foo, Dup once
+K191_XMOD=$(node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.symbolsInFiles(['svc/external/models.py']);const l=r.symbols.map(s=>s.symbol);console.log(l.filter(x=>x==='Foo').length);" 2>/dev/null)
+# Test hunk-scoping (baseRef): models.py changed at L1-2, AppError defined L9 → dropped
+K191_HUNK=$(node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.symbolsInFiles(['models.py'],25,{baseRef:'$K191_BASE'});const l=r.symbols.map(s=>s.symbol);console.log('foolocal='+(l.includes('FooLocal')?'1':'0')+',apperr='+(l.includes('AppError')?'1':'0')+',dup='+l.filter(x=>x==='Dup').length);" 2>/dev/null)
+cd "$ROOT"; rm -rf "$K191_TMP"
+if [ "$K191_XMOD" = "1" ] && echo "$K191_HUNK" | /usr/bin/grep -q "foolocal=1,apperr=0,dup=1"; then
+  pass "K191: symbolsInFiles full-path-match (cross-module killed) + dedup (Dup once) + hunk-scoping (AppError outside changed hunk dropped, FooLocal kept)"
+else
+  fail "K191: signal-quality wrong — xmod_Foo=$K191_XMOD (expect 1), hunk=$K191_HUNK (expect foolocal=1,apperr=0,dup=1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.116.0] - 2026-06-27
+
+### Cal #38.A — symbolsInFiles signal-quality overhaul (receipt #10 root cause)
+
+Receipt #10 (greenfield) reframed the entire improvement axis: *"the plumbing is now genuinely strong (gates/telemetry/consolidation are real assets) — the weakness moved upstream to signal quality at the input (symbol extraction)."* The headline bug: `blast_radius` was fed AppError/License/UUID (the top god-nodes) instead of the actually-changed providers (VicasaCallProvider, indexed at in_degree 33 but never extracted). Greenfield read the code and surfaced the root cause + two bugs neither of us had flagged.
+
+**Three confirmed bugs in `symbolsInFiles` (graphify.cjs:1919):**
+1. **Cross-module basename pollution** — matched by `path.basename(sf)`, so a changed `models.py` pulled symbols from *every* `models.py` across all services.
+2. **Sort by `edge_count` DESC + cap** — god-nodes (1000+ edges) filled the limit, burying mid-degree changed symbols. Degree measures *ubiquity*, anti-correlated with discriminating signal.
+3. **No dedup** — duplicate labels (EventBusDep twice).
+
+**Fixes (generalized per the devt-stays-general guardrail — greenfield's project-specific suggestions adapted to devt's uncontrolled `source_file`/`source_location` formats):**
+
+- **Segment-boundary full-path suffix match** (`_pathSuffixMatch`) — `a===b || a.endsWith('/'+b) || b.endsWith('/'+a)`. Kills cross-module pollution while tolerating graph-path rooting differences (repo-relative / absolute / package-relative). Greenfield's literal "exact full-path compare" would have broken matching on absolute-path graphs — the suffix match is the general fix.
+- **Hunk-scoping** (`_changedHunkRanges` via `git diff -U0` + `_parseSourceLine` defensive parse) — keeps only symbols whose definition line falls in a changed hunk (±5 slack for decorators/multi-line sigs). God-nodes now appear *only when their own definition changed*. Graceful degradation: no baseRef / git failure → no scoping; unparseable `source_location` → keep the symbol (never drop a real target for a missing line). `source_location` parser handles `"L33"` / `"33"` / `33` / `{line}` / `{start_line}` / nested — devt doesn't control graphify's emit format.
+- **Dedup** by symbol label across graph-results + diff-hunk-fallback.
+- **Q2 caveat reconciliation** (`computeGraphifyImpactPlan`) — the "N files not indexed" caveat now reconciles the added-file list against the actual `matched_files` the extractor returned, instead of a blind `git diff --diff-filter=A` count. Receipt #10 proved the static count overstated ~37× (37/38 added .py files were indexed at HEAD; only an ignore-patterned migration was genuinely absent).
+- **Cap bump 10→25** on the review path (with hunk-scoping shrinking the candidate set, the cap rarely binds, but protects against truncation when a large changed set survives).
+- **Telemetry** (`hunk_scoped`, `hunk_filtered`, `matched_files`) surfaced per [[telemetry-on-reduction]].
+
+**Validated end-to-end** with real git-diff fixtures: AppError defined at L9, change at L1-2 → AppError dropped, changed Foo survives; cross-module agenda/models.py Foo excluded; EventBusDep deduped; caveat reconciles to "1 of 2" not "2 of 2."
+
+**Drift-guard stack now 98-deep K94-K191.** Smoke gate K191 asserts all three (full-path / dedup / hunk-scoping) with a real git repo fixture.
+
+**Cal #38 carryover** (next sessions): #38.B (shared auto-derived god-node stoplist for warnings + new-file fallback + unified inc+out degree source), #38.C (incremental lane writes + query_graph AND-then-OR fallback + disk preflight), #38.D (comment-hygiene: strip greenfield-api provenance refs + genericize comment-examples + smoke fixtures, per [[devt-stays-general]] + [[feedback-no-version-refs-in-code]]).
+
 ## [0.115.0] - 2026-06-26
 
 ### Cal #37 #3 — devt state compute-impact-plan wrapper CLI
