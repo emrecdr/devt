@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.120.0] - 2026-06-27
+
+### Cal #37 #2 — lane state-mutation guard (concurrent-rotation corruption fix)
+
+The last architectural piece of the cal #37 cluster. Field evidence (the cal #37 #1 audit log was built to diagnose exactly this): during a parallel-lane review, 8 subagents rotated the shared `workflow_id` mid-run (1f871314 → f67240bb), corrupting trace attribution. `workflow.yaml` — especially `workflow_id` — is orchestrator-owned; a lane subagent must never rotate/reset/init it.
+
+**Enforcement is at the CLI, not a hook** — a subagent's Bash runs the same `node devt-tools.cjs state update`, so a CLI self-guard works regardless of whether PreToolUse:Bash hooks fire for subagents (unverifiable). The discriminator is sound: during a fan-out the orchestrator is *blocked* awaiting `Task()` returns, so any workflow_id rotation while a subagent is "running" is necessarily a lane subagent.
+
+`state update` (workflow_id first-activation + type-transition), `state reset`, `state reset-soft`, and `init workflow` (closed-workflow strip) now call `_guardConcurrentRotation()`, which reads the `subagent-status.sh`-maintained `.devt/state/status.json`: if a subagent is marked `running` with a fresh timestamp, the mutation throws (block mode). Key properties:
+- **`state update-lane` is never guarded** — it's the safe lane path, mutates only `lanes[].status` in-place, never touches `workflow_id`. Lanes update their status normally.
+- **Stale "running" entries are ignored** — a crashed subagent whose SubagentStop never fired (timestamp > 30 min) doesn't permanently wedge the orchestrator.
+- **No status.json (the common case) never blocks** — the guard is best-effort signal, not a hard precondition.
+- **`config.lane_state_guard`** = `block` (default) / `warn` (stderr advisory, proceed) / `off`. Same block-default rationale as `dispatch_hygiene_mode`: silent corruption is hard to diagnose post-hoc, so prevention beats a warning.
+
+Validated end-to-end: fresh-running → `state update`/`reset-soft` throw; `update-lane` allowed; completed/stale/no-file → allowed. `test-locking.cjs` (20-worker concurrent state writes) stays green — the guard doesn't impede legitimate concurrency.
+
+### Fix: K194 aborted the suite under `set -e` (shipped latent in v0.119.0)
+
+K194's `K194_HITS=$(grep ... | wc -l)` exits non-zero on **0 matches** — which is the *pass* case — and `pipefail` + `set -euo pipefail` turned that into a full-suite abort after K193 (K194/K195/test-gates/result never ran). v0.119.0's CI was red as a result. Wrapped the grep in `{ ...; || true; }` so a clean tree yields `0` without aborting. (K195's expected-failure command substitutions got the same `|| true` treatment.)
+
+**Drift-guard stack now 102-deep K94-K195.** New gate K195 asserts the guard's full matrix (fresh-running blocks update+reset-soft; update-lane allowed; no-file + stale allowed).
+
+**Cal #37 complete** (#1 audit log, #2 state-mutation guard, #3 compute-impact-plan wrapper).
+
 ## [0.119.0] - 2026-06-27
 
 ### Cal #38.D — stays-general comment hygiene + regression meta-gate

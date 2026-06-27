@@ -896,6 +896,49 @@ function releaseLock(lockFile) {
 // point: rotations BY resetSoft are themselves the events being audited).
 // Append-only + best-effort: any I/O failure is swallowed (audit logging
 // must NEVER prevent the underlying mutation from succeeding).
+// Concurrent-mutation guard. workflow.yaml (especially workflow_id) is
+// orchestrator-owned. During a parallel-lane fan-out the orchestrator is
+// blocked awaiting Task() returns, so any workflow_id rotation / reset / init
+// while a subagent is still RUNNING is necessarily a lane subagent mutating
+// shared state — the concurrent-rotation failure where parallel lanes rotated
+// workflow_id mid-run and corrupted trace attribution. Lanes update their own
+// status via `state update-lane` (which never touches workflow_id), so this
+// guard never blocks legitimate lane work. Reads the subagent-status.sh-
+// maintained status.json; a "running" entry older than the fresh window is a
+// crash leak (SubagentStop never fired) and is ignored.
+const _ACTIVE_SUBAGENT_FRESH_MS = 30 * 60 * 1000;
+function _activeSubagentNames() {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(getStateDir(), "status.json"), "utf8"));
+    const agents = (data && data.agents) || {};
+    const now = Date.now();
+    const active = [];
+    for (const [name, info] of Object.entries(agents)) {
+      if (!info || info.status !== "running") continue;
+      const ts = Date.parse(info.timestamp || "");
+      if (Number.isFinite(ts) && (now - ts) > _ACTIVE_SUBAGENT_FRESH_MS) continue;
+      active.push(name);
+    }
+    return active;
+  } catch { return []; }
+}
+function _guardConcurrentRotation(operation) {
+  let mode = "block";
+  try {
+    const cfg = require("./config.cjs").getMergedConfig();
+    if (cfg && typeof cfg.lane_state_guard === "string") mode = cfg.lane_state_guard;
+  } catch { /* default block */ }
+  if (mode === "off") return;
+  const active = _activeSubagentNames();
+  if (active.length === 0) return;
+  const msg = `lane_state_guard: refusing ${operation} — ${active.length} subagent(s) still running (${active.slice(0, 4).join(", ")}). workflow.yaml + workflow_id are orchestrator-owned; a lane subagent must update only its own status via 'state update-lane <id> status=...', never rotate/reset/init the shared workflow (this is the concurrent-rotation corruption). Override: config.lane_state_guard=warn|off.`;
+  if (mode === "warn") {
+    try { process.stderr.write(msg + "\n"); } catch { /* best-effort */ }
+    return;
+  }
+  throw new Error(msg);
+}
+
 function _logWorkflowIdRotation({ prev_id, new_id, source }) {
   if (!new_id || prev_id === new_id) return; // no-rotation case (idempotent updates)
   try {
@@ -1049,6 +1092,7 @@ function updateState(keyValues, opts = {}) {
     // must NOT reset, otherwise artifacts written before the transition look
     // stale to gates running after).
     if (current.active === true && !current.created_at) {
+      _guardConcurrentRotation("state update (workflow_id first-activation)");
       const now = new Date().toISOString();
       current.created_at = now;
       const prevId = current.workflow_id || null;
@@ -1068,6 +1112,7 @@ function updateState(keyValues, opts = {}) {
       // /devt:workflow would write trace records with the old workflow_id.
       // first_created_at + original_workflow_id are NOT touched here — they
       // anchor the session, not the logical workflow.
+      _guardConcurrentRotation(`state update (workflow_type transition ${previousWorkflowType}->${current.workflow_type})`);
       const prevId = current.workflow_id;
       current.created_at = new Date().toISOString();
       current.workflow_id = require("crypto").randomUUID();
@@ -1356,6 +1401,7 @@ function resetState() {
   if (!fs.existsSync(dir)) {
     return { ok: true, cleaned: dir };
   }
+  _guardConcurrentRotation("state reset (hard)");
   const archiveRuns = getArchiveRuns();
   const lockFile = acquireLock();
   let archivedTo = null;
@@ -1464,6 +1510,7 @@ const RESET_SOFT_EVICT_PATTERNS = [
 function resetSoft() {
   const filePath = getWorkflowPath();
   const stateDir = getStateDir();
+  _guardConcurrentRotation("state reset-soft");
   const lockFile = acquireLock();
   try {
     const prev = fs.existsSync(filePath)
@@ -6609,6 +6656,8 @@ function run(subcommand, args) {
 module.exports = {
   run,
   diskCheck,
+  _guardConcurrentRotation,
+  _activeSubagentNames,
   parseSimpleYaml,
   serializeSimpleYaml,
   readState,

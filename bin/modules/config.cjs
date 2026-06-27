@@ -57,6 +57,21 @@ const DEFAULTS = {
   // dispatch_hygiene_mode — block-default makes the audit-trail review
   // involuntary rather than perceived-urgency optional.
   claim_check_mode: "block",
+  // Lane state-mutation guard. workflow.yaml (especially workflow_id) is
+  // orchestrator-owned. During a parallel-lane fan-out the orchestrator is
+  // blocked awaiting Task() returns, so any workflow_id rotation / reset /
+  // init while a subagent is still running is necessarily a lane subagent
+  // mutating shared state — the failure where parallel lanes rotated
+  // workflow_id mid-run and corrupted trace attribution. Lanes update their
+  // own status via `state update-lane` (which never touches workflow_id).
+  //   block (default) — updateState rotation paths + resetState + resetSoft
+  //     + initWorkflow strip throw when a fresh "running" subagent exists in
+  //     .devt/state/status.json (subagent-status.sh-maintained).
+  //   warn — emit a stderr advisory but proceed.
+  //   off — no-op.
+  // Same block-default rationale as dispatch_hygiene_mode: the corruption is
+  // silent + hard to diagnose post-hoc, so prevention beats a warning.
+  lane_state_guard: "block",
   // graphify_decision_mode gates the drill-down skip case in
   // assert-graphify-decision. block: when tier ∈ {symbol_anchored,
   // bulk_scoped} AND 0 get_neighbors MCP calls AND 0 drill-down sections,

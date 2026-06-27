@@ -14902,11 +14902,54 @@ fi
 # with no existing code) is legitimate and deliberately NOT matched. Prevents
 # regression of the cal #38.D decoupling pass.
 K194_PAT="green""field-api|/Projects/green""field|Vicasa""CallProvider|Test""MappingExtractors|Nettie""Calendar"
-K194_HITS=$(/usr/bin/grep -rniE "$K194_PAT" "$ROOT/bin/modules/" "$ROOT/workflows/" "$ROOT/agents/" 2>/dev/null | wc -l | tr -d ' ')
+# `|| true`: 0 matches is the PASS case but grep exits 1 there, which
+# pipefail+set -e would otherwise treat as a suite abort.
+K194_HITS=$({ /usr/bin/grep -rniE "$K194_PAT" "$ROOT/bin/modules/" "$ROOT/workflows/" "$ROOT/agents/" 2>/dev/null || true; } | wc -l | tr -d ' ')
 if [ "$K194_HITS" = "0" ]; then
   pass "K194: stays-general guardrail — zero field-test-project coupling (name/path/symbols) in bin/modules + workflows + agents"
 else
   fail "K194: field-test-project coupling regressed — $K194_HITS hit(s) in product surfaces; fixes must generalize, not hardcode the field-test project"
+fi
+
+# K195: lane state-mutation guard (cal #37 #2). workflow.yaml + workflow_id are
+# orchestrator-owned; a lane subagent rotating/resetting them mid-fan-out is
+# the concurrent-rotation corruption. The CLI self-guards: when a FRESH
+# "running" subagent exists in status.json, `state update` (workflow_id
+# rotation) + `state reset-soft` THROW, while `state update-lane` (the safe
+# lane path that never touches workflow_id) is allowed. With no status.json
+# (normal op) nothing is blocked. Asserts: (1) fresh-running → first-activation
+# blocked, (2) fresh-running → reset-soft blocked, (3) update-lane allowed,
+# (4) no status.json → allowed, (5) stale running (crash leak) → allowed.
+K195_TMP=$(mktemp -d)
+mkdir -p "$K195_TMP/.devt/state"
+echo '{}' > "$K195_TMP/.devt/config.json"
+K195_NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+K195_OLD=$(node -e "console.log(new Date(Date.now()-2*3600*1000).toISOString().replace(/\.[0-9]+Z/,'Z'))")
+_k195det() { node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(/lane_state_guard/.test(s)?'BLOCKED':'allowed'))"; }
+# (4) no status.json → first-activation allowed. `|| true` on each: a BLOCKED
+# command correctly exits 1, which pipefail+set -e would otherwise treat as a
+# suite abort — the detector already captured the verdict before exit matters.
+K195_NOFILE=$(cd "$K195_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
+# (1) fresh running → first-activation blocked (fresh dir)
+K195_T1=$(mktemp -d); mkdir -p "$K195_T1/.devt/state"; echo '{}' > "$K195_T1/.devt/config.json"
+printf '{"agents":{"devt_code-reviewer":{"status":"running","timestamp":"%s"}}}' "$K195_NOW" > "$K195_T1/.devt/state/status.json"
+K195_BLOCK1=$(cd "$K195_T1" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
+# (2) fresh running → reset-soft blocked (activate first w/o status.json, then add it)
+K195_T2=$(mktemp -d); mkdir -p "$K195_T2/.devt/state"; echo '{}' > "$K195_T2/.devt/config.json"
+(cd "$K195_T2" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x >/dev/null 2>&1) || true
+printf '{"agents":{"devt_x":{"status":"running","timestamp":"%s"}}}' "$K195_NOW" > "$K195_T2/.devt/state/status.json"
+K195_BLOCK2=$(cd "$K195_T2" && node "$ROOT/bin/devt-tools.cjs" state reset-soft 2>&1 | _k195det || true)
+# (3) update-lane allowed even with fresh running
+K195_LANE=$(cd "$K195_T2" && node "$ROOT/bin/devt-tools.cjs" state update-lane L1 status=substance_pass 2>&1 | _k195det || true)
+# (5) stale running → first-activation allowed
+K195_T5=$(mktemp -d); mkdir -p "$K195_T5/.devt/state"; echo '{}' > "$K195_T5/.devt/config.json"
+printf '{"agents":{"devt_x":{"status":"running","timestamp":"%s"}}}' "$K195_OLD" > "$K195_T5/.devt/state/status.json"
+K195_STALE=$(cd "$K195_T5" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
+rm -rf "$K195_TMP" "$K195_T1" "$K195_T2" "$K195_T5"
+if [ "$K195_NOFILE" = "allowed" ] && [ "$K195_BLOCK1" = "BLOCKED" ] && [ "$K195_BLOCK2" = "BLOCKED" ] && [ "$K195_LANE" = "allowed" ] && [ "$K195_STALE" = "allowed" ]; then
+  pass "K195: lane state-mutation guard — fresh-running blocks update(first-activation)+reset-soft; update-lane allowed; no-status-file + stale-running allowed"
+else
+  fail "K195: lane_state_guard wrong — nofile=$K195_NOFILE(exp allowed), block1=$K195_BLOCK1(exp BLOCKED), block2=$K195_BLOCK2(exp BLOCKED), lane=$K195_LANE(exp allowed), stale=$K195_STALE(exp allowed)"
 fi
 
 echo

@@ -602,6 +602,12 @@ function initWorkflow(task, pluginRoot, initVerb) {
         } else {
           // Closed (active: false) or missing active marker — strip stamps
           // and lanes so updateState treats this as a fresh activation.
+          // Concurrent-mutation guard (cal #37 #2): a lane subagent must
+          // never strip/rotate the shared workflow_id mid-fan-out. Throws when
+          // a fresh "running" subagent exists (block mode); the orchestrator
+          // only inits at workflow boundaries when no subagent is active.
+          try { require("./state.cjs")._guardConcurrentRotation("init workflow (strip closed workflow_id)"); }
+          catch (e) { if (/lane_state_guard/.test(e.message)) throw e; }
           // Cal #37 #1 — audit-log the pre-strip workflow_id so post-hoc
           // forensics can pair "init stripped X" with the eventual
           // updateState "created Y" entry. Without this, the strip-and-
