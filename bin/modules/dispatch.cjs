@@ -381,7 +381,7 @@ function buildSubstitutionTable(agent) {
   // correlation_id from the MCP _meta envelope). Conditional: only inject
   // when graph-impact.md is actually present. In graphify-skip flows the
   // protocol would have nothing to cite and would just waste tokens.
-  // Closes greenfield's audit finding #5 "WHAT was called, not WHAT
+  // Closes a field audit finding: "WHAT was called, not WHAT
   // signal was delivered" — converts graphify from an opaque dependency
   // into an auditable signal source (mcp-stats --correlation-id=<id>
   // resolves citations back to the specific MCP call).
@@ -842,7 +842,7 @@ function cmdWarnings(args) {
   }
   let filtered = sinceTs ? entries.filter((e) => e.ts && e.ts >= sinceTs) : entries;
   // Default-filter healthy task_output_bytes noise.
-  // Field signal: greenfield session emitted 246 task_output_bytes events,
+  // Field signal: a field session emitted 246 task_output_bytes events,
   // 0 actionable (all signal:healthy) — drowning the actionable raw_dispatch
   // count in the summary view. The full series stays available for the
   // stuck-detector consumer at state.cjs:3000 (reads the file directly,
@@ -1323,7 +1323,7 @@ function cmdRenderLanes(target, options) {
   };
   // Disk preflight (cal #38.C, pre-fan-out surface) — warn-only. This is the
   // moment right before N lane transcripts start accumulating, the exact spot
-  // greenfield's run hit ENOSPC mid-lane. Surface a low-disk signal so the
+  // a field run hit ENOSPC mid-lane. Surface a low-disk signal so the
   // operator can free space before fanning out; never blocks the dispatch.
   try {
     const _disk = require("./state.cjs").diskCheck();

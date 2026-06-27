@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.119.0] - 2026-06-27
+
+### Cal #38.D — stays-general comment hygiene + regression meta-gate
+
+The cal #38 arc field-tested against an external project ("greenfield-api"). An audit confirmed devt's *logic* was 100% general (zero field-project specifics in any executable path), but ~111 references to the field project's name + distinctive symbol names had accumulated in **comments** and **smoke-test fixtures** — cosmetic coupling that made the "is devt tailored to one project?" question harder to answer at a glance. This pass removes it and institutionalizes the [[devt-stays-general]] guardrail as CI.
+
+**Decoupled across all product + CI surfaces:**
+- **Production `.cjs` (26 refs across 7 modules)** — field-project provenance in comments genericized to "field-observed" / "a field project" / "field evidence"; field-specific symbol-name examples (`CallBackend`, `VicasaCallProvider`, `PScope`, `TestMappingExtractors`, …) replaced with generic placeholders (`PaymentService`, `BaseError`, …). The non-obvious *why* each comment documents is preserved; only the project-specific names + dates drop.
+- **Workflows + agents (5 refs)** — "field-validated against greenfield-api" → "field-validated"; the generic-term "greenfield" (a fresh codebase with no existing patterns) in `research-task.md` is legitimate and kept.
+- **smoke-test.sh (81 comment refs + 18 fixture symbols)** — calibration-provenance comments genericized; synthetic fixture symbol names renamed to generic ones (`CallBackend`→`PaymentService`, `TestMappingExtractors`→`TestWidgetMapper` keeping the `Test*` prefix K184 exercises, `PScope`→`AuthScope`, `external_calls`→`billing`) in lockstep with their assertions. Zero pass/fail strings touched.
+- **README (2 refs)** — measurement-note provenance + the K184 fixture-name mention genericized.
+
+**New meta-gate K194** — CI-enforces the guardrail: greps `bin/modules` + `workflows` + `agents` for the field project's name/path + three distinctive symbol names (pattern assembled from fragments so the gate can't self-trip). Any reintroduction fails the build. The generic-term "greenfield" is deliberately not matched. This converts the stays-general guardrail from a manual audit into a structural invariant — the same pattern as K155/K156 meta-gates.
+
+**Drift-guard stack now 101-deep K94-K194.** Logic was already general; this pass makes the *whole source tree* reflect that, and K194 keeps it that way.
+
+**Cal #38 complete** (A: symbolsInFiles overhaul, B: alarm-fatigue suppression, C: robustness trio, D: stays-general hygiene + meta-gate).
+
 ## [0.118.0] - 2026-06-27
 
 ### Cal #38.C — robustness trio (receipt #10 findings #3 + #6 + lane-stall)

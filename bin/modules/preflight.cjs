@@ -44,7 +44,7 @@ const STALE_LAG_COMMITS = 10;
 // so a topic with many governing docs can't balloon dispatch prefix bytes.
 const MAX_DIRECT_DEPS = 12;
 
-// Tier-aware <scope_hint> cap. Field-validated against greenfield-api: a
+// Tier-aware <scope_hint> cap. Field-validated: a
 // 61-file PR in COMPLEX-tier review was crowded out by the 8-item ceiling —
 // reviewers fell back to grep. SURGICAL/TRIVIAL keep 8 (scannable Brief),
 // STANDARD bumps to 15, COMPLEX/QUALITY gets 25.
@@ -530,8 +530,7 @@ function extractTopic(taskText, opts = {}) {
   }
 
   // B4 — when FTS rescue produced real symbols, drop the short text-leg
-  // stand-ins that triggered the rescue gate. Field signal (greenfield
-  // 2026-05-29 calibration #8): a task containing `VAT` (3 chars) +
+  // stand-ins that triggered the rescue gate. Field signal: a task containing `VAT` (3 chars) +
   // path-leaked `Users` (5 chars) "succeeded" at the text leg with two
   // junk symbols, polluting downstream blast_radius args even when FTS
   // resolved the real snake_case identifier. Demotion only applies to
@@ -1223,7 +1222,7 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
         lines.push("**God-nodes touching this topic (high coupling — scope changes carefully):**");
         for (const g of matchedGods) {
           // Operational guidance — distinguish raw edge count from behavior the
-          // agent should adopt. Field audit (greenfield GF-543) showed agents
+          // agent should adopt. Field audit showed agents
           // ignored bare edge counts but modified signatures of 100+ edge nodes
           // anyway. Reifying the implication makes the guidance load-bearing.
           const guidance = g.edge_count >= 50
@@ -1517,7 +1516,7 @@ function generate(taskText, opts) {
   // Cal #33.B-2 — suggested_reading split files vs symbols. Receipt #7 #5:
   // direct_dependents are labels/ids (per graphify.cjs:740 comment), NOT file
   // paths. Previously concatenated into a single flat array, mixing
-  // CallBackend/CallProvider (symbols) with src/foo.py (files). Reviewers
+  // symbols (e.g. PaymentService) with file paths (src/foo.py). Reviewers
   // couldn't tell which entries were navigable paths vs which were symbol
   // hints. Split into typed sub-arrays at projection time so consumers
   // (renderer, sidecar readers, reuse-search) get the right shape.

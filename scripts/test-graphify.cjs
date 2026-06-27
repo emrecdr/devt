@@ -665,7 +665,7 @@ function setupFixture(opts = {}) {
 }
 
 // ── R7 W6: service-boundary auto-detect ────────────────────────────────────
-// When the graph doesn't carry Leiden community attributes (greenfield's case
+// When the graph doesn't carry Leiden community attributes (a field project's case
 // — every probed node degree-only, no `community` field), lane-suggestions
 // auto-detects service-boundary prefixes (app/services/X/, packages/X/, etc.)
 // at ≥80% coverage and emits mode=service_boundary with the service path as

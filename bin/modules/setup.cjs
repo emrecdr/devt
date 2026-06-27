@@ -281,7 +281,7 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     }
     // Auto-wire arch_scanner.command for templates that ship a runnable
     // scanner. Without this, every new adopter has to discover the canonical
-    // CLI invocation by reading the template. Field-validated by greenfield
+    // CLI invocation by reading the template. Field-validated
     // as the working command. Users can override at any time.
     if (templateName === "python-fastapi") {
       finalConfig = deepMerge(finalConfig, {
@@ -325,9 +325,9 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
   // .devt/memory/_suggestions.md (some teams commit for review history)
   const gitignorePath = path.join(projectRoot, ".gitignore");
   // Patterns use **/ recursive prefix where field
-  // evidence shows sub-tree devt invocations leak. Greenfield committed 6
-  // transient files from tools/hurl-dashboard/.devt/state/ + tests/hurl/.devt/
-  // state/ because the prior flat `.devt/state/` pattern only matched the
+  // evidence shows sub-tree devt invocations leak. A field project committed 6
+  // transient files from a tools/dashboard/.devt/state/ + tests/.devt/
+  // state/ subtree because the prior flat `.devt/state/` pattern only matched the
   // root-level directory. Recursive patterns catch nested .devt/ trees
   // without requiring per-subdirectory .gitignore additions.
   // Backward-compat: existing projects with flat `.devt/state/` get the

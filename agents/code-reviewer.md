@@ -135,7 +135,7 @@ Before you do ANYTHING else, inspect your dispatch task prompt for the workflow-
 
 After writing both files, STOP — emit a final user-visible message: `Code-reviewer dispatched without workflow context. See review.md for the BLOCKED finding. Re-run via /devt:review to invoke the full workflow.`
 
-This assertion is intentionally strict: even one of the three blocks being present means you're workflow-dispatched (the heuristic is forgiving). All three missing is the unambiguous "rogue orchestration" signal — exactly the failure mode the greenfield-api pass-9 evidence surfaced where 6 parallel slice agents ran with no context injection and silently fell back to grep-first review.
+This assertion is intentionally strict: even one of the three blocks being present means you're workflow-dispatched (the heuristic is forgiving). All three missing is the unambiguous "rogue orchestration" signal — exactly the failure mode field evidence surfaced where 6 parallel slice agents ran with no context injection and silently fell back to grep-first review.
 
 **Envelope-health soft signal.** When `<envelope_health>` is present in the dispatch, parse its JSON `status` field:
 - `status="healthy"` (≥3 of 5 monitored blocks populated) → proceed normally.

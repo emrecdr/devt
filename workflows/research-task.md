@@ -72,7 +72,7 @@ The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it
 
 The fourth call caches `scope_hint_json` for the researcher dispatch — paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
 
-**Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar (greenfield-api forensic). Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
+**Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar. Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
 
 ```bash
 DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)

@@ -413,7 +413,7 @@ function evictWorkflowArtifacts(opts = {}) {
     }
   }
 
-  // Slug-variant sweep — calibration #8 evidence: greenfield-api accumulated
+  // Slug-variant sweep — field evidence: a project accumulated
   // 167 stale files in .devt/state/ (review-pr367-*, review-architecture.md,
   // impl-summary-c5.md, review-slice-*, etc.) because the original allowlist
   // only knew about the canonical filenames + review-lane-* regex. The mtime

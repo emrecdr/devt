@@ -231,7 +231,7 @@ const DEFAULTS = {
     // the auto-derived set (suppress a type the top-K missed). Prefix an entry
     // with "!" to FORCE-KEEP (exempt a genuinely-refactored type from
     // suppression even if it's in the top-K). Generic by design — any project
-    // names its own ubiquitous types; greenfield's are only examples.
+    // names its own ubiquitous types.
     ubiquitous_types: [],
     // After an implementation phase writes new code (impl-summary.json with
     // non-empty files_modified), the workflow decides how to handle the now-

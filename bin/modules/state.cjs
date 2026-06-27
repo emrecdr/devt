@@ -1415,7 +1415,7 @@ const RESET_SOFT_CLEAR_KEYS = [
 
 // Logs rotated by resetSoft. Cross-workflow accumulators that the KILL gate +
 // claim-check gate read MUST be rotated, else gates re-fire immediately on the
-// preserved counts. Field receipt: greenfield's 51-raw-dispatch KILL gate from
+// preserved counts. Field receipt: a 51-raw-dispatch KILL gate from
 // a 20-day-old workflow blocked a brand-new review's first state.update call.
 const RESET_SOFT_ROTATE_LOGS = [
   "dispatch-warnings.jsonl",
@@ -1454,7 +1454,7 @@ const RESET_SOFT_EVICT_PATTERNS = [
  * layer, and all phase artifacts (impl-summary.md, graph-impact.md, review.md,
  * test-summary.md) — operators resuming legitimate prior phases retain their work.
  *
- * Field motivation: greenfield receipt #4 — operator ran /devt:review on a fresh
+ * Field motivation: a field receipt — operator ran /devt:review on a fresh
  * task, the workflow.yaml carried 51 raw_dispatch entries + 6-deep workflow_id_history
  * from a 20-day-old prior workflow chain, KILL gate fired on the first state.update
  * call, agent had to bypass the state machine entirely. /devt:review context_init
@@ -2398,7 +2398,7 @@ function graphifyRoi() {
 
   // Code-identifier-only weak match. Tighten the word-boundary regex to
   // ALSO exclude path separators (`/`, `\`) and dots in lookbehind/
-  // lookahead so `src/CallBackend.py` doesn't match symbol `CallBackend` —
+  // lookahead so `src/PaymentService.py` doesn't match symbol `PaymentService` —
   // symbol must appear as a STANDALONE identifier, not as a path component.
   // Backtick-wrapping always matches. NO line-strip pre-pass: line-strip
   // over-fires when a line mentions the symbol legitimately AND contains
@@ -2492,7 +2492,7 @@ function graphifyRoi() {
 // Cheap free-disk probe (cal #38.C / receipt #10 finding #6). devt workflows
 // are disk-heavy — `.devt/state/` artifacts + N parallel-lane agent
 // transcripts (multiple MB each). On a near-full disk a write fails mid-run
-// with ENOSPC (greenfield died at 132Mi when a Bash stdout-capture failed
+// with ENOSPC (a field run died at ~132Mi when a Bash stdout-capture failed
 // mid-lane), leaving partial work + a stalled lane. This is WARN-ONLY by
 // design: a low-disk signal is surfaced so the operator can act, but the
 // workflow is never blocked (per the no-defensive-limits-for-low-risk
@@ -5595,7 +5595,7 @@ function assertNoRawDispatchesThisSession() {
   // or "off", this gate returns ok:true with the count surfaced so consumers
   // can choose to log it without blocking.
   // Hard kill-threshold bypasses dispatch_hygiene_mode.
-  // Field signal: greenfield session accumulated 62 raw_dispatch warnings in
+  // Field signal: a field session accumulated 62 raw_dispatch warnings in
   // warn mode with zero enforcement. The kill-threshold is a hard-limit
   // safety (not a soft hygiene reminder) — runaway-pattern at 3+ dispatches
   // is a different failure class from intentional 1-2-off ad-hoc dispatches.
@@ -6105,7 +6105,7 @@ function updateLane(laneId, kvPairs) {
 
 // Process-level gate that the orchestrator actually ran `preflight generate`
 // in context_init (vs. silently reusing a brief from a prior workflow). Field
-// observed (greenfield-api 2026-05-21): orchestrator started a new workflow at
+// observed in the field: orchestrator started a new workflow at
 // 21:29 UTC but preflight-brief.json mtime was 17:29 UTC — 4 hours older than
 // workflow.yaml::created_at. The orchestrator skipped the regenerate step and
 // the stale topic.symbols caused tier=skip → 0 graphify calls.
@@ -6193,7 +6193,7 @@ function assertPreflightFresh() {
 // claude-mem-harvest.md OR claude-mem-skipped.txt MUST exist after the
 // orchestrator's pre-step in context_init". Without enforcement, orchestrators
 // under context pressure silently skip the pre-step and discovery never sees
-// claude-mem observations — field-validated leak where greenfield's
+// claude-mem observations — field-validated leak where a project's
 // _suggestions.md accumulated only graphify god-nodes (zero claude-mem entries)
 // despite dozens of workflows running.
 //

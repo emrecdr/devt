@@ -5081,7 +5081,7 @@ fi
 # Both scan_prep gates instruct the orchestrator to call get_neighbors + blast_radius
 # when ACTIVE. Verbose dispatch protocol prose required for the orchestrator to know
 # what to do. The check accepts the prefixed plugin-namespace form (the only form
-# that actually resolves through the plugin loader; greenfield 2026-05-28 namespace
+# that actually resolves through the plugin loader; field 2026-05-28 namespace
 # drift fix).
 SCAN_PREP_PROTOCOL_MISSING=""
 for wf in quick-implement dev-workflow; do
@@ -5571,7 +5571,7 @@ for wf in quick-implement.md dev-workflow.md; do
   fi
 done
 # Symbol denylist must include product/platform proper nouns that survived
-# the regex (field-validated: greenfield's topic extractor produced ["Bitbucket"]).
+# the regex (field-validated: a field project's topic extractor produced ["Bitbucket"]).
 for noun in bitbucket github gitlab; do
   if grep -q "\"$noun\"" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null; then
     pass "SYMBOL_DENYLIST contains \"$noun\""
@@ -5607,7 +5607,7 @@ fi
 
 echo
 echo "== Graphify tier ordering: symbol_anchored before bulk_scoped =="
-# Field validation in greenfield-api (Bitbucket project) showed bulk_scoped was
+# Field validation in a field project (Bitbucket) showed bulk_scoped was
 # firing even when topic.symbols was non-empty — symbol-anchored gives cleaner
 # signal so it must take precedence when symbols are available. After cal #37
 # #3, the tier-decision tree lives in state.cjs::computeGraphifyImpactPlan;
@@ -5692,7 +5692,7 @@ echo
 echo "== Topic extractor: multi-range diff (PR + working tree) =="
 # v0.52.0 shipped extractDiffSymbols with refRange='HEAD' default — but for
 # code-review on a feature branch, the PR diff is base...HEAD, NOT HEAD.
-# Field-validated against greenfield-api: PR branch had 43 files in
+# Field-validated against a field project: PR branch had 43 files in
 # `development...HEAD` but 0 in `HEAD` (uncommitted). v0.53.0 merges both.
 MULTIRANGE_TMP=$(mktemp -d)
 (
@@ -5731,7 +5731,7 @@ echo
 echo "== Mechanical staleness override + suppression artifact =="
 # v0.52.0 shipped the staleness gate as prose ("In autonomous mode, force
 # scope_trust.trust='sparse'") — field validation showed this prose-only
-# spec was violated (greenfield session had scope_trust.trust='dense' while
+# spec was violated (field session had scope_trust.trust='dense' while
 # the gate condition fired). v0.53.0 lifts the override into bash so it's
 # orchestrator-LLM-independent.
 STALENESS_WORKFLOW_FAILURES=""
@@ -5782,7 +5782,7 @@ rm -rf "$STALE_TMP"
 
 echo
 echo "== Preflight-fresh gate (DEF-038): assert-preflight-fresh CLI + 5-workflow wiring =="
-# Field-validated against greenfield 2026-05-21: orchestrator skipped preflight
+# Field-validated against field 2026-05-21: orchestrator skipped preflight
 # generate at workflow start; brief mtime was 4h older than workflow.yaml::created_at.
 # The new gate catches this design-time, not by accident.
 PFRESH_OUT=$(node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh 2>&1)
@@ -5842,7 +5842,7 @@ fi
 
 echo
 echo "== Scope-hint cap is tier-aware (DEF-034) =="
-# Field-validated against greenfield: 8-item cap crowded out caller-set on a
+# Field-validated against field: 8-item cap crowded out caller-set on a
 # 61-file PR in COMPLEX-tier review. Cap is now SCOPE_HINT_CAP_BY_TIER[tier]
 # with default 8 when tier is absent.
 CAP_FAILURES=""
@@ -5877,7 +5877,7 @@ rm -rf "$CAP_TMP"
 
 echo
 echo "== Impact-plan args VERBATIM contract (DEF-035) =="
-# Field-validated against greenfield: orchestrator substituted hand-picked
+# Field-validated against field: orchestrator substituted hand-picked
 # symbols for the plan's blast_radius args. Workflow now mandates verbatim use.
 ARGS_FAILURES=""
 for term in "args.*VERBATIM|VERBATIM.*args" "ARGS CONTRACT" "do not re-pick|do NOT substitute"; do
@@ -5948,8 +5948,8 @@ fi
 # Functional smoke — run the hook in an isolated tmp project with .devt/state present.
 TRUNC_TMP=$(mktemp -d)
 mkdir -p "$TRUNC_TMP/.devt/state"
-# WI-3b (greenfield calibration #17): LOW-output path NOW emits an advisory.
-# Suspiciously small returns are a mid-task wall signal greenfield's "Now B.5"
+# WI-3b (field calibration #17): LOW-output path NOW emits an advisory.
+# Suspiciously small returns are a mid-task wall signal a field project's "Now B.5"
 # case (140 bytes) exposed. Threshold: <500 bytes triggers LOW cliff advisory.
 # F26 (cal #21): proportional-response gate — lowOutput now requires the
 # input prompt to be >= 1000 bytes (real workflow dispatch territory) to
@@ -5997,7 +5997,7 @@ fi
 rm -rf "$TRUNC_TMP"
 
 # L1: dispatch-hygiene-guard.sh blocks raw investigative dispatches by default
-# Field rationale (greenfield 2026-05-26): soft warning was ignored 6 times in a row.
+# Field rationale (field 2026-05-26): soft warning was ignored 6 times in a row.
 # Block-default makes ceremony involuntary. Curator/docs-writer exempt from block.
 L1_TMP=$(mktemp -d)
 mkdir -p "$L1_TMP/.devt/state"
@@ -6046,7 +6046,7 @@ fi
 rm -rf "$L1_TMP"
 
 # F21: pick-central-symbol CLI — picks task-relevant symbol over alphabetically first (B1 fix).
-# Field rationale (greenfield 2026-05-26): bash `jq -r '.[0]'` picked AuditMapping for a task about
+# Field rationale (field 2026-05-26): bash `jq -r '.[0]'` picked AuditMapping for a task about
 # clients/relatives because it was alphabetically first; orchestrator had to manually override.
 F21A=$(node "$ROOT/bin/devt-tools.cjs" preflight pick-central-symbol '["AuditMapping","ClientRelativeDetail","ClientService"]' "extend GET /clients/relatives/details" 2>/dev/null | head -1)
 if [ "$F21A" = "ClientRelativeDetail" ]; then
@@ -6379,7 +6379,7 @@ fi
 # B: zsh echo round-trip — the field failure scenario
 F14B=$(cd "$F14_TMP" && STATE=$(node "$ROOT/bin/devt-tools.cjs" state read); echo "$STATE" | jq -c '.scope_hint_json[0]' 2>&1)
 if [ "$F14B" = '"NotFoundError"' ]; then
-  pass "F14b: STATE=\$(...); echo \"\$STATE\" | jq survives zsh-echo escape interpretation (greenfield field failure fixed)"
+  pass "F14b: STATE=\$(...); echo \"\$STATE\" | jq survives zsh-echo escape interpretation (field failure fixed)"
 else
   fail "F14b: round-trip through shell still broken — got: $F14B"
 fi
@@ -6394,7 +6394,7 @@ fi
 rm -rf "$F14_TMP"
 
 # F5b: #KNOWLEDGE-CANDIDATE reinforcement in all agent-dispatching workflows
-# Field validation (greenfield 2026-05-26 PR #370 review): agent-body instruction wasn't enforced —
+# Field validation (field 2026-05-26 PR #370 review): agent-body instruction wasn't enforced —
 # 5 lane subagents wrote zero tags. Reinforcing in the task block makes it load-bearing.
 # Coverage extended to all 7 workflows that dispatch an agent with a knowledge_candidates body step
 # (researcher, code-reviewer, debugger, architect, programmer).
@@ -6630,7 +6630,7 @@ rm -rf "$F3_TMP"
 # F26: assert-graphify-decision must cross-reference _mcp-trace.jsonl for
 # get_neighbors calls scoped to the current workflow_id. Drill-down sections
 # without matching MCP trace records are fabricated and MUST fail the gate.
-# Field rationale (greenfield 2026-05-26 PR #372): orchestrator wrote 3 prose
+# Field rationale (field 2026-05-26 PR #372): orchestrator wrote 3 prose
 # drill-down headings without calling MCP; previous form-only gate passed.
 F26_TMP=$(mktemp -d)
 mkdir -p "$F26_TMP/.devt/state" "$F26_TMP/.devt/memory" "$F26_TMP/graphify-out"
@@ -6691,7 +6691,7 @@ fi
 rm -rf "$F26_TMP"
 
 # F27: state check-agent-output detects stub-output failure mode. Field
-# rationale (greenfield 2026-05-26 PR #372): 5/6 lane sub-agent dispatches
+# rationale (field 2026-05-26 PR #372): 5/6 lane sub-agent dispatches
 # returned status:completed with placeholder bodies; verifier approved on
 # file-existence alone. CLI must flag stub markers, low word count, and
 # heading-only structure.
@@ -6832,7 +6832,7 @@ if echo "$F31A" | jq -e '.looks_like_stub == true and (.stub_phrases_found | len
 else
   fail "F31a: broadened regex missed 'implementation in progress' — got: $F31A"
 fi
-# F31b: leading "Stub:" marker (covers the field-validated greenfield case)
+# F31b: leading "Stub:" marker (covers the field-validated field case)
 {
   echo "Stub: deferred. $PAD"
 } > "$F31_TMP/leading.md"
@@ -6856,8 +6856,8 @@ else
 fi
 rm -rf "$F31_TMP"
 
-# F38a: SYMBOL_DENYLIST extension catches greenfield prose-noise tokens that
-# slipped through into topic.symbols (greenfield 2026-05-27 PR #372 P1).
+# F38a: SYMBOL_DENYLIST extension catches field prose-noise tokens that
+# slipped through into topic.symbols (field 2026-05-27 PR #372 P1).
 # Validates by checking the source: the new tokens must appear in the denylist
 # Set literal in preflight.cjs. Behavioral test (preflight generate against
 # a noisy task) is covered by existing F11/F12 gates.
@@ -6871,7 +6871,7 @@ else
   fail "F38a: denylist missing tokens:$F38_MISSING"
 fi
 
-# F39: per-section drill-down substance gate (greenfield 2026-05-27 PR #372 P5).
+# F39: per-section drill-down substance gate (field 2026-05-27 PR #372 P5).
 # F26 counted sections; F39 requires each section's body to be ≥ 200 bytes OR
 # carry an explicit truncation marker.
 F39_TMP=$(mktemp -d)
@@ -6937,7 +6937,7 @@ else
 fi
 rm -rf "$F39_TMP"
 
-# F40: verifier-ran enforcement gate (greenfield 2026-05-27 PR #372 silent-
+# F40: verifier-ran enforcement gate (field 2026-05-27 PR #372 silent-
 # skip #2). Asserts the verifier dispatch happened when config requires it.
 F40_TMP=$(mktemp -d)
 mkdir -p "$F40_TMP/.devt/state"
@@ -6979,7 +6979,7 @@ else
 fi
 
 # F42: claude-mem 2-step pre-step now wired in code-review.md context_init
-# (greenfield 2026-05-27 PR #372 silent-skip #3). Presence check.
+# (field 2026-05-27 PR #372 silent-skip #3). Presence check.
 if /usr/bin/grep -q "mcp__plugin_claude-mem_mcp-search__search" "$ROOT/workflows/code-review.md" \
   && /usr/bin/grep -q "assert-claude-mem-harvest" "$ROOT/workflows/code-review.md"; then
   pass "F42a: code-review.md wires claude-mem 2-step pre-search + assert-claude-mem-harvest gate"
@@ -7533,7 +7533,7 @@ rm -rf "$I8_TMP"
 # W010: every workflow that dispatches a devt:* agent MUST carry an
 # <available_agent_types> section. Without it, post-/clear context-reload
 # silently falls back to general-purpose dispatch (loses devt's specialist
-# agents). Field signal (greenfield health check 2026-05-28): code-review-
+# agents). Field signal (field health check 2026-05-28): code-review-
 # parallel.md was missing the section since v0.59.0; health surface W010
 # flagged it. This gate enforces the invariant for all dispatching workflows.
 W010_OFFENDERS=""
@@ -7551,7 +7551,7 @@ else
 fi
 
 # K2: F31 stub-marker regex must not false-positive on legitimate compliance
-# checklists. Field signal (greenfield 2026-05-28 calibration #2): substantive
+# checklists. Field signal (field 2026-05-28 calibration #2): substantive
 # review.md (897 words) flagged because of "No TODO / placeholder | ✓" row.
 # Fixture mimics that exact shape; if K2 fails, a regex regression reintroduced
 # bare-noun "placeholder" matching.
@@ -7590,7 +7590,7 @@ rm -rf "$K2_TMP"
 
 # K3: extractTopic must filter common English verb-prefixes from task text
 # so they don't cascade into the graphify_scan_prep SKIP path. Field signal
-# (greenfield 2026-05-28 calibration #2): "Enrich relative-clients picker
+# (field 2026-05-28 calibration #2): "Enrich relative-clients picker
 # endpoint with license code…" returned topic.symbols=["Enrich"], masking
 # the snake_case FTS fallback (gated on symbols.length === 0).
 K3_OUT=$(node -e '
@@ -7605,7 +7605,7 @@ else
 fi
 
 # K4: review-lane-*.json sidecars must be evicted alongside their .md
-# counterparts. Field signal (greenfield 2026-05-28 calibration #2, 1b):
+# counterparts. Field signal (field 2026-05-28 calibration #2, 1b):
 # review-lane-c.json from a prior workflow persisted across init review,
 # causing validation_warnings=2 mid-session. The eviction regex covered
 # .md only.
@@ -7626,7 +7626,7 @@ fi
 rm -rf "$K4_TMP"
 
 # K5: assert-verifier-ran must short-circuit for workflow_types that don't
-# dispatch a verifier by design. Field signal (greenfield 2026-05-28
+# dispatch a verifier by design. Field signal (field 2026-05-28
 # calibration #2, 1c + 6a #2): orchestrator running quick_implement with
 # project config.workflow.verification=true hit ok:false even though
 # quick_implement has no verifier step. Silent miss.
@@ -7649,7 +7649,7 @@ fi
 rm -rf "$K5_TMP"
 
 # K11: state release CLI subcommand cleanly releases the workflow lock.
-# Field signal (greenfield 2026-05-28 PM calibration #3 finding #3): no
+# Field signal (field 2026-05-28 PM calibration #3 finding #3): no
 # `state release` existed; workaround `state update active=false
 # phase=cancelled status=cancelled` tripped the VALID_PHASES warning
 # because "cancelled" wasn't in PHASE_ORDER. This gate verifies:
@@ -7684,7 +7684,7 @@ fi
 rm -rf "$K11_TMP"
 
 # K10: debug.md carries the auto_refresh_post_impl hook (parity with
-# dev-workflow.md). Field signal (greenfield 2026-05-28 graphify-audit.md
+# dev-workflow.md). Field signal (field 2026-05-28 graphify-audit.md
 # improvement #3): post-debug-fix doesn't refresh the graph; the next
 # code-review fires on stale data. The hook surfaces an AskUserQuestion
 # (or silent refresh in autonomous mode) when a fix lands.
@@ -7696,7 +7696,7 @@ else
 fi
 
 # K9: MCP namespace consistency across dispatching workflows. Field signal
-# (greenfield 2026-05-28 graphify-audit.md): 12 unprefixed mcp__devt-graphify__
+# (field 2026-05-28 graphify-audit.md): 12 unprefixed mcp__devt-graphify__
 # functional references across dev-workflow.md, debug.md, research-task.md,
 # quick-implement.md. An agent reading those workflows verbatim would call
 # a tool name that doesn't exist (the plugin loader exposes only the
@@ -7720,7 +7720,7 @@ else
 fi
 
 # K8: pre-flight-guard.sh refuses to fire on out-of-project file paths.
-# Field signal (greenfield 2026-05-28 PM calibration #3): preflight-denies.jsonl
+# Field signal (field 2026-05-28 PM calibration #3): preflight-denies.jsonl
 # accumulated 10+ entries for files OUTSIDE the project root because the
 # walk-up resolved an adjacent .devt/ and the hook validated unrelated files.
 # Fixture creates a non-symlinked tmpdir (resolves /tmp -> /private/tmp on
@@ -7751,7 +7751,7 @@ fi
 rm -rf "$K8_TMP"
 
 # K12: graphify check-symbol-godnodes surfaces symbol-level god-nodes from
-# diff files independently of topic.symbols. Field signal (greenfield
+# diff files independently of topic.symbols. Field signal (field
 # 2026-05-28 calibration #4 — graph-impact.md:62 verbatim): "0 file-level
 # god-nodes in PR #374 diff despite symbol-level god-node match on
 # AuditMapping." File-level checkLargeFilesGodNodes aggregates max-degree
@@ -7794,7 +7794,7 @@ fi
 rm -rf "$K12_TMP"
 
 # K13: mcp-stats --since-workflow-created filters trace records to
-# entries newer than workflow.yaml::created_at. Field signal (greenfield
+# entries newer than workflow.yaml::created_at. Field signal (field
 # 2026-05-28 calibration #4): 82 graphify calls in a code_review_parallel
 # session were invisible to `mcp-stats --workflow-id=66473ef4` because
 # the calls were stamped with the prior workflow_id (6863c532) during
@@ -7832,7 +7832,7 @@ rm -rf "$K13_TMP"
 # 8-char hex correlation_id at the start of callTool, include it in
 # both appendTrace records (TOOL_NOT_FOUND path + success/error path),
 # and surface it on the response envelope via _meta.correlation_id.
-# Field signal (greenfield 2026-05-28 calibration #4): trace records
+# Field signal (field 2026-05-28 calibration #4): trace records
 # carried args_fp but not a per-call id, so lane findings could cite
 # "blast_radius said X" but couldn't trace back to the specific call.
 K14A_MCP="$ROOT/bin/devt-memory-mcp.cjs"
@@ -7870,7 +7870,7 @@ rm -rf "$K14B_TMP"
 
 # K15-K18: B-I symbol extraction unlock — exercises extractTopic's four
 # fallback legs (loosened gate + kebab pattern + terminal full-text +
-# resolution_path telemetry). Field signal (greenfield calibration #2):
+# resolution_path telemetry). Field signal (field calibration #2):
 # "topic.symbols=['Enrich']. Net: 0 useful symbols, but the system
 # doesn't know." Short-symbol noise (Enrich ≤ 6 chars) blocked the
 # rescue path under the legacy `symbols.length === 0` gate.
@@ -7933,7 +7933,7 @@ else
 fi
 rm -rf "$K36_TMP"
 
-# K19: assert-reuse-analyzed three-state matrix. Field signal (greenfield
+# K19: assert-reuse-analyzed three-state matrix. Field signal (field
 # calibration #2): the legacy `ok:true` escape clause on missing
 # reuse-candidates.md blessed sessions where the orchestrator skipped the
 # reuse-search bash block entirely. The marker (reuse-search-attempted.txt)
@@ -7973,7 +7973,7 @@ fi
 rm -rf "$K19_TMP"
 
 # K20: assert-claude-mem-harvest validates skip-file structured payload.
-# Field signal (greenfield calibration #2 finding 6b#3): "wrote a one-line
+# Field signal (field calibration #2 finding 6b#3): "wrote a one-line
 # skip reason instead of actually running mcp__plugin_claude-mem_mcp-search.
 # Lazy escape that satisfies the gate but produces no value." Four enum
 # values for reason= cover the legitimate skip universe; task_unrelated_to_
@@ -8013,7 +8013,7 @@ fi
 rm -rf "$K20_TMP"
 
 # K21: assert-knowledge-candidates-tagged enforces either scratchpad tags
-# or a structured none-declaration. Field signal (greenfield calibration
+# or a structured none-declaration. Field signal (field calibration
 # #2 finding 6a#1): "I described 4 candidates in prose inside review.md
 # but never appended the magic-string #KNOWLEDGE-CANDIDATE lines to
 # scratchpad.md. The candidates I noted in prose will NEVER reach the
@@ -8058,7 +8058,7 @@ rm -rf "$K21_TMP"
 
 # K22: aggregate-knowledge-candidates pulls #KNOWLEDGE-CANDIDATE lines
 # from review-lane-*.md and review.md into scratchpad.md with provenance
-# comments. Field signal (greenfield calibration #2 + B-II.3 design):
+# comments. Field signal (field calibration #2 + B-II.3 design):
 # parallel-flow lanes write tags to their lane output files; without
 # aggregation, scratchpad stays empty and the assert-knowledge-
 # candidates-tagged gate false-blocks the workflow. Dedup is by line
@@ -8166,7 +8166,7 @@ fi
 rm -rf "$K24_TMP"
 
 # K25: memory-curation skill carries the tooling-evolving pre-recommendation
-# heuristic that drives B-III.2's curator behavior. Greenfield calibration
+# heuristic that drives B-III.2's curator behavior. Field calibration
 # #2 finding 7c-7d: tooling-related candidates (Hurl, CONCURRENTLY) belong
 # in `candidate` status, not `active`. The skill's classifier section is
 # the source of truth — if it drifts out of the skill, the curator agent
@@ -8185,7 +8185,7 @@ else
 fi
 
 # L1: first_created_at + original_workflow_id are immutable across
-# workflow_type transitions. Greenfield calibration #5: `state update
+# workflow_type transitions. Field calibration #5: `state update
 # workflow_type=code_review_parallel` mutates created_at + workflow_id,
 # retroactively invalidating assert-preflight-fresh / assert-claude-mem-
 # harvest / assert-graphify-decision because artifacts written BEFORE the
@@ -8220,7 +8220,7 @@ else
 fi
 rm -rf "$L1_TMP"
 
-# L2: lanes[] round-trip across state mutations. Greenfield calibration #5
+# L2: lanes[] round-trip across state mutations. Field calibration #5
 # bug: parseSimpleYaml only handled flat key:value pairs, dropping the
 # `lanes:` nested block entirely on read. Every subsequent state update
 # call re-serialized without lanes, so assert-lanes-registered would
@@ -8266,7 +8266,7 @@ else
 fi
 rm -rf "$L2_TMP"
 
-# L3: JSON object values round-trip through workflow.yaml. Greenfield
+# L3: JSON object values round-trip through workflow.yaml. Field
 # calibration #5: memory_signal_json got coerced to "[object Object]"
 # literal by the legacy serializer's ${value} template (NEW-3). Now
 # objects serialize via JSON.stringify and parse back to structured
@@ -8306,7 +8306,7 @@ else
 fi
 rm -rf "$L3_TMP" /tmp/l3_out.json
 
-# L4: mcp-stats normalizes prefixed vs unprefixed tool names. Greenfield
+# L4: mcp-stats normalizes prefixed vs unprefixed tool names. Field
 # calibration #5: trace records carry `mcp__devt-graphify__*` (handler
 # name); orchestrators call via `mcp__plugin_devt_devt-graphify__*`
 # (plugin-namespace prefixed). Exact match returned 0 entries when user
@@ -8332,7 +8332,7 @@ fi
 rm -rf "$L4_TMP"
 
 # L5: graphify neighbors --max-bytes truncates god-node drill-downs to a
-# size cap. Greenfield calibration #5: AuditMapping at depth=2 incoming
+# size cap. Field calibration #5: AuditMapping at depth=2 incoming
 # overflowed 84KB and returned zero signal via MCP. The CLI fallback path
 # truncates deterministically (depth-asc + label-alpha) and surfaces
 # truncated/total_neighbors so the consumer knows the result is partial.
@@ -8368,7 +8368,7 @@ fi
 rm -rf "$L5_TMP"
 
 # L6: assert-reuse-analyzed opts out for read-only workflow_types.
-# Greenfield calibration #5: /devt:review (code_review) returned ok:false
+# Field calibration #5: /devt:review (code_review) returned ok:false
 # because no programmer-side reuse-search bash ran — but review is
 # READ-ONLY by design. Same A9-pattern as assert-verifier-ran: declare
 # REUSE_REQUIRED_WORKFLOWS = {dev, quick_implement}, other types get
@@ -8419,7 +8419,7 @@ fi
 rm -rf "$L6_TMP"
 
 # M1: memory suggest triggers index rebuild on completion.
-# Greenfield calibration #6: writeSuggestionsReport's atomic write to
+# Field calibration #6: writeSuggestionsReport's atomic write to
 # _suggestions.md missed the auto-index hook (rename-after-tmp-write
 # pattern), leaving FTS5 index drifted ~1h+ behind on active sessions.
 # Fix: rebuildIndex called immediately after writeSuggestionsReport.
@@ -8454,7 +8454,7 @@ else
 fi
 rm -rf "$M1_TMP"
 
-# M2: health --repair handler fires for MEM_INDEX_STALE. Greenfield
+# M2: health --repair handler fires for MEM_INDEX_STALE. Field
 # calibration #6 silent failure: the issue catalogue declared
 # MEM_INDEX_STALE as repairable:true but the switch in attemptRepair
 # had no case, so repairs:[] returned despite repairable:true. Users
@@ -8516,7 +8516,7 @@ fi
 rm -rf "$M2_TMP"
 
 # M3: memory validate defers to graphify.status() before probing.
-# Greenfield calibration #6: validate's 3-probe retry budget aborted
+# Field calibration #6: validate's 3-probe retry budget aborted
 # with GRAPHIFY_UNREACHABLE even when the orchestrator had successfully
 # made impact-plan calls seconds earlier (two consumers, two retry
 # budgets, divergent verdicts). Fix: when graphify.status() reports
@@ -8573,7 +8573,7 @@ else
 fi
 
 # M5: verifier dispatch + agent body wired for <scope_trust> across all
-# 3 dispatch sites (V65-4). Plan finding from greenfield was tentative
+# 3 dispatch sites (V65-4). Plan finding from field was tentative
 # ("may lack scope_trust") — investigation confirmed verifier IS wired
 # in all 3 workflows. This gate locks the wiring so a future edit doesn't
 # silently drop it. Same drift-detection pattern as M4 / L7.
@@ -8625,7 +8625,7 @@ else
 fi
 
 # M8: HF-1 — assertPreflightFresh + assertGraphifyDecision read
-# first_created_at instead of mutable created_at. Greenfield calibration
+# first_created_at instead of mutable created_at. Field calibration
 # #7 evidence: state update workflow_type=code_review_parallel rotated
 # created_at + workflow_id, retroactively invalidating assert-preflight-
 # fresh ("421s drift") and assert-graphify-decision ("fabricated drill-
@@ -8687,7 +8687,7 @@ fi
 rm -rf "$M8_TMP"
 
 # M9: HF-2 — mcp-stats --workflow-id unions with original_workflow_id
-# when the supplied id matches the current workflow. Greenfield calibration
+# when the supplied id matches the current workflow. Field calibration
 # #7: 4 confirmed graphify MCP calls under the original_workflow_id became
 # invisible to --workflow-id=<rotated-current> after workflow_type
 # transition. Fixture: trace with one record under original id + one under
@@ -8723,7 +8723,7 @@ fi
 rm -rf "$M9_TMP"
 
 # M10: HF-3 — preflight sidecar persists blast.god_node_match +
-# ambiguous_bindings. Greenfield calibration #7 evidence: preflight
+# ambiguous_bindings. Field calibration #7 evidence: preflight
 # generate's stdout showed god_node_match:true but the persisted JSON
 # only carried {effect_size, source, direct_dependents_count}. The
 # substep-3 jq extraction read .blast.god_node_match → null → fell back
@@ -8744,7 +8744,7 @@ else
 fi
 
 # M11: C7-1 — F17 cross-checks preflight.god_nodes when both diff-anchored
-# CLIs return 0. Greenfield calibration #7 finding: routine pattern for
+# CLIs return 0. Field calibration #7 finding: routine pattern for
 # their PRs is diff touches callers but not symbol definition sites →
 # check-large-files + check-symbol-godnodes both return 0 → orchestrator
 # manually synthesized "## Symbol-level god-nodes" from preflight every
@@ -8776,7 +8776,7 @@ else
 fi
 
 # M13: C7-4 — lane-suggestions --target-lanes=N consolidates micro-
-# communities into N super-groups via path-prefix similarity. Greenfield
+# communities into N super-groups via path-prefix similarity. Field
 # calibration #7: 44 micro-communities at 95% coverage was unusable for
 # the 5-lane cap. Manual override grouped by domain path. The CLI now
 # does that consolidation. Fixture: graph with 8 distinct community
@@ -8820,7 +8820,7 @@ else
 fi
 rm -rf "$M13_TMP"
 
-# M14: C7-3+C7-6 — ambiguous_bindings consumer wiring. Greenfield
+# M14: C7-3+C7-6 — ambiguous_bindings consumer wiring. Field
 # calibrations #4 + #7: two ExternalCallService modules collided unflagged;
 # reviewers manually cross-checked every finding. blastRadius already
 # returned ambiguous_details but the count was the only persisted/surfaced
@@ -8840,7 +8840,7 @@ else
 fi
 
 # M15: C7-7 — code_review rubric inlined into code-reviewer dispatch
-# (not just verifier). Greenfield calibration #7: reviewer was self-checking
+# (not just verifier). Field calibration #7: reviewer was self-checking
 # against agent-body conventions only; verifier graded against the rubric;
 # axes drift caused extra revision loops. Wiring the rubric into the
 # reviewer's first dispatch eliminates the loop and aligns reviewer↔verifier
@@ -8854,7 +8854,7 @@ else
   fail "M15: rubric inline wiring incomplete. single=${M15_SINGLE} (need >=2: reviewer + verifier) parallel=${M15_PARALLEL_LANE} (need >=2: per-lane bullet + consolidator) agent=${M15_AGENT}"
 fi
 
-# M16: Q4 — probe failure diagnostic logging. Greenfield calibration #7
+# M16: Q4 — probe failure diagnostic logging. Field calibration #7
 # noted that graphify/python probe failures were silent (catch -> return false)
 # so users seeing "graphify not detected" had no way to distinguish "not
 # installed" from "installed but timeout/segfault/permission". Wires three
@@ -8955,7 +8955,7 @@ else
 fi
 
 # L9: graphify adaptive-threshold scales with graph size. C-III.1: legacy
-# hardcoded >= 10 was right for 45K-node graphs (greenfield-api) but too
+# hardcoded >= 10 was right for 45K-node graphs (a field project) but too
 # high for 5K-node projects. max(5, log10(node_count) * 2) clamps the
 # floor at 5 and saturates around 10 by 100K nodes. Three checks:
 # small graph (100 nodes → 5), mid graph (5K nodes → 8), large graph
@@ -9010,7 +9010,7 @@ else
 fi
 
 # L7: god_node_warnings block wired into code-review.md dispatch templates
-# AND code-reviewer agent body. Greenfield review report #3: today
+# AND code-reviewer agent body. Field review report #3: today
 # god_nodes lands in the preflight-brief.md prose but isn't injected as
 # a STRUCTURED hint into the agent context. C-I.1 adds the prep step
 # (jq extracts {god_node_match, matches} from preflight-brief.json into
@@ -9143,7 +9143,7 @@ fi
 rm -rf "$K30_TMP"
 
 # K29: code-review-parallel.md::context_init documents MCP-setup inheritance
-# architecture. Greenfield audit flagged "0 functional MCP calls" in parallel
+# architecture. Field audit flagged "0 functional MCP calls" in parallel
 # workflow — that's correct observation, intentional architecture (lanes are
 # MCP-blind by design per CLAUDE.md::Critical Agent + Workflow Contracts; the
 # orchestrator-mediated graph-impact.md handoff is the single source). This
@@ -9158,7 +9158,7 @@ else
 fi
 
 # K28: redispatch_lanes step carries the B-IX narrowed-prompt protocol.
-# Field signal (greenfield calibration #3 finding #2): identical re-dispatch
+# Field signal (field calibration #3 finding #2): identical re-dispatch
 # wastes budget; "5 highest-signal findings only" trades completeness for
 # substance. The narrowed prompt template must remain in the workflow body —
 # this gate is drift detection so a future edit doesn't silently revert to
@@ -9173,7 +9173,7 @@ fi
 
 # K27: listLaneOutputs surfaces oversized-lane sizing fields (file_count,
 # est_loc, oversized) when present in workflow.yaml::lanes[]. Field signal
-# (greenfield calibration #3 finding #1): Lane C with 25 files / 1577 LOC
+# (field calibration #3 finding #1): Lane C with 25 files / 1577 LOC
 # consistently exhausted code-reviewer maxTurns. partition_lanes writes the
 # sizing; listLaneOutputs surfaces it so the oversized-lane warning bash in
 # code-review-parallel.md can iterate. Two cases: oversized=true present →
@@ -9218,7 +9218,7 @@ fi
 rm -rf "$K27_TMP"
 
 # K26: context_init substep navigation markers exist in code-review.md and
-# dev-workflow.md. Field signal (greenfield calibration #2, 6c): "context_init
+# dev-workflow.md. Field signal (field calibration #2, 6c): "context_init
 # is still 188+ lines in v0.62.0 with 5 nested bash conditionals…". B-III.3
 # scoped the refactor to those two workflows (NOT quick-implement.md whose
 # 123-line context_init was deemed tractable). Each workflow carries 8 named
@@ -9284,15 +9284,15 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# N1–N10: greenfield calibration #8 — semantic quality + plan-aware preflight
+# N1–N10: field calibration #8 — semantic quality + plan-aware preflight
 # + 4 confirmed bugfixes. Each gate maps 1:1 to a v0.68 backlog item.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # N1: devt-graphify-mcp.cjs emits correlation_id in trace records AND _meta
-# envelope. Field signal (greenfield calibration #8): 0 of 91 trace records
+# envelope. Field signal (field calibration #8): 0 of 91 trace records
 # carried correlation_id even though v0.63 CHANGELOG documented it — only
 # memory-mcp.cjs ever adopted the pattern; graphify-mcp (which carries 95%+
-# of greenfield's MCP traffic) was missed. Static check on the file body so
+# of a field project's MCP traffic) was missed. Static check on the file body so
 # this gate doesn't depend on a live MCP server roundtrip.
 N1_CALL_OK=$(/usr/bin/grep -c "crypto.randomBytes(4).toString(\"hex\")" "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || echo 0)
 N1_TRACE_OK=$(/usr/bin/grep -c "correlation_id: correlationId" "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null || echo 0)
@@ -9306,7 +9306,7 @@ fi
 # N2: pre-flight-guard.sh writes source field in deny records. Both the
 # helper-path (logger.cjs::appendJsonl) AND the fallback-path (direct
 # fs.appendFileSync used when CLAUDE_PLUGIN_ROOT isn't set) must carry it
-# — greenfield's 359 deny entries were all source:MISSING because only
+# — a field project's 359 deny entries were all source:MISSING because only
 # bash-guard.cjs wrote the field.
 N2_HOOK_SRC=$(/usr/bin/grep -c "source: 'preflight'" "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null || echo 0)
 if [ "${N2_HOOK_SRC:-0}" -ge 2 ]; then
@@ -9316,7 +9316,7 @@ else
 fi
 
 # N3: extractTopic strips absolute paths from tokenization. Field repro
-# (greenfield's exact task) — "Users" must NOT appear in symbols and
+# (a field project's exact task) — "Users" must NOT appear in symbols and
 # "claude"/"emrec"/"plans" must NOT appear in keywords; "billing_country"
 # must survive in keywords.
 N3_OUT=$(node -e '
@@ -9381,7 +9381,7 @@ rm -rf "$N5_TMP"
 
 # N6: aggregate-knowledge-candidates pulls #KNOWLEDGE-CANDIDATE: tags from
 # impl-summary*.md alongside review-lane-*.md + review.md. Field signal:
-# greenfield's quick_implement session wrote 3 valid tags in impl-summary.md
+# a field project's quick_implement session wrote 3 valid tags in impl-summary.md
 # that never reached scratchpad because the aggregator's filter excluded
 # the impl-summary surface.
 N6_TMP=$(mktemp -d)
@@ -9437,7 +9437,7 @@ fi
 rm -rf "$N7_TMP"
 
 # N8: workflow_id_history captures every workflow_type transition; mcp-stats
-# --workflow-id unions the whole chain when matching current. Greenfield's
+# --workflow-id unions the whole chain when matching current. A field project's
 # field case had 5 records via time filter but 0 via id filter — 1-hop HF-2
 # union missed intermediate ids. This gate simulates a 3-hop chain and
 # asserts the union catches all 3.
@@ -9518,7 +9518,7 @@ fi
 rm -rf "$N10_TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# O1–O7: greenfield calibration #9 v0.68.1 follow-ups. Each maps 1:1 to an H
+# O1–O7: field calibration #9 v0.68.1 follow-ups. Each maps 1:1 to an H
 # backlog item. Live fixture-based — no static-only greps.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -9653,7 +9653,7 @@ rm -rf "$O6_TMP"
 # O7: health --repair MEM_INDEX_STALE handler reports doc_count via
 # `result.inserted` not the broken `indexed_count`/`doc_count` chain that
 # always resolved to 0. Static grep — the live integration is exercised by
-# greenfield's actual workflows; this gate just locks the field-name fix.
+# a field project's actual workflows; this gate just locks the field-name fix.
 O7_FIELD_USED=$(/usr/bin/grep -c "result.inserted" "$ROOT/bin/modules/health.cjs" 2>/dev/null || echo 0)
 if [ "${O7_FIELD_USED:-0}" -ge 1 ]; then
   pass "O7 (H12): health --repair MEM_INDEX_STALE handler reads result.inserted (${O7_FIELD_USED} reference)"
@@ -9662,12 +9662,12 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# P1-P3: greenfield calibration #10 v0.68.2 hotfixes. Each maps 1:1 to an H-v2
+# P1-P3: field calibration #10 v0.68.2 hotfixes. Each maps 1:1 to an H-v2
 # scope item. All use live fixture-based assertions.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # P1: workflow_id_history self-healing — when history exists but is missing
-# both original_workflow_id and current workflow_id (greenfield calibration #10
+# both original_workflow_id and current workflow_id (field calibration #10
 # scenario), state update prepends original AND appends current. Idempotent —
 # repeat updates don't grow the array.
 P1_TMP=$(mktemp -d)
@@ -9697,7 +9697,7 @@ rm -rf "$P1_TMP"
 # P2: memory.recentSuccessfulGraphifyTraceCount supports session-anchor mode.
 # When passed {sinceSessionAnchor:true}, reads first_created_at from
 # workflow.yaml and counts graphify trace records since then. Catches the
-# greenfield calibration #10 case where the burst was hours ago but still in
+# field calibration #10 case where the burst was hours ago but still in
 # THIS session — minutes-based window misses it.
 P2_TMP=$(mktemp -d)
 mkdir -p "$P2_TMP/.devt/state" "$P2_TMP/.devt/memory"
@@ -9754,7 +9754,7 @@ fi
 rm -rf "$P3_TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Q1-Q7: greenfield calibration #11 v0.69.0 fixes. Each maps 1:1 to a backlog
+# Q1-Q7: field calibration #11 v0.69.0 fixes. Each maps 1:1 to a backlog
 # item. Live fixture-based.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -9885,12 +9885,12 @@ else
   fail "Q7: Option A plumbing incomplete (fn=$Q7_HYPER_FN ship=$Q7_SHIP_STEP preflight=$Q7_PREFLIGHT_WIRE)"
 fi
 
-# S1 (greenfield calibration #12 / #13): post-hoc enforcement gate for raw
+# S1 (field calibration #12 / #13): post-hoc enforcement gate for raw
 # devt:* agent dispatches. Hook detects them at dispatch time but CC doesn't
 # enforce PreToolUse Task-deny — gate is the post-hoc enforcement at finalize.
 #
 # S1-v2 (cal #13): scope binds to `created_at` (current WORKFLOW window) not
-# `first_created_at` (immutable session anchor). Greenfield's evidence: 31
+# `first_created_at` (immutable session anchor). A field project's evidence: 31
 # raw dispatches across 18 prior workflows were blocking a current workflow
 # whose dispatches were properly enveloped. Workflow-scope respects each
 # workflow's independent dispatch hygiene.
@@ -9934,7 +9934,7 @@ else
 fi
 rm -rf "$S1_TMP"
 
-# S1-v3 (greenfield calibration #14): deactivation hook in updateState().
+# S1-v3 (field calibration #14): deactivation hook in updateState().
 # CLI-driven orchestrators bypass the workflow .md finalize step by running
 # direct `state update active=false`, escaping the post-hoc gate. Hooking the
 # gate into the active=true→false transition closes the escape hatch. Also
@@ -10039,7 +10039,7 @@ run "K1: dispatch compile --check (no drift)" \
 # at L43 above.
 K2_OUT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null || echo "K2_FAILED")
 # Extract line 1 via bash parameter expansion — avoids `head -1` SIGPIPE
-# under `set -o pipefail` when K2_OUT exceeds the OS pipe buffer (greenfield
+# under `set -o pipefail` when K2_OUT exceeds the OS pipe buffer (field
 # CI hit this on 2026-06-07 after envelope growth added ~10KB to programmer
 # dispatch). `head -1` closes stdin after one line; `echo` then receives
 # SIGPIPE on the next write and pipefail propagates the failure.
@@ -10089,11 +10089,11 @@ rm -f "$K4_OUTFILE"
 if [ -s "$K4_CFG_BAK" ]; then cp "$K4_CFG_BAK" .devt/config.json; else rm -f .devt/config.json; fi
 rm -f "$K4_CFG_BAK"
 
-# K5 (greenfield calibration #16): every workflow that reads STATE=$(... state read)
+# K5 (field calibration #16): every workflow that reads STATE=$(... state read)
 # to extract scope_trust_json must invoke `state refresh-scope-context` immediately
 # before. Count-equality assertion across the 4 workflow files that use this pattern;
 # debug.md and research-task.md are exempt because they read scope_trust directly from
-# preflight-brief.json (self-refreshing pattern). Cal #16 evidence: greenfield's
+# preflight-brief.json (self-refreshing pattern). Cal #16 evidence: a field project's
 # code-review-parallel.md had 2 STATE= sites vs 0 refresh calls — silent stale-cache
 # bug across 5-lane parallel review. Count-equality catches new workflows that add
 # STATE= without the refresh.
@@ -10111,10 +10111,10 @@ else
   fail "K5: refresh-scope-context wiring gap —$K5_FAIL"
 fi
 
-# K6 (greenfield calibration #16 + #17 Q8): every output-writing agent declares
+# K6 (field calibration #16 + #17 Q8): every output-writing agent declares
 # a Status enum that includes PARTIAL. 6 non-sidecar agents declare via markdown
 # `## Status` body section; 4 sidecar agents declare via JSON_SIDECAR_SCHEMAS in
-# state.cjs. Field evidence: greenfield's cal #17 documented programmer return
+# state.cjs. Field evidence: a field project's cal #17 documented programmer return
 # "Now B.5" being treated as DONE because no PARTIAL state existed.
 K6_FAIL=""
 for agent_file in agents/architect.md agents/researcher.md agents/docs-writer.md agents/curator.md agents/retro.md agents/debugger.md; do
@@ -10138,7 +10138,7 @@ else
   fail "K6: missing PARTIAL state declaration —$K6_FAIL"
 fi
 
-# K7 (greenfield calibration #16 §G + cal #17): every wired dispatch site has
+# K7 (field calibration #16 §G + cal #17): every wired dispatch site has
 # the Q11 mechanical claim-check (state assert-artifact-present) before phase
 # advance. Pilot scope: 5 dispatch sites wired in WI-5. Future v0.71.1 may
 # expand to verifier + tester + other sites based on cal #18 field evidence.
@@ -10543,7 +10543,7 @@ fi
 
 # K50 — every workflow that dispatches an output-writing agent MUST have at
 # least one assert-artifact-present Layer-1 call. cal #19 §9 Surprise 3:
-# greenfield discovered 23 state subcommands exist but only 8 referenced in
+# field discovered 23 state subcommands exist but only 8 referenced in
 # workflows — exactly the integration gap this gate locks. Coverage matrix:
 # any workflow that contains `Task(subagent_type="devt:<agent>"` for an
 # agent declared in io-contracts.yaml MUST also reference
@@ -10715,7 +10715,7 @@ K54_FAIL=""
 [ -f "$ROOT/skills/council/SKILL.md" ] || K54_FAIL="$K54_FAIL skills/council/SKILL.md"
 [ -f "$ROOT/commands/council.md" ] || K54_FAIL="$K54_FAIL commands/council.md"
 [ -f "$ROOT/references/council-offramp.md" ] || K54_FAIL="$K54_FAIL references/council-offramp.md"
-# Workflows that reference the canonical offramp path. Greenfield + canonical
+# Workflows that reference the canonical offramp path. Field + canonical
 # integration paths per offramp doc §3 (clarify, research, specify) plus the
 # memory workflows that surface council in their context (memory-promote,
 # memory-reject). All MUST cite the canonical path.
@@ -11155,7 +11155,7 @@ fi
 
 # K72 (v0.77.0 B1): lane-suggestions archetype classifier sub-classifies the
 # ungrouped bucket by file-extension when files have no graph community.
-# Greenfield 2026-06-07 calibration: 24 of 42 files (57%) landed in one
+# Field 2026-06-07 calibration: 24 of 42 files (57%) landed in one
 # "ungrouped" mega-bucket; archetype classifier splits them into docs/tests/
 # config/ungrouped so the orchestrator gets coherent fallback lanes.
 # Mixed-input fixture: 1 covered file + 1 .md + 1 test path + 1 sql.
@@ -11183,7 +11183,7 @@ rm -rf "$K72_TMP"
 
 # K73 (v0.77.0 A1): dispatch render-filled inlines graph-impact.md content
 # via the {graph_impact_content} placeholder. v0.76.0 shipped a Read-prompt
-# wrapped in <graph_impact>; greenfield calibration 2026-06-07 confirmed the
+# wrapped in <graph_impact>; field calibration 2026-06-07 confirmed the
 # data reached sub-agents only via Read, not via inlining. loadGraphImpact()
 # + dispatch substitution closes the gap. Test verifies present + absent
 # branches.
@@ -11340,7 +11340,7 @@ fi
 # substantive artifact missing one or more expected_sections triggers the
 # targeted-fix branch with the right drift list AND that the fix-envelope
 # template exists with the {drift_errors} placeholder ready to substitute.
-# Greenfield 2026-06-09: zero structural-drift fires in 30+ days of
+# Field 2026-06-09: zero structural-drift fires in 30+ days of
 # production runs — synthetic fixture is the only way to validate the
 # recovery path without inventing field data that doesn't exist.
 K79_TMP=$(mktemp -d)
@@ -11575,7 +11575,7 @@ fi
 # K83: provenance citation protocol injection (v0.87.0 B2).
 # Validates conditional protocol block — present only when graph-impact.md
 # exists (graphify ran). In graphify-skip flows the block is absent (would
-# have nothing to cite). Closes the greenfield #5 finding: converts
+# have nothing to cite). Closes the field #5 finding: converts
 # graphify from an opaque dependency into an auditable signal source.
 K83_TMP=$(mktemp -d)
 mkdir -p "$K83_TMP/.devt/state"
@@ -11700,7 +11700,7 @@ cat > "$K85_TMP/case4.md" <<'EOF_K85'
 see the cat. we have an example. check the docs.
 EOF_K85
 # Fixture 5 (v0.88.2): inline triple-backticks in prose must NOT pair
-# with a real code fence's opening. Greenfield greenfield-api's
+# with a real code fence's opening. A field project's
 # quality-gates.md had this exact pattern: blockquote example
 # `tagged ``` ```bash parallel ``` are run` followed by a real
 # `bash parallel` fence. The earlier unanchored regex paired the
@@ -11769,7 +11769,7 @@ K86_TOTAL=$(echo "$K86_OUT" | jq -r '.total_bytes' 2>/dev/null)
 K86_PCT_SUM=$(echo "$K86_OUT" | jq -r '(.summary.static_pct + .summary.dynamic_pct + .summary.wrapper_pct)' 2>/dev/null)
 K86_AGENT=$(echo "$K86_OUT" | jq -r '.agent' 2>/dev/null)
 K86_HAS_GOV_RULES=$(echo "$K86_OUT" | jq -r '[.blocks[] | select(.tag == "governing_rules" and .kind == "static")] | length > 0' 2>/dev/null)
-# wrapper_bytes MUST be non-negative (greenfield audit B1 fix): nested tags
+# wrapper_bytes MUST be non-negative (field audit B1 fix): nested tags
 # like <review_checklist> inside <governing_rules> were being double-counted
 # in the prior implementation, producing negative wrapper_bytes. New logic
 # attributes inner-tag bytes only to their outermost ancestor.
@@ -11822,10 +11822,10 @@ else
   fail "K86b: byte-coverage mismatch — wrapper=$K86B_WRAPPER (want ≥0) sum=$K86B_SUM total=$K86B_TOTAL task_occurrences=$K86B_TASK_OCCURRENCES (want ≥1)"
 fi
 
-# K87: static-compress always persists log entry (greenfield audit B2).
+# K87: static-compress always persists log entry (field audit B2).
 # Prior implementation only called _logEntry on the success return path
 # — refusal paths (mode=off, backup exists, sensitive path, drift,
-# empty input, identical output, etc.) left no audit trail. Greenfield
+# empty input, identical output, etc.) left no audit trail. Field
 # 2026-06-10: 14 files compressed but .devt/state/static-compress.jsonl
 # was absent because subsequent re-runs all took refusal paths.
 # Fix: route every return through _logAndReturn which calls _logEntry
@@ -11858,10 +11858,10 @@ else
 fi
 
 # K88: workflow_id stability across re-init within active workflow
-# (greenfield audit B4). Prior init.cjs unconditionally stripped
+# (field audit B4). Prior init.cjs unconditionally stripped
 # created_at + workflow_id from workflow.yaml on every init * call,
 # forcing updateState to re-stamp both → workflow_id rotated on every
-# devt command. Greenfield observed 42 IDs in one conceptual workflow's
+# devt command. Field observed 42 IDs in one conceptual workflow's
 # history. Fix: when prior workflow.yaml has active=true, preserve
 # stamps. When active=false (or absent), strip as before.
 # K88 verifies both branches.
@@ -11895,8 +11895,8 @@ else
   fail "K88: workflow_id rotation mismatch — preserved_id='$K88_PRESERVED_ID' (want 'k88-preserved-uuid'), rotated_id='$K88_ROTATED_ID' (want fresh UUID)"
 fi
 
-# K89: graphify symbols-in-files envelope shape (greenfield audit G2).
-# Prior implementation returned a bare array []. Greenfield could not
+# K89: graphify symbols-in-files envelope shape (field audit G2).
+# Prior implementation returned a bare array []. Field could not
 # distinguish "graph stale, re-index needed" from "no symbols in diff"
 # from "input was empty". New shape returns
 # { symbols, reason, graph_lag_commits, total_matches } so orchestrators
@@ -11915,10 +11915,10 @@ else
   fail "K89: envelope mismatch — no_input_reason='$K89_NO_INPUT_REASON' envelope=$K89_HAS_ENVELOPE consumer_updated=$K89_CONSUMER_UPDATED"
 fi
 
-# K90: lane-suggestions skew detection (greenfield audit G6).
+# K90: lane-suggestions skew detection (field audit G6).
 # When the largest community group dominates the covered scope (>40%),
 # the partition is too skewed to parallelize meaningfully — one lane
-# would do most of the work. Greenfield observed a 230-file giant + 3
+# would do most of the work. Field observed a 230-file giant + 3
 # noise buckets in code-review-parallel and had to discard the result.
 # Fix: laneSuggestions returns mode=fallback (instead of mode=partial)
 # when skew_ratio > 0.40. K90 builds a synthetic 102/5/3 fixture →
@@ -11956,7 +11956,7 @@ else
 fi
 
 # K91: graphify --allow=<pattern> whitelist for sensitive-path filter
-# (greenfield audit G7). Greenfield reported false-positive class:
+# (field audit G7). Field reported false-positive class:
 # `.env.example` / `.env.sample` are committed templates that match the
 # sensitive denylist but contain no real credentials. Fix: --allow=<substring>
 # CLI flag bypasses the denylist for known-safe paths. K91 verifies:
@@ -12012,7 +12012,7 @@ fi
 # Prior gate flagged ALL Task() calls to devt:* agents that lacked the
 # canonical <scope_trust>/<scope_hint>/<memory_signal> trio — even when
 # the orchestrator hand-injected a richer envelope shape (e.g. <context>
-# + <original_review> for iter-2 verifier revisions). Greenfield I1
+# + <original_review> for iter-2 verifier revisions). Field I1
 # reported the false-positive class blocked legitimate workflow teardown.
 # Fix: expanded signal set to include any of <context>, <graph_impact>,
 # <original_review>, <lane_scope>, <god_node_warnings>, <prior_outputs>,
@@ -12559,7 +12559,7 @@ else
 fi
 
 # K107: cliff detector proportional-response gate (cal #21 F26).
-# Greenfield's F21 falsification test accidentally exposed this: a 112-byte
+# A field project's F21 falsification test accidentally exposed this: a 112-byte
 # probe prompt with a 39-byte reply tripped lowOutput and produced a false
 # SendMessage-resume hint. Real cliff hits happen when an agent processes a
 # substantial input (envelope blocks alone are >= ~1KB) but returns a stub.
@@ -12587,8 +12587,8 @@ else
 fi
 
 # K108: state check-inherited-edits surfaces uncommitted source files (cal #21 A4).
-# Greenfield's W12 retry inherited a `str | None` type from a prior dead dispatch
-# and self-corrected to `PScope`. The orchestrator had no programmatic signal that
+# A field project's W12 retry inherited a `str | None` type from a prior dead dispatch
+# and self-corrected to `AuthScope`. The orchestrator had no programmatic signal that
 # files had been modified. detectInheritedSourceEdits surfaces uncommitted git
 # state filtered by workflow start mtime so re-dispatching is an informed choice.
 # K108 validates the function's response shape against fixtures with three states:
@@ -12708,7 +12708,7 @@ else
 fi
 
 # K112: G1 — UserPromptSubmit session signal push (cal #21 round 5 V6).
-# Greenfield's V6 honest answer revealed A2/A2b/A4 infrastructure works but
+# A field project's V6 honest answer revealed A2/A2b/A4 infrastructure works but
 # discovery surfaces are too passive for an LLM operator — operators forget
 # the CLIs exist when head-down in a workflow. G1 extends the
 # workflow-context-injector hook to push session-scoped telemetry counts
@@ -12761,8 +12761,8 @@ else
   fail "K113: G3 rubric drift — dev_has=$K113_DEV_HAS cr_has=$K113_CR_HAS dev_req=$K113_DEV_REQ cr_req=$K113_CR_REQ"
 fi
 
-# K114: cal #22 F1 — assert-graphify-decision gate flip (greenfield I1).
-# Field evidence: 5+ prior greenfield sessions skipped F16 drill-down entirely
+# K114: cal #22 F1 — assert-graphify-decision gate flip (field I1).
+# Field evidence: 5+ prior field sessions skipped F16 drill-down entirely
 # (0 get_neighbors calls, 0 drill-down sections) while the gate returned
 # ok:true because under_three_drill_downs was informational only.
 # Fixture: workflow.yaml + graphify-impact-plan.json(tier=symbol_anchored)
@@ -12777,7 +12777,7 @@ mkdir -p "$K114_TMP/graphify-out"
 printf '{"nodes":[],"edges":[]}\n' > "$K114_TMP/graphify-out/graph.json"
 K114_OLD_TS=$(node -e "console.log(new Date(Date.now() - 60000).toISOString())")
 printf 'active: true\nworkflow_id: k114-test\nworkflow_type: code_review\nphase: review\ntier: STANDARD\niteration: 1\ntask: "k114 fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K114_OLD_TS" "$K114_OLD_TS" > "$K114_TMP/.devt/state/workflow.yaml"
-printf '{"tier":"symbol_anchored","args":{"symbols":["PScope","PAction"]},"git_provider":"github"}\n' > "$K114_TMP/.devt/state/graphify-impact-plan.json"
+printf '{"tier":"symbol_anchored","args":{"symbols":["AuthScope","AuthAction"]},"git_provider":"github"}\n' > "$K114_TMP/.devt/state/graphify-impact-plan.json"
 printf '## Top direct dependents\n\nSomething substantive enough to clear the byte gate.\n' > "$K114_TMP/.devt/state/graph-impact.md"
 printf '{"graphify_decision_mode":"block","graphify":{"enabled":true}}\n' > "$K114_TMP/.devt/config.json"
 K114_RESULT=$(set +eo pipefail; cd "$K114_TMP" && node "$CLI" state assert-graphify-decision 2>/dev/null) || K114_RESULT=""
@@ -12795,8 +12795,8 @@ else
   fail "K114: gate flip broken — block_ok_no=$K114_OK has_reason=$K114_HAS_REASON has_skipped=$K114_HAS_SKIPPED warn_ok_yes=$K114_WARN_OK"
 fi
 
-# K115: cal #22 F2 — assert-verifier-graded-all-axes (greenfield Q1).
-# Field evidence: greenfield's verifier walked rubric axes A–G and stopped at
+# K115: cal #22 F2 — assert-verifier-graded-all-axes (field Q1).
+# Field evidence: a field project's verifier walked rubric axes A–G and stopped at
 # G, silently skipping axis H "## Axis H — Dispatch warnings acknowledgment".
 # Verdict came back satisfied despite the missing axis grade.
 # Fixture: workflow.yaml (workflow_type=code_review) + verification.json with
@@ -12981,7 +12981,7 @@ else
 fi
 
 # K120 (cal #23 8E): workflow_id_history trim respects archive_runs cap.
-# Greenfield session evidence: history grew to 234 entries while archive_runs=5
+# Field session evidence: history grew to 234 entries while archive_runs=5
 # because the self-healing logic appended ids but never bounded. K120 verifies
 # the trim runs on state update and bounds the history to archive_runs+1
 # (the +1 preserves the original_workflow_id anchor for cross-rotation trace
@@ -13416,7 +13416,7 @@ else
 fi
 
 # K135: docs/GRAPHIFY.md positions symbol_anchored as canonical primary for non-GitHub.
-# Field calibration: greenfield (Bitbucket project) read pr_scoped as "the flagship"
+# Field calibration: field (Bitbucket project) read pr_scoped as "the flagship"
 # and symbol_anchored as a fallback. The framing was already honest in workflow code
 # but absent from user-facing docs/GRAPHIFY.md. This gate locks the positioning.
 if /usr/bin/grep -qE "symbol_anchored.*(canonical primary|primary tier).*non-GitHub" "$ROOT/docs/GRAPHIFY.md" 2>/dev/null; then
@@ -13426,7 +13426,7 @@ else
 fi
 
 # K136: code-review.md identify_scope uses merge-base-aware diff (not HEAD~1).
-# Field calibration: greenfield's multi-commit feature branch was silently
+# Field calibration: a field project's multi-commit feature branch was silently
 # diffed at HEAD~1 (single commit) instead of merge-base (whole branch).
 # L207/L252 already use ${PRIMARY_BRANCH:-main}...HEAD; L495 had diverged.
 # This gate enforces alignment across all three sites in the same workflow.
@@ -13460,7 +13460,7 @@ else
 fi
 
 # K137: state reset-soft clears per-workflow accumulators while preserving
-# session anchors. Field calibration: greenfield receipt #4 — operator ran
+# session anchors. Field calibration: field receipt #4 — operator ran
 # /devt:review on stale workflow with 51 raw_dispatch entries from prior 20-day
 # workflow chain. KILL gate fired on first state.update call, blocking the
 # entire review. Reset-soft is the surgical escape hatch.
@@ -13525,7 +13525,7 @@ else
 fi
 
 # K139: dispatch render-lanes emits <correlation_id>cid_ tag per envelope.
-# Field calibration: greenfield receipt #4 — operator followed register-lanes
+# Field calibration: field receipt #4 — operator followed register-lanes
 # + render-lanes canonical path, but dispatch-hygiene-guard.sh still flagged
 # all 6 dispatches as raw_dispatch because matcher only recognized literal
 # envelope tags. correlation_id is the short tag operators can preserve when
@@ -14581,18 +14581,18 @@ fi
 K182_TMP=$(mktemp -d)
 mkdir -p "$K182_TMP/.devt/state"
 cat > "$K182_TMP/.devt/state/graph-impact.md" <<EOF
-## Drill-down: CallBackend (empty)
+## Drill-down: PaymentService (empty)
 get_neighbors returned results:[].
-## Drill-down: CallProvider (has data)
+## Drill-down: PaymentProvider (has data)
 useful neighbors found.
 ## Drill-down: CallStateManagerInterface (empty)
 returned results:[].
 EOF
 cat > "$K182_TMP/.devt/state/review.md" <<EOF
-- I-4: CallBackend union-type port issue at \`external_calls/types.py:42\`
+- I-4: PaymentService union-type port issue at \`billing/types.py:42\`
 - I-7: Migration issue.
 EOF
-K182_OUT=$(cd "$K182_TMP" && node "$ROOT/bin/devt-tools.cjs" state graphify-roi 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const cbDrill = (o.per_drill||[]).find(d => d.symbol==='CallBackend'); console.log('strict=' + o.wasted_drill_rate + ',weak=' + o.wasted_drill_rate_weak + ',cb_citation=' + (cbDrill && cbDrill.citation) + ',cb_yielded=' + (cbDrill && cbDrill.yielded_data))}catch{console.log('err')}});" 2>/dev/null)
+K182_OUT=$(cd "$K182_TMP" && node "$ROOT/bin/devt-tools.cjs" state graphify-roi 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const cbDrill = (o.per_drill||[]).find(d => d.symbol==='PaymentService'); console.log('strict=' + o.wasted_drill_rate + ',weak=' + o.wasted_drill_rate_weak + ',cb_citation=' + (cbDrill && cbDrill.citation) + ',cb_yielded=' + (cbDrill && cbDrill.yielded_data))}catch{console.log('err')}});" 2>/dev/null)
 rm -rf "$K182_TMP"
 if echo "$K182_OUT" | /usr/bin/grep -q "strict=1,weak=0.667,cb_citation=weak,cb_yielded=false"; then
   pass "K182: graphifyRoi 3-state citation + yielded_data + dual-rate (strict 1.0 / weak 0.667 reveals diagnostic delta)"
@@ -14628,34 +14628,34 @@ fi
 
 # K184: godNodes filters Test[A-Z] symbol-prefix + test-path source files so
 # pytest classes don't pollute the constitutional-abstraction list. Asserts:
-# fixture with TestMappingExtractors (high edges) + PScope + AppError → top-5
-# excludes test classes; PScope + AppError survive.
+# fixture with TestWidgetMapper (high edges) + AuthScope + AppError → top-5
+# excludes test classes; AuthScope + AppError survive.
 K184_OUT=$(node -e "
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const tmp = path.join(os.tmpdir(), 'devt-k184-' + Date.now());
 fs.mkdirSync(tmp + '/.devt', {recursive: true}); fs.mkdirSync(tmp + '/graphify-out', {recursive: true});
 fs.writeFileSync(tmp + '/.devt/config.json', JSON.stringify({graphify: {enabled: true, command: 'graphify'}}));
 const nodes = [
-  {id: 'PScope', label: 'PScope', source_file: 'src/scope.py', file_type: 'code'},
-  {id: 'TestMappingExtractors', label: 'TestMappingExtractors', source_file: 'tests/test_mapping.py', file_type: 'code'},
+  {id: 'AuthScope', label: 'AuthScope', source_file: 'src/scope.py', file_type: 'code'},
+  {id: 'TestWidgetMapper', label: 'TestWidgetMapper', source_file: 'tests/test_mapping.py', file_type: 'code'},
   {id: 'AppError', label: 'AppError', source_file: 'src/errors.py', file_type: 'code'},
 ];
 const links = [];
-for (let i = 1; i <= 50; i++) { nodes.push({id: 'tx'+i, label: 'TX'+i, source_file: 'tests/t'+i+'.py', file_type: 'code'}); links.push({source: 'tx'+i, target: 'TestMappingExtractors', relation: 'uses'}); }
-for (let i = 1; i <= 20; i++) { nodes.push({id: 'px'+i, label: 'PX'+i, source_file: 'src/p'+i+'.py', file_type: 'code'}); links.push({source: 'px'+i, target: 'PScope', relation: 'calls'}); }
+for (let i = 1; i <= 50; i++) { nodes.push({id: 'tx'+i, label: 'TX'+i, source_file: 'tests/t'+i+'.py', file_type: 'code'}); links.push({source: 'tx'+i, target: 'TestWidgetMapper', relation: 'uses'}); }
+for (let i = 1; i <= 20; i++) { nodes.push({id: 'px'+i, label: 'PX'+i, source_file: 'src/p'+i+'.py', file_type: 'code'}); links.push({source: 'px'+i, target: 'AuthScope', relation: 'calls'}); }
 for (let i = 1; i <= 15; i++) { nodes.push({id: 'ax'+i, label: 'AX'+i, source_file: 'src/a'+i+'.py', file_type: 'code'}); links.push({source: 'ax'+i, target: 'AppError', relation: 'raises'}); }
 fs.writeFileSync(tmp + '/graphify-out/graph.json', JSON.stringify({built_at_commit: 'abc', nodes, links}));
 process.chdir(tmp);
 const g = require('$ROOT/bin/modules/graphify.cjs');
 const r = g.godNodes(5);
 const hasTest = r.some(n => /^Test[A-Z]/.test(n.symbol));
-const hasPScope = r.some(n => n.symbol === 'PScope');
+const hasAuthScope = r.some(n => n.symbol === 'AuthScope');
 const hasAppError = r.some(n => n.symbol === 'AppError');
-console.log('hasTest=' + hasTest + ',hasPScope=' + hasPScope + ',hasAppError=' + hasAppError);
+console.log('hasTest=' + hasTest + ',hasAuthScope=' + hasAuthScope + ',hasAppError=' + hasAppError);
 fs.rmSync(tmp, {recursive: true, force: true});
 " 2>/dev/null)
-if echo "$K184_OUT" | /usr/bin/grep -q "hasTest=false,hasPScope=true,hasAppError=true"; then
-  pass "K184: godNodes filters Test[A-Z] classes (TestMappingExtractors excluded; PScope + AppError surface as real god-nodes)"
+if echo "$K184_OUT" | /usr/bin/grep -q "hasTest=false,hasAuthScope=true,hasAppError=true"; then
+  pass "K184: godNodes filters Test[A-Z] classes (TestWidgetMapper excluded; AuthScope + AppError surface as real god-nodes)"
 else
   fail "K184: test-class filter wrong — got: $K184_OUT"
 fi
@@ -14890,6 +14890,23 @@ if echo "$K193_C1" | /usr/bin/grep -qE "^1:token_(and|or)$" && [ "$K193_C2" = "1
   pass "K193: cal #38.C robustness — queryGraph token fallback (multi-word resolves via token_and/or), disk-check warn-only envelope, code-reviewer incremental-write directive"
 else
   fail "K193: robustness trio wrong — C1=$K193_C1 (expect 1:token_and|or), C2=$K193_C2 (expect 1), C3=$K193_C3 (expect ≥1)"
+fi
+
+# K194: stays-general guardrail meta-gate (cal #38.D). CI-enforces that the
+# product surfaces (bin/modules + workflows + agents) carry NO field-test-
+# project coupling — the fix for any field-surfaced bug must be a GENERAL
+# mechanism, never hardcoded to the field-test project. Checks for the
+# field project's name (as an api/path token) + three of its distinctive
+# symbol names (assembled from fragments so this gate's own pattern can't be
+# what a future search trips on). Generic-term "greenfield" (a fresh project
+# with no existing code) is legitimate and deliberately NOT matched. Prevents
+# regression of the cal #38.D decoupling pass.
+K194_PAT="green""field-api|/Projects/green""field|Vicasa""CallProvider|Test""MappingExtractors|Nettie""Calendar"
+K194_HITS=$(/usr/bin/grep -rniE "$K194_PAT" "$ROOT/bin/modules/" "$ROOT/workflows/" "$ROOT/agents/" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$K194_HITS" = "0" ]; then
+  pass "K194: stays-general guardrail — zero field-test-project coupling (name/path/symbols) in bin/modules + workflows + agents"
+else
+  fail "K194: field-test-project coupling regressed — $K194_HITS hit(s) in product surfaces; fixes must generalize, not hardcode the field-test project"
 fi
 
 echo

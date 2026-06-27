@@ -178,7 +178,7 @@ function _computeFreshnessForPath(graphPath) {
   const fresh = !!(builtAt && head && builtAt === head);
 
   // Cal #33.B-1 — built_at_commit consistency defensive surface. Receipt #7
-  // (greenfield 2026-06-25): observed graph.json with built_at_commit: null
+  // (field-observed): graph.json with built_at_commit: null
   // while lag_commits: 0 — internally inconsistent state where the
   // staleness gate trusts a freshness it can't verify against HEAD. Even if
   // the current freshness() math doesn't predict this combination (null
@@ -663,7 +663,7 @@ function getNeighbors(symbol, options) {
   const extraNoise = _getExtraNoiseSet();
   const testPathPatterns = _getTestPathPatterns();
 
-  // G1 (cal #31.B) — DI-aggregation collapse. Receipt #5 Q3: greenfield's
+  // G1 (cal #31.B) — DI-aggregation collapse. Receipt #5 Q3: a field project's
   // `licences/dependencies.py` "imports everything" pattern produced a fan of
   // 100+ result nodes all sharing one source_file via `imports`/`uses` edges,
   // overwhelming legitimate call-graph signal. Detection is structural (per-
@@ -1520,8 +1520,8 @@ function writeMemoryEntry(payload) {
 // Test-class symbol prefix — pytest classes use TestX naming convention; when
 // they accumulate edges (fixtures, parametrize wiring, shared helpers) they
 // rank as god-nodes and pollute the surface that reviewers consult for
-// "constitutional abstractions." Field receipt: TestMappingExtractors hit
-// 591 edges and ranked top-12, drowning out actual god-nodes like PScope.
+// "constitutional abstractions." Field-observed: a test class accumulated
+// ~591 edges and ranked top-12, drowning out genuine domain god-nodes.
 // Filter on label only (source_file alone isn't enough — some test classes
 // live in tests/ AND some prod classes are mis-classified into tests/ via
 // monorepo layout).
@@ -1802,7 +1802,7 @@ function laneSuggestions(diffFiles, options) {
   }
   if (!sawCommunity) {
     // Round 7 W6 — try service-boundary auto-detect before falling back.
-    // Field signal: greenfield's graph carries zero community attributes
+    // Field signal: an observed graph carried zero community attributes
     // (Q5 receipts: Client/AppError/etc. all returned degree-only schema).
     // Every parallel review reverted to legacy path-based partition, which
     // produced semantically broken lanes for service-oriented layouts. The
@@ -2478,7 +2478,7 @@ function getHyperedgesContaining(symbols, options = {}) {
         confidence_score: h.confidence_score || null,
         source_file: h.source_file || null,
         relation: h.relation || null,
-        // Cal #32.A (greenfield receipt 2026-06-25 follow-up): hyperedge
+        // Cal #32.A (field receipt follow-up): hyperedge
         // rationale was being silently dropped. graph.json::hyperedges[]
         // carries it (alongside label) — graphify's standard query/MCP
         // tools (DFS/BFS, query_graph, get_node) skip the hyperedges array
@@ -2510,15 +2510,15 @@ function getHyperedgesContaining(symbols, options = {}) {
  * (graphify hasn't finished, or language coverage is poor) — derived signals
  * are unreliable in that state.
  */
-// C-III.1 (greenfield review report #5): the legacy direct_dependents
+// C-III.1 (field review report): the legacy direct_dependents
 // threshold was hardcoded `>= 10` across quick-implement.md + dev-workflow.md.
-// For a 45K-node graph (greenfield-api scale), 10 is roughly right; for a
+// For a 45K-node graph (large-project scale), 10 is roughly right; for a
 // 5K-node graph it's too high — many edits touch 3-9 dependents that would
 // benefit from a blast map. Scale with graph size: max(5, log10(node_count) * 2).
 //   100 nodes  → max(5, 4)  = 5
 //   1000 nodes → max(5, 6)  = 6
 //   10000 nodes → max(5, 8) = 8
-//   45000 nodes → max(5, 10) = 10  (greenfield baseline)
+//   45000 nodes → max(5, 10) = 10  (large-graph baseline)
 //   100000 nodes → max(5, 10) = 10
 // Floor at 5 prevents trivially-small graphs from triggering scan-prep on
 // 2-3 dependent counts. node_count = 0 (graph not ready) falls back to 5.
@@ -2889,9 +2889,8 @@ function getSymbolCollisions(label) {
   const targetLower = label.toLowerCase();
   const collisions = [];
   // Cal #33.A Rank #3 — ghost-node defensive filter + visible counter.
-  // Receipt #7 (greenfield 2026-06-25): collision detection on
-  // PushNotifier/OutboundInitiator surfaced empty-source_file ghosts and
-  // null-location duplicate VicasaCallProvider entries; reviewer couldn't
+  // Receipt #7: collision detection surfaced empty-source_file ghosts
+  // and null-location duplicate symbol entries; a reviewer couldn't
   // tell a real N-way collision from an AST↔semantic merge artifact.
   // Upstream graphify is fixing the canonical-ID merge that creates these,
   // but the bug has demonstrably recurred — defense-in-depth at the
