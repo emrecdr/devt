@@ -1122,7 +1122,22 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
     lines.push(`- **Direct dependents:** ${(blast.direct_dependents || []).length}`);
     lines.push(`- **Indirect dependents (depth 2):** ${(blast.indirect_dependents || []).length}`);
     lines.push(`- **Modules touched:** ${blast.modules_touched || 0}`);
-    if (blast.god_node_match) lines.push("- ⚠️ **God-node match** — review GRAPH_REPORT.md before proceeding");
+    // God-node warning is alarm-fatigue-aware (cal #38.B): the ⚠️ fires only
+    // for a DISCRIMINATING match (a non-ubiquitous god-node). A match on
+    // ubiquitous types alone (touched by nearly every PR) downgrades to an
+    // info note so the ⚠️ keeps its signal. Falls back to the legacy boolean
+    // when an older blast object lacks the itemized fields.
+    const _discriminatingGod = (blast.discriminating_god_node_match !== undefined)
+      ? blast.discriminating_god_node_match : blast.god_node_match;
+    if (_discriminatingGod) {
+      const names = (blast.god_node_matches || []).filter(m => !m.ubiquitous).map(m => m.symbol);
+      const detail = names.length > 0 ? ` (${names.slice(0, 4).join(", ")})` : "";
+      lines.push(`- ⚠️ **God-node match**${detail} — review GRAPH_REPORT.md before proceeding`);
+    } else if (blast.god_node_match) {
+      const names = (blast.god_node_matches || []).filter(m => m.ubiquitous).map(m => m.symbol);
+      const detail = names.length > 0 ? ` (${names.slice(0, 4).join(", ")})` : "";
+      lines.push(`- ℹ️ God-node touch${detail} — ubiquitous types only (expected; not flagged)`);
+    }
     if (blast.ambiguous_bindings && blast.ambiguous_bindings > 0) {
       lines.push(`- ⚠️ **AMBIGUOUS bindings:** ${blast.ambiguous_bindings} (review needed)`);
     }
@@ -1712,6 +1727,15 @@ function generate(taskText, opts) {
     graph_stats: graphStats,
     staleness,
     god_nodes: topGods,
+    // Commit the cached god_nodes were computed against (Q5). The cached
+    // sidecar value and a later live MCP god_nodes read can disagree on edge
+    // counts (e.g. 893 vs 1074) — not a computation bug but a temporal one:
+    // the graph was rebuilt between the cache write and the live read. The
+    // absolute count doesn't change any decision ("high-degree, weight it"),
+    // but a silent contradiction erodes trust. Stamping the source commit makes
+    // the divergence diagnosable: a reader comparing cached-vs-live can see the
+    // cache is from an older build. null when freshness couldn't resolve it.
+    god_nodes_built_at: (staleness && staleness.built_at) || null,
     memory_index_missing: memoryIndexMissing,
     rej_keyword_matches: lanes.E.map(r => r.keyword).filter(Boolean),
     // G2 (cal #31.C) — laneH auto-memory + claude-mem-harvest matches.

@@ -891,16 +891,36 @@ function blastRadius(symbols, _options) {
   // is what defines god-nodes (per upstream graphify/analyze.py::god_nodes),
   // and graph.json carries the structural data directly. Works even when
   // GRAPH_REPORT.md hasn't been generated yet.
-  let godNodeMatch = false;
   const topNodes = _topByDegree(adj, 10);
   const topIds = new Set(topNodes.map(item => item.id));
   const topLabels = new Set(topNodes.map(item => (item.node.label || item.id).toLowerCase()));
+  // Itemize WHICH input symbols hit a god-node + flag each as ubiquitous (an
+  // expected, fires-on-most-PRs type) or discriminating (a notable structural
+  // god-node). Replaces the prior opaque boolean so consumers can quiet the
+  // alarm-fatigue warning for ubiquitous-only matches. See _getUbiquitousTypeSet.
+  const ubiquitousSet = _getUbiquitousTypeSet(adj);
+  const godNodeMatches = [];
+  const seenGod = new Set();
   for (const sym of symbols) {
     if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
     const resolvedId = _resolveOne(adj, sym);
-    if (resolvedId && topIds.has(resolvedId)) { godNodeMatch = true; break; }
-    if (topLabels.has(sym.toLowerCase())) { godNodeMatch = true; break; }
+    let matchedLabel = null;
+    if (resolvedId && topIds.has(resolvedId)) {
+      const n = adj.nodeMap.get(resolvedId);
+      matchedLabel = (n && n.label) || resolvedId;
+    } else if (topLabels.has(sym.toLowerCase())) {
+      matchedLabel = sym;
+    }
+    if (matchedLabel && !seenGod.has(matchedLabel.toLowerCase())) {
+      seenGod.add(matchedLabel.toLowerCase());
+      godNodeMatches.push({ symbol: matchedLabel, ubiquitous: ubiquitousSet.has(matchedLabel.toLowerCase()) });
+    }
   }
+  const godNodeMatch = godNodeMatches.length > 0;
+  // Discriminating = matched a god-node that is NOT ubiquitous. This is the
+  // signal that should fire the ⚠️ warning; a PR touching only ubiquitous
+  // types (the alarm-fatigue case) has godNodeMatch=true but discriminating=false.
+  const discriminatingGodNodeMatch = godNodeMatches.some(m => !m.ubiquitous);
 
   let effect_size;
   if (godNodeMatch || direct.size + indirect.size > 20 || modules.size >= 4) effect_size = "large";
@@ -924,6 +944,8 @@ function blastRadius(symbols, _options) {
     indirect_dependents: Array.from(indirect),
     modules_touched: modules.size,
     god_node_match: godNodeMatch,
+    god_node_matches: godNodeMatches,
+    discriminating_god_node_match: discriminatingGodNodeMatch,
     ambiguous_bindings: ambiguous.length,
     ambiguous_details: ambiguous,
     source: "graphify",
@@ -1128,6 +1150,54 @@ function _topByDegree(adj, n = 10) {
     if (result.length >= n) break;
   }
   return result;
+}
+
+// Auto-derived ubiquitous-type set for god-node alarm-fatigue suppression.
+// Returns a Set of lowercased labels considered "ubiquitous" — structural hubs
+// so high-degree they're touched by nearly every PR (so a match on them is
+// expected noise, not a notable signal). Used to downgrade the god-node ⚠️ to
+// an info note when only ubiquitous types matched.
+//
+// Auto-derivation uses degree DOMINANCE, not a flat top-K. A flat top-K can't
+// work: the god-node MATCH window is the top-10, so any flat top-K ≥ 10 would
+// mark every match ubiquitous and suppress ALL warnings. Instead, of the top
+// god-nodes, flag the dominant outliers — those whose degree is ≥
+// DOMINANCE_FACTOR × the match-window floor degree. This separates the
+// fires-on-every-PR hubs (e.g. a base error type at many× the floor) from
+// merely-high domain symbols, and fails safe: a flat degree distribution
+// yields an empty set (no suppression → warnings still fire).
+//
+// Project overrides from config.graphify.ubiquitous_types: a plain name is
+// FORCE-ADDED to the suppression set; a "!"-prefixed name is FORCE-KEPT
+// (exempt from suppression — e.g. when a normally-ubiquitous type is itself
+// being refactored). Generic by design — no project-specific names baked in.
+const _UBIQUITOUS_DOMINANCE_FACTOR = 2;
+function _getUbiquitousTypeSet(adj) {
+  const set = new Set();
+  const top = _topByDegree(adj, 10);
+  if (top.length > 0) {
+    const floorDegree = top[top.length - 1].degree || 0;
+    if (floorDegree > 0) {
+      const threshold = floorDegree * _UBIQUITOUS_DOMINANCE_FACTOR;
+      for (const item of top) {
+        if (item.degree >= threshold) {
+          const label = (item.node && item.node.label) || item.id;
+          if (label) set.add(String(label).toLowerCase());
+        }
+      }
+    }
+  }
+  let overrides = [];
+  try { overrides = getConfig().ubiquitous_types; } catch { /* default empty */ }
+  if (!Array.isArray(overrides)) overrides = [];
+  const forceKeep = new Set();
+  for (const raw of overrides) {
+    if (typeof raw !== "string" || !raw) continue;
+    if (raw.startsWith("!")) forceKeep.add(raw.slice(1).toLowerCase());
+    else set.add(raw.toLowerCase());
+  }
+  for (const k of forceKeep) set.delete(k);
+  return set;
 }
 
 /**

@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.117.0] - 2026-06-27
+
+### Cal #38.B — god-node alarm-fatigue suppression + edge-count staleness stamp (receipt #10 findings #4 + #5)
+
+Receipt #10 finding #4: *"God-node warnings have alarm fatigue — PScope/AppError/UUID fire on nearly every PR. Needs a project ubiquitous-types suppression list."* Finding #5: *"Edge-count drift — cached preflight (AppError 893) vs live MCP (1074) disagree; pick one source of truth."*
+
+**B1 — ubiquitous-type discrimination (alarm fatigue).** `blastRadius` no longer returns an opaque `god_node_match` boolean alone — it now itemizes `god_node_matches: [{symbol, ubiquitous}]` and a `discriminating_god_node_match` flag. The preflight god-node warning fires the ⚠️ only for a *discriminating* match (a non-ubiquitous god-node); a match on ubiquitous types alone downgrades to an `ℹ️` info note, killing the every-PR alarm fatigue.
+
+The ubiquitous set is **auto-derived via degree-DOMINANCE**, not a flat top-K. A flat top-K can't work: the god-node match window is the top-10, so any flat top-K ≥ 10 would mark every match ubiquitous and suppress *all* warnings. Instead, of the top-10 god-nodes, those whose degree is ≥ `_UBIQUITOUS_DOMINANCE_FACTOR` (2) × the match-window floor degree are flagged ubiquitous — separating the fires-on-every-PR hubs from merely-high domain symbols. Fails safe: a flat degree distribution yields an empty set (no suppression → warnings still fire).
+
+Greenfield's Q1a chose hybrid (auto + override). New `config.graphify.ubiquitous_types` knob: a plain name is FORCE-ADDED to suppression; a `!`-prefixed name is FORCE-KEPT (exempt — e.g. when a normally-ubiquitous type is itself being refactored, you want it back in the warning set). `effect_size` routing is **unchanged** (touching a hub is still structurally large) — only the warning surface is quieted, which is where the fatigue actually was.
+
+This generalizes greenfield's "K=15 flat list" suggestion per the devt-stays-general guardrail: degree-dominance is the general mechanism that works against devt's actual top-10 match semantics, and it self-tunes as the graph grows (a hardcoded count rots — receipt #10 watched AppError move 893→1074 in a day).
+
+**B2 — edge-count staleness stamp.** The cached-vs-live divergence (893 vs 1074) is temporal, not a computation bug: preflight already overlays live `godNodes()` (inc+out degree), but the cached sidecar value is from an earlier graph snapshot than a later live MCP read. `preflight-brief.json` now carries `god_nodes_built_at` (the commit the cached counts were computed against), so the divergence is diagnosable as staleness rather than a silent contradiction. Per greenfield's Q5: the absolute count doesn't change any decision ("high-degree, weight it") — what erodes trust is the unexplained contradiction.
+
+**Drift-guard stack now 99-deep K94-K192.** Smoke gate K192 asserts the discrimination (dominant hub → suppressed info note; moderate god-node → ⚠️ fires; `!`-force-keep → re-fires) with a synthetic dominance-distribution graph.
+
+**Cal #38 carryover**: #38.C (incremental lane writes + query_graph AND-then-OR fallback + disk preflight), #38.D (comment-hygiene per [[devt-stays-general]]).
+
 ## [0.116.0] - 2026-06-27
 
 ### Cal #38.A — symbolsInFiles signal-quality overhaul (receipt #10 root cause)

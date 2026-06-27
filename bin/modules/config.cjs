@@ -223,6 +223,16 @@ const DEFAULTS = {
     // where transitive reach dwarfs literal callsites. Set to null to
     // disable the cross-check entirely.
     blast_magnification_threshold: 3,
+    // Project-curated ubiquitous-type override for god-node alarm-fatigue
+    // suppression. The stoplist is AUTO-DERIVED by default (top-K god-nodes by
+    // degree), so leaving this empty is the recommended path — auto-derivation
+    // self-tunes as the graph grows (a hardcoded count rots: a god-node's
+    // edge total can shift hundreds in a day). Entries here are FORCE-ADDED to
+    // the auto-derived set (suppress a type the top-K missed). Prefix an entry
+    // with "!" to FORCE-KEEP (exempt a genuinely-refactored type from
+    // suppression even if it's in the top-K). Generic by design — any project
+    // names its own ubiquitous types; greenfield's are only examples.
+    ubiquitous_types: [],
     // After an implementation phase writes new code (impl-summary.json with
     // non-empty files_modified), the workflow decides how to handle the now-
     // stale graph. Three accepted values:

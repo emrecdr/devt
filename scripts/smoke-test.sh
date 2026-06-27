@@ -14828,6 +14828,40 @@ else
   fail "K191: signal-quality wrong — xmod_Foo=$K191_XMOD (expect 1), hunk=$K191_HUNK (expect foolocal=1,apperr=0,dup=1)"
 fi
 
+# K192: god-node alarm-fatigue discrimination (cal #38.B from receipt #10
+# finding #4). A synthetic graph with one DOMINANT hub (degree ~1000) + one
+# moderate god-node (degree ~60 near the top-10 floor). Asserts: (1) touching
+# the dominant hub → god_node_match=true but discriminating=false (ubiquitous,
+# downgraded to info note); (2) touching the moderate god-node →
+# discriminating=true (⚠️ fires); (3) config ubiquitous_types "!Hub" force-keep
+# makes the hub discriminating again (refactor-exempt path).
+K192_TMP=$(mktemp -d)
+mkdir -p "$K192_TMP/.devt" "$K192_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K192_TMP/.devt/config.json"
+node -e "
+const fs=require('fs');
+const nodes=[
+  {id:'Hub',label:'Hub',source_file:'errors.py',source_location:'L1',file_type:'code'},
+  {id:'Mid',label:'Mid',source_file:'svc.py',source_location:'L1',file_type:'code'}
+];
+const links=[];
+for(let i=0;i<1000;i++){nodes.push({id:'a'+i,label:'A'+i,source_file:'a.py',file_type:'code'});links.push({source:'a'+i,target:'Hub',relation:'raises'});}
+for(let i=0;i<60;i++){nodes.push({id:'c'+i,label:'C'+i,source_file:'c.py',file_type:'code'});links.push({source:'c'+i,target:'Mid',relation:'calls'});}
+for(let gi=0;gi<8;gi++){const gid='G'+gi;nodes.push({id:gid,label:'God'+gi,source_file:'g'+gi+'.py',file_type:'code'});for(let i=0;i<40+gi;i++){nodes.push({id:gid+'_'+i,label:gid+'_'+i,source_file:'gx.py',file_type:'code'});links.push({source:gid+'_'+i,target:gid,relation:'calls'});}}
+fs.writeFileSync('$K192_TMP/graphify-out/graph.json',JSON.stringify({built_at_commit:'abc',nodes,links}));
+"
+K192_HUB=$(cd "$K192_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.blastRadius(['Hub']);console.log((r.god_node_match?'1':'0')+(r.discriminating_god_node_match?'1':'0'));" 2>/dev/null)
+K192_MID=$(cd "$K192_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.blastRadius(['Mid']);console.log((r.god_node_match?'1':'0')+(r.discriminating_god_node_match?'1':'0'));" 2>/dev/null)
+echo '{"graphify":{"enabled":true,"command":"graphify","ubiquitous_types":["!Hub"]}}' > "$K192_TMP/.devt/config.json"
+K192_KEEP=$(cd "$K192_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.blastRadius(['Hub']);console.log(r.discriminating_god_node_match?'1':'0');" 2>/dev/null)
+rm -rf "$K192_TMP"
+# Hub: match=1 discriminating=0 → "10"; Mid: match=1 discriminating=1 → "11"; force-keep → "1"
+if [ "$K192_HUB" = "10" ] && [ "$K192_MID" = "11" ] && [ "$K192_KEEP" = "1" ]; then
+  pass "K192: god-node alarm-fatigue discrimination — dominant hub suppressed (info note), moderate god-node fires ⚠️, config !force-keep exempts a refactored hub"
+else
+  fail "K192: discrimination wrong — Hub=$K192_HUB (expect 10), Mid=$K192_MID (expect 11), forceKeep=$K192_KEEP (expect 1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
