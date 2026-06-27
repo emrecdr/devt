@@ -14,7 +14,7 @@ Every file in `.devt/state/` belongs to exactly one of these buckets:
 
 | Bucket | What it is | Survives `state reset`? | Archived by `state cleanup`? |
 |---|---|---|---|
-| **canonical** | Listed by exact filename in the contract | Per RESET_EXEMPT — most are wiped, 5 survive | Never |
+| **canonical** | Listed by exact filename in the contract | Per RESET_EXEMPT — most are wiped, the RESET_EXEMPT set survives | Never |
 | **pattern_allowed** | Matches an `ALLOWED_PATTERNS` regex | No (workflow-scoped) | Only when `mtime > stale_days_default` (default 21) |
 | **ephemeral** | Matches `EPHEMERAL_PATTERNS` (`.tmp`, `~`) | No | Always (every cleanup) |
 | **ad_hoc** | Matches NOTHING in the contract | No | Always (every cleanup) |
@@ -94,6 +94,9 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `probe-failures.jsonl` | `graphify.probeBinary` + `setup.probePythonGraphifyMcp` | JSONL with `{ts, category, command, args, error, ...}` — categories: `spawn-error` / `timeout` / `nonzero-exit` / `not-installed` / `no-result`. `health` surfaces `PROBE_FAILURES_RECENT` info-check when activity is logged within the last 24h. | ✓ |
 | `.graphify-rebuild.lock` | `graphify rebuild` CLI (DEF-038) | atomic O_CREAT|O_EXCL lock holding `{pid, started_at}` JSON; auto-unlinked in finally; survives reset only when the holder crashed (next `rebuild` breaks past the debounce window) | ✓ |
 | `static-compress.jsonl` | `static-compress.cjs` CLI | JSONL with `{action, ts, path, engine, before_bytes, after_bytes, ratio, backup_path, warnings}` records — one per compress / restore action. Audits the opt-in static-file compressor; survives reset so calibration data isn't lost when a workflow resets between compression runs. | ✓ |
+| `last-curator-run.txt` | auto-curator cooldown tracker | timestamp marker gating the 7-day auto-curator cadence; survives reset so `/devt:workflow --cancel` can't bypass the cooldown | ✓ |
+| `graphify-impact-plan.json` | `state compute-impact-plan` | `{tier, tool, args, skip_reason, …}` audit trail for the impact step; survives reset so the "args VERBATIM" contract stays auditable post-hoc (otherwise the only evidence is graph-impact.md, the MCP response, without the args that derived it) | ✓ |
+| `workflow-id-rotations.jsonl` | `state` rotation sites + `init` strip | JSONL `{ts, prev_id, new_id, source, pid, argv}` per workflow_id mutation. RESET_EXEMPT because rotations BY resetSoft are themselves the audited events — wiping on reset would erase the forensic trail for the concurrent-rotation bug it exists to diagnose | ✓ |
 
 ### Audit-only
 
@@ -177,7 +180,7 @@ node bin/devt-tools.cjs state cleanup --apply --stale-days=7
 | | `state reset` | `state cleanup` |
 |---|---|---|
 | When invoked | Workflow boundary (`/devt:workflow --cancel`, end-of-workflow) | On-demand (manual) |
-| What survives | RESET_EXEMPT only (5 entries) | canonical + non-stale pattern_allowed |
+| What survives | RESET_EXEMPT only | canonical + non-stale pattern_allowed |
 | What's archived | Everything not RESET_EXEMPT → `.archive/<ts>/` | ad_hoc + ephemeral + stale pattern_allowed → `.archive/cleanup-<ts>/` |
 | Archive ring buffer | `state.archive_runs` (default 5) | Same ring buffer |
 | Affects canonical files | Yes (most) | No |

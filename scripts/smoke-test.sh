@@ -14981,6 +14981,29 @@ else
   fail "K196: new-file fallback stoplist wrong — got '$K196_OUT' (expect new=1,app=0,filt=1)"
 fi
 
+# K197: docs/STATE-RULES.md documents every RESET_EXEMPT canonical filename
+# (doc-drift meta-gate). RESET_EXEMPT grows as forensic logs are added
+# (workflow-id-rotations.jsonl, graphify-impact-plan.json, …); without this
+# guard STATE-RULES.md silently drifts behind the contract — the exact drift
+# this gate was added to catch (the doc claimed "5 entries" at 8 actual).
+# Extracts the Set's line-start quoted members (mid-line comment artifacts like
+# "args VERBATIM" are not at line-start, so excluded) and asserts each appears
+# in STATE-RULES.md. Same structural-guard class as K117/K156/K194.
+K197_MISSING=$(node -e "
+  const fs=require('fs');
+  const src=fs.readFileSync('$ROOT/bin/modules/state.cjs','utf8');
+  const doc=fs.readFileSync('$ROOT/docs/STATE-RULES.md','utf8');
+  const m=src.match(/const RESET_EXEMPT = new Set\(\[([\s\S]*?)\]\)/);
+  const entries=[];
+  if(m){ for(const line of m[1].split('\n')){ const q=line.match(/^\s*\"([^\"]+)\"/); if(q) entries.push(q[1]); } }
+  process.stdout.write(entries.filter(e=>!doc.includes(e)).join(' '));
+" 2>/dev/null)
+if [ -z "$K197_MISSING" ]; then
+  pass "K197: docs/STATE-RULES.md documents every RESET_EXEMPT canonical filename (no contract↔doc drift)"
+else
+  fail "K197: STATE-RULES.md missing RESET_EXEMPT entries: $K197_MISSING"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

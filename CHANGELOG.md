@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.122.0] - 2026-06-27
+
+### Doc sync — close the cal #37/#38 documentation gaps + RESET_EXEMPT drift meta-gate
+
+A wrap-up doc audit found three staleness issues from the cal #37/#38 arc:
+
+- **`docs/STATE-RULES.md` claimed "5 entries"** for RESET_EXEMPT when the set had grown to 8 (forensic logs accreted across cal #31.D / #34 #6 / #37 #1). The two hardcoded "5" counts are now **count-free** ("the RESET_EXEMPT set survives") to prevent re-staleness, and the forensic-logs table gains the three missing rows: `last-curator-run.txt`, `graphify-impact-plan.json`, `workflow-id-rotations.jsonl`.
+- **`docs/operator-guide/CLI-REFERENCE.md` was missing `state disk-check`** (cal #38.C) — added alongside the existing `compute-impact-plan` entry, documenting the warn-only contract.
+- Config knobs `ubiquitous_types` + `lane_state_guard` are documented in `config.cjs` (the source-of-truth convention all graphify knobs follow — `di_aggregation_pattern`, `test_path_patterns`, etc. live there too), so no separate config-table entry was needed.
+
+**New meta-gate K197** asserts every `RESET_EXEMPT` canonical filename appears in `docs/STATE-RULES.md` — converting "remember to update the doc when you add a forensic log" into a structural CI invariant (same class as K117 doc-count / K156 case-enum / K194 stays-general). It extracts the Set's line-start quoted members (mid-line comment artifacts excluded) and fails the build on any undocumented entry.
+
+**Drift-guard stack now 104-deep K94-K197.**
+
 ## [0.121.0] - 2026-06-27
 
 ### Cal #38.B item 6 completion — ubiquitous-type stoplist reaches the new-file fallback
