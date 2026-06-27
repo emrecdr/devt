@@ -411,6 +411,43 @@ function _resolveMany(adj, query, limit = 20) {
   return Array.from(hits);
 }
 
+// Token fallback for multi-word queries. `_resolveMany` substring-matches the
+// WHOLE query string, so a phrase like "orchestration service TokenProvider"
+// matches no single node label and returns empty — forcing a silent grep
+// degrade. This splits the query into tokens and resolves in two passes:
+//   1. token-AND — nodes whose label/id contains EVERY token (precise).
+//   2. token-OR  — if AND is empty, nodes matching ANY token, ranked by
+//      token-match-count then degree (graceful: never empty when any token
+//      hits). OR-ranked degradation beats an empty result for review scoping.
+// Returns { ids, mode } where mode is "token_and" | "token_or" | null.
+function _tokenizeQuery(text) {
+  return String(text || "").toLowerCase().split(/[^a-z0-9_]+/i).filter(t => t.length >= 2);
+}
+function _resolveManyTokens(adj, text, limit = 20) {
+  const tokens = _tokenizeQuery(text);
+  if (tokens.length < 2) return { ids: [], mode: null };
+  const _deg = (id) => (adj.inc.get(id) || []).length + (adj.out.get(id) || []).length;
+  const scoreById = new Map();
+  for (const [id, node] of adj.nodeMap) {
+    const hay = ((typeof node.label === "string" ? node.label : "") + " " + id).toLowerCase();
+    let matched = 0;
+    for (const t of tokens) { if (hay.includes(t)) matched++; }
+    if (matched > 0) scoreById.set(id, matched);
+  }
+  if (scoreById.size === 0) return { ids: [], mode: null };
+  const andIds = Array.from(scoreById.entries())
+    .filter(([, n]) => n === tokens.length)
+    .map(([id]) => id);
+  if (andIds.length > 0) {
+    andIds.sort((a, b) => _deg(b) - _deg(a));
+    return { ids: andIds.slice(0, limit), mode: "token_and" };
+  }
+  const orIds = Array.from(scoreById.entries())
+    .sort((a, b) => (b[1] - a[1]) || (_deg(b[0]) - _deg(a[0])))
+    .map(([id]) => id);
+  return { ids: orIds.slice(0, limit), mode: "token_or" };
+}
+
 /**
  * BFS from `fromId` along `direction` ("in" | "out" | "both") up to `depth`.
  * Returns { visited: Map<id, {depth, edge}>, order: [id...] } where `edge` is
@@ -525,9 +562,18 @@ function queryGraph(text, options) {
   const loaded = loadGraph();
   if (!loaded.ok) return loaded.degraded;
 
-  const ids = _resolveMany(loaded.cache.adj, text, options.limit || 20);
+  const limit = options.limit || 20;
+  let ids = _resolveMany(loaded.cache.adj, text, limit);
+  let resolutionMode = null;
   if (ids.length === 0) {
-    return { source: "grep", results: [], degraded: true, reason: "no matching nodes", fallback_trigger: "empty" };
+    // Whole-query match empty → token fallback (AND, then OR-ranked) so
+    // multi-word queries degrade gracefully instead of silently grep-falling.
+    const tok = _resolveManyTokens(loaded.cache.adj, text, limit);
+    ids = tok.ids;
+    resolutionMode = tok.mode;
+  }
+  if (ids.length === 0) {
+    return { source: "grep", results: [], degraded: true, reason: "no matching nodes (whole-query + token-AND + token-OR all empty)", fallback_trigger: "empty" };
   }
 
   const results = ids.map(id => {
@@ -542,7 +588,12 @@ function queryGraph(text, options) {
       out_degree: (loaded.cache.adj.out.get(id) || []).length,
     };
   });
-  return { source: "graphify", results };
+  const out = { source: "graphify", results };
+  // Telemetry: surface WHICH resolution pass produced results so a reviewer
+  // can see the query was an exact-substring hit vs a token fallback (and how
+  // loose) — per the telemetry-on-reduction principle.
+  if (resolutionMode) out.resolution_mode = resolutionMode;
+  return out;
 }
 
 /**

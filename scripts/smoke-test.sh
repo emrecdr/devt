@@ -14862,6 +14862,36 @@ else
   fail "K192: discrimination wrong — Hub=$K192_HUB (expect 10), Mid=$K192_MID (expect 11), forceKeep=$K192_KEEP (expect 1)"
 fi
 
+# K193: cal #38.C robustness trio (receipt #10 findings #3 + #6 + #4-stall).
+# (C1) queryGraph token fallback — a multi-word query that matches no single
+# node label whole-string resolves via token_and/token_or instead of empty;
+# (C2) state disk-check CLI returns a warn-only envelope {ok:true, status,
+# free_mb}; (C3) code-reviewer.md carries the incremental-write directive so a
+# budget/disk wall costs the last finding, not the whole analysis.
+K193_TMP=$(mktemp -d)
+mkdir -p "$K193_TMP/.devt" "$K193_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K193_TMP/.devt/config.json"
+node -e "
+const fs=require('fs');
+const nodes=[
+  {id:'OAuthTokenService',label:'OAuthTokenService',source_file:'a.py',file_type:'code'},
+  {id:'OrchestrationService',label:'OrchestrationService',source_file:'b.py',file_type:'code'}
+];
+fs.writeFileSync('$K193_TMP/graphify-out/graph.json',JSON.stringify({built_at_commit:'abc',nodes,links:[]}));
+"
+# C1: multi-word query that matches no whole-string label
+K193_C1=$(cd "$K193_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.queryGraph('orchestration service OAuthTokenService');console.log((r.results&&r.results.length>0?'1':'0')+':'+(r.resolution_mode||'none'));" 2>/dev/null)
+# C2: disk-check envelope shape (warn-only — ok always true, never blocks)
+K193_C2=$(cd "$K193_TMP" && node "$ROOT/bin/devt-tools.cjs" state disk-check 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log((o.ok===true && (o.status==='ok'||o.status==='warn'||o.status==='unknown') && ('free_mb' in o))?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+rm -rf "$K193_TMP"
+# C3: incremental-write directive present in code-reviewer.md
+K193_C3=$(/usr/bin/grep -c "Write findings incrementally" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
+if echo "$K193_C1" | /usr/bin/grep -qE "^1:token_(and|or)$" && [ "$K193_C2" = "1" ] && [ "$K193_C3" -ge "1" ]; then
+  pass "K193: cal #38.C robustness — queryGraph token fallback (multi-word resolves via token_and/or), disk-check warn-only envelope, code-reviewer incremental-write directive"
+else
+  fail "K193: robustness trio wrong — C1=$K193_C1 (expect 1:token_and|or), C2=$K193_C2 (expect 1), C3=$K193_C3 (expect ≥1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

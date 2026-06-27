@@ -1315,12 +1315,21 @@ function cmdRenderLanes(target, options) {
       out.push("");
     }
   }
-  return {
+  const result = {
     lane_count: lanes.length,
     text: out.join("\n"),
     lanes: summary,
     target,
   };
+  // Disk preflight (cal #38.C, pre-fan-out surface) — warn-only. This is the
+  // moment right before N lane transcripts start accumulating, the exact spot
+  // greenfield's run hit ENOSPC mid-lane. Surface a low-disk signal so the
+  // operator can free space before fanning out; never blocks the dispatch.
+  try {
+    const _disk = require("./state.cjs").diskCheck();
+    if (_disk && _disk.status === "warn" && _disk.message) result.disk_warning = _disk.message;
+  } catch { /* disk probe best-effort */ }
+  return result;
 }
 
 module.exports = { run, parseIoContracts, listMarkerRegions, cmdRenderFilled, cmdRenderLanes, cmdDecompose, cmdWarnings };

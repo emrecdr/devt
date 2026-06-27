@@ -999,6 +999,16 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   lines.push("");
   lines.push("## Status: FRESH");
   lines.push("");
+  // Disk preflight (cal #38.C, context_init surface) — warn-only. Surfaces a
+  // low-disk signal up front so a multi-lane run doesn't ENOSPC mid-fan-out;
+  // never blocks (user intervention is the failsafe).
+  try {
+    const _disk = require("./state.cjs").diskCheck();
+    if (_disk && _disk.status === "warn" && _disk.message) {
+      lines.push(`> ${_disk.message}`);
+      lines.push("");
+    }
+  } catch { /* disk probe best-effort */ }
 
   // Memory FTS5 index missing → governance lanes A/B/D/F return empty even
   // when ADR/CON/FLOW/REJ/LES docs exist on disk. The signal is invisible to

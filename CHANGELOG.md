@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.118.0] - 2026-06-27
+
+### Cal #38.C — robustness trio (receipt #10 findings #3 + #6 + lane-stall)
+
+Three independent robustness fixes from receipt #10.
+
+**C1 — query_graph token fallback (finding #3).** `_resolveMany` substring-matches the WHOLE query string, so a multi-word phrase ("orchestration service TokenProvider") matched no single node label and returned empty — silently forcing a grep degrade, which made the `bulk_scoped` review tier weak. Added `_resolveManyTokens`: when whole-query match is empty, tokenize and resolve in two passes — token-AND (nodes containing every token, precise) then token-OR (nodes matching any token, ranked by token-match-count then degree, graceful — never empty when any token hits). Per greenfield's Q3 (AND-then-OR; OR-ranked is the floor that fixes the bulk_scoped path). `queryGraph` surfaces `resolution_mode` (`token_and` / `token_or`) telemetry so a reviewer sees the match was a fallback and how loose.
+
+**C2 — disk preflight, warn-only (finding #6).** devt workflows are disk-heavy (`.devt/state/` + N parallel-lane transcripts at multiple MB each); greenfield hit `ENOSPC` at 132Mi when a Bash stdout-capture failed mid-lane. New `state disk-check` CLI (`df -Pk`, ~5ms) returns `{ok, status, free_mb}` where status is `ok` / `warn` (< 1 GiB free) / `unknown`. **Warn-only by design** — surfaced at the context_init preflight brief AND at pre-fan-out (`cmdRenderLanes::disk_warning`), but never blocks the workflow. This deliberately diverges from greenfield's Q6 (which proposed a hard-block < 200Mi): per the no-defensive-limits-for-low-risk principle, a low-disk signal is surfaced for the operator to act on, but user intervention is the failsafe, not a hard stop that overrides intent.
+
+**C3 — incremental lane writes (greenfield's highest-value item, "more valuable than disk preflight").** Greenfield's Lane 6 ran 117 tool calls, wrote only its start-stub, then hit its budget wall before the single terminal write — losing all analysis. Extended the code-reviewer stub-first protocol with an explicit incremental-write directive: append each finding to the output file as you confirm it (Edit), rather than buffering every finding for one terminal write. A budget or disk wall then costs the last finding, not the whole analysis — the orchestrator gets a partially-populated, recoverable artifact. Makes lane work crash-safe regardless of *cause* (budget OR disk), which the disk preflight alone can't.
+
+**Drift-guard stack now 100-deep K94-K193.** Smoke gate K193 asserts all three (token fallback resolution_mode, disk-check warn-only envelope, incremental-write directive presence).
+
+**Cal #38 carryover**: #38.D (comment-hygiene per [[devt-stays-general]] — strip greenfield-api provenance refs + genericize comment-examples + smoke fixtures).
+
 ## [0.117.0] - 2026-06-27
 
 ### Cal #38.B — god-node alarm-fatigue suppression + edge-count staleness stamp (receipt #10 findings #4 + #5)

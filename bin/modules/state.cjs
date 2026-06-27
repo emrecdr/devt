@@ -2489,6 +2489,40 @@ function graphifyRoi() {
 //   - .devt/state/topic-symbols-dropped.json (when topic.symbols > 32)
 //     OR removes any stale topic-symbols-dropped.json
 //
+// Cheap free-disk probe (cal #38.C / receipt #10 finding #6). devt workflows
+// are disk-heavy — `.devt/state/` artifacts + N parallel-lane agent
+// transcripts (multiple MB each). On a near-full disk a write fails mid-run
+// with ENOSPC (greenfield died at 132Mi when a Bash stdout-capture failed
+// mid-lane), leaving partial work + a stalled lane. This is WARN-ONLY by
+// design: a low-disk signal is surfaced so the operator can act, but the
+// workflow is never blocked (per the no-defensive-limits-for-low-risk
+// principle — user intervention is the failsafe, not a hard stop). One `df`
+// call, ~5ms. Always returns ok:true; status is "ok" | "warn" | "unknown".
+const _DISK_WARN_MB = 1024; // warn below 1 GiB free
+function diskCheck() {
+  try {
+    const { execFileSync } = require("child_process");
+    const out = execFileSync("df", ["-Pk", "."], { encoding: "utf8", timeout: 3000 });
+    const lines = out.trim().split("\n");
+    // POSIX -P guarantees one un-wrapped data row: Filesystem 1024-blocks Used
+    // Available Capacity Mounted-on. Take the last line (the mount for ".").
+    const cols = lines[lines.length - 1].trim().split(/\s+/);
+    const availKb = parseInt(cols[3], 10);
+    if (!Number.isFinite(availKb)) {
+      return { ok: true, status: "unknown", free_mb: null, reason: "df output unparseable" };
+    }
+    const freeMb = Math.floor(availKb / 1024);
+    const status = freeMb < _DISK_WARN_MB ? "warn" : "ok";
+    const result = { ok: true, status, free_mb: freeMb, warn_threshold_mb: _DISK_WARN_MB };
+    if (status === "warn") {
+      result.message = `⚠️ low disk: ${freeMb}Mi free (< ${_DISK_WARN_MB}Mi) — parallel-lane transcripts may exhaust space mid-run; free space to avoid ENOSPC`;
+    }
+    return result;
+  } catch (e) {
+    return { ok: true, status: "unknown", free_mb: null, reason: "df unavailable: " + (e && e.message ? e.message : "error") };
+  }
+}
+
 // MCP execution + AskUserQuestion remain orchestrator-side (architecturally
 // can't move into a CLI). This wrapper handles ONLY the pure-compute tier-
 // decision path.
@@ -6352,6 +6386,8 @@ function run(subcommand, args) {
     }
     case "graphify-roi":
       return graphifyRoi();
+    case "disk-check":
+      return diskCheck();
     case "compute-impact-plan": {
       const scopeArg = args.find(a => a.startsWith("--scope="));
       const branchArg = args.find(a => a.startsWith("--primary-branch="));
@@ -6565,13 +6601,14 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, compute-impact-plan, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }
 
 module.exports = {
   run,
+  diskCheck,
   parseSimpleYaml,
   serializeSimpleYaml,
   readState,
