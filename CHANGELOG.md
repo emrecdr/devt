@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.121.0] - 2026-06-27
+
+### Cal #38.B item 6 completion — ubiquitous-type stoplist reaches the new-file fallback
+
+A verification pass against the original cal #38 plan found item 6 was half-shipped: the shared ubiquitous-type stoplist was wired into god-node warnings (v0.117.0) but NOT into the `symbolsInFiles` G5 new-file fallback — the plan called for "one shared list for god-node-warning suppression AND the new-file whole-file fallback path." The warnings half landed; the fallback half was an oversight.
+
+The graph has no nodes for an un-indexed (new) file, so hunk-scoping can't anchor it — every regex-extracted declaration is included as a blast anchor. A declaration whose NAME collides with a ubiquitous graph god-node pulls that god-node's entire blast set (noise). Now the same `_getUbiquitousTypeSet` stoplist that quiets god-node warnings drops it here too: a genuinely-new symbol survives, a god-node-named declaration is filtered, and `fallback_ubiquitous_filtered` is surfaced per the telemetry-on-reduction principle. Force-keep (`!`-prefixed `config.graphify.ubiquitous_types`) entries are honored via the same exemption.
+
+**Drift-guard stack now 103-deep K94-K196.** Gate K196 asserts the fallback stoplist (dominant-hub graph + a new file declaring a fresh symbol + a colliding god-node name → fresh kept, god-node dropped, telemetry counter set).
+
+This closes the last genuine gap in the cal #38 plan. (Item 7's literal "drop markdown-parse path" remains a deliberate no-op — preflight already overlays live `godNodes()` inc+out, so the path is dead and the `god_nodes_built_at` stamp addresses the temporal divergence. Item 10's `<200Mi` hard-block was dropped per the operator's warn-only choice.)
+
 ## [0.120.0] - 2026-06-27
 
 ### Cal #37 #2 — lane state-mutation guard (concurrent-rotation corruption fix)

@@ -14952,6 +14952,35 @@ else
   fail "K195: lane_state_guard wrong — nofile=$K195_NOFILE(exp allowed), block1=$K195_BLOCK1(exp BLOCKED), block2=$K195_BLOCK2(exp BLOCKED), lane=$K195_LANE(exp allowed), stale=$K195_STALE(exp allowed)"
 fi
 
+# K196: shared ubiquitous-type stoplist on the symbolsInFiles G5 new-file
+# fallback (cal #38.B item 6 — closes the gap where the stoplist was wired
+# into god-node warnings but NOT the un-indexed-file fallback). The graph has
+# no nodes for a new file, so hunk-scoping can't anchor it; a regex-extracted
+# declaration whose NAME matches a ubiquitous god-node is dropped from the
+# blast anchors while a genuinely-new symbol survives. Synthetic graph: one
+# DOMINANT hub (AppError) → ubiquitous; a new file declares NewProvider + a
+# colliding AppError. Asserts NewProvider kept, AppError filtered, telemetry
+# counter surfaced.
+K196_TMP=$(mktemp -d)
+mkdir -p "$K196_TMP/.devt" "$K196_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K196_TMP/.devt/config.json"
+node -e "
+const fs=require('fs');
+const nodes=[{id:'AppError',label:'AppError',source_file:'errors.py',file_type:'code'}];
+const links=[];
+for(let i=0;i<1000;i++){nodes.push({id:'a'+i,label:'A'+i,source_file:'a.py',file_type:'code'});links.push({source:'a'+i,target:'AppError',relation:'raises'});}
+for(let gi=0;gi<9;gi++){const gid='G'+gi;nodes.push({id:gid,label:'God'+gi,source_file:'g'+gi+'.py',file_type:'code'});for(let i=0;i<40;i++){nodes.push({id:gid+'_'+i,label:gid+'_'+i,source_file:'gx.py',file_type:'code'});links.push({source:gid+'_'+i,target:gid,relation:'calls'});}}
+fs.writeFileSync('$K196_TMP/graphify-out/graph.json',JSON.stringify({built_at_commit:'abc',nodes,links}));
+fs.writeFileSync('$K196_TMP/new_mod.py','class NewProvider:\n    pass\n\nclass AppError:\n    pass\n');
+"
+K196_OUT=$(cd "$K196_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.symbolsInFiles(['new_mod.py']);const l=r.symbols.map(s=>s.symbol);console.log('new='+(l.includes('NewProvider')?'1':'0')+',app='+(l.includes('AppError')?'1':'0')+',filt='+(r.fallback_ubiquitous_filtered||0));" 2>/dev/null)
+rm -rf "$K196_TMP"
+if echo "$K196_OUT" | /usr/bin/grep -q "new=1,app=0,filt=1"; then
+  pass "K196: symbolsInFiles G5 new-file fallback applies the shared ubiquitous-type stoplist (fresh symbol kept; god-node-named declaration dropped + telemetry)"
+else
+  fail "K196: new-file fallback stoplist wrong — got '$K196_OUT' (expect new=1,app=0,filt=1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

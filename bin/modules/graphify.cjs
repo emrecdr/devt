@@ -2215,6 +2215,15 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
   // consumers can distinguish them from graph-derived results.
   const fallbackSymbols = [];
   let fallbackFilesScanned = 0;
+  let fallbackUbiquitousFiltered = 0;
+  // Shared ubiquitous-type stoplist applied to the new-file fallback. The
+  // graph has no nodes for un-indexed files, so hunk-scoping can't anchor
+  // them — every regex-extracted declaration is included. A declaration whose
+  // NAME matches a ubiquitous graph god-node is noise as a blast anchor (it
+  // pulls the god-node's whole blast set), so the same stoplist that quiets
+  // god-node warnings drops it here. Force-keep ("!"-prefixed config entries)
+  // are honored via _getUbiquitousTypeSet's exemption.
+  const fallbackUbiquitous = _getUbiquitousTypeSet(loaded.cache.adj);
   for (const file of diffFiles) {
     const nf = _normPath(file);
     // Skip files the graph already covered (any matched source_file
@@ -2228,6 +2237,7 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
     fallbackFilesScanned++;
     for (const sym of extracted) {
       if (seen.has(sym)) continue;   // dedup across graph-results + fallback
+      if (fallbackUbiquitous.has(sym.toLowerCase())) { fallbackUbiquitousFiltered++; continue; }
       seen.add(sym);
       fallbackSymbols.push({
         symbol: sym,
@@ -2270,6 +2280,7 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
     envelope.hunk_scoped = true;
     if (hunkFilteredCount > 0) envelope.hunk_filtered = hunkFilteredCount;
   }
+  if (fallbackUbiquitousFiltered > 0) envelope.fallback_ubiquitous_filtered = fallbackUbiquitousFiltered;
   return envelope;
 }
 

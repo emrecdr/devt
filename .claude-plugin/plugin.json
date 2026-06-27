@@ -2,7 +2,7 @@
   "name": "devt",
   "displayName": "devt",
   "description": "Lightweight multi-agent development workflow plugin. Language-agnostic -- adapts to any project via .devt/rules/ convention. Commands -> Workflows -> Agents architecture with learning loops.",
-  "version": "0.120.0",
+  "version": "0.121.0",
   "defaultEnabled": false,
   "author": {
     "name": "Emre Camdere",
