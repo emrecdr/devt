@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.128.0] - 2026-06-30
+
+### research-task wrapper wiring + researcher `memory_signal` fix (lightening + quality)
+
+The remaining-lever pick: the only one that's **both** lightening *and* a quality fix.
+
+- **Lightening:** `research-task.md` context_init now calls `state workflow-context-init --workflow-type=research` once — init round-trips **8 → 4**. Replaces its fragile inline-jq scope override with the wrapper's `preflight scope-cache`. The preflight-fresh gate, staleness AskUserQuestion, and graphify scan-prep stay separate.
+- **Quality fix (the differentiator):** the researcher dispatch previously carried **no `<memory_signal>`** — it investigated approaches blind to REJ tombstones / ADRs and could re-recommend an already-rejected approach. Added `<memory_signal>` to `templates/dispatch/envelopes/researcher-research.tmpl.md` + recompiled; the wrapper caches `memory_signal_json` and the researcher now receives REJ/ADR/Concept governance signal (north-star #2: output quality always increases).
+- **K204** locks both the wiring and the `<memory_signal>` injection (template + compiled inline) against regression. Drift stack 110 → 111-deep (K94–K204).
+- research-task was safe to wire (it already calls `init workflow`, so no resume-reset hazard). debug.md remains excluded (needs a resume-safe non-resetting variant); research-task's own scan-prep block is left inline for a later fold.
+
 ## [0.127.0] - 2026-06-29
 
 ### `preflight scan-prep` — shared graphify_scan_prep CLI (dedup, token-optimization)

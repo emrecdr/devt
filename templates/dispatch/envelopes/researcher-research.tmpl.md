@@ -7,6 +7,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 </governing_rules>
 <scope_hint>{scope_hint_json}</scope_hint>
 <scope_trust>{scope_trust_json}</scope_trust>
+<memory_signal>{memory_signal_json}</memory_signal>
 <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed caller set + blast radius for the topic's central symbol. When absent, .devt/state/graphify-skip-reason.txt explains why (orchestrator already wrote one of these before dispatch).</graph_impact>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>

@@ -29,48 +29,27 @@ Before dispatching the researcher agent, read `resolved_skills.researcher` from 
 ## Step 1: Initialize
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=research phase=context_init status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=research --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
+PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+if [ -n "$PREREQ_FAILED" ]; then
+  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  exit 1
+fi
+# Preflight freshness gate stays separate (the wrapper gathers; the gate enforces).
 PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
 if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
   echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
   exit 1
 fi
-SCOPE_HINT=$(jq -c '.suggested_reading // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .staleness.lag_commits, fresh: (.staleness.fresh // false)}' .devt/state/preflight-brief.json 2>/dev/null || echo '{}')
-
-# Mechanical staleness override — force scope_trust.trust='sparse' + write a suppression artifact when
-# graph_stats.state=ready AND (lag_commits is null OR exceeds threshold). Bash-mechanical because the
-# prior prose-only spec ("In autonomous mode, force sparse") was found violated in field validation:
-# the orchestrator wrote scope_trust before the prose, then never re-wrote.
-GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
-STALE_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.stale_threshold 2>/dev/null | jq -r '.value // 30')
-LAG=$(echo "$SCOPE_TRUST" | jq -r '.lag_commits // "null"')
-SUPPRESS=""
-if [ "$GRAPHIFY_STATE" = "ready" ]; then
-  if [ "$LAG" = "null" ]; then
-    SUPPRESS="lag_commits=null, state=ready (unreachable SHA / shallow clone)"
-  elif [ "$LAG" -gt "$STALE_THRESHOLD" ] 2>/dev/null; then
-    SUPPRESS="lag_commits=$LAG > stale_threshold=$STALE_THRESHOLD"
-  fi
-fi
-if [ -n "$SUPPRESS" ]; then
-  SCOPE_TRUST=$(echo "$SCOPE_TRUST" | jq '.trust = "sparse"')
-  printf '%s — %s\n' "$(date -u +%FT%TZ)" "$SUPPRESS" > .devt/state/staleness-suppressed.txt
-fi
-
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${SCOPE_HINT}" scope_trust_json="${SCOPE_TRUST}"
 ```
 
-The `state evict-graphify` call clears stale `graph-impact.md` + related MCP-response artifacts from prior workflows so this research session doesn't inherit a different topic's blast radius. **Note**: `graphify-impact-plan.json` is **NOT** evicted — it carries the args+tier audit trail for the impact step and is preserved across workflows (it's idempotently overwritten by substep 5 each session AND on `state reset` survives via RESET_EXEMPT). This keeps the "args VERBATIM" contract auditable post-hoc.
+The wrapper performs `init workflow`, activates the workflow (`workflow_type=research`), runs `preflight generate "${TASK_DESCRIPTION}"` (the **Topic Pre-Flight Brief** — researcher reads it FIRST; REJ tombstones act as "we already evaluated and rejected this" markers it cites when approaches are out of scope), computes the `memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact` aggregate, runs `preflight scope-cache` (computing `scope_hint` + `scope_trust` with the mechanical staleness override — writes `.devt/state/staleness-suppressed.txt` when `graph_stats.state=ready` AND `lag_commits` is null or exceeds `graphify.stale_threshold`), and runs `state evict-graphify`. All cached in `workflow.yaml`; fill the researcher dispatch's `{governing_rules}` / `{models}` / `<scope_hint>` / `<scope_trust>` / `<memory_signal>` placeholders from `$CTX.init` + those caches.
 
-**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
+**`memory_signal` now reaches the researcher.** The wrapper-cached `memory_signal_json` is injected into the researcher dispatch's `<memory_signal>` block below. Previously the researcher investigated approaches with NO governance signal — it could re-recommend an approach the project already rejected (a REJ tombstone). Now REJ/ADR/Concept signals reach it directly (north-star: output quality always increases).
 
-The third call auto-fires the **Topic Pre-Flight Brief** — researcher reads it FIRST so investigation builds on existing governance instead of re-discovering it. REJ tombstones in the Brief act as "we already evaluated and rejected this" markers — researcher cites them in research.md when relevant approaches are out of scope.
+`state evict-graphify` clears stale `graph-impact.md` + related MCP-response artifacts so this research session doesn't inherit a different topic's blast radius. **Note**: `graphify-impact-plan.json` is **NOT** evicted — it carries the args+tier audit trail and survives `state reset` via RESET_EXEMPT.
 
-The fourth call caches `scope_hint_json` for the researcher dispatch — paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
+**Staleness gate** — When `$CTX.staleness_tier ∈ {stale, unknown_lag}` (`staleness.lag_commits > graphify.stale_threshold`, OR `graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
 **Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar. Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
 
@@ -143,6 +122,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 </governing_rules>
 <scope_hint>{scope_hint_json}</scope_hint>
 <scope_trust>{scope_trust_json}</scope_trust>
+<memory_signal>{memory_signal_json}</memory_signal>
 <graph_impact>Read .devt/state/graph-impact.md if it exists — pre-computed caller set + blast radius for the topic's central symbol. When absent, .devt/state/graphify-skip-reason.txt explains why (orchestrator already wrote one of these before dispatch).</graph_impact>
 <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
 <decisions>Read .devt/state/decisions.md (if exists)</decisions>

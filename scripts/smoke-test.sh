@@ -15157,6 +15157,22 @@ else
   fail "K203: scan-prep wrong — skip=$K203_SKIP(exp SKIP) artifact=$K203_ARTIFACT(exp present) active=$K203_ACTIVE(exp ACTIVE) recovery=$K203_RECOVERY(exp RECOVERY)"
 fi
 
+# K204: research-task.md context_init wires the `workflow-context-init` wrapper
+# AND the researcher dispatch carries `<memory_signal>` (template + compiled
+# inline region). Closes the field gap where the researcher investigated
+# approaches with NO REJ/ADR governance signal — it could re-recommend an
+# approach the project already rejected (a REJ tombstone). Locks both the wiring
+# and the memory_signal injection against regression (e.g. a dispatch recompile
+# silently dropping it).
+K204_WIRED=$(/usr/bin/grep -c "state workflow-context-init" "$ROOT/workflows/research-task.md" 2>/dev/null || echo 0)
+K204_INLINE=$(/usr/bin/grep -c "<memory_signal>" "$ROOT/workflows/research-task.md" 2>/dev/null || echo 0)
+K204_TMPL=$(/usr/bin/grep -c "<memory_signal>" "$ROOT/templates/dispatch/envelopes/researcher-research.tmpl.md" 2>/dev/null || echo 0)
+if [ "${K204_WIRED:-0}" -ge 1 ] && [ "${K204_INLINE:-0}" -ge 1 ] && [ "${K204_TMPL:-0}" -ge 1 ]; then
+  pass "K204: research-task wires workflow-context-init (${K204_WIRED}) + researcher dispatch carries <memory_signal> (template + compiled inline) — closes the researcher's missing-governance-signal gap"
+else
+  fail "K204: research-task wiring/memory_signal wrong — wired=$K204_WIRED(exp>=1) inline=$K204_INLINE(exp>=1) template=$K204_TMPL(exp>=1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
