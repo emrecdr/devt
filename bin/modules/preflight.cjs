@@ -2013,13 +2013,78 @@ function run(subcommand, args) {
       json(scopeCache());
       return 0;
     }
+    case "scan-prep": {
+      // Usage: preflight scan-prep [--scope=<task>]
+      const scopeArg = args.find(a => a.startsWith("--scope="));
+      const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
+      json(scanPrep({ scope }));
+      return 0;
+    }
     default:
       process.stderr.write(
         `Unknown preflight subcommand: ${subcommand}\n` +
-        `Valid: generate | topic | status | mark-stale | pick-central-symbol | scope-cache\n`
+        `Valid: generate | topic | status | mark-stale | pick-central-symbol | scope-cache | scan-prep\n`
       );
       return 2;
   }
+}
+
+// Consolidates the graphify_scan_prep decision tree (the ~10-line bash
+// conditional duplicated across dev-workflow + quick-implement) into one call.
+// Reads .devt/state/preflight-brief.json (direct_dependents_count +
+// graph_stats.trust + topic.symbols), computes the adaptive threshold via
+// graphify, and returns the ACTIVE / RECOVERY / SKIP decision (+ central_symbol
+// on ACTIVE). Writes graphify-skip-reason.txt on SKIP so the
+// assert-graphify-decision "exactly one artifact" contract holds. Executing the
+// MCP calls on ACTIVE/RECOVERY stays the orchestrator's job (read .decision).
+function scanPrep({ scope } = {}) {
+  let root;
+  try { root = findProjectRoot(); }
+  catch (e) { return { ok: false, error: `findProjectRoot: ${e.message}`, decision: "SKIP" }; }
+
+  let brief = null;
+  try { brief = JSON.parse(fs.readFileSync(path.join(root, ".devt", "state", "preflight-brief.json"), "utf8")); }
+  catch { brief = null; }
+
+  const dependents = (brief && brief.blast && Number(brief.blast.direct_dependents_count)) || 0;
+  const trust = (brief && brief.graph_stats && brief.graph_stats.trust) || "empty";
+  const symbols = (brief && brief.topic && Array.isArray(brief.topic.symbols)) ? brief.topic.symbols : [];
+  const symbolsCount = symbols.length;
+
+  let threshold = 10;
+  try {
+    const stats = graphify.graphStats();
+    const nc = (stats && Number.isFinite(stats.node_count)) ? stats.node_count : 0;
+    threshold = graphify.adaptiveImpactThreshold(nc);
+  } catch { threshold = 10; }
+
+  let decision, centralSymbol = null, reason = null;
+  if (trust === "dense" && dependents >= threshold && symbolsCount > 0) {
+    decision = "ACTIVE";
+    try { centralSymbol = pickCentralSymbol(symbols, scope || "") || symbols[0]; }
+    catch { centralSymbol = symbols[0]; }
+  } else if (trust === "dense" && symbolsCount === 0) {
+    decision = "RECOVERY";
+  } else {
+    decision = "SKIP";
+    reason = `dependents=${dependents} trust=${trust} symbols=${symbolsCount} (need dense+>=${threshold}+symbols)`;
+    try {
+      const stateDir = path.join(root, ".devt", "state");
+      if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+      fs.writeFileSync(path.join(stateDir, "graphify-skip-reason.txt"), reason + "\n");
+    } catch { /* best-effort */ }
+  }
+
+  // Operator-visible decision line on stderr (mirrors the prior bash echo);
+  // stdout stays pure JSON so the orchestrator can parse `.decision`.
+  const line = decision === "ACTIVE"
+    ? `graphify_scan_prep: ACTIVE — central=${centralSymbol} dependents=${dependents} trust=${trust} threshold=${threshold}`
+    : decision === "RECOVERY"
+      ? "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; resolve synthetic symbols via query_graph"
+      : `graphify_scan_prep: SKIP — ${reason}`;
+  try { process.stderr.write(line + "\n"); } catch { /* ignore */ }
+
+  return { ok: true, decision, central_symbol: centralSymbol, dependents, trust, threshold, symbols_count: symbolsCount, reason };
 }
 
 function scopeCache() {

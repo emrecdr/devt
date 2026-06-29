@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.127.0] - 2026-06-29
+
+### `preflight scan-prep` — shared graphify_scan_prep CLI (dedup, token-optimization)
+
+Lightening pass option #5: the `graphify_scan_prep` decision tree was an ~84%-identical inline bash block duplicated across dev-workflow.md + quick-implement.md (a KEEP-IN-SYNC burden). Extracted into one CLI.
+
+- **`preflight scan-prep --scope=<task>`** — reads `preflight-brief.json` (`direct_dependents_count` + `graph_stats.trust` + `topic.symbols`), applies the adaptive threshold via graphify, picks the central symbol, and returns `{decision, central_symbol, dependents, trust, threshold, symbols_count, reason}`. Writes `graphify-skip-reason.txt` on SKIP (preserving the assert-graphify-decision "exactly one artifact" contract). The orchestrator reads `.decision` and runs the MCP calls (still its job — ACTIVE → blast_radius + drill-down, RECOVERY → query_graph, SKIP → grep fallback). No feature removed.
+- **dev-workflow context_init: 6 → 5; quick-implement: 7 → 6** orchestrator CLI round-trips (cumulative with the prior wrapper: dev-workflow 16 → 5, quick-implement 11 → 6). Removes the duplicate decision tree.
+- **K203** locks the CLI's 3-way decision + the skip artifact. Drift stack 109 → 110-deep (K94–K203).
+
+Note: the gate→hook lever was investigated and reclassified — devt's PostToolUse(Task) hooks are advisory-only, so migrating `assert-artifact-present` off its inline hard-block would regress enforcement. It is a reliability lever (add unskippable hook + keep the block), NOT a lightening one. The remaining lightening backlog is recorded in the project memory.
+
 ## [0.126.0] - 2026-06-29
 
 ### Generalized context-init wrapper — dev-workflow + quick-implement (token-optimization, no feature/quality loss)

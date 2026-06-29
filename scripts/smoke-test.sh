@@ -15137,6 +15137,26 @@ else
   fail "K202: wiring/bundle wrong — dev=$K202_DEV(exp >=1) quick=$K202_QI(exp >=1) bundle=$K202_BUNDLE(exp 1)"
 fi
 
+# K203: `preflight scan-prep` CLI — the shared graphify_scan_prep decision tree
+# extracted from dev-workflow + quick-implement (was an 84%-identical inline
+# bash block). Asserts the 3-way decision: SKIP on empty/sparse (+ writes the
+# graphify-skip-reason.txt decision artifact), ACTIVE on dense+dependents+symbols
+# (+ resolves central_symbol), RECOVERY on dense+0-symbols.
+K203_T=$(mktemp -d); mkdir -p "$K203_T/.devt/state"; echo '{}' > "$K203_T/.devt/config.json"
+echo '{"graph_stats":{"trust":"empty"},"blast":{"direct_dependents_count":0},"topic":{"symbols":[]}}' > "$K203_T/.devt/state/preflight-brief.json"
+K203_SKIP=$(cd "$K203_T" && node "$ROOT/bin/devt-tools.cjs" preflight scan-prep --scope=x 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).decision)}catch{process.stdout.write('err')}})")
+K203_ARTIFACT=$([ -f "$K203_T/.devt/state/graphify-skip-reason.txt" ] && echo present || echo absent)
+echo '{"graph_stats":{"trust":"dense"},"blast":{"direct_dependents_count":50},"topic":{"symbols":["AuthService","TokenStore"]}}' > "$K203_T/.devt/state/preflight-brief.json"
+K203_ACTIVE=$(cd "$K203_T" && node "$ROOT/bin/devt-tools.cjs" preflight scan-prep --scope="fix AuthService" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write((o.decision==='ACTIVE'&&o.central_symbol)?'ACTIVE':'no')}catch{process.stdout.write('err')}})")
+echo '{"graph_stats":{"trust":"dense"},"blast":{"direct_dependents_count":50},"topic":{"symbols":[]}}' > "$K203_T/.devt/state/preflight-brief.json"
+K203_RECOVERY=$(cd "$K203_T" && node "$ROOT/bin/devt-tools.cjs" preflight scan-prep 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).decision)}catch{process.stdout.write('err')}})")
+cd "$ROOT"; rm -rf "$K203_T"
+if [ "$K203_SKIP" = "SKIP" ] && [ "$K203_ARTIFACT" = "present" ] && [ "$K203_ACTIVE" = "ACTIVE" ] && [ "$K203_RECOVERY" = "RECOVERY" ]; then
+  pass "K203: preflight scan-prep returns SKIP(+skip-reason.txt) / ACTIVE(+central_symbol) / RECOVERY — shared decision tree extracted from dev-workflow + quick-implement"
+else
+  fail "K203: scan-prep wrong — skip=$K203_SKIP(exp SKIP) artifact=$K203_ARTIFACT(exp present) active=$K203_ACTIVE(exp ACTIVE) recovery=$K203_RECOVERY(exp RECOVERY)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

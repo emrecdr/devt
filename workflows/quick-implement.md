@@ -80,35 +80,30 @@ The wrapper writes the same side-effect artifacts the inline steps did — `pref
 **Graphify scan-prep gate** — When the task is non-trivial AND the graph is dense AND blast radius is substantial, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Field-validated threshold: `direct_dependents_count >= 10 AND graph_stats.trust == "dense"`. Below the threshold (or graphify disabled): skip; agents fall back to grep + scope_hint. The decision tree is bash; the MCP calls are the orchestrator's responsibility:
 
 ```bash
-DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
-TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
-SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
-# C-III.1: adaptive threshold scales with graph size — small graphs need a
-# lower bar to surface useful blast maps. max(5, log10(node_count) * 2):
-# 100 nodes → 5, 5K → 8, 45K → 10, 100K+ → 10.
-ADAPTIVE_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify adaptive-threshold 2>/dev/null | jq -r '.threshold // 10' || echo 10)
-if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge "$ADAPTIVE_THRESHOLD" ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
-  CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${TASK_DESCRIPTION:-}" 2>/dev/null | head -1)
-  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
-  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST threshold=$ADAPTIVE_THRESHOLD"
-elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
-  echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
-else
-  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥${ADAPTIVE_THRESHOLD}+symbols)"
-  echo "graphify_scan_prep: SKIP — $REASON"
-  printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
-fi
+# `preflight scan-prep` consolidates the decision tree (reads
+# preflight-brief.json's direct_dependents_count + graph_stats.trust +
+# topic.symbols, applies the adaptive threshold, picks the central symbol) into
+# one call and writes graphify-skip-reason.txt on SKIP — replacing the inline
+# bash shared with dev-workflow.md::graphify_scan_prep. Returns
+# {decision, central_symbol, dependents, trust, threshold, symbols_count, reason}.
+SCAN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scan-prep --scope="${TASK_DESCRIPTION}")
+DECISION=$(echo "$SCAN" | jq -r '.decision')
+CENTRAL_SYMBOL=$(echo "$SCAN" | jq -r '.central_symbol // empty')
+echo "graphify_scan_prep: $DECISION — $(echo "$SCAN" | jq -r '.reason // ("central=" + (.central_symbol // "?") + " dependents=" + (.dependents|tostring) + " trust=" + .trust)')"
 ```
 
-When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
+The CLI emits exactly one of `graphify_scan_prep: ACTIVE` / `graphify_scan_prep: RECOVERY` / `graphify_scan_prep: SKIP` (also in `$DECISION`). Act on it:
+
+**`graphify_scan_prep: ACTIVE`** — `$CENTRAL_SYMBOL` resolved. Execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
 
 1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, returns the impact map with `direct_dependents` array.
 2. **Drill-down on top-3 direct dependents** (multi-tier follow-up). Parse `direct_dependents` from blast_radius response, take top-3 by impact_size, and for each call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEPENDENT_NAME>", direction: "in", depth: 2})`. Drills DOWN the impact tree so the programmer/code-reviewer sees which callers each high-risk dependent has.
 
-Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. Sub-agents will Read this file during their scan + implement phases. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep+scope_hint.
+Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. Sub-agents will Read this file during their scan + implement phases.
 
-**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the snake_case fallback also missed). Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
+**`graphify_scan_prep: SKIP`** — the CLI already wrote `graphify-skip-reason.txt` as the explicit decision artifact and no MCP call is made — downstream agents fall back to grep + scope_hint.
+
+**`graphify_scan_prep: RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the snake_case fallback also missed). Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` — the `query_graph(task_text)` fallback — to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 
