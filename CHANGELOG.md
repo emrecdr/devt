@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.125.0] - 2026-06-29
+
+### Cal #39.B wiring — `code-review.md` context_init consumes the `review-context-init` bundle
+
+The `state review-context-init` compound CLI shipped previously but `code-review.md` still issued the ~19 inline round-trips, so the ceremony reduction was never actually delivered. This wires the workflow to the wrapper.
+
+- **Substep 1** now makes a single `state review-context-init --scope=… --primary-branch=…` call, capturing the bundle into `$CTX`. Substeps 2/3/5 read `memory_signal` / `scope_trust` / `god_node_warnings` / `impact_plan` from the bundle; substep 4's staleness decision reads `$CTX.staleness_tier`. The wrapper still writes the same `workflow.yaml` caches + `.devt/state/` side-effect artifacts, so the dispatch envelopes are unchanged. Orchestrator context_init drops from ~19 CLI round-trips to ~4.
+- **Gates stay separate, unskippable stops** — substep 0 stale-workflow prompt, substep 4 staleness AskUserQuestion, substep 6 MCP impact-plan execution, and all 7 substep-8 `assert-*` gates remain distinct orchestrator steps (deliberately NOT folded into the wrapper). The win is removing LLM round-trips, not gates.
+- **Wrapper now surfaces the `init` payload** — `reviewContextInit` runs `init review` ahead of the freshness short-circuit and returns its payload as `bundle.init` (`governing_rules`, `models`, `inline_rubrics`, …) in BOTH the full and short-circuit paths, so the code-reviewer/verifier dispatch envelopes fill their `{governing_rules}` / `{models}` / `{inline_rubrics}` placeholders from the one call instead of a separate `init review`.
+- **Wrapper `god_node_warnings` shape fixed** — now emits the canonical `{god_node_match, matches, ambiguous}` the code-reviewer agent body parses. The shipped wrapper emitted `{god_nodes}`, which the agent's parser + the ambiguous-bindings surface did not recognize — a latent bug exposed only once the wrapper was actually consumed.
+- **K201** locks the collapse: asserts `code-review.md` context_init calls `review-context-init` AND the bundle carries the `init` payload, so it can't silently regress to inline calls or a payload-less bundle. Drift-guard stack 107→108-deep (K94–K201).
+- Migrated the L7 + M14 smoke gates (god_node_warnings prep + ambiguous-bindings construction) to assert `state.cjs` computes them, since those inline workflow steps moved into the wrapper.
+- Stripped ephemeral provenance markers (`cal #34 #1`, `receipt #8 Q4`, `C-I.1`) from the rewritten substeps per the no-version-refs-in-prose rule.
+
 ## [0.124.0] - 2026-06-29
 
 ### Cal #39.B — compound `review-context-init` wrapper (heavy-ceremony fix, CLI)

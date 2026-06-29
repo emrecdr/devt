@@ -2842,6 +2842,20 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
     catch { return null; }
   };
 
+  // ── init review (fail-fast; payload needed by the dispatch envelope) ───
+  // Runs ahead of the freshness short-circuit so BOTH paths return the init
+  // payload — the code-review dispatch envelope fills governing_rules / models
+  // / inline_rubrics from it, and a short-circuit must not starve those. init
+  // is read-only context assembly; it does not evict graph-impact.md, so it is
+  // safe before the freshness check (the eviction-after-freshness invariant is
+  // about evict-graphify, not init).
+  const initRes = sh(["init", "review"]);
+  if (!initRes.ok) {
+    return { ok: false, prerequisite_failed: "init review", detail: initRes.stderr || initRes.stdout };
+  }
+  let initPayload = null;
+  try { initPayload = JSON.parse(initRes.stdout); } catch { initPayload = null; }
+
   // ── Freshness short-circuit (BEFORE any eviction) ──────────────────────
   // If a fresh preflight brief + impact-plan already exist for the current
   // graph, return the cached bundle untouched — re-computing wastes work and
@@ -2859,6 +2873,7 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
         ok: true,
         short_circuited: true,
         reason: "preflight + impact-plan already fresh for current graph; returning cached bundle without re-eviction",
+        init: initPayload,
         impact_plan: plan,
         scope_trust: st.scope_trust_json || null,
         memory_signal: st.memory_signal_json || null,
@@ -2869,11 +2884,8 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
     }
   } catch { /* fall through to full compute */ }
 
-  // ── Prerequisite: init + activate (fail-fast) ──────────────────────────
-  const initRes = sh(["init", "review"]);
-  if (!initRes.ok) {
-    return { ok: false, prerequisite_failed: "init review", detail: initRes.stderr || initRes.stdout };
-  }
+  // ── Prerequisite: activate (fail-fast) ─────────────────────────────────
+  // init already ran above; only the activation state-write remains.
   try {
     updateState([
       "active=true", "workflow_type=code_review", "phase=context_init", "status=DONE",
@@ -2919,8 +2931,17 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
     else if (lag > 0) stalenessTier = "warn";
     else stalenessTier = "fresh";
   }
-  let godNodeWarnings = (brief && brief.god_nodes) ? { god_nodes: brief.god_nodes } : null;
-  if (godNodeWarnings === null) godNodeWarnings = { god_nodes: [] };
+  // Canonical god_node_warnings shape the code-reviewer agent body parses
+  // ({god_node_match, matches, ambiguous}) — mirrors the inline jq the workflow
+  // substep used before the collapse so the agent's parser + the ambiguous-
+  // bindings surface keep working unchanged.
+  const godNodeWarnings = brief
+    ? {
+        god_node_match: (brief.blast && brief.blast.god_node_match) || false,
+        matches: brief.god_nodes || [],
+        ambiguous: (brief.blast && brief.blast.ambiguous_details) || [],
+      }
+    : { god_node_match: false, matches: [], ambiguous: [] };
   try { updateState([`god_node_warnings_json=${JSON.stringify(godNodeWarnings)}`]); } catch { /* best-effort cache */ }
 
   // ── Eviction (AFTER freshness read) + impact-plan ──────────────────────
@@ -2932,6 +2953,7 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
   return {
     ok: true,
     short_circuited: false,
+    init: initPayload,
     impact_plan: impactPlan,
     scope_trust: scopeTrust,
     memory_signal: memorySignal,

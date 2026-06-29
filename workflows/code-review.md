@@ -95,106 +95,64 @@ If user picks `Reset`: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stat
 
 If `IS_STALE=0`: continue to substep 1 silently (no prompt, no overhead).
 
-### Substep 1: Compound init + project context
+### Substep 1: Compound review-context-init (single bundle)
 
-Initialize the workflow (read-only — do NOT reset .devt/state/ here; substep 0 handled the on-demand soft-reset for stale workflows. This step preserves prior-phase artifacts that a legitimate resumed review may depend on):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init review
-```
-
-Load project context:
-
-- Read `.devt/rules/coding-standards.md`
-- Read `.devt/rules/architecture.md`
-- Read `.devt/rules/quality-gates.md`
-- Read `CLAUDE.md` if it exists
+Run the compound context-init wrapper ONCE. It performs `init review`, activates the workflow (`active=true workflow_type=code_review phase=context_init`), runs `preflight generate` (Topic Pre-Flight Brief), computes + caches `memory_signal` / `scope_hint` / `scope_trust` / `god_node_warnings`, evicts stale Graphify artifacts, and computes the Graphify impact-plan — collapsing what were ~8 sequential CLI round-trips into one. It is read-only of prior-phase artifacts (does NOT reset `.devt/state/`; substep 0 handled the on-demand soft-reset for stale workflows), so a legitimate resumed review keeps its artifacts.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=code_review phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${REVIEW_SCOPE}"
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${REVIEW_SCOPE}"
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" --primary-branch="${PRIMARY_BRANCH:-main}")
+PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+if [ -n "$PREREQ_FAILED" ]; then
+  echo "BLOCKED: compound init failed — review-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  exit 1
+fi
 ```
 
-The second call auto-fires the **Topic Pre-Flight Brief** for the review scope. The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss. Skip silently on failure.
+The wrapper writes the same side-effect artifacts the inline substeps did — `preflight-brief.{md,json}`, `graphify-impact-plan.json`, and `scope_trust_json` + `memory_signal_json` + `god_node_warnings_json` cached in `workflow.yaml` — so the dispatch envelopes that read those caches keep working unchanged.
 
-### Substep 2: Compute memory_signal (cached for downstream dispatches)
+**Dispatch-envelope payload.** `$CTX.init` carries the `init review` compound payload — `governing_rules` (`content` + `rules_hash`), `models`, `inline_rubrics`, `rubrics`, `config`. Fill the `{governing_rules…}` / `{models.code-reviewer}` / `{inline_rubrics.code_review}` placeholders in the code-reviewer and verifier dispatch envelopes from `$CTX.init`; the governing-rule file contents (CLAUDE.md, `.devt/rules/*.md`) are in `$CTX.init.governing_rules.content`, so no separate Reads are needed to fill the dispatch.
 
-**Compute the memory signal once and cache it for downstream dispatches.** The same `memory query --signal=3` aggregate keyed on the review scope is consumed by both the code-reviewer and verifier dispatches — compute once here, cache in `workflow.yaml`, read back in each orchestrator-prep step below:
+The wrapper's `preflight generate` auto-fires the **Topic Pre-Flight Brief** for the review scope (degrades silently on failure). The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss.
 
-```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${REVIEW_SCOPE}" --signal=3 --json-compact 2>/dev/null || echo '{}')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
-```
+### Substep 2: memory_signal (cached by the wrapper)
 
-### Substep 3: Cache scope_hint + scope_trust
+The wrapper ran the `memory query "${REVIEW_SCOPE}" --signal=3 --json-compact` aggregate once and cached it in `workflow.yaml::memory_signal_json` — consumed by both the code-reviewer and verifier dispatches (read back into each `<memory_signal>` block below). It is also in the bundle as `$CTX.memory_signal`; no separate query round-trip is needed.
 
-**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
+### Substep 3: scope_hint + scope_trust + god_node_warnings (cached by the wrapper)
 
-```bash
-# Single CLI call replaces the prior 4-jq + conditional + state-update chain.
-# Reads preflight-brief.json, computes scope_hint + scope_trust, applies the
-# mechanical staleness override (forces trust='sparse' + writes
-# staleness-suppressed.txt when state=ready AND lag exceeds graphify.stale_threshold
-# or is null), and persists both JSON blobs to workflow.yaml.
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scope-cache
-```
+The wrapper ran `preflight scope-cache` (reads `preflight-brief.json`, computes `scope_hint` + `scope_trust`, applies the mechanical staleness override — forces `trust='sparse'` + writes `staleness-suppressed.txt` when state=ready AND lag exceeds `graphify.stale_threshold` or is null) and persisted `scope_trust_json` to `workflow.yaml`. The `scope_hint` `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
 
-**Cache god_node_warnings (C-I.1)** for `<god_node_warnings>` injection. Extracts the structured god-node data already computed in `preflight-brief.json` — `god_nodes[]` array carries `{symbol, edge_count, source_file}` per entry, plus the boolean `blast.god_node_match`. Cached once so the dispatch block stays byte-stable across iterations:
+It also extracted the structured god-node data from `preflight-brief.json` — `god_nodes[]` carries `{symbol, edge_count, source_file}` per entry plus the boolean `blast.god_node_match` — and persisted `god_node_warnings_json` to `workflow.yaml` for the `<god_node_warnings>` dispatch injection. Both blobs are in the bundle (`$CTX.scope_trust`, `$CTX.god_node_warnings`).
 
-```bash
-GOD_NODE_WARNINGS=$(jq -c '{
-  god_node_match: (.blast.god_node_match // false),
-  matches: (.god_nodes // []),
-  ambiguous: (.blast.ambiguous_details // [])
-}' .devt/state/preflight-brief.json 2>/dev/null || echo '{"god_node_match":false,"matches":[],"ambiguous":[]}')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update god_node_warnings_json="${GOD_NODE_WARNINGS}"
-```
+When `god_node_match=true`, the agent sees a structured warning ("you're about to edit `<symbol>` — it has `<edge_count>` callers") instead of having to parse the markdown brief. Empty `god_nodes: []` with `god_node_match: false` is the no-warning baseline.
 
-When `god_node_match=true`, the agent sees a structured warning ("you're about to edit `<symbol>` — it has `<edge_count>` callers") instead of having to parse the markdown brief. Empty `matches: []` with `god_node_match: false` is the no-warning baseline.
+### Substep 4: Staleness gate + arch-scan advisory
 
-### Substep 4: Staleness gate + Graphify eviction
+**Staleness gate (tiered).** The wrapper tiered the Graphify freshness into `$CTX.staleness_tier` (comparing `preflight-brief.json::staleness.lag_commits` against `graphify.stale_threshold`, default 10). Decision tree:
 
-**Staleness gate (tiered, cal #34 #1 from receipt #8 Q4).** Read `preflight-brief.json::staleness.lag_commits` + `graphify.stale_threshold` (default 10 — lowered 30→10 per receipt #8). Decision tree:
-
-- **Operator escape hatch (`--no-refresh` / `--stale-ok`)**: when the task text in `REVIEW_SCOPE` contains either flag, skip the staleness gate entirely + force `scope_trust.trust="sparse"` so reviewers downweight blast-radius signal. For emergency-review-on-known-broken-graph (graph build failing, CI runs accepting staleness). Cheap to add, real value.
-- **`lag_commits == 0`**: noop. Graph matches HEAD; proceed silently.
-- **`0 < lag_commits < stale_threshold`** (small-but-nonzero drift): **silent-warn band**. Emit one-line stderr `[staleness] graph N commits behind HEAD; caller-sets may be slightly stale (lag<threshold)` + set `scope_trust.fresh=false` in the sidecar so reviewers see the freshness signal. No prompt — small drift doesn't justify interrupting. Per receipt #8 Q4 reasoning: 28.5s `graphify update . --no-cluster` benchmark places auto-fire in the "operator-prompt-gated" band rather than always-silent-refresh.
-- **`lag_commits >= stale_threshold`** OR (`graph_stats.state` is `ready` AND `lag_commits` is `null`): AskUserQuestion BEFORE the impact-map fetch and any agent dispatch. Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD (threshold {threshold}); review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled.
+- **Operator escape hatch (`--no-refresh` / `--stale-ok`)**: when the task text in `REVIEW_SCOPE` contains either flag, skip the staleness gate entirely + force `scope_trust.trust="sparse"` so reviewers downweight blast-radius signal. For emergency-review-on-known-broken-graph (graph build failing, CI runs accepting staleness).
+- **`staleness_tier == "fresh"`** (`lag_commits == 0`): noop. Graph matches HEAD; proceed silently.
+- **`staleness_tier == "warn"`** (`0 < lag_commits < stale_threshold`, small-but-nonzero drift): **silent-warn band**. Emit one-line stderr `[staleness] graph behind HEAD; caller-sets may be slightly stale (lag<threshold)`; the wrapper already set `scope_trust.fresh=false` so reviewers see the freshness signal. No prompt — small drift doesn't justify interrupting.
+- **`staleness_tier == "stale"`** (`lag_commits >= stale_threshold`) OR **`"unknown_lag"`** (`graph_stats.state` is `ready` AND `lag_commits` is `null`): AskUserQuestion BEFORE the impact-map fetch and any agent dispatch. Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD (threshold {threshold}); review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed.
+- **`staleness_tier == "unknown"`** (graphify disabled / not ready) or **absent** (short-circuit re-call on a fresh graph): proceed silently.
 
 ```bash
 # Operator escape hatch detection
 if [[ " ${REVIEW_SCOPE} " == *" --no-refresh "* ]] || [[ " ${REVIEW_SCOPE} " == *" --stale-ok "* ]] || [[ " $ARGUMENTS " == *" --no-refresh "* ]] || [[ " $ARGUMENTS " == *" --stale-ok "* ]]; then
   echo "[staleness] --no-refresh / --stale-ok: skipping staleness gate; forcing scope_trust.trust=sparse"
-  STALENESS_GATE_BYPASS="1"
+  STALENESS_TIER="bypass"
 else
-  STALENESS_GATE_BYPASS=""
+  STALENESS_TIER=$(echo "$CTX" | jq -r '.staleness_tier // "unknown"')
 fi
-
-# Tiered staleness check (only when not bypassed)
-if [ -z "$STALENESS_GATE_BYPASS" ]; then
-  LAG_COMMITS=$(jq -r '.staleness.lag_commits // "null"' .devt/state/preflight-brief.json 2>/dev/null)
-  STALE_THRESHOLD=$(node -e "const c = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/config.cjs').getMergedConfig(); console.log((c.graphify && c.graphify.stale_threshold) || 10)")
-  if [ "$LAG_COMMITS" = "null" ]; then
-    # Treated as prompt-tier (unknown freshness)
-    STALENESS_TIER="prompt"
-  elif [ "$LAG_COMMITS" = "0" ]; then
-    STALENESS_TIER="noop"
-  elif [ "$LAG_COMMITS" -lt "$STALE_THRESHOLD" ]; then
-    STALENESS_TIER="silent_warn"
-    echo "[staleness] graph $LAG_COMMITS commits behind HEAD; caller-sets may be slightly stale (lag<threshold=$STALE_THRESHOLD)"
-  else
-    STALENESS_TIER="prompt"
-  fi
-fi
+case "$STALENESS_TIER" in
+  warn)               echo "[staleness] graph behind HEAD; caller-sets may be slightly stale (lag<threshold)";;
+  stale|unknown_lag)  echo "[staleness] graph stale / unknown-lag — issue the AskUserQuestion before dispatch";;
+esac
 ```
 
-When `STALENESS_TIER=prompt`: issue the AskUserQuestion above. When `silent_warn`: continue silently (banner already emitted). When `noop`: proceed.
+When `STALENESS_TIER` is `stale` or `unknown_lag`: issue the AskUserQuestion above. When `warn`: continue silently (silent-warn band — banner already emitted). When `fresh` / `unknown` / `bypass`: proceed.
 
-**Evict any stale Graphify artifacts before regeneration.** A prior session's `graph-impact.md` or `graphify-skip-reason.txt` would otherwise look current and silently mask whether the orchestrator actually ran the plan this session. Targeted — never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The CLI is the single source of truth for the eviction set (also used by `dev-workflow`, `quick-implement`, `debug`, `research-task`):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
-```
+**Stale Graphify artifacts were already evicted by the wrapper** (`state evict-graphify`, run after the freshness read so a clean short-circuit can reuse its `graph-impact.md`). The eviction is targeted — it never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The same eviction set is shared with `dev-workflow`, `quick-implement`, `debug`, `research-task`.
 
 **Arch-scan freshness advisory.** Check whether an arch-scan-report.md is available and how recent it is. Advisory-only by default — surfaces a `[STALE-ARCH-SCAN]` sentinel if the report is older than 24h so the reviewer can decide whether to refresh before reviewing structural changes. Surfaces state subcommands that would otherwise be available but unwired into workflows:
 
@@ -210,25 +168,24 @@ fi
 
 If the diff under review touches files that arch-scan has flagged (cross-reference arch-scan-report.md::findings vs the review's `scope_files`), surface the overlap explicitly to the reviewer — known architectural drift in the review's scope is a strong signal worth elevating.
 
-### Substep 5: Compute the Graphify impact-plan
+### Substep 5: Graphify impact-plan (computed by the wrapper)
 
-**Compute the Graphify impact-map plan.** Single CLI computes the tier-decision tree + writes `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, topic_symbols_dropped_count?}`. The orchestrator then has ONE imperative instruction below — no "run the first matching" prose to skip past.
+The wrapper computed the tier-decision tree in-process and wrote `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, topic_symbols_dropped_count?}`. Read the plan from the bundle (identical to the on-disk JSON) — the orchestrator then has ONE imperative instruction in substep 6, no "run the first matching" prose to skip past:
 
 ```bash
-PLAN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state compute-impact-plan --scope="${REVIEW_SCOPE}" --primary-branch="${PRIMARY_BRANCH:-main}")
-TIER=$(echo "$PLAN" | jq -r '.tier')
-TOOL=$(echo "$PLAN" | jq -r '.tool')
-GIT_PROVIDER=$(echo "$PLAN" | jq -r '.git_provider')
+TIER=$(echo "$CTX" | jq -r '.impact_plan.tier')
+TOOL=$(echo "$CTX" | jq -r '.impact_plan.tool')
+GIT_PROVIDER=$(echo "$CTX" | jq -r '.impact_plan.git_provider')
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 # Echo the pr_diff_caveat (if any) so reviewers see the new-files-not-indexed signal in stdout.
-PR_DIFF_CAVEAT=$(echo "$PLAN" | jq -r '.pr_diff_caveat // empty')
+PR_DIFF_CAVEAT=$(echo "$CTX" | jq -r '.impact_plan.pr_diff_caveat // empty')
 [ -n "$PR_DIFF_CAVEAT" ] && echo "pr_scoped_diff caveat: $PR_DIFF_CAVEAT"
 # Echo the topic-symbol pre-truncation signal so reviewers see the dropped-list sidecar exists.
-DROPPED_COUNT=$(echo "$PLAN" | jq -r '.topic_symbols_dropped_count // empty')
+DROPPED_COUNT=$(echo "$CTX" | jq -r '.impact_plan.topic_symbols_dropped_count // empty')
 [ -n "$DROPPED_COUNT" ] && echo "topic.symbols pre-truncated: $DROPPED_COUNT symbols dropped → .devt/state/topic-symbols-dropped.json"
 ```
 
-**Tier decision tree (preserved by `compute-impact-plan` CLI — identical semantics to the prior inline bash):**
+**Tier decision tree (computed by the `computeGraphifyImpactPlan` wrapper — identical semantics to the prior inline bash):**
 
 | Precondition | Tier | Tool | Args |
 |---|---|---|---|
@@ -241,7 +198,7 @@ DROPPED_COUNT=$(echo "$PLAN" | jq -r '.topic_symbols_dropped_count // empty')
 | scope ≥ threshold + dense + no diff-symbols | `bulk_scoped` | `query_graph` | `{text: REVIEW_SCOPE, limit: 20}` |
 | else | `skip` | — | `{skip_reason: "no PR…"}` |
 
-Side-effects (same as prior bash): writes `.devt/state/graphify-impact-plan.json`; writes `.devt/state/topic-symbols-dropped.json` when `topic.symbols > 32` (consumed by substep 7's god-node check); removes any stale dropped-list sidecar otherwise.
+Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; `.devt/state/topic-symbols-dropped.json` when `topic.symbols > 32` (consumed by substep 7's god-node check); removes any stale dropped-list sidecar otherwise.
 
 ### Substep 6: Execute the impact-plan + multi-tier drill-down
 

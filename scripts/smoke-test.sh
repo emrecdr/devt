@@ -8832,7 +8832,7 @@ M14_GRAPHIFY=$(/usr/bin/grep -c "source_file: (node && node.source_file)" "$ROOT
 M14_PERSIST=$(/usr/bin/grep -c "ambiguous_details: Array.isArray" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
 M14_WORKFLOW=$(/usr/bin/grep -c "## Ambiguous bindings" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M14_AGENT=$(/usr/bin/grep -cE "ambiguous.*non-empty" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
-M14_JQ=$(/usr/bin/grep -c "ambiguous: (.blast.ambiguous_details // \[\])" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M14_JQ=$(/usr/bin/grep -c "ambiguous: (brief.blast && brief.blast.ambiguous_details)" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
 if [ "${M14_GRAPHIFY:-0}" -ge 1 ] && [ "${M14_PERSIST:-0}" -ge 1 ] && [ "${M14_WORKFLOW:-0}" -ge 1 ] && [ "${M14_AGENT:-0}" -ge 1 ] && [ "${M14_JQ:-0}" -ge 1 ]; then
   pass "M14: ambiguous_bindings consumer wiring complete (graphify=${M14_GRAPHIFY}, persist=${M14_PERSIST}, workflow=${M14_WORKFLOW}, agent=${M14_AGENT}, jq=${M14_JQ})"
 else
@@ -9010,20 +9010,20 @@ else
 fi
 
 # L7: god_node_warnings block wired into code-review.md dispatch templates
-# AND code-reviewer agent body. Field review report #3: today
-# god_nodes lands in the preflight-brief.md prose but isn't injected as
-# a STRUCTURED hint into the agent context. C-I.1 adds the prep step
-# (jq extracts {god_node_match, matches} from preflight-brief.json into
-# god_node_warnings_json), the dispatch block in code-review.md, and the
-# agent-body parsing instruction. Gate: drift detection that all three
-# touch points stay in sync.
+# AND code-reviewer agent body. god_nodes lands in the preflight-brief.md
+# prose but must ALSO be injected as a STRUCTURED hint into the agent context.
+# The computation + caching of god_node_warnings_json now lives in the
+# review-context-init wrapper (state.cjs::reviewContextInit), which extracts
+# {god_node_match, matches} from preflight-brief.json — the workflow reads it
+# from the bundle / workflow.yaml cache. Gate: drift detection that all three
+# touch points stay in sync (dispatch envelopes, agent body, wrapper compute).
 L7_WORKFLOW=$(/usr/bin/grep -c "god_node_warnings_json" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 L7_AGENT=$(/usr/bin/grep -c "<god_node_warnings>" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
-L7_PREP=$(/usr/bin/grep -c "GOD_NODE_WARNINGS=" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-if [ "${L7_WORKFLOW:-0}" -ge 3 ] && [ "${L7_AGENT:-0}" -ge 1 ] && [ "${L7_PREP:-0}" -ge 1 ]; then
-  pass "L7: god_node_warnings wired into workflow (${L7_WORKFLOW} refs), agent body (${L7_AGENT} ref), prep step (${L7_PREP} bash)"
+L7_PREP=$(/usr/bin/grep -c "god_node_warnings_json=" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+if [ "${L7_WORKFLOW:-0}" -ge 2 ] && [ "${L7_AGENT:-0}" -ge 1 ] && [ "${L7_PREP:-0}" -ge 1 ]; then
+  pass "L7: god_node_warnings wired into workflow (${L7_WORKFLOW} refs), agent body (${L7_AGENT} ref), wrapper compute (${L7_PREP} in state.cjs)"
 else
-  fail "L7: god_node_warnings wiring incomplete. workflow=${L7_WORKFLOW} agent=${L7_AGENT} prep=${L7_PREP}"
+  fail "L7: god_node_warnings wiring incomplete. workflow=${L7_WORKFLOW} agent=${L7_AGENT} wrapper=${L7_PREP}"
 fi
 
 # K32: graphify lane-suggestions partitions diff files by dominant community
@@ -15096,6 +15096,25 @@ if [ "$K200_FIRST" = "1" ] && [ "$K200_SECOND" = "1" ] && [ "$K200_HONEST" = "1"
   pass "K200: review-context-init returns bundle (impact_plan+staleness_tier), short-circuits on fresh re-call, honest-absence freshness when graphify disabled"
 else
   fail "K200: wrapper wrong — first=$K200_FIRST(exp 1) short_circuit=$K200_SECOND(exp 1) honest_absence=$K200_HONEST(exp 1)"
+fi
+
+# K201: code-review.md context_init WIRES the review-context-init wrapper (cal
+# #39.B) — locks the collapse so context_init can't silently regress to the ~19
+# inline CLI round-trips it replaced — AND the bundle carries the init payload
+# (governing_rules + models) that the code-reviewer/verifier dispatch envelopes
+# fill their {governing_rules}/{models} placeholders from. The wrapper runs
+# `init review` internally; if it stopped surfacing that payload the dispatches
+# would lose their governing rules + rubric with no other gate noticing.
+K201_WIRED=$(/usr/bin/grep -c "state review-context-init" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+K201_T=$(mktemp -d); mkdir -p "$K201_T/.devt/state"
+echo '{"graphify":{"enabled":false}}' > "$K201_T/.devt/config.json"
+cd "$K201_T"; git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t; echo y > z.py; git add -A; git commit -qm b >/dev/null 2>&1
+K201_INIT=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review x" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write((o.ok===true && o.init && o.init.governing_rules && o.init.models)?'1':'0')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K201_T"
+if [ "${K201_WIRED:-0}" -ge 1 ] && [ "$K201_INIT" = "1" ]; then
+  pass "K201: code-review.md context_init calls review-context-init wrapper (${K201_WIRED} ref) + bundle carries init payload (governing_rules + models for the dispatch envelope)"
+else
+  fail "K201: wiring/payload wrong — wired=$K201_WIRED(exp >=1) bundle_init=$K201_INIT(exp 1)"
 fi
 
 echo
