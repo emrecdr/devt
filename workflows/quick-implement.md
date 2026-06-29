@@ -58,57 +58,22 @@ Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::
 
 <step name="context_init" gate="compound init succeeds and .devt/rules/ is readable">
 
-Initialize the workflow:
+Run the compound context-init wrapper ONCE — it performs `init workflow`, activates the workflow (`active=true workflow_type=quick_implement phase=context_init`), runs `preflight generate`, computes + caches `memory_signal` / `scope_hint` / `scope_trust`, and evicts stale Graphify artifacts — collapsing ~6 data-gathering round-trips into one:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=quick_implement --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
+PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+if [ -n "$PREREQ_FAILED" ]; then
+  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  exit 1
+fi
+# quick-implement hardcodes the SIMPLE tier (the wrapper stamps workflow_type, not tier).
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update tier=SIMPLE
 ```
 
-Load project context:
+Load project context (orchestrator-side reads, not CLI round-trips): governing-rule contents (`CLAUDE.md`, `.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are already in `$CTX.init.governing_rules.content`; read `.devt/state/spec.md` if it exists (from `/devt:specify`) as the primary requirements source. Fill the `{models.<agent>}` / `<guardrails_inline>` / `<governing_rules>` dispatch placeholders from `$CTX.init`.
 
-- Read `.devt/rules/coding-standards.md`
-- Read `.devt/rules/architecture.md`
-- Read `.devt/rules/quality-gates.md`
-- Read `.devt/rules/testing-patterns.md`
-- Read `CLAUDE.md` if it exists
-- Read `.devt/state/spec.md` if it exists (from `/devt:specify`)
-  - If spec exists: use it as the primary requirements source
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=quick_implement phase=context_init tier=SIMPLE status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
-```
-
-**Evict stale Graphify artifacts** before regenerating preflight + impact data. Prevents cross-workflow contamination (a prior `/devt:review` or sibling workflow's `graph-impact.md` would otherwise persist and mislead this session's scan):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
-```
-
-**Auto-fire Pre-Flight Brief**:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
-```
-
-Produces `.devt/state/preflight-brief.md`. The programmer agent reads it before edits. Skip silently if the call fails.
-
-**Compute the memory signal once and cache it for downstream dispatches.** Same aggregate is consumed by the programmer and code-reviewer dispatches — compute once here, cache in `workflow.yaml`, read back in each orchestrator-prep step below:
-
-```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact 2>/dev/null || echo '{}')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
-```
-
-**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8:
-
-```bash
-# Single CLI call replaces the prior 4-jq + conditional + state-update chain.
-# Reads preflight-brief.json, computes scope_hint + scope_trust, applies the
-# mechanical staleness override (forces trust='sparse' + writes
-# staleness-suppressed.txt when state=ready AND lag exceeds graphify.stale_threshold
-# or is null), and persists both JSON blobs to workflow.yaml.
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scope-cache
-```
+The wrapper writes the same side-effect artifacts the inline steps did — `preflight-brief.{md,json}` + `memory_signal_json` / `scope_hint_json` / `scope_trust_json` cached in `workflow.yaml` (the programmer + code-reviewer dispatches read them back). Its `preflight generate "${TASK_DESCRIPTION}"` produces `.devt/state/preflight-brief.md`; its `memory query "${TASK_DESCRIPTION}" --signal=3` aggregate is cached for those dispatches; its `preflight scope-cache` computes `scope_hint` + `scope_trust` with the mechanical staleness override (forces `trust='sparse'` + writes `.devt/state/staleness-suppressed.txt` when `graph_stats.state=ready` AND `lag_commits` is null or exceeds `graphify.stale_threshold`); and `state evict-graphify` ran after the freshness read so a clean resume reuses its `graph-impact.md`.
 
 **Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the programmer dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; symbol-to-file mappings may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 

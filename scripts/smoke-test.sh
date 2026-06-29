@@ -15117,6 +15117,26 @@ else
   fail "K201: wiring/payload wrong — wired=$K201_WIRED(exp >=1) bundle_init=$K201_INIT(exp 1)"
 fi
 
+# K202: dev-workflow.md + quick-implement.md context_init WIRE the generalized
+# `state workflow-context-init` wrapper (the contextInitBundle shared core that
+# also powers review-context-init). Locks the collapse so these two highest-
+# frequency workflows can't regress to the ~16 / ~11 inline data-gathering
+# round-trips they replaced, and verifies the workflow-mode bundle carries the
+# init payload (governing_rules for the dispatch envelopes) + a memory_signal
+# field (workflow mode gathers the same FTS signal review mode does).
+K202_DEV=$(/usr/bin/grep -c "state workflow-context-init" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+K202_QI=$(/usr/bin/grep -c "state workflow-context-init" "$ROOT/workflows/quick-implement.md" 2>/dev/null || echo 0)
+K202_T=$(mktemp -d); mkdir -p "$K202_T/.devt/state"
+echo '{"graphify":{"enabled":false}}' > "$K202_T/.devt/config.json"
+cd "$K202_T"; git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t; echo y > z.py; git add -A; git commit -qm b >/dev/null 2>&1
+K202_BUNDLE=$(node "$ROOT/bin/devt-tools.cjs" state workflow-context-init --workflow-type=dev --scope="k202 test" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write((o.ok===true && o.init && o.init.governing_rules && o.memory_signal!==undefined && o.memory_signal!==null)?'1':'0')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K202_T"
+if [ "${K202_DEV:-0}" -ge 1 ] && [ "${K202_QI:-0}" -ge 1 ] && [ "$K202_BUNDLE" = "1" ]; then
+  pass "K202: dev-workflow + quick-implement context_init call workflow-context-init wrapper (dev=${K202_DEV} quick=${K202_QI}) + bundle carries init payload + memory_signal"
+else
+  fail "K202: wiring/bundle wrong — dev=$K202_DEV(exp >=1) quick=$K202_QI(exp >=1) bundle=$K202_BUNDLE(exp 1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

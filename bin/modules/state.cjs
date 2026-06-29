@@ -2820,9 +2820,10 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
 //    graphify is an enhancer; its outage degrades, never aborts.
 //  - FRESHNESS short-circuit checked BEFORE eviction: a clean resume must not
 //    evict the graph-impact.md it's about to reuse.
-function reviewContextInit({ scope, primaryBranch } = {}) {
+function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, taskDefault = "code review" } = {}) {
   const { spawnSync } = require("child_process");
   const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
+  const initMode = mode === "workflow" ? "workflow" : "review";
   const proot = findProjectRoot();
   if (!primaryBranch) {
     try {
@@ -2849,9 +2850,9 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
   // is read-only context assembly; it does not evict graph-impact.md, so it is
   // safe before the freshness check (the eviction-after-freshness invariant is
   // about evict-graphify, not init).
-  const initRes = sh(["init", "review"]);
+  const initRes = sh(["init", initMode]);
   if (!initRes.ok) {
-    return { ok: false, prerequisite_failed: "init review", detail: initRes.stderr || initRes.stdout };
+    return { ok: false, prerequisite_failed: `init ${initMode}`, detail: initRes.stderr || initRes.stdout };
   }
   let initPayload = null;
   try { initPayload = JSON.parse(initRes.stdout); } catch { initPayload = null; }
@@ -2888,21 +2889,21 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
   // init already ran above; only the activation state-write remains.
   try {
     updateState([
-      "active=true", "workflow_type=code_review", "phase=context_init", "status=DONE",
+      "active=true", `workflow_type=${workflowType}`, "phase=context_init", "status=DONE",
       "stopped_at=null", "stopped_phase=null", "verdict=null", "repair=null",
-      "verify_iteration=0", "resume_context=null", `task=${scope || "code review"}`,
+      "verify_iteration=0", "resume_context=null", `task=${scope || taskDefault}`,
     ]);
   } catch (e) {
     return { ok: false, prerequisite_failed: "state activate", detail: String(e && e.message) };
   }
 
   // ── Preflight brief (important; degrade, don't abort) ──────────────────
-  const pfGen = sh(["preflight", "generate", scope || "code review"]);
+  const pfGen = sh(["preflight", "generate", scope || taskDefault]);
   if (!pfGen.ok) degraded.push("preflight_brief");
 
   // ── memory_signal (enhancer; degrade to empty) ─────────────────────────
   let memorySignal = null;
-  const memRes = sh(["memory", "query", scope || "code review", "--signal=3", "--json-compact"]);
+  const memRes = sh(["memory", "query", scope || taskDefault, "--signal=3", "--json-compact"]);
   if (memRes.ok && memRes.stdout) {
     try { memorySignal = JSON.parse(memRes.stdout); } catch { memorySignal = null; }
   }
@@ -2962,6 +2963,21 @@ function reviewContextInit({ scope, primaryBranch } = {}) {
     staleness_tier: stalenessTier,
     degraded_fields: degraded,
   };
+}
+
+// Thin mode-specific wrappers over the shared contextInitBundle core. review
+// mode runs `init review` (rubrics/inline_rubrics in the payload); workflow
+// mode runs `init workflow` (inline_guardrails) and stamps the caller's
+// workflow_type. Both return the identical bundle shape so the dispatch
+// envelopes + the still-separate gates/MCP/scan-prep steps consume them
+// uniformly. memory_signal is gathered for EVERY mode — closing the gap where
+// debug + research dispatches previously received no <memory_signal> block.
+function reviewContextInit({ scope, primaryBranch } = {}) {
+  return contextInitBundle({ mode: "review", workflowType: "code_review", scope, primaryBranch, taskDefault: "code review" });
+}
+
+function workflowContextInit({ workflowType = "dev", scope, primaryBranch } = {}) {
+  return contextInitBundle({ mode: "workflow", workflowType, scope, primaryBranch, taskDefault: "development task" });
 }
 
 // Substance check for agent output files. Lane sub-agent dispatches can
@@ -6656,6 +6672,15 @@ function run(subcommand, args) {
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
       return reviewContextInit({ scope, primaryBranch });
     }
+    case "workflow-context-init": {
+      const wtArg = args.find(a => a.startsWith("--workflow-type="));
+      const scopeArg = args.find(a => a.startsWith("--scope="));
+      const branchArg = args.find(a => a.startsWith("--primary-branch="));
+      const workflowType = wtArg ? wtArg.slice("--workflow-type=".length) : "dev";
+      const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
+      const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
+      return workflowContextInit({ workflowType, scope, primaryBranch });
+    }
     case "mark-claude-mem-skipped": {
       // Operator-declarable skip for claude-mem harvest. When session
       // memory already covers the scope, marginal value of harvest is ~0.
@@ -6862,7 +6887,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

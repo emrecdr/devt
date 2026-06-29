@@ -146,132 +146,86 @@ Before any step, initialize the workflow:
 
 > Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with code-review.md::context_init.
 
-### Substep 1: Compound init + project context
+### Substep 1: Compound workflow-context-init (single bundle)
+
+Run the compound context-init wrapper ONCE. It performs `init workflow`, activates the workflow (`active=true workflow_type=dev phase=context_init`), runs `preflight generate` (Topic Pre-Flight Brief), computes + caches `memory_signal` / `scope_hint` / `scope_trust`, and evicts stale Graphify artifacts — collapsing what were ~6 sequential data-gathering CLI round-trips into one. Capture the JSON bundle into `CTX`:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" init workflow
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=dev --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
+PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+if [ -n "$PREREQ_FAILED" ]; then
+  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  exit 1
+fi
 ```
 
-This compound init:
+The wrapper writes the same side-effect artifacts the inline substeps did — `preflight-brief.{md,json}` + `memory_signal_json` / `scope_hint_json` / `scope_trust_json` cached in `workflow.yaml` — so the dispatch envelopes that read those caches keep working unchanged.
 
-1. Validates `.devt/config.json` exists and is valid
-2. Creates/resets `.devt/state/` for a fresh workflow run
-3. Records workflow start time and task description
-
-Then load project context:
+Then load project context (orchestrator-side reads, NOT CLI round-trips):
 
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/status-enum.md` for status values and transition mapping
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/checkpoint-protocol.md` for checkpoint format
-- Read `.devt/rules/coding-standards.md`
-- Read `.devt/rules/architecture.md`
-- Read `.devt/rules/quality-gates.md`
-- Read `.devt/rules/testing-patterns.md`
-- Read `CLAUDE.md` if it exists
-- Search for relevant lessons: lessons live in the unified memory layer at `.devt/memory/lessons/` (LES-NNNN frontmatter docs, FTS5-indexed in `.devt/memory/index.db`). The Pre-Flight Brief (auto-fired earlier) already surfaces task-relevant lessons via Lane F (it filters governing docs by `doc_type='lesson'`). Read `.devt/state/preflight-brief.md` and lift its "Related Operational Lessons" section into `learning_context` for agent dispatches. If no Brief exists yet OR the section is empty, set `learning_context` to empty — agents proceed without prior lessons (normal for new projects).
-- Read `.devt/state/spec.md` if it exists (from `/devt:specify`)
-  - If spec exists: use it as the primary requirements source — decisions, API design, test scenarios
-  - If no spec: derive requirements from the task description
-- Read `.devt/state/plan.md` if it exists (from `/devt:plan`)
-  - If plan exists: use it to guide implementation (programmer reads it as context)
-  - If no plan: proceed normally (programmer plans internally)
-- Read `.devt/state/research.md` if it exists (from /devt:research)
-  - If research.md has status DONE_WITH_CONCERNS, flag concerns to planner/programmer as additional context
-- Read `.devt/state/handoff.json` if it exists (from /devt:workflow --pause)
-  - If handoff exists: restore phase, iteration, and remaining_tasks as resume context
-  - Use handoff.next_action to guide which step to resume from
-  - Compare handoff.last_commit with current `git rev-parse HEAD` — if they differ, warn user that codebase may have changed since pause
-  - **Delete handoff.json after reading** — it is a one-shot artifact. Stale handoff data causes false resume triggers.
+- Governing-rule file contents (`CLAUDE.md`, `.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are already in `$CTX.init.governing_rules.content` — no separate Reads needed to fill the dispatch envelopes.
+- Lessons live in the memory layer at `.devt/memory/lessons/` (LES-NNNN, FTS5-indexed). The Pre-Flight Brief surfaces task-relevant lessons via Lane F. Read `.devt/state/preflight-brief.md` and lift its "Related Operational Lessons" section into `learning_context`; empty if none (normal for new projects).
+- Read `.devt/state/spec.md` if it exists (from `/devt:specify`) — primary requirements source (decisions, API design, test scenarios); else derive requirements from the task description.
+- Read `.devt/state/plan.md` if it exists (from `/devt:plan`) — guides implementation (programmer reads it as context).
+- Read `.devt/state/research.md` if it exists (from /devt:research) — if status `DONE_WITH_CONCERNS`, flag concerns to planner/programmer.
+- Read `.devt/state/handoff.json` if it exists (from /devt:workflow --pause):
+  - Restore phase, iteration, remaining_tasks as resume context; use `handoff.next_action` to guide resume.
+  - Compare `handoff.last_commit` with `git rev-parse HEAD` — if they differ, warn the codebase may have changed since pause.
+  - **Delete handoff.json after reading** — one-shot artifact; stale data causes false resume triggers.
     ```bash
     rm -f .devt/state/handoff.json .devt/state/continue-here.md
     ```
 
-Store the task description in workflow state for reference by status, forensics, and resume.
+### Substep 2: Dispatch-envelope payload (from the bundle)
 
-### Substep 2: Capture inline_guardrails + governing_rules
+`$CTX.init` carries the `init workflow` compound payload — fill the dispatch-envelope placeholders from it (the wrapper already stamped `workflow_type=dev`; there is no separate activate call to paraphrase):
 
-**Capture `inline_guardrails` for downstream dispatches**: the `init workflow` payload includes `inline_guardrails` — a `{ "<file>.md": "<content>" }` object covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit, in which case agents fall back to on-disk Reads). Keep this in working memory across the workflow run. The `programmer` and `code-reviewer` dispatch templates below embed it as a `<guardrails_inline>` block — those two agents read all three files on every dispatch, so inlining cuts three Read tool calls per dispatch in favor of cache-friendly prefix injection. Other dev agents continue reading from disk.
+- **`inline_guardrails`** — `{ "<file>.md": "<content>" }` covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit → agents fall back to on-disk Reads). The `programmer` + `code-reviewer` dispatch templates embed it as a `<guardrails_inline>` block — inlining cuts three Read calls per dispatch in favor of cache-friendly prefix injection.
+- **`governing_rules`** — `{ content, paths_included, paths_excluded, rules_hash, total_bytes }` covering the project's `CLAUDE.md` + `.devt/rules/*.md` (96 KB cap; over-cap files in `paths_excluded` are Read on demand). The `code-reviewer`, `verifier`, `researcher` dispatches embed it as `<governing_rules>`; `rules_hash` detects mid-workflow rule-file drift.
+- **`models`** — fill the `{models.<agent>}` placeholders in Task() prompts.
+- **`config`** — `model_profile`, `agent_skills` for dispatch behavior.
 
-**Capture `governing_rules` for downstream dispatches**: the same `init workflow` payload also includes `governing_rules` — a `{ content: {<path>: <content>}, paths_included: [...], paths_excluded: [...], rules_hash: "<sha256-16>", total_bytes: N }` shape covering the PROJECT's `CLAUDE.md` plus `.devt/rules/*.md` files (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical). Cap is 96 KB total — files past the cap appear in `paths_excluded` and agents Read them on demand. The `code-reviewer`, `verifier`, and `researcher` dispatches embed this as a `<governing_rules>` block — those three READ-ONLY agents previously reread `CLAUDE.md` + 1-4 rule files on every dispatch (~30-50 KB duplicate reads per workflow). The `rules_hash` lets agents detect mid-workflow drift if a rule file is edited between Brief generation and agent dispatch.
+### Substep 3: Graphify eviction (done by the wrapper)
 
-> **CONTRACT — execute the next bash block VERBATIM.** Do not paraphrase `workflow_type=dev` to `workflow_type=workflow` (the slash-command name) or any other inferred value. The state validator catches drift via alias hint, but verbatim execution prevents the entire class of orchestrator-deviation bugs that produce silent watchdog stalls downstream. If you find yourself "summarizing" or "improving" the command, stop — re-read this line and copy the command exactly.
+Stale Graphify artifacts were already evicted by the wrapper (`state evict-graphify`, run after the freshness read) — prevents a prior `/devt:review` or sibling workflow's `graph-impact.md` from persisting and misleading this session. Targeted: never touches `impl-summary.md` / `test-summary.md` that a resumed run legitimately depends on.
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=dev phase=context_init status=DONE stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null "task=${TASK_DESCRIPTION}"
-```
+### Substep 4: Pre-Flight Brief (done by the wrapper)
 
-### Substep 3: Evict stale Graphify artifacts
+The wrapper's `preflight generate "${TASK_DESCRIPTION}"` wrote `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules (degrades silently on failure → agents fall back to `codebase-scan`). The PreToolUse `pre-flight-guard` hook warns or blocks edits whose target file isn't covered by a scratchpad PREFLIGHT line.
 
-**Evict stale Graphify artifacts** before regenerating preflight + impact data. Prevents cross-workflow contamination (a prior `/devt:review` or sibling workflow's `graph-impact.md` would otherwise persist and mislead this session — observed in field as PR-#367 artifacts persisting into an unrelated GFBUGS-XXX dev session):
+### Substep 5: memory_signal (cached by the wrapper)
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
-```
+The wrapper ran the `memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact` aggregate once and cached it in `workflow.yaml::memory_signal_json` — consumed by the programmer, code-reviewer, and verifier dispatches (read back via `state read | jq -r '.memory_signal_json // "{}"'` into each `<memory_signal>` block). Also in the bundle as `$CTX.memory_signal`; no separate query round-trip.
 
-### Substep 4: Auto-fire Pre-Flight Brief
+### Substep 6: scope_hint + scope_trust (cached by the wrapper)
 
-**Auto-fire Pre-Flight Brief**:
+The wrapper ran `preflight scope-cache` (reads `preflight-brief.json`, computes `scope_hint` + `scope_trust`, applies the mechanical staleness override — forces `trust='sparse'` + writes `staleness-suppressed.txt` when state=ready AND lag exceeds `graphify.stale_threshold` or is null — and persists both to `workflow.yaml`). `scope_hint.suggested_reading` is the capped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`. Both are in the bundle (`$CTX.scope_trust`) and read back into the `<scope_hint>` / `<scope_trust>` dispatch blocks; empty renders as `[]` and agents fall back to discovering scope from the task.
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
-```
+### Substep 7: Staleness gate + flag writes
 
-This writes `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules. Skip silently if the call fails — graceful degradation: the workflow proceeds, agents fall back to legacy `codebase-scan` behavior. The PreToolUse `pre-flight-guard` hook will warn or block edits whose target file isn't covered by a scratchpad PREFLIGHT line — agents satisfy this by reading the Brief and writing a one-line summary before each edit.
-
-### Substep 5: Compute memory_signal (cached for downstream dispatches)
-
-**Compute the memory signal once and cache it for all downstream dispatches.** The same `memory query --signal=3` aggregate is consumed by the programmer, code-reviewer, and verifier dispatches — running it once at context_init eliminates 2 redundant subprocess calls per workflow and keeps the `<memory_signal>` block byte-stable across iterations (better prompt-cache hits on retries):
-
-```bash
-MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory query "${TASK_DESCRIPTION}" --signal=3 --json-compact 2>/dev/null || echo '{}')
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update memory_signal_json="${MEMORY_SIGNAL}"
-```
-
-The cached value is read back via `state read | jq -r '.memory_signal_json // "{}"'` in each dispatch's orchestrator-prep step below — substituted into the `<memory_signal>` template variable.
-
-### Substep 6: Cache scope_hint + scope_trust
-
-**Cache the scope hint** for `<scope_hint>` injection. `preflight generate` writes `preflight-brief.json` alongside the markdown; its `suggested_reading` array is the deduped union of governing docs' `affects_paths` (frontmatter-declared file globs) plus blast-radius `direct_dependents` (Graphify depth-1 incoming), capped at 8. Cache once at context_init so the block is byte-stable across iterations:
-
-```bash
-# Single CLI call replaces the prior 4-jq + conditional + state-update chain.
-# Reads preflight-brief.json, computes scope_hint + scope_trust, applies the
-# mechanical staleness override (forces trust='sparse' + writes
-# staleness-suppressed.txt when state=ready AND lag exceeds graphify.stale_threshold
-# or is null), and persists both JSON blobs to workflow.yaml. Returns
-# {ok, scope_hint, scope_trust, suppress_reason, threshold}.
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scope-cache
-```
-
-### Substep 7: Staleness gate
-
-**Staleness gate** — If `preflight-brief.json::staleness.lag_commits > graphify.stale_threshold` (default 30, set via `.devt/config.json::graphify.stale_threshold`) OR (`graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE any dispatch in this workflow:
+**Staleness gate (tiered).** The wrapper tiered Graphify freshness into `$CTX.staleness_tier`. When `staleness_tier ∈ {stale, unknown_lag}` (lag ≥ `graphify.stale_threshold`, OR `graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt via AskUserQuestion BEFORE any dispatch in this workflow:
 
 - Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; scope_hint signals may reflect stale call graph. Refresh now?"
-- Options: **Refresh (recommended)** — pause, ask the user to run `graphify update .` in another terminal, then re-run `preflight generate "${TASK_DESCRIPTION}"` and re-cache; **Proceed with stale graph** — continue dispatch; downstream agents see `scope_trust.fresh=false` and de-weight `scope_hint`; **Cancel** — STOP with BLOCKED.
+- Options: **Refresh (recommended)** — pause, ask the user to run `graphify update .` in another terminal, then re-run `preflight generate "${TASK_DESCRIPTION}"` and re-cache; **Proceed with stale graph** — continue dispatch; agents see `scope_trust.fresh=false` and de-weight `scope_hint`; **Cancel** — STOP with BLOCKED.
 
-When `workflow.yaml::autonomous=true`, skip the prompt and proceed silently with `scope_trust.trust` forced to `"sparse"` so downstream agents fall back to discovery. Skip the gate entirely only when graphify is disabled (`scope_trust.trust == "empty"`) — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
+When `workflow.yaml::autonomous=true`, skip the prompt and force `scope_trust.trust="sparse"`. Skip the gate entirely only when graphify is disabled (`scope_trust.trust == "empty"`) — a null `lag_commits` while `state=ready` (unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
 
-The cached value is read back in each dispatch's orchestrator-prep step — substituted into the `<scope_hint>` template variable. When empty (no governing docs, or Graphify disabled, or preflight call failed), the block renders as `[]` and agents fall back to discovering scope from the task description.
+**Flag writes** (parsed from the original task input, outside the wrapper). `${TASK_DESCRIPTION}` is the user's input stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, `--chain`, `--tdd`, `--dry-run`:
 
-If `--autonomous` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
+- `--autonomous` → `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous=true`
+- `--to <phase>` → `state update stop_at_phase=<phase>`
+- `--only <phase>` → `state update only_phase=<phase>`
+- `--chain` → `state update autonomous_chain=next`
+- `--tdd` → `state update tdd_mode=true`
 
-If `--to <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update stop_at_phase=<phase>`
+**Parse `$CTX.init`:**
 
-If `--only <phase>` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update only_phase=<phase>`
-
-If `--chain` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update autonomous_chain=next`
-
-If `--tdd` was detected, also write: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update tdd_mode=true`
-
-Where `${TASK_DESCRIPTION}` is the user's original task input (stripped of `--autonomous`, `--to <phase>`, `--only <phase>`, `--chain`, `--tdd`, and `--dry-run` flags if present).
-
-Parse the init output JSON:
-
-- If `workflow_lock.locked` is true: STOP. Report: "A workflow is already active. Run /devt:workflow --cancel first."
-- If `dev_rules.missing_rules` is non-empty: WARN user which required files are missing
-- If `warnings` array is non-empty: report each warning
-- Store `models` for agent dispatch (use model values in Task() prompts)
-- Store `config` for workflow behavior (model_profile, agent_skills)
+- If `$CTX.init.workflow_lock.locked` is true: STOP. Report: "A workflow is already active. Run /devt:workflow --cancel first."
+- If `$CTX.init.dev_rules.missing_rules` is non-empty: WARN which required files are missing.
+- If `$CTX.init.warnings` is non-empty: report each warning.
+- Store `$CTX.init.models` for agent dispatch; `$CTX.init.config` for workflow behavior (model_profile, agent_skills).
 
 ### Substep 8: Graphify scan-prep + decision-artifact assertion
 

@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.126.0] - 2026-06-29
+
+### Generalized context-init wrapper — dev-workflow + quick-implement (token-optimization, no feature/quality loss)
+
+Receipt-driven lightening pass (5-dimension research): the dominant per-run cost is ceremony round-trips + re-paid static context, not the gates. The top option generalizes the shipped `reviewContextInit` into a shared `contextInitBundle` core with thin `review` / `workflow` mode wrappers.
+
+- **`state workflow-context-init --workflow-type=<t> --scope=…`** — new CLI (shared core with `review-context-init`). Collapses each workflow's data-gathering (`init workflow` + activate + `preflight generate` + `memory query --signal=3` + `preflight scope-cache` + `evict-graphify`) into one bundle call carrying `{ok, init, impact_plan, scope_trust, memory_signal, god_node_warnings, freshness, staleness_tier, degraded_fields}`.
+- **dev-workflow.md context_init: ~16 → 6 orchestrator CLI round-trips**; **quick-implement.md: ~11 → 7**. Gates (`assert-preflight-fresh`, `assert-graphify-decision`), the graphify scan-prep step, the staleness AskUserQuestion, and the flag-writes stay as separate, unskippable steps. No feature removed; same side-effect artifacts + `workflow.yaml` caches, so dispatch envelopes are unchanged.
+- **`contextInitBundle` refactor is DRY** — `reviewContextInit` is now a thin caller; K200/K201 guard the review path against regression (both still green).
+- **K202** locks the dev-workflow + quick-implement wiring + the workflow-mode bundle shape (init payload + memory_signal). Drift stack 108→109-deep (K94–K202).
+- **Plugin description reworded `Lightweight` → `Zero-dependency`** (plugin.json + marketplace.json). "Lightweight" was only defensible on install footprint (zero deps, stdlib-only, no build); it misleadingly implied conceptual simplicity for a system with 10 agents, ~20 workflows, a 109-gate drift stack, and a multi-layer memory graph. The reword anchors the claim to the axis where it's true.
+- **Deferred (documented):** `debug.md` excluded from wrapper wiring — it deliberately omits `init workflow` to preserve `/devt:next` resume state, so routing it through a state-resetting wrapper would risk a resume regression (violates the no-quality-loss constraint). `research-task.md` deferred to a focused pass (its prose is tightly coupled to specific call positions). The remaining research items (gate→hook migration, guardrails `static-compress`, claude-mem harvest dedup) are queued.
+
 ## [0.125.0] - 2026-06-29
 
 ### Cal #39.B wiring — `code-review.md` context_init consumes the `review-context-init` bundle
