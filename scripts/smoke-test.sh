@@ -12876,10 +12876,10 @@ K117_CHECK=$(node -e "
   const smoke = fs.readFileSync('$0', 'utf8');
   const readme = fs.readFileSync('$ROOT/README.md', 'utf8');
   const claude = fs.readFileSync('$ROOT/CLAUDE.md', 'utf8');
-  // Count K94-K1XX gate definitions in smoke. Accepts `# K94:` and
-  // `# K94 (anything):` so gate authors can add parenthetical hints
+  // Count K94+ gate definitions in smoke (K94-K99 + any 3-digit K100+).
+  // Accepts `# K94:` and `# K94 (anything):` so gate authors can add hints
   // without breaking the count.
-  const gateMatches = smoke.match(/^# K(9[4-9]|1[0-9][0-9])[a-z]?(\s+\(.*?\))?:/gm) || [];
+  const gateMatches = smoke.match(/^# K(9[4-9]|[1-9][0-9][0-9])[a-z]?(\s+\(.*?\))?:/gm) || [];
   const actual = gateMatches.length;
   // Highest K number
   const nums = gateMatches.map(m => parseInt(m.match(/K(\d+)/)[1], 10));
@@ -15064,6 +15064,38 @@ if [ "$K199_CAVEAT" = "1" ]; then
   pass "K199: SHA-based new-files caveat counts only files introduced AFTER built_at_commit (1 of 2 — file1 pre-build indexed, file2 post-build new)"
 else
   fail "K199: SHA caveat wrong — counted '$K199_CAVEAT' new files (expect 1; file1 is pre-build/indexed)"
+fi
+
+# K200: compound review-context-init wrapper (cal #39.B). Collapses code-review
+# context_init data-gathering into one call. Asserts: (1) returns a bundle with
+# ok:true + impact_plan + freshness + staleness_tier fields; (2) a 2nd call
+# SHORT-CIRCUITS (fresh plan+brief reused, no re-eviction); (3) graphify
+# disabled → HONEST ABSENCE (freshness.state is "disabled"/"unknown"/"not_ready",
+# NEVER a false-confident "ready"/"fresh"). The gates + staleness prompt + MCP
+# execution deliberately stay separate orchestrator steps (not in the bundle).
+K200_T=$(mktemp -d)
+mkdir -p "$K200_T/.devt/state" "$K200_T/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"},"git":{"primary_branch":"main"}}' > "$K200_T/.devt/config.json"
+cd "$K200_T"
+git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t
+echo "x=1" > base.py; git add -A; git commit -qm base >/dev/null 2>&1
+git checkout -q -b feature 2>/dev/null
+echo "class NewSvc: pass" > svc.py; git add -A; git commit -qm svc >/dev/null 2>&1
+K200_BUILT=$(git rev-parse HEAD)
+node -e "require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({built_at_commit:'$K200_BUILT',nodes:[{id:'NewSvc',label:'NewSvc',source_file:'svc.py',source_location:'L1',file_type:'code'}],links:[]}))"
+K200_FIRST=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review PR #5" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write((o.ok===true && o.short_circuited===false && o.impact_plan && typeof o.staleness_tier==='string')?'1':'0')}catch{process.stdout.write('0')}})")
+K200_SECOND=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review PR #5" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write(o.short_circuited===true?'1':'0')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K200_T"
+# graphify disabled → honest absence
+K200_T2=$(mktemp -d); mkdir -p "$K200_T2/.devt/state"
+echo '{"graphify":{"enabled":false}}' > "$K200_T2/.devt/config.json"
+cd "$K200_T2"; git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t; echo y > z.py; git add -A; git commit -qm b >/dev/null 2>&1
+K200_HONEST=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review x" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const st=(o.freshness||{}).state;process.stdout.write((o.ok===true && st!=='ready' && st!=='fresh')?'1':'0')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K200_T2"
+if [ "$K200_FIRST" = "1" ] && [ "$K200_SECOND" = "1" ] && [ "$K200_HONEST" = "1" ]; then
+  pass "K200: review-context-init returns bundle (impact_plan+staleness_tier), short-circuits on fresh re-call, honest-absence freshness when graphify disabled"
+else
+  fail "K200: wrapper wrong — first=$K200_FIRST(exp 1) short_circuit=$K200_SECOND(exp 1) honest_absence=$K200_HONEST(exp 1)"
 fi
 
 echo

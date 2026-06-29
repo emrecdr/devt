@@ -2800,6 +2800,148 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   return plan;
 }
 
+// Compound review context_init (cal #39.B). Collapses the data-gathering
+// substeps of code-review.md (init + state-activate + preflight brief +
+// memory_signal + scope-cache + freshness/eviction + impact-plan + god-node
+// warnings) into ONE call, removing ~15 of the orchestrator's ~19 LLM
+// round-trips. The gates (substep 8) + the staleness AskUserQuestion (substep
+// 4 prompt) + the MCP impact-plan execution (substep 6) deliberately STAY
+// separate orchestrator steps — bundling a gate verdict into JSON would make
+// an unskippable wall skimmable. Returns a bundle exposing the fields the
+// still-separate steps consume: {impact_plan.tier/args, freshness/
+// staleness_tier, scope_trust, god_node_warnings, memory_signal}.
+//
+// Design constraints (greenfield receipt #11):
+//  - Per-field GRACEFUL DEGRADATION with HONEST ABSENCE: a degraded field
+//    reports freshness:"unknown"/scope_trust:"empty"/god_node_warnings:[],
+//    NEVER a false-confident "fresh"/"dense" (a false "fresh" is worse than a
+//    graphify outage — it tells reviewers a signal is present when it isn't).
+//  - FAIL-FAST only on a true PREREQUISITE (init itself, governing-rules) —
+//    graphify is an enhancer; its outage degrades, never aborts.
+//  - FRESHNESS short-circuit checked BEFORE eviction: a clean resume must not
+//    evict the graph-impact.md it's about to reuse.
+function reviewContextInit({ scope, primaryBranch } = {}) {
+  const { spawnSync } = require("child_process");
+  const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
+  const proot = findProjectRoot();
+  if (!primaryBranch) {
+    try {
+      const cfg = require("./config.cjs").getMergedConfig();
+      primaryBranch = (cfg && cfg.git && cfg.git.primary_branch) || "main";
+    } catch { primaryBranch = "main"; }
+  }
+  const degraded = [];
+  const sh = (args) => {
+    try {
+      const r = spawnSync("node", [selfBin, ...args], { cwd: proot, encoding: "utf8", timeout: 30000 });
+      return { ok: r.status === 0, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+    } catch (e) { return { ok: false, stdout: "", stderr: String(e && e.message) }; }
+  };
+  const readBriefJson = () => {
+    try { return JSON.parse(fs.readFileSync(path.join(getStateDir(), "preflight-brief.json"), "utf8")); }
+    catch { return null; }
+  };
+
+  // ── Freshness short-circuit (BEFORE any eviction) ──────────────────────
+  // If a fresh preflight brief + impact-plan already exist for the current
+  // graph, return the cached bundle untouched — re-computing wastes work and
+  // re-evicting would destroy the reusable graph-impact.md.
+  try {
+    const planPath = path.join(getStateDir(), "graphify-impact-plan.json");
+    const brief = readBriefJson();
+    const pfresh = sh(["state", "assert-preflight-fresh"]);
+    let graphFresh = false;
+    try { const f = require("./graphify.cjs").freshness(); graphFresh = !!(f && f.fresh); } catch { graphFresh = false; }
+    if (fs.existsSync(planPath) && brief && pfresh.ok && graphFresh) {
+      const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+      const st = readState();
+      return {
+        ok: true,
+        short_circuited: true,
+        reason: "preflight + impact-plan already fresh for current graph; returning cached bundle without re-eviction",
+        impact_plan: plan,
+        scope_trust: st.scope_trust_json || null,
+        memory_signal: st.memory_signal_json || null,
+        god_node_warnings: st.god_node_warnings_json || null,
+        freshness: brief.staleness || { state: "unknown" },
+        degraded_fields: [],
+      };
+    }
+  } catch { /* fall through to full compute */ }
+
+  // ── Prerequisite: init + activate (fail-fast) ──────────────────────────
+  const initRes = sh(["init", "review"]);
+  if (!initRes.ok) {
+    return { ok: false, prerequisite_failed: "init review", detail: initRes.stderr || initRes.stdout };
+  }
+  try {
+    updateState([
+      "active=true", "workflow_type=code_review", "phase=context_init", "status=DONE",
+      "stopped_at=null", "stopped_phase=null", "verdict=null", "repair=null",
+      "verify_iteration=0", "resume_context=null", `task=${scope || "code review"}`,
+    ]);
+  } catch (e) {
+    return { ok: false, prerequisite_failed: "state activate", detail: String(e && e.message) };
+  }
+
+  // ── Preflight brief (important; degrade, don't abort) ──────────────────
+  const pfGen = sh(["preflight", "generate", scope || "code review"]);
+  if (!pfGen.ok) degraded.push("preflight_brief");
+
+  // ── memory_signal (enhancer; degrade to empty) ─────────────────────────
+  let memorySignal = null;
+  const memRes = sh(["memory", "query", scope || "code review", "--signal=3", "--json-compact"]);
+  if (memRes.ok && memRes.stdout) {
+    try { memorySignal = JSON.parse(memRes.stdout); } catch { memorySignal = null; }
+  }
+  if (memorySignal === null) { memorySignal = {}; degraded.push("memory_signal"); }
+  try { updateState([`memory_signal_json=${JSON.stringify(memorySignal)}`]); } catch { /* best-effort cache */ }
+
+  // ── scope-cache → scope_trust (enhancer; honest "empty" on degrade) ────
+  const scRes = sh(["preflight", "scope-cache"]);
+  if (!scRes.ok) degraded.push("scope_trust");
+  let scopeTrust = null;
+  try { scopeTrust = readState().scope_trust_json || null; } catch { scopeTrust = null; }
+  if (scopeTrust === null) scopeTrust = { trust: "empty", fresh: false };
+
+  // ── freshness + god_node_warnings from the brief (honest absence) ──────
+  const brief = readBriefJson();
+  let freshness = (brief && brief.staleness) || null;
+  if (!freshness) { freshness = { state: "unknown", lag_commits: null, fresh: false }; degraded.push("freshness"); }
+  // Tier the staleness for the orchestrator's still-separate prompt decision.
+  let stalenessTier = "unknown";
+  if (freshness && freshness.state === "ready") {
+    let threshold = 10;
+    try { const cfg = require("./config.cjs").getMergedConfig(); threshold = (cfg.graphify && cfg.graphify.stale_threshold) || 10; } catch { /* default */ }
+    const lag = freshness.lag_commits;
+    if (lag === null || lag === undefined) stalenessTier = "unknown_lag";
+    else if (lag >= threshold) stalenessTier = "stale";
+    else if (lag > 0) stalenessTier = "warn";
+    else stalenessTier = "fresh";
+  }
+  let godNodeWarnings = (brief && brief.god_nodes) ? { god_nodes: brief.god_nodes } : null;
+  if (godNodeWarnings === null) godNodeWarnings = { god_nodes: [] };
+  try { updateState([`god_node_warnings_json=${JSON.stringify(godNodeWarnings)}`]); } catch { /* best-effort cache */ }
+
+  // ── Eviction (AFTER freshness read) + impact-plan ──────────────────────
+  sh(["state", "evict-graphify"]);
+  let impactPlan = null;
+  try { impactPlan = computeGraphifyImpactPlan({ reviewScope: scope, primaryBranch }); }
+  catch { impactPlan = { tier: "skip", tool: "", args: {}, skip_reason: "impact-plan compute failed" }; degraded.push("impact_plan"); }
+
+  return {
+    ok: true,
+    short_circuited: false,
+    impact_plan: impactPlan,
+    scope_trust: scopeTrust,
+    memory_signal: memorySignal,
+    god_node_warnings: godNodeWarnings,
+    freshness,
+    staleness_tier: stalenessTier,
+    degraded_fields: degraded,
+  };
+}
+
 // Substance check for agent output files. Lane sub-agent dispatches can
 // return status:completed with placeholder bodies like
 // "Stub written; analysis in progress." while the verifier approves on
@@ -6485,6 +6627,13 @@ function run(subcommand, args) {
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
       return computeGraphifyImpactPlan({ reviewScope, primaryBranch });
     }
+    case "review-context-init": {
+      const scopeArg = args.find(a => a.startsWith("--scope="));
+      const branchArg = args.find(a => a.startsWith("--primary-branch="));
+      const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
+      const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
+      return reviewContextInit({ scope, primaryBranch });
+    }
     case "mark-claude-mem-skipped": {
       // Operator-declarable skip for claude-mem harvest. When session
       // memory already covers the scope, marginal value of harvest is ~0.
@@ -6691,7 +6840,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
       );
   }
 }

@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.124.0] - 2026-06-29
+
+### Cal #39.B — compound `review-context-init` wrapper (heavy-ceremony fix, CLI)
+
+greenfield receipt #11's headline friction: code-review `context_init` is 9 substeps / **19 CLI round-trips** / 7 gates before a single file is reviewed — "great for autonomous runs, heavy for interactive." But greenfield also confirmed the gates "earned their keep" (the staleness pre-flight + claim-check each caught a real failure this session). So the tax is the ~15 *data-gathering* round-trips, not the gates.
+
+New `state review-context-init --scope=<text> [--primary-branch=<ref>]` collapses the data-gathering (init + activate + preflight brief + memory_signal + scope-cache + freshness/eviction + impact-plan + god-node warnings) into **one** call returning a bundle: `{ok, short_circuited, impact_plan, scope_trust, memory_signal, god_node_warnings, freshness, staleness_tier, degraded_fields}`. Removes ~15 of the ~19 orchestrator round-trips.
+
+Design (per greenfield's round-two answers):
+- **Per-field graceful degradation with honest absence** — a degraded field reports `freshness.state:"unknown"`/`scope_trust:"empty"`/`god_node_warnings:[]`, **never** a false-confident `"ready"`/`"fresh"`. A false "fresh" is worse than a graphify outage (it claims a signal is present when it's absent). Validated: graphify-disabled → `freshness.state:"disabled"`, not a fake fresh.
+- **Fail-fast only on a true prerequisite** (init itself / state-activate) — graphify is an enhancer; its outage degrades, never aborts.
+- **Freshness short-circuit checked BEFORE eviction** — a fresh re-call (preflight-fresh + plan exists + graph fresh) returns the cached bundle untouched, so a clean resume doesn't evict the `graph-impact.md` it's about to reuse.
+- **Gates stay separate** — the 7 asserts + the staleness AskUserQuestion + the MCP impact-plan execution remain distinct orchestrator stops; bundling a gate verdict into JSON would make an unskippable wall skimmable.
+
+**Note:** this ships the validated CLI mechanism. Wiring it into `code-review.md` (collapsing substeps 1–5+7 to call it) is the remaining integration — deferred to a focused step to protect the production review path, since several smoke gates assert that workflow's substep prose.
+
+### Fix: K117 doc-count meta-gate blind spot at K200
+
+K117's gate-counting regex was `K(9[4-9]|1[0-9][0-9])` — it matched K94–K199 but **not** K200+. Crossing into the 200s meant a new gate (K200) went uncounted and the meta-gate passed against stale docs. Widened to `K(9[4-9]|[1-9][0-9][0-9])` (K94–K999). The doc-drift guard now guards its own range boundary.
+
+**Drift-guard stack now 107-deep K94-K200.** K200 asserts the wrapper bundle shape + short-circuit + honest-absence degradation.
+
 ## [0.123.0] - 2026-06-29
 
 ### Cal #39.A — three receipt-#11 fixes (substance hard-fail + SHA caveat + DI-opaque surface)
