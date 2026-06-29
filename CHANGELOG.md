@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.123.0] - 2026-06-29
+
+### Cal #39.A — three receipt-#11 fixes (substance hard-fail + SHA caveat + DI-opaque surface)
+
+Three decoupled, field-evidenced fixes from greenfield's receipt #11, each closing a way the review pipeline could mislead silently.
+
+**#3 — substance-check hard-fail on missing/zero-byte + `lane_failed` coverage status.** `checkAgentOutput` on a missing file returned `looks_like_stub: false`, and all 6 consumers branch on `looks_like_stub == true` — so a missing lane file silently took the *pass* branch (greenfield's L9: a lane file absent the whole time read as substantive). Now missing → `looks_like_stub: true` + `missing: true`; zero-byte/whitespace-only → `+ empty: true`. New `lane_failed` lane status (terminal, distinct from `deferred`): a lane that produced *no* output even after retry reviewed *nothing* — the consolidator reports it under "Uncovered Scope" so "all lanes terminal" can't hide a zero-coverage hole. (The all-lanes-terminal gate that *prevents* the race already existed; greenfield hit it only via a hand-rolled background loop.)
+
+**#4 — SHA-based "new files" caveat.** The cal #38.A `matched_files` proxy still over-fired for files indexed-at-HEAD-but-symbolless (receipt #11: "6 of 188 files new" was a false alarm — the graph was at HEAD). Now each added file's introducing commit is compared against `built_at_commit` via `git merge-base --is-ancestor`; only files added *after* the graph was built count. Degrades **safe**: unresolvable SHA (rebase/squash) → assume indexed, because false-"not-indexed" is the noise this caveat exists to remove.
+
+**Q5a — `blast_radius` DI-opaque caller surface.** A service reached only through FastAPI `Depends()` factories shows empty/sparse `direct_dependents` (callers collapsed by DI-aggregation), which silently reads as "no callers" for often the highest-value symbol in the diff. When the collapse *dominates* the visible set (`filtered_di_aggregation >= direct.size`), `blast_radius` now emits `di_opaque: true` + `di_collapsed_caller_files` (top-K caller source_files — the actual files to open, which the graph already had and was just hiding) + a labeled note. Zero edge-tracing; purely re-surfacing.
+
+**Drift-guard stack now 106-deep K94-K199.** K198 (substance hard-fail + lane_failed + DI-opaque) + K199 (SHA caveat via real git fixture).
+
 ## [0.122.0] - 2026-06-27
 
 ### Doc sync — close the cal #37/#38 documentation gaps + RESET_EXEMPT drift meta-gate

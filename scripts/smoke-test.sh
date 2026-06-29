@@ -15004,6 +15004,68 @@ else
   fail "K197: STATE-RULES.md missing RESET_EXEMPT entries: $K197_MISSING"
 fi
 
+# K198: cal #39.A substance-check hard-fail + lane_failed coverage + Q5a DI-opaque
+# surface. Three asserts: (a) checkAgentOutput on a MISSING file returns
+# looks_like_stub:true + missing:true (was looks_like_stub:false → silently
+# passed the stub-grep consumers, receipt #11 L9 race); (b) a zero-byte file →
+# looks_like_stub:true + empty:true; (c) `lane_failed` is an accepted lane
+# status (coverage-honesty terminal, distinct from deferred). Plus Q5a:
+# blastRadius surfaces di_opaque + caller source_files when DI-collapse
+# dominates the visible direct set.
+K198_TMP=$(mktemp -d)
+mkdir -p "$K198_TMP/.devt/state" "$K198_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$K198_TMP/.devt/config.json"
+# (a) missing
+K198_MISS=$(cd "$K198_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output .devt/state/nope.md 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const o=JSON.parse(s);process.stdout.write((o.looks_like_stub===true&&o.missing===true)?'1':'0')})")
+# (b) zero-byte
+: > "$K198_TMP/.devt/state/empty.md"
+K198_EMPTY=$(cd "$K198_TMP" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output .devt/state/empty.md 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const o=JSON.parse(s);process.stdout.write((o.looks_like_stub===true&&o.empty===true)?'1':'0')})")
+# (c) lane_failed accepted
+cd "$K198_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review_parallel task=x >/dev/null 2>&1
+K198_LF=$(cd "$K198_TMP" && node "$ROOT/bin/devt-tools.cjs" state update-lane L1 status=lane_failed 2>&1 | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{process.stdout.write(/invalid status/.test(s)?'0':'1')})")
+# Q5a DI-opaque surface
+node -e "
+const fs=require('fs');
+const nodes=[{id:'svc',label:'OrchSvc',source_file:'app/orchestration_service.py',file_type:'code'}];
+const links=[];
+for(let i=0;i<8;i++){nodes.push({id:'fac'+i,label:'get_orch_'+i,source_file:'app/dependencies.py',file_type:'code'});links.push({source:'fac'+i,target:'svc',relation:'provides'});}
+nodes.push({id:'r1',label:'route_a',source_file:'app/api/routes.py',file_type:'code'});links.push({source:'r1',target:'fac0',relation:'calls'});
+fs.writeFileSync('$K198_TMP/graphify-out/graph.json',JSON.stringify({built_at_commit:'abc',nodes,links}));
+"
+K198_DI=$(cd "$K198_TMP" && node -e "const g=require('$ROOT/bin/modules/graphify.cjs');const r=g.blastRadius(['OrchSvc']);process.stdout.write((r.di_opaque===true && Array.isArray(r.di_collapsed_caller_files) && r.di_collapsed_caller_files.length>0)?'1':'0')" 2>/dev/null)
+rm -rf "$K198_TMP"
+if [ "$K198_MISS" = "1" ] && [ "$K198_EMPTY" = "1" ] && [ "$K198_LF" = "1" ] && [ "$K198_DI" = "1" ]; then
+  pass "K198: substance-check hard-fails missing(+missing) + zero-byte(+empty); lane_failed status accepted; blastRadius di_opaque surfaces caller files when DI-collapse dominates"
+else
+  fail "K198: cal #39.A wrong — miss=$K198_MISS empty=$K198_EMPTY lane_failed=$K198_LF di_opaque=$K198_DI (each expect 1)"
+fi
+
+# K199: cal #39.A #4 — SHA-based "new files" caveat. A file added in a commit
+# that is an ANCESTOR of the graph's built_at_commit is indexed (not counted);
+# only files introduced AFTER the build count toward the caveat. Replaces the
+# matched_files proxy that over-fired for indexed-but-symbolless files
+# (receipt #11: "6 of 188 new" false alarm). Synthetic git repo: file1 before
+# build, file2 after → caveat counts exactly 1.
+K199_TMP=$(mktemp -d)
+mkdir -p "$K199_TMP/.devt/state" "$K199_TMP/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"},"git":{"primary_branch":"main"}}' > "$K199_TMP/.devt/config.json"
+cd "$K199_TMP"
+git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t
+echo "x=1" > base.py; git add -A; git commit -qm base >/dev/null 2>&1
+git checkout -q -b feature 2>/dev/null
+echo "class Foo: pass" > file1.py; git add -A; git commit -qm f1 >/dev/null 2>&1
+K199_BUILT=$(git rev-parse HEAD)
+echo "class Bar: pass" > file2.py; git add -A; git commit -qm f2 >/dev/null 2>&1
+node -e "require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({built_at_commit:'$K199_BUILT',nodes:[{id:'Foo',label:'Foo',source_file:'file1.py',source_location:'L1',file_type:'code'}],links:[]}))"
+echo '{"graph_stats":{"state":"ready","trust":"dense"},"topic":{"symbols":[]}}' > .devt/state/preflight-brief.json
+K199_CAVEAT=$(node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review PR #7" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);const m=(o.pr_diff_caveat||'').match(/^(\d+) of/);process.stdout.write(m?m[1]:'none')}catch{process.stdout.write('err')}})")
+cd "$ROOT"; rm -rf "$K199_TMP"
+if [ "$K199_CAVEAT" = "1" ]; then
+  pass "K199: SHA-based new-files caveat counts only files introduced AFTER built_at_commit (1 of 2 — file1 pre-build indexed, file2 post-build new)"
+else
+  fail "K199: SHA caveat wrong — counted '$K199_CAVEAT' new files (expect 1; file1 is pre-build/indexed)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

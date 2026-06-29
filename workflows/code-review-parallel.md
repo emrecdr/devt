@@ -387,11 +387,12 @@ done
 
 Why this works: oversized + low-information lanes hit maxTurns because the agent tries to cover everything shallowly. Constraining to top-5 lets the limited budget produce substantive findings on the issues that actually matter. The orchestrator's `## Out-of-Scope Findings (Deferred)` synthesis step (consolidate) already absorbs lanes that go deferred, so completeness loss here is intentional and bounded.
 
-After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time any lane that's still a stub gets `status=deferred` (the retry-once-then-defer terminal).
+After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time a lane that's still non-substantive becomes terminal. Distinguish two terminal failures for coverage honesty: a **present-but-thin** stub → `deferred` (it reviewed *something*); a file that is **missing or zero-byte** even after retry → `lane_failed` (it reviewed *nothing*). `check-agent-output` flags the latter with `missing:true` / `empty:true`.
 
 ```bash
 # Re-run the substance check loop (copy from substance_check_lanes step).
-# Lanes with redispatch_count >= 1 that still look like stubs route to deferred.
+# Lanes with redispatch_count >= 1 that still look like stubs route to a
+# terminal failure — deferred (thin) vs lane_failed (no output at all).
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
   LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
@@ -400,7 +401,10 @@ for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_
   # Layer-2; another stub leaves the failure record in place for finalize.
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present "code-reviewer:lane-${LANE_ID}" > /dev/null
   RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output "$LANE_FILE")
-  if echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
+  if echo "$RESULT" | grep -qE '"(missing|empty)":true'; then
+    # Zero output even after retry — reviewed nothing. Terminal failure, NOT deferred.
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=lane_failed
+  elif echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred
   else
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=substance_pass
@@ -432,6 +436,16 @@ DEFERRED_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane
   jq '[.lanes[] | select(.status == "deferred")] | length')
 SUBSTANCE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
   jq '[.lanes[] | select(.status == "substance_pass")] | length')
+# lane_failed = produced NO output even after retry → that lane's scope is
+# UNREVIEWED. Surface it loudly; a "all lanes terminal" summary must not hide a
+# zero-coverage hole. The consolidator MUST carry these into review.md as an
+# explicit "## Uncovered Scope (lane_failed)" section so the user sees what
+# was not reviewed (coverage honesty, not silent omission).
+FAILED_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
+  jq -r '[.lanes[] | select(.status == "lane_failed") | .id] | join(", ")')
+if [ -n "$FAILED_LANES" ]; then
+  echo "[consolidator] ⚠️ lane(s) produced NO output (lane_failed): ${FAILED_LANES} — their scope is UNREVIEWED. Record under '## Uncovered Scope' in review.md; do NOT report these as covered."
+fi
 if [ "$FOREIGN_CID_COUNT" -gt 0 ]; then
   echo "[consolidator] dropped $FOREIGN_CID_COUNT lane file(s) with foreign cid (stale from rotated workflow); reset-soft eviction should have cleared these — investigate if recurring"
 fi

@@ -857,6 +857,14 @@ function blastRadius(symbols, _options) {
   let filteredNoiseCount = 0;
   let filteredTestPathCount = 0;
   let filteredDIAggregationCount = 0;
+  // Q5a (cal #39.A) — accumulate the source_files of ALL incoming callers
+  // (depth 1+2) across the seed symbols. When direct_dependents ends up empty
+  // BUT DI-aggregation collapsed callers (the FastAPI Depends()-factory case),
+  // an empty set silently reads as "no callers" for the highest-value symbol.
+  // Surfacing the top-K caller files turns that silent blind spot into a
+  // labeled one — "which files to open to verify wiring" — with zero edge
+  // tracing (the graph already has these; we just stopped hiding them).
+  const incomingFileCounts = new Map();
 
   for (const sym of symbols) {
     const seedId = _resolveOne(adj, sym);
@@ -878,6 +886,7 @@ function blastRadius(symbols, _options) {
       if (!src) continue;
       const target = info.depth === 1 ? sourceFileCountsDirect : sourceFileCountsIndirect;
       target.set(src, (target.get(src) || 0) + 1);
+      incomingFileCounts.set(src, (incomingFileCounts.get(src) || 0) + 1);
     }
     const seenDIDirect = new Set();
     const seenDIIndirect = new Set();
@@ -1004,6 +1013,29 @@ function blastRadius(symbols, _options) {
     raw_indirect_count: rawIndirectCount,
   };
   if (noiseTelemetry) base.noise_telemetry = noiseTelemetry;
+  // Q5a (cal #39.A) — DI-opaque caller surface. When direct_dependents is empty
+  // BUT callers were DI-aggregation-collapsed, the empty set would otherwise
+  // read as "no callers" for what may be the highest-value symbol in the diff
+  // (a FastAPI service reached only through Depends() factories). Surface the
+  // top-K caller source_files (graph already has them; we just stopped hiding
+  // them) + a labeled note so a reviewer opens the right files instead of
+  // trusting a false "no dependents". No edge tracing — purely re-surfacing.
+  // Fire when DI-collapse DOMINATES the visible caller set (collapsed ≥
+  // surviving), not only when it's literally empty — the collapse keeps one
+  // representative per source_file, so a DI-opaque service often shows 1-2
+  // reps masking dozens of real callers. `>= direct.size` catches both the
+  // empty case greenfield observed and the sparse-reps case, while staying
+  // quiet when the caller picture is mostly real (collapse was minor).
+  if (filteredDIAggregationCount > 0 && filteredDIAggregationCount >= direct.size && incomingFileCounts.size > 0) {
+    const callerFiles = Array.from(incomingFileCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([f]) => f);
+    base.di_opaque = true;
+    base.di_collapsed_caller_files = callerFiles;
+    const shown = direct.size === 0 ? "direct_dependents: []" : `direct_dependents shows only ${direct.size}`;
+    base.di_opaque_note = `${shown} — ${filteredDIAggregationCount} caller(s) collapsed via DI-aggregation (e.g. FastAPI Depends() factories); true blast radius is DI-opaque. Open these caller source_files to verify wiring: ${callerFiles.join(", ")}`;
+  }
   return base;
 }
 

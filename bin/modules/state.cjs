@@ -511,9 +511,13 @@ const VALID_WORKFLOW_TYPES = new Set([
 // in_flight       — Task() dispatched, lane file may be empty/stub
 // substance_pass  — state check-agent-output returned ok:true
 // stub_redispatched — first F28 stub; will be re-dispatched once
-// deferred        — second F28 stub OR harness failure; consolidator notes it
+// deferred        — second F28 stub (present-but-thin); REVIEWED SOMETHING — consolidator notes it
+// lane_failed     — produced NO output (missing/zero-byte) even after retry; reviewed NOTHING.
+//                   Distinct from `deferred` for COVERAGE HONESTY: "9 lanes, all terminal"
+//                   must not hide a zero-coverage hole. Terminal; consolidator reports it as
+//                   uncovered scope, never silently folded into the deferred bucket.
 const VALID_LANE_STATUSES = new Set([
-  "in_flight", "substance_pass", "stub_redispatched", "deferred",
+  "in_flight", "substance_pass", "stub_redispatched", "deferred", "lane_failed",
 ]);
 
 // Slug normalization for lane file names. Graphify affected_communities[].name
@@ -2674,28 +2678,49 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
           // when a large changed set survives scoping.
           const res = graphifyMod.symbolsInFiles(files, 25, { baseRef: primaryBranch });
           symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
-          // Q2 caveat reconciliation: an added file is "not indexed" ONLY when
-          // NO graph node matched it — not merely because git flags it added.
-          // The prior static --diff-filter=A count overstated ~37× (receipt
-          // #10: 37/38 added .py files WERE indexed at HEAD; only an
-          // ignore-patterned migration was genuinely absent). Reconcile the
-          // added-file list against the actual matched_files the extractor
-          // returned.
-          const matched = Array.isArray(res && res.matched_files) ? res.matched_files : [];
+          // Caveat reconciliation (cal #39.A #4): an added file is "not indexed"
+          // ONLY if it was introduced AFTER the graph was built — compare each
+          // added file's introducing commit against the graph's built_at_commit
+          // via `git merge-base --is-ancestor`. The prior matched_files proxy
+          // still over-fired for files that ARE indexed but produced no extracted
+          // symbol (indexed-but-symbolless); the build-SHA check is the precise
+          // signal (receipt #11: "6 of 188 files new" was a false alarm —
+          // graph was at HEAD so all were indexed). Degrade SAFE: if the
+          // introducing commit or built_at can't be resolved (rebase/squash
+          // rewrote SHAs), assume INDEXED — false-"not-indexed" is the noisy
+          // direction this caveat exists to remove, so degrade toward not-warning.
+          let builtAt = null;
+          try {
+            const graphifyMod = require("./graphify.cjs");
+            const f = graphifyMod.freshness();
+            builtAt = (f && (f.built_at || f.built_at_commit)) || null;
+          } catch { builtAt = null; }
           const addRes = spawnSync("git", ["diff", "--name-status", "--diff-filter=A", `${primaryBranch}...HEAD`], {
             cwd: proot, encoding: "utf8", timeout: 5000,
           });
           if (addRes.status === 0) {
             const added = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean)
               .map(l => l.replace(/^A\s+/, "").trim()).filter(Boolean);
-            const norm = (p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "");
-            const matchedNorm = matched.map(norm);
-            const suffixMatch = (a, b) => a === b || a.endsWith("/" + b) || b.endsWith("/" + a);
-            // Count added files NOT covered by any matched graph source_file.
-            newFilesCount = added.filter(a => {
-              const na = norm(a);
-              return !matchedNorm.some(m => suffixMatch(m, na));
-            }).length;
+            if (!builtAt) {
+              // No resolvable build anchor → can't prove staleness → assume indexed.
+              newFilesCount = 0;
+            } else {
+              newFilesCount = added.filter(file => {
+                // Introducing commit for this added file.
+                const introRes = spawnSync("git", ["log", "--diff-filter=A", "--format=%H", "-1", "--", file], {
+                  cwd: proot, encoding: "utf8", timeout: 5000,
+                });
+                const intro = (introRes.status === 0 ? introRes.stdout.trim().split("\n")[0] : "").trim();
+                if (!intro) return false; // unresolvable → assume indexed (safe)
+                // intro is an ancestor of builtAt ⇒ the file existed at build time ⇒ indexed.
+                const anc = spawnSync("git", ["merge-base", "--is-ancestor", intro, builtAt], {
+                  cwd: proot, timeout: 5000,
+                });
+                if (anc.status === 0) return false;  // ancestor → indexed
+                if (anc.status === 1) return true;   // not ancestor → genuinely new
+                return false;                         // unknown (bad SHA) → assume indexed (safe)
+              }).length;
+            }
           }
         }
       }
@@ -2807,10 +2832,17 @@ function checkAgentOutput(filePath, opts) {
     ? filePath
     : path.join(findProjectRoot(), filePath);
   if (!fs.existsSync(abs)) {
+    // A missing output is a substance FAILURE, not a pass. Consumers grep
+    // `looks_like_stub == true` to detect non-substantive output; the prior
+    // `false` here let a missing file fall through to the pass branch (the
+    // race that left a lane silently uncovered). Set looks_like_stub:true so
+    // every consumer hard-fails; `missing:true` lets coverage reporting tell a
+    // zero-output lane apart from a present-but-stub one.
     return {
       ok: false,
       path: filePath,
-      looks_like_stub: false,
+      looks_like_stub: true,
+      missing: true,
       reason: `file does not exist: ${filePath}`,
     };
   }
@@ -2818,7 +2850,18 @@ function checkAgentOutput(filePath, opts) {
   try {
     content = fs.readFileSync(abs, "utf8");
   } catch (e) {
-    return { ok: false, path: filePath, reason: `read failure: ${e.message}` };
+    return { ok: false, path: filePath, looks_like_stub: true, reason: `read failure: ${e.message}` };
+  }
+  // Zero-byte / whitespace-only is a substance failure, same class as missing.
+  if (content.trim().length === 0) {
+    return {
+      ok: false,
+      path: filePath,
+      looks_like_stub: true,
+      empty: true,
+      word_count: 0,
+      reason: `file is empty (zero substantive bytes): ${filePath}`,
+    };
   }
   const wordCount = content.split(/\s+/).filter(Boolean).length;
   const stubPhrasesFound = [];
@@ -4344,7 +4387,7 @@ function assertLanesQuiesced() {
       ok: true,
       in_flight_count: 0,
       terminal_count: terminal.length,
-      reason: `all ${terminal.length} lane(s) reached terminal status (substance_pass | stub_redispatched | deferred)`,
+      reason: `all ${terminal.length} lane(s) reached terminal status (substance_pass | stub_redispatched | deferred | lane_failed)`,
     };
   }
   return {
