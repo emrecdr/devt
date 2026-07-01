@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.135.0] - 2026-07-02
+
+### `--dry-run` preview accuracy — reconcile the tier tables with the live gates
+
+A live receipt on the tier-partition (v0.132–134) surfaced a pre-existing drift: `dev-workflow.md`'s two summary surfaces — the **Tier Routing Manifest** and the **Tier→Steps table** that `--dry-run` prints its pipeline from — under-reported the STANDARD/COMPLEX step lists versus the authoritative inline `_Skip if…_` gates. Execution was always correct (the inline annotations are the live gates); only the `--dry-run` *preview* was incomplete.
+
+- **Tier→Steps table** (the `--dry-run` source) now lists the full per-tier pipeline: STANDARD gains `risk_warning`, `regression_baseline`, `harvest`; COMPLEX gains `risk_warning`, `research`/`plan`, `regression_baseline`, `harvest`, `autoskill`; SIMPLE gains `harvest`.
+- **Tier Routing Manifest** legend gains `R=risk-warning` + `RP=auto-research+plan` so the two unnumbered pre-steps appear in the STANDARD/COMPLEX rows.
+- Pre-existing (not caused by the carve); zero execution impact — a `--dry-run` now previews exactly what a real run executes. No gate change; 957 smoke/0.
+
 ## [0.134.0] - 2026-07-01
 
 ### Workflow body-weight Stage 3 — lazy-load the COMPLEX steps (tier-partition complete)

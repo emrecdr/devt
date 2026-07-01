@@ -81,10 +81,10 @@ Single-glance view of which steps fire for each complexity tier. Per-step `(STAN
 | ------------ | ------------------------------------------------------------------------------- |
 | **TRIVIAL**  | 1 (inline execute + quality gates only — no subagents)                          |
 | **SIMPLE**   | 1, 4, 5, 6, 9a                                                                  |
-| **STANDARD** | 1, 2, 2.5, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 10                                       |
-| **COMPLEX**  | 1, 2, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 9b, 10                                |
+| **STANDARD** | 1, R, 2, 2.5, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 10                                    |
+| **COMPLEX**  | 1, R, RP, 2, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7+8, 9a, 9b, 10                         |
 
-Step legend: 1=assess, 2=scan, 2.5=baseline, 3=arch-review, 4=implement, 5=test, 5.5=simplify, 6=review, 6.5=verify, 7+8=docs+retro (parallel), 9a=harvest, 9b=curate, 10=autoskill.
+Step legend: 1=assess, R=risk-warning, RP=auto-research+plan, 2=scan, 2.5=baseline, 3=arch-review, 4=implement, 5=test, 5.5=simplify, 6=review, 6.5=verify, 7+8=docs+retro (parallel), 9a=harvest, 9b=curate, 10=autoskill.
 
 Tier is set in Step 1 and stored in `workflow.yaml::tier`. When in doubt, the inline annotation at each step heading is authoritative.
 
@@ -349,9 +349,9 @@ STANDARD:     Everything else
 | Tier         | Criteria                                                            | Steps                                                                                       |
 | ------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | **TRIVIAL**  | Typo fix, config change, <=3 files, no decisions needed             | execute inline, validate quality gates (no subagents)                                       |
-| **SIMPLE**   | Single file/function, well-known pattern, no cross-cutting concerns | implement, test, review (3 steps)                                                           |
-| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting      | scan, implement, test, simplify, review, verify, docs, retro, autoskill (9 steps)           |
-| **COMPLEX**  | New patterns, cross-service, architectural decisions needed         | research, plan, scan, [arch-health?], architect, implement, test, simplify, review, verify, docs, retro, curate (12-13 steps) |
+| **SIMPLE**   | Single file/function, well-known pattern, no cross-cutting concerns | implement, test, review, harvest (4 steps)                                                  |
+| **STANDARD** | Multiple files, follows existing patterns, minor cross-cutting      | risk_warning, scan, regression_baseline, implement, test, simplify, review, verify, docs, retro, harvest, autoskill (12 steps) |
+| **COMPLEX**  | New patterns, cross-service, architectural decisions needed         | risk_warning, research, plan, scan, regression_baseline, [arch-health?], architect, implement, test, simplify, review, verify, docs, retro, harvest, curate, autoskill (16-17 steps) |
 
 Record the tier:
 
