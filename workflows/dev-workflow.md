@@ -383,6 +383,17 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset
 Do NOT proceed to any subsequent step. The dry run is complete.
 </step>
 
+## Step 1.5: Load Tier Steps
+
+<step name="load_tier_steps" gate="tier-step file(s) for the assessed tier are loaded into context">
+Based on the tier set in Step 1 (`workflow.yaml::tier`):
+
+- **TRIVIAL / SIMPLE** — no tier-step file; the spine (implement → test → review) is the full pipeline.
+- **STANDARD or COMPLEX** — **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/dev-workflow.standard.md` now**, so every STANDARD+ tier step body is in context before you reach its `TIER-STEP` insertion point below.
+
+Do NOT execute any `TIER-STEP` insertion point or dispatch any agent for a STANDARD+ step until the tier file is loaded.
+</step>
+
 ---
 
 ### TRIVIAL Path (inline execution, no subagents)
@@ -406,39 +417,7 @@ STOP here — do not proceed to subsequent steps.
 
 ### Risk & Simplicity Warning (STANDARD + COMPLEX)
 
-<step name="risk_warning" gate="risk check completed">
-
-_Skip if TRIVIAL or SIMPLE._
-
-Before proceeding, evaluate:
-
-1. **Simpler approach exists?** — Is the proposed solution more complex than the problem requires?
-2. **Over-engineering risk?** — Does the task description imply abstractions or patterns beyond what's needed?
-3. **High-risk change?** — Does it touch auth, data integrity, public APIs, or 10+ files?
-4. **Breaking change?** — Does it change API contracts, database schema, or external interfaces?
-
-If ANY warning triggers, present options to the user via AskUserQuestion:
-
-```yaml
-question: "I detected a potential concern before proceeding."
-header: "Risk Check"
-multiSelect: false
-options:
-  - label: "Proceed with current approach"
-    description: "{describe the approach and its trade-offs}"
-  - label: "Use simpler alternative (Recommended)"
-    description: "{describe the simpler approach if one exists}"
-  - label: "Let me reconsider the task"
-    description: "Pause to rethink scope or approach"
-```
-
-If no warnings trigger, proceed silently.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=risk_warning status=DONE
-```
-
-</step>
+<!-- TIER-STEP:risk_warning — step body relocated to workflows/dev-workflow.standard.md (loaded by the load_tier_steps step after Step 1). When tier is STANDARD or COMPLEX, execute the `risk_warning` step from that file at THIS pipeline position (after assess, before auto_research_plan (COMPLEX)). Skip for TRIVIAL/SIMPLE. -->
 
 ---
 
@@ -627,74 +606,13 @@ This step is recommended but not mandatory. Skip for well-defined tasks with cle
      Await background completion before Step 3 (implement). See Step 2.5 for the
      pairing note. -->
 
-<step name="scan" gate="scan-results.md is written to .devt/state/">
-
-_Skip this step if complexity is SIMPLE._
-
-Use the codebase-scan skill to survey relevant code:
-
-Read `${CLAUDE_PLUGIN_ROOT}/skills/codebase-scan/` for the scan protocol.
-
-Scan for:
-
-- Existing implementations related to the task (patterns to reuse)
-- Module boundaries and interfaces involved
-- Error types, constants, enums in the domain
-- Existing tests for the affected modules
-- Cross-module dependencies and integration points
-
-Write results to `.devt/state/scan-results.md` with:
-
-- Files relevant to the task (grouped by module)
-- Existing patterns to follow (with file references)
-- Interfaces and contracts to satisfy
-- Risks and constraints discovered
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scan status=DONE
-```
-
-</step>
+<!-- TIER-STEP:scan — step body relocated to workflows/dev-workflow.standard.md (loaded by the load_tier_steps step after Step 1). When tier is STANDARD or COMPLEX, execute the `scan` step from that file at THIS pipeline position (pre-implement). Skip for TRIVIAL/SIMPLE. -->
 
 ---
 
 ## Step 2.5: Regression Baseline (STANDARD + COMPLEX)
 
-<step name="regression_baseline" gate="baseline-gates.md is written to .devt/state/ or step is skipped">
-
-_Skip this step if complexity is SIMPLE._
-_Skip this step if `config.workflow.regression_baseline` is `false`._
-
-Run quality gates **before** implementation to establish a baseline. This captures the current pass/fail state so that any regressions introduced by the implementation can be detected.
-
-**Parallel-bash pairing with Step 2 (scan)**: when the test suite from `.devt/rules/quality-gates.md` is slow (minutes), launch it with `run_in_background=true` and proceed to Step 2's scan in the foreground. The two steps share no state (different artifacts, no overlapping `state update` writes) so they cannot race. Await background completion before the implement step.
-
-```bash
-# Read quality gate commands from .devt/rules/quality-gates.md and run them
-# Capture output — failures here are PRE-EXISTING, not caused by this task
-```
-
-Write results to `.devt/state/baseline-gates.md`:
-
-```markdown
-# Baseline Quality Gates
-
-Captured before implementation to detect regressions.
-
-| Gate | Command | Result | Notes |
-|------|---------|--------|-------|
-| lint | {command} | PASS/FAIL | {pre-existing failures if any} |
-| typecheck | {command} | PASS/FAIL | {pre-existing failures if any} |
-| tests | {command} | PASS/FAIL ({N passed, M failed}) | {pre-existing failures if any} |
-```
-
-**Important**: Pre-existing failures are noted but NOT blocking. The baseline exists to compare AFTER implementation — new failures not in the baseline are regressions.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=regression_baseline status=DONE
-```
-
-</step>
+<!-- TIER-STEP:regression_baseline — step body relocated to workflows/dev-workflow.standard.md (loaded by the load_tier_steps step after Step 1). When tier is STANDARD or COMPLEX, execute the `regression_baseline` step from that file at THIS pipeline position (pre-implement (after scan)). Skip for TRIVIAL/SIMPLE. -->
 
 ---
 
@@ -1060,42 +978,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=test status=$
 
 ## Step 5.5: Simplify (STANDARD + COMPLEX)
 
-<step name="simplify" gate="code is cleaned up and quality gates still pass">
-
-_Only applies if complexity tier is STANDARD or COMPLEX. Skip for TRIVIAL and SIMPLE._
-_Skip this step if `simplify` is listed in `skipped_phases` from workflow state._
-
-After tests pass, run a simplification pass on the changed code before it goes to review. This catches generative debt (redundancy, over-engineering, missed reuse) that the programmer's self-review may have missed.
-
-Invoke the built-in `/simplify` skill, which spawns 3 parallel review agents (reuse, quality, efficiency) and applies fixes:
-
-```
-Skill(skill="simplify")
-```
-
-After simplify completes, **re-run quality gates** to ensure simplification didn't break anything:
-
-```bash
-# Read quality gate commands from project rules and execute
-GATES_FILE=".devt/rules/quality-gates.md"
-if [[ -f "$GATES_FILE" ]]; then
-  echo "Re-running quality gates after simplification..."
-  bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-quality-gates.sh"
-fi
-```
-
-**Gate check** — set `STATUS` based on outcome:
-
-- Quality gates pass → `STATUS=DONE`, proceed to review
-- Quality gates fail → attempt to fix (run failing command, read error, fix). Re-run gates.
-  - Gates pass after fix → `STATUS=DONE`, proceed to review
-  - Gates still fail → revert simplification changes (`git checkout -- <broken_files>`), `STATUS=REVERTED`, proceed to review with pre-simplify code. The original code was already tested and passing — safe to fall back.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=simplify status=$STATUS
-```
-
-</step>
+<!-- TIER-STEP:simplify — step body relocated to workflows/dev-workflow.standard.md (loaded by the load_tier_steps step after Step 1). When tier is STANDARD or COMPLEX, execute the `simplify` step from that file at THIS pipeline position (after test, before review). Skip for TRIVIAL/SIMPLE. -->
 
 ---
 
@@ -1541,28 +1424,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=curate status
 
 ## Step 10: Autoskill (STANDARD + COMPLEX)
 
-<step name="autoskill" gate="autoskill analysis is complete">
-
-_Skip this step if complexity is SIMPLE._
-_Skip this step if `config.workflow.autoskill` is `false`._
-_Skip this step if `autoskill` is listed in `skipped_phases` from workflow state._
-
-Read `${CLAUDE_PLUGIN_ROOT}/skills/autoskill/` for the autoskill protocol.
-
-Analyze the completed workflow for patterns that could be automated:
-
-- Repeated manual interventions that could become skills
-- Agent prompt patterns that could be extracted into reusable templates
-- Quality gate patterns that could be added to `.devt/rules/`
-
-If actionable proposals are identified, write them to `.devt/state/autoskill-proposals.md`.
-Report proposals to the user — do NOT auto-apply them.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=autoskill status=DONE
-```
-
-</step>
+<!-- TIER-STEP:autoskill — step body relocated to workflows/dev-workflow.standard.md (loaded by the load_tier_steps step after Step 1). When tier is STANDARD or COMPLEX, execute the `autoskill` step from that file at THIS pipeline position (after curate, before review_deferred). Skip for TRIVIAL/SIMPLE. -->
 
 ---
 

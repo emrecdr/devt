@@ -12282,7 +12282,7 @@ for (const dir of ["commands", "workflows", "agents", "skills"]) {
       if (e.isDirectory()) walk(full);
       else if (e.isFile() && e.name.endsWith(".md")) {
         const body = fs.readFileSync(full, "utf8");
-        const matches = body.match(/workflows\/[a-z][a-z0-9-]*\.md/g) || [];
+        const matches = body.match(/workflows\/[a-z][a-z0-9.-]*\.md/g) || [];
         matches.forEach(m => referenced.add(m));
       }
     }
@@ -15272,6 +15272,43 @@ if [ "$K209_WARN" = "1" ] && [ "$K209_BLOCK" = "1" ]; then
   pass "K209: session-start.sh surfaces the dispatch_hygiene_mode safety floor when lowered below block, silent at block"
 else
   fail "K209: hygiene-floor surfacing wrong — warn_surfaced=$K209_WARN(exp1) block_silent=$K209_BLOCK(exp1)"
+fi
+
+# K210: dev-workflow tier-partition is complete + disjoint. Each STANDARD+ step
+# lazy-loaded into dev-workflow.standard.md must appear in EXACTLY ONE file —
+# moved out of the spine (0 in dev-workflow.md), present once in the tier file —
+# proving the carve lost no step and duplicated none. Spine-only steps must not
+# leak into the tier file.
+K210_OK=1; K210_BAD=""
+for st in risk_warning scan regression_baseline simplify autoskill; do
+  K210_SPINE=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.md" || true)
+  K210_TIER=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.standard.md" || true)
+  if [ "$K210_SPINE" != "0" ] || [ "$K210_TIER" != "1" ]; then K210_OK=0; K210_BAD="$st(spine=$K210_SPINE,tier=$K210_TIER)"; fi
+done
+for sp in context_init implement test review finalize; do
+  K210_LEAK=$(/usr/bin/grep -c "<step name=\"$sp\"" "$ROOT/workflows/dev-workflow.standard.md" 2>/dev/null || true)
+  if [ "$K210_LEAK" != "0" ]; then K210_OK=0; K210_BAD="spine-step $sp leaked into tier file"; fi
+done
+if [ "$K210_OK" = "1" ]; then
+  pass "K210: dev-workflow tier-partition complete + disjoint (5 STANDARD+ steps live exactly once in dev-workflow.standard.md, zero in the spine; no spine step leaked)"
+else
+  fail "K210: dev-workflow partition broken — $K210_BAD"
+fi
+
+# K211: the spine carries the load_tier_steps directive (mandatory Read of the
+# tier file) + a TIER-STEP pointer for every relocated step, so a STANDARD+ run
+# can never reach an insertion point without the step body already in context.
+K211_STEP=$(/usr/bin/grep -c '<step name="load_tier_steps"' "$ROOT/workflows/dev-workflow.md" || true)
+K211_READ=$(/usr/bin/grep -cE 'Mandatory action: Read.*dev-workflow\.standard\.md' "$ROOT/workflows/dev-workflow.md" || true)
+K211_PTRS=0
+for st in risk_warning scan regression_baseline simplify autoskill; do
+  K211_P=$(/usr/bin/grep -c "TIER-STEP:$st" "$ROOT/workflows/dev-workflow.md" || true)
+  if [ "$K211_P" -ge 1 ]; then K211_PTRS=$((K211_PTRS+1)); fi
+done
+if [ "$K211_STEP" -ge 1 ] && [ "$K211_READ" -ge 1 ] && [ "$K211_PTRS" = "5" ]; then
+  pass "K211: spine carries load_tier_steps (mandatory Read of dev-workflow.standard.md) + a TIER-STEP pointer for all 5 relocated steps"
+else
+  fail "K211: tier-load wiring incomplete — load_step=$K211_STEP read_directive=$K211_READ pointers=$K211_PTRS/5"
 fi
 
 echo

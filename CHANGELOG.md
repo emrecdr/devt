@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.132.0] - 2026-07-01
+
+### Workflow body-weight — lazy-load STANDARD+ tier steps (Stage 1)
+
+`dev-workflow.md` is the default `/devt:workflow` entry, and its whole 1,728-line body loaded into context on every run regardless of tier — even though a SIMPLE task executes only implement → test → review. Stage 1 of the tier-partition relocates the **dispatch-free STANDARD+ steps** (risk_warning, scan, regression_baseline, simplify, autoskill) into a lazily-Read `dev-workflow.standard.md`, loaded only when the assessed tier is STANDARD or COMPLEX. TRIVIAL/SIMPLE runs no longer carry those bodies. Zero features removed — the step bodies moved **verbatim** (gate contracts, tier skip-clauses, artifacts unchanged).
+
+- **New spine step `load_tier_steps`** (after tier detection) issues a mandatory Read of `dev-workflow.standard.md` for STANDARD+; each relocated step leaves a `TIER-STEP:<name>` pointer at its original pipeline position so execution order is preserved.
+- **`dev-workflow.md` 1,728 → 1,590 lines**; the 5 relocated steps (~138 lines) load only on STANDARD/COMPLEX. The dispatch compiler globs `workflows/`, so all compile/contract gates (K1/K71/K119/K206) + the ~60 dev-workflow-coupled gates stay green.
+- **K210** (partition complete + disjoint — each relocated step appears exactly once across the file set, none lost, none duplicated) + **K211** (spine carries the `load_tier_steps` mandatory-Read directive + a pointer per relocated step). Drift stack 116 → 118-deep (K94–K211).
+- **K99 orphan-detector fix**: its reference regex now recognizes dotted workflow filenames (`dev-workflow.standard.md`) so the lazy-load Read reference is seen — was `[a-z0-9-]*`, now `[a-z0-9.-]*`.
+- Stage 1 deliberately moves only the **dispatch-free** steps (0 gate breakers). Stages 2–3 (verify + the COMPLEX dispatch steps) follow, each with its gate repointing + a tier-aware `verify` gate that also closes a pre-existing `dev.complete` hole (`assert-verifier-ran` is absent from the dev terminal set today).
+
 ## [0.131.0] - 2026-07-01
 
 ### Scope-aware context-init freshness — fixes cross-review stale-bundle contamination
