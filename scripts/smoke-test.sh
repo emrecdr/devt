@@ -2503,7 +2503,7 @@ fi
 # Workflow text MUST distinguish the three envelope shapes for the routing
 # discipline to hold. If the verify step's text loses these distinctions,
 # Claude (the orchestrator) can't tell I/O failures from constraint violations.
-DW="$ROOT/workflows/dev-workflow.md"
+DW="$ROOT/workflows/dev-workflow.standard.md"  # verify step lives in the tier file (Stage 2 carve)
 if grep -q '`{ok: false' "$DW" \
    && grep -q '`{ok: true, pass: false' "$DW" \
    && grep -q '`{ok: true, pass: true' "$DW" \
@@ -3833,7 +3833,7 @@ else
   fail "init payload missing or wrong rubrics.dev (expected dev.v1.md)"
 fi
 # Dev-workflow verifier dispatch must reference {rubrics.dev} in a <rubric_path> tag.
-if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.md"; then
+if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.standard.md"; then
   pass "dev-workflow verifier dispatch injects <rubric_path>"
 else
   fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
@@ -3858,7 +3858,7 @@ for actual in $ACTUAL_VERIFIER_WORKFLOWS; do
   # Map workflow filename → workflow_type. Today they're the same except
   # dev-workflow.md → dev. Add mappings here as new workflows surface.
   case "$actual" in
-    dev-workflow) wt="dev" ;;
+    dev-workflow*) wt="dev" ;;
     code-review) wt="code_review" ;;
     code-review-parallel) wt="code_review_parallel" ;;
     *) wt="$actual" ;;
@@ -4085,11 +4085,13 @@ else
 fi
 rm -rf "$C1_TMP"
 
-# C1: dispatch wiring — dev-workflow.md
-if grep -q '<memory_signal>' "$ROOT/workflows/dev-workflow.md"; then
-  pass "dev-workflow.md verifier dispatch contains <memory_signal>"
+# C1: dispatch wiring — dev verifier dispatch (region-scoped; verify step lives
+# in dev-workflow.standard.md since the Stage 2 carve, so check the verifier
+# envelope directly rather than a hollow whole-file grep).
+if sed -n '/BEGIN dispatch:verifier:dev/,/END dispatch:verifier:dev/p' "$ROOT/workflows/dev-workflow.standard.md" | grep -q '<memory_signal>'; then
+  pass "dev verifier dispatch contains <memory_signal> (region-scoped in dev-workflow.standard.md)"
 else
-  fail "dev-workflow.md missing <memory_signal> in verifier dispatch"
+  fail "dev verifier dispatch missing <memory_signal>"
 fi
 
 # C1: dispatch wiring — code-review.md
@@ -6777,11 +6779,11 @@ rm -rf "$F28_TMP"
 # impl-summary + test-summary + review.md (the three upstream artifacts the
 # verifier consumes). Field signal: same architectural risk as F28 in
 # code-review.md, applied to a workflow with multi-artifact verifier input.
-if /usr/bin/grep -q "state check-agent-output" "$ROOT/workflows/dev-workflow.md" \
-  && /usr/bin/grep -q "for ARTIFACT in impl-summary.md test-summary.md review.md" "$ROOT/workflows/dev-workflow.md"; then
-  pass "F29a: dev-workflow.md wires state check-agent-output across all three upstream artifacts before verifier dispatch"
+if /usr/bin/grep -q "state check-agent-output" "$ROOT/workflows/dev-workflow.standard.md" \
+  && /usr/bin/grep -q "for ARTIFACT in impl-summary.md test-summary.md review.md" "$ROOT/workflows/dev-workflow.standard.md"; then
+  pass "F29a: dev verify step wires state check-agent-output across all three upstream artifacts before verifier dispatch (verify lives in dev-workflow.standard.md since the Stage 2 carve)"
 else
-  fail "F29a: dev-workflow.md missing F28 substance pre-gate wiring"
+  fail "F29a: dev verify step missing F28 substance pre-gate wiring"
 fi
 F29_TMP=$(mktemp -d)
 mkdir -p "$F29_TMP/.devt/state"
@@ -8579,7 +8581,7 @@ fi
 # silently drop it. Same drift-detection pattern as M4 / L7.
 M5_CR=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 M5_CRP=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
-M5_DW=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+M5_DW=$(sed -n '/BEGIN dispatch:verifier:dev/,/END dispatch:verifier:dev/p' "$ROOT/workflows/dev-workflow.standard.md" | /usr/bin/grep -c "<scope_trust>" || true)  # verifier envelope moved to the tier file (Stage 2)
 M5_VAGENT=$(/usr/bin/grep -c "<scope_trust>" "$ROOT/agents/verifier.md" 2>/dev/null || echo 0)
 # Verifier dispatch sites: each workflow has ≥1 scope_trust ref
 if [ "${M5_CR:-0}" -ge 1 ] && [ "${M5_CRP:-0}" -ge 1 ] && [ "${M5_DW:-0}" -ge 1 ] && [ "${M5_VAGENT:-0}" -ge 1 ]; then
@@ -15280,7 +15282,7 @@ fi
 # proving the carve lost no step and duplicated none. Spine-only steps must not
 # leak into the tier file.
 K210_OK=1; K210_BAD=""
-for st in risk_warning scan regression_baseline simplify autoskill; do
+for st in risk_warning scan regression_baseline simplify autoskill verify; do
   K210_SPINE=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.md" || true)
   K210_TIER=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.standard.md" || true)
   if [ "$K210_SPINE" != "0" ] || [ "$K210_TIER" != "1" ]; then K210_OK=0; K210_BAD="$st(spine=$K210_SPINE,tier=$K210_TIER)"; fi
@@ -15290,7 +15292,7 @@ for sp in context_init implement test review finalize; do
   if [ "$K210_LEAK" != "0" ]; then K210_OK=0; K210_BAD="spine-step $sp leaked into tier file"; fi
 done
 if [ "$K210_OK" = "1" ]; then
-  pass "K210: dev-workflow tier-partition complete + disjoint (5 STANDARD+ steps live exactly once in dev-workflow.standard.md, zero in the spine; no spine step leaked)"
+  pass "K210: dev-workflow tier-partition complete + disjoint (6 STANDARD+ steps live exactly once in dev-workflow.standard.md, zero in the spine; no spine step leaked)"
 else
   fail "K210: dev-workflow partition broken — $K210_BAD"
 fi
@@ -15301,14 +15303,34 @@ fi
 K211_STEP=$(/usr/bin/grep -c '<step name="load_tier_steps"' "$ROOT/workflows/dev-workflow.md" || true)
 K211_READ=$(/usr/bin/grep -cE 'Mandatory action: Read.*dev-workflow\.standard\.md' "$ROOT/workflows/dev-workflow.md" || true)
 K211_PTRS=0
-for st in risk_warning scan regression_baseline simplify autoskill; do
+for st in risk_warning scan regression_baseline simplify autoskill verify; do
   K211_P=$(/usr/bin/grep -c "TIER-STEP:$st" "$ROOT/workflows/dev-workflow.md" || true)
   if [ "$K211_P" -ge 1 ]; then K211_PTRS=$((K211_PTRS+1)); fi
 done
-if [ "$K211_STEP" -ge 1 ] && [ "$K211_READ" -ge 1 ] && [ "$K211_PTRS" = "5" ]; then
-  pass "K211: spine carries load_tier_steps (mandatory Read of dev-workflow.standard.md) + a TIER-STEP pointer for all 5 relocated steps"
+if [ "$K211_STEP" -ge 1 ] && [ "$K211_READ" -ge 1 ] && [ "$K211_PTRS" = "6" ]; then
+  pass "K211: spine carries load_tier_steps (mandatory Read of dev-workflow.standard.md) + a TIER-STEP pointer for all 6 relocated steps"
 else
-  fail "K211: tier-load wiring incomplete — load_step=$K211_STEP read_directive=$K211_READ pointers=$K211_PTRS/5"
+  fail "K211: tier-load wiring incomplete — load_step=$K211_STEP read_directive=$K211_READ pointers=$K211_PTRS/6"
+fi
+
+# K212: tier-aware assert-verifier-ran (Stage 2 verify carve). dev SIMPLE/TRIVIAL
+# runs no verify step, so the gate opts out (ok:true) even without a verification
+# artifact; dev STANDARD/COMPLEX requires it (ok:false when absent) — closing the
+# pre-existing dev.complete hole where a STANDARD dev task could silently skip
+# verify. code_review is unaffected (still required regardless of tier).
+K212_T=$(mktemp -d); mkdir -p "$K212_T/.devt/state"; echo '{}' > "$K212_T/.devt/config.json"
+_k212() {
+  printf 'active: true\nworkflow_type: %s\ntier: %s\nphase: complete\n' "$1" "$2" > "$K212_T/.devt/state/workflow.yaml"
+  (cd "$K212_T" && node "$ROOT/bin/devt-tools.cjs" state assert-verifier-ran 2>/dev/null || true) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).ok))}catch{process.stdout.write('err')}})"
+}
+K212_SIMPLE=$(_k212 dev SIMPLE)
+K212_STANDARD=$(_k212 dev STANDARD)
+K212_CR=$(_k212 code_review "")
+rm -rf "$K212_T"
+if [ "$K212_SIMPLE" = "true" ] && [ "$K212_STANDARD" = "false" ] && [ "$K212_CR" = "false" ]; then
+  pass "K212: tier-aware assert-verifier-ran — dev SIMPLE opts out (ok:true), dev STANDARD requires verification.json (ok:false), code_review unaffected (ok:false)"
+else
+  fail "K212: tier-aware verify gate wrong — dev_simple=$K212_SIMPLE(exp true) dev_standard=$K212_STANDARD(exp false) code_review=$K212_CR(exp false)"
 fi
 
 echo

@@ -3228,9 +3228,11 @@ function assertVerifierRan() {
   // the gate uniformly would block their present_findings step on a missing
   // artifact that was never going to be written.
   let workflowType = null;
+  let tier = null;
   try {
     const stateData = readState();
     workflowType = stateData && stateData.workflow_type;
+    tier = stateData && stateData.tier;
   } catch { /* fall through — treat as unknown, apply gate */ }
   if (workflowType && !VERIFIER_REQUIRED_WORKFLOWS.has(workflowType)) {
     return {
@@ -3238,6 +3240,22 @@ function assertVerifierRan() {
       verification_enabled: true,
       workflow_type: workflowType,
       reason: `workflow_type=${workflowType} does not dispatch a verifier by design — gate does not apply`,
+    };
+  }
+  // Tier opt-out (dev only): SIMPLE/TRIVIAL dev tasks run only implement→test→
+  // review — the verify step is STANDARD+ only, so requiring a verification
+  // artifact for those tiers would false-block a correct SIMPLE/TRIVIAL run.
+  // code_review / code_review_parallel carry no tier and always verify, so they
+  // are unaffected. This is what makes assert-verifier-ran safe to add to the
+  // dev::complete gate set (closing the gap where a STANDARD dev task could
+  // silently skip verify with nothing catching it).
+  if (workflowType === "dev" && (tier === "SIMPLE" || tier === "TRIVIAL")) {
+    return {
+      ok: true,
+      verification_enabled: true,
+      workflow_type: "dev",
+      tier,
+      reason: `tier=${tier} runs no verify step (STANDARD+ only) — gate does not apply`,
     };
   }
   const dir = getStateDir();

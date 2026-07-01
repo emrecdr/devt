@@ -149,6 +149,9 @@ workflow_types:
         - assert-no-raw-dispatches-this-session
         - assert-knowledge-candidates-tagged
         - assert-auto-curator-considered
+        # tier-aware: assertVerifierRan opts out (ok:true) for dev SIMPLE/TRIVIAL
+        # (no verify step); requires verification.json for STANDARD/COMPLEX.
+        - assert-verifier-ran
 
   quick_implement:
     # Intermediate phases — raw-dispatch gate only

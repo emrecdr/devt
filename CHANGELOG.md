@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.133.0] - 2026-07-01
+
+### Workflow body-weight Stage 2 — lazy-load the verify step (+ close a pre-existing verify-skip hole)
+
+Stage 2 of the `dev-workflow.md` tier-partition relocates the **verify step** (166 lines — the single largest tier-gated block, carrying the verifier dispatch envelope) into `dev-workflow.standard.md`. `dev-workflow.md` 1,590 → 1,424 lines; SIMPLE/TRIVIAL runs no longer carry it.
+
+- **Verbatim move** — the `<!-- BEGIN/END dispatch:verifier:dev -->` + `EDIT-SOURCE` region moved intact; the dispatch compiler globs `workflows/`, so `dispatch check-contracts` + K1/K71/K119/K206 stay green. The verify step gains an `assert-artifact-present verifier` Layer-1 claim-check (parity with the programmer/architect steps) and the tier file carries its own `<available_agent_types>` (W010) — both correct, not gate-appeasement.
+- **Closes a pre-existing safety hole:** `assert-verifier-ran` was in the code_review terminal gate set but **absent from `dev.complete`** — a STANDARD dev task could silently skip verify with nothing catching it. It's now added to `dev.complete`, made **tier-aware**: `assertVerifierRan` opts out (ok:true) for dev SIMPLE/TRIVIAL (which run no verify step) and requires `verification.json` for STANDARD/COMPLEX. code_review/code_review_parallel carry no tier and are unaffected.
+- **Gate repointing:** the verify-content gates (three-way envelope routing, two-call merge precedence, `rubric_path`) now read the tier file; the `devt:verifier` workflow→type case-map accepts `dev-workflow*`; and the two hollow whole-file greps (verifier `<memory_signal>` / `<scope_trust>`) are tightened to region-scope the moved verifier envelope — so they verify the actual dispatch instead of passing off an unrelated spine copy.
+- **K212** locks the tier-aware verify gate; **K210/K211** extended to 6 relocated steps. Drift stack 118 → 119-deep (K94–K212).
+- Stage 3 (COMPLEX dispatch steps: auto_research_plan, architect, curate + docs_retro) remains.
+
 ## [0.132.0] - 2026-07-01
 
 ### Workflow body-weight — lazy-load STANDARD+ tier steps (Stage 1)
