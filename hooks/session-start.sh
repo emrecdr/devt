@@ -150,6 +150,19 @@ if [[ -n "$UPDATE_MSG" ]]; then
 ${UPDATE_MSG}"
 fi
 
+# ─── Safety-Floor Surfacing ───
+# dispatch_hygiene_mode defaults to "block" — raw devt:* dispatches that bypass
+# the /devt:* envelope are hard-blocked. A project that lowers it to "warn"/"off"
+# silently weakens that floor. Surface it once per session so a lowered guard is
+# never invisible (field-observed: warn was flagged every turn but never
+# explained at session start).
+HYGIENE_MODE=$(node -e "try{const{getMergedConfig}=require('${PLUGIN_ROOT}/bin/modules/config.cjs');process.stdout.write(String((getMergedConfig().dispatch_hygiene_mode)||'block'));}catch{process.stdout.write('block');}" 2>/dev/null || echo "block")
+if [[ -n "$HYGIENE_MODE" && "$HYGIENE_MODE" != "block" ]]; then
+  CONTEXT="${CONTEXT}
+
+⚠️ devt safety floor lowered: dispatch_hygiene_mode=\"${HYGIENE_MODE}\" (default \"block\"). Raw devt:* sub-agent dispatches that bypass the /devt:* envelope are NOT hard-blocked in this mode. Set \"dispatch_hygiene_mode\": \"block\" in .devt/config.json to restore enforcement."
+fi
+
 # ─── What's-New Surfacing ───
 # Closes the doc-promotion gap where a project's Claude Code session only
 # loads the project's CLAUDE.md, never devt's — new CHANGELOG entries

@@ -1461,6 +1461,7 @@ const RESET_SOFT_CLEAR_KEYS = [
   "redispatch_count", "lanes", "review_file", "dispatched_at",
   "stopped_at", "stopped_phase", "resume_context",
   "memory_signal_json", "scope_hint_json", "scope_trust_json",
+  "context_init_scope_sig", "context_init_graph_head",
 ];
 
 // Logs rotated by resetSoft. Cross-workflow accumulators that the KILL gate +
@@ -1487,11 +1488,18 @@ const RESET_SOFT_ROTATE_LOGS = [
 // spanning artifacts. impl-summary.md / graph-impact.md / test-summary.md
 // are NOT in this list — they legitimately survive across review re-runs of
 // the same implementation workflow.
+//
+// graphify-impact-plan.json IS evicted: it is scope-bound (its args carry the
+// diff symbols of ONE specific review), not durable. A soft-reset marks a new
+// working session against a new scope; preserving the prior scope's plan lets
+// a faithful impact-step anchor the whole blast-radius on the wrong diff
+// (field-observed). It is cheap to regenerate on the next context-init.
 const RESET_SOFT_EVICT_PATTERNS = [
   /^review\.md$/,
   /^review\.json$/,
   /^review-lane-.+\.md$/,
   /^review-lane-.+\.json$/,
+  /^graphify-impact-plan\.json$/,
 ];
 
 /**
@@ -2820,6 +2828,35 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
 //    graphify is an enhancer; its outage degrades, never aborts.
 //  - FRESHNESS short-circuit checked BEFORE eviction: a clean resume must not
 //    evict the graph-impact.md it's about to reuse.
+// Scope signature for the context-init freshness key: a hash of the review's
+// changed-file set (git three-dot / merge-base diff vs the primary branch),
+// anchored to the current commit. This is "what this review is about". Keying
+// freshness on this — NOT the free-text task, which routinely degrades to a
+// generic default like "code review" — is what lets a scope change invalidate
+// a cached bundle even when the graph is fresh. The HEAD anchor keeps the
+// signature stable and scope-distinguishing when the diff-vs-primary is empty
+// (the review is ON the primary branch, or the base ref is unresolved).
+// Returns null only when neither a diff nor a HEAD can be read (no git at all);
+// a null signature never matches a stored stamp, so the caller falls through to
+// a full recompute — the safe direction (a false full-compute costs a few
+// round-trips; a false short-circuit serves the wrong review's context).
+function contextInitScopeSig(primaryBranch) {
+  try {
+    const { execFileSync } = require("child_process");
+    const proot = findProjectRoot();
+    const base = primaryBranch || "main";
+    const runGit = (args) => execFileSync("git", args, { cwd: proot, encoding: "utf8", timeout: 10000 }).trim();
+    let files = [];
+    try {
+      files = runGit(["diff", "--name-only", `${base}...HEAD`]).split("\n").map(s => s.trim()).filter(Boolean).sort();
+    } catch { /* base ref unresolvable — fall through to the HEAD-only signature */ }
+    let head = "";
+    try { head = runGit(["rev-parse", "HEAD"]); } catch { head = ""; }
+    if (files.length === 0 && !head) return null;
+    return require("crypto").createHash("sha1").update(head + "\n" + files.join("\n")).digest("hex").slice(0, 16);
+  } catch { return null; }
+}
+
 function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, taskDefault = "code review" } = {}) {
   const { spawnSync } = require("child_process");
   const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
@@ -2858,22 +2895,34 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   try { initPayload = JSON.parse(initRes.stdout); } catch { initPayload = null; }
 
   // ── Freshness short-circuit (BEFORE any eviction) ──────────────────────
-  // If a fresh preflight brief + impact-plan already exist for the current
-  // graph, return the cached bundle untouched — re-computing wastes work and
-  // re-evicting would destroy the reusable graph-impact.md.
+  // Reuse the cached bundle ONLY when it was computed for the SAME review
+  // scope AND the same graph head. Freshness is keyed on (scope_sig,
+  // graph_head) jointly — NOT on graph freshness alone. A graph-fresh check by
+  // itself will serve a bundle from an entirely different review whenever the
+  // graph happens to be fresh (field-observed: a PR review served the prior
+  // PR's scope_hint / memory_signal / impact-plan). scope_sig is the
+  // changed-file signature (independent of the free-text task, which degrades
+  // to a generic default); graph_head additionally catches a same-scope resume
+  // across an advanced graph, so a stale brief is regenerated, not served.
   try {
     const planPath = path.join(getStateDir(), "graphify-impact-plan.json");
     const brief = readBriefJson();
     const pfresh = sh(["state", "assert-preflight-fresh"]);
-    let graphFresh = false;
-    try { const f = require("./graphify.cjs").freshness(); graphFresh = !!(f && f.fresh); } catch { graphFresh = false; }
-    if (fs.existsSync(planPath) && brief && pfresh.ok && graphFresh) {
+    let graphFresh = false, curHead = null;
+    try { const f = require("./graphify.cjs").freshness(); graphFresh = !!(f && f.fresh); curHead = (f && f.head) || null; } catch { graphFresh = false; }
+    const curSig = contextInitScopeSig(primaryBranch);
+    const st = readState();
+    const stampSig = st.context_init_scope_sig || null;
+    const stampHead = st.context_init_graph_head || null;
+    const scopeMatches = curSig !== null && stampSig !== null && curSig === stampSig;
+    const headMatches = curHead !== null && stampHead !== null && curHead === stampHead;
+    if (scopeMatches && headMatches && fs.existsSync(planPath) && brief && pfresh.ok && graphFresh) {
       const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
-      const st = readState();
+      process.stderr.write(`[devt] context-init: reused cached bundle for scope ${curSig} @ graph ${String(curHead).slice(0, 8)} — pass --fresh to force a recompute\n`);
       return {
         ok: true,
         short_circuited: true,
-        reason: "preflight + impact-plan already fresh for current graph; returning cached bundle without re-eviction",
+        reason: `cached bundle matches scope_sig=${curSig} + graph_head=${String(curHead).slice(0, 8)}; reused without re-eviction`,
         init: initPayload,
         impact_plan: plan,
         scope_trust: st.scope_trust_json || null,
@@ -2882,6 +2931,12 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
         freshness: brief.staleness || { state: "unknown" },
         degraded_fields: [],
       };
+    }
+    // Loud signal when a cached bundle exists but belongs to a DIFFERENT scope:
+    // recompute rather than silently serving stale context (the field-observed
+    // failure mode). Only fires when a real prior stamp is present.
+    if (stampSig && curSig && stampSig !== curSig) {
+      process.stderr.write(`[devt] context-init: review scope changed (was ${stampSig}, now ${curSig}) — recomputing fresh context instead of serving the cached bundle\n`);
     }
   } catch { /* fall through to full compute */ }
 
@@ -2950,6 +3005,15 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   let impactPlan = null;
   try { impactPlan = computeGraphifyImpactPlan({ reviewScope: scope, primaryBranch }); }
   catch { impactPlan = { tier: "skip", tool: "", args: {}, skip_reason: "impact-plan compute failed" }; degraded.push("impact_plan"); }
+
+  // Stamp the freshness key for the NEXT call's short-circuit decision:
+  // scope_sig = the changed-file signature of THIS review; graph_head = the
+  // graph commit it was computed against. Written even when empty, so a prior
+  // review's stamp is cleared rather than left to spuriously match.
+  let graphHeadStamp = null;
+  try { const f = require("./graphify.cjs").freshness(); graphHeadStamp = (f && f.head) || null; } catch { /* graph unavailable — empty stamp forces next recompute */ }
+  const scopeSigStamp = contextInitScopeSig(primaryBranch);
+  try { updateState([`context_init_scope_sig=${scopeSigStamp || ""}`, `context_init_graph_head=${graphHeadStamp || ""}`]); } catch { /* best-effort stamp */ }
 
   return {
     ok: true,

@@ -15208,6 +15208,72 @@ else
   fail "K206: dispatch region(s) missing a declared context_block — $(echo "$K206_JSON" | tr -d '\n' | head -c 400)"
 fi
 
+# K207: scope-aware context-init freshness. The short-circuit keys on
+# (scope_sig, graph_head) jointly — a review whose changed-file set differs from
+# the cached bundle's must NOT reuse it, even when the graph is fresh. Guards the
+# field-observed bug where a graph-fresh-only check served a prior PR's
+# scope_hint / memory_signal / impact-plan. Also confirms a same-scope re-call
+# still short-circuits (the resume optimization is preserved).
+K207_T=$(mktemp -d); mkdir -p "$K207_T/.devt/state" "$K207_T/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"},"git":{"primary_branch":"main"}}' > "$K207_T/.devt/config.json"
+cd "$K207_T"
+git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t
+echo base > base.py; git add -A; git commit -qm base >/dev/null 2>&1
+git checkout -q -b feat-a; echo a > fileX.py; git add -A; git commit -qm a >/dev/null 2>&1
+K207_HEAD_A=$(git rev-parse HEAD)
+node -e "require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({built_at_commit:'$K207_HEAD_A',nodes:[{id:'X',label:'X',source_file:'fileX.py',source_location:'L1',file_type:'code'}],links:[]}))"
+K207_FIRST=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review A" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write(o.short_circuited===false?'1':'0')}catch{process.stdout.write('0')}})")
+K207_RESUME=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review A" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write(o.short_circuited===true?'1':'0')}catch{process.stdout.write('0')}})")
+git checkout -q main >/dev/null 2>&1; git checkout -q -b feat-b >/dev/null 2>&1; echo b > fileY.py; git add -A; git commit -qm b >/dev/null 2>&1
+K207_HEAD_B=$(git rev-parse HEAD)
+node -e "require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({built_at_commit:'$K207_HEAD_B',nodes:[{id:'Y',label:'Y',source_file:'fileY.py',source_location:'L1',file_type:'code'}],links:[]}))"
+K207_SCOPE=$(node "$ROOT/bin/devt-tools.cjs" state review-context-init --scope="review B" --primary-branch=main 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);process.stdout.write(o.short_circuited===false?'1':'0')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K207_T"
+if [ "$K207_FIRST" = "1" ] && [ "$K207_RESUME" = "1" ] && [ "$K207_SCOPE" = "1" ]; then
+  pass "K207: context-init freshness keyed on (scope_sig, graph_head) — same-scope re-call short-circuits; a changed-scope review recomputes even on a fresh graph (no cross-review contamination)"
+else
+  fail "K207: scope-aware freshness broken — first_full=$K207_FIRST(exp1) resume_shortcircuit=$K207_RESUME(exp1) scope_changed_recompute=$K207_SCOPE(exp1)"
+fi
+
+# K208: reset-soft evicts the scope-bound graphify-impact-plan.json (a new
+# working session must not inherit the prior scope's impact plan) while
+# PRESERVING workflow-spanning phase artifacts (graph-impact.md). Field-observed:
+# reset-soft left the stale plan behind and a faithful impact-step anchored the
+# whole review's blast-radius on the wrong PR.
+K208_T=$(mktemp -d); mkdir -p "$K208_T/.devt/state"
+echo '{}' > "$K208_T/.devt/config.json"
+cd "$K208_T"
+git init -q -b main >/dev/null 2>&1; git config user.email t@t.t; git config user.name t; echo x > a.py; git add -A; git commit -qm x >/dev/null 2>&1
+node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=t >/dev/null 2>&1
+echo '{"tier":"pr_scoped_diff"}' > .devt/state/graphify-impact-plan.json
+echo 'stale blast map' > .devt/state/graph-impact.md
+node "$ROOT/bin/devt-tools.cjs" state reset-soft >/dev/null 2>&1
+K208_PLAN_GONE=$([ ! -f .devt/state/graphify-impact-plan.json ] && echo 1 || echo 0)
+K208_GRAPH_KEPT=$([ -f .devt/state/graph-impact.md ] && echo 1 || echo 0)
+cd "$ROOT"; rm -rf "$K208_T"
+if [ "$K208_PLAN_GONE" = "1" ] && [ "$K208_GRAPH_KEPT" = "1" ]; then
+  pass "K208: reset-soft evicts scope-bound graphify-impact-plan.json while preserving workflow-spanning graph-impact.md"
+else
+  fail "K208: reset-soft eviction wrong — plan_evicted=$K208_PLAN_GONE(exp1) graph_impact_preserved=$K208_GRAPH_KEPT(exp1)"
+fi
+
+# K209: session-start.sh surfaces a safety-floor notice when dispatch_hygiene_mode
+# is lowered below the "block" default, and stays silent at block. Closes the
+# field-observed gap where a warn floor was flagged every turn but never
+# explained at session start. HOME is redirected to the temp dir so the hook's
+# command-symlink + cache side effects don't touch the real environment.
+K209_T=$(mktemp -d); mkdir -p "$K209_T/.devt/state"
+echo '{"dispatch_hygiene_mode":"warn"}' > "$K209_T/.devt/config.json"
+K209_WARN=$(cd "$K209_T" && HOME="$K209_T" bash "$ROOT/hooks/session-start.sh" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const c=(JSON.parse(s).hookSpecificOutput||{}).additionalContext||'';process.stdout.write(c.indexOf('safety floor lowered')>=0?'1':'0')}catch{process.stdout.write('0')}})")
+echo '{"dispatch_hygiene_mode":"block"}' > "$K209_T/.devt/config.json"
+K209_BLOCK=$(cd "$K209_T" && HOME="$K209_T" bash "$ROOT/hooks/session-start.sh" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const c=(JSON.parse(s).hookSpecificOutput||{}).additionalContext||'';process.stdout.write(c.indexOf('safety floor lowered')>=0?'0':'1')}catch{process.stdout.write('0')}})")
+cd "$ROOT"; rm -rf "$K209_T"
+if [ "$K209_WARN" = "1" ] && [ "$K209_BLOCK" = "1" ]; then
+  pass "K209: session-start.sh surfaces the dispatch_hygiene_mode safety floor when lowered below block, silent at block"
+else
+  fail "K209: hygiene-floor surfacing wrong — warn_surfaced=$K209_WARN(exp1) block_silent=$K209_BLOCK(exp1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

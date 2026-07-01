@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.131.0] - 2026-07-01
+
+### Scope-aware context-init freshness — fixes cross-review stale-bundle contamination
+
+A field eval (dogfooding `/devt:review` on a Bitbucket PR) surfaced a correctness bug in the compound context-init wrapper: the freshness short-circuit keyed on **graph freshness alone**, so a review served a *different* PR's cached bundle whenever the graph happened to be fresh — wrong `scope_hint` / `memory_signal` / `scope_trust`, and an on-disk `graphify-impact-plan.json` still carrying the prior PR's symbols. A faithful impact-step would have anchored the whole blast-radius on the wrong diff. The free-text `task` was no help as a key — it degrades to the generic default `"code review"`.
+
+- **Freshness is now keyed on `(scope_sig, graph_head)` jointly** (`contextInitBundle`). `scope_sig` is a hash of the review's changed-file set (`git diff --name-only <primary>...HEAD`, three-dot / merge-base), anchored to HEAD; `graph_head` is the graph's current commit. A scope change invalidates the cached `scope_hint` / `memory_signal` / `impact-plan` **even on a fresh graph**; a same-scope re-call still short-circuits (the resume optimization is preserved). A null signature (no git / unresolved base / empty diff) fails safe to a full recompute — a false full-compute costs a few round-trips; a false short-circuit served the wrong review's context.
+- **Loud signals replace silent stale-serve:** a one-line `[devt]` banner on every legitimate cache reuse, plus an explicit "review scope changed (was … now …) — recomputing" line when a stamped bundle belongs to a different scope.
+- **`state.task` + the on-disk impact-plan now recompute on a scope change** (both were skipped on the short-circuit path). `reset-soft` additionally evicts the scope-bound `graphify-impact-plan.json` — it had preserved it as a "phase artifact", so a soft-reset left a stale plan behind — while still preserving workflow-spanning `graph-impact.md`.
+
+### SessionStart surfaces a lowered safety floor
+
+`dispatch_hygiene_mode` defaults to `block` (raw `devt:*` dispatches that bypass the envelope are hard-blocked). A project that lowers it to `warn`/`off` silently weakens that floor — the field eval hit exactly this, flagged every turn but never explained at session start. `session-start.sh` now surfaces a one-line `⚠️ safety floor lowered` notice when the merged config is below `block`, silent at `block`.
+
+- **K207/K208/K209** lock the three surfaces: scope-aware `(scope_sig, graph_head)` freshness (same-scope short-circuits, a changed-scope review recomputes on a fresh graph), `reset-soft` evicts `graphify-impact-plan.json` while preserving `graph-impact.md`, and `session-start.sh` surfaces the hygiene floor. Drift stack 113 → 116-deep (K94–K209).
+
 ## [0.130.0] - 2026-06-30
 
 ### Structural context-blocks contract gate (`dispatch check-contracts`, K206)
