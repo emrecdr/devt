@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.130.0] - 2026-06-30
+
+### Structural context-blocks contract gate (`dispatch check-contracts`, K206)
+
+Generalizes the per-agent `<memory_signal>` presence greps (K204/K205) into one structural invariant, so the bug class that left the researcher blind — a dispatch silently missing a context block its contract declares — is caught for **every** agent + variant, not one hand-written grep at a time. Closes the `io-contracts.yaml` drift surface that was marked `(future)` precisely because it was unenforced.
+
+- **New CLI `dispatch check-contracts`:** for every compiled `<!-- BEGIN dispatch:agent:wf -->` region, asserts the region body carries an XML block for each `context_block` the agent declares in `agents/io-contracts.yaml`. Exit 1 + a `violations[]` list on any gap. Checks the committed region bodies (what actually ships), not just the templates.
+- **Variant-aware via `context_blocks_exempt`:** io-contracts gains an optional flat `<workflow_id>:<block>` exemption list so a variant can legitimately omit a declared block — `programmer` exempts `quick_implement:plan` (quick-implement skips planning); `code-reviewer` exempts `guardrails_inline` on the `code_review` / `code_review_parallel` variants (standalone review leans on `governing_rules` + the rubric and never loads inline guardrails). Each exemption is itself audited — it must name a real declared block, so the suppression list can't silently neuter the gate.
+- **Closed an inconsistency the gate surfaced:** the `quick_implement` code-reviewer now carries `<guardrails_inline>` (golden-rules / engineering-principles / generative-debt-checklist). quick-implement already loads inline guardrails for its programmer, so the reviewer now reviews against the same constitutional guardrails the dev reviewer does — no exemption needed (only `code_review` / `code_review_parallel`, which don't load them at all, stay exempt).
+- **K206** runs the real CLI against the live templates. Drift stack 112 → 113-deep (K94–K206).
+
+## [0.129.0] - 2026-06-30
+
+### researcher `memory_signal` — second path (`/devt:workflow` auto-research)
+
+Completes the `memory_signal` fix shipped for the standalone `/devt:research` path. That change wired the standalone researcher but left the COMPLEX `/devt:workflow` auto-research researcher (`dev-workflow.md`'s `dispatch:researcher:dev`, sourced from the generic `researcher.tmpl.md`) still blind to REJ/ADR — even though `dev-workflow` already computes and caches `memory_signal_json` and injects it into the programmer, code-reviewer, and verifier dispatches. The signal was computed but never delivered to the researcher (mechanism firing without value conversion).
+
+- **Quality fix:** added `<memory_signal>` to `templates/dispatch/envelopes/researcher.tmpl.md` + recompiled the inline region, and added an orchestrator-prep `memory_signal_json` read before the parallel researcher/architect dispatch. The auto-research researcher now investigates with the project's REJ-tombstone / ADR governance signal (north-star #2: output quality always increases).
+- **SSoT consistency:** `agents/io-contracts.yaml` researcher contract now lists `memory_signal` in `context_blocks` — it was the lone consumer omitting it while shipping the block in its dispatch.
+- **K205** locks all four surfaces — generic template, region-scoped compiled inline (a sibling dispatch's `<memory_signal>` can't satisfy it), orchestrator-prep substitution, and the io-contracts SSoT — so the signal can't silently drop on either researcher path. Drift stack 111 → 112-deep (K94–K205).
+
 ## [0.128.0] - 2026-06-30
 
 ### research-task wrapper wiring + researcher `memory_signal` fix (lightening + quality)

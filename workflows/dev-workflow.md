@@ -476,6 +476,14 @@ If no risk signals trip, skip the prompt and dispatch only the researcher.
 
 **Discoverability tip (Q11 + Q8 contract)**: When the canonical envelope below isn't sufficient (custom parallelism, mid-task resume, or hand-rolled lane scope), use `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled <agent>:auto` to generate the paste-ready envelope with current state + governing rules + guardrails substituted. See `skills/dispatch-helpers/SKILL.md` for the lane-customization + SendMessage-resume patterns.
 
+**Orchestrator-prep — read cached `memory_signal`**. The wrapper cached `memory_signal_json` at context_init; read it back so the researcher investigates with the project's REJ-tombstone / ADR governance signal instead of re-recommending an already-rejected approach:
+
+```bash
+MEMORY_SIGNAL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.memory_signal_json // "{}"')
+```
+
+Substitute `MEMORY_SIGNAL` into the researcher's `<memory_signal>` block below.
+
 <!-- parallel-dispatch: researcher + architect (arch_health mode). Both must
      be in the SAME message for true parallelism per the Anthropic Task
      parallelism contract. -->
@@ -492,6 +500,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
     </governing_rules>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <memory_signal>{memory_signal_json}</memory_signal>
     <spec>Read .devt/state/spec.md (if exists)</spec>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>

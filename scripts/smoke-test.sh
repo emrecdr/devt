@@ -15173,6 +15173,41 @@ else
   fail "K204: research-task wiring/memory_signal wrong — wired=$K204_WIRED(exp>=1) inline=$K204_INLINE(exp>=1) template=$K204_TMPL(exp>=1)"
 fi
 
+# K205: the OTHER researcher path — dev-workflow.md's COMPLEX auto-research
+# dispatch — also carries `<memory_signal>`. v0.128.0 wired only the
+# /devt:research path (K204); the /devt:workflow auto-research researcher stayed
+# blind to REJ/ADR even though dev-workflow computes + caches memory_signal_json
+# and injects it into programmer/code-reviewer/verifier. Four surfaces must
+# agree or the cached signal never reaches the agent (mechanism fires, value
+# never converts): the generic researcher template, the compiled inline region
+# (region-scoped grep — a sibling dispatch's <memory_signal> must NOT satisfy
+# it), the orchestrator-prep substitution instruction, and the io-contracts SSoT.
+K205_TMPL=$(/usr/bin/grep -c "<memory_signal>" "$ROOT/templates/dispatch/envelopes/researcher.tmpl.md" 2>/dev/null || echo 0)
+K205_REGION=$(/usr/bin/sed -n '/BEGIN dispatch:researcher:dev/,/END dispatch:researcher:dev/p' "$ROOT/workflows/dev-workflow.md" 2>/dev/null | /usr/bin/grep -c "<memory_signal>" 2>/dev/null || echo 0)
+K205_PREP=$(/usr/bin/grep -c "Substitute .MEMORY_SIGNAL. into the researcher" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+K205_SSOT=$(/usr/bin/grep -c "context_blocks: \[governing_rules, memory_signal, agent_skills, task\]" "$ROOT/agents/io-contracts.yaml" 2>/dev/null || echo 0)
+if [ "${K205_TMPL:-0}" -ge 1 ] && [ "${K205_REGION:-0}" -ge 1 ] && [ "${K205_PREP:-0}" -ge 1 ] && [ "${K205_SSOT:-0}" -ge 1 ]; then
+  pass "K205: dev-workflow auto-research researcher carries <memory_signal> (template + region-scoped inline + orchestrator-prep) and io-contracts SSoT agrees — closes the /devt:workflow researcher governance-signal gap"
+else
+  fail "K205: dev-workflow researcher memory_signal wiring wrong — template=$K205_TMPL(exp>=1) region=$K205_REGION(exp>=1) prep=$K205_PREP(exp>=1) ssot=$K205_SSOT(exp>=1)"
+fi
+
+# K206: structural contract gate — every compiled dispatch region carries an XML
+# block for each context_block its agent declares in io-contracts.yaml, minus
+# that variant's documented context_blocks_exempt entries. Generalizes the
+# per-agent presence greps (K204/K205's literal <memory_signal> checks): a
+# dispatch silently missing a declared governance block — the class that left
+# the researcher blind to REJ/ADR — is now ONE structural failure caught for
+# every agent+variant, not one hand-written grep at a time. Runs the real
+# `dispatch check-contracts` CLI (exit 1 + violations[] on any gap).
+K206_JSON=$(node "$ROOT/bin/devt-tools.cjs" dispatch check-contracts 2>/dev/null)
+K206_OK=$(echo "$K206_JSON" | /usr/bin/grep -c '"ok": true' 2>/dev/null || echo 0)
+if [ "${K206_OK:-0}" -ge 1 ]; then
+  pass "K206: every dispatch region ⊇ its agent's declared context_blocks (minus documented context_blocks_exempt variants) — generalizes K204/K205's per-agent <memory_signal> greps into one structural class gate"
+else
+  fail "K206: dispatch region(s) missing a declared context_block — $(echo "$K206_JSON" | tr -d '\n' | head -c 400)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

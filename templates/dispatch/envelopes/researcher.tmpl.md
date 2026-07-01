@@ -7,6 +7,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
     </governing_rules>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
+    <memory_signal>{memory_signal_json}</memory_signal>
     <spec>Read .devt/state/spec.md (if exists)</spec>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <template>${CLAUDE_PLUGIN_ROOT}/templates/research-template.md</template>

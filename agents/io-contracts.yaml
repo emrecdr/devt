@@ -40,8 +40,16 @@
 #                        intentionally flexible (docs, lessons, debug).
 #   inputs:
 #     context_blocks   — static blocks the workflow dispatch template MUST inject
-#                        into <context>. Smoke test (future) asserts the dispatch
-#                        actually references them.
+#                        into <context>. Smoke gate K206 (via `dispatch
+#                        check-contracts`) asserts every compiled dispatch region
+#                        references each declared block, minus that variant's
+#                        context_blocks_exempt entries.
+#     context_blocks_exempt — optional. Flat list of `<workflow_id>:<block>`
+#                        entries naming declared context_blocks that a specific
+#                        dispatch variant legitimately omits (e.g.
+#                        `quick_implement:plan` — quick-implement skips planning).
+#                        Each entry's block MUST appear in context_blocks or the
+#                        gate fails, keeping the suppression list auditable.
 #     graphify_inputs  — (V65-5) declares which graphify-derived context blocks
 #                        the agent consumes. Subset of:
 #                          scope_hint           — graphify-derived file list
@@ -64,6 +72,8 @@ agents:
       expected_sections: [Task, Files Modified, Key Decisions, Quality Gate Results, Provenance]
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task, plan]
+      # quick-implement skips the plan phase by design — no <plan> block to inject.
+      context_blocks_exempt: [quick_implement:plan]
       graphify_inputs: [scope_hint, scope_trust, graph_impact_md]
 
   tester:
@@ -86,6 +96,10 @@ agents:
       expected_sections: [Findings]
     inputs:
       context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
+      # Standalone review (code_review / _parallel) reviews against governing_rules
+      # + the rubric and never loads inline guardrails. The dev + quick_implement
+      # reviewers both carry <guardrails_inline> (their workflows load it).
+      context_blocks_exempt: [code_review:guardrails_inline, code_review_parallel:guardrails_inline]
       graphify_inputs: [scope_hint, scope_trust, graphify_status, god_node_warnings, graph_impact_md]
 
   docs-writer:
@@ -136,7 +150,7 @@ agents:
       primary: research.md
       sidecar: null
     inputs:
-      context_blocks: [governing_rules, agent_skills, task]
+      context_blocks: [governing_rules, memory_signal, agent_skills, task]
       graphify_inputs: [scope_hint, scope_trust]
 
   debugger:

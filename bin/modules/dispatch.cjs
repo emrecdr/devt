@@ -73,7 +73,7 @@ function parseIoContracts(content) {
         frontmatter_skills: [],
         index_buckets: [],
         outputs: { primary: null, sidecar: null, expected_sections: null },
-        inputs: { context_blocks: [], graphify_inputs: [] },
+        inputs: { context_blocks: [], graphify_inputs: [], context_blocks_exempt: [] },
       };
       inInputs = false;
       inOutputs = false;
@@ -110,7 +110,7 @@ function parseIoContracts(content) {
       if (colonIdx < 0) continue;
       const key = trimmed.slice(0, colonIdx).trim();
       const valueStr = trimmed.slice(colonIdx + 1).trim();
-      if (inInputs && (key === "context_blocks" || key === "graphify_inputs")) {
+      if (inInputs && (key === "context_blocks" || key === "graphify_inputs" || key === "context_blocks_exempt")) {
         const list = parseInlineList(valueStr);
         if (list !== null) agents[currentAgent].inputs[key] = list;
       } else if (inOutputs && (key === "primary" || key === "sidecar")) {
@@ -235,6 +235,57 @@ function cmdContracts() {
     };
   }
   return { agents: summary, blocks_dir_present: blocksPresent, envelopes_dir_present: envelopesPresent };
+}
+
+// Structural contract gate: assert every compiled dispatch region carries an
+// XML block for each context_block its agent declares, minus that variant's
+// declared context_blocks_exempt entries. Generalizes the per-agent presence
+// greps — a dispatch silently missing a declared governance block (the class
+// that left the researcher blind to <memory_signal>) becomes one structural
+// failure caught for every agent+variant, not one literal string at a time.
+function cmdCheckContracts() {
+  const { agents } = readContracts();
+  const violations = [];
+
+  // Audit the suppression list first: an exemption whose block the agent never
+  // declared is dead config that could mask a real gap if a block name later
+  // changes. Force every exemption to name a real <workflow_id>:<declared-block>.
+  for (const [agent, c] of Object.entries(agents)) {
+    const declared = new Set(c.inputs.context_blocks || []);
+    for (const entry of c.inputs.context_blocks_exempt || []) {
+      const block = entry.includes(":") ? entry.slice(entry.indexOf(":") + 1) : "";
+      if (!entry.includes(":") || !declared.has(block)) {
+        violations.push({ agent, error: `context_blocks_exempt '${entry}' must be <workflow_id>:<declared-context_block>` });
+      }
+    }
+  }
+
+  const regions = listMarkerRegions();
+  const fileCache = {};
+  for (const r of regions) {
+    const contract = agents[r.agent];
+    if (!contract) {
+      violations.push({ file: r.file, region: `${r.agent}:${r.workflow_id}`, error: "agent not declared in io-contracts.yaml" });
+      continue;
+    }
+    const exemptPrefix = `${r.workflow_id}:`;
+    const exempt = new Set(
+      (contract.inputs.context_blocks_exempt || [])
+        .filter((e) => e.startsWith(exemptPrefix))
+        .map((e) => e.slice(exemptPrefix.length)),
+    );
+    const required = (contract.inputs.context_blocks || []).filter((b) => !exempt.has(b));
+    if (!fileCache[r.file]) {
+      fileCache[r.file] = fs.readFileSync(path.join(WORKFLOWS_DIR, r.file), "utf8").split("\n");
+    }
+    const body = fileCache[r.file].slice(r.begin_line - 1, r.end_line).join("\n");
+    const missing = required.filter((b) => !body.includes(`<${b}`));
+    if (missing.length) {
+      violations.push({ file: r.file, region: `${r.agent}:${r.workflow_id}`, begin_line: r.begin_line, missing });
+    }
+  }
+
+  return { ok: violations.length === 0, regions_checked: regions.length, violations };
 }
 
 function cmdRender(target) {
@@ -914,6 +965,11 @@ function run(subcommand, args) {
     case "contracts":
       json(cmdContracts());
       return 0;
+    case "check-contracts": {
+      const res = cmdCheckContracts();
+      json(res);
+      return res.ok ? 0 : 1;
+    }
     case "warnings":
       try { json(cmdWarnings(args)); return 0; }
       catch (err) { process.stderr.write("dispatch warnings: " + err.message + "\n"); return 2; }
@@ -1165,7 +1221,7 @@ function run(subcommand, args) {
       }
     }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|render|render-filled|render-lanes|run-lanes|run|compile|decompose|warnings>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|check-contracts|render|render-filled|render-lanes|run-lanes|run|compile|decompose|warnings>\n");
       return 2;
   }
 }
