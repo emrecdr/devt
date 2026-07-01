@@ -3615,7 +3615,7 @@ echo "== Parallel researcher + arch_health dispatch (v0.36.0+, Option 9a) =="
 # instructing the orchestrator to fire researcher + architect (arch_health
 # mode) in ONE message with two Task tool calls. Without the marker, the
 # dispatches serialize and the round-trip saving is lost.
-if grep -qE '<!-- parallel-dispatch: researcher \+ architect' "$ROOT/workflows/dev-workflow.md"; then
+if grep -qE '<!-- parallel-dispatch: researcher \+ architect' "$ROOT/workflows/dev-workflow.complex.md"; then
   pass "dev-workflow.md carries parallel-dispatch marker comment"
 else
   fail "dev-workflow.md missing parallel-dispatch marker (researcher + architect)"
@@ -3627,22 +3627,22 @@ else
   pass "Step 2.7 section deleted (logic subsumed into Step 2.5)"
 fi
 # arch_health dispatch must NOT depend on plan.md anymore — the scan reads scan-results.md alone
-if grep -q "Write findings to .devt/state/arch-health-scan.md" "$ROOT/workflows/dev-workflow.md"; then
+if grep -q "Write findings to .devt/state/arch-health-scan.md" "$ROOT/workflows/dev-workflow.complex.md"; then
   # Check the block does NOT reference plan.md for input scoping
-  ARCH_BLOCK=$(awk '/Write findings to .devt\/state\/arch-health-scan.md/{found=1} found && /^```$/{print; exit} found' "$ROOT/workflows/dev-workflow.md")
+  ARCH_BLOCK=$(awk '/Write findings to .devt\/state\/arch-health-scan.md/{found=1} found && /^```$/{print; exit} found' "$ROOT/workflows/dev-workflow.complex.md")
   # Walk backward — verify the dispatch context block doesn't read plan.md
   ARCH_CTX=$(awk '
     /Run an architecture health scan on the modules affected/{found=1}
     found{print}
     found && /Write findings to .devt\/state\/arch-health-scan.md/{exit}
-  ' "$ROOT/workflows/dev-workflow.md")
+  ' "$ROOT/workflows/dev-workflow.complex.md")
   if echo "$ARCH_CTX" | grep -q "Read .devt/state/plan.md"; then
     fail "arch_health dispatch still reads plan.md (must scope from scan-results.md only when running in parallel with researcher)"
   else
     pass "arch_health dispatch scopes from scan-results.md (no plan.md dependency)"
   fi
 else
-  fail "arch_health dispatch not found in dev-workflow.md"
+  fail "arch_health dispatch not found in dev-workflow.complex.md"
 fi
 # No stale "Step 2.7" references in prompt context blocks
 STALE_REFS=$(grep -c "from Step 2\.7" "$ROOT/workflows/dev-workflow.md" || true)
@@ -6066,7 +6066,7 @@ fi
 # F22: B4 pre-dispatch gate present before curator Task() in dev-workflow, lesson-extraction, memory-promote.
 # Relocates assert-claude-mem-harvest from optional harvest step to mandatory curator precondition.
 F22_OK=0
-for wf in workflows/dev-workflow.md workflows/lesson-extraction.md workflows/memory-promote.md; do
+for wf in workflows/dev-workflow.complex.md workflows/lesson-extraction.md workflows/memory-promote.md; do
   if /usr/bin/grep -B0 -A30 "Pre-dispatch gate (B4)" "$ROOT/$wf" 2>/dev/null | /usr/bin/grep -q "assert-claude-mem-harvest"; then
     F22_OK=$((F22_OK + 1))
   fi
@@ -10146,7 +10146,7 @@ fi
 # expand to verifier + tester + other sites based on cal #18 field evidence.
 K7_FAIL=""
 K7_DISPATCH_SITES=(
-  "workflows/dev-workflow.md:architect"
+  "workflows/dev-workflow.complex.md:architect"
   "workflows/dev-workflow.md:programmer"
   "workflows/code-review.md:code-reviewer"
   "workflows/quick-implement.md:programmer"
@@ -15185,8 +15185,8 @@ fi
 # (region-scoped grep — a sibling dispatch's <memory_signal> must NOT satisfy
 # it), the orchestrator-prep substitution instruction, and the io-contracts SSoT.
 K205_TMPL=$(/usr/bin/grep -c "<memory_signal>" "$ROOT/templates/dispatch/envelopes/researcher.tmpl.md" 2>/dev/null || echo 0)
-K205_REGION=$(/usr/bin/sed -n '/BEGIN dispatch:researcher:dev/,/END dispatch:researcher:dev/p' "$ROOT/workflows/dev-workflow.md" 2>/dev/null | /usr/bin/grep -c "<memory_signal>" 2>/dev/null || echo 0)
-K205_PREP=$(/usr/bin/grep -c "Substitute .MEMORY_SIGNAL. into the researcher" "$ROOT/workflows/dev-workflow.md" 2>/dev/null || echo 0)
+K205_REGION=$(/usr/bin/sed -n '/BEGIN dispatch:researcher:dev/,/END dispatch:researcher:dev/p' "$ROOT/workflows/dev-workflow.complex.md" 2>/dev/null | /usr/bin/grep -c "<memory_signal>" 2>/dev/null || echo 0)
+K205_PREP=$(/usr/bin/grep -c "Substitute .MEMORY_SIGNAL. into the researcher" "$ROOT/workflows/dev-workflow.complex.md" 2>/dev/null || echo 0)
 K205_SSOT=$(/usr/bin/grep -c "context_blocks: \[governing_rules, memory_signal, agent_skills, task\]" "$ROOT/agents/io-contracts.yaml" 2>/dev/null || echo 0)
 if [ "${K205_TMPL:-0}" -ge 1 ] && [ "${K205_REGION:-0}" -ge 1 ] && [ "${K205_PREP:-0}" -ge 1 ] && [ "${K205_SSOT:-0}" -ge 1 ]; then
   pass "K205: dev-workflow auto-research researcher carries <memory_signal> (template + region-scoped inline + orchestrator-prep) and io-contracts SSoT agrees — closes the /devt:workflow researcher governance-signal gap"
@@ -15282,17 +15282,20 @@ fi
 # proving the carve lost no step and duplicated none. Spine-only steps must not
 # leak into the tier file.
 K210_OK=1; K210_BAD=""
-for st in risk_warning scan regression_baseline simplify autoskill verify; do
+for st in risk_warning scan regression_baseline simplify autoskill verify docs_retro_parallel auto_research_plan architect curate; do
   K210_SPINE=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.md" || true)
-  K210_TIER=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.standard.md" || true)
-  if [ "$K210_SPINE" != "0" ] || [ "$K210_TIER" != "1" ]; then K210_OK=0; K210_BAD="$st(spine=$K210_SPINE,tier=$K210_TIER)"; fi
+  K210_STD=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.standard.md" || true)
+  K210_CPX=$(/usr/bin/grep -c "<step name=\"$st\"" "$ROOT/workflows/dev-workflow.complex.md" || true)
+  K210_TIER=$((K210_STD + K210_CPX))
+  if [ "$K210_SPINE" != "0" ] || [ "$K210_TIER" != "1" ]; then K210_OK=0; K210_BAD="$st(spine=$K210_SPINE,std=$K210_STD,cpx=$K210_CPX)"; fi
 done
 for sp in context_init implement test review finalize; do
-  K210_LEAK=$(/usr/bin/grep -c "<step name=\"$sp\"" "$ROOT/workflows/dev-workflow.standard.md" 2>/dev/null || true)
-  if [ "$K210_LEAK" != "0" ]; then K210_OK=0; K210_BAD="spine-step $sp leaked into tier file"; fi
+  K210_LS=$(/usr/bin/grep -c "<step name=\"$sp\"" "$ROOT/workflows/dev-workflow.standard.md" 2>/dev/null || true)
+  K210_LC=$(/usr/bin/grep -c "<step name=\"$sp\"" "$ROOT/workflows/dev-workflow.complex.md" 2>/dev/null || true)
+  if [ "$K210_LS" != "0" ] || [ "$K210_LC" != "0" ]; then K210_OK=0; K210_BAD="spine-step $sp leaked into a tier file"; fi
 done
 if [ "$K210_OK" = "1" ]; then
-  pass "K210: dev-workflow tier-partition complete + disjoint (6 STANDARD+ steps live exactly once in dev-workflow.standard.md, zero in the spine; no spine step leaked)"
+  pass "K210: dev-workflow tier-partition complete + disjoint (10 tier steps live exactly once across dev-workflow.standard.md + dev-workflow.complex.md, zero in the spine; no spine step leaked)"
 else
   fail "K210: dev-workflow partition broken — $K210_BAD"
 fi
@@ -15302,15 +15305,16 @@ fi
 # can never reach an insertion point without the step body already in context.
 K211_STEP=$(/usr/bin/grep -c '<step name="load_tier_steps"' "$ROOT/workflows/dev-workflow.md" || true)
 K211_READ=$(/usr/bin/grep -cE 'Mandatory action: Read.*dev-workflow\.standard\.md' "$ROOT/workflows/dev-workflow.md" || true)
+K211_READC=$(/usr/bin/grep -c 'dev-workflow\.complex\.md' "$ROOT/workflows/dev-workflow.md" || true)
 K211_PTRS=0
-for st in risk_warning scan regression_baseline simplify autoskill verify; do
+for st in risk_warning scan regression_baseline simplify autoskill verify docs_retro_parallel auto_research_plan architect curate; do
   K211_P=$(/usr/bin/grep -c "TIER-STEP:$st" "$ROOT/workflows/dev-workflow.md" || true)
   if [ "$K211_P" -ge 1 ]; then K211_PTRS=$((K211_PTRS+1)); fi
 done
-if [ "$K211_STEP" -ge 1 ] && [ "$K211_READ" -ge 1 ] && [ "$K211_PTRS" = "6" ]; then
-  pass "K211: spine carries load_tier_steps (mandatory Read of dev-workflow.standard.md) + a TIER-STEP pointer for all 6 relocated steps"
+if [ "$K211_STEP" -ge 1 ] && [ "$K211_READ" -ge 1 ] && [ "$K211_READC" -ge 1 ] && [ "$K211_PTRS" = "10" ]; then
+  pass "K211: spine carries load_tier_steps (mandatory Read of dev-workflow.standard.md + dev-workflow.complex.md) + a TIER-STEP pointer for all 10 relocated steps"
 else
-  fail "K211: tier-load wiring incomplete — load_step=$K211_STEP read_directive=$K211_READ pointers=$K211_PTRS/6"
+  fail "K211: tier-load wiring incomplete — load_step=$K211_STEP read_std=$K211_READ read_cpx=$K211_READC pointers=$K211_PTRS/10"
 fi
 
 # K212: tier-aware assert-verifier-ran (Stage 2 verify carve). dev SIMPLE/TRIVIAL

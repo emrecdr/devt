@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.134.0] - 2026-07-01
+
+### Workflow body-weight Stage 3 — lazy-load the COMPLEX steps (tier-partition complete)
+
+The final stage of the `dev-workflow.md` tier-partition. The 3 COMPLEX-only dispatch steps (auto_research_plan, architect, curate) move into a new `dev-workflow.complex.md`, and docs_retro_parallel joins the STANDARD file. `dev-workflow.md` 1,424 → 1,088 lines — **cumulatively 1,728 → 1,088 (~37% lighter)** for the common SIMPLE/TRIVIAL tiers, which now load only the spine.
+
+- **`load_tier_steps` extended:** STANDARD reads `dev-workflow.standard.md`; COMPLEX reads both `.standard.md` + `.complex.md`; SIMPLE/TRIVIAL load neither.
+- **Verbatim moves** — the researcher / architect×2 / curator / docs-writer / retro dispatch envelopes moved with BEGIN/END/EDIT-SOURCE intact (the compiler globs `workflows/`); `check-contracts` + compile-drift stay clean. `auto_research_plan`'s pre-existing double-`</step>` was preserved byte-for-byte. Each tier file carries its own `<available_agent_types>` (W010) and an `assert-artifact-present` (K50: complex.md via architect's, standard.md via verifier's).
+- **Gate repointing:** the 5 COMPLEX-content gates (parallel-dispatch marker, arch_health dispatch scoping, F22 curator B4 pre-gate, K7 architect claim-check, K205 researcher `<memory_signal>` region) now read `dev-workflow.complex.md`.
+- **K210/K211 extended to all 10 relocated steps** across both tier files (partition still complete + disjoint; the load directive references both). Gate count unchanged at 119-deep (K94–K212).
+- Tier-partition complete: `dev-workflow.md` (spine, all tiers) + `dev-workflow.standard.md` (STANDARD+) + `dev-workflow.complex.md` (COMPLEX). Every step body appears exactly once; SIMPLE runs shed ~640 lines.
+
 ## [0.133.0] - 2026-07-01
 
 ### Workflow body-weight Stage 2 — lazy-load the verify step (+ close a pre-existing verify-skip hole)

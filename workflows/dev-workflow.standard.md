@@ -6,6 +6,8 @@ Loaded by `workflows/dev-workflow.md`'s `load_tier_steps` step when the assessed
 Dispatched from this tier file (full roster + tool surfaces in the spine `dev-workflow.md`):
 
 - `devt:verifier` — goal-backward verification specialist, READ-ONLY (Read, Bash, Glob, Grep)
+- `devt:docs-writer` — documentation specialist (Read, Write, Edit, Bash, Glob, Grep)
+- `devt:retro` — lesson extraction specialist (Read, Write, Bash, Glob, Grep)
 </available_agent_types>
 
 ## risk_warning (STANDARD+; insertion: after assess, before auto_research_plan (COMPLEX))
@@ -350,6 +352,79 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status
 - `verification.json::verdict` — lowercase grader vocab (`satisfied | needs_revision | failed`) — used by THIS gate-check to decide retry vs. proceed.
 
 The PRUNE branch sets `repair=PRUNE` on state so a future inspector can distinguish "converged with gaps" from "hit the iteration cap" without reading the JSON sidecar.
+
+</step>
+
+## docs_retro_parallel (STANDARD+; insertion: after verify, before harvest_observations)
+
+<step name="docs_retro_parallel" gate="docs-summary.md and lessons.yaml are written to .devt/state/">
+
+These two agents are independent — dispatch both simultaneously to reduce wall-clock time.
+
+**Pre-dispatch check**: Read `.devt/state/impl-summary.md` status.
+
+- If DONE or DONE_WITH_CONCERNS: dispatch both agents below
+- If BLOCKED: skip both steps (nothing to document or learn from)
+- If file missing: skip both steps with warning "No implementation summary found"
+
+**Skip conditions** (evaluated independently for each agent):
+- _Skip docs-writer if complexity is SIMPLE, `config.workflow.docs` is `false`, or `docs` is listed in `skipped_phases`._
+- _Skip retro if complexity is SIMPLE, `config.workflow.retro` is `false`, or `retro` is listed in `skipped_phases`._
+
+Dispatch both agents in parallel:
+
+```
+<!-- BEGIN dispatch:docs-writer:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/docs-writer.tmpl.md -->
+Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
+  <context>
+    <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
+    <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
+    <test_summary>Read .devt/state/test-summary.md</test_summary>
+    <review>Read .devt/state/review.md</review>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+  </context>
+  <task>
+    Update module documentation to reflect the implementation changes.
+    Update existing docs — do not create parallel documentation.
+    Delete documentation for any removed features.
+  </task>
+  Write summary to .devt/state/docs-summary.md
+")
+<!-- END dispatch:docs-writer:dev -->
+
+<!-- BEGIN dispatch:retro:dev -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/retro.tmpl.md -->
+Task(subagent_type="devt:retro", model="{models.retro}", prompt="
+  <context>
+    <files_to_read>
+      .devt/state/impl-summary.md,
+      .devt/state/test-summary.md,
+      .devt/state/review.md,
+      .devt/state/arch-review.md (if exists),
+      .devt/state/docs-summary.md (if exists),
+      CLAUDE.md (if exists),
+      .devt/rules/coding-standards.md,
+      .devt/rules/testing-patterns.md,
+      .devt/memory/lessons/*.md (existing LES-NNNN entries)
+    </files_to_read>
+    <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+  </context>
+  <task>
+    Review all workflow artifacts and extract lessons learned.
+    Apply the 4-filter test: specific, generalizable, actionable, evidence-based.
+    Discard anything that fails any filter.
+  </task>
+  Write lessons to .devt/state/lessons.yaml
+")
+<!-- END dispatch:retro:dev -->
+```
+
+Wait for both to complete before proceeding to Step 9 (curation).
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=retro status=DONE
+```
 
 </step>
 
