@@ -19,6 +19,15 @@ PROJ_HASH=$(printf '%s' "$(pwd)" | shasum 2>/dev/null | cut -c1-12)
 CACHE_FILE="$CACHE_DIR/wf-state-$PROJ_HASH.json"
 STATE_JSON=""
 
+# Hook stdin carries the UserPromptSubmit event JSON; session_id keys the
+# once-per-session config-alert dedup below. Empty when the runner didn't
+# forward stdin — dedup then degrades to every-prompt (fail-loud is the
+# right failure mode for a safety banner).
+HOOK_INPUT=$(cat 2>/dev/null || true)
+SESSION_ID=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+ALERT_MARKER="$CACHE_DIR/config-alert-$PROJ_HASH"
+mkdir -p "$CACHE_DIR" 2>/dev/null || true
+
 if [ -f "$WF_PATH" ] && [ -f "$CACHE_FILE" ]; then
   # stat -f for BSD/macOS, stat -c for GNU/Linux — try both.
   WF_MTIME=$(stat -f %m "$WF_PATH" 2>/dev/null || stat -c %Y "$WF_PATH" 2>/dev/null || echo 0)
@@ -100,6 +109,25 @@ RESULT=$(node -e "
       }
     }
   } catch { /* config read/parse failure — silent (don't break the hook) */ }
+
+  // Once-per-session dedup for the config alert. Field-observed: every-prompt
+  // firing (~15-19x/session) trains operators to ignore the banner — the
+  // opposite of its purpose — and SessionStart already surfaces the same
+  // warning at session open. Marker stores the last-alerted session_id per
+  // project; a different session (or a missing marker) re-alerts once.
+  // Missing session_id (runner didn't forward hook stdin) keeps the
+  // every-prompt behavior.
+  const _sessionId = process.argv[3] || '';
+  const _alertMarker = process.argv[4] || '';
+  if (configAlertLines.length > 0 && _sessionId && _alertMarker) {
+    try {
+      if (fs.existsSync(_alertMarker) && fs.readFileSync(_alertMarker, 'utf8').trim() === _sessionId) {
+        configAlertLines.length = 0;
+      } else {
+        fs.writeFileSync(_alertMarker, _sessionId);
+      }
+    } catch { /* marker IO failure — keep alerting */ }
+  }
 
   // Active workflow — compact status line.
   // Format is human-facing only (no programmatic consumers). Compactness wins
@@ -303,7 +331,7 @@ RESULT=$(node -e "
   // via explicit /devt:status or /devt:next; pinning it into every prompt
   // costs tokens long after the workflow ended without adding load-bearing
   // context.
-" "$STATE_JSON" "$PLUGIN_ROOT" 2>/dev/null) || exit 0
+" "$STATE_JSON" "$PLUGIN_ROOT" "$SESSION_ID" "$ALERT_MARKER" 2>/dev/null) || exit 0
 
 # printf avoids echo's flag interpretation (-n, -e) regardless of JSON content
 [ -n "$RESULT" ] && printf '%s\n' "$RESULT"

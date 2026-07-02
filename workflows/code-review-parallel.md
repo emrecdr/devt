@@ -709,8 +709,12 @@ if [ -n "$WID" ]; then
   # but the recorded tool field in _mcp-trace.jsonl is the unprefixed form).
   # mcp-stats queries must use the unprefixed form to match trace records.
   # Workflow PROSE references for graphify tools stay prefixed.
-  GRAPHIFY_SUMMARY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__devt-graphify__*' --by=calls 2>/dev/null || echo "")
-  GRAPHIFY_UPSTREAM=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__graphify__*' --by=calls 2>/dev/null || echo "")
+  # --include-chain: context_init MCP calls land under the pre-rotation
+  # workflow_id (the code_review → code_review_parallel transition rotates
+  # it), so the strict default would report zero graphify usage for a run
+  # that used it.
+  GRAPHIFY_SUMMARY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --include-chain --tool='mcp__devt-graphify__*' --by=calls 2>/dev/null || echo "")
+  GRAPHIFY_UPSTREAM=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --include-chain --tool='mcp__graphify__*' --by=calls 2>/dev/null || echo "")
   PLAN_TIER=$(jq -r '.tier // "unknown"' .devt/state/graphify-impact-plan.json 2>/dev/null || echo "unknown")
   if [ -f .devt/state/graphify-skip-reason.txt ]; then
     SKIP_REASON=$(cat .devt/state/graphify-skip-reason.txt)

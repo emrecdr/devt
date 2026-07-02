@@ -15374,6 +15374,132 @@ else
   fail "K214: specify.md reference deferral broken — prd_read=$K214_READ guide_ref=$K214_GUIDE prd_file=$K214_PRD_OK guide_file=$K214_GUIDE_OK"
 fi
 
+# K215: check-agent-output phrase-vs-length precedence — a stub phrase inside a
+# long, substantive document must NOT flag it (field false positive: a 2,242-word
+# lane review was flagged because a verdict sentence contained "not yet done");
+# a gray-zone doc (100 words + phrase) must still flag. Phrases are decisive
+# only below STUB_PHRASE_WORD_CEILING.
+K215_T=$(mktemp -d); mkdir -p "$K215_T/.devt/state"; echo '{}' > "$K215_T/.devt/config.json"
+{ for i in $(seq 1 400); do printf 'w%d ' "$i"; done; echo; echo "the sanctioning document has not yet done its job"; } > "$K215_T/long.md"
+{ for i in $(seq 1 100); do printf 'w%d ' "$i"; done; echo; echo "Stub: analysis in progress."; } > "$K215_T/gray.md"
+_k215_flag() {
+  (cd "$K215_T" && node "$ROOT/bin/devt-tools.cjs" state check-agent-output "$1" 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).looks_like_stub))}catch{process.stdout.write('err')}})"
+}
+K215_LONG=$(_k215_flag long.md)
+K215_GRAY=$(_k215_flag gray.md)
+rm -rf "$K215_T"
+if [ "$K215_LONG" = "false" ] && [ "$K215_GRAY" = "true" ]; then
+  pass "K215: stub-phrase precedence — phrase in 400-word doc not decisive (looks_like_stub=false), 100-word gray-zone doc with phrase still caught"
+else
+  fail "K215: stub-phrase precedence wrong — long=$K215_LONG(exp false) gray=$K215_GRAY(exp true)"
+fi
+
+# K216: auto-reset double-signal — task_changed AND workflow_type_changed AND
+# age>1h recommends auto-reset (a prior age>24h leg forced an interactive
+# staleness prompt on real session turnover); <1h stays false (typo-retry
+# floor); task-change alone stays false even at 30h (single signal keeps the
+# operator prompt — counters/artifacts may legitimately continue).
+_k216() {
+  local d ts; d=$(mktemp -d); mkdir -p "$d/.devt/state"; echo '{}' > "$d/.devt/config.json"
+  ts=$(node -e "console.log(new Date(Date.now()-$1*3600*1000).toISOString())")
+  printf 'active: true\ntask: "old task"\nworkflow_type: code_review\ncreated_at: "%s"\n' "$ts" > "$d/.devt/state/workflow.yaml"
+  (cd "$d" && node "$ROOT/bin/devt-tools.cjs" state staleness-check --task="$2" --workflow-type="$3" 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).auto_reset_recommended))}catch{process.stdout.write('err')}})"
+  rm -rf "$d"
+}
+K216_BOTH=$(_k216 2 "new dev task" dev)
+K216_FRESH=$(_k216 0.3 "new dev task" dev)
+K216_SINGLE=$(_k216 30 "reworded review task" code_review)
+if [ "$K216_BOTH" = "true" ] && [ "$K216_FRESH" = "false" ] && [ "$K216_SINGLE" = "false" ]; then
+  pass "K216: auto-reset double-signal — task+type changed at 2h recommends (true), 18min stays false, task-only at 30h stays false"
+else
+  fail "K216: auto-reset condition wrong — both=$K216_BOTH(exp true) fresh=$K216_FRESH(exp false) single=$K216_SINGLE(exp false)"
+fi
+
+# K217: review-pipeline phases registered — `state update` with a parallel-review
+# phase must not warn "Unknown phase" (unregistered phases also short-circuit
+# validateConsistency's phase-gated artifact checks via the indexOf -1 path);
+# a bogus phase still warns (registry not blown open).
+K217_T=$(mktemp -d); mkdir -p "$K217_T/.devt/state"; echo '{}' > "$K217_T/.devt/config.json"
+K217_WARN=$( (cd "$K217_T" && node "$ROOT/bin/devt-tools.cjs" state update phase=substance_check_lanes 2>&1 >/dev/null) | /usr/bin/grep -c 'Unknown phase' || true)
+K217_CTRL=$( (cd "$K217_T" && node "$ROOT/bin/devt-tools.cjs" state update phase=zz_not_a_phase 2>&1 >/dev/null) | /usr/bin/grep -c 'Unknown phase' || true)
+K217_ALL=$(node -e "const m=require('$ROOT/bin/modules/state.cjs');const need=['scope_check','partition_lanes','dispatch_lanes','substance_check_lanes','redispatch_lanes','consolidate','present_findings'];process.stdout.write(String(need.every(p=>m.PHASE_ORDER.includes(p))))" 2>/dev/null || echo err)
+rm -rf "$K217_T"
+if [ "$K217_WARN" = "0" ] && [ "$K217_CTRL" = "1" ] && [ "$K217_ALL" = "true" ]; then
+  pass "K217: review phases registered — substance_check_lanes accepted silently, all 7 in PHASE_ORDER, bogus phase still warns"
+else
+  fail "K217: phase registry wrong — warn=$K217_WARN(exp 0) ctrl=$K217_CTRL(exp 1) all7=$K217_ALL(exp true)"
+fi
+
+# K218: mcp-stats strict-zero chain hint — a strict --workflow-id query that
+# returns 0 entries while the workflow_id_history chain has matches must emit
+# a hint naming --include-chain (silent under-report field-observed as "zero
+# graphify usage" on a run with 5 real calls); --include-chain must recover.
+K218_T=$(mktemp -d); mkdir -p "$K218_T/.devt/state" "$K218_T/.devt/memory"; echo '{}' > "$K218_T/.devt/config.json"
+printf 'active: true\ntask: "t"\nworkflow_type: code_review_parallel\nworkflow_id: "B-cur"\noriginal_workflow_id: "A-orig"\nworkflow_id_history: "[\\"A-orig\\",\\"B-cur\\"]"\ncreated_at: "2026-07-02T08:00:00Z"\n' > "$K218_T/.devt/state/workflow.yaml"
+echo '{"ts":"2026-07-02T09:00:00Z","tool":"blast_radius","duration_ms":1,"workflow_id":"A-orig"}' > "$K218_T/.devt/memory/_mcp-trace.jsonl"
+K218_STRICT=$( (cd "$K218_T" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id="B-cur" 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write((j.entries_considered===0&&typeof j.hint==='string'&&j.hint.indexOf('--include-chain')>=0)?'hinted':'no')}catch{process.stdout.write('err')}})")
+K218_CHAIN=$( (cd "$K218_T" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id="B-cur" --include-chain 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).entries_considered))}catch{process.stdout.write('err')}})")
+rm -rf "$K218_T"
+if [ "$K218_STRICT" = "hinted" ] && [ "$K218_CHAIN" = "1" ]; then
+  pass "K218: mcp-stats chain hint — strict zero-result emits --include-chain hint; chain query recovers the pre-rotation record"
+else
+  fail "K218: chain hint wrong — strict=$K218_STRICT(exp hinted) chain=$K218_CHAIN(exp 1)"
+fi
+
+# K219: scope_check measures its own scope source — the step runs before
+# identify_scope writes code-review-input.md, so the old wc-l read of that
+# artifact was always 0 on fresh runs (file-size path to parallel unreachable).
+# Lock: artifact-read-as-primary gone; git-diff-derived count present.
+K219_OLD=$(/usr/bin/grep -c 'wc -l < .devt/state/code-review-input.md' "$ROOT/workflows/code-review.md" || true)
+K219_DIFF=$(/usr/bin/grep -c 'DIFF_FILES=' "$ROOT/workflows/code-review.md" || true)
+if [ "$K219_OLD" = "0" ] && [ "$K219_DIFF" -ge 1 ]; then
+  pass "K219: scope_check derives file count from git diff (artifact wc-l read gone, DIFF_FILES source present)"
+else
+  fail "K219: scope_check source wrong — old_read=$K219_OLD(exp 0) diff_source=$K219_DIFF(exp >=1)"
+fi
+
+# K220: update-lane override_reason audit ledger — an override with a reason
+# appends a lane-status-overrides.jsonl record carrying prior_status; a
+# standalone override_reason (no status/redispatch mutation) is rejected.
+K220_T=$(mktemp -d); mkdir -p "$K220_T/.devt/state"; echo '{}' > "$K220_T/.devt/config.json"
+printf 'active: true\ntask: "t"\nworkflow_type: code_review_parallel\nlanes:\n  - id: "L1"\n    status: "in_flight"\n    redispatch_count: 0\n' > "$K220_T/.devt/state/workflow.yaml"
+K220_OK=$( (cd "$K220_T" && node "$ROOT/bin/devt-tools.cjs" state update-lane L1 status=substance_pass "override_reason=gate false positive" 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).ok))}catch{process.stdout.write('err')}})")
+K220_REC=$( (cd "$K220_T" && node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/lane-status-overrides.jsonl','utf8').trim());process.stdout.write((j.lane_id==='L1'&&j.prior_status==='in_flight'&&j.override_reason.length>0)?'audited':'bad')" 2>/dev/null) || echo missing)
+K220_SOLO=$( (cd "$K220_T" && node "$ROOT/bin/devt-tools.cjs" state update-lane L1 "override_reason=orphan" 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).ok===false?'rejected':'accepted')}catch{process.stdout.write('err')}})")
+rm -rf "$K220_T"
+if [ "$K220_OK" = "true" ] && [ "$K220_REC" = "audited" ] && [ "$K220_SOLO" = "rejected" ]; then
+  pass "K220: update-lane override_reason — status override audited to lane-status-overrides.jsonl with prior_status; standalone reason rejected"
+else
+  fail "K220: override_reason wrong — ok=$K220_OK(exp true) rec=$K220_REC(exp audited) solo=$K220_SOLO(exp rejected)"
+fi
+
+# K221: config-drift banner once-per-session — with dispatch_hygiene_mode=warn
+# the UserPromptSubmit banner fires on the first prompt of a session, is
+# suppressed on a repeat prompt of the SAME session_id, and fails loud (fires)
+# when no session_id was forwarded on hook stdin.
+K221_T=$(mktemp -d); mkdir -p "$K221_T/.devt/state"; printf '{"dispatch_hygiene_mode":"warn"}' > "$K221_T/.devt/config.json"
+K221_R1=$( (cd "$K221_T" && echo '{"session_id":"k221-s1"}' | bash "$ROOT/hooks/workflow-context-injector.sh") | /usr/bin/grep -c 'config alert' || true)
+K221_R2=$( (cd "$K221_T" && echo '{"session_id":"k221-s1"}' | bash "$ROOT/hooks/workflow-context-injector.sh") | /usr/bin/grep -c 'config alert' || true)
+K221_R3=$( (cd "$K221_T" && echo '{}' | bash "$ROOT/hooks/workflow-context-injector.sh") | /usr/bin/grep -c 'config alert' || true)
+rm -rf "$K221_T"
+if [ "$K221_R1" = "1" ] && [ "$K221_R2" = "0" ] && [ "$K221_R3" = "1" ]; then
+  pass "K221: config alert once-per-session — first prompt fires, same-session repeat suppressed, missing session_id fails loud"
+else
+  fail "K221: alert dedup wrong — r1=$K221_R1(exp 1) r2=$K221_R2(exp 0) r3=$K221_R3(exp 1)"
+fi
+
+# K222: Graphify-activity surfaces pass --include-chain — both workflow files'
+# mcp-stats calls must union the id chain (their context_init MCP calls land
+# under the pre-rotation workflow_id; the strict default would report zero
+# graphify usage for a run that demonstrably used it).
+K222_CR=$(/usr/bin/grep -c -- '--workflow-id="$WID" --include-chain' "$ROOT/workflows/code-review.md" || true)
+K222_CRP=$(/usr/bin/grep -c -- '--workflow-id="$WID" --include-chain' "$ROOT/workflows/code-review-parallel.md" || true)
+if [ "$K222_CR" = "2" ] && [ "$K222_CRP" = "2" ]; then
+  pass "K222: Graphify-activity telemetry uses --include-chain in both code-review.md and code-review-parallel.md (2 call sites each)"
+else
+  fail "K222: --include-chain missing — code-review=$K222_CR(exp 2) parallel=$K222_CRP(exp 2)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

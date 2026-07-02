@@ -304,7 +304,16 @@ const KNOWN_STATE_KEYS = {
 };
 
 const PHASE_ORDER = [
-  "context_init", "flow_deviation", "assess", "risk_warning",
+  "context_init", "flow_deviation",
+  // Review-pipeline phases (code-review.md + code-review-parallel.md).
+  // Deliberately placed early: validateConsistency expects the artifact of
+  // every lower-indexed mapped phase to exist, so a low index keeps sitting
+  // at a lane phase from implying dev-pipeline artifacts (impl-summary.md,
+  // test-summary.md) are present. Unregistered they were worse — the
+  // indexOf() -1 short-circuit skipped ALL phase-gated artifact checks.
+  "scope_check", "partition_lanes", "dispatch_lanes", "substance_check_lanes",
+  "redispatch_lanes", "consolidate", "present_findings",
+  "assess", "risk_warning",
   "scan", "regression_baseline", "arch_health", "arch_health_scan",
   "plan", "architect", "implement", "test", "simplify", "review",
   "verify", "docs", "retro", "curate", "autoskill", "review_deferred",
@@ -1289,6 +1298,7 @@ const RESET_EXEMPT = new Set([
   "last-curator-run.txt",               // auto-curator cooldown tracker; survives reset so the 7-day gate isn't bypassed by /devt:workflow --cancel
   "graphify-impact-plan.json",          // args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
   "workflow-id-rotations.jsonl",        // audit log of every workflow_id mutation (prev_id, new_id, source, pid, argv). RESET_EXEMPT because rotations BY resetSoft are themselves the events being audited — wiping the log on reset would erase the forensic trail for the bug that motivated it.
+  "lane-status-overrides.jsonl",        // operator lane-verdict override rationales (update-lane override_reason=). Survives reset so post-hoc audits can distinguish "gate wrong, operator overrode with reason" from "gate right, lane redispatched".
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1342,6 +1352,7 @@ const STATE_FILE_CONTRACT = {
     "topic-symbols-dropped.json",  // symbols dropped when symbol_anchored truncates >32 from preflight; consumed by code-review step to emit truncation notice in graph-impact.md
     "probe-failures.jsonl",        // append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
     "workflow-id-rotations.jsonl", // append-only audit log of workflow_id mutations (prev, new, source, pid, argv); RESET_EXEMPT for forensics
+    "lane-status-overrides.jsonl", // append-only audit log of update-lane override_reason= annotations; RESET_EXEMPT for post-hoc gate audits
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -1645,12 +1656,15 @@ function stalenessCheck({ task, workflowType } = {}) {
   const stale = Boolean(taskChanged && ageStale);
 
   // Auto-reset recommendation — non-destructive resetSoft auto-fire when
-  // ALL hold: task_changed AND age>24h AND workflow_type_changed. Any one
-  // alone is too aggressive (typo retry / long-running workflow / mid-
-  // session mode flip respectively). All three = unambiguous "new working
-  // session" — orchestrator can fire without prompting the operator.
-  const ageVeryStale = ageHours !== null && ageHours > 24;
-  const autoResetRecommended = Boolean(taskChanged && ageVeryStale && workflowTypeChanged);
+  // task_changed AND workflow_type_changed AND age>1h. The double signal
+  // (task + type both changed) is an unambiguous new working session; a
+  // prior extra age>24h leg forced an interactive staleness prompt on real
+  // session turnover (field case: task+type changed at 16h, silent reset
+  // verified lossless). The >1h floor excludes same-session typo retries.
+  // Single-signal cases (same-type re-review with a reworded task) still go
+  // through the operator prompt — counters and artifacts may legitimately
+  // continue there.
+  const autoResetRecommended = Boolean(taskChanged && workflowTypeChanged && ageStale);
 
   let reason = "fresh";
   if (autoResetRecommended) {
@@ -3066,6 +3080,13 @@ const STUB_MARKER_PATTERNS = [
   /\bnot yet (?:written|complete|done)\b/i,
 ];
 const STUB_WORD_COUNT_THRESHOLD = 50;
+// Phrase matches are decisive only below this word count. In a long,
+// substantive document a stub phrase is overwhelmingly a quotation or a
+// finding sentence, not a placeholder — field case: a 2,242-word lane review
+// was flagged as a stub because one verdict sentence contained "not yet
+// done". Between the two thresholds, phrases still catch stubs whose
+// boilerplate headings inflate word count past the bare minimum.
+const STUB_PHRASE_WORD_CEILING = 300;
 
 function checkAgentOutput(filePath, opts) {
   if (!filePath || typeof filePath !== "string") {
@@ -3117,9 +3138,9 @@ function checkAgentOutput(filePath, opts) {
     nonEmptyLines.length > 0 &&
     nonEmptyLines.every((l) => /^#+\s/.test(l.trim()));
   const looksLikeStub =
-    stubPhrasesFound.length > 0 ||
     wordCount < STUB_WORD_COUNT_THRESHOLD ||
-    allHeadings;
+    allHeadings ||
+    (stubPhrasesFound.length > 0 && wordCount < STUB_PHRASE_WORD_CEILING);
   const result = {
     ok: !looksLikeStub,
     path: filePath,
@@ -6412,12 +6433,17 @@ function updateLane(laneId, kvPairs) {
         return { ok: false, reason: `invalid redispatch_count "${v}" (must be non-negative integer)` };
       }
       updates.redispatch_count = n;
+    } else if (k === "override_reason") {
+      if (!v.trim()) {
+        return { ok: false, reason: "override_reason must be non-empty" };
+      }
+      updates.override_reason = v.trim();
     } else {
-      return { ok: false, reason: `unknown lane field "${k}" (allowed: status, redispatch_count)` };
+      return { ok: false, reason: `unknown lane field "${k}" (allowed: status, redispatch_count, override_reason)` };
     }
   }
-  if (Object.keys(updates).length === 0) {
-    return { ok: false, reason: "no updates provided (need status=... or redispatch_count=...)" };
+  if (updates.status === undefined && updates.redispatch_count === undefined) {
+    return { ok: false, reason: "no updates provided (need status=... or redispatch_count=...; override_reason= only annotates one of those)" };
   }
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -6431,6 +6457,7 @@ function updateLane(laneId, kvPairs) {
   const lines = yaml.split("\n");
   let inLane = false;
   let mutated = false;
+  let priorStatus = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/^  - id:\s*"?/.test(line)) {
@@ -6440,6 +6467,7 @@ function updateLane(laneId, kvPairs) {
     }
     if (!inLane) continue;
     if (updates.status !== undefined && /^\s+status:\s*/.test(line)) {
+      if (priorStatus === null) priorStatus = (line.match(/status:\s*"?([^"\n]*?)"?\s*$/) || [null, null])[1];
       lines[i] = line.replace(/status:\s*"?[^"\n]*"?/, `status: "${updates.status}"`);
       mutated = true;
     }
@@ -6452,6 +6480,27 @@ function updateLane(laneId, kvPairs) {
     return { ok: false, reason: `lane id "${laneId}" not found in workflow.yaml::lanes[]` };
   }
   atomicWriteFileSync(wfPath, lines.join("\n"));
+  if (updates.override_reason) {
+    // Operator overrides of lane verdicts (e.g. keeping a review the stub
+    // gate false-flagged) were untraceable — the rationale lived only in
+    // whatever scratchpad the operator kept. Same forensic class as
+    // workflow-id-rotations.jsonl: append-only, RESET_EXEMPT.
+    const { appendJsonl } = require("./logger.cjs");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const auditPath = path.join(dir, "lane-status-overrides.jsonl");
+    try {
+      appendJsonl(auditPath, {
+        ts: new Date().toISOString(),
+        lane_id: laneId,
+        prior_status: priorStatus,
+        status: updates.status !== undefined ? updates.status : null,
+        redispatch_count: updates.redispatch_count !== undefined ? updates.redispatch_count : null,
+        override_reason: updates.override_reason,
+        pid: process.pid,
+      });
+    } catch { /* audit-trail failure must not block the status write */ }
+    return { ok: true, lane_id: laneId, updates, audit: auditPath };
+  }
   return { ok: true, lane_id: laneId, updates };
 }
 

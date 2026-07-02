@@ -110,6 +110,8 @@ fi
 
 The wrapper writes the same side-effect artifacts the inline substeps did — `preflight-brief.{md,json}`, `graphify-impact-plan.json`, and `scope_trust_json` + `memory_signal_json` + `god_node_warnings_json` cached in `workflow.yaml` — so the dispatch envelopes that read those caches keep working unchanged.
 
+**Capture discipline:** if you persist `$CTX` for later substeps, write it via shell redirection (`printf '%s' "$CTX" > <file>`) — never re-emit the JSON through a Write-tool body or heredoc you typed out. Model-rendered rewrites turn `\n` escapes inside string values (guardrails, rules content) into literal newlines, producing a file that fails `jq`/`JSON.parse` even though the CLI stdout was valid. Field-observed: a 133KB re-written bundle broke at the first embedded-file field while the live stdout parsed clean.
+
 **Dispatch-envelope payload.** `$CTX.init` carries the `init review` compound payload — `governing_rules` (`content` + `rules_hash`), `models`, `inline_rubrics`, `rubrics`, `config`. Fill the `{governing_rules…}` / `{models.code-reviewer}` / `{inline_rubrics.code_review}` placeholders in the code-reviewer and verifier dispatch envelopes from `$CTX.init`; the governing-rule file contents (CLAUDE.md, `.devt/rules/*.md`) are in `$CTX.init.governing_rules.content`, so no separate Reads are needed to fill the dispatch.
 
 The wrapper's `preflight generate` auto-fires the **Topic Pre-Flight Brief** for the review scope (degrades silently on failure). The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss.
@@ -409,7 +411,19 @@ Measure the file count in the review scope. If > 10 files AND graphify is ready,
 > **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. Each rendered envelope carries a `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` tag that `dispatch-hygiene-guard.sh` recognizes — preserve this short tag in your dispatch prompt (even when customizing other envelope content) to silence `raw_dispatch` warnings on registered-lane dispatches. The matcher is content-based: any one of the recognized envelope tags (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<correlation_id>cid_*`, etc.) is sufficient. This avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
 
 ```bash
-SCOPE_FILE_COUNT=$(wc -l < .devt/state/code-review-input.md 2>/dev/null | tr -d ' ' || echo 0)
+# Scope size must come from the same source identify_scope will use.
+# This step runs BEFORE identify_scope writes code-review-input.md, so
+# measuring that artifact here read 0 on every fresh run — the file-size
+# path to parallel was only reachable via the operator-intent short-circuit
+# or a leftover file from a prior run. Prefer the artifact when it already
+# exists (pre-written scope escape hatch); otherwise count the same
+# merge-base-aware diff identify_scope strategy 2 uses.
+if [ -s .devt/state/code-review-input.md ]; then
+  SCOPE_FILE_COUNT=$(awk '/^- /{n++} END{print n+0}' .devt/state/code-review-input.md 2>/dev/null || echo 0)
+else
+  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null || echo "")
+  SCOPE_FILE_COUNT=$(printf '%s\n' "$DIFF_FILES" | sed '/^$/d' | wc -l | tr -d ' ')
+fi
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 echo "scope_check: file_count=${SCOPE_FILE_COUNT}, graphify_state=${GRAPHIFY_STATE}"
 
@@ -961,8 +975,11 @@ if [ -n "$WID" ]; then
   # but the recorded tool field in _mcp-trace.jsonl is the unprefixed form).
   # mcp-stats queries must use the unprefixed form to match trace records.
   # Workflow PROSE references for graphify tools stay prefixed.
-  GRAPHIFY_SUMMARY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__devt-graphify__*' --by=calls 2>/dev/null || echo "")
-  GRAPHIFY_UPSTREAM=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --tool='mcp__graphify__*' --by=calls 2>/dev/null || echo "")
+  # --include-chain: context_init MCP calls land under the pre-rotation
+  # workflow_id (the type-transition rotates it later), so the strict
+  # default would report zero graphify usage for a run that used it.
+  GRAPHIFY_SUMMARY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --include-chain --tool='mcp__devt-graphify__*' --by=calls 2>/dev/null || echo "")
+  GRAPHIFY_UPSTREAM=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" mcp-stats --workflow-id="$WID" --include-chain --tool='mcp__graphify__*' --by=calls 2>/dev/null || echo "")
   PLAN_TIER=$(jq -r '.tier // "unknown"' .devt/state/graphify-impact-plan.json 2>/dev/null || echo "unknown")
   if [ -f .devt/state/graphify-skip-reason.txt ]; then
     SKIP_REASON=$(cat .devt/state/graphify-skip-reason.txt)

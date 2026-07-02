@@ -640,11 +640,11 @@ function initWorkflow(task, pluginRoot, initVerb) {
             // nested block ("lanes:\n  - id:..." with continuation lines).
             .replace(/^lanes:\s*\n(?:\s{2,}.*\n?)*/gm, "");
 
-          // Cal #34 #6 — rotate JSONL counter logs on workflow_id change.
-          // Receipt #8 Q5(c): "the auto-reset is a patch over [counter
-          // accumulation]." Cal #31.D's auto-reset-if-stale only fires when
-          // task_changed AND age>24h AND workflow_type_changed — same-day
-          // workflow churn never triggers it, leaving raw_dispatch +
+          // Rotate JSONL counter logs on workflow_id change. Auto-reset is a
+          // patch over counter accumulation: auto-reset-if-stale only fires
+          // when task_changed AND workflow_type_changed AND age>1h —
+          // same-type or same-hour workflow churn never triggers it, leaving
+          // raw_dispatch +
           // claim_check_failures records from the closed workflow in the
           // gate's scan window. On block-mode projects this triggers KILL-gate
           // false-fire (dispatch_hygiene_kill_threshold=3 catches 3+

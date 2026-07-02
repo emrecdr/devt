@@ -199,6 +199,8 @@ The mechanism is announcement-only. It does NOT change CLI behavior, does NOT bl
 
 Regressions in message length get caught at CI time, not in production.
 
+**Frequency is right-sized too.** The config-drift safety banner (`workflow-context-injector.sh`, fires when a safety mode like `dispatch_hygiene_mode` is weakened below `block`) alerts once per session per project — a marker in the devt cache dir stores the last-alerted `session_id`. Every-prompt alerting field-tested as alert fatigue (~15+ fires/session) that trains operators to ignore the one banner that matters; `session-start.sh` still surfaces the same warning at session open. A missing `session_id` (runner didn't forward hook stdin) falls back to every-prompt — fail-loud is the right failure mode for a safety banner.
+
 ---
 
 ## Cross-references

@@ -127,7 +127,7 @@ node bin/devt-tools.cjs report window|generate [--weeks N]
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 121-deep drift-guard stack K94-K214) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 129-deep drift-guard stack K94-K222) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -215,7 +215,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 - Atomic file writes throughout via `bin/modules/io.cjs::atomicWriteFileSync` / `atomicWriteJsonSync` (single shared implementation). → docs/INTERNALS.md (Universal Conventions).
 - Config uses prototype-pollution-safe deep merge with `FORBIDDEN_KEYS` set. → docs/INTERNALS.md.
 - Workflow session metadata (`created_at`, `workflow_id` auto-stamped on activation; idempotent; cleared on reset). Immutable session anchors `first_created_at` + `original_workflow_id` frozen at first activation. Append-only `workflow_id_history[]` is **idempotently self-healing**: every `state update` ensures `{original_workflow_id, workflow_id} ⊆ history` (prepend original if missing, append current if missing). Captures every `workflow_type` transition AND recovers from upgrade-boundary cases where prior tool versions seeded history without the original. Cross-rotation trace attribution survives multi-hop sessions and partial-history scenarios. → docs/INTERNALS.md (state.cjs).
-- MCP trace records carry `workflow_id` / `workflow_type` / `phase` (mtime-invalidated caching). `mcp-stats --workflow-id=<current>` unions the whole `workflow_id_history[]` chain so trace records written under intermediate rotations stay attributable. → docs/INTERNALS.md (MCP Trace Workflow Context).
+- MCP trace records carry `workflow_id` / `workflow_type` / `phase` (mtime-invalidated caching). `mcp-stats --workflow-id` is strict by default; add `--include-chain` to union the `workflow_id_history[]` chain so trace records written under intermediate rotations stay attributable — a strict query returning 0 with chain matches emits a `hint` naming the flag. → docs/INTERNALS.md (MCP Trace Workflow Context).
 - Shadow-mode state validation persists `validation_status` to `workflow.yaml`. → docs/INTERNALS.md (Shadow-mode State Validation).
 - `autonomous_chain` enables cross-workflow chaining (implement → test → review). → docs/INTERNALS.md (Autonomous Chaining).
 - Parallel researcher + arch_health dispatch in COMPLEX dev flows (one message, two `Task` calls). → docs/INTERNALS.md (Parallel Researcher + arch_health Dispatch).

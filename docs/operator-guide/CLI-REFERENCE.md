@@ -28,8 +28,12 @@ node bin/devt-tools.cjs state assert-verifier-graded-all-axes
 node bin/devt-tools.cjs state list-lane-outputs
 # Read workflow.yaml::lanes[] registry with per-lane file existence + size + stale flag (mtime < first_created_at)
 
-node bin/devt-tools.cjs state update-lane <id> status=<status>
-# Mutate a single lane's status (substance_pass | stub_redispatched | deferred)
+node bin/devt-tools.cjs state update-lane <id> status=<status> ["override_reason=<why>"]
+# Mutate a single lane's status (substance_pass | stub_redispatched | deferred). Optional
+# override_reason= annotates an operator override (e.g. keeping a review the stub gate
+# false-flagged) — appends {ts, lane_id, prior_status, status, override_reason, pid} to
+# .devt/state/lane-status-overrides.jsonl (RESET_EXEMPT audit ledger). Rejected standalone:
+# it must accompany status= or redispatch_count=
 
 node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py [--overwrite]
 # Formal registration shortcut for orchestrators with a hand-rolled partition. Writes the canonical lane entry into workflow.yaml::lanes[] with derived metadata (slug via slugifyLaneName, file_count, est_loc, oversized) + new `registered_at` ISO timestamp. Per-lane files persist to .devt/state/lane-files/<id>.json sidecar (canonical subdir; not flagged by state cleanup). Validates id matches /^L\d+$/; rejects duplicates without --overwrite. Lock-aware read-modify-write. Replaces the raw-dispatch escape hatch that orchestrators previously used to express hand-rolled partitions

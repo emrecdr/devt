@@ -345,6 +345,19 @@ function run(subcommand, args) {
   }
   const summary = summarize(loaded.entries);
 
+  // Strict-by-default --workflow-id can silently under-report: in the normal
+  // review flow the context_init MCP calls land under the pre-rotation
+  // workflow_id, so filtering by the CURRENT id alone returns zero even
+  // though the run demonstrably used graphify. Never let that reduction be
+  // silent — probe the history-chain union and name the recovery flag.
+  let chainHint = null;
+  if (opts.workflow_id && !opts.include_chain && loaded.entries.length === 0) {
+    const chainProbe = loadEntries({ ...opts, include_chain: true, strict_wid: false });
+    if (chainProbe.exists && chainProbe.entries.length > 0) {
+      chainHint = `0 records under workflow_id=${opts.workflow_id}; ${chainProbe.entries.length} record(s) exist under its workflow_id_history chain — re-run with --include-chain for whole-session attribution`;
+    }
+  }
+
   // --top=N --by=calls|duration|errors — narrow tools[] to the top-N by chosen metric
   let tools = (summary && summary.tools) || [];
   if (opts.top) {
@@ -370,10 +383,13 @@ function run(subcommand, args) {
       since: opts.since || null,
       since_workflow_created: workflowCreatedAt,
       tool: opts.tool || null,
+      workflow_id: opts.workflow_id || null,
+      include_chain: Boolean(opts.include_chain),
       correlation_id: opts.correlation_id || null,
       top: opts.top || null,
       by: opts.top ? (opts.by || "calls") : null,
     },
+    ...(chainHint ? { hint: chainHint } : {}),
     ...(summary ? { aggregate: summary.aggregate, tools } : { aggregate: null, tools: [] }),
   });
   return 0;

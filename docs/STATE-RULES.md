@@ -97,6 +97,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `last-curator-run.txt` | auto-curator cooldown tracker | timestamp marker gating the 7-day auto-curator cadence; survives reset so `/devt:workflow --cancel` can't bypass the cooldown | ✓ |
 | `graphify-impact-plan.json` | `state compute-impact-plan` | `{tier, tool, args, skip_reason, …}` audit trail for the impact step; survives reset so the "args VERBATIM" contract stays auditable post-hoc (otherwise the only evidence is graph-impact.md, the MCP response, without the args that derived it) | ✓ |
 | `workflow-id-rotations.jsonl` | `state` rotation sites + `init` strip | JSONL `{ts, prev_id, new_id, source, pid, argv}` per workflow_id mutation. RESET_EXEMPT because rotations BY resetSoft are themselves the audited events — wiping on reset would erase the forensic trail for the concurrent-rotation bug it exists to diagnose | ✓ |
+| `lane-status-overrides.jsonl` | `state update-lane` (only when `override_reason=` passed) | JSONL `{ts, lane_id, prior_status, status, redispatch_count, override_reason, pid}` per operator override. RESET_EXEMPT so post-hoc audits can distinguish "gate wrong, operator overrode with reason" from "gate right, lane redispatched" | ✓ |
 
 ### Audit-only
 
