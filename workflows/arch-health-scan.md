@@ -157,6 +157,19 @@ If the scanner command fails to execute (command not found, permission denied), 
 **If no scanner is configured**: Skip this step. The architect agent will perform the analysis manually using Grep/Glob. Write the manual analysis to `.devt/state/scanner-output.txt` for baseline consistency.
 </step>
 
+<step name="evolution_scan" gate="evolution report captured (or gracefully skipped)">
+
+Run the language-agnostic evolution scan — git-history behavioral metrics the snapshot scanner cannot see (hotspots, change coupling, fix density, ownership):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" evolution scan
+```
+
+Writes `.devt/state/evolution-report.md` (architect input) + `.devt/state/evolution-report.json` (full data). Degrades gracefully: `{ok:false}` outside a git repository or when git is unavailable — continue without evolution data, do NOT stop.
+
+This step is independent of the structural scanner result and runs in both scanner-assisted and manual-analysis paths.
+</step>
+
 <step name="baseline_delta" gate="delta computed (or full mode selected)">
 
 ### Baseline & Delta Logic
@@ -263,6 +276,7 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
       CLAUDE.md (if exists)
     </files_to_read>
     <scanner_output>Read .devt/state/scanner-output.txt (if exists)</scanner_output>
+    <evolution>Read .devt/state/evolution-report.md (if exists) — git-history hotspots, change coupling, fix density</evolution>
     <delta>Read .devt/state/scan-delta.md (if exists)</delta>
     <triage>Read .devt/state/arch-triage.json (if exists)</triage>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -283,6 +297,14 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 
     If no scanner output is available, perform the analysis manually by scanning
     imports, module structure, and cross-module references.
+
+    If an evolution report exists in .devt/state/evolution-report.md, use it to
+    EFFORT-WEIGHT your findings: a violation in a top hotspot file outranks the
+    same violation in cold code (state the hotspot rank when elevating). Flag
+    change-coupling pairs that lack a structural relationship (no import/call
+    edge) as hidden-coupling findings — likely a missing abstraction or
+    copy-paste twins. High churn/loc + high fix count = bleeding edge; note it
+    in the health summary trend.
 
     **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing arch-review.md): per your `knowledge_candidates` step, if your assessment surfaces architectural rules / patterns worth promoting (cross-component invariants, "this layer cannot depend on that layer", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
@@ -332,6 +354,12 @@ Read `.devt/state/arch-review.md` and present findings to the user, organized by
 - Dismissed: N findings (false positives)
 - Deferred: N findings (revisit later)
 - Untriaged: N findings
+
+**Evolution summary** (if evolution-report.json exists):
+
+- Top hotspots overlapping findings (finding severity × hotspot rank = fix-first list)
+- Hidden coupling pairs (co-change without structural edge)
+- Bleeding-edge files (high churn/loc + high fix density)
 
 **Health summary**:
 

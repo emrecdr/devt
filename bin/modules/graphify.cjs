@@ -661,6 +661,7 @@ function getNeighbors(symbol, options) {
   // only): AuthenticationService incoming ~95% test methods + rationale_for
   // docstrings, burying the production-caller signal.
   const extraNoise = _getExtraNoiseSet();
+  const frameworkBuiltins = _getFrameworkBuiltinSet();
   const testPathPatterns = _getTestPathPatterns();
 
   // G1 (cal #31.B) — DI-aggregation collapse. Receipt #5 Q3: a field project's
@@ -688,7 +689,7 @@ function getNeighbors(symbol, options) {
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
     const label = node.label || id;
-    if (_isBlastNoise(node, label, extraNoise)) { filteredNoiseCount++; continue; }
+    if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; continue; }
     if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
 
     // DI-aggregation collapse: when many nodes share one DI-pattern source_file,
@@ -845,6 +846,7 @@ function blastRadius(symbols, _options) {
   const modules = new Set();
   const ambiguous = [];
   const extraNoise = _getExtraNoiseSet();
+  const frameworkBuiltins = _getFrameworkBuiltinSet();
   // Cal #34 #5b — telemetry-on-reduction per [[telemetry-on-reduction]]
   // standing principle: every filter / collapser tracks its own count + the
   // raw (pre-filter) totals so reviewers can audit how aggressive each
@@ -904,7 +906,7 @@ function blastRadius(symbols, _options) {
       // project-configured extras. Without filtering, blast_radius reports
       // `int`/`str`/docstring fragments as "dependents" of every queried
       // symbol — accurate to the graph topology, useless as signal.
-      if (_isBlastNoise(node, label, extraNoise)) { filteredNoiseCount++; continue; }
+      if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; continue; }
 
       // Cal #34 #5b — test-path filter. Mirrors F2 (cal #30.3) from getNeighbors.
       // Receipt #8: indirect_dependents had 150+ entries dominated by
@@ -998,9 +1000,25 @@ function blastRadius(symbols, _options) {
     filtered_test_path: filteredTestPathCount,
     filtered_di_aggregation: filteredDIAggregationCount,
   } : null;
+  // Rank direct dependents by in-degree so "top-3 dependents" means the
+  // most-depended-on callers, not Set-insertion order. Field-observed: the
+  // drill-down protocol fell back to array position because no degree fields
+  // existed, surfacing low-value anchors ahead of the symbols that mattered
+  // (2 of 3 drill-downs worthless until the substance gate forced a
+  // re-anchor). direct_dependents stays a label array (its order is now the
+  // rank); direct_dependents_degrees carries the numbers for consumers that
+  // rank explicitly.
+  const directDegrees = Array.from(direct).map((label) => {
+    const id = _resolveOne(adj, label);
+    const inCount = id ? ((adj.inc.get(id) || []).length) : 0;
+    const outCount = id ? ((adj.out.get(id) || []).length) : 0;
+    return { label, in_count: inCount, edge_count: inCount + outCount };
+  }).sort((a, b) => b.in_count - a.in_count || b.edge_count - a.edge_count);
+
   const base = {
     effect_size,
-    direct_dependents: Array.from(direct),
+    direct_dependents: directDegrees.map(d => d.label),
+    direct_dependents_degrees: directDegrees,
     indirect_dependents: Array.from(indirect),
     modules_touched: modules.size,
     god_node_match: godNodeMatch,
@@ -1104,6 +1122,41 @@ function _isPrimitiveTypeNode(label) {
   return _PRIMITIVE_TYPE_LABELS.has(label);
 }
 
+// Framework request/response/DI-injection builtins that leak into
+// direct_dependents: every handler signature references them, so BFS ranks
+// them as top "callers" of any touched symbol (field-observed: Request,
+// Depends, BackgroundTasks led a drill-down list and 2 of 3 drill-downs
+// anchored on them were worthless). Framework-GENERAL by construction —
+// spans FastAPI/Starlette, Spring, Django, ASP.NET, Express — never
+// project-specific names. Extend via config graphify.framework_builtin_noise[]
+// ("!Label" removes a default from the set — same force-keep convention as
+// ubiquitous_types).
+const _FRAMEWORK_BUILTIN_LABELS_DEFAULT = new Set([
+  // FastAPI / Starlette
+  "Request", "Response", "Depends", "BackgroundTasks", "WebSocket",
+  "APIRouter", "HTTPException", "status",
+  // Spring / Jakarta
+  "HttpServletRequest", "HttpServletResponse", "ResponseEntity", "Autowired",
+  // Django
+  "HttpRequest", "HttpResponse", "JsonResponse", "QuerySet",
+  // ASP.NET
+  "HttpContext", "IServiceProvider", "IActionResult", "ActionResult",
+  // Express / Node
+  "NextFunction", "IncomingMessage", "ServerResponse",
+]);
+
+function _getFrameworkBuiltinSet() {
+  const cfg = getConfig();
+  const set = new Set(_FRAMEWORK_BUILTIN_LABELS_DEFAULT);
+  const list = cfg && Array.isArray(cfg.framework_builtin_noise) ? cfg.framework_builtin_noise : [];
+  for (const entry of list) {
+    if (typeof entry !== "string" || entry.length === 0) continue;
+    if (entry.startsWith("!")) set.delete(entry.slice(1));
+    else set.add(entry);
+  }
+  return set;
+}
+
 // Upstream graphify emits some docstrings as first-class nodes (observed in
 // the wild: `"Stringify value for streaming CSV output, with formula-escape
 // applied."`, `"Test successful login."`, `"Tests for ExportService.list_exports."`).
@@ -1129,10 +1182,11 @@ function _isDocstringNode(label) {
 // Composed noise filter for blast_radius BFS. Combines existing file/concept/
 // json-key filters with primitive-type + docstring detection + project-extra
 // labels from `.devt/config.json::graphify.blast_radius_extra_noise[]`.
-function _isBlastNoise(node, label, extraNoiseSet) {
+function _isBlastNoise(node, label, extraNoiseSet, frameworkBuiltinSet) {
   if (_isPrimitiveTypeNode(label)) return true;
   if (_isDocstringNode(label)) return true;
   if (extraNoiseSet && extraNoiseSet.has(label)) return true;
+  if (frameworkBuiltinSet && frameworkBuiltinSet.has(label)) return true;
   if (node) {
     if (_isFileNode(node, 0)) return true;
     if (_isConceptNode(node)) return true;

@@ -238,6 +238,17 @@ const DEFAULTS = {
     // where transitive reach dwarfs literal callsites. Set to null to
     // disable the cross-check entirely.
     blast_magnification_threshold: 3,
+    // Cosmetic-hunk ratio at which the impact plan attaches a severity-
+    // calibration note (effect_size measures symbol popularity, not change
+    // semantics — a comments-and-imports branch touching popular symbols
+    // still scores "large"). Ratio of comment/import/prose-only hunks over
+    // total hunks, [0..1]. Set to 1.1 to never attach the note.
+    severity_note_threshold: 0.5,
+    // Framework request/response/DI builtins filtered from blast_radius +
+    // get_neighbors dependents (defaults span FastAPI/Spring/Django/.NET/
+    // Express — see graphify.cjs::_FRAMEWORK_BUILTIN_LABELS_DEFAULT). Entries
+    // here extend the set; "!Label" removes a default (force-keep).
+    framework_builtin_noise: [],
     // Project-curated ubiquitous-type override for god-node alarm-fatigue
     // suppression. The stoplist is AUTO-DERIVED by default (top-K god-nodes by
     // degree), so leaving this empty is the recommended path — auto-derivation
@@ -268,6 +279,34 @@ const DEFAULTS = {
   arch_scanner: {
     command: null,
     report_dir: "docs/reports",
+  },
+  // Evolution scan — git-history behavioral metrics feeding /devt:review
+  // --focus=arch (hotspots, change coupling, fix density, ownership).
+  // Language-agnostic: needs only `git log`. All heuristics are generic git
+  // conventions; every threshold is overridable per project.
+  evolution: {
+    window_months: 12,
+    // Commits touching more files than this are excluded from coupling
+    // (mass reformats/renames create false co-change signal) — code-maat's
+    // --max-changeset-size precedent. They still count for revisions/churn.
+    max_changeset_size: 30,
+    coupling: {
+      min_revisions: 5,
+      min_shared: 5,
+      min_degree_pct: 30,
+    },
+    top_n: 15,
+    // "auto" computes ownership/minor-contributor metrics only when the
+    // window has >=3 distinct authors — below that the Bird et al. signal
+    // is noise. true forces on, false disables.
+    ownership: "auto",
+    // Syntactic bug-fix commit detection (SZZ first layer). Case-insensitive.
+    fix_pattern: "\\b(fix(e[ds])?|bug(s|fix)?|defects?|hotfix|patch(ed|es)?)\\b",
+    exclude: [
+      "node_modules/", "vendor/", "dist/", "build/", ".devt/",
+      "*.lock", "*.min.js", "*.map",
+      "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    ],
   },
   workflow: {
     docs: true,

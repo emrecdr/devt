@@ -47,7 +47,7 @@ Use `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh` to selectively disable individual ho
 
 Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. Modules in `bin/modules/`:
 
-`init`, `config`, `state`, `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`.
+`init`, `config`, `state`, `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `evolution`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`.
 
 Deep-dive per module: → docs/INTERNALS.md (CLI Modules).
 
@@ -121,13 +121,16 @@ node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]  # 
 # Semantic search + reports
 node bin/devt-tools.cjs semantic sync|query|compact|status
 node bin/devt-tools.cjs report window|generate [--weeks N]
+
+# Evolution scan — git-history behavioral metrics (hotspots, change coupling, fix density)
+node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write]
 ```
 
 → docs/operator-guide/CLI-REFERENCE.md for the full inventory including `state assert-*` gates, claim-check, `recover-partial-impl`, multi-instance isolation (`state new-instance|list-instances`), `static-compress`, and `graphify rebuild`.
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 131-deep drift-guard stack K94-K224) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 136-deep drift-guard stack K94-K229) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -201,6 +204,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 ### Architecture health
 
 - `arch_scanner.command` config wires a project-supplied scanner into `/devt:review --focus=arch`. When unset, the workflow probes `.devt/rules/arch-scan.{py,sh}` + `tests/architecture/arch-scan.py` + `scripts/arch-scan.py` and AskUserQuestion offers auto-wire / show-command / skip. python-fastapi template ships the canonical scanner at the convention path.
+- Evolution scan (`bin/modules/evolution.cjs`, config `evolution.*`) adds the git-history dimension the snapshot scanner lacks: hotspots (change frequency × LOC), change coupling (co-change pairs — catches runtime-wired dependencies the structural graph misses), SZZ-lite fix density, relative churn, code age, ownership (auto-gated at ≥3 authors). Language-agnostic, `git log` only. Runs as the `evolution_scan` step in `arch-health-scan.md`; architect effort-weights findings by hotspot rank. Gates K225 (module) + K226 (workflow wiring).
 
 ### Graphify
 

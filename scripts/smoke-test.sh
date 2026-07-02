@@ -15538,6 +15538,149 @@ else
   fail "K222: --include-chain missing — code-review=$K222_CR(exp 2) parallel=$K222_CRP(exp 2)"
 fi
 
+# K225: evolution scan — git-history behavioral metrics. On a synthetic repo:
+# the frequently-changed large file ranks as top hotspot (freq × LOC), the
+# co-change pair is detected with high coupling degree, the changeset-size
+# guard excludes the mass commit from coupling, the fix-subject commit counts
+# toward fix density, and both report artifacts land in .devt/state/.
+K225_T=$(mktemp -d)
+(
+  cd "$K225_T"
+  git init -q . >/dev/null 2>&1
+  git config user.email k225@devt.test && git config user.name K225
+  mkdir -p src .devt/state
+  for i in 1 2 3 4 5 6; do
+    seq 1 200 | sed 's/^/line /' > src/hot.js
+    echo "// rev $i" >> src/hot.js
+    echo "$i" > src/a.js
+    echo "$i" > src/b.js
+    git add -A >/dev/null && git commit -qm "feat: change $i" >/dev/null
+  done
+  echo "small" > src/cold.js
+  git add -A >/dev/null && git commit -qm "feat: add cold" >/dev/null
+  echo "fixline" >> src/hot.js
+  git add -A >/dev/null && git commit -qm "fix: repair hot bug" >/dev/null
+  for f in $(seq 1 40); do echo x > "src/mass$f.js"; done
+  git add -A >/dev/null && git commit -qm "chore: mass add" >/dev/null
+) >/dev/null 2>&1
+K225_OUT=$( (cd "$K225_T" && node "$ROOT/bin/devt-tools.cjs" evolution scan 2>/dev/null) || echo "")
+K225_CHECK=$(node -e "
+  const fs = require('fs');
+  const out = JSON.parse(process.argv[1] || '{}');
+  const j = JSON.parse(fs.readFileSync('$K225_T/.devt/state/evolution-report.json', 'utf8'));
+  const failures = [];
+  if (!out.ok) failures.push('scan not ok');
+  if (!fs.existsSync('$K225_T/.devt/state/evolution-report.md')) failures.push('report md missing');
+  if (!j.hotspots.length || j.hotspots[0].file !== 'src/hot.js') failures.push('top hotspot != src/hot.js (got ' + (j.hotspots[0] || {}).file + ')');
+  const ab = j.coupling.find(c => (c.a === 'src/a.js' && c.b === 'src/b.js'));
+  if (!ab || ab.degree_pct < 80) failures.push('a/b coupling missing or weak: ' + JSON.stringify(ab || null));
+  if (j.commits_skipped_large < 1) failures.push('mass commit not excluded from coupling');
+  const hot = j.hotspots.find(h => h.file === 'src/hot.js');
+  if (!hot || hot.fix_commits < 1) failures.push('fix commit not counted for hot.js');
+  console.log(failures.length === 0 ? 'OK' : 'FAIL:' + failures.join('; '));
+" "$K225_OUT" 2>&1 || echo "FAIL:node error")
+rm -rf "$K225_T"
+if [ "$K225_CHECK" = "OK" ]; then
+  pass "K225: evolution scan — hotspot ranking, co-change coupling, changeset guard, fix density, report artifacts"
+else
+  fail "K225: evolution scan wrong — $K225_CHECK"
+fi
+
+# K226: arch-health-scan.md carries the evolution wiring — the evolution_scan
+# step, the <evolution> line in the architect envelope, and the effort-weight
+# instruction. Without all three the module runs but its output is never
+# consumed (mechanism firing without value conversion).
+K226_STEP=$(/usr/bin/grep -c 'name="evolution_scan"' "$ROOT/workflows/arch-health-scan.md" || true)
+K226_ENV=$(/usr/bin/grep -c '<evolution>Read .devt/state/evolution-report.md' "$ROOT/workflows/arch-health-scan.md" || true)
+K226_WEIGHT=$(/usr/bin/grep -c 'EFFORT-WEIGHT' "$ROOT/workflows/arch-health-scan.md" || true)
+if [ "$K226_STEP" = "1" ] && [ "$K226_ENV" = "1" ] && [ "$K226_WEIGHT" = "1" ]; then
+  pass "K226: arch-health-scan.md evolution wiring — scan step + architect envelope block + effort-weight instruction"
+else
+  fail "K226: evolution wiring incomplete — step=$K226_STEP(exp 1) env=$K226_ENV(exp 1) weight=$K226_WEIGHT(exp 1)"
+fi
+
+# K227: symbol_anchored working-tree caveat — the impact plan must attach
+# symbol_anchored_caveat when untracked / added-after-build code files are
+# invisible to blast_radius (graph indexes commits). Shares one git fixture
+# with K228: base commit = graph build anchor; feature branch with
+# comment/import-only hunks; one untracked code file. The impact plan must
+# attach symbol_anchored_caveat (graph indexes commits — untracked files are
+# invisible to blast_radius) and severity_calibration_note (cosmetic-heavy
+# diff must not inflate severity off a popularity-driven effect_size).
+K227_T=$(mktemp -d); (
+  cd "$K227_T" && git init -q -b main . && git config user.email t@t && git config user.name t
+  mkdir -p .devt/state app graphify-out
+  echo '{"graphify":{"enabled":true}}' > .devt/config.json
+  printf 'import os\n\ndef popular_svc():\n    return os.getcwd()\n' > app/svc.py
+  git add -A && git commit -qm base
+  BUILT=$(git rev-parse HEAD)
+  node -e "require('fs').writeFileSync('graphify-out/graph.json', JSON.stringify({built_at_commit:'$BUILT', nodes:[{id:'n1',label:'popular_svc',source_file:'app/svc.py',source_location:'app/svc.py:3'}], edges:[]}))"
+  git checkout -qb feature
+  printf 'import sys\nimport os\n\n# comment one\n# comment two\ndef popular_svc():\n    return os.getcwd()\n' > app/svc.py
+  printf '# prose\nnew doc line\n' > NOTES.md
+  git add -A && git commit -qm cosmetic
+  printf 'def moved_thing():\n    pass\n' > app/untracked_new.py
+  printf '{"topic":{"symbols":["popular_svc"]},"graph_stats":{"state":"ready"}}' > .devt/state/preflight-brief.json
+  printf 'active: true\ntask: "review the svc changes"\nworkflow_type: code_review\n' > .devt/state/workflow.yaml
+) >/dev/null 2>&1
+K227_PLAN=$( (cd "$K227_T" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --primary-branch=main 2>/dev/null) )
+K227_EVAL=$(printf '%s' "$K227_PLAN" | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const cav=typeof j.symbol_anchored_caveat==='string'&&j.symbol_anchored_caveat.indexOf('1 untracked')>=0;const hc=j.hunk_census&&j.hunk_census.total_hunks>=3&&j.hunk_census.cosmetic_ratio>=0.5;const note=typeof j.severity_calibration_note==='string'&&j.severity_calibration_note.indexOf('caller sets')>=0;process.stdout.write((j.tier==='symbol_anchored'?'T':'t')+(cav?'C':'c')+(hc?'H':'h')+(note?'N':'n'))}catch{process.stdout.write('err')}})")
+rm -rf "$K227_T"
+if [ "${K227_EVAL:0:2}" = "TC" ]; then
+  pass "K227: symbol_anchored working-tree caveat — untracked code file surfaces '1 untracked' caveat on the impact plan (graph indexes commits; blast runs against last-committed layout)"
+else
+  fail "K227: symbol_anchored caveat missing — eval=$K227_EVAL (expected TC..: Tier/Caveat)"
+fi
+
+# K228: hunk-census severity calibration — cosmetic-heavy diff (ratio >= the
+# graphify.severity_note_threshold default 0.5) must attach hunk_census
+# telemetry + severity_calibration_note carrying the keep-the-caller-sets
+# clause. Evaluated from the same fixture plan K227 computed above.
+if [ "${K227_EVAL:2:2}" = "HN" ]; then
+  pass "K228: hunk-census severity calibration — cosmetic-heavy diff (ratio >=0.5) attaches severity_calibration_note with the keep-the-caller-sets clause + hunk_census telemetry"
+else
+  fail "K228: severity calibration note missing — eval=$K227_EVAL (expected ..HN: HunkCensus/Note)"
+fi
+
+# K229: degree-ranked dependents + framework-builtin filter — blast_radius
+# must (a) exclude framework request/response/DI builtins (Depends, Request)
+# from direct_dependents with noise telemetry, (b) order direct_dependents by
+# in-degree descending, (c) emit direct_dependents_degrees with in_count so
+# the drill-down top-3 ranks by structure instead of array position.
+K229_T=$(mktemp -d); (
+  cd "$K229_T" && mkdir -p .devt graphify-out
+  echo '{"graphify":{"enabled":true}}' > .devt/config.json
+  node -e "
+const nodes=[{id:'n1',label:'PopularSvc',source_file:'app/svc.py',source_location:'app/svc.py:1'},
+{id:'n2',label:'CallerA',source_file:'app/a.py',source_location:'app/a.py:1'},
+{id:'n3',label:'CallerB',source_file:'app/b.py',source_location:'app/b.py:1'},
+{id:'n4',label:'CallerHub',source_file:'app/hub.py',source_location:'app/hub.py:1'},
+{id:'n5',label:'Depends',source_file:'',source_location:null},
+{id:'n6',label:'Request',source_file:'',source_location:null},
+{id:'n7',label:'LeafUser',source_file:'app/leaf.py',source_location:'app/leaf.py:1'}];
+const edges=[{source:'n2',target:'n1',confidence:'HIGH'},{source:'n3',target:'n1',confidence:'HIGH'},
+{source:'n4',target:'n1',confidence:'HIGH'},{source:'n5',target:'n1',confidence:'HIGH'},
+{source:'n6',target:'n1',confidence:'HIGH'},{source:'n7',target:'n4',confidence:'HIGH'},
+{source:'n2',target:'n4',confidence:'HIGH'},{source:'n3',target:'n4',confidence:'HIGH'}];
+require('fs').writeFileSync('graphify-out/graph.json', JSON.stringify({nodes, edges}));
+"
+) >/dev/null 2>&1
+K229_EVAL=$( (cd "$K229_T" && node -e "
+const g=require('$ROOT/bin/modules/graphify.cjs');
+const r=g.blastRadius(['PopularSvc']);
+const noBuiltins=!r.direct_dependents.includes('Depends')&&!r.direct_dependents.includes('Request');
+const ranked=r.direct_dependents[0]==='CallerHub';
+const degrees=Array.isArray(r.direct_dependents_degrees)&&r.direct_dependents_degrees[0]&&r.direct_dependents_degrees[0].label==='CallerHub'&&r.direct_dependents_degrees[0].in_count===3;
+const telem=r.noise_telemetry&&r.noise_telemetry.filtered_noise>=2;
+process.stdout.write((noBuiltins?'B':'b')+(ranked?'R':'r')+(degrees?'D':'d')+(telem?'T':'t'));
+" 2>/dev/null) )
+rm -rf "$K229_T"
+if [ "$K229_EVAL" = "BRDT" ]; then
+  pass "K229: blast_radius filters framework builtins (Depends/Request, telemetry counted) + ranks direct_dependents by in-degree + emits direct_dependents_degrees with in_count"
+else
+  fail "K229: dependent ranking/builtin filter wrong — eval=$K229_EVAL (expected BRDT: Builtins/Ranked/Degrees/Telemetry)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

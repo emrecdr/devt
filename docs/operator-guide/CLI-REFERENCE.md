@@ -141,6 +141,13 @@ node bin/devt-tools.cjs agent resume [auto|--sidecar=<path>]
 | `DEVT_HOOK_TRACE` | `1` | Universal hook invocation trace at `.devt/state/hook-trace/run-hook.jsonl`. Kill switch: `DEVT_HOOK_TRACE=0` |
 | `DEVT_MCP_ALLOW_WRITES` | (unset) | Permits `memory_upsert_doc` MCP write surface — default-deny safety floor for project-shape doc writes |
 
+### Evolution — git-history behavioral metrics (operator-runnable)
+
+```bash
+node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--max-changeset-size=N] [--out-dir=DIR] [--no-write]
+# Single `git log --numstat` pass → hotspots (change frequency × LOC), change coupling (co-change pairs, code-maat degree formula), SZZ-lite fix density (commit-subject regex), relative churn, code age, ownership/minor contributors (auto-gated at ≥3 distinct authors in window). Language-agnostic — no parser, no AST, works on any stack. Writes .devt/state/evolution-report.md (architect-ready tables + interpretation notes) + evolution-report.json (full per-file data). Stdout is a compact summary (counts, top-5 hotspots/coupling, artifact paths). Degrades gracefully: {ok:false, reason:"not_a_git_repo"} outside git. Coupling excludes commits over max_changeset_size files (default 30 — mass reformats fake coupling); exclusion count surfaces in commits_skipped_large. Config: evolution.* (window_months, thresholds, fix_pattern, exclude globs, ownership mode). Consumed by the evolution_scan step in arch-health-scan.md; gates K225/K226
+```
+
 ### Memory — surface helpers (operator-runnable)
 
 ```bash

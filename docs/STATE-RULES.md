@@ -44,6 +44,8 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `research.md` | researcher | Pattern + pitfall investigation | `ARTIFACT_SCHEMA` |
 | `scan-results.md` | architect (arch-health) | Architecture scan output | (not status-gated) |
 | `scan-delta.md` | architect (arch-health) | Delta from prior baseline | (not status-gated) |
+| `evolution-report.md` | `evolution scan` CLI (arch-health) | Git-history behavioral metrics — hotspots, change coupling, fix density | (not status-gated) |
+| `evolution-report.json` | `evolution scan` CLI (arch-health) | Full per-file evolution data (JSON companion) | (not status-gated) |
 | `lessons.yaml` | retro | Retro hand-off draft → curator promotes to LES-NNNN | (not status-gated) |
 | `debug-context.md` | orchestrator | Symptom capture | (not status-gated) |
 | `debug-investigation.md` | debugger | Hypothesis log | (not status-gated) |
@@ -108,6 +110,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `arch-triage.json` | arch-health-scan |
 | `arch-scan-report.md` | arch-health-scan (Markdown report from project scanner, e.g. `.devt/rules/arch-scan.py --report`) |
 | `scanner-output.txt` | arch-health-scan (legacy stdout capture; new projects use `arch-scan-report.md` via the convention probe) |
+| `evolution-report.md` + `.json` | arch-health-scan (`evolution scan` CLI — git-history behavioral metrics; prune-persistent like the other arch artifacts, cheaply regenerable) |
 
 ---
 

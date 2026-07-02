@@ -135,6 +135,22 @@ For `CANONICAL-ENTITY-MISSING` (LOW): not a bug, just a question — should the 
 
 See `docs/CANONICAL-ENTITY-DRIFT.md` for full registry schema and detection logic.
 
+## Evolutionary Hotspot
+
+**What**: A file that is both frequently changed and large (change frequency × LOC from `.devt/state/evolution-report.md`). Not a defect by itself — a *prioritization signal*: structural findings located in hotspots carry a high interest rate because the team keeps paying them on every change.
+
+**Typical severity**: modifier, not a finding — elevate co-located findings one level; a hotspot with high fix density (`fix` column) and high `churn/loc` is a bleeding edge worth its own Important finding.
+
+**Investigation**: Read the hotspot's revision count and fix density in evolution-report.json. Cross-check against the structural findings list: any Critical/Important finding in a top-10 hotspot goes to Fix Now. A hotspot with no structural findings but sustained fix density suggests latent design debt the snapshot scanner cannot express — recommend a focused review.
+
+## Hidden Coupling (co-change without structural edge)
+
+**What**: Two files that co-change at high degree (evolution report coupling table) but have no import/call relationship in the dependency graph. The dependency is real — it lives in runtime wiring (DI containers, event buses, middleware), duplicated logic, or an implicit contract (e.g. version files, config pairs).
+
+**Typical severity**: Important
+
+**Investigation**: Read both files. Classify the mechanism: (a) runtime-wired dependency the graph cannot see — document it, consider a hyperedge or an explicit interface; (b) copy-paste twins — extract the shared concept; (c) legitimate contract pair (CHANGELOG + VERSION) — acceptable design, add to baseline. Coupling percentages come from commit history, so batch-edit habits can inflate them — check whether the shared commits are substantive or bulk formatting before classifying.
+
 ## Convention Drift
 
 **What**: Code that uses outdated patterns, deprecated APIs, or legacy conventions when the project has established newer standards. Detected by comparing code against `.devt/rules/coding-standards.md` and `.devt/rules/patterns/common-smells.md`.

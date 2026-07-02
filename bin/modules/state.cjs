@@ -501,6 +501,7 @@ const PERSISTENT_ARTIFACTS = [
   "debug-context.md", "debug-investigation.md",
   "code-review-input.md", "session-report.md", "autoskill-proposals.md",
   "arch-baseline.json", "arch-triage.json", "arch-scan-report.md", "scanner-output.txt", "scan-delta.md",
+  "evolution-report.md", "evolution-report.json",
 ];
 
 const VALID_WORKFLOW_TYPES = new Set([
@@ -1330,6 +1331,7 @@ const STATE_FILE_CONTRACT = {
     "debug-context.md", "debug-investigation.md", "debug-summary.md",
     "arch-review.md", "arch-health-scan.md", "arch-baseline.json",
     "arch-triage.json", "arch-scan-report.md", "scanner-output.txt",
+    "evolution-report.md", "evolution-report.json",
     "docs-summary.md", "curation-summary.md", "session-report.md",
     "autoskill-proposals.md", "baseline-gates.md",
     "claude-mem-harvest.md", "claude-mem-skipped.txt", "last-curator-run.txt",
@@ -2539,7 +2541,8 @@ function graphifyRoi() {
 // workflows/code-review.md substep 5. Returns the same JSON shape that the
 // workflow used to write to .devt/state/graphify-impact-plan.json:
 //   {tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason,
-//    pr_diff_caveat?, topic_symbols_dropped_count?}
+//    pr_diff_caveat?, symbol_anchored_caveat?, hunk_census?,
+//    severity_calibration_note?, topic_symbols_dropped_count?}
 //
 // Inputs (all optional, defaulted from current state):
 //   - reviewScope: text of the current review task (used for PR# extraction
@@ -2648,12 +2651,15 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   // Config — graphify provider + impact threshold (single config read)
   let gitProvider = "";
   let impactThreshold = 10;
+  let severityNoteThreshold = 0.5;
   try {
     const { getMergedConfig } = require("./config.cjs");
     const cfg = getMergedConfig();
     gitProvider = ((cfg && cfg.git && cfg.git.provider) || "").toLowerCase();
     impactThreshold = (cfg && cfg.graphify && typeof cfg.graphify.impact_threshold === "number")
       ? cfg.graphify.impact_threshold : 10;
+    severityNoteThreshold = (cfg && cfg.graphify && typeof cfg.graphify.severity_note_threshold === "number")
+      ? cfg.graphify.severity_note_threshold : 0.5;
   } catch { /* defaults */ }
 
   // PR# extraction from REVIEW_SCOPE: matches "PR #N" / "PR N" / "pull request #N"
@@ -2675,6 +2681,75 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (prNum && gitProvider !== "github") {
     prScopedSkipReason = `provider=${gitProvider}; pr_scoped (GitHub get_pr_impact) skipped — pr_scoped_diff tier used instead`;
   }
+
+  // Graph build anchor + "added after build" ancestry check — shared by the
+  // pr_scoped_diff caveat and the symbol_anchored working-tree caveat below.
+  const _resolveBuiltAt = () => {
+    try {
+      const graphifyMod = require("./graphify.cjs");
+      const f = graphifyMod.freshness();
+      return (f && (f.built_at || f.built_at_commit)) || null;
+    } catch { return null; }
+  };
+  // An added file is "not indexed" ONLY if it was introduced AFTER the graph
+  // was built — compare each added file's introducing commit against the
+  // graph's build anchor via `git merge-base --is-ancestor`. A matched-files
+  // proxy over-fires on indexed-but-symbolless files. Degrade SAFE: when the
+  // anchor or an introducing commit can't be resolved (rebase/squash rewrote
+  // SHAs), assume INDEXED — false-"not-indexed" is the noisy direction this
+  // caveat exists to remove.
+  const _countAddedAfterBuild = (spawnSync, proot, builtAt, extRe) => {
+    if (!builtAt) return 0;
+    const addRes = spawnSync("git", ["diff", "--name-status", "--diff-filter=A", `${primaryBranch}...HEAD`], {
+      cwd: proot, encoding: "utf8", timeout: 5000,
+    });
+    if (addRes.status !== 0) return 0;
+    let added = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean)
+      .map(l => l.replace(/^A\s+/, "").trim()).filter(Boolean);
+    if (extRe) added = added.filter(f => extRe.test(f));
+    return added.filter(file => {
+      const introRes = spawnSync("git", ["log", "--diff-filter=A", "--format=%H", "-1", "--", file], {
+        cwd: proot, encoding: "utf8", timeout: 5000,
+      });
+      const intro = (introRes.status === 0 ? introRes.stdout.trim().split("\n")[0] : "").trim();
+      if (!intro) return false;
+      const anc = spawnSync("git", ["merge-base", "--is-ancestor", intro, builtAt], {
+        cwd: proot, timeout: 5000,
+      });
+      if (anc.status === 0) return false;  // ancestor → indexed
+      if (anc.status === 1) return true;   // not ancestor → genuinely new
+      return false;                        // unknown (bad SHA) → assume indexed
+    }).length;
+  };
+
+  // Working-tree blind-spot census for symbol_anchored: the graph indexes
+  // commits, so untracked files and files added after the graph build are
+  // invisible — blast_radius runs against the last-committed layout.
+  // pr_scoped_diff already emits this caveat; symbol_anchored (whose symbols
+  // come from the preflight topic, not the diff) stayed silent even when the
+  // branch centerpiece was an untracked module and the blast ran against its
+  // old path. Untracked count is restricted to code extensions so scratch
+  // files don't inflate it.
+  const _CODE_EXT_RE = /\.(py|js|jsx|ts|tsx|go|rb|java|kt|cs|rs|php|swift|c|cc|cpp|h|hpp|scala|ex|exs)$/i;
+  const countUnindexedWorkingTree = () => {
+    let untracked = 0;
+    let addedAfterBuild = 0;
+    try {
+      const { spawnSync } = require("child_process");
+      const proot = findProjectRoot();
+      const u = spawnSync("git", ["ls-files", "--others", "--exclude-standard"], {
+        cwd: proot, encoding: "utf8", timeout: 5000,
+      });
+      if (u.status === 0) {
+        untracked = u.stdout.split("\n").map(s => s.trim()).filter(f => f && _CODE_EXT_RE.test(f)).length;
+      }
+      // Census-side only: prose/config files the graph never indexes must not
+      // inflate the caveat (pr_scoped_diff's file count stays unfiltered —
+      // its "N of M files" framing is about the diff, not the graph).
+      addedAfterBuild = _countAddedAfterBuild(spawnSync, proot, _resolveBuiltAt(), _CODE_EXT_RE);
+    } catch { /* defaults */ }
+    return { untracked, added_after_build: addedAfterBuild, total: untracked + addedAfterBuild };
+  };
 
   // Diff symbols extractor — wraps `graphify symbols-in-files` against
   // the current diff. Only invoked on tier branches that need it.
@@ -2700,50 +2775,9 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
           // when a large changed set survives scoping.
           const res = graphifyMod.symbolsInFiles(files, 25, { baseRef: primaryBranch });
           symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
-          // Caveat reconciliation (cal #39.A #4): an added file is "not indexed"
-          // ONLY if it was introduced AFTER the graph was built — compare each
-          // added file's introducing commit against the graph's built_at_commit
-          // via `git merge-base --is-ancestor`. The prior matched_files proxy
-          // still over-fired for files that ARE indexed but produced no extracted
-          // symbol (indexed-but-symbolless); the build-SHA check is the precise
-          // signal (receipt #11: "6 of 188 files new" was a false alarm —
-          // graph was at HEAD so all were indexed). Degrade SAFE: if the
-          // introducing commit or built_at can't be resolved (rebase/squash
-          // rewrote SHAs), assume INDEXED — false-"not-indexed" is the noisy
-          // direction this caveat exists to remove, so degrade toward not-warning.
-          let builtAt = null;
-          try {
-            const graphifyMod = require("./graphify.cjs");
-            const f = graphifyMod.freshness();
-            builtAt = (f && (f.built_at || f.built_at_commit)) || null;
-          } catch { builtAt = null; }
-          const addRes = spawnSync("git", ["diff", "--name-status", "--diff-filter=A", `${primaryBranch}...HEAD`], {
-            cwd: proot, encoding: "utf8", timeout: 5000,
-          });
-          if (addRes.status === 0) {
-            const added = addRes.stdout.split("\n").map(s => s.trim()).filter(Boolean)
-              .map(l => l.replace(/^A\s+/, "").trim()).filter(Boolean);
-            if (!builtAt) {
-              // No resolvable build anchor → can't prove staleness → assume indexed.
-              newFilesCount = 0;
-            } else {
-              newFilesCount = added.filter(file => {
-                // Introducing commit for this added file.
-                const introRes = spawnSync("git", ["log", "--diff-filter=A", "--format=%H", "-1", "--", file], {
-                  cwd: proot, encoding: "utf8", timeout: 5000,
-                });
-                const intro = (introRes.status === 0 ? introRes.stdout.trim().split("\n")[0] : "").trim();
-                if (!intro) return false; // unresolvable → assume indexed (safe)
-                // intro is an ancestor of builtAt ⇒ the file existed at build time ⇒ indexed.
-                const anc = spawnSync("git", ["merge-base", "--is-ancestor", intro, builtAt], {
-                  cwd: proot, timeout: 5000,
-                });
-                if (anc.status === 0) return false;  // ancestor → indexed
-                if (anc.status === 1) return true;   // not ancestor → genuinely new
-                return false;                         // unknown (bad SHA) → assume indexed (safe)
-              }).length;
-            }
-          }
+          // Caveat reconciliation via the shared build-SHA ancestry check —
+          // see _countAddedAfterBuild above for the degrade-safe semantics.
+          newFilesCount = _countAddedAfterBuild(spawnSync, proot, _resolveBuiltAt());
         }
       }
     } catch { /* defaults */ }
@@ -2807,6 +2841,86 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     skipReason = "no PR (or non-GitHub), no topic symbols, scope below threshold";
   }
 
+  // symbol_anchored working-tree caveat — mirrors pr_diff_caveat: warn when
+  // blast_radius will run against a committed layout that misses working-tree
+  // files (untracked or added after the graph build).
+  let symbolAnchoredCaveat = null;
+  if (tier === "symbol_anchored") {
+    const uw = countUnindexedWorkingTree();
+    if (uw.total > 0) {
+      symbolAnchoredCaveat = `${uw.total} working-tree file(s) invisible to the graph (${uw.untracked} untracked, ${uw.added_after_build} added after graph build) — blast_radius runs against the last-committed layout; verify hits on moved/new paths manually or rebuild via "graphify update ."`;
+    }
+  }
+
+  // Hunk-type census → severity-calibration note. effect_size is computed
+  // from graph degree (popularity of the touched symbols), so a branch whose
+  // hunks are overwhelmingly comment/import/prose edits still scores "large"
+  // and inflates lane severity. The census classifies each diff hunk by its
+  // changed lines (framework/language-general regexes, no project coupling);
+  // when the cosmetic ratio crosses graphify.severity_note_threshold the plan
+  // carries a calibration note for graph-impact.md. The note keeps the
+  // caller-set clause deliberately — the discount must not become an excuse
+  // to skip wiring/cascade checks.
+  const hunkCensus = () => {
+    try {
+      const { spawnSync } = require("child_process");
+      const proot = findProjectRoot();
+      const d = spawnSync("git", ["diff", "-U0", `${primaryBranch}...HEAD`], {
+        cwd: proot, encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
+      });
+      if (d.status !== 0 || !d.stdout) return null;
+      const PROSE_EXT = /\.(md|rst|txt|adoc)$/i;
+      // A changed line is cosmetic when blank, comment-only, or import/using/
+      // require-only. Language-general by construction (Python/JS/TS/Go/Java/
+      // C#/Ruby/SQL comment + import forms) — never project symbol names.
+      const COSMETIC_LINE = /^\s*$|^\s*(#|\/\/|\/\*|\*|--|;|"""|''')|^\s*(import\s|from\s+\S+\s+import\b|require\s*\(|using\s|use\s|include\s)/;
+      let total = 0;
+      let cosmetic = 0;
+      let currentFileProse = false;
+      let inHunk = false;
+      let hunkCosmetic = true;
+      const closeHunk = () => {
+        if (inHunk) { total++; if (hunkCosmetic) cosmetic++; inHunk = false; }
+      };
+      for (const line of d.stdout.split("\n")) {
+        if (line.startsWith("diff --git")) {
+          closeHunk();
+          const m = line.match(/ b\/(.+)$/);
+          currentFileProse = m ? PROSE_EXT.test(m[1]) : false;
+          continue;
+        }
+        if (line.startsWith("@@")) { closeHunk(); inHunk = true; hunkCosmetic = true; continue; }
+        if (!inHunk || line.startsWith("+++") || line.startsWith("---")) continue;
+        if (line.startsWith("+") || line.startsWith("-")) {
+          if (currentFileProse) continue; // prose-file hunks count as cosmetic
+          if (!COSMETIC_LINE.test(line.slice(1))) hunkCosmetic = false;
+        }
+      }
+      closeHunk();
+      let renames = 0;
+      const r = spawnSync("git", ["diff", "--name-status", "-M90", `${primaryBranch}...HEAD`], {
+        cwd: proot, encoding: "utf8", timeout: 10000,
+      });
+      if (r.status === 0) renames = r.stdout.split("\n").filter(l => /^R(9\d|100)\t/.test(l)).length;
+      return {
+        total_hunks: total,
+        cosmetic_hunks: cosmetic,
+        cosmetic_ratio: total > 0 ? Number((cosmetic / total).toFixed(2)) : 0,
+        high_similarity_renames: renames,
+      };
+    } catch { return null; }
+  };
+  let census = null;
+  let severityCalibrationNote = null;
+  if (tier !== "skip") {
+    census = hunkCensus();
+    if (census && census.total_hunks >= 3 && census.cosmetic_ratio >= severityNoteThreshold) {
+      const renameClause = census.high_similarity_renames > 0
+        ? `; rename-similarity ≥90% on ${census.high_similarity_renames} file pair(s)` : "";
+      severityCalibrationNote = `${census.cosmetic_hunks} of ${census.total_hunks} diff hunks are comment/import/prose-only (${Math.round(census.cosmetic_ratio * 100)}%${renameClause}) — a large effect_size reflects the popularity of the touched symbols, not behavioral change surface. Weight findings by actual semantic delta, but use the caller sets to verify no import-order/wiring regressions.`;
+    }
+  }
+
   const plan = {
     tier,
     tool,
@@ -2816,6 +2930,9 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     pr_scoped_skip_reason: prScopedSkipReason,
   };
   if (prDiffCaveat) plan.pr_diff_caveat = prDiffCaveat;
+  if (symbolAnchoredCaveat) plan.symbol_anchored_caveat = symbolAnchoredCaveat;
+  if (census) plan.hunk_census = census;
+  if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
   if (topicSymbolsDroppedCount > 0) plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
 
   try { atomicWriteJsonSync(planPath, plan); } catch { /* best-effort */ }

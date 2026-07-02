@@ -73,6 +73,12 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "evolution":
+        // git-history behavioral metrics (hotspots, coupling, fix density) — degrades outside git repos
+        console.log(
+          JSON.stringify(require("./modules/evolution.cjs").run(subcommand, args.slice(2))),
+        );
+        break;
       case "discovery": {
         // discovery subcommand — #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-node harvest
         const code = require("./modules/discovery.cjs").run(subcommand, args.slice(2));
@@ -258,6 +264,9 @@ Commands:
   memory import <bundle> [--prefix=ORG-] [--overwrite]  Restore docs from a bundle
   report window [--weeks N] Compute reporting time window
   report generate [--weeks N] [--output PATH]  Generate contribution report
+  evolution scan            Git-history behavioral metrics — hotspots (freq×LOC), change
+                            coupling, fix density, ownership. Writes .devt/state/evolution-report.{md,json}
+                            [--window-months=N] [--top=N] [--max-changeset-size=N] [--out-dir=DIR] [--no-write]
   health [--repair]         Validate project config, state, hooks. --repair auto-fixes safe issues
   update check [--force]    Check for newer version on GitHub (--force bypasses cache)
   update status             Combined: install type + dirty tree + version (one call)
