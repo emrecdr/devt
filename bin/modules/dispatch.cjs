@@ -543,6 +543,27 @@ function cmdRenderFilled(target, options) {
   // keeps project portability open; promote to config after field evidence
   // accumulates that specific sections are routinely uncited across
   // dispatches.
+  // rulesByReference: swap each governing_rules.content body for a short
+  // read-from-disk stub while keeping the template's XML structure and the
+  // rules_hash attribute intact. The receiving agent Reads only the rules
+  // files relevant to its scope instead of being force-fed the full corpus;
+  // rules_hash still gives drift detection without content duplication.
+  // CLAUDE.md is dropped outright — the harness auto-injects project
+  // CLAUDE.md into every subagent's context, so inlining it pays its byte
+  // cost twice. Field-validated on a 5-lane review: selective reads (¼–½ of
+  // the corpus, targeted) with zero verifier-flagged quality gaps.
+  // Inline content remains the right call for worktree-isolated agents whose
+  // disk view may not match the orchestrator's — hence opt-out, not removal.
+  if (options && options.rulesByReference && subs.governing_rules && subs.governing_rules.content) {
+    const refContent = {};
+    for (const key of Object.keys(subs.governing_rules.content)) {
+      refContent[key] = key === "CLAUDE.md"
+        ? "(by-reference: CLAUDE.md is auto-injected into subagent context by the harness — not duplicated here)"
+        : `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
+    }
+    subs.governing_rules = { ...subs.governing_rules, content: refContent };
+  }
+
   const excludeHeadings = (options && options.rulesExclude) || [];
   let totalSaved = 0;
   let totalSectionsCut = 0;
@@ -565,6 +586,19 @@ function cmdRenderFilled(target, options) {
   if (totalSectionsCut > 0) {
     const kb = (totalSaved / 1024).toFixed(1);
     out += `\n<!-- rules-excluded: ${totalSectionsCut} sections (${kb} KB saved) -->\n`;
+  }
+
+  // Context-Loaded contract rides with by-reference rules: the agent must
+  // record which rules files it actually Read, so the consolidator/verifier
+  // can check that a lane's reads cover the rules its findings depend on.
+  // This is the cheap gate that keeps selective reading honest — without it,
+  // a weaker model skipping every Read is invisible.
+  if (options && options.rulesByReference) {
+    const contract = `    <context_loaded_contract>governing_rules are by-reference: Read the rules files relevant to your scope from disk, and record every file you actually read in a "## Context Loaded" section of your output artifact (name + full/section read). The verifier checks that your reads cover the rules your findings depend on.</context_loaded_contract>\n  `;
+    const lastIdx = out.lastIndexOf("</context>");
+    if (lastIdx >= 0) {
+      out = out.slice(0, lastIdx) + contract + out.slice(lastIdx);
+    }
   }
 
   // Inject <envelope_health> block before </context>. Surfaces (not gates)
@@ -1092,7 +1126,7 @@ function run(subcommand, args) {
       // envelopes from the canonical template by default makes the bypass
       // structurally impossible.
       //
-      // Args: [target] [--target=agent:workflow] [--out=dir]
+      // Args: [target] [--target=agent:workflow] [--out=dir] [--inline-rules]
       const positional = args.filter(a => !a.startsWith("--"));
       const targetFlag = args.find(a => a.startsWith("--target="));
       let target = targetFlag
@@ -1100,8 +1134,9 @@ function run(subcommand, args) {
         : (positional[0] && positional[0].includes(":") ? positional[0] : "code-reviewer:code_review");
       const outFlag = args.find(a => a.startsWith("--out="));
       const outDir = outFlag ? outFlag.slice("--out=".length) : null;
+      const inlineRules = args.includes("--inline-rules");
       try {
-        const result = cmdRenderLanes(target, { outDir });
+        const result = cmdRenderLanes(target, { outDir, inlineRules });
         if (result.lane_count === 0) {
           // Don't silently exit non-zero — tell the operator why and how to
           // proceed. Round 9 #4 fix; previously empty stdout + exit 2 made
@@ -1296,9 +1331,19 @@ function cmdRenderLanes(target, options) {
   // wide cut applies uniformly across all lanes (no per-lane override needed
   // since lanes are scope-partitioned, not rules-partitioned).
   const baseRulesExclude = _mergeConfigRulesExclude(options.rulesExclude || []);
+  // Lanes default to rules-by-reference: the governing_rules body is
+  // byte-identical across all N lanes, so inlining it multiplies the single
+  // largest static block per lane (field-measured: ~57KB × 5 lanes ≈ 73% of
+  // a 391KB render). Lane agents run in the same working tree as the
+  // orchestrator, so read-from-disk is safe; --inline-rules restores full
+  // inlining for worktree-isolated dispatches.
+  const rulesByReference = !options.inlineRules;
   // Render base envelope once (substitution is identical across lanes — the
   // per-lane variation is injected on top, not re-substituted).
-  const base = cmdRenderFilled(target, baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : undefined);
+  const base = cmdRenderFilled(target, {
+    ...(baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : {}),
+    ...(rulesByReference ? { rulesByReference: true } : {}),
+  });
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
   const out = [];
@@ -1376,6 +1421,9 @@ function cmdRenderLanes(target, options) {
     text: out.join("\n"),
     lanes: summary,
     target,
+    // Reduction is never silent: the mode names what was withheld per lane
+    // so a size comparison across runs is attributable to the right lever.
+    rules_mode: rulesByReference ? "by-reference" : "inline",
   };
   // Disk preflight (cal #38.C, pre-fan-out surface) — warn-only. This is the
   // moment right before N lane transcripts start accumulating, the exact spot

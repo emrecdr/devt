@@ -88,7 +88,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 <step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
-> **Hand-rolled-partition shortcut:** If the orchestrator already knows the right lane breakdown (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely. Write a YAML file `/tmp/lanes.yaml` with `lanes: [{id: L1, scope: identity, files: [...]}, ...]`, then run `node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml && node bin/devt-tools.cjs dispatch render-lanes` — render-lanes emits paste-ready per-lane envelopes carrying the rubric self-grade directive + scope blocks + governing rules. Hygiene-guard silences the registered (lane_id × scope_hint × file_set) tuples so the raw_dispatch warnings that field-evidenced unbounded raw-dispatch accumulation in long sessions don't fire. The auto-partitioner below is the FALLBACK when the partition isn't known up-front.
+> **Hand-rolled-partition shortcut:** If the orchestrator already knows the right lane breakdown (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely. Write a YAML file `/tmp/lanes.yaml` with `lanes: [{id: L1, scope: identity, files: [...]}, ...]`, then run `node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml && node bin/devt-tools.cjs dispatch render-lanes` — render-lanes emits paste-ready per-lane envelopes carrying the rubric self-grade directive + scope blocks + governing rules **by reference** (rules_hash + read-from-disk stubs + the Context-Loaded contract; pass `--inline-rules` to restore full rule bodies for worktree-isolated lanes). Hygiene-guard silences the registered (lane_id × scope_hint × file_set) tuples so the raw_dispatch warnings that field-evidenced unbounded raw-dispatch accumulation in long sessions don't fire. The auto-partitioner below is the FALLBACK when the partition isn't known up-front.
 
 Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise tries service-boundary auto-detect (R7-W6), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, `mode: "service_boundary"` when the graph has no community labels but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `packages/X/`, etc. — community field carries the service name), or `mode: "fallback"` when neither applies. The fallback case is the legacy path partition. The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
@@ -270,7 +270,7 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_trust>{cached from workflow.yaml::scope_trust_json}</scope_trust>`
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
-- `<governing_rules>{governing_rules.content from init payload}</governing_rules>`
+- `<governing_rules rules_hash="{governing_rules.rules_hash}">by-reference: Read the .devt/rules/ files relevant to your lane scope from disk ({governing_rules.paths_included, .devt/rules/* entries only}). CLAUDE.md is auto-injected by the harness — do not re-read it.</governing_rules>` — rules-by-reference is the lane default: the rules body is byte-identical across all N lanes and lane agents share the orchestrator's working tree, so inlining it multiplies ~57KB per lane for zero signal gain. Inline the full content only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
 - `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>`
 - `<rubric_content>{inline_rubrics.code_review}</rubric_content>` — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice
 
@@ -289,7 +289,7 @@ fi
 
 The orchestrator uses `${LANE_GRAPH_IMPACT_BLOCK}` and `${LANE_SCOPE_HINT_BLOCK}` verbatim in the lane's `<context>` — the bash already filtered prose-only vs mixed. Respects the MCP-blind lane contract: the orchestrator filters per-lane, lanes never query graphify themselves.
 
-Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate.`
+Task instruction: `Review the files listed in <lane_files>. Write your review to <output_path>. Do NOT review files outside the lane. Use the substance-first protocol — write the stub on first turn, then iterate. Record every rules file you actually read (name + full/section) in a "## Context Loaded" section of your review.`
 
 Output path: each lane's `review_file` from the registry.
 
@@ -449,6 +449,16 @@ fi
 if [ "$FOREIGN_CID_COUNT" -gt 0 ]; then
   echo "[consolidator] dropped $FOREIGN_CID_COUNT lane file(s) with foreign cid (stale from rotated workflow); reset-soft eviction should have cleared these — investigate if recurring"
 fi
+# Context-Loaded honesty check (advisory) — lanes receive governing rules
+# by-reference, so each substance_pass review must record which rules files
+# it actually read. A missing section means the lane may have reviewed blind
+# to the rules; the consolidator notes it per lane in review.md rather than
+# blocking (the findings themselves may still be sound).
+for LF in $(echo "$LANE_FILES" | tr ',' ' '); do
+  if [ -f "$LF" ] && ! /usr/bin/grep -q '^## Context Loaded' "$LF"; then
+    echo "[consolidator] ⚠️ ${LF} has no '## Context Loaded' section — lane did not record which rules files it read (by-reference contract). Note this next to that lane's findings in review.md."
+  fi
+done
 ```
 
 Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction:

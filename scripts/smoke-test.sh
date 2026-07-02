@@ -15488,6 +15488,44 @@ else
   fail "K221: alert dedup wrong — r1=$K221_R1(exp 1) r2=$K221_R2(exp 0) r3=$K221_R3(exp 1)"
 fi
 
+# K223: render-lanes rules-by-reference default — the rendered lane envelope
+# must NOT inline rule bodies or CLAUDE.md (harness auto-injects the latter
+# into subagents; the former is byte-identical across N lanes — field-measured
+# 73% of a 391KB 5-lane render), must carry rules_hash + read-from-disk stubs
+# + the Context-Loaded contract; --inline-rules restores full bodies and
+# drops the contract.
+K223_T=$(mktemp -d); mkdir -p "$K223_T/.devt/state" "$K223_T/.devt/rules"; echo '{}' > "$K223_T/.devt/config.json"
+printf '# Coding Standards\nK223_RULES_BODY_MARKER every function documented.\n' > "$K223_T/.devt/rules/coding-standards.md"
+printf '# Project\nK223_CLAUDEMD_MARKER\n' > "$K223_T/CLAUDE.md"
+printf 'active: true\ntask: "t"\nworkflow_type: code_review_parallel\nworkflow_id: "wf-k223aaaa"\n' > "$K223_T/.devt/state/workflow.yaml"
+(cd "$K223_T" && node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=core --files=a.py >/dev/null 2>&1)
+K223_REF=$( (cd "$K223_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>/dev/null) )
+K223_INL=$( (cd "$K223_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes --inline-rules 2>/dev/null) )
+K223_REF_OK=$(printf '%s' "$K223_REF" | /usr/bin/grep -c 'K223_RULES_BODY_MARKER\|K223_CLAUDEMD_MARKER' || true)
+K223_REF_STUB=$(printf '%s' "$K223_REF" | /usr/bin/grep -c 'by-reference: Read' || true)
+K223_REF_CONTRACT=$(printf '%s' "$K223_REF" | /usr/bin/grep -c 'context_loaded_contract' || true)
+K223_REF_HASH=$(printf '%s' "$K223_REF" | /usr/bin/grep -c 'governing_rules rules_hash=' || true)
+K223_INL_BODY=$(printf '%s' "$K223_INL" | /usr/bin/grep -c 'K223_RULES_BODY_MARKER' || true)
+K223_INL_CONTRACT=$(printf '%s' "$K223_INL" | /usr/bin/grep -c 'context_loaded_contract' || true)
+rm -rf "$K223_T"
+if [ "$K223_REF_OK" = "0" ] && [ "$K223_REF_STUB" -ge 1 ] && [ "$K223_REF_CONTRACT" -ge 1 ] && [ "$K223_REF_HASH" -ge 1 ] && [ "$K223_INL_BODY" -ge 1 ] && [ "$K223_INL_CONTRACT" = "0" ]; then
+  pass "K223: render-lanes rules-by-reference default — no rule/CLAUDE.md bodies inlined, rules_hash + stubs + Context-Loaded contract present; --inline-rules restores bodies + drops contract"
+else
+  fail "K223: rules-by-reference wrong — ref_leak=$K223_REF_OK(exp 0) stub=$K223_REF_STUB(exp>=1) contract=$K223_REF_CONTRACT(exp>=1) hash=$K223_REF_HASH(exp>=1) inl_body=$K223_INL_BODY(exp>=1) inl_contract=$K223_INL_CONTRACT(exp 0)"
+fi
+
+# K224: the Context-Loaded contract survives on the prose surfaces — the lane
+# dispatch instruction in code-review-parallel.md tells lanes to record reads,
+# and the consolidate step carries the advisory check for missing sections
+# (without both, by-reference selective reading is unauditable).
+K224_TASK=$(/usr/bin/grep -c '## Context Loaded' "$ROOT/workflows/code-review-parallel.md" || true)
+K224_BYREF=$(/usr/bin/grep -c 'by-reference' "$ROOT/workflows/code-review-parallel.md" || true)
+if [ "$K224_TASK" -ge 2 ] && [ "$K224_BYREF" -ge 2 ]; then
+  pass "K224: code-review-parallel.md carries the Context-Loaded contract (lane task instruction + consolidator advisory) and the by-reference lane default"
+else
+  fail "K224: Context-Loaded prose contract missing — task+advisory=$K224_TASK(exp>=2) byref=$K224_BYREF(exp>=2)"
+fi
+
 # K222: Graphify-activity surfaces pass --include-chain — both workflow files'
 # mcp-stats calls must union the id chain (their context_init MCP calls land
 # under the pre-rotation workflow_id; the strict default would report zero

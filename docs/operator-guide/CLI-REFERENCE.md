@@ -41,6 +41,13 @@ node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=
 node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
 # Bulk wrapper (round 8 W2). YAML inline-array files: form + JSON both accepted. Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?}], errors:[]}
 
+node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]
+# Per-lane envelopes are rules-BY-REFERENCE by default: governing_rules carries rules_hash +
+# read-from-disk stubs + a Context-Loaded contract instead of full rule bodies, and CLAUDE.md
+# is never inlined (the harness auto-injects it into subagents). Field-measured 391KB → 110KB
+# (−71%) on a 5-lane render. --inline-rules restores full inlining for worktree-isolated lanes
+# whose disk view may not match the orchestrator's. Result carries rules_mode for audit.
+
 node bin/devt-tools.cjs state assert-knowledge-candidates-tagged
 # Session-scoped via first_created_at — stale scratchpad tags from a prior workflow fail the gate
 

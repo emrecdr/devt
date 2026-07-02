@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.139.0] - 2026-07-02
+
+### Lane envelopes go rules-by-reference — 391KB → 110KB (−71%) per 5-lane review
+
+`dispatch render-lanes` duplicated the full governing-rules body (CLAUDE.md + 4 `.devt/rules/*` files, ~57KB) byte-identical into every lane envelope — 73% of a field-measured 391KB 5-lane render. The same field run proved the alternative: hand-rolled compact envelopes with rules-by-reference passed the dispatch-hygiene guard (it matches tag *presence*, not content) and produced five substantive, verifier-clean lane reviews with **selective** rules reads (each lane read the 1–2 files relevant to its scope, ¼–½ of the corpus, targeted) and zero verifier-flagged quality gaps.
+
+- **`render-lanes` defaults to by-reference.** Each `governing_rules` content field becomes a short read-from-disk stub; the `rules_hash` attribute stays for drift detection; CLAUDE.md is dropped outright (the harness auto-injects project CLAUDE.md into every subagent — inlining it paid its byte cost twice). Field-measured on the real 5-lane registry: 391,013 → 110,528 bytes.
+- **`--inline-rules` opt-out** restores full inlining for worktree-isolated lanes whose disk view may not match the orchestrator's. `render-filled` (single dispatch, 1× cost) and the consolidator dispatch keep inline content unchanged.
+- **Context-Loaded contract** keeps selective reading honest: by-reference envelopes carry a `<context_loaded_contract>` block requiring lanes to record every rules file actually read in a `## Context Loaded` section; the consolidate step emits a per-lane advisory when the section is missing. This is the guard against the n=1 risk that a weaker model skips the Reads entirely.
+- `render-lanes` result carries `rules_mode` (`by-reference`/`inline`) so the reduction is auditable, per the telemetry-on-reduction rule.
+- The hand-assembled lane dispatch block in `code-review-parallel.md` mirrors the same default (by-reference `governing_rules` line + Context-Loaded task instruction).
+- **K223** (behavioral: no rule/CLAUDE.md bodies in by-reference render, stubs + hash + contract present, `--inline-rules` restores bodies and drops the contract) + **K224** (prose: lane task instruction + consolidator advisory carry the Context-Loaded contract). Drift stack 129 → 131-deep (K94–K224).
+
 ## [0.138.0] - 2026-07-02
 
 ### Field-receipt fixes — 7 validated bugs/UX gaps from the first full parallel-review run
