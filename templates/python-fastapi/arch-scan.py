@@ -236,9 +236,24 @@ def _iter_python_files(root: Path) -> Iterable[Path]:
         ".pytest_cache",
         ".ruff_cache",
         "site-packages",
+        # Test suites are not architectural surface. Tests legitimately import
+        # across layers, run long, and use fixture-scoped inline imports, so
+        # scanning them only manufactures false positives (LAYER-IMPORT,
+        # GOD-FILE, INLINE-IMPORT). Excluded wholesale — production code carries
+        # the architecture rules. Both common test-directory names are skipped
+        # (nested ``tests/`` at any depth is caught by the part-membership test).
+        "tests",
+        "test",
     }
     for path in root.rglob("*.py"):
         if any(part in skip for part in path.parts):
+            continue
+        # Also exclude test modules that live OUTSIDE a test directory — a
+        # co-located ``test_foo.py`` beside ``foo.py``, a ``foo_test.py``, or a
+        # pytest ``conftest.py`` fixture module — so the exclusion survives
+        # stray placement rather than relying on directory layout alone.
+        name = path.name
+        if name == "conftest.py" or name.startswith("test_") or name.endswith("_test.py"):
             continue
         yield path
 

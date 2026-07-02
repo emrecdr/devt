@@ -329,6 +329,53 @@ def test_visitor_signals_default_factory_independence() -> None:
     assert b.imports == []
 
 
+def _load_scanner_module():
+    """Load the hyphenated arch-scan.py as an importable module.
+
+    Resolves the scanner from a seeded project (``.devt/rules/arch-scan.py``,
+    where ``SCANNER`` points) or, when absent, the template's top-level
+    ``arch-scan.py`` — so this runs in both the template and a seeded project.
+    """
+    import importlib.util
+
+    path = SCANNER if SCANNER.exists() else REPO / "arch-scan.py"
+    spec = importlib.util.spec_from_file_location("_arch_scan_mod", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    # Register in sys.modules BEFORE exec: on Python 3.14 the @dataclass in
+    # arch-scan.py resolves its own module via sys.modules[__module__], which is
+    # None until the module is registered (raises AttributeError otherwise).
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_iter_python_files_excludes_test_suites(tmp_path: Path) -> None:
+    """Test suites are not architectural surface — ``_iter_python_files`` skips
+    them wholesale (``tests/``/``test/`` dirs, ``conftest.py``, and test-named
+    modules) so detectors never fire on tests (GOD-FILE / LAYER-IMPORT /
+    INLINE-IMPORT)."""
+    scanner = _load_scanner_module()
+
+    svc = tmp_path / "app" / "svc"
+    (svc / "tests" / "unit").mkdir(parents=True)
+    (svc / "service.py").write_text("x = 1\n")
+    (svc / "tests" / "unit" / "test_service.py").write_text("x = 1\n")
+    (svc / "tests" / "conftest.py").write_text("x = 1\n")
+    # test-named module living OUTSIDE a tests/ dir is still excluded
+    (tmp_path / "app" / "test_stray.py").write_text("x = 1\n")
+    # co-located *_test.py suffix beside production code is excluded
+    (svc / "service_test.py").write_text("x = 1\n")
+
+    found = {p.name for p in scanner._iter_python_files(tmp_path)}
+
+    assert "service.py" in found
+    assert "test_service.py" not in found
+    assert "conftest.py" not in found
+    assert "test_stray.py" not in found
+    assert "service_test.py" not in found
+
+
 # ---------------------------------------------------------------------------
 # Code-review remediation regression tests (F1–F10)
 # ---------------------------------------------------------------------------

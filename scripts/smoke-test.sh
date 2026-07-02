@@ -98,6 +98,36 @@ else
   echo "$SCAN_OUT2"
 fi
 
+echo "== python-fastapi reference arch-scan: test files excluded from scan =="
+SCAN_TMP3="$TMP/arch-scan-tests"
+mkdir -p "$SCAN_TMP3/app/services/photos/domain/tests"
+# production layer violation (domain importing infrastructure) — MUST be reported
+cat > "$SCAN_TMP3/app/services/photos/domain/models.py" <<'EOF_PY'
+from app.services.photos.infrastructure.repositories import PhotoRepository
+class Photo: pass
+EOF_PY
+# same violation inside a tests/ dir — MUST be excluded
+cat > "$SCAN_TMP3/app/services/photos/domain/tests/test_models.py" <<'EOF_PY'
+from app.services.photos.infrastructure.repositories import PhotoRepository
+EOF_PY
+# co-located test-named module beside production code — MUST be excluded
+cat > "$SCAN_TMP3/app/services/photos/domain/models_test.py" <<'EOF_PY'
+from app.services.photos.infrastructure.repositories import PhotoRepository
+EOF_PY
+cat > "$SCAN_TMP3/app/services/photos/domain/tests/conftest.py" <<'EOF_PY'
+import pytest
+EOF_PY
+SCAN_OUT3=$(cd "$SCAN_TMP3" && python3 "$ROOT/templates/python-fastapi/arch-scan.py" --json 2>/dev/null) || SCAN_EC3=$?
+SCANNED3=$(echo "$SCAN_OUT3" | python3 -c "import json,sys; print(json.load(sys.stdin)['scanned_files'])" 2>/dev/null || echo "INVALID")
+TESTHITS=$(echo "$SCAN_OUT3" | python3 -c "import json,sys; fs=json.load(sys.stdin)['findings']; print(sum(1 for f in fs if 'test' in f['file'] or 'conftest' in f['file']))" 2>/dev/null || echo "INVALID")
+PRODHIT=$(echo "$SCAN_OUT3" | python3 -c "import json,sys; fs=json.load(sys.stdin)['findings']; print(sum(1 for f in fs if f['file']=='app/services/photos/domain/models.py'))" 2>/dev/null || echo "0")
+if [[ "$SCANNED3" == "1" ]] && [[ "$TESTHITS" == "0" ]] && [[ "$PRODHIT" -ge "1" ]]; then
+  pass "arch-scan excludes test files: 1 prod file scanned, 0 test-file findings, prod violation reported"
+else
+  fail "arch-scan test-exclusion regression: scanned=$SCANNED3 (exp 1), test_hits=$TESTHITS (exp 0), prod_hit=$PRODHIT (exp >=1)"
+  echo "$SCAN_OUT3"
+fi
+
 echo "== run-quality-gates.sh: rejection reasons are precise =="
 RQG_TMP="$TMP/reject-test"
 mkdir -p "$RQG_TMP/.devt/rules"
@@ -15754,6 +15784,51 @@ if [ "$K231_EVAL" = "FPLTG" ]; then
   pass "K231: blast_radius ranks co-located (relevance_tier 2) dependents above high-in-degree god-nodes; god-node demoted-not-dropped + flagged is_god_node/pure_god_node for --max-bytes routing"
 else
   fail "K231: relevance ranking wrong — eval=$K231_EVAL (expected FPLTG: First/Present/Last/Tier/Godflag)"
+fi
+
+# K232: evolution scan excludes test files from ALL behavioral metrics (hotspots,
+# coupling, fix density, churn) — language-general (Python/Go/JS-TS/Java + tests/
+# dirs), config-gated (evolution.exclude_tests, default on) with an
+# --include-tests escape hatch and a test_files_excluded telemetry counter. Tests
+# churn on every feature + co-change with the code they cover, inflating signal.
+K232_T=$(mktemp -d)
+(
+  cd "$K232_T"
+  git init -q . >/dev/null 2>&1
+  git config user.email k232@devt.test && git config user.name K232
+  mkdir -p app tests src/test
+  printf 'x=1\n' > app/service.py
+  printf 'y=1\n' > app/handler.go
+  printf 'x=1\n' > tests/test_service.py
+  printf 'x=1\n' > app/handler_test.go
+  printf 'x=1\n' > app/widget.spec.ts
+  printf 'x=1\n' > app/widget.test.tsx
+  printf 'x=1\n' > tests/conftest.py
+  printf 'x=1\n' > src/test/FooTest.java
+  git add -A >/dev/null && git commit -qm "init" >/dev/null
+  printf 'x=2\n' > app/service.py; printf 'x=2\n' > tests/test_service.py
+  git add -A >/dev/null && git commit -qm "fix: service" >/dev/null
+) >/dev/null 2>&1
+K232_DEF=$( (cd "$K232_T" && node "$ROOT/bin/devt-tools.cjs" evolution scan --no-write 2>/dev/null) || echo "{}")
+K232_INC=$( (cd "$K232_T" && node "$ROOT/bin/devt-tools.cjs" evolution scan --no-write --include-tests 2>/dev/null) || echo "{}")
+rm -rf "$K232_T"
+K232_CHECK=$(node -e "
+  const def = JSON.parse(process.argv[1] || '{}');
+  const inc = JSON.parse(process.argv[2] || '{}');
+  const f = [];
+  const hs = (def.top_hotspots || []).map(h => h.file);
+  if (!hs.includes('app/service.py')) f.push('prod service.py missing from hotspots');
+  if (hs.some(x => /test|spec|conftest/i.test(x))) f.push('test leaked into hotspots: ' + JSON.stringify(hs));
+  if (def.test_files_excluded !== 6) f.push('test_files_excluded != 6 (got ' + def.test_files_excluded + ')');
+  if (def.files_tracked !== 2) f.push('files_tracked != 2 (got ' + def.files_tracked + ')');
+  if (inc.test_files_excluded !== 0) f.push('--include-tests still excluded (got ' + inc.test_files_excluded + ')');
+  if (inc.files_tracked <= def.files_tracked) f.push('--include-tests did not add files back');
+  console.log(f.length === 0 ? 'OK' : 'FAIL:' + f.join('; '));
+" "$K232_DEF" "$K232_INC" 2>&1 || echo "FAIL:node error")
+if [ "$K232_CHECK" = "OK" ]; then
+  pass "K232: evolution scan excludes 6 multi-language test files from all metrics + test_files_excluded counter + --include-tests escape hatch restores them"
+else
+  fail "K232: evolution test-exclusion — $K232_CHECK"
 fi
 
 echo

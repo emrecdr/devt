@@ -326,6 +326,16 @@ const DEFAULTS = {
       "*.lock", "*.min.js", "*.map",
       "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
     ],
+    // Exclude test files from ALL evolution metrics (hotspots, coupling, fix
+    // density, churn). Tests churn on every feature and co-change with the code
+    // they cover, inflating behavioral signal without representing production
+    // structure. Language-general defaults span Python/Go/Ruby/JS/TS/Java +
+    // tests/ dirs. Set false (or pass --include-tests) to keep them — a churny
+    // test file can itself flag an unstable API.
+    exclude_tests: true,
+    // Extra regex patterns (strings) that extend the built-in test-path set —
+    // e.g. a project-specific test directory convention.
+    test_path_patterns: [],
   },
   workflow: {
     docs: true,

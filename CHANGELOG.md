@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.142.0] - 2026-07-02
+
+### Test files excluded from architectural scanners
+
+Both of devt's architecture surfaces now skip test files — tests legitimately import across layers, run long, and co-change with the code they cover, so scanning them only manufactures false positives (layer violations, god-files) and inflates hotspot/coupling signal without representing production structure.
+
+- **Python arch scanner (`templates/python-fastapi/arch-scan.py`).** `_iter_python_files` — the sole file-gathering chokepoint every detector consumes — now skips `tests/` and `test/` directories (any depth) plus co-located test modules by name (`test_*.py`, `*_test.py`, `conftest.py`), so a test file outside a test directory is excluded too. Added `test_iter_python_files_excludes_test_suites` to the scanner's pytest suite and a dedicated smoke gate (a project with a layer violation in production + identical violations in `tests/` and a co-located `models_test.py` → only the production file is scanned/reported).
+- **Evolution scan (`bin/modules/evolution.cjs`, language-agnostic).** New `exclude_tests` option (default on) filters test files from ALL behavioral metrics (hotspots, coupling, fix density, churn) at both file-entry points. Language-general patterns span Python/Go/Ruby/JS/TS/Java + `tests/` dirs (mirrors graphify's canonical test-path set); projects extend via `evolution.test_path_patterns[]`, disable via `evolution.exclude_tests`, or pass `--include-tests` per-run (a churny test file can itself flag an unstable API). A `test_files_excluded` counter is surfaced in the JSON summary + report markdown per the telemetry-on-reduction rule.
+- Gate **K232** (behavioral: 6 multi-language test files excluded from metrics + counter + `--include-tests` escape hatch restores them). Drift-guard stack 138 → 139 deep (K94–K232).
+
+### Fixed
+
+- **`evolution.cjs` was stored as a binary file.** The coupling-pair map key used two *literal* NUL bytes as a path delimiter (`paths[i] + <NUL> + paths[j]`) instead of the `"\0"` escape sequence, so git detected the whole file as binary and rendered its diffs unreviewable. Replaced the embedded NUL bytes with the textually-identical `\0` escape (zero behavior change — verified by the existing coupling gate K225) so the file is plain text and diffs are reviewable again.
+
 ## [0.141.0] - 2026-07-02
 
 ### Graphify drill-down signal calibration — relevance-ranked targets + confidence-split neighbors
