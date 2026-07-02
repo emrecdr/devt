@@ -15681,6 +15681,81 @@ else
   fail "K229: dependent ranking/builtin filter wrong — eval=$K229_EVAL (expected BRDT: Builtins/Ranked/Degrees/Telemetry)"
 fi
 
+# K230: get_neighbors confidence split + INFERRED cap — INFERRED (low-confidence
+# co-location) neighbors rank BELOW EXTRACTED and the INFERRED tail is capped at
+# graphify.inferred_neighbor_cap (default 25); telemetry surfaces the split.
+# Field-observed: a 247-neighbor result split 228 INFERRED / 19 EXTRACTED, the
+# co-location bulk drowning the trustworthy structural edges.
+K230_T=$(mktemp -d); (
+  cd "$K230_T" && mkdir -p .devt graphify-out
+  echo '{"graphify":{"enabled":true}}' > .devt/config.json
+  node -e "
+const nodes=[{id:'h',label:'Hub',source_file:'app/hub.py',source_location:'app/hub.py:1'}];
+const edges=[];
+['Ext1','Ext2','Ext3'].forEach((l,i)=>{nodes.push({id:'e'+i,label:l,source_file:'app/e'+i+'.py',source_location:'app/e'+i+'.py:1'});edges.push({source:'e'+i,target:'h',relation:'calls',confidence:'EXTRACTED'});});
+for(let i=0;i<30;i++){nodes.push({id:'i'+i,label:'Inf'+i,source_file:'app/inf/f'+i+'.py',source_location:'app/inf/f'+i+'.py:1'});edges.push({source:'i'+i,target:'h',relation:'uses',confidence:'INFERRED'});}
+require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({nodes,edges}));
+"
+) >/dev/null 2>&1
+K230_EVAL=$( (cd "$K230_T" && node -e "
+const g=require('$ROOT/bin/modules/graphify.cjs');
+const r=g.getNeighbors('Hub',{direction:'in',depth:1});
+const res=r.results||[];
+const reliableFirst=res.slice(0,3).every(x=>x.confidence==='EXTRACTED');
+const capped=res.filter(x=>x.confidence==='INFERRED').length===25;
+const total=res.length===28;
+const telem=r.confidence_extracted===3&&r.confidence_inferred_total===30&&r.confidence_inferred_capped===5;
+process.stdout.write((reliableFirst?'R':'r')+(capped?'C':'c')+(total?'T':'t')+(telem?'M':'m'));
+" 2>/dev/null) )
+rm -rf "$K230_T"
+if [ "$K230_EVAL" = "RCTM" ]; then
+  pass "K230: get_neighbors ranks EXTRACTED before INFERRED + caps INFERRED tail at 25 (default) + surfaces confidence_extracted/_inferred_total/_inferred_capped telemetry"
+else
+  fail "K230: confidence split wrong — eval=$K230_EVAL (expected RCTM: Reliable-first/Capped/Total/teleMetry)"
+fi
+
+# K231: blast_radius relevance-ranked drill-down targets — a dependent co-located
+# with a changed symbol (source_file in the changed set → relevance_tier 2)
+# outranks an incidental high-in-degree god-node; the god-node is DEMOTED to the
+# bottom but stays present (real dependent, never dropped) and carries
+# is_god_node + pure_god_node so the F16 step routes it to the --max-bytes
+# transport fallback instead of surfacing it ahead of relevant callers.
+K231_T=$(mktemp -d); (
+  cd "$K231_T" && mkdir -p .devt graphify-out
+  echo '{"graphify":{"enabled":true}}' > .devt/config.json
+  node -e "
+const nodes=[{id:'t',label:'Target',source_file:'app/target.py',source_location:'app/target.py:1'},
+ {id:'rc',label:'RelevantCaller',source_file:'app/target.py',source_location:'app/target.py:9'},
+ {id:'pc',label:'PlainCaller',source_file:'app/plain.py',source_location:'app/plain.py:1'},
+ {id:'gn',label:'GodNode',source_file:'app/god.py',source_location:'app/god.py:1'}];
+const edges=[{source:'rc',target:'t',relation:'calls',confidence:'EXTRACTED'},
+ {source:'pc',target:'t',relation:'calls',confidence:'EXTRACTED'},
+ {source:'gn',target:'t',relation:'calls',confidence:'EXTRACTED'}];
+for(let i=0;i<20;i++){nodes.push({id:'gf'+i,label:'GF'+i,source_file:'app/gf'+i+'.py',source_location:'app/gf'+i+'.py:1'});edges.push({source:'gf'+i,target:'gn',relation:'calls',confidence:'EXTRACTED'});}
+for(let i=0;i<12;i++){nodes.push({id:'c'+i,label:'C'+i,source_file:'app/c'+i+'.py',source_location:'app/c'+i+'.py:1'});}
+for(let i=0;i<12;i++){edges.push({source:'c'+i,target:'c'+((i+1)%12),relation:'calls',confidence:'EXTRACTED'});edges.push({source:'c'+i,target:'c'+((i+2)%12),relation:'calls',confidence:'EXTRACTED'});}
+require('fs').writeFileSync('graphify-out/graph.json',JSON.stringify({nodes,edges}));
+"
+) >/dev/null 2>&1
+K231_EVAL=$( (cd "$K231_T" && node -e "
+const g=require('$ROOT/bin/modules/graphify.cjs');
+const r=g.blastRadius(['Target']);
+const dd=r.direct_dependents||[];
+const deg=Object.fromEntries((r.direct_dependents_degrees||[]).map(d=>[d.label,d]));
+const rcFirst=dd[0]==='RelevantCaller';
+const godPresent=dd.includes('GodNode');
+const godLast=dd[dd.length-1]==='GodNode';
+const rcTier=deg.RelevantCaller&&deg.RelevantCaller.relevance_tier===2;
+const godFlag=deg.GodNode&&deg.GodNode.is_god_node===true&&deg.GodNode.pure_god_node===true;
+process.stdout.write((rcFirst?'F':'f')+(godPresent?'P':'p')+(godLast?'L':'l')+(rcTier?'T':'t')+(godFlag?'G':'g'));
+" 2>/dev/null) )
+rm -rf "$K231_T"
+if [ "$K231_EVAL" = "FPLTG" ]; then
+  pass "K231: blast_radius ranks co-located (relevance_tier 2) dependents above high-in-degree god-nodes; god-node demoted-not-dropped + flagged is_god_node/pure_god_node for --max-bytes routing"
+else
+  fail "K231: relevance ranking wrong — eval=$K231_EVAL (expected FPLTG: First/Present/Last/Tier/Godflag)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

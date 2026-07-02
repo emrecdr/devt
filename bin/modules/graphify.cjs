@@ -721,26 +721,51 @@ function getNeighbors(symbol, options) {
       depth: info.depth,
     });
   }
-  items.sort((a, b) => a.depth - b.depth || (a.label || "").localeCompare(b.label || ""));
-  // Filter telemetry exposed in envelope so callers can audit how aggressive
-  // the noise+test-path+DI-aggregation filtering was. Empty objects when nothing filtered.
-  const filterTelemetry = (filteredNoiseCount || filteredTestPathCount || filteredDIAggregationCount) ? {
-    filtered_noise: filteredNoiseCount,
-    filtered_test_path: filteredTestPathCount,
-    filtered_di_aggregation: filteredDIAggregationCount,
+  // Confidence-aware ordering + INFERRED cap. INFERRED edges are low-confidence
+  // co-location links (upstream graphify emits same-file symbol adjacency as
+  // `uses` edges); field-observed a 247-neighbor result split 228 INFERRED / 19
+  // EXTRACTED, the INFERRED bulk drowning the trustworthy structural edges. Rank
+  // every non-INFERRED neighbor (EXTRACTED / AMBIGUOUS / unknown) ahead of
+  // INFERRED — the reliable set is never capped — then trim the INFERRED tail so
+  // co-location noise can't dominate. Graphs without confidence data land
+  // everything in the reliable bucket → depth+alpha ordering, unchanged.
+  const byDepthAlpha = (a, b) => a.depth - b.depth || (a.label || "").localeCompare(b.label || "");
+  const reliableItems = items.filter(it => it.confidence !== "INFERRED").sort(byDepthAlpha);
+  const inferredItems = items.filter(it => it.confidence === "INFERRED").sort(byDepthAlpha);
+  const inferredCap = _getInferredNeighborCap();
+  const inferredKept = inferredCap === null ? inferredItems : inferredItems.slice(0, inferredCap);
+  const inferredCappedCount = inferredItems.length - inferredKept.length;
+  const rankedItems = reliableItems.concat(inferredKept);
+  // Filter + confidence telemetry exposed in envelope so callers can audit how
+  // aggressive the reduction was, per [[telemetry-on-reduction]]. Surfaces both
+  // the retained EXTRACTED count and the total/capped INFERRED counts so the
+  // split is visible, not silent. Null when nothing filtered and no confidence data.
+  const extractedCount = reliableItems.filter(it => it.confidence === "EXTRACTED").length;
+  const confidenceTelemetry = (inferredItems.length || extractedCount) ? {
+    confidence_extracted: extractedCount,
+    confidence_inferred_total: inferredItems.length,
+    confidence_inferred_capped: inferredCappedCount,
+  } : null;
+  const filterTelemetry = (filteredNoiseCount || filteredTestPathCount || filteredDIAggregationCount || confidenceTelemetry) ? {
+    ...((filteredNoiseCount || filteredTestPathCount || filteredDIAggregationCount) ? {
+      filtered_noise: filteredNoiseCount,
+      filtered_test_path: filteredTestPathCount,
+      filtered_di_aggregation: filteredDIAggregationCount,
+    } : {}),
+    ...(confidenceTelemetry || {}),
   } : null;
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
   if (!maxBytes) {
-    const base = { source: "graphify", results: items };
+    const base = { source: "graphify", results: rankedItems };
     if (filterTelemetry) Object.assign(base, filterTelemetry);
     return base;
   }
-  const totalCount = items.length;
+  const totalCount = rankedItems.length;
   const results = [];
   let runningBytes = 0;
   // Approximate per-item byte cost via JSON.stringify of the item; cheap
   // enough at this granularity (god-node payloads are 10K-50K items).
-  for (const item of items) {
+  for (const item of rankedItems) {
     const itemBytes = JSON.stringify(item).length + 1; // +1 for separator comma
     if (runningBytes + itemBytes > maxBytes) break;
     results.push(item);
@@ -1000,20 +1025,56 @@ function blastRadius(symbols, _options) {
     filtered_test_path: filteredTestPathCount,
     filtered_di_aggregation: filteredDIAggregationCount,
   } : null;
-  // Rank direct dependents by in-degree so "top-3 dependents" means the
-  // most-depended-on callers, not Set-insertion order. Field-observed: the
-  // drill-down protocol fell back to array position because no degree fields
-  // existed, surfacing low-value anchors ahead of the symbols that mattered
-  // (2 of 3 drill-downs worthless until the substance gate forced a
-  // re-anchor). direct_dependents stays a label array (its order is now the
-  // rank); direct_dependents_degrees carries the numbers for consumers that
-  // rank explicitly.
+  // Rank direct dependents by RELEVANCE to the diff, not raw in-degree. Raw
+  // in-degree surfaces incidental high-fan-in god-nodes (permission enums,
+  // event-bus protocols) as top drill-down targets even when they relate to the
+  // change only tangentially — and their depth-2 incoming overflows the MCP
+  // transport. Relevance tiers, derived from data already in this function (no
+  // extra inputs): tier 2 = dependent's source_file is among the changed
+  // symbols' files (co-located with a change); tier 1 = dependent shares a
+  // Leiden community with a changed symbol; tier 0 = neither. Pure god-nodes
+  // (top-degree AND tier 0) sink to the bottom but STAY present — they are real
+  // dependents, so dropping them would hide genuine callers (only demote, never
+  // filter). in-degree is the within-tier tie-break. direct_dependents order is
+  // the rank; direct_dependents_degrees carries the ranking signal so the F16
+  // drill-down step consumes it directly (and uses is_god_node to trigger the
+  // --max-bytes transport fallback). Config reverts to raw in-degree.
+  const relevanceRanking = _getDrillDownRelevanceRanking();
+  const changedFiles = new Set();
+  const changedCommunities = new Set();
+  if (relevanceRanking) {
+    for (const sym of symbols) {
+      if (typeof sym !== "string" || sym.length === 0 || sym.length > 256) continue;
+      const sid = _resolveOne(adj, sym);
+      if (!sid) continue;
+      const snode = adj.nodeMap.get(sid);
+      if (snode && snode.source_file) changedFiles.add(snode.source_file);
+      if (snode && snode.community !== undefined && snode.community !== null) changedCommunities.add(snode.community);
+    }
+  }
   const directDegrees = Array.from(direct).map((label) => {
     const id = _resolveOne(adj, label);
     const inCount = id ? ((adj.inc.get(id) || []).length) : 0;
     const outCount = id ? ((adj.out.get(id) || []).length) : 0;
-    return { label, in_count: inCount, edge_count: inCount + outCount };
-  }).sort((a, b) => b.in_count - a.in_count || b.edge_count - a.edge_count);
+    const node = id ? adj.nodeMap.get(id) : null;
+    const srcFile = (node && node.source_file) || "";
+    const isGodNode = id ? topIds.has(id) : topLabels.has(String(label).toLowerCase());
+    let relevanceTier = 0;
+    if (relevanceRanking) {
+      if (srcFile && changedFiles.has(srcFile)) relevanceTier = 2;
+      else if (node && node.community !== undefined && node.community !== null && changedCommunities.has(node.community)) relevanceTier = 1;
+    }
+    const pureGodNode = isGodNode && relevanceTier === 0;
+    return {
+      label, in_count: inCount, edge_count: inCount + outCount,
+      source_file: srcFile, relevance_tier: relevanceTier,
+      is_god_node: isGodNode, pure_god_node: pureGodNode,
+    };
+  }).sort((a, b) => {
+    if (relevanceRanking && a.pure_god_node !== b.pure_god_node) return a.pure_god_node ? 1 : -1;
+    if (relevanceRanking && b.relevance_tier !== a.relevance_tier) return b.relevance_tier - a.relevance_tier;
+    return b.in_count - a.in_count || b.edge_count - a.edge_count;
+  });
 
   const base = {
     effect_size,
@@ -1155,6 +1216,23 @@ function _getFrameworkBuiltinSet() {
     else set.add(entry);
   }
   return set;
+}
+
+// Cap on INFERRED neighbors in getNeighbors. null disables (keep all); a
+// non-negative integer caps the INFERRED tail. Anything else falls back to 25.
+function _getInferredNeighborCap() {
+  const cfg = getConfig();
+  const v = cfg ? cfg.inferred_neighbor_cap : undefined;
+  if (v === null) return null;
+  if (Number.isInteger(v) && v >= 0) return v;
+  return 25;
+}
+
+// Relevance ranking of blast_radius drill-down targets. Default on; only an
+// explicit `false` reverts to raw in-degree ordering.
+function _getDrillDownRelevanceRanking() {
+  const cfg = getConfig();
+  return !(cfg && cfg.drill_down_relevance_ranking === false);
 }
 
 // Upstream graphify emits some docstrings as first-class nodes (observed in

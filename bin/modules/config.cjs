@@ -249,6 +249,25 @@ const DEFAULTS = {
     // Express — see graphify.cjs::_FRAMEWORK_BUILTIN_LABELS_DEFAULT). Entries
     // here extend the set; "!Label" removes a default (force-keep).
     framework_builtin_noise: [],
+    // Cap on INFERRED (low-confidence) neighbors returned by get_neighbors.
+    // Upstream graphify emits same-file symbol adjacency as INFERRED `uses`
+    // edges; field-observed a 247-neighbor result was 228 INFERRED / 19
+    // EXTRACTED, the co-location bulk drowning the trustworthy structural
+    // edges. EXTRACTED (and AMBIGUOUS/unknown) neighbors rank first and are
+    // NEVER capped — only the INFERRED tail is trimmed. Graphs that don't
+    // populate confidence are unaffected (everything reads as non-INFERRED).
+    // Set to null to disable capping (still ranks reliable-first).
+    inferred_neighbor_cap: 25,
+    // Rank blast_radius direct_dependents (drill-down targets) by relevance to
+    // the diff — a dependent whose source_file is among the changed symbols'
+    // files, or that shares a Leiden community with a changed symbol, ranks
+    // above an incidental high-fan-in god-node. Raw in-degree ranking surfaces
+    // the most-depended-on nodes (permission enums, event-bus protocols) as top
+    // drill targets even when they relate to the change only tangentially, and
+    // their depth-2 incoming overflows the MCP transport. God-nodes are demoted,
+    // never dropped (they remain real dependents). Set false to revert to raw
+    // in-degree ranking.
+    drill_down_relevance_ranking: true,
     // Project-curated ubiquitous-type override for god-node alarm-fatigue
     // suppression. The stoplist is AUTO-DERIVED by default (top-K god-nodes by
     // degree), so leaving this empty is the recommended path — auto-derivation
