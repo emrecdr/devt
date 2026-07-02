@@ -148,7 +148,11 @@ workflow_types:
         - assert-claim-checks-resolved
         - assert-no-raw-dispatches-this-session
         - assert-knowledge-candidates-tagged
-        - assert-auto-curator-considered
+        # assert-auto-curator-considered is deliberately NOT here: the marker
+        # (auto-curator-considered.txt) is written only by code-review's
+        # auto_curator step, so requiring it hard-blocked dev finalize (dev never
+        # writes it). dev enforces curation-consideration via the inline
+        # assert-claude-mem-harvest in its unconditional harvest step. K213 locks this.
         # tier-aware: assertVerifierRan opts out (ok:true) for dev SIMPLE/TRIVIAL
         # (no verify step); requires verification.json for STANDARD/COMPLEX.
         - assert-verifier-ran
@@ -179,7 +183,10 @@ workflow_types:
         - assert-claim-checks-resolved
         - assert-no-raw-dispatches-this-session
         - assert-knowledge-candidates-tagged
-        - assert-auto-curator-considered
+        # assert-auto-curator-considered removed — same reason as dev.complete:
+        # the marker is code-review-only; quick_implement enforces curation-
+        # consideration via its own harvest_observations / assert-claude-mem-harvest.
+        # K213 locks this.
 
   debug:
     # Intermediate phase — raw-dispatch gate only

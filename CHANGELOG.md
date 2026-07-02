@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.136.0] - 2026-07-02
+
+### Fix: dev + quick_implement finalize hard-blocked by a code-review-only gate
+
+Confirmed pre-existing bug — `dev.complete` **and** `quick_implement.complete` required `assert-auto-curator-considered`, but the marker (`auto-curator-considered.txt`) is written **only** by code-review.md's auto_curator step. Since `advanceState` throws on any blocking gate, a real dev or quick_implement run reaching finalize would throw at `state advance-phase complete` (verified by reproduction). It went unnoticed because full pipelines-to-`complete` are rare in dogfooding.
+
+- **Removed `assert-auto-curator-considered` from `dev.complete` + `quick_implement.complete`.** Both are non-review workflows that enforce curation-consideration via their own unconditional `harvest_observations` / `assert-claude-mem-harvest` gate — the code-review-only marker never applied. `code_review` / `code_review_parallel` keep the gate (they own the auto_curator step + write the marker).
+- **K213** locks the class: each workflow_type's `.complete` set must be satisfiable by that workflow — a STANDARD dev and a quick_implement, each with only the markers their own workflow writes, must reach `complete` without blocking. Drift stack 119 → 120-deep (K94–K213).
+- Surfaced-but-deferred: `code_review_parallel`'s `present_findings` also calls `assert-auto-curator-considered`, and the parallel path has no auto_curator writer step of its own — a probable related review-path gap flagged for a separate design call (does a parallel review run auto_curator, or not).
+
 ## [0.135.0] - 2026-07-02
 
 ### `--dry-run` preview accuracy — reconcile the tier tables with the live gates

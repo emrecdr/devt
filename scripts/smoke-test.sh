@@ -15337,6 +15337,28 @@ else
   fail "K212: tier-aware verify gate wrong — dev_simple=$K212_SIMPLE(exp true) dev_standard=$K212_STANDARD(exp false) code_review=$K212_CR(exp false)"
 fi
 
+# K213: a workflow_type's .complete gate set must be satisfiable by that workflow.
+# Regression guard for the class where a .complete gate requires a marker the
+# workflow never writes — assert-auto-curator-considered (a code_review-only
+# marker) hard-blocked dev + quick_implement finalize (advanceState THROWS on a
+# blocking gate). A STANDARD dev and a quick_implement, each with the markers
+# their own workflow writes, must reach `complete` without blocking.
+_k213() {
+  local d; d=$(mktemp -d); mkdir -p "$d/.devt/state"; echo '{}' > "$d/.devt/config.json"
+  printf 'active: true\nworkflow_type: %s\ntier: %s\nphase: finalize\nfirst_created_at: "2026-07-02T00:00:00Z"\ncreated_at: "2026-07-02T00:00:00Z"\n' "$1" "$2" > "$d/.devt/state/workflow.yaml"
+  echo 'reason=task_too_routine' > "$d/.devt/state/knowledge-candidates-none.txt"
+  [ "$1" = "dev" ] && echo '{"verdict":"VERIFIED","criteria_total":3,"criteria_met":3,"findings":[]}' > "$d/.devt/state/verification.json"
+  (cd "$d" && node "$ROOT/bin/devt-tools.cjs" state advance-phase complete active=false 2>&1) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).advanced===true?'advanced':'blocked')}catch{process.stdout.write('err')}})"
+  rm -rf "$d"
+}
+K213_DEV=$(_k213 dev STANDARD)
+K213_QI=$(_k213 quick_implement SIMPLE)
+if [ "$K213_DEV" = "advanced" ] && [ "$K213_QI" = "advanced" ]; then
+  pass "K213: dev.complete + quick_implement.complete satisfiable by their own workflows (each reaches complete with the markers it writes; the code_review-only auto-curator gate no longer hard-blocks non-review finalize)"
+else
+  fail "K213: complete-gate unsatisfiable — dev=$K213_DEV(exp advanced) quick_implement=$K213_QI(exp advanced)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
