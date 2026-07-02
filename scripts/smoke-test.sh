@@ -15359,6 +15359,21 @@ else
   fail "K213: complete-gate unsatisfiable — dev=$K213_DEV(exp advanced) quick_implement=$K213_QI(exp advanced)"
 fi
 
+# K214: specify.md's PRD template + illustration are lazy-loaded from references/
+# (body-weight deferral). Lock it: the generate step Reads prd-template.md, a
+# specify-guide.md pointer is present, and both reference files exist with real
+# content — so the deferred body can't silently vanish (a missing template would
+# leave the generate step unable to produce a PRD).
+K214_READ=$(/usr/bin/grep -c 'references/prd-template.md' "$ROOT/workflows/specify.md" || true)
+K214_GUIDE=$(/usr/bin/grep -c 'references/specify-guide.md' "$ROOT/workflows/specify.md" || true)
+K214_PRD_OK=$([ -s "$ROOT/references/prd-template.md" ] && /usr/bin/grep -q '## Summary' "$ROOT/references/prd-template.md" && echo 1 || echo 0)
+K214_GUIDE_OK=$([ -s "$ROOT/references/specify-guide.md" ] && /usr/bin/grep -q 'Anti-patterns' "$ROOT/references/specify-guide.md" && echo 1 || echo 0)
+if [ "$K214_READ" -ge 1 ] && [ "$K214_GUIDE" -ge 1 ] && [ "$K214_PRD_OK" = "1" ] && [ "$K214_GUIDE_OK" = "1" ]; then
+  pass "K214: specify.md lazy-loads its PRD template + guide from references/ (generate step Reads prd-template.md; specify-guide.md pointer present; both reference files exist with real content)"
+else
+  fail "K214: specify.md reference deferral broken — prd_read=$K214_READ guide_ref=$K214_GUIDE prd_file=$K214_PRD_OK guide_file=$K214_GUIDE_OK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

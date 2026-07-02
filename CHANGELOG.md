@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.137.0] - 2026-07-02
+
+### Workflow body-weight — defer specify.md's PRD template + illustration to references/
+
+`specify.md` carried a 115-line PRD template (needed only at Step 4) + ~50 lines of best-practices / anti-patterns / example-session illustration up-front on every run. Both are now lazy-loaded from `references/`, matching the pattern specify.md already uses for `questioning-guide.md` / `domain-probes.md` / `council-offramp.md`.
+
+- **`references/prd-template.md`** (new) — the generate step Reads it at Step 4 and fills it; deferred from up-front load (and skipped entirely if the spec is abandoned before Step 4).
+- **`references/specify-guide.md`** (new) — best practices, anti-patterns, and a worked example session; pointer only, Read when useful (not required to execute the steps).
+- **`specify.md` 504 → 344 lines.** The load-bearing `validate_spec` scoring rubric, `success_criteria`, and Memory-layer-integration sections stay inline.
+- **K214** locks the deferral (generate step Reads `prd-template.md`; `specify-guide.md` pointer present; both reference files exist with real content — so the deferred body can't silently vanish). Drift stack 120 → 121-deep (K94–K214).
+
 ## [0.136.0] - 2026-07-02
 
 ### Fix: dev + quick_implement finalize hard-blocked by a code-review-only gate
