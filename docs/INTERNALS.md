@@ -386,7 +386,7 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 **Cap.** 96 KB total. Files past the cap surface in `paths_excluded` and agents Read them on demand.
 
-**Consumer workflows.** `dev-workflow.md`, `quick-implement.md`, `code-review.md`, `research-task.md` inject the block as `<governing_rules rules_hash="...">` with sub-tags `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>`, `<review_checklist>` into the **code-reviewer, verifier, and researcher** dispatch templates — the 3 READ-ONLY agents that previously re-read CLAUDE.md + 1–4 rule files on every dispatch.
+**Consumer workflows.** `dev-workflow.md` (its verifier + researcher dispatch templates live in the tier files `dev-workflow.standard.md` / `dev-workflow.complex.md` since the tier-partition; code-reviewer stays in the spine), `quick-implement.md`, `code-review.md`, `research-task.md` inject the block as `<governing_rules rules_hash="...">` with sub-tags `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>`, `<review_checklist>` into the **code-reviewer, verifier, and researcher** dispatch templates — the 3 READ-ONLY agents that previously re-read CLAUDE.md + 1–4 rule files on every dispatch.
 
 **Agent behavior.** Those agents prefer inline content over on-disk Reads when the block is present; fall back to disk Reads when a specific sub-tag is empty (project lacks that file) or `governing_rules.content` is empty (no project rules).
 

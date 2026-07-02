@@ -107,7 +107,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### Verifier memory signal
 
-**Rule.** Every verifier dispatch in `workflows/dev-workflow.md` and `workflows/code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step that runs `node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact`. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan.
+**Rule.** Every verifier dispatch in `workflows/dev-workflow.standard.md` (the tier-partitioned verify step) and `workflows/code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step that runs `node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact`. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan.
 
 **Why.** Saves 3–4 MCP round trips per verify iteration. The CLI's `--signal` mode returns `{counts: {<domain>: N}, top: [{id, title, doc_type}]}` in one call — bypassing the mutually-exclusive precedence trap of the standalone `--count` / `--domain-counts` / `--top` flags.
 
