@@ -61,7 +61,7 @@ BEFORE starting the review, load the following in order:
 what the programmer claims. Then VERIFY every claim by reading the actual code.
 Summaries document what the programmer SAID they did. You verify what ACTUALLY exists.
 
-Do NOT skip any of these. Reviewing without loading the project's rules means reviewing against your own preferences, which is worthless.
+Do NOT skip any of these — reviewing without the project's rules means reviewing against your own preferences, not the project's.
 </context_loading>
 
 <execution_flow>

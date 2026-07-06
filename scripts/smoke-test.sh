@@ -15881,6 +15881,37 @@ else
   fail "K232: evolution test-exclusion — $K232_CHECK"
 fi
 
+# K234: no agent/skill body instructs the model to reproduce its OWN internal
+# reasoning as response text. Newer Claude models (Fable 5 era) can trigger a
+# reasoning_extraction refusal — and an elevated fallback to a heavier model —
+# when a prompt tells them to echo/transcribe/output their internal reasoning,
+# chain-of-thought, or thought process verbatim. Bodies that legitimately ask
+# an agent to "explain your reasoning for this finding" are fine: the gate only
+# fires on a reproduce-verb paired with a QUALIFIED reasoning-noun (internal /
+# chain-of-thought / thought-process / trace / tokens / hidden / raw / verbatim),
+# never bare "reasoning". Self-tests that a synthetic offender is caught so the
+# pattern can't silently rot into an always-pass.
+K234_CHECK=$(node -e "
+  const fs=require('fs');
+  const VERB='(echo|transcribe|reproduce|repeat|dump|print|output|paste|reveal|narrate|verbalize|surface|write out|show)';
+  const NOUN='(internal reasoning|chain[- ]of[- ]thought|thought process|thinking process|reasoning trace|reasoning tokens|hidden reasoning|raw reasoning|your reasoning verbatim)';
+  const re=new RegExp(VERB+'[^.\\\\n]{0,40}'+NOUN,'i');
+  // self-test: the pattern MUST catch a real offender and MUST NOT catch legit prose
+  if(!re.test('transcribe your internal reasoning into the output')){console.log('SELFTEST_FAIL:false-negative');process.exit(0);}
+  if(re.test('explain your reasoning for each finding in review.md')){console.log('SELFTEST_FAIL:false-positive');process.exit(0);}
+  const files=[];
+  for(const f of fs.readdirSync('$ROOT/agents')) if(f.endsWith('.md')) files.push('$ROOT/agents/'+f);
+  for(const d of fs.readdirSync('$ROOT/skills',{withFileTypes:true})) if(d.isDirectory()){const p='$ROOT/skills/'+d.name+'/SKILL.md'; if(fs.existsSync(p)) files.push(p);}
+  const hits=[];
+  for(const f of files){for(const line of fs.readFileSync(f,'utf8').split('\\n')) if(re.test(line)) hits.push(f.replace('$ROOT/','')+': '+line.trim().slice(0,80));}
+  console.log(hits.length===0?'OK':'HITS:'+hits.join(' | '));
+" 2>&1 || echo "FAIL:node error")
+if [ "$K234_CHECK" = "OK" ]; then
+  pass "K234: no agent/skill body instructs the model to reproduce its internal reasoning (reasoning_extraction refusal guard)"
+else
+  fail "K234: reasoning-extraction footgun — $K234_CHECK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

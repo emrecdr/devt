@@ -49,7 +49,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-section --file plan.m
 
 Exact-then-prefix heading match; `"Phase 2"` finds `## Phase 2: ...`. Returns `{ok:true, section, level, content, match}` on hit, `{ok:false, reason}` on miss. For iteration 1 or whole-plan re-reads (verifier-style requirement-coverage sweeps), use the full Read tool — section-read is for surgical re-reads when the prior agent's feedback is phase-scoped.
 
-Do NOT skip any of these. Missing context causes implementation errors that waste everyone's time.
+Do NOT skip any of these — the steps below assume this context is loaded.
 </context_loading>
 
 <execution_flow>

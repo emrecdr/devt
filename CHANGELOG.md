@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.144.0] - 2026-07-06
+
+### Newer-model prompt hygiene (safe subset)
+
+Current Anthropic guidance for the Fable 5 / Opus 4.x generation deprecates two habits carried over from older models: anxious over-emphasis, and prompts that make the model reproduce its own internal reasoning as response text. This ships only the provably-safe part of that alignment — the wholesale de-prescription of the two largest agent files (programmer.md's 21 steps, code-reviewer.md's 41) is deferred: 60 of their exact prose strings are smoke-gate-asserted, and the quality gain from restructuring them is unproven on Fable, so churning them now would be mechanism-firing without demonstrated value.
+
+- **Preventive `reasoning_extraction` guard (gate K234).** Newer Claude models can trigger a `reasoning_extraction` refusal — and an elevated fallback to a heavier model — when a prompt tells them to echo, transcribe, or output their internal reasoning / chain-of-thought / thought process verbatim. No agent or skill body does this today; K234 keeps it that way. The pattern fires only on a reproduce-verb paired with a *qualified* reasoning-noun (internal / chain-of-thought / thought-process / trace / tokens / hidden / raw / verbatim), never bare "reasoning", so a legitimate "explain your reasoning for this finding" instruction is untouched. The gate self-tests against a synthetic false-positive and false-negative so the pattern can't silently rot into an always-pass. Drift-guard stack 140 → 141 deep (K94–K234).
+- **Anxious closers calmed.** The two `context_loading` closers that leaned on anxiety ("...that waste everyone's time", "...which is worthless") now state the directive plus a factual reason without the pressure language — aligned with the current-model preference for brief, non-anxious instructions. No gate-asserted string touched.
+
 ## [0.143.0] - 2026-07-06
 
 ### Token-lightening: transport dedup (zero output-quality change)
