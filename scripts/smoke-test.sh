@@ -16007,6 +16007,30 @@ else
   fail "K236: review-weight — $K236_CHECK"
 fi
 
+# K237: memory-pre-flight skill keeps the HOT protocol inline (preloaded by 8-9
+# agents per dispatch) but lazy-loads its cold detail. Asserts: the skill body
+# retains the PREFLIGHT scratchpad-line format + the deny-recovery source table
+# (the protocol an agent needs mid-edit); it points to the on-demand
+# `references/memory-pre-flight-details.md`; that reference exists with real
+# content (the 5-lane table + config + multi-root moved out of the preloaded
+# body); and the skill stays under a body-weight ceiling so the cold detail
+# can't silently creep back into every dispatch.
+K237_SKILL="$ROOT/skills/memory-pre-flight/SKILL.md"
+K237_REF="$ROOT/references/memory-pre-flight-details.md"
+K237_FAIL=""
+grep -q "PREFLIGHT <ISO-timestamp> <action> <file_path>" "$K237_SKILL" || K237_FAIL="$K237_FAIL no-PREFLIGHT-format;"
+grep -q "preflight-denies.jsonl" "$K237_SKILL" || K237_FAIL="$K237_FAIL no-deny-recovery;"
+grep -q "references/memory-pre-flight-details.md" "$K237_SKILL" || K237_FAIL="$K237_FAIL no-reference-pointer;"
+[ -f "$K237_REF" ] || K237_FAIL="$K237_FAIL reference-missing;"
+grep -q "5-Lane File Pre-Flight" "$K237_REF" 2>/dev/null || K237_FAIL="$K237_FAIL reference-no-5lane;"
+K237_LINES=$(wc -l < "$K237_SKILL" 2>/dev/null | tr -d ' ')
+[ "${K237_LINES:-999}" -le 160 ] || K237_FAIL="$K237_FAIL skill-over-160-lines($K237_LINES);"
+if [ -z "$K237_FAIL" ]; then
+  pass "K237: memory-pre-flight keeps hot protocol inline (PREFLIGHT format + deny recovery), lazy-loads cold detail to references/ (${K237_LINES} lines)"
+else
+  fail "K237: memory-pre-flight slim broke —$K237_FAIL"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

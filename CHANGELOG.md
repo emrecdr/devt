@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.147.0] - 2026-07-06
+
+### Slim the memory-pre-flight skill (per-dispatch weight)
+
+The `memory-pre-flight` skill is preloaded in full into 8–9 agents' system prompts on every dispatch — but roughly half of it was cold-path detail (the full Brief structure, the 5-lane escalation mechanics, config, multi-root behavior, common pitfalls) that an agent needs only when it actually escalates. That half was paying per-dispatch rent for a minority-case reference.
+
+- **Hot protocol stays inline; cold detail lazy-loads.** The skill body now carries only what an agent needs mid-edit — when the protocol applies, how to read `.devt/state/preflight-brief.md`, the `PREFLIGHT` scratchpad-line format + decision tree, the hook behavior, and the deny-recovery source table. The cold detail moved to `references/memory-pre-flight-details.md`, Read on demand (the same lazy-load pattern `specify.md` already uses for its PRD template). Result: **261 → 118 lines** (~55% smaller) in the preloaded body, saving that weight on every programmer / reviewer / tester / verifier / researcher / architect / debugger / docs-writer dispatch.
+- No behavior change: the pre-flight-guard hook reads the scratchpad, not the skill, so the protocol contract is unchanged; the load-bearing strings (`preflight-brief.md`, multi-root `source_root`) stay in the body.
+- Gate **K237** (behavioral: the skill retains the `PREFLIGHT` format + deny-recovery table, points to the reference, the reference exists with the 5-lane detail, and the body stays under a line ceiling so the cold detail can't creep back). Drift-guard stack 143 → 144 deep (K94–K237).
+
 ## [0.146.0] - 2026-07-06
 
 ### Review-weight: scale ceremony to change size (field receipt, Scope A)
