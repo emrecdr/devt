@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.146.0] - 2026-07-06
+
+### Review-weight: scale ceremony to change size (field receipt, Scope A)
+
+A field review argued that the heavyweight review pipeline runs the same way for a two-line change as for a cross-cutting refactor — and that the "correct" path fires friction warnings for the sensible lightweight path. This ships the safe half of the fix: an explicit lightweight flag plus a **fail-safe advisory** that recommends light-vs-heavy on every review but never auto-acts. Auto-selection is deliberately deferred until the advisory has a track record (the field priors are n=1).
+
+- **`review-weight assess` — a fail-safe light-vs-heavy verdict.** New `bin/modules/review-weight.cjs` computes, from the diff, whether a review can safely run light: logic-file count (lockfiles / `requirements*.txt` / `VERSION` / `*.md` excluded — a "12-file" change that is 10 lockfiles + 2 logic files is small), domain count, and **risk-surface hits** (framework-general patterns: auth / authz / rbac / crypto / secrets / redaction, schema / migrations / `*.sql`, core / shared / event-bus / error-bases). Combined with the blast headline (`effect_size`, `god_node_match`, `tier`) the caller already computed, the verdict is `light` **only** when danger is provably absent: `god_node_match: false` and no risk-surface path are HARD gates; `effect_size` only corroborates (it is popularity-derived and noisy). A change the graph can't speak to (`tier: skip` / no headline) is **not** eligible — absence of a headline is not evidence of safety. Every threshold is project-overridable under `.devt/config.json::review.*`; the defaults are framework-general (no project-specific paths).
+- **Advisory shadow mode (non-gating).** `code-review.md` context_init now runs the verdict and announces it (`[review-weight] LIGHT-eligible …` / `HEAVY recommended — <reasons>`) on every review. It changes nothing on its own — it accumulates a track record so a future cal can decide whether the recommendation is reliable enough to auto-act on. Light must be earned, not granted.
+- **`/devt:review --lite` / `--full`.** `--lite` (operator judges the change small) runs the graphify headline (single `blast_radius`) plus the deterministic god-node check but skips the heavyweight multi-tier drill-down; `--full` forces the full drill-down. Neither is auto-selected — only the operator's flag changes behavior.
+- Gate **K236** (behavioral: small-clean → light; auth path / god-node / >2 domains / effect_size large → heavy hard-gates; graph-blind → not eligible; lockfile-heavy → stays light). Drift-guard stack 142 → 143 deep (K94–K236).
+
+Deferred (per the field receipt's own n=1 caveat): auto-selection of the light path, review-lens lane partitioning, and memory contradiction-flagging — each its own cal once the advisory has run enough real reviews.
+
 ## [0.145.0] - 2026-07-06
 
 ### Blast-radius transparency + degree coherence (field receipt)

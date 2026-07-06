@@ -122,6 +122,14 @@ function main() {
         if (typeof code === "number" && code !== 0) process.exit(code);
         break;
       }
+      case "review-weight": {
+        // review-weight assess — fail-safe light-vs-heavy review verdict from
+        // the diff (path-based risk surface + logic-file/domain counts) plus the
+        // caller-supplied blast headline (effect_size / god_node / tier).
+        const code = require("./modules/review-weight.cjs").run(subcommand, args.slice(2));
+        if (typeof code === "number" && code !== 0) process.exit(code);
+        break;
+      }
       case "bash-guard": {
         // bash-guard — PreToolUse Bash classifier; reads stdin tool-call JSON,
         // emits hook response. See bin/modules/bash-guard.cjs.

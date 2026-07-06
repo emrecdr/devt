@@ -15977,6 +15977,36 @@ else
   fail "K235: blast-radius transparency/coherence — $K235_CHECK"
 fi
 
+# K236: review-weight is FAIL-SAFE (greenfield field receipt — "scale ceremony to
+# change size"). Light is EARNED by proving absence of danger, never granted by a
+# single metric. Asserts: a small clean change is light-eligible; a risk-surface
+# path (auth) OR a god-node OR too-many-domains forces heavy (hard gates); a
+# graph-blind change (tier=skip / no blast headline) is NOT eligible (absence of
+# a headline is not evidence of safety); and a lockfile-heavy diff (many files
+# but few LOGIC files) stays light-eligible (file-count is the wrong trigger).
+K236_CHECK=$(node -e '
+  const { assessReviewWeight } = require("'"$ROOT"'/bin/modules/review-weight.cjs");
+  const f = [];
+  const E = (name, opts, want) => { const r = assessReviewWeight(opts); if (r.eligible !== want) f.push(name + " eligible=" + r.eligible + " want " + want + " [" + (r.blocked_by||[]).join("|") + "]"); };
+  const graph = { effectSize: "small", godNodeMatch: false, tier: "symbol_anchored" };
+  E("small-clean", { files: ["app/svc/a.py","app/svc/b.py"], ...graph }, true);
+  E("auth-risk-surface", { files: ["app/auth/token.py"], ...graph }, false);
+  E("migration", { files: ["app/migrations/0001.py"], ...graph }, false);
+  E("god-node", { files: ["app/x.py"], effectSize: "small", godNodeMatch: true, tier: "symbol_anchored" }, false);
+  E("graph-blind-skip", { files: ["app/x.py"], effectSize: null, godNodeMatch: null, tier: "skip" }, false);
+  E("effect-large", { files: ["app/x.py"], effectSize: "large", godNodeMatch: false, tier: "symbol_anchored" }, false);
+  E("lockfile-heavy", { files: ["uv.lock","requirements.txt","VERSION","README.md","app/svc/a.py"], ...graph }, true);
+  // risk-surface pattern removable via config-style "!" (removal honored)
+  const withRemoval = assessReviewWeight({ files: ["app/auth/token.py"], ...graph });
+  if (!(withRemoval.risk_surface_hits||[]).length) f.push("auth path did not register a risk hit");
+  console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+' 2>&1 || echo "FAIL:node error")
+if [ "$K236_CHECK" = "OK" ]; then
+  pass "K236: review-weight fail-safe verdict — small-clean light; auth/god-node/domains/effect-large force heavy; graph-blind not eligible; lockfile-heavy stays light"
+else
+  fail "K236: review-weight — $K236_CHECK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

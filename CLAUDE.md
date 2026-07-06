@@ -47,7 +47,7 @@ Use `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh` to selectively disable individual ho
 
 Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. Modules in `bin/modules/`:
 
-`init`, `config`, `state`, `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `evolution`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`.
+`init`, `config`, `state`, `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `evolution`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`, `review-weight`.
 
 Deep-dive per module: → docs/INTERNALS.md (CLI Modules).
 
@@ -130,7 +130,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 142-deep drift-guard stack K94-K235) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 143-deep drift-guard stack K94-K236) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

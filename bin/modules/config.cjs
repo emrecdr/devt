@@ -369,6 +369,36 @@ const DEFAULTS = {
       complex: 75,
     },
   },
+  // Review-weight assessment (`review-weight assess`) — the fail-safe light-vs-
+  // heavy verdict that lets a review scale ceremony to change size. A review is
+  // "light-eligible" only when the graph headline affirms it (effect_size small,
+  // no god-node) AND the diff proves absence of danger: no risk-surface path,
+  // few logic files, few domains. Light is EARNED by proving safety, never
+  // granted by a single metric — so the risk-surface and god-node terms are hard
+  // gates, effect_size only corroborates. Defaults are framework-general; every
+  // knob is project-overridable.
+  review: {
+    // Extra risk-surface path patterns (regex, case-insensitive, matched against
+    // the posix path). Additive to the framework-general defaults in
+    // review-weight.cjs::DEFAULT_RISK_SURFACE_PATTERNS (auth/rbac/crypto/secret/
+    // redaction, schema/migration/*.sql, core/shared/event-bus/error-bases).
+    // Prefix an entry with "!" to REMOVE a default. A path matching any pattern
+    // forces heavy.
+    risk_surface_patterns: [],
+    // Extra non-logic exclude patterns (lockfiles, requirements*.txt, VERSION,
+    // *.md, CHANGELOG are excluded by default). Excluded files don't count
+    // toward logic-file/domain totals and never register as a risk hit — a diff
+    // that is only a lockfile bump has near-zero review risk. "!"-prefix removes.
+    logic_file_excludes: [],
+    // A change with more than this many LOGIC files is not light-eligible.
+    // Directional prior (n=1 field receipt: "modest confidence, could be 6–8").
+    lite_max_logic_files: 5,
+    // A change spanning more than this many domains is not light-eligible.
+    lite_max_domains: 2,
+    // How many leading path segments define a "domain" (coarse grouping of
+    // "distinct areas touched"). 2 = e.g. `app/services`.
+    domain_depth: 2,
+  },
   // Dispatch scope advisory thresholds — consumed by hooks/dispatch-scope-guard.sh
   // (PreToolUse on Task). Advisory only: warnings append to
   // .devt/state/dispatch-warnings.jsonl, the dispatch never blocks. Tune higher

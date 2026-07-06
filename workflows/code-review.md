@@ -221,6 +221,8 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 
 **Caveat + calibration passthrough.** When the plan carries `symbol_anchored_caveat`, prepend it as a one-line note at the top of `graph-impact.md` (blast_radius ran against the last-committed layout — reviewers must know moved/new paths are unrepresented). When it carries `severity_calibration_note`, append the note as a `## Severity Calibration` section to `graph-impact.md` — lane reviewers weight findings by actual semantic delta instead of inflating severity off a popularity-driven `effect_size`, while still using the caller sets to verify wiring.
 
+**Lite mode.** When the command injected `<mode>lite</mode>` (the operator judged the change small via `--lite`), execute the headline tier call above but SKIP the multi-tier drill-down follow-up in this substep AND the hyperedge/ambiguous augmentation in substep 7 — the headline (`effect_size` / `god_node_match` / `modules_touched`) plus the deterministic god-node check (substep 7's `check-large-files`) is the lite signal. The drill-down is a heavy-path tool for when the caller set is too large to grep; on a small change the reviewer reads the code directly. Emit `[review-weight] lite mode — headline only, multi-tier drill-down skipped per --lite`. `<mode>full</mode>` forces the full drill-down regardless.
+
 **Multi-tier follow-up (post-impact-plan drill-down).** When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response — rank via the `direct_dependents_degrees` array (`{label, in_count, edge_count, source_file, relevance_tier, is_god_node, pure_god_node}`, already sorted by RELEVANCE to the diff — dependents whose `source_file` is among the changed symbols' files (`relevance_tier: 2`), or that share a Leiden community with a changed symbol (`relevance_tier: 1`), rank first; incidental high-fan-in god-nodes are demoted to the bottom but remain present; `direct_dependents` carries the same order, so position IS the rank); fall back to array position on older response shapes. When the response has fewer than 3 dependents, drill on however many exist (skip the drill-down step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Why: one blast_radius call alone leaves lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
 
 **Empty drill-down handling**: when `get_neighbors` returns `results: []` for a top-3 dependent (e.g., a module-level container where callers are dynamically dispatched), record the empty result as `## Drill-down: <SYM> (empty — dynamic dispatch suspected) [call: <correlation_id>]` and substitute the next-ranked dependent in the cap-3 slot. Bounded: try up to 5 ranked dependents before giving up on completing the top-3.
@@ -410,6 +412,24 @@ fi
 ```
 
 The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason satisfies the gate. The point is to make the consideration explicit — silent skips are the failure mode.
+
+**Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline already cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6). It runs on every review so its recommendation accumulates a track record against reality: light must be EARNED (proven absence of god-node + risk-surface path), never granted by a single metric.
+
+```bash
+RW_TIER=$(echo "$CTX" | jq -r '.impact_plan.tier // empty')
+RW_GOD=$(echo "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
+RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
+RW_ARGS="--base=${PRIMARY_BRANCH:-main}"
+[ -n "$RW_TIER" ]   && RW_ARGS="$RW_ARGS --tier=$RW_TIER"
+[ -n "$RW_GOD" ]    && RW_ARGS="$RW_ARGS --god-node=$RW_GOD"
+[ -n "$RW_EFFECT" ] && RW_ARGS="$RW_ARGS --effect-size=$RW_EFFECT"
+RW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight assess $RW_ARGS 2>/dev/null || echo '{}')
+if [ "$(echo "$RW" | jq -r '.eligible // false')" = "true" ]; then
+  echo "[review-weight] LIGHT-eligible — $(echo "$RW" | jq -r '.logic_file_count') logic file(s), $(echo "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
+else
+  echo "[review-weight] HEAVY recommended — $(echo "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
+fi
+```
 </step>
 
 <step name="scope_check" gate="scope size measured + parallel decision made if applicable">

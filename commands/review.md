@@ -1,7 +1,7 @@
 ---
 name: review
 description: Standalone code review — READ-ONLY analysis. --focus routes to specialized reviews (architecture, quality gates, security emphasis).
-argument-hint: "[--focus=code|arch|quality|security] [--quick]"
+argument-hint: "[--focus=code|arch|quality|security] [--quick] [--lite|--full]"
 ---
 
 <tool_restrictions>
@@ -29,6 +29,8 @@ Routing table (apply first match):
 If an unrecognized `--focus=<name>` value appears, STOP with error: `"Invalid --focus value '<name>'. Valid: code, arch, quality, security."`
 
 `--quick` is an orthogonal flag — when present, also inject `<mode>quick</mode>` so the reviewer skips deep community-filter analysis.
+
+`--lite` / `--full` are orthogonal flags that scale review ceremony to change size. `--lite` (when the operator has judged the change small) injects `<mode>lite</mode>` — context_init runs the graphify **headline** (single blast_radius: effect_size / god_node / modules) plus the deterministic god-node check, but skips the heavyweight multi-tier drill-down. `--full` injects `<mode>full</mode>`, forcing the complete drill-down regardless. Neither is auto-selected — the workflow's `review-weight` advisory (below) announces a light-vs-heavy *recommendation* on every review, but only the operator's flag changes behavior.
 
 **Step 2 — Read the resolved workflow file via the Read tool.**
 
