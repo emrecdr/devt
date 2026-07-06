@@ -258,6 +258,15 @@ const DEFAULTS = {
     // populate confidence are unaffected (everything reads as non-INFERRED).
     // Set to null to disable capping (still ranks reliable-first).
     inferred_neighbor_cap: 25,
+    // Raw-dependent count at/below which blast_radius exposes the FULL
+    // unfiltered direct-dependent set (`raw_direct_dependents`), with the noise
+    // filter demoted to an advisory annotation. Keyed on dependent count, not
+    // file count — a 2-file change can touch a symbol with 200 dependents, a
+    // 10-file change 15. At small scale the filter creates a blind spot to solve
+    // a problem that doesn't exist (the reviewer can just read the list); above
+    // it the filter earns its keep. `direct_dependents` stays the filtered
+    // risk-sizing view regardless. Set null to always keep filtered-only.
+    raw_dependents_full_view_threshold: 30,
     // Rank blast_radius direct_dependents (drill-down targets) by relevance to
     // the diff — a dependent whose source_file is among the changed symbols'
     // files, or that shares a Leiden community with a changed symbol, ranks

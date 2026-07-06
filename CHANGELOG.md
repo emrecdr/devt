@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.145.0] - 2026-07-06
+
+### Blast-radius transparency + degree coherence (field receipt)
+
+A field review found that graphify's blast-radius drill-down was untrustworthy in three specific ways, all in devt's own consumption code (`bin/modules/graphify.cjs`, not upstream graphify). This ships the safe, unambiguous subset of the fixes — correctness and telemetry only, no change to which nodes are considered dependents.
+
+- **`edge_count: 0` on a real dependent — fixed.** `blastRadius` held dependents as labels and recomputed each one's degree by re-resolving the label back to a node id — which returned the *first* node with that label, an edgeless namesake in another module when a homonym existed. A dependent reached through a real edge would then report `edge_count: 0`, a self-contradiction that eroded trust in the whole degree signal. The traversal now carries the real BFS-visited node id through to the degree computation, so degrees are always measured against the exact node that was reached. Any residual `edge_count: 0` (a genuine graph inconsistency) is flagged `low_confidence` and counted in `edge_count_zero_flagged` rather than presented as fact.
+- **Filtered consumers are no longer a black box.** The noise/test-path/DI-aggregation filters dropped dependents with only a per-category count emitted — a reviewer asking "what else must I check" couldn't see *which* consumers were filtered, and a wrongly-filtered real consumer was invisible. `blast_radius` and `get_neighbors` now emit a capped, reason-coded `dropped_sample` (`{label, reason, source_file, depth}`) so every filtered consumer is auditable. (Field case: a route was silently filtered as a file-node; the sample now surfaces it by name and reason.)
+- **The filter and the reviewer's question are no longer conflated.** `effect_size` legitimately wants the filtered set (risk sizing), but "what else depends on this" wants the raw set. When the raw dependent count is small enough for a human to read (`graphify.raw_dependents_full_view_threshold`, default 30, keyed on dependent count — not file count), `blast_radius` now exposes the full unfiltered `raw_direct_dependents` (each annotated with its `filtered_reason` or `null`) and demotes the noise filter to an advisory annotation. Above the threshold the filter earns its keep. `direct_dependents` remains the filtered risk-sizing view throughout.
+- Gate **K235** (behavioral: a homonym-carrying synthetic graph proves the degree fix distinguishes from the pre-fix re-resolution, plus `dropped_sample` reason coverage and small-diff raw exposure). Drift-guard stack 141 → 142 deep (K94–K235).
+
+Upstream-owned findings from the same review (Leiden community over-fragmentation, incremental-update phantom deletions, producer-suppression extraction blind spots) are relayed to graphify rather than reimplemented here — devt guards nonsensical output but does not re-derive graphify's algorithms.
+
 ## [0.144.0] - 2026-07-06
 
 ### Newer-model prompt hygiene (safe subset)

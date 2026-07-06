@@ -686,11 +686,22 @@ function getNeighbors(symbol, options) {
   let filteredNoiseCount = 0;
   let filteredTestPathCount = 0;
   let filteredDIAggregationCount = 0;
+  // Transparency: same reason-coded dropped-sample surface as blast_radius, so a
+  // drill-down that filters a real caller is auditable, not a black box.
+  const droppedSample = [];
+  const droppedSeen = new Set();
+  const DROPPED_SAMPLE_CAP = 15;
+  const recordDrop = (label, reason, srcFile, dep) => {
+    if (!droppedSeen.has(label) && droppedSample.length < DROPPED_SAMPLE_CAP) {
+      droppedSeen.add(label);
+      droppedSample.push({ label, reason, source_file: srcFile || "", depth: dep });
+    }
+  };
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
     const label = node.label || id;
-    if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; continue; }
-    if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
+    if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; recordDrop(label, "noise", node && node.source_file, info.depth); continue; }
+    if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; recordDrop(label, "test_path", node && node.source_file, info.depth); continue; }
 
     // DI-aggregation collapse: when many nodes share one DI-pattern source_file,
     // keep one representative + count the rest as collapsed. Marker field
@@ -698,7 +709,7 @@ function getNeighbors(symbol, options) {
     // suppressed so they can drill down if needed.
     const src = (node && node.source_file) || "";
     if (src && DI_AGGREGATION_BASENAMES.test(src) && (sourceFileCounts.get(src) || 0) > COLLAPSE_THRESHOLD) {
-      if (seenDIAggregator.has(src)) { filteredDIAggregationCount++; continue; }
+      if (seenDIAggregator.has(src)) { filteredDIAggregationCount++; recordDrop(label, "di_aggregation", src, info.depth); continue; }
       seenDIAggregator.add(src);
       items.push({
         id,
@@ -754,6 +765,9 @@ function getNeighbors(symbol, options) {
     } : {}),
     ...(confidenceTelemetry || {}),
   } : null;
+  // Carry the reason-coded dropped sample on the same envelope as the filter
+  // counts, so every return path (plain / truncated / capped) surfaces it.
+  if (filterTelemetry && droppedSample.length > 0) filterTelemetry.dropped_sample = droppedSample;
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
   if (!maxBytes) {
     const base = { source: "graphify", results: rankedItems };
@@ -866,7 +880,12 @@ function blastRadius(symbols, _options) {
     };
   }
   const adj = loaded.cache.adj;
-  const direct = new Set();
+  // direct maps label → the BFS-visited node id. Carrying the real id (instead
+  // of re-resolving the label later) is what keeps degree data coherent: label
+  // re-resolution via _resolveOne returns the FIRST homonym, which can be an
+  // edgeless namesake in another module — the source of the field-observed
+  // "direct dependent with edge_count:0" contradiction.
+  const direct = new Map();
   const indirect = new Set();
   const modules = new Set();
   const ambiguous = [];
@@ -892,6 +911,19 @@ function blastRadius(symbols, _options) {
   // labeled one — "which files to open to verify wiring" — with zero edge
   // tracing (the graph already has these; we just stopped hiding them).
   const incomingFileCounts = new Map();
+
+  // Transparency (greenfield field receipt): the noise filter answers "how big
+  // is the blast" (risk sizing) but a reviewer also needs "what else must I
+  // check" — the dropped consumers. droppedSample surfaces a capped, reason-
+  // coded sample of every filtered dependent so a wrongly-filtered real consumer
+  // (the field case: a route + DI provider silently collapsed 20→1) is visible
+  // instead of a black box. rawDirectMap retains the pre-filter depth-1 set,
+  // deduped by label, so a small-diff review can be shown the full unfiltered
+  // consumer list — the filter is the wrong tool at a scale a human can read.
+  const droppedSample = [];
+  const droppedSeen = new Set();
+  const DROPPED_SAMPLE_CAP = 15;
+  const rawDirectMap = new Map();
 
   for (const sym of symbols) {
     const seedId = _resolveOne(adj, sym);
@@ -922,42 +954,60 @@ function blastRadius(symbols, _options) {
       if (id === seedId) continue;
       const node = adj.nodeMap.get(id);
       const label = node && node.label ? node.label : id;
+      const srcFile = (node && node.source_file) || "";
       // Raw-count tracking BEFORE any filter so receipt-#8-required raw_direct_count
       // / raw_indirect_count telemetry stays auditable per cal #34 #5b spec.
       if (info.depth === 1) rawDirectCount++;
       else if (info.depth === 2) rawIndirectCount++;
 
+      // Retain the raw depth-1 consumer (deduped by label) so the small-diff
+      // full-view can expose it; filtered ones get their reason stamped below.
+      let rawItem = null;
+      if (info.depth === 1) {
+        rawItem = rawDirectMap.get(label);
+        if (!rawItem) { rawItem = { label, source_file: srcFile, filtered_reason: null }; rawDirectMap.set(label, rawItem); }
+      }
+      // Record a dropped dependent with its filter reason — the transparency
+      // surface. Deduped by label, capped, so the sample stays small but every
+      // filter class is representable.
+      const recordDrop = (reason) => {
+        if (rawItem && rawItem.filtered_reason === null) rawItem.filtered_reason = reason;
+        if (!droppedSeen.has(label) && droppedSample.length < DROPPED_SAMPLE_CAP) {
+          droppedSeen.add(label);
+          droppedSample.push({ label, reason, source_file: srcFile, depth: info.depth });
+        }
+      };
+
       // Skip noise: primitives, docstrings, file/concept/JSON-key nodes, +
       // project-configured extras. Without filtering, blast_radius reports
       // `int`/`str`/docstring fragments as "dependents" of every queried
       // symbol — accurate to the graph topology, useless as signal.
-      if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; continue; }
+      if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; recordDrop("noise"); continue; }
 
       // Cal #34 #5b — test-path filter. Mirrors F2 (cal #30.3) from getNeighbors.
       // Receipt #8: indirect_dependents had 150+ entries dominated by
       // MagicMock/AsyncMock/test_inbound_push_failure_* — useful as test-coverage
       // info but not as "what production code depends on this." F2 drops with
       // telemetry so the reduction is auditable per [[telemetry-on-reduction]].
-      if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; continue; }
+      if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; recordDrop("test_path"); continue; }
 
       // Cal #34 #5b — DI-aggregation collapse. Mirrors G1 (cal #31.B) from
       // getNeighbors. Receipt #8: direct_dependents had Depends/Select/Page/
       // get_*_repository entries — framework wiring + DI patterns where one
       // source_file (factory.py, dependencies.py, etc.) contributes many edges.
       // Collapse (not drop) to preserve signal at 1/N volume.
-      const src = (node && node.source_file) || "";
-      if (src && DI_AGGREGATION_BASENAMES.test(src)) {
+      if (srcFile && DI_AGGREGATION_BASENAMES.test(srcFile)) {
         const counts = info.depth === 1 ? sourceFileCountsDirect : sourceFileCountsIndirect;
         const seen = info.depth === 1 ? seenDIDirect : seenDIIndirect;
-        if ((counts.get(src) || 0) > COLLAPSE_THRESHOLD) {
-          if (seen.has(src)) { filteredDIAggregationCount++; continue; }
-          seen.add(src);
+        if ((counts.get(srcFile) || 0) > COLLAPSE_THRESHOLD) {
+          if (seen.has(srcFile)) { filteredDIAggregationCount++; recordDrop("di_aggregation"); continue; }
+          seen.add(srcFile);
           // Keep the representative (one label) — the collapsed-count is
           // surfaced via filteredDIAggregationCount in noise_telemetry.
         }
       }
 
-      if (info.depth === 1) direct.add(label);
+      if (info.depth === 1) direct.set(label, id);
       else if (info.depth === 2) indirect.add(label);
       if (node && node.source_file) modules.add(path.dirname(node.source_file));
       // Include source_file so consumers can show the colliding module.
@@ -1052,8 +1102,11 @@ function blastRadius(symbols, _options) {
       if (snode && snode.community !== undefined && snode.community !== null) changedCommunities.add(snode.community);
     }
   }
-  const directDegrees = Array.from(direct).map((label) => {
-    const id = _resolveOne(adj, label);
+  let edgeCountZeroFlagged = 0;
+  const directDegrees = Array.from(direct.entries()).map(([label, id]) => {
+    // id is the BFS-visited node id, carried through from the traversal — NOT
+    // a label re-resolution — so degrees are computed against the exact node
+    // that was reached via a real edge (no first-homonym mismatch).
     const inCount = id ? ((adj.inc.get(id) || []).length) : 0;
     const outCount = id ? ((adj.out.get(id) || []).length) : 0;
     const node = id ? adj.nodeMap.get(id) : null;
@@ -1065,10 +1118,18 @@ function blastRadius(symbols, _options) {
       else if (node && node.community !== undefined && node.community !== null && changedCommunities.has(node.community)) relevanceTier = 1;
     }
     const pureGodNode = isGodNode && relevanceTier === 0;
+    const edgeCount = inCount + outCount;
+    // A node reached as a depth-1 "in" dependent necessarily has an edge to the
+    // seed, so edge_count 0 is contradictory — it signals a graph inconsistency
+    // (or a residual id mismatch). Flag rather than drop: a real caller must
+    // stay visible, but the reviewer is told the degree data is untrustworthy.
+    const lowConfidence = edgeCount === 0;
+    if (lowConfidence) edgeCountZeroFlagged++;
     return {
-      label, in_count: inCount, edge_count: inCount + outCount,
+      label, in_count: inCount, edge_count: edgeCount,
       source_file: srcFile, relevance_tier: relevanceTier,
       is_god_node: isGodNode, pure_god_node: pureGodNode,
+      ...(lowConfidence ? { low_confidence: true } : {}),
     };
   }).sort((a, b) => {
     if (relevanceRanking && a.pure_god_node !== b.pure_god_node) return a.pure_god_node ? 1 : -1;
@@ -1092,6 +1153,24 @@ function blastRadius(symbols, _options) {
     raw_indirect_count: rawIndirectCount,
   };
   if (noiseTelemetry) base.noise_telemetry = noiseTelemetry;
+  // Transparency surface (greenfield field receipt). direct_dependents stays the
+  // FILTERED risk-sizing view (effect_size legitimately wants filtering); these
+  // fields answer the separate "what else must I check" question so the two are
+  // no longer conflated into one filtered answer.
+  //   dropped_sample — always-on, capped, reason-coded list of filtered
+  //     dependents, so a wrongly-filtered real consumer is auditable.
+  //   raw_direct_dependents — the FULL unfiltered depth-1 set, exposed only when
+  //     it's small enough for a human to read (≤ threshold). At that scale the
+  //     filter creates a blind spot to solve a problem that doesn't exist, so it
+  //     is demoted to an advisory annotation. Keyed on raw-dependent-COUNT (not
+  //     file-count): a 2-file change can touch a symbol with 200 dependents.
+  if (droppedSample.length > 0) base.dropped_sample = droppedSample;
+  if (edgeCountZeroFlagged > 0) base.edge_count_zero_flagged = edgeCountZeroFlagged;
+  const rawFullThreshold = _getRawDependentsFullViewThreshold();
+  if (rawFullThreshold !== null && rawDirectMap.size > 0 && rawDirectMap.size <= rawFullThreshold) {
+    base.raw_direct_dependents = Array.from(rawDirectMap.values());
+    base.raw_direct_view_note = `Showing all ${rawDirectMap.size} raw direct dependents (≤ ${rawFullThreshold} — a scale a reviewer can read directly). The noise filter is advisory here: ${filteredNoiseCount} noise, ${filteredTestPathCount} test-path, ${filteredDIAggregationCount} DI-aggregation. direct_dependents remains the filtered risk-sizing view.`;
+  }
   // Q5a (cal #39.A) — DI-opaque caller surface. When direct_dependents is empty
   // BUT callers were DI-aggregation-collapsed, the empty set would otherwise
   // read as "no callers" for what may be the highest-value symbol in the diff
@@ -1226,6 +1305,18 @@ function _getInferredNeighborCap() {
   if (v === null) return null;
   if (Number.isInteger(v) && v >= 0) return v;
   return 25;
+}
+
+// Raw-dependent count at/below which blast_radius exposes the FULL unfiltered
+// direct-dependent set (filter demoted to advisory). Keyed on dependent count,
+// not file count — the question is "can a reviewer read the whole list." Set to
+// null to always keep the filtered-only view.
+function _getRawDependentsFullViewThreshold() {
+  const cfg = getConfig();
+  const v = cfg ? cfg.raw_dependents_full_view_threshold : undefined;
+  if (v === null) return null;
+  if (Number.isInteger(v) && v >= 0) return v;
+  return 30;
 }
 
 // Relevance ranking of blast_radius drill-down targets. Default on; only an

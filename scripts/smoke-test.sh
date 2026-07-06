@@ -15912,6 +15912,71 @@ else
   fail "K234: reasoning-extraction footgun — $K234_CHECK"
 fi
 
+# K235: blast_radius transparency + degree coherence (greenfield field receipt).
+# Synthetic graph carries a homonym (an edgeless namesake of the real caller,
+# ordered first so a label re-resolution would pick it). Asserts three fixes:
+#   (1) a surviving direct dependent's edge_count is computed from the BFS-
+#       visited node id, NOT a label re-resolution that returns the first
+#       edgeless homonym — the field-observed "dependent with edge_count:0"
+#       contradiction. (Distinguishes the fix: pre-fix this is 0.)
+#   (2) every filtered dependent is surfaced in a reason-coded dropped_sample,
+#       so a wrongly-filtered real consumer is auditable instead of a black box.
+#   (3) when raw dependent count ≤ threshold, raw_direct_dependents exposes the
+#       full unfiltered set (filter demoted to advisory), keyed on dependent
+#       count not file count.
+K235_T=$(mktemp -d)
+mkdir -p "$K235_T/.devt" "$K235_T/graphify-out"
+printf '{"graphify":{"enabled":true}}' > "$K235_T/.devt/config.json"
+node -e '
+  const fs=require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({
+    nodes:[
+      {id:"n_homonym",label:"handle_request",source_file:"app/other.py"},
+      {id:"n_seed",label:"TargetService",source_file:"app/svc.py"},
+      {id:"n_call",label:"handle_request",source_file:"app/routes.py"},
+      {id:"n_int",label:"int",source_file:""},
+      {id:"n_test",label:"test_it",source_file:"tests/test_svc.py"}
+    ],
+    links:[
+      {source:"n_call",target:"n_seed",relation:"calls",confidence:"EXTRACTED"},
+      {source:"n_int",target:"n_seed",relation:"uses",confidence:"EXTRACTED"},
+      {source:"n_test",target:"n_seed",relation:"calls",confidence:"EXTRACTED"}
+    ],
+    built_at_commit:"testsha"
+  }));
+' "$K235_T/graphify-out/graph.json"
+K235_OUT=$( (cd "$K235_T" && node "$ROOT/bin/devt-tools.cjs" graphify blast-radius TargetService 2>/dev/null) || echo "{}")
+rm -rf "$K235_T"
+K235_CHECK=$(node -e '
+  let r; try { r=JSON.parse(process.argv[1]||"{}"); } catch(e){ console.log("FAIL:parse "+e.message); process.exit(0); }
+  const f=[];
+  const direct=r.direct_dependents||[];
+  if(!direct.includes("handle_request")) f.push("real caller not in direct_dependents: "+JSON.stringify(direct));
+  const deg=(r.direct_dependents_degrees||[]).find(d=>d.label==="handle_request");
+  if(!deg) f.push("no degree entry for handle_request");
+  else if(deg.edge_count<1) f.push("edge_count:0 bug — label re-resolution hit the edgeless homonym");
+  const ds=r.dropped_sample||[];
+  const reasons=new Set(ds.map(d=>d.reason));
+  if(!reasons.has("noise")) f.push("dropped_sample missing noise reason");
+  if(!reasons.has("test_path")) f.push("dropped_sample missing test_path reason");
+  if(!ds.some(d=>d.label==="int")) f.push("filtered int not in dropped_sample");
+  const raw=r.raw_direct_dependents;
+  if(!Array.isArray(raw)) f.push("raw_direct_dependents not exposed at raw_count "+r.raw_direct_count);
+  else {
+    if(raw.length!==3) f.push("raw_direct_dependents length "+raw.length+" != 3");
+    const hr=raw.find(x=>x.label==="handle_request");
+    const it=raw.find(x=>x.label==="int");
+    if(hr && hr.filtered_reason!==null) f.push("survivor marked filtered: "+hr.filtered_reason);
+    if(it && it.filtered_reason!=="noise") f.push("int filtered_reason != noise");
+  }
+  console.log(f.length===0?"OK":"FAIL:"+f.join("; "));
+' "$K235_OUT" 2>&1 || echo "FAIL:node error")
+if [ "$K235_CHECK" = "OK" ]; then
+  pass "K235: blast_radius degree coherence (BFS-id not homonym re-resolution) + dropped_sample transparency + small-diff raw_direct_dependents exposure"
+else
+  fail "K235: blast-radius transparency/coherence — $K235_CHECK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
