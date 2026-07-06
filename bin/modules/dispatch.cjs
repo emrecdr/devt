@@ -537,6 +537,7 @@ function cmdRenderFilled(target, options) {
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
   const subs = buildSubstitutionTable(agent);
+  const { CLAUDE_MD_BY_REFERENCE_STUB } = require("./init.cjs");
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
   // entries) section strip by exact `## Heading` match. Per-dispatch opt-in
@@ -558,7 +559,7 @@ function cmdRenderFilled(target, options) {
     const refContent = {};
     for (const key of Object.keys(subs.governing_rules.content)) {
       refContent[key] = key === "CLAUDE.md"
-        ? "(by-reference: CLAUDE.md is auto-injected into subagent context by the harness — not duplicated here)"
+        ? CLAUDE_MD_BY_REFERENCE_STUB
         : `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
     }
     subs.governing_rules = { ...subs.governing_rules, content: refContent };
@@ -573,13 +574,11 @@ function cmdRenderFilled(target, options) {
   // directive is what degrades lane reviews to topic-shape output.
   if (options && options.rubricByReference && subs.inline_rubrics) {
     const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently including axis H). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
-    const refRubrics = {};
-    for (const key of Object.keys(subs.inline_rubrics)) refRubrics[key] = stub;
-    // Ensure code_review resolves to the stub even when loadInlineRubrics
-    // returned an empty map (oversized rubric → null inline body), so the
-    // template's {inline_rubrics.code_review} never survives as a placeholder.
-    refRubrics.code_review = stub;
-    subs.inline_rubrics = refRubrics;
+    // Stub every configured rubric key — not just the ones loadInlineRubrics
+    // returned — so an oversized-rubric empty map still resolves each template's
+    // {inline_rubrics.<type>} placeholder to the stub instead of leaking it.
+    const rubricKeys = new Set([...Object.keys(subs.inline_rubrics), ...Object.keys(subs.rubrics || {})]);
+    subs.inline_rubrics = Object.fromEntries([...rubricKeys].map((k) => [k, stub]));
   }
 
   const excludeHeadings = (options && options.rulesExclude) || [];
@@ -649,14 +648,6 @@ function cmdRenderFilled(target, options) {
   return out;
 }
 
-// Classify the substantive payload state of each monitored context
-// block. Returns {populated:[names], empty:[names], placeholder:[names],
-// status:"healthy"|"degraded"} where status is "healthy" when ≥3 of 5 are
-// populated. Returns null when the envelope is too short to meaningfully
-// classify (e.g., a stub render). The 5 monitored blocks are the ones whose
-// emptiness materially degrades a lane reviewer's discovery quality: scope
-// signal (scope_trust/scope_hint), memory anchor (memory_signal), graph
-// anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
 // Classify one context-block body: "absent" (block missing), "placeholder"
 // (unsubstituted {token} literal — init didn't populate the sub-table for this
 // key, e.g. inline_rubrics substitution failing when render-lanes runs outside
@@ -665,7 +656,7 @@ function cmdRenderFilled(target, options) {
 function classifyBlockBody(raw) {
   if (raw === null || raw === undefined) return "absent";
   const body = String(raw).trim();
-  if (/^\{[\w.\-\[\]"]+\}$/.test(body) || body === "{inline_rubrics.code_review}" || body === "{inline_rubrics.dev}") {
+  if (/^\{[\w.\-\[\]"]+\}$/.test(body)) {
     return "placeholder";
   }
   if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
@@ -674,6 +665,14 @@ function classifyBlockBody(raw) {
   return "populated";
 }
 
+// Classify the substantive payload state of each monitored context
+// block. Returns {populated:[names], empty:[names], placeholder:[names],
+// status:"healthy"|"degraded"} where status is "healthy" when ≥3 of 5 are
+// populated. Returns null when the envelope is too short to meaningfully
+// classify (e.g., a stub render). The 5 monitored blocks are the ones whose
+// emptiness materially degrades a lane reviewer's discovery quality: scope
+// signal (scope_trust/scope_hint), memory anchor (memory_signal), graph
+// anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
 function computeEnvelopeHealth(rendered) {
   if (!rendered || typeof rendered !== "string" || rendered.length < 200) return null;
   const MONITORED = ["scope_trust", "scope_hint", "memory_signal", "graph_impact", "rubric_content"];

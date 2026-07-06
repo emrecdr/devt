@@ -703,14 +703,18 @@ function initWorkflow(task, pluginRoot, initVerb) {
   }
 
   // Inline rubric bodies: only the standalone-review single-dispatch reviewer
-  // consumes one (its deliberate self-check). Every workflow-verb envelope
-  // carries the rubric by-reference (<rubric_path>) and Reads it from disk, so
-  // the workflow-verb payload ships no inline rubric bodies. inline_rubrics_omitted
-  // keeps the reduction visible so a payload-size delta stays attributable.
-  const _inlineRubrics = loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {});
-  warnings.push(..._inlineRubrics.warnings);
-  const inlineRubricsForVerb = initVerb === "review" ? (_inlineRubrics.content || {}) : {};
-  const inlineRubricsOmitted = Object.keys(_inlineRubrics.content || {}).filter((k) => !(k in inlineRubricsForVerb));
+  // consumes one (its deliberate self-check). Every workflow-verb envelope reads
+  // the rubric by-reference (<rubric_path>), so off the review path we skip the
+  // rubric-file reads entirely rather than reading them only to discard the
+  // bodies. inline_rubrics_omitted keeps the reduction visible (payload-size
+  // delta stays attributable); its universe is the CONFIGURED rubric set, so an
+  // oversized-rubric fallback still reports the bodies as omitted.
+  const _inlineRubrics = initVerb === "review"
+    ? loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {})
+    : null;
+  if (_inlineRubrics) warnings.push(..._inlineRubrics.warnings);
+  const inlineRubricsForVerb = _inlineRubrics ? (_inlineRubrics.content || {}) : {};
+  const inlineRubricsOmitted = Object.keys(config.rubrics || {}).filter((k) => !(k in inlineRubricsForVerb));
 
   return {
     task: sanitizedTask,
@@ -888,4 +892,4 @@ function runReviewBundle(taskText) {
   };
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB };

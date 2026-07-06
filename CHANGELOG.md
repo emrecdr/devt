@@ -15,6 +15,13 @@ Current Anthropic guidance for the Fable 5 / Opus 4.x generation deprecates two 
 - **Preventive `reasoning_extraction` guard (gate K234).** Newer Claude models can trigger a `reasoning_extraction` refusal — and an elevated fallback to a heavier model — when a prompt tells them to echo, transcribe, or output their internal reasoning / chain-of-thought / thought process verbatim. No agent or skill body does this today; K234 keeps it that way. The pattern fires only on a reproduce-verb paired with a *qualified* reasoning-noun (internal / chain-of-thought / thought-process / trace / tokens / hidden / raw / verbatim), never bare "reasoning", so a legitimate "explain your reasoning for this finding" instruction is untouched. The gate self-tests against a synthetic false-positive and false-negative so the pattern can't silently rot into an always-pass. Drift-guard stack 140 → 141 deep (K94–K234).
 - **Anxious closers calmed.** The two `context_loading` closers that leaned on anxiety ("...that waste everyone's time", "...which is worthless") now state the directive plus a factual reason without the pressure language — aligned with the current-model preference for brief, non-anxious instructions. No gate-asserted string touched.
 
+### Internal (post-review cleanup)
+
+Cleanups on the v0.143.0/v0.144.0 mechanisms, surfaced by a `/simplify` pass:
+
+- **`init` no longer reads rubric files off the workflow path.** `loadInlineRubrics` is now called only for the `review` verb (the sole consumer of an inline rubric); non-review `init` previously read every configured rubric off disk just to discard the bodies. Also fixed `inline_rubrics_omitted` to derive its universe from the configured rubric set rather than the read result, so an oversized-rubric fallback is correctly reported as omitted instead of silently as `[]`.
+- Consolidated the CLAUDE.md by-reference stub to a single exported constant (was two divergent string literals across `init.cjs` and `dispatch.cjs`); generalized the rubric-by-reference stub to seed from the configured rubric keys instead of hardcoding `code_review`; moved a doc-comment onto the function it describes and dropped a redundant placeholder check already covered by the general regex.
+
 ## [0.143.0] - 2026-07-06
 
 ### Token-lightening: transport dedup (zero output-quality change)
