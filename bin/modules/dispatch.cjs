@@ -564,6 +564,24 @@ function cmdRenderFilled(target, options) {
     subs.governing_rules = { ...subs.governing_rules, content: refContent };
   }
 
+  // rubricByReference: swap the inline rubric body for a short directive stub
+  // that points at <rubric_path>. The rubric body is byte-identical across all
+  // N lanes, so inlining it multiplies a large static block per lane for zero
+  // signal gain. The plugin-root rubric path is a stable Read even from
+  // worktree-isolated lanes, so no inline fallback is needed. The axis-walk
+  // instruction stays STRONG — a weak or absent "walk EVERY declared axis"
+  // directive is what degrades lane reviews to topic-shape output.
+  if (options && options.rubricByReference && subs.inline_rubrics) {
+    const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently including axis H). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
+    const refRubrics = {};
+    for (const key of Object.keys(subs.inline_rubrics)) refRubrics[key] = stub;
+    // Ensure code_review resolves to the stub even when loadInlineRubrics
+    // returned an empty map (oversized rubric → null inline body), so the
+    // template's {inline_rubrics.code_review} never survives as a placeholder.
+    refRubrics.code_review = stub;
+    subs.inline_rubrics = refRubrics;
+  }
+
   const excludeHeadings = (options && options.rulesExclude) || [];
   let totalSaved = 0;
   let totalSectionsCut = 0;
@@ -639,34 +657,50 @@ function cmdRenderFilled(target, options) {
 // emptiness materially degrades a lane reviewer's discovery quality: scope
 // signal (scope_trust/scope_hint), memory anchor (memory_signal), graph
 // anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
+// Classify one context-block body: "absent" (block missing), "placeholder"
+// (unsubstituted {token} literal — init didn't populate the sub-table for this
+// key, e.g. inline_rubrics substitution failing when render-lanes runs outside
+// a full init path), "empty" (literal {}, [], "", or a "(no … available —"
+// fallback notice), or "populated".
+function classifyBlockBody(raw) {
+  if (raw === null || raw === undefined) return "absent";
+  const body = String(raw).trim();
+  if (/^\{[\w.\-\[\]"]+\}$/.test(body) || body === "{inline_rubrics.code_review}" || body === "{inline_rubrics.dev}") {
+    return "placeholder";
+  }
+  if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
+    return "empty";
+  }
+  return "populated";
+}
+
 function computeEnvelopeHealth(rendered) {
   if (!rendered || typeof rendered !== "string" || rendered.length < 200) return null;
   const MONITORED = ["scope_trust", "scope_hint", "memory_signal", "graph_impact", "rubric_content"];
   const populated = [];
   const empty = [];
   const placeholder = [];
+  const bodyOf = (name) => {
+    const m = rendered.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+    return m ? m[1] : null;
+  };
   for (const name of MONITORED) {
-    const re = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`);
-    const m = rendered.match(re);
-    if (!m) {
-      // Block not present in envelope — neither populated nor empty;
-      // skip (some envelopes legitimately omit certain blocks per agent).
-      continue;
+    let state = classifyBlockBody(bodyOf(name));
+    // The rubric signal is satisfied by EITHER an inline <rubric_content> body
+    // OR a populated <rubric_path>. By-reference envelopes (verifier,
+    // consolidator, lanes) carry only the path — that is a healthy rubric
+    // anchor, not a gap — so fall back to rubric_path before recording a
+    // non-populated verdict. When the path is ALSO unusable, the inline
+    // placeholder/empty verdict is preserved so a genuine substitution miss
+    // still surfaces.
+    if (name === "rubric_content" && state !== "populated") {
+      const pathState = classifyBlockBody(bodyOf("rubric_path"));
+      if (pathState === "populated") state = "populated";
+      else if (state === "absent" && pathState !== "absent") state = pathState;
     }
-    const body = (m[1] || "").trim();
-    // Placeholder: unsubstituted {foo} or {foo.X} or {foo_json} literal
-    // remains. Indicates substitution failure (init didn't populate the
-    // sub-table for this key — inline_rubrics
-    // substitution can fail when render-lanes runs outside a full init path).
-    if (/^\{[\w.\-\[\]"]+\}$/.test(body) || body === `{inline_rubrics.code_review}` || body === `{inline_rubrics.dev}`) {
-      placeholder.push(name);
-      continue;
-    }
-    // Empty: literal {}, [], "", or fallback notice text
-    if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
-      empty.push(name);
-      continue;
-    }
+    if (state === "absent") continue; // block legitimately omitted for this agent
+    if (state === "placeholder") { placeholder.push(name); continue; }
+    if (state === "empty") { empty.push(name); continue; }
     populated.push(name);
   }
   // Nothing recognized — envelope shape too unusual to classify
@@ -685,7 +719,7 @@ function computeEnvelopeHealth(rendered) {
 // fresh sub-conversation), so identifying which agents have large
 // static slices is the primary input to A1 (selective inlining) work.
 const STATIC_TAGS = [
-  "governing_rules", "inline_rubrics", "rubric_content", "inline_guardrails",
+  "governing_rules", "inline_rubrics", "rubric_content", "guardrails_inline",
   "files_to_read", "baseline", "plan", "decisions", "agent_skills", "spec",
   "workflow_type", "rubric_path", "original_task", "provenance_protocol",
   "impl_summary", "test_summary", "impl_summary_sidecar", "review_checklist",
@@ -1337,12 +1371,15 @@ function cmdRenderLanes(target, options) {
   // a 391KB render). Lane agents run in the same working tree as the
   // orchestrator, so read-from-disk is safe; --inline-rules restores full
   // inlining for worktree-isolated dispatches.
+  // Lanes default to rules-by-reference AND rubric-by-reference for the same
+  // reason: both bodies are byte-identical across all N lanes. --inline-rules
+  // restores full inlining of both for worktree-isolated dispatches.
   const rulesByReference = !options.inlineRules;
   // Render base envelope once (substitution is identical across lanes — the
   // per-lane variation is injected on top, not re-substituted).
   const base = cmdRenderFilled(target, {
     ...(baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : {}),
-    ...(rulesByReference ? { rulesByReference: true } : {}),
+    ...(rulesByReference ? { rulesByReference: true, rubricByReference: true } : {}),
   });
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
@@ -1421,9 +1458,10 @@ function cmdRenderLanes(target, options) {
     text: out.join("\n"),
     lanes: summary,
     target,
-    // Reduction is never silent: the mode names what was withheld per lane
+    // Reduction is never silent: the modes name what was withheld per lane
     // so a size comparison across runs is attributable to the right lever.
     rules_mode: rulesByReference ? "by-reference" : "inline",
+    rubric_mode: rulesByReference ? "by-reference" : "inline",
   };
   // Disk preflight (cal #38.C, pre-fan-out surface) — warn-only. This is the
   // moment right before N lane transcripts start accumulating, the exact spot

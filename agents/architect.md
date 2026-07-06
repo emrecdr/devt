@@ -39,7 +39,7 @@ work. Your reviews must:
 <context_loading>
 BEFORE starting the review, load the following in order:
 
-1-2. Load the two governing-rule sources — `.devt/rules/architecture.md` (layer definitions, boundary rules, dependency direction, module structure) and `CLAUDE.md` (project-specific architectural rules and constraints). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with `<claude_md>`, `<architecture>` sub-tags, treat those tag contents as authoritative and SKIP the on-disk Reads. Only Read from disk when the block is absent or a specific sub-tag is empty.
+1-2. Load the two governing-rule sources — `.devt/rules/architecture.md` (layer definitions, boundary rules, dependency direction, module structure) and `CLAUDE.md` (project-specific architectural rules and constraints — auto-injected into your context by the harness; never Read it from disk, the `<claude_md>` tag carries only a by-reference note). **Prefer the inline content when present**: if the dispatch prompt includes a `<governing_rules>` block with an `<architecture>` sub-tag, treat its contents as authoritative and SKIP the on-disk Read. Only Read from disk when the block is absent or the sub-tag is empty.
 
 **Scope hint preferred over discovery.** If the dispatch prompt contains a `<scope_hint>` block, parse it as a JSON array of file paths derived from governing docs' `affects_paths` plus blast-radius `direct_dependents`. Read these FIRST when assessing structural impact — these are the paths most likely to anchor existing architectural boundaries. Empty `[]` means no governing docs matched; fall back to scan-results.md and broader Glob/Grep.
 

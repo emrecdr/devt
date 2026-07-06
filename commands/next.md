@@ -11,12 +11,8 @@ This workflow uses: Bash, Read, Glob, Grep, Agent, Write, Edit, AskUserQuestion
 Read the current workflow state, determine the next logical action, and execute it. The user never needs to remember which command comes next.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/next.md
-</execution_context>
-
 <process>
-**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/next.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/next.md` via the Read tool before any other action. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 

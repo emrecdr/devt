@@ -6,7 +6,6 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
       .devt/state/review.md,
       .devt/state/arch-review.md (if exists),
       .devt/state/docs-summary.md (if exists),
-      CLAUDE.md (if exists),
       .devt/rules/coding-standards.md,
       .devt/rules/testing-patterns.md,
       .devt/memory/lessons/*.md (existing LES-NNNN entries)

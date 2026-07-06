@@ -17,7 +17,10 @@
 #   index_buckets      — list of bucket names (`skills`, `skills_standard`,
 #                        `skills_complex`) the agent declares in skill-index.yaml.
 #                        Smoke test asserts each declared bucket is non-empty in
-#                        skill-index.yaml.
+#                        skill-index.yaml. Buckets never repeat a skill from
+#                        frontmatter_skills — the harness preloads frontmatter
+#                        bodies at startup, so re-listing forces a duplicate
+#                        Read (disjointness is smoke-gated).
 #   outputs:
 #     primary          — the markdown artifact the agent writes (canonical
 #                        human-readable record). Empty when the agent is a
@@ -78,7 +81,7 @@ agents:
 
   tester:
     frontmatter_skills: [devt:memory-pre-flight, devt:tdd-patterns]
-    index_buckets: [skills, skills_standard]
+    index_buckets: [skills]
     outputs:
       primary: test-summary.md
       sidecar: test-summary.json
@@ -134,7 +137,7 @@ agents:
 
   verifier:
     frontmatter_skills: [devt:memory-pre-flight, devt:verification-patterns]
-    index_buckets: [skills, skills_standard]
+    index_buckets: [skills_standard]
     outputs:
       primary: verification.md
       sidecar: verification.json
@@ -145,7 +148,7 @@ agents:
 
   researcher:
     frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
-    index_buckets: [skills, skills_standard]
+    index_buckets: [skills_standard]
     outputs:
       primary: research.md
       sidecar: null
@@ -155,7 +158,7 @@ agents:
 
   debugger:
     frontmatter_skills: [devt:memory-pre-flight, devt:codebase-scan]
-    index_buckets: [skills]
+    index_buckets: []
     outputs:
       primary: debug-summary.md
       sidecar: null
@@ -165,7 +168,7 @@ agents:
 
   curator:
     frontmatter_skills: [devt:memory-curation]
-    index_buckets: [skills, skills_complex]
+    index_buckets: [skills_complex]
     outputs:
       primary: curation-summary.md
       sidecar: null

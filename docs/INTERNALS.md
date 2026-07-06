@@ -370,7 +370,7 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 ## Governing Rules Wiring
 
-**Function.** `init.cjs::loadGoverningRules` returns the PROJECT'S `CLAUDE.md` + `.devt/rules/*.md` contents (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical) inline in the `init` payload:
+**Function.** `init.cjs::loadGoverningRules` returns the PROJECT'S `.devt/rules/*.md` contents (priority order: `coding-standards.md`, `architecture.md`, `quality-gates.md`, `review-checklist.md`, then alphabetical) inline in the `init` payload. `CLAUDE.md` is hashed but NEVER inlined — the harness auto-injects project `CLAUDE.md` into every subagent's context (built-in Explore/Plan are the only agents that skip it; devt's agents are custom agents), so inlining it would pay the byte cost twice. `content["CLAUDE.md"]` holds a short by-reference stub, and the real bytes surface in `paths_excluded` with reason `harness_injected` while still feeding `rules_hash`:
 
 ```jsonc
 {
@@ -384,11 +384,11 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 }
 ```
 
-**Cap.** 96 KB total. Files past the cap surface in `paths_excluded` and agents Read them on demand.
+**Cap.** 96 KB total for the `.devt/rules/*.md` corpus. Files past the cap surface in `paths_excluded` and agents Read them on demand. `CLAUDE.md` also surfaces in `paths_excluded` (reason `harness_injected`), not `paths_included`.
 
 **Consumer workflows.** `dev-workflow.md` (its verifier + researcher dispatch templates live in the tier files `dev-workflow.standard.md` / `dev-workflow.complex.md` since the tier-partition; code-reviewer stays in the spine), `quick-implement.md`, `code-review.md`, `research-task.md` inject the block as `<governing_rules rules_hash="...">` with sub-tags `<claude_md>`, `<coding_standards>`, `<architecture>`, `<quality_gates>`, `<review_checklist>` into the **code-reviewer, verifier, and researcher** dispatch templates — the 3 READ-ONLY agents that previously re-read CLAUDE.md + 1–4 rule files on every dispatch.
 
-**Agent behavior.** Those agents prefer inline content over on-disk Reads when the block is present; fall back to disk Reads when a specific sub-tag is empty (project lacks that file) or `governing_rules.content` is empty (no project rules).
+**Agent behavior.** Those agents prefer inline content over on-disk Reads when the block is present; fall back to disk Reads when a specific sub-tag is empty (project lacks that file) or `governing_rules.content` is empty (no project rules). The `<claude_md>` sub-tag carries only the by-reference stub — agents never Read `CLAUDE.md` from disk, since the harness has already injected it.
 
 **Drift detection.** The `rules_hash` (SHA-256 first 16 chars over all discovered rule file contents in stable order) lets agents detect mid-workflow drift if a rule file is edited between init and agent dispatch.
 

@@ -12,21 +12,8 @@ This workflow uses: Bash, Read, Write, Edit, Agent, Glob, Grep, AskUserQuestion
 Execute the development workflow for a given task. The primary family head of devt — auto-detects complexity tier (TRIVIAL/SIMPLE/STANDARD/COMPLEX) and runs the full pipeline by default. `--mode` switches to a single-phase workflow (specify, plan, research, implement, clarify, fast, docs). Lifecycle flags (--pause, --cancel, --retro) operate on the active workflow state.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/dev-workflow.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/specify.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/create-plan.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/research-task.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/quick-implement.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/clarify-task.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/fast.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/docs-extraction.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/pause-work.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/lesson-extraction.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the routing flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/dev-workflow.md`) via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the routing flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/dev-workflow.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for routing flags.** Detect ONE primary flag (mutually exclusive). Strip the matched flag from $ARGUMENTS before passing the remaining text to the workflow as the task description.
 
@@ -52,7 +39,7 @@ If an unrecognized `--mode=<name>` value appears, STOP with error: `"Invalid --m
 
 If `--cancel` is matched, run the state reset command and STOP — do NOT load a workflow body.
 
-**Step 2 — Read the resolved workflow file via the Read tool.** The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Step 2 — Read the resolved workflow file via the Read tool.** The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 3 — Execute every `<step>` block in the loaded file in order.** Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 

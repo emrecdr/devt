@@ -12,13 +12,8 @@ This workflow uses: Read, Write, Bash
 Capture an idea instantly without disrupting the current workflow. Notes can be listed or promoted to tasks later. `--defer` writes to `.devt/state/deferred.md` instead — the deferred queue persists across workflow resets (reset-exempt) for ideas that should outlive the current work session.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/note.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/defer.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the --defer flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/note.md`) via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the --defer flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/note.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for --defer flag.** Strip the flag from $ARGUMENTS before passing the remaining text to the workflow.
 

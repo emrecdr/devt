@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.143.0] - 2026-07-06
+
+### Token-lightening: transport dedup (zero output-quality change)
+
+Four surfaces were paying for the same bytes twice per dispatch. Removing the duplication leaves each agent's effective context identical, minus the redundant copy — so the savings carry no quality risk. The dispatch prose itself was already audited and kept (rewording guardrails was previously found net-negative); this pass trims only transport, not content.
+
+- **CLAUDE.md is no longer inlined into dispatch envelopes.** The harness auto-injects project `CLAUDE.md` into every subagent's context (only the built-in Explore/Plan agents skip it, and devt's agents are custom agents), so inlining it inside the `<governing_rules>` block paid its ~23KB cost a second time on every programmer / code-reviewer / tester / verifier / researcher / architect dispatch. `loadGoverningRules` now carries a short by-reference stub for the `CLAUDE.md` key — hashed for drift detection, surfaced in `paths_excluded` with reason `harness_injected` — and the 14 envelope templates plus all compiled workflow regions render the stub. Agent bodies updated to state CLAUDE.md is harness-injected and never Read from disk.
+  - Before: `<claude_md>` carried the full project CLAUDE.md body per dispatch.
+  - After: `<claude_md>` carries a one-line by-reference note; the harness supplies the real content.
+- **Skill double-load removed.** An agent's frontmatter `skills:` preloads the full SKILL.md bodies at agent startup; `skill-index.yaml` then re-listed the same skills in the `<agent_skills>` injection, so each dispatch Read ~5–14KB of skill bodies it already held. `skill-index.yaml` buckets are now disjoint from each agent's frontmatter skills (`memory-pre-flight`, `codebase-scan`, `code-review-guide`, `tdd-patterns`, `verification-patterns`, `graphify-helpers`, `memory-curation` removed from the buckets that duplicated frontmatter); `io-contracts.yaml` `index_buckets` synced; the `<agent_skill_injection>` prose across all workflows now notes frontmatter skills are never re-listed and to inject an explicit "(none — defaults preloaded via agent frontmatter)" when the resolved list is empty.
+- **Rubric by-reference for the verifier, the parallel consolidator, and per-lane reviewers.** The pinned rubric is now Read from `<rubric_path>` by those dispatches instead of being inlined (14.3KB × N lanes + every verifier dispatch). The single-dispatch reviewer KEEPS its inline rubric — a deliberate self-check so reviewer and verifier grade the same axes without a revision loop. `init workflow` ships no inline rubric bodies (only the standalone-review verb keeps them, since only `code_review` is consumed anywhere), surfaced via a new `inline_rubrics_omitted` key. `dispatch render-lanes` defaults to rubric-by-reference alongside rules-by-reference (`--inline-rules` restores both for worktree-isolated lanes), reported via a new `rubric_mode` field. Envelope-health now counts the rubric signal as present when either `<rubric_content>` or `<rubric_path>` is populated.
+- **Command `@`-refs removed.** `commands/*.md` no longer `@`-reference whole workflow families in an `<execution_context>` block — in harnesses that expand `@`-refs this inlined every referenced workflow body (≈196KB for `commands/workflow.md`'s 10 refs) before routing, of which only one is used and is then Read again. The smoke-gated mandatory `Read` of the resolved workflow file was always the deterministic load path.
+
+### Fixed
+
+- Removed cal/receipt provenance identifiers from runtime prose (envelope templates, workflows, hooks) — the reasoning is preserved, the ephemeral IDs belong to the changelog and git history.
+- `commands/memory.md` referenced the dead path `.devt/learning-playbook.md`; operational lessons live in `.devt/memory/lessons/` (curator-gated LES entries).
+- The `CLAUDE.md` guardrails inventory listed two files that no longer exist (`incident runbook`, `skill update guidelines`).
+- Unified the `<agent_skill_injection>` idiom onto the `resolved_skills`-from-init one-liner where the workflow's init path exposes it; the two workflows whose init genuinely lacks `resolved_skills` (parallel review off cached state, arch-health with no compound init) keep the config-probing variant, now corrected to reference the `skill-index.yaml` default merge.
+- `dispatch.cjs` STATIC_TAGS named the guardrails block `inline_guardrails` where the rendered tag is `guardrails_inline` (measurement-only misattribution).
+
+### Guardrails
+
+- The governing-rules gate now positively asserts the CLAUDE.md by-reference invariant (content stub + `harness_injected` in `paths_excluded`); the complex-tier skill gate asserts frontmatter skills are not re-listed in `resolved_skills`; the code-review rubric gate (M15) now guards the inline-reviewer / by-reference-everywhere-else split.
+- Gate **K233** (behavioral: `skill-index.yaml` buckets stay disjoint from every agent's frontmatter `skills:` — generalizes the programmer-only complex-tier spot-check to all agents). Drift-guard stack 139 → 140 deep (K94–K233).
+
 ## [0.142.0] - 2026-07-02
 
 ### Test files excluded from architectural scanners

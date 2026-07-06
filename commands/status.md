@@ -18,17 +18,8 @@ Show current workflow progress by default. Parameter modes:
 - `--health [--repair]` — diagnose plugin health (config, state, rules, hooks)
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/status.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/session-report.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/weekly-report.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/tokens.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/mcp-stats.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/health.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the routing flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/status.md`) via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the routing flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/status.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for routing flags.** Detect ONE primary routing flag (mutually exclusive across the three families). Strip the matched flag from $ARGUMENTS before passing remaining options to the workflow.
 

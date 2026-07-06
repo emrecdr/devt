@@ -163,19 +163,18 @@ RESULT=$(node -e "
       }
     }
 
-    // C1' (cal #31.A) parallel-canonical banner was scoped here but skipped:
-    // this hook receives state-only via process.argv[1], not the UserPromptSubmit
-    // event JSON with input.prompt. Adding stdin handling for one banner is
-    // larger than the C5 "tighten" scope. C1' deferred — would need to fire
-    // from a separate UserPromptSubmit hook OR plumb stdin into this one.
+    // A parallel-canonical banner cannot fire from this hook: it receives
+    // state-only via process.argv[1], not the UserPromptSubmit event JSON with
+    // input.prompt. Emitting one would need a separate UserPromptSubmit hook OR
+    // plumbing stdin into this one.
 
-    // C2' (cal #31.A) — preflight-brief staleness banner. Receipt #2 Q3:
-    // operator cited preflight-brief.json data from a prior workflow run as
-    // fresh; A2 staleness banner covers workflow.yaml age but NOT .devt/
-    // state/ artifact age. Delegates to state.cjs::isArtifactFresh which
-    // already prefers first_created_at (immutable session anchor) over
-    // created_at (rotates on workflow_type transitions) — using the inline
-    // arithmetic would false-fire on every dev→debug rotation.
+    // preflight-brief staleness banner. Operators can cite preflight-brief.json
+    // data from a prior workflow run as fresh; the workflow.yaml-age banner
+    // above covers workflow age but NOT .devt/state/ artifact age. Delegates to
+    // state.cjs::isArtifactFresh which already prefers first_created_at
+    // (immutable session anchor) over created_at (rotates on workflow_type
+    // transitions) — using the inline arithmetic would false-fire on every
+    // dev->debug rotation.
     try {
       const briefPath = path.join(_projectRoot, '.devt/state/preflight-brief.json');
       // state.cjs lives in PLUGIN_ROOT (the devt repo), not _projectRoot

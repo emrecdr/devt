@@ -1,6 +1,6 @@
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>

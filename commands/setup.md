@@ -12,15 +12,8 @@ This workflow uses: Bash, Read, Write, AskUserQuestion
 Admin family head — consolidates the four plugin lifecycle operations under one entry. Each operation has its own workflow body; this command parses the requested flag and routes accordingly.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/project-init.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/update.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/uninstall.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/health.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the operation flag, then Read the resolved workflow file from the table below via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the operation flag, then Read the resolved workflow file from the table below via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for the operation flag.** Detect ONE of `--init`, `--update`, `--uninstall`, `--health`. Strip the matched flag from $ARGUMENTS before passing remaining options to the workflow.
 

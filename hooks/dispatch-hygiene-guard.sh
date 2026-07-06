@@ -253,11 +253,10 @@ node -e "
     // Scope advisory is dropped here — would have been advisory-only and the
     // block message takes priority.
     //
-    // C3' (cal #31.A): per-subagent canonical CLI for the deny path.
-    // INVESTIGATIVE agents only — curator/retro/docs-writer/devt-coordinator
-    // early-exit via ENVELOPE_NOT_REQUIRED at L192. Field receipt #2: generic
-    // 3-command list misrouted operators to /devt:workflow when /devt:review
-    // was canonical.
+    // Per-subagent canonical CLI for the deny path. INVESTIGATIVE agents only
+    // — curator/retro/docs-writer/devt-coordinator early-exit via
+    // ENVELOPE_NOT_REQUIRED at L192. A generic 3-command list misroutes
+    // operators to /devt:workflow when /devt:review is the canonical entry.
     const CANONICAL_FOR_AGENT = {
       'code-reviewer': '/devt:review (single-dispatch) OR dispatch run-lanes --partition=FILE (parallel canonical)',
       'programmer': '/devt:workflow (full dev cycle) OR /devt:implement (skip docs+retro)',

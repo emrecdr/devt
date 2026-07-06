@@ -30,12 +30,12 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### Workflow body loading is explicit
 
-**Rule.** Every `commands/*.md` that delegates to a workflow file pairs the `@${CLAUDE_PLUGIN_ROOT}/workflows/<name>.md` reference with a mandatory `Read` instruction in its `<process>` block:
-> "Mandatory first action: read the workflow body via the Read tool before any other action."
+**Rule.** Every `commands/*.md` that delegates to a workflow file carries a mandatory `Read` instruction in its `<process>` block — and NO `@${CLAUDE_PLUGIN_ROOT}/workflows/*.md` pre-inline reference:
+> "Mandatory first action: read the resolved workflow file via the Read tool before any other action."
 
-**Why.** The `@`-reference's auto-inline behavior is harness-dependent; the explicit Read makes the workflow body deterministically present in the orchestrator's context. Without it, the orchestrator can't see `<step>` blocks, skips `context_init`, and the entire workflow contract degrades silently — every integration lives inside those steps.
+**Why.** An `@`-reference's auto-inline behavior is harness-dependent, and where a harness does expand it, `@`-expansion pulls in the ENTIRE workflow family the command lists (every `--mode` target, not just the resolved one) — roughly an order of magnitude more tokens than the single file a run needs. The explicit Read makes exactly the resolved workflow body deterministically present in the orchestrator's context. Without the body, the orchestrator can't see `<step>` blocks, skips `context_init`, and the entire workflow contract degrades silently — every integration lives inside those steps.
 
-**Enforcement.** Smoke gate asserts every `@`-ref command also carries the Read instruction.
+**Enforcement.** Commands ship no `@`-ref; the `Read` directive in `<process>` is the sole, deterministic load path. Routing-flag commands additionally carry a routing table mapping each flag to the workflow file the orchestrator must Read.
 
 ### Single-dispatch contract for `/devt:review`
 

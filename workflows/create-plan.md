@@ -20,9 +20,10 @@ Plans that pass validation result in fewer iterations during implementation.
   </available_agent_types>
 
 <agent_skill_injection>
-Before dispatching agents, read `resolved_skills.<agent_type>` from the compound `init` output. Pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills` overrides; skill-index.yaml fills gaps. Defaults for plan-phase agents:
-- researcher: codebase-scan, strategic-analysis
-- architect: codebase-scan, architecture-health-scanner, api-docs-fetcher, strategic-analysis, complexity-assessment
+Before dispatching agents, read `resolved_skills.<agent_type>` from the compound `init` output. Pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills` overrides; skill-index.yaml fills gaps. Skills preloaded via agent frontmatter (researcher: memory-pre-flight, codebase-scan; architect: memory-pre-flight, graphify-helpers) are never re-listed. Tier-bucket defaults for plan-phase agents:
+- researcher: strategic-analysis (STANDARD+)
+- architect: codebase-scan; api-docs-fetcher (STANDARD+); architecture-health-scanner, strategic-analysis, complexity-assessment (COMPLEX)
+When a resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 <process>

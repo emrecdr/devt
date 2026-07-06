@@ -254,9 +254,16 @@ function loadGraphImpact(projectRoot) {
  * CLAUDE.md, coding-standards.md, architecture.md, quality-gates.md,
  * review-checklist.md, then any remaining .devt/rules/*.md alphabetically.
  *
- * Cap at 96KB total — generous enough for CLAUDE.md (~27KB) + 5 rule files
- * (~8KB each). Files beyond cap are NOT included; their paths surface in
- * `paths_excluded` so agents can Read them on demand when relevant.
+ * CLAUDE.md is hashed but NEVER inlined: the harness auto-injects project
+ * CLAUDE.md into every subagent's context (built-in Explore/Plan are the
+ * only exceptions, and devt agents are custom agents), so inlining it pays
+ * the byte cost twice per dispatch. `content["CLAUDE.md"]` carries a short
+ * stub so template substitution stays populated; the real bytes surface in
+ * `paths_excluded` with reason "harness_injected" and still feed rules_hash.
+ *
+ * Cap at 96KB total for the .devt/rules/*.md corpus. Files beyond cap are
+ * NOT included; their paths surface in `paths_excluded` so agents can Read
+ * them on demand when relevant.
  *
  * The `rules_hash` is SHA-256 (first 16 chars) of the concatenated content
  * of ALL discovered rule files (included and excluded), in a stable order.
@@ -271,6 +278,8 @@ const GOVERNING_RULES_PRIORITY = [
   "review-checklist.md",
 ];
 const MAX_GOVERNING_RULES_BYTES = 96 * 1024;
+const CLAUDE_MD_BY_REFERENCE_STUB =
+  "(not inlined: the harness auto-injects project CLAUDE.md into every devt subagent's context — content covered by rules_hash)";
 
 function loadGoverningRules(projectRoot) {
   const result = { content: {}, paths_included: [], paths_excluded: [], rules_hash: null, total_bytes: 0, warnings: [] };
@@ -325,6 +334,11 @@ function loadGoverningRules(projectRoot) {
     let buf;
     try { buf = fs.readFileSync(c.filePath); } catch { result.warnings.push(`unreadable: ${c.name}`); continue; }
     hash.update(c.name); hash.update("\0"); hash.update(buf);
+    if (c.name === "CLAUDE.md") {
+      result.content[c.name] = CLAUDE_MD_BY_REFERENCE_STUB;
+      result.paths_excluded.push({ name: c.name, bytes: buf.length, reason: "harness_injected" });
+      continue;
+    }
     if (totalBytes + buf.length <= MAX_GOVERNING_RULES_BYTES) {
       result.content[c.name] = buf.toString("utf8");
       result.paths_included.push({ name: c.name, bytes: buf.length });
@@ -688,6 +702,16 @@ function initWorkflow(task, pluginRoot, initVerb) {
     ]);
   }
 
+  // Inline rubric bodies: only the standalone-review single-dispatch reviewer
+  // consumes one (its deliberate self-check). Every workflow-verb envelope
+  // carries the rubric by-reference (<rubric_path>) and Reads it from disk, so
+  // the workflow-verb payload ships no inline rubric bodies. inline_rubrics_omitted
+  // keeps the reduction visible so a payload-size delta stays attributable.
+  const _inlineRubrics = loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {});
+  warnings.push(..._inlineRubrics.warnings);
+  const inlineRubricsForVerb = initVerb === "review" ? (_inlineRubrics.content || {}) : {};
+  const inlineRubricsOmitted = Object.keys(_inlineRubrics.content || {}).filter((k) => !(k in inlineRubricsForVerb));
+
   return {
     task: sanitizedTask,
     project_root: projectRoot,
@@ -729,11 +753,8 @@ function initWorkflow(task, pluginRoot, initVerb) {
     // rather than nested `{config.rubrics.dev}` access. Defaults to
     // `dev.v1.md`; override in `.devt/config.json` to bump version.
     rubrics: config.rubrics || {},
-    inline_rubrics: (() => {
-      const r = loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {});
-      warnings.push(...r.warnings);
-      return r.content;
-    })(),
+    inline_rubrics: inlineRubricsForVerb,
+    inline_rubrics_omitted: inlineRubricsOmitted,
     warnings: warnings.concat(injectionWarning),
   };
 }

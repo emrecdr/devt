@@ -89,7 +89,7 @@ Task(subagent_type="devt:researcher", model="{models.researcher}", prompt="
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/architect-dev-arch-health.tmpl.md -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
-    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
@@ -183,7 +183,7 @@ Dispatch the architect agent to review the proposed approach before implementati
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/architect-dev-arch-review.tmpl.md -->
 Task(subagent_type="devt:architect", model="{models.architect}", prompt="
   <context>
-    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/architecture.md, .devt/rules/coding-standards.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
@@ -266,7 +266,7 @@ fi
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/curator.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
-    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing)</files_to_read>
     <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
   <task>

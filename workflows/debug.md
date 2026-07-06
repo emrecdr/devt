@@ -20,7 +20,7 @@ follows a structured protocol that builds evidence before proposing fixes.
 </available_agent_types>
 
 <agent_skill_injection>
-Before dispatching the debugger agent, read `resolved_skills.debugger` from the compound `init` output. This is pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills.debugger` overrides; default falls back to skill-index.yaml (`codebase-scan`).
+Before dispatching the debugger agent, read `resolved_skills.debugger` from the compound `init` output. This is pre-resolved by `init.cjs::resolveSkills` — `.devt/config.json::agent_skills.debugger` overrides; the debugger's default skills (`memory-pre-flight`, `codebase-scan`) are preloaded via agent frontmatter, so an empty/absent list is normal — inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 <process>
@@ -217,7 +217,7 @@ When ACTIVE, dispatch curator:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-debug.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
-    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing)</files_to_read>
     <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
   <task>

@@ -12,6 +12,12 @@
 # (= always loaded, ignores tier) — that path is preserved for stable
 # project config.
 #
+# Disjointness invariant: buckets MUST NOT list a skill that already
+# appears in the agent's frontmatter `skills:` (agents/<name>.md). The
+# harness preloads frontmatter skills' full bodies at agent startup, so
+# re-listing one here makes the agent Read ~5-14KB it already has in
+# context. The smoke test asserts frontmatter ∩ buckets = ∅ per agent.
+#
 # Memory boundary (do not blur these):
 # - scratchpad → EPHEMERAL within-workflow notes. Resets between
 # workflows. Cross-agent handoff inside one run only.
@@ -19,16 +25,14 @@
 # - lesson-extraction → PERMANENT cross-workflow knowledge. Curated, scored,
 # decay-tracked. Promoted from scratchpad when a finding
 # is generalizable + actionable + evidence-based.
-# File: .devt/learning-playbook.md
+# Files: .devt/memory/lessons/*.md (LES-NNNN, curator-gated)
 # If a finding only matters to the next agent in this workflow → scratchpad.
 # If it would help a future workflow avoid the same mistake → lesson-extraction.
 
 agents:
   programmer:
     skills:
-      - codebase-scan
       - scratchpad
-      - memory-pre-flight
     skills_standard:
       - tdd-patterns
       - verification-patterns
@@ -43,36 +47,27 @@ agents:
   tester:
     skills:
       - scratchpad
-      - memory-pre-flight
-    skills_standard:
-      - tdd-patterns
     reads:
       - .devt/rules/testing-patterns.md
       - .devt/rules/quality-gates.md
 
   code-reviewer:
     skills:
-      - code-review-guide
       - scratchpad
-      - memory-pre-flight
     skills_standard:
       - codebase-scan
     reads:
       - .devt/rules/coding-standards.md
-      - CLAUDE.md
 
   docs-writer:
     skills:
       - scratchpad
-      - memory-pre-flight
     reads:
       - .devt/rules/documentation.md
 
   architect:
     skills:
       - codebase-scan
-      - memory-pre-flight
-      - graphify-helpers
     skills_standard:
       - api-docs-fetcher
     skills_complex:
@@ -91,9 +86,6 @@ agents:
       - .devt/state/*.md
 
   verifier:
-    skills:
-      - memory-pre-flight
-      - verification-patterns
     skills_standard:
       - codebase-scan
     reads:
@@ -102,32 +94,22 @@ agents:
       - .devt/state/test-summary.md
       - .devt/state/review.md
       - .devt/state/plan.md
-      - CLAUDE.md
 
   researcher:
-    skills:
-      - codebase-scan
-      - memory-pre-flight
     skills_standard:
       - strategic-analysis
     reads:
       - .devt/rules/coding-standards.md
       - .devt/rules/architecture.md
-      - CLAUDE.md
       - .devt/state/decisions.md
 
   debugger:
-    skills:
-      - codebase-scan
-      - memory-pre-flight
     reads:
       - .devt/rules/coding-standards.md
       - .devt/rules/quality-gates.md
       - .devt/state/debug-context.md
 
   curator:
-    skills:
-      - memory-curation
     skills_complex:
       - autoskill
 

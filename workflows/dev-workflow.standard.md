@@ -271,10 +271,6 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          the path from <workflow_type>, so we can ship rubric updates as new
          files (dev.v2.md) without breaking projects pinned to v1. -->
     <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
-    <!-- Inline rubric body from init payload — verifier prefers this over the
-         on-disk Read at <rubric_path> when present. Falls back to path when
-         omitted (oversized rubric → init returns null inline_rubrics). -->
-    <rubric_content>{inline_rubrics.dev}</rubric_content>
     <original_task>{task_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
@@ -296,6 +292,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     Verify the implementation achieves the original task goal.
     Use goal-backward verification: trace from requirements to code.
     If a spec exists, verify against its user stories, success criteria, and test scenarios — not just the task description.
+    Grade against the pinned rubric — Read it from <rubric_path> before grading (verdict vocabulary, required levels, and revisions[] shape all come from the rubric).
   </task>
   Write verification to .devt/state/verification.md
 ")
@@ -378,7 +375,7 @@ Dispatch both agents in parallel:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/docs-writer.tmpl.md -->
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   <context>
-    <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/documentation.md (if exists)</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <review>Read .devt/state/review.md</review>
@@ -403,7 +400,6 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
       .devt/state/review.md,
       .devt/state/arch-review.md (if exists),
       .devt/state/docs-summary.md (if exists),
-      CLAUDE.md (if exists),
       .devt/rules/coding-standards.md,
       .devt/rules/testing-patterns.md,
       .devt/memory/lessons/*.md (existing LES-NNNN entries)

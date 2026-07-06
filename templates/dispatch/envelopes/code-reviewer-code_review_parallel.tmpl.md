@@ -15,7 +15,6 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {prior_outputs}
     {provenance_protocol}
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
-    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -28,8 +27,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Synthesis rules:
     - Dedupe findings by (file:line:finding_class). When the same finding appears in multiple
       lanes (cross-cutting concern), keep the most specific one and cite all source lanes.
-    - Reconcile severity using the rubric in <rubric_content> when lanes disagree — promote to
-      the higher severity when evidence supports it.
+    - Reconcile severity using the rubric at <rubric_path> (Read it BEFORE reconciling
+      severities) when lanes disagree — promote to the higher severity when evidence supports it.
     - Preserve EVERY Critical finding. Important and Minor may be deduped but never silently
       dropped — when you drop one, note it in the per-lane provenance.
     - Group findings by file for the consolidated output.

@@ -2,10 +2,6 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
-    <!-- Inline rubric body from init payload — verifier prefers this over the
-         on-disk Read at <rubric_path> when present. Falls back to path when
-         omitted (oversized rubric → init returns null inline_rubrics). -->
-    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>

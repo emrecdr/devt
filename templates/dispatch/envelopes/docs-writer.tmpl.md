@@ -1,6 +1,6 @@
 Task(subagent_type="devt:docs-writer", model="{models.docs-writer}", prompt="
   <context>
-    <files_to_read>.devt/rules/documentation.md (if exists), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/documentation.md (if exists)</files_to_read>
     <impl_summary>Read .devt/state/impl-summary.md</impl_summary>
     <test_summary>Read .devt/state/test-summary.md</test_summary>
     <review>Read .devt/state/review.md</review>

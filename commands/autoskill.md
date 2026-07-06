@@ -12,12 +12,8 @@ This workflow uses: Bash, Read, Write, Edit, Agent, Glob, Grep
 Scan the current session for repeated corrections, missing capabilities, and workflow friction. Propose targeted improvements to devt skills and agents with evidence (3+ instances required).
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/autoskill.md
-</execution_context>
-
 <process>
-**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/autoskill.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/autoskill.md` via the Read tool before any other action. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 

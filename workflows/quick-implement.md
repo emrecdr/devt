@@ -49,7 +49,7 @@ If `agent_skills.<agent_type>` exists, inject the skill references into the agen
 </agent_skills>
 ```
 
-Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::resolveSkills` — merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt.
+Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::resolveSkills` — merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt. Frontmatter-preloaded skills are never re-listed; when the resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 ---
@@ -195,7 +195,7 @@ Dispatch the programmer agent:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/programmer-quick_implement.tmpl.md -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
@@ -317,7 +317,7 @@ Dispatch the tester agent:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/tester-quick_implement.tmpl.md -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
-    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>

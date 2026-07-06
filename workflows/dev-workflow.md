@@ -133,7 +133,7 @@ If `agent_skills.<agent_type>` exists, inject the skill references into the agen
 </agent_skills>
 ```
 
-Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::resolveSkills` — merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt.
+Read `resolved_skills.<agent_type>` from the compound `init` output (`init.cjs::resolveSkills` — merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt. Frontmatter-preloaded skills are never re-listed; when the resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 ---
@@ -165,7 +165,7 @@ Then load project context (orchestrator-side reads, NOT CLI round-trips):
 
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/status-enum.md` for status values and transition mapping
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/checkpoint-protocol.md` for checkpoint format
-- Governing-rule file contents (`CLAUDE.md`, `.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are already in `$CTX.init.governing_rules.content` — no separate Reads needed to fill the dispatch envelopes.
+- Governing-rule file contents (`.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are already in `$CTX.init.governing_rules.content` — no separate Reads needed to fill the dispatch envelopes. `CLAUDE.md` is carried as a by-reference stub: the harness auto-injects it into every subagent, so it is never inlined.
 - Lessons live in the memory layer at `.devt/memory/lessons/` (LES-NNNN, FTS5-indexed). The Pre-Flight Brief surfaces task-relevant lessons via Lane F. Read `.devt/state/preflight-brief.md` and lift its "Related Operational Lessons" section into `learning_context`; empty if none (normal for new projects).
 - Read `.devt/state/spec.md` if it exists (from `/devt:specify`) — primary requirements source (decisions, API design, test scenarios); else derive requirements from the task description.
 - Read `.devt/state/plan.md` if it exists (from `/devt:plan`) — guides implementation (programmer reads it as context).
@@ -183,7 +183,7 @@ Then load project context (orchestrator-side reads, NOT CLI round-trips):
 `$CTX.init` carries the `init workflow` compound payload — fill the dispatch-envelope placeholders from it (the wrapper already stamped `workflow_type=dev`; there is no separate activate call to paraphrase):
 
 - **`inline_guardrails`** — `{ "<file>.md": "<content>" }` covering `golden-rules.md`, `engineering-principles.md`, `generative-debt-checklist.md` (or `null` when the 64 KB cap was hit → agents fall back to on-disk Reads). The `programmer` + `code-reviewer` dispatch templates embed it as a `<guardrails_inline>` block — inlining cuts three Read calls per dispatch in favor of cache-friendly prefix injection.
-- **`governing_rules`** — `{ content, paths_included, paths_excluded, rules_hash, total_bytes }` covering the project's `CLAUDE.md` + `.devt/rules/*.md` (96 KB cap; over-cap files in `paths_excluded` are Read on demand). The `code-reviewer`, `verifier`, `researcher` dispatches embed it as `<governing_rules>`; `rules_hash` detects mid-workflow rule-file drift.
+- **`governing_rules`** — `{ content, paths_included, paths_excluded, rules_hash, total_bytes }` covering the project's `.devt/rules/*.md` (96 KB cap; over-cap files in `paths_excluded` are Read on demand). `CLAUDE.md` is hashed but never inlined (harness-injected; `content["CLAUDE.md"]` is a stub, surfaced in `paths_excluded` as `harness_injected`). The `code-reviewer`, `verifier`, `researcher` dispatches embed it as `<governing_rules>`; `rules_hash` detects mid-workflow rule-file drift.
 - **`models`** — fill the `{models.<agent>}` placeholders in Task() prompts.
 - **`config`** — `model_profile`, `agent_skills` for dispatch behavior.
 
@@ -556,7 +556,7 @@ Dispatch the programmer agent:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/programmer.tmpl.md -->
 Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
   <context>
-    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/coding-standards.md, .devt/rules/quality-gates.md, .devt/rules/architecture.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <coding_standards>{governing_rules.content[\".devt/rules/coding-standards.md\"]}</coding_standards>
@@ -708,7 +708,7 @@ Dispatch the tester agent:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/tester.tmpl.md -->
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
-    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>

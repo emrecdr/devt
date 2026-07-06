@@ -11,17 +11,13 @@ This workflow uses: Bash, Read
 <objective>
 Route the user's `/devt:memory <subcommand> [args]` invocation to bin/devt-tools.cjs and
 display the result. The memory layer is the permanent knowledge graph for architectural
-decisions, concepts, flows, and rejected proposals — distinct from the per-workflow
-state at `.devt/state/decisions.md` and the operational lessons at
-`.devt/learning-playbook.md`.
+decisions, concepts, flows, rejected proposals, and operational lessons (LES) — all
+curator-gated in `.devt/memory/{decisions,concepts,flows,rejected,lessons}/`, distinct
+from the ephemeral per-workflow state at `.devt/state/decisions.md`.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/memory-init.md
-</execution_context>
-
 <process>
-**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/memory-init.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/memory-init.md` via the Read tool before any other action. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 
@@ -69,6 +65,6 @@ If the user passes no subcommand or an unknown one, surface the table above.
 - This command is **read/write on the markdown files**, **read-only on the index** during query subcommands, and **write on the index** during init/index.
 - Permanent ADR/CON/FLOW/REJ markdown files are NEVER created automatically by these subcommands. Phase 2 will add `promote` and `reject` subcommands that DO create files, but those routes through curator's AskUserQuestion approval flow.
 - For ephemeral session decisions (DEC-xxx in `.devt/state/decisions.md`), use `/devt:workflow --mode=clarify` instead — those are workflow-scoped and reset between workflows.
-- For operational lessons ("when X fails, check Y first"), use `/devt:workflow --retro` — those go to the learning-playbook, not the memory layer.
+- For operational lessons ("when X fails, check Y first"), use `/devt:workflow --retro` — those are extracted as candidates and promoted by the curator into `.devt/memory/lessons/` (LES-NNNN).
 
 </process>

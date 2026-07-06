@@ -59,7 +59,7 @@ If `agent_skills.architect` exists, inject the skill references into the agent's
 </agent_skills>
 ```
 
-If not configured, omit the block.
+The resolved set is `.devt/config.json::agent_skills.architect` merged over the `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` tier defaults (config wins); this workflow does not build a compound-`init` payload, so resolve it that way rather than reading a `resolved_skills` field. Frontmatter-preloaded skills are never re-listed; when the resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 ---

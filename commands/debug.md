@@ -12,13 +12,8 @@ This workflow uses: Read, Write, Edit, Bash, Glob, Grep, Agent
 Debug a specific issue using systematic 4-phase investigation. Dispatches a debugger agent in isolated context. `--mode=forensics` routes to post-mortem analysis of a stuck or failed workflow instead — useful when `/devt:next` hits a wall and the cause needs to be reconstructed from `.devt/state/` + git history.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/debug.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/forensics.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the --mode flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/debug.md`) via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the --mode flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/debug.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for --mode flag.** Strip the matched flag from $ARGUMENTS before passing the remaining text to the workflow.
 

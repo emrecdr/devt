@@ -46,7 +46,7 @@ If `agent_skills.code-reviewer` exists, inject the skill references into the age
 </agent_skills>
 ```
 
-If not configured, omit the block.
+Read `resolved_skills.code-reviewer` from the compound `init` output (`$CTX.init.resolved_skills`; `init.cjs::resolveSkills` merges `.devt/config.json::agent_skills` with `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` defaults, config wins). Inject the list as the `<agent_skills>` block in the agent's task prompt. Frontmatter-preloaded skills are never re-listed; when the resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 ---
@@ -59,9 +59,9 @@ If not configured, omit the block.
 
 ### Substep 0: Stale-workflow pre-flight (auto-reset for unambiguous cases; prompt otherwise)
 
-Before any state update, detect whether `workflow.yaml` is stale relative to this new review. KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Field-evidenced failure mode (receipt #1): a 51-raw-dispatch counter from a 20-day-old workflow blocked a brand-new review at substep 1; receipt #5 saw the same with a 57-counter from a 9-day-old workflow.
+Before any state update, detect whether `workflow.yaml` is stale relative to this new review. KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Failure mode: a stale raw-dispatch counter left over from a days-old prior workflow blocks a brand-new review at substep 1.
 
-**Auto-reset path** (cal #31.D G4): when ALL hold — task changed AND prior workflow > 24h old AND workflow_type changed — this is unambiguously a new working session. Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value.
+**Auto-reset path**: when ALL hold — task changed AND prior workflow > 24h old AND workflow_type changed — this is unambiguously a new working session. Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value.
 
 **Operator-override path**: if the operator types `/devt:review --fresh` (or includes `--fresh` in the task), skip the staleness check and unconditionally call `state reset-soft` before substep 1. This is the operator-explicit form of "I know it's stale, just reset and go."
 
@@ -112,7 +112,7 @@ The wrapper writes the same side-effect artifacts the inline substeps did — `p
 
 **Capture discipline:** if you persist `$CTX` for later substeps, write it via shell redirection (`printf '%s' "$CTX" > <file>`) — never re-emit the JSON through a Write-tool body or heredoc you typed out. Model-rendered rewrites turn `\n` escapes inside string values (guardrails, rules content) into literal newlines, producing a file that fails `jq`/`JSON.parse` even though the CLI stdout was valid. Field-observed: a 133KB re-written bundle broke at the first embedded-file field while the live stdout parsed clean.
 
-**Dispatch-envelope payload.** `$CTX.init` carries the `init review` compound payload — `governing_rules` (`content` + `rules_hash`), `models`, `inline_rubrics`, `rubrics`, `config`. Fill the `{governing_rules…}` / `{models.code-reviewer}` / `{inline_rubrics.code_review}` placeholders in the code-reviewer and verifier dispatch envelopes from `$CTX.init`; the governing-rule file contents (CLAUDE.md, `.devt/rules/*.md`) are in `$CTX.init.governing_rules.content`, so no separate Reads are needed to fill the dispatch.
+**Dispatch-envelope payload.** `$CTX.init` carries the `init review` compound payload — `governing_rules` (`content` + `rules_hash`), `models`, `inline_rubrics`, `rubrics`, `config`. Fill the `{governing_rules…}` / `{models.code-reviewer}` / `{models.verifier}` placeholders in the code-reviewer and verifier dispatch envelopes from `$CTX.init`. Fill `{inline_rubrics.code_review}` in the code-reviewer envelope only — that inline rubric is the reviewer's deliberate self-check; the verifier envelope carries the rubric by-reference (`<rubric_path>`) and Reads it from disk. The governing-rule file contents (`.devt/rules/*.md`) are in `$CTX.init.governing_rules.content`, so no separate Reads are needed to fill the dispatch. `CLAUDE.md` is carried as a by-reference stub — the harness auto-injects it into every subagent, so it is never inlined.
 
 The wrapper's `preflight generate` auto-fires the **Topic Pre-Flight Brief** for the review scope (degrades silently on failure). The reviewer reads `.devt/state/preflight-brief.md` so the review checklist gains "alignment with governing ADRs/Concepts" and "no proposed changes that match a REJ tombstone" — high-leverage code-review items that are otherwise easy to miss.
 
@@ -442,7 +442,7 @@ fi
 
 If `SCOPE_FILE_COUNT ≤ 10` OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope creeps past 10 files without graphify.
 
-**Cal #33.B-3 operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question (receipt #7 Q1 classified this as clean (iii) dead-weight). Pre-detect the intent and auto-write the answer:
+**Operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question. Pre-detect the intent and auto-write the answer:
 
 ```bash
 PARALLEL_INTENT_RE='(parallel|split (across|between|into) (multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
@@ -584,13 +584,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
 <memory_signal>{memory_signal_json}</memory_signal>
-    <!-- Cal #32 rank #2: auto_memory carries user-curated decisions (laneH
-         from ~/.claude/projects/<projHash>/memory/*.md) + claude-mem
-         observations (.devt/state/claude-mem-harvest.md). G2 (cal #31.C)
-         populated this in preflight-brief.json but the envelope never
-         referenced the field — reviewers got it only redundantly via
-         claude-mem harvest. Distinct from memory_signal which is the
-         FTS-backed ADR/CON/FLOW/REJ/LES governance layer. -->
+    <!-- auto_memory carries user-curated decisions (laneH from
+         ~/.claude/projects/<projHash>/memory/*.md) + claude-mem observations
+         (.devt/state/claude-mem-harvest.md), populated in preflight-brief.json.
+         Distinct from memory_signal, which is the FTS-backed
+         ADR/CON/FLOW/REJ/LES governance layer. -->
     <auto_memory>{auto_memory_json}</auto_memory>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>
@@ -745,10 +743,6 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
-    <!-- Inline rubric body from init payload — verifier prefers this over the
-         on-disk Read at <rubric_path> when present. Falls back to path when
-         omitted (oversized rubric → init returns null inline_rubrics). -->
-    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
@@ -881,7 +875,7 @@ When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
 <!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-code_review.tmpl.md -->
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
-    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing)</files_to_read>
     <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
   <task>

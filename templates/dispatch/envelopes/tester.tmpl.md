@@ -1,6 +1,6 @@
 Task(subagent_type="devt:tester", model="{models.tester}", prompt="
   <context>
-    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md, CLAUDE.md</files_to_read>
+    <files_to_read>.devt/rules/testing-patterns.md, .devt/rules/quality-gates.md</files_to_read>
 <governing_rules rules_hash=\"{governing_rules.rules_hash}\">
       <claude_md>{governing_rules.content[\"CLAUDE.md\"]}</claude_md>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>

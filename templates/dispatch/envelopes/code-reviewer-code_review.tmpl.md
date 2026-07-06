@@ -8,13 +8,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
 <memory_signal>{memory_signal_json}</memory_signal>
-    <!-- Cal #32 rank #2: auto_memory carries user-curated decisions (laneH
-         from ~/.claude/projects/<projHash>/memory/*.md) + claude-mem
-         observations (.devt/state/claude-mem-harvest.md). G2 (cal #31.C)
-         populated this in preflight-brief.json but the envelope never
-         referenced the field — reviewers got it only redundantly via
-         claude-mem harvest. Distinct from memory_signal which is the
-         FTS-backed ADR/CON/FLOW/REJ/LES governance layer. -->
+    <!-- auto_memory carries user-curated decisions (laneH from
+         ~/.claude/projects/<projHash>/memory/*.md) + claude-mem observations
+         (.devt/state/claude-mem-harvest.md), populated in preflight-brief.json.
+         Distinct from memory_signal, which is the FTS-backed
+         ADR/CON/FLOW/REJ/LES governance layer. -->
     <auto_memory>{auto_memory_json}</auto_memory>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>

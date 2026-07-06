@@ -2812,16 +2812,22 @@ if echo "$GR_OUT" | node -e "
       if (!gr || typeof gr !== 'object') { console.error('governing_rules missing'); process.exit(1); }
       if (typeof gr.rules_hash !== 'string' || gr.rules_hash.length !== 16) { console.error('rules_hash malformed:',gr.rules_hash); process.exit(2); }
       const c = gr.content || {};
-      const required = ['CLAUDE.md','.devt/rules/coding-standards.md','.devt/rules/architecture.md'];
+      // CLAUDE.md is by-reference: the harness auto-injects it, so content carries
+      // a short stub and the path surfaces in paths_excluded/harness_injected (NOT
+      // paths_included). Only .devt/rules/*.md are inlined into content+paths_included.
+      const required = ['.devt/rules/coding-standards.md','.devt/rules/architecture.md'];
       const missing = required.filter(k=>!c[k]||typeof c[k]!=='string'||c[k].length===0);
       if (missing.length) { console.error('missing/empty governing_rules.content:',missing.join(',')); process.exit(3); }
+      if (typeof c['CLAUDE.md'] !== 'string' || c['CLAUDE.md'].length===0) { console.error('CLAUDE.md by-reference stub missing from content'); process.exit(3); }
+      const claudeByRef = (gr.paths_excluded||[]).some(p=>p && p.name==='CLAUDE.md' && p.reason==='harness_injected');
+      if (!claudeByRef) { console.error('CLAUDE.md not marked harness_injected in paths_excluded'); process.exit(7); }
       if (gr.total_bytes <= 0 || gr.total_bytes > 96*1024) { console.error('total_bytes out of cap:',gr.total_bytes); process.exit(4); }
-      if (!Array.isArray(gr.paths_included) || gr.paths_included.length < 3) { console.error('paths_included malformed'); process.exit(5); }
+      if (!Array.isArray(gr.paths_included) || gr.paths_included.length < 2) { console.error('paths_included malformed'); process.exit(5); }
       process.exit(0);
     } catch (e) { console.error('parse failed:',e.message); process.exit(6); }
   });
 " 2>/dev/null; then
-  pass "init.cjs returns governing_rules with CLAUDE.md + .devt/rules/*.md + hash + paths_included"
+  pass "init.cjs returns governing_rules: CLAUDE.md by-reference (harness_injected) + .devt/rules/*.md inlined + hash + paths_included"
 else
   fail "governing_rules missing or malformed in init JSON (Option 1)"
 fi
@@ -3266,9 +3272,16 @@ if echo "$COMPLEX_OUT" | node -e "
       const j=JSON.parse(d);
       if(j.tier!=='complex'){console.error('tier not complex:',j.tier);process.exit(1);}
       const p=j.resolved_skills&&j.resolved_skills.programmer;
-      const required=['codebase-scan','scratchpad','memory-pre-flight','tdd-patterns','verification-patterns','strategic-analysis','api-docs-fetcher'];
+      // Frontmatter-preloaded skills (io-contracts programmer.frontmatter_skills:
+      // memory-pre-flight, codebase-scan) are deduped OUT of resolved_skills so
+      // the <agent_skills> injection never re-lists what the agent frontmatter
+      // already loaded. Required union = complex-tier index skills MINUS those.
+      const required=['scratchpad','tdd-patterns','verification-patterns','strategic-analysis','api-docs-fetcher'];
       const missing=required.filter(k=>!p.includes(k));
       if(missing.length){console.error('missing complex skills:',missing.join(','));process.exit(2);}
+      const frontmatterPreloaded=['memory-pre-flight','codebase-scan'];
+      const leaked=frontmatterPreloaded.filter(k=>p.includes(k));
+      if(leaked.length){console.error('frontmatter skills re-listed in resolved_skills:',leaked.join(','));process.exit(4);}
       process.exit(0);
     }catch(e){console.error('parse:',e.message);process.exit(3);}
   });
@@ -3276,6 +3289,42 @@ if echo "$COMPLEX_OUT" | node -e "
   pass "complex task seeds tier=complex and loads full skill union"
 else
   fail "complex-tier skill resolution regression"
+fi
+
+# K233: skill-index buckets stay disjoint from agent frontmatter skills, for
+# EVERY agent (generalizes the programmer spot-check above). The harness
+# preloads each agent's frontmatter `skills:` bodies at startup; a bucket that
+# re-lists one makes resolveSkills inject a load-and-follow path for a skill the
+# agent already holds in context — a duplicate 5-14KB Read per dispatch. Guards
+# the transport-dedup invariant against future skill-index edits.
+if echo "$COMPLEX_OUT" | node -e "
+  const fs=require('fs');
+  let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+    try{
+      const j=JSON.parse(d);
+      const rs=j.resolved_skills||{};
+      // Parse io-contracts.yaml frontmatter_skills (one inline array per agent).
+      const txt=fs.readFileSync(process.argv[1],'utf8');
+      const fm={};let cur=null;
+      for(const line of txt.split('\n')){
+        const a=line.match(/^  ([a-z][\w-]*):\s*\$/);
+        if(a){cur=a[1];continue;}
+        const m=line.match(/^\s*frontmatter_skills:\s*\[(.*)\]/);
+        if(m&&cur)fm[cur]=m[1].split(',').map(s=>s.trim().replace(/^devt:/,'')).filter(Boolean);
+      }
+      const viol=[];
+      for(const agent of Object.keys(rs)){
+        const dup=(rs[agent]||[]).filter(s=>(fm[agent]||[]).includes(s));
+        if(dup.length)viol.push(agent+':['+dup.join(',')+']');
+      }
+      if(viol.length){console.error('frontmatter/bucket overlap: '+viol.join('; '));process.exit(1);}
+      process.exit(0);
+    }catch(e){console.error('parse:',e.message);process.exit(2);}
+  });
+" "$ROOT/agents/io-contracts.yaml" 2>/dev/null; then
+  pass "K233: skill-index buckets disjoint from agent frontmatter skills across all agents (no duplicate preload+inject)"
+else
+  fail "K233: a skill-index bucket re-lists an agent's frontmatter skill (duplicate load)"
 fi
 
 echo "== Agent IO Contracts registry drift =="
@@ -8871,19 +8920,20 @@ else
   fail "M14: ambiguous_bindings wiring incomplete. graphify=${M14_GRAPHIFY} persist=${M14_PERSIST} workflow=${M14_WORKFLOW} agent=${M14_AGENT} jq=${M14_JQ}"
 fi
 
-# M15: C7-7 — code_review rubric inlined into code-reviewer dispatch
-# (not just verifier). Field calibration #7: reviewer was self-checking
-# against agent-body conventions only; verifier graded against the rubric;
-# axes drift caused extra revision loops. Wiring the rubric into the
-# reviewer's first dispatch eliminates the loop and aligns reviewer↔verifier
-# on the same axes (north-stars #1 coordination, #3 token efficiency).
-M15_SINGLE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-M15_PARALLEL_LANE=$(/usr/bin/grep -c "rubric_content>{inline_rubrics.code_review}</rubric_content" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+# M15: code_review rubric alignment. The single-dispatch reviewer carries the
+# rubric INLINE (deliberate self-check so reviewer↔verifier grade the SAME axes
+# without a revision loop); the verifier, the parallel lanes, and the
+# consolidator read that same rubric by-reference from <rubric_path>. This gate
+# guards the split: inline stays for the reviewer, by-reference everywhere else
+# (north-stars #1 coordination, #3 token efficiency).
+M15_REVIEWER_INLINE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M15_PATH_REFS=$(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M15_PARALLEL_BYREF=$(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
 M15_AGENT=$(/usr/bin/grep -c "Rubric self-check" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
-if [ "${M15_SINGLE:-0}" -ge 2 ] && [ "${M15_PARALLEL_LANE:-0}" -ge 2 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
-  pass "M15: code_review rubric inlined into reviewer dispatch (single=${M15_SINGLE} parallel=${M15_PARALLEL_LANE} agent=${M15_AGENT})"
+if [ "${M15_REVIEWER_INLINE:-0}" -ge 1 ] && [ "${M15_PATH_REFS:-0}" -ge 2 ] && [ "${M15_PARALLEL_BYREF:-0}" -ge 1 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
+  pass "M15: code_review rubric aligned — reviewer inline self-check (${M15_REVIEWER_INLINE}) + reviewer/verifier rubric_path (${M15_PATH_REFS}) + parallel by-reference (${M15_PARALLEL_BYREF}) + agent self-check (${M15_AGENT})"
 else
-  fail "M15: rubric inline wiring incomplete. single=${M15_SINGLE} (need >=2: reviewer + verifier) parallel=${M15_PARALLEL_LANE} (need >=2: per-lane bullet + consolidator) agent=${M15_AGENT}"
+  fail "M15: rubric wiring drift. reviewer_inline=${M15_REVIEWER_INLINE} (need >=1) path_refs=${M15_PATH_REFS} (need >=2: reviewer + verifier rubric_path) parallel_byref=${M15_PARALLEL_BYREF} (need >=1) agent=${M15_AGENT}"
 fi
 
 # M16: Q4 — probe failure diagnostic logging. Field calibration #7

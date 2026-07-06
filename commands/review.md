@@ -12,14 +12,8 @@ This workflow uses: Bash, Read, Glob, Grep, Agent
 Perform a standalone code review of the current changes or specified files. Read-only — no edits or writes. `--focus` switches the lens: code (default), arch (architectural-health scan), quality (lint/typecheck/tests gate), security (review with security emphasis).
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/code-review.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/arch-health-scan.md
-@${CLAUDE_PLUGIN_ROOT}/workflows/quality-gates.md
-</execution_context>
-
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the --focus flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.md`) via the Read tool. The `@`-references above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: Parse $ARGUMENTS for the --focus flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 **Step 1 — Parse $ARGUMENTS for --focus flag.** Strip the matched flag from $ARGUMENTS before passing the remaining scope/options to the workflow.
 

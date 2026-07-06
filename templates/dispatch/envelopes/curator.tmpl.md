@@ -1,6 +1,6 @@
 Task(subagent_type="devt:curator", model="{models.curator}", prompt="
   <context>
-    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing), CLAUDE.md</files_to_read>
+    <files_to_read>.devt/state/lessons.yaml, .devt/memory/_suggestions.md (if exists), .devt/memory/lessons/*.md (existing)</files_to_read>
     <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
   </context>
   <task>

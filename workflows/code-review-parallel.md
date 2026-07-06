@@ -48,9 +48,7 @@ Before dispatching the code-reviewer agent (both per-lane and consolidator), che
 }
 ```
 
-If `agent_skills.code-reviewer` exists, inject the skill references into the agent's prompt context — same idiom as `code-review.md` single-dispatch path. Apply uniformly to every per-lane dispatch AND the consolidator synthesis-mode dispatch so all dispatches have the same skill surface.
-
-If not configured, omit the block.
+If `agent_skills.code-reviewer` exists, inject the skill references into the agent's prompt context — same idiom as `code-review.md` single-dispatch path. The resolved set is `.devt/config.json::agent_skills.code-reviewer` merged over the `${CLAUDE_PLUGIN_ROOT}/skill-index.yaml` tier defaults (config wins); this workflow runs off cached state with no compound-`init` payload of its own, so resolve it that way rather than reading a `resolved_skills` field. Apply uniformly to every per-lane dispatch AND the consolidator synthesis-mode dispatch so all dispatches have the same skill surface. Frontmatter-preloaded skills are never re-listed; when the resolved list is empty, inject `<agent_skills>(none — defaults preloaded via agent frontmatter)</agent_skills>`.
 </agent_skill_injection>
 
 ---
@@ -271,8 +269,7 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules rules_hash="{governing_rules.rules_hash}">by-reference: Read the .devt/rules/ files relevant to your lane scope from disk ({governing_rules.paths_included, .devt/rules/* entries only}). CLAUDE.md is auto-injected by the harness — do not re-read it.</governing_rules>` — rules-by-reference is the lane default: the rules body is byte-identical across all N lanes and lane agents share the orchestrator's working tree, so inlining it multiplies ~57KB per lane for zero signal gain. Inline the full content only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
-- `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>`
-- `<rubric_content>{inline_rubrics.code_review}</rubric_content>` — same axes the verifier will grade against; lane reviewer self-checks axes A–D + G for its file slice
+- `<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>` — rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric at `<rubric_path>` FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently including H) — the same axes the verifier will grade. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
 
 **L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Why: a prose-only README lane otherwise receives the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
 
@@ -422,11 +419,11 @@ Dispatch the code-reviewer in synthesis mode. The synthesis-mode handler (agents
 Build the lane files list (only `substance_pass` and `deferred` lanes — never include `in_flight` or `stub_redispatched`; those should have been resolved by now):
 
 ```bash
-# Cal #32 rank #1 part (c): cid_match != "foreign" filter prevents stale
-# review-lane-*.md files from a rotated workflow leaking into consolidation
-# (receipt #6 evidence: cid_68768a3d stale files nearly merged into fresh
-# report). "current" + "absent" both pass — "absent" preserves backward-
-# compat with legacy lanes pre-F6 cid stamping.
+# cid_match != "foreign" filter prevents stale review-lane-*.md files from a
+# rotated workflow leaking into consolidation (field-observed: stale lane files
+# from a rotated workflow nearly merged into a fresh report). "current" +
+# "absent" both pass — "absent" preserves compatibility with legacy lanes that
+# predate cid stamping.
 LANE_FILES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
   jq -r '.lanes[] | select(.status == "substance_pass" or .status == "deferred") | select(.cid_match != "foreign") | .review_file' | \
   /usr/bin/grep -v '^$' | paste -sd ',' -)
@@ -483,7 +480,6 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {prior_outputs}
     {provenance_protocol}
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
-    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -496,8 +492,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     Synthesis rules:
     - Dedupe findings by (file:line:finding_class). When the same finding appears in multiple
       lanes (cross-cutting concern), keep the most specific one and cite all source lanes.
-    - Reconcile severity using the rubric in <rubric_content> when lanes disagree — promote to
-      the higher severity when evidence supports it.
+    - Reconcile severity using the rubric at <rubric_path> (Read it BEFORE reconciling
+      severities) when lanes disagree — promote to the higher severity when evidence supports it.
     - Preserve EVERY Critical finding. Important and Minor may be deduped but never silently
       dropped — when you drop one, note it in the per-lane provenance.
     - Group findings by file for the consolidated output.
@@ -585,10 +581,6 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
-    <!-- Inline rubric body from init payload — verifier prefers this over the
-         on-disk Read at <rubric_path> when present. Falls back to path when
-         omitted (oversized rubric → init returns null inline_rubrics). -->
-    <rubric_content>{inline_rubrics.code_review}</rubric_content>
     <original_task>{review_scope_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>

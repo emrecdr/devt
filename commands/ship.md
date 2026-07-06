@@ -11,12 +11,8 @@ This workflow uses: Bash, Read, Glob, Grep
 Create a pull request with a rich, auto-generated description composed from the completed workflow's .devt/state/ artifacts (impl-summary.md, test-summary.md, review.md, decisions.md, preflight-brief.md). The PR body cites governing ADR/Concept/Flow ids consulted during the work and any REJ tombstones the implementation deliberately respected — reviewers can verify alignment without re-reading the Brief themselves.
 </objective>
 
-<execution_context>
-@${CLAUDE_PLUGIN_ROOT}/workflows/ship.md
-</execution_context>
-
 <process>
-**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/ship.md` via the Read tool before any other action. The `@`-reference above may not be inlined by every harness; the explicit Read guarantees the workflow body is in context.
+**Mandatory first action**: read `${CLAUDE_PLUGIN_ROOT}/workflows/ship.md` via the Read tool before any other action. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
 Then execute every `<step>` block in the file in order. Do NOT skip `context_init`. Do NOT dispatch any `Task(subagent_type="devt:*", ...)` without the workflow's `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` blocks injected into the prompt — raw dispatches bypass the Graphify-first protocol and produce grep-quality output.
 
