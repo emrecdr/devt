@@ -129,7 +129,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 149-deep drift-guard stack K94-K242) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 151-deep drift-guard stack K94-K244) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -154,7 +154,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 ### Critical Agent + Workflow Contracts (read these before modifying any workflow)
 
 - **Never raw-dispatch devt agents.** Route through `/devt:*` slash commands; raw `Task(subagent_type="devt:*")` bypasses envelope (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, graph-impact map, impact-plan, verifier loop, telemetry). Three-layer defense: `dispatch-hygiene-guard.sh` (advisory) → `assert-no-raw-dispatches-this-session` finalize gate (block) → `code-reviewer.md::workflow_context_assertion` (hard-stop). → docs/AGENT-CONTRACTS.md (Never raw-dispatch).
-- **Orchestrator owns MCP; sub-agents are MCP-blind.** Sub-agents declare stdlib tools only (`Read, Bash, Glob, Grep` + `Write, Edit` for writers) — never `mcp__*`. Orchestrators run MCP, write to `.devt/state/graph-impact.md`, sub-agents consume read-only. Architect's `graphify-helpers` skill uses Bash-callable CLI wrappers, not MCP. → docs/AGENT-CONTRACTS.md (Orchestrator owns MCP).
+- **Orchestrator owns MCP; sub-agents are MCP-blind.** Sub-agents declare stdlib tools only (`Read, Bash, Glob, Grep` + `Write, Edit` for writers; + `LSP` native code-navigation on code-reviewer/debugger/programmer) — never `mcp__*`. Orchestrators run MCP, write to `.devt/state/graph-impact.md`, sub-agents consume read-only. Architect's `graphify-helpers` skill uses Bash-callable CLI wrappers, not MCP. → docs/AGENT-CONTRACTS.md (Orchestrator owns MCP).
 - **Single-dispatch contract for `/devt:review`.** `workflows/code-review.md` defines EXACTLY ONE reviewer + ONE verifier dispatch. Large reviews use the built-in community-filter (>10 files → restrict to `affected_communities`, defer rest); sanctioned parallel fan-out lives in `workflows/code-review-parallel.md` only. → docs/AGENT-CONTRACTS.md (Single-dispatch contract).
 - **Escape hatches** for cases no `/devt:*` command fits (custom multi-lane fan-out, side audits, ad-hoc continuations). → docs/operator-guide/DISPATCH-RECIPES.md.
 

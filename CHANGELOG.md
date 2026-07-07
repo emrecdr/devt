@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.152.0] - 2026-07-07
+
+### LSP-first caller lookup + test-tampering defense
+
+- **Native LSP tool wired into the three code-navigation agents.** code-reviewer, debugger, and programmer now declare the harness's `LSP` tool (`incomingCalls`, `findReferences`, `goToDefinition`, …) — validated live on this repo before wiring (a language server resolved a function's callers with exact positions). Caller-enumeration guidance is LSP-first: a language server sees runtime-wired callers (DI, event handlers) that static extraction misses — the exact blind spot behind the long-standing "who-calls answered by Grep" bottleneck — with Grep as the documented fallback when no server covers the file type, and graphify's `get_neighbors` staying as the community/blast-context complement. LSP is a native harness tool, not `mcp__*`: the MCP-blind sub-agent contract is unchanged (wording updated in AGENT-CONTRACTS + CLAUDE.md).
+- **Test-tampering defense (deletion-shaped gate gaming was invisible).** The verify loop re-dispatches the programmer under an iteration cap — exactly the pressure where deleting a failing test is the cheapest path to green — and every defense layer was blind to it: `failed_count=0` is trivially satisfied by deletion, and baseline diffing only caught pass→fail transitions. Now golden-rules Rule 16 ("Never Weaken Tests to Pass", CRITICAL) reaches programmer + code-reviewer via `guardrails_inline`, and the verifier's Level 4.5 baseline comparison diffs test/gate COUNTS — a lower current total is a flagged gap unless impl-summary explicitly declares the removal. The rule lives in guardrails rather than programmer.md because that agent sits at the hard 500-line cap.
+- Gates **K243** (LSP wiring) + **K244** (anti-tampering rule + count-diff). Drift-guard stack 149 → 151 deep (K94–K244).
+
 ## [0.151.0] - 2026-07-07
 
 ### Trim batch + receipt-gated model experiment

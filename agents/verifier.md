@@ -146,6 +146,7 @@ For each acceptance criterion, trace through the codebase using the 4-level veri
 - Read `.devt/state/baseline-gates.md` (if exists) for pre-implementation gate results
 - Compare current gate results against baseline
 - Any test/gate that PASSED in baseline but FAILS now is a **regression** — report as a gap
+- Diff test/gate COUNTS against baseline too: a LOWER current total means a test was deleted or skipped — pass→fail diffing cannot see this (a deleted test can't fail). Report the drop as a gap unless the impl-summary explicitly declares the removal with a reason.
 - Pre-existing failures (already failing in baseline) are NOT regressions — ignore them
 
 Everything must reach Level 3 minimum. Level 4 for critical paths. Level 4.5 when baseline exists.

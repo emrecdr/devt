@@ -8,7 +8,7 @@ description: |
   Code review specialist. Triggered when code needs quality review before approval.
   READ-ONLY — inspects but never modifies code. Examples: "review the payment service
   changes", "check the new API endpoints for issues", "review this PR for quality".
-tools: Read, Bash, Glob, Grep
+tools: Read, Bash, Glob, Grep, LSP
 memory: project
 skills:
   - devt:memory-pre-flight
@@ -27,7 +27,7 @@ For each diff hunk:
 2. For each governing ADR, verify the diff respects it (e.g. ADR-007 mandates Argon2 — flag any diff that introduces Bcrypt)
 3. Run `node bin/devt-tools.cjs memory rejected-keywords` once and check whether any diff text matches a REJ tombstone (e.g. introduces "Redis caching" when REJ-001 rejected it)
 4. Treat ADR violations as **Critical** findings — same severity as security issues. ADRs are constitutional; ignoring them is not "acceptable" any more than ignoring `.devt/rules/`.
-5. When Graphify is enabled, also enumerate **affected callers** of changed symbols via the graphify-helpers skill (`get_neighbors --direction=in`) — review whether the callers' behavior is preserved.
+5. Enumerate **affected callers** of changed symbols and review whether their behavior is preserved. Prefer the `LSP` tool (`incomingCalls` / `findReferences` at the symbol's definition) — a language server sees runtime-wired callers (DI, event handlers) the static graph misses; it errors when no server covers the file type, in which case fall back to Grep. When Graphify is enabled, the graphify-helpers skill (`get_neighbors --direction=in`) adds community/blast context on top.
 </role>
 
 <context_loading>

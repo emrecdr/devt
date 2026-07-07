@@ -162,3 +162,13 @@ Match existing style even if you would write it differently. The Boy Scout insti
 **Why**: A stale FTS5 index makes Pre-Flight queries return wrong results — agents proceed thinking governance has been read when it hasn't. REJ tombstones exist precisely so the team doesn't keep re-litigating the same rejected approach; bypassing tombstone checks reanimates settled debates.
 
 **Practice**: Trust the PostToolUse hook for routine edits — it's idempotent. After bulk operations or when hooks are disabled, run `node bin/devt-tools.cjs memory index && node bin/devt-tools.cjs memory validate`. When generating proposals via `discovery suggest`, the tooling already filters against `rejected_keywords` — never bypass that filter manually. When curator promotes a DEC → ADR, it must check for matching REJs first; the curator skill body documents this filter.
+
+---
+
+## Rule 16: Never Weaken Tests to Pass `[CRITICAL]`
+
+**What**: Never remove, skip, or weaken a failing test, gate, or assertion to make a run pass. Fix the code, not the test.
+
+**Why**: Retry loops create exactly the pressure where deleting a failing test is the cheapest path to green. A deleted test cannot fail — pass/fail diffing is blind to it, so the gap ships silently as missing or buggy functionality.
+
+**Practice**: If a test is genuinely wrong, say so explicitly in your output artifact (impl-summary / review) with the reason, and change it visibly — never silently. Deleting or skipping a test to satisfy a gate is gaming, not fixing; the verifier diffs test counts against the baseline and will flag it.

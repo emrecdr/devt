@@ -7,7 +7,7 @@ maxTurns: 60
 description: |
   Systematic debugging specialist. Use when encountering bugs, test failures, or unexpected behavior.
   Follows 4-phase investigation protocol. Isolates in fresh context to preserve the workflow's context window.
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, LSP
 memory: project
 skills:
   - devt:memory-pre-flight
@@ -99,6 +99,7 @@ GATE: Phase 1 must produce at least 3 concrete observations backed by strong evi
 3. List every difference, however small — do not assume "that can't matter"
 4. Check dependencies: did a dependency change? Check versions.
 5. Check configuration: is the environment correct? Compare env vars.
+6. Trace call paths with the `LSP` tool (`incomingCalls` / `findReferences` at the definition) — a language server sees runtime-wired callers that static text search misses. It errors when no server covers the file type; fall back to Grep.
 </step>
 
 <step name="phase3_hypothesis">

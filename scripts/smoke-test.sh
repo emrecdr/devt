@@ -16149,6 +16149,30 @@ else
   fail "K242: dependency-legitimacy guardrail missing from engineering-principles.md or researcher.md"
 fi
 
+# K243: LSP-first caller lookup wired — code-reviewer/debugger/programmer declare
+# the native LSP tool (not mcp__*, so the MCP-blind contract is intact), and
+# caller-enumeration guidance is LSP-first with an explicit Grep fallback.
+K243_TOOLS=$({ /usr/bin/grep -l "^tools:.*LSP" "$ROOT/agents/code-reviewer.md" "$ROOT/agents/debugger.md" "$ROOT/agents/programmer.md" 2>/dev/null || true; } | wc -l | tr -d " ")
+if [ "$K243_TOOLS" = "3" ] \
+   && /usr/bin/grep -q "incomingCalls" "$ROOT/agents/code-reviewer.md" \
+   && /usr/bin/grep -q "incomingCalls" "$ROOT/agents/debugger.md" \
+   && /usr/bin/grep -q "fall back to Grep" "$ROOT/agents/code-reviewer.md"; then
+  pass "K243: LSP declared on code-reviewer/debugger/programmer + LSP-first caller guidance with Grep fallback"
+else
+  fail "K243: LSP wiring incomplete — tools_count=$K243_TOOLS"
+fi
+
+# K244: test-tampering defense present — golden-rules rule (never weaken tests
+# to pass) reaches programmer/code-reviewer via guardrails_inline, and the
+# verifier's baseline comparison diffs test COUNTS (deletion-shaped gaming is
+# invisible to pass->fail diffing alone).
+if /usr/bin/grep -q "Never Weaken Tests to Pass" "$ROOT/guardrails/golden-rules.md" \
+   && /usr/bin/grep -q "COUNTS against baseline" "$ROOT/agents/verifier.md"; then
+  pass "K244: anti-tampering — golden-rules never-weaken-tests rule + verifier count-diff vs baseline"
+else
+  fail "K244: anti-tampering defense missing (golden-rules rule or verifier count-diff)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
