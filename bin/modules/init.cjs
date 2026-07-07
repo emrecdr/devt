@@ -320,6 +320,17 @@ function loadGoverningRules(projectRoot) {
         if (!check.safe) continue;
         const rootCheck = validatePath(check.resolved, rulesDir);
         if (!rootCheck.safe) continue;
+        // static-compress writes <name>.original.md backups as siblings —
+        // inlining them duplicates the corpus per dispatch and cap-evicts
+        // live rules. Excluded from content AND rules_hash (the hash must
+        // reflect effective rules, not their backups), surfaced in
+        // paths_excluded so the reduction is never silent.
+        if (name.endsWith(".original.md")) {
+          let bytes = 0;
+          try { bytes = fs.statSync(check.resolved).size; } catch { /* best-effort size */ }
+          result.paths_excluded.push({ name: `.devt/rules/${name}`, bytes, reason: "static_compress_backup" });
+          continue;
+        }
         candidates.push({ name: `.devt/rules/${name}`, filePath: check.resolved });
       }
     } catch { /* dir empty or unreadable */ }
@@ -786,6 +797,8 @@ function scanDevRules(dir, prefix, rootDir) {
       if (entry.isDirectory()) {
         files.push(...scanDevRules(check.resolved, relPath, rootDir));
       } else if (entry.isFile()) {
+        // static-compress .original.md backups are not rules — keep them out of listings
+        if (entry.name.endsWith(".original.md")) continue;
         files.push(relPath);
       }
     }

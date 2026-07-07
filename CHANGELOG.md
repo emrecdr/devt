@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.150.0] - 2026-07-07
+
+### Two loop-validated fixes: backup-inlining field bug + dead effort plumbing
+
+Both landed from a multi-agent research loop whose findings were adversarially verified (novelty critic + value critic per finding) and then re-validated against the repo and the field project before implementation.
+
+- **Governing-rules inlining no longer swallows static-compress backups.** `static-compress` writes `<name>.original.md` siblings into `.devt/rules/`; `loadGoverningRules` inlined every top-level `.md`, so on a compressed project roughly half of the `<governing_rules>` block was byte-duplicate backup content on every dispatch to the 6 consuming agents — and the duplicates filled the 96KB cap, evicting live rules (`golden-rules.md`, `testing-patterns.md`) from dispatches entirely. Backups are now excluded from both the inline set and `rules_hash` (the hash reflects effective rules, not their backups), surfaced in `paths_excluded` with reason `static_compress_backup` so the reduction is never silent, and skipped by `scanDevRules` listings.
+- **Dead per-dispatch effort plumbing deleted.** The per-profile `EFFORTS` map, `getEfforts()`, the `models efforts|efforts-table` CLI subcommands, and the `{efforts.<agent>}` envelope substitution never reached a dispatch since introduction: zero templates/workflows consume `{efforts.*}` (contrast `{models.*}` in 12+ envelope templates), and the Agent tool exposes a per-call `model` parameter but no per-call effort — agent frontmatter `effort:` is the only effort lever the harness honors, and every agent already pins it there (coding agents at `high`, safe per the published Sonnet 5 cross-model effort mapping). Before: profile-differentiated effort existed as configuration that structurally could not fire. After: frontmatter is the single documented effort lever and the dead surface is gone.
+- Gates: **K240** (functional: backups excluded from the inline set + surfaced in `paths_excluded`), **K141 + K239 recalibrated** (opus/sonnet alias currency, effort-plumbing-stays-deleted tripwires, all 11 agents pin frontmatter effort). Drift-guard stack 146 → 147 deep (K94–K240).
+
 ## [0.149.0] - 2026-07-07
 
 ### Platform calibration: current model + effort surface

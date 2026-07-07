@@ -13672,18 +13672,15 @@ else
   fail "K140: matcher behavior wrong — correlation_id silent=$NEW_WARNINGS_A (expected 0); no-envelope flagged=$NEW_WARNINGS_B (expected >=1)"
 fi
 
-# K141: model profiles carry per-agent effort settings (M1, cal #30.2).
-# Opus 4.8's default effort flipped medium→high; without explicit per-agent
-# settings, every devt dispatch silently spends 30-50% more tokens. EFFORTS
-# map + getEfforts() + {efforts.X} dispatch substitution surfaces the lever.
-K141_RESULT=$(node "$ROOT/bin/devt-tools.cjs" models efforts balanced 2>/dev/null)
-K141_HAS_ARCHITECT=$(echo "$K141_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.architect==='high'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
-K141_HAS_TESTER=$(echo "$K141_RESULT" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); console.log(o.tester==='low'?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+# K141: model-profile surface — opus alias current, and the dead per-dispatch
+# effort plumbing stays deleted (frontmatter `effort:` is the only effort lever
+# the harness honors; the Agent tool has no per-call effort parameter).
 K141_OPUS_RESOLVED=$(node -e 'const {resolveModelId}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(resolveModelId("opus")==="claude-opus-4-8"?"1":"0");' 2>/dev/null)
-if [ "${K141_HAS_ARCHITECT:-0}" = "1" ] && [ "${K141_HAS_TESTER:-0}" = "1" ] && [ "${K141_OPUS_RESOLVED:-0}" = "1" ]; then
-  pass "K141: model profiles carry per-agent effort (architect=high, tester=low) + opus alias resolves to claude-opus-4-8"
+K141_EFFORTS_GONE=$(node -e 'const m=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(m.getEfforts===undefined&&m.EFFORTS===undefined?"1":"0");' 2>/dev/null)
+if [ "${K141_OPUS_RESOLVED:-0}" = "1" ] && [ "${K141_EFFORTS_GONE:-0}" = "1" ]; then
+  pass "K141: opus alias resolves to claude-opus-4-8 + effort plumbing stays deleted (frontmatter is the effort lever)"
 else
-  fail "K141: effort schema broken — architect_high=$K141_HAS_ARCHITECT tester_low=$K141_HAS_TESTER opus_resolved=$K141_OPUS_RESOLVED"
+  fail "K141: model-profile surface broken — opus_resolved=$K141_OPUS_RESOLVED efforts_gone=$K141_EFFORTS_GONE"
 fi
 
 # K142: state assert-verifier-short-circuit fires on substantive clean sidecar.
@@ -16090,16 +16087,42 @@ else
   fail "K238: augment-impact-map fold — $K238_CHECK"
 fi
 
-# K239: model/effort surface currency — sonnet alias resolves to claude-sonnet-5,
-# xhigh accepted in effort_overrides, quality profile routes programmer/debugger
-# at xhigh (Anthropic's recommended coding/agentic starting point on Opus-class).
+# K239: model surface currency + effort-lever integrity — sonnet alias resolves
+# to claude-sonnet-5, no {efforts.*} substitution survives in dispatch.cjs, and
+# every agent pins its effort in frontmatter (the only lever the harness honors).
 K239_SONNET=$(node -e 'const {resolveModelId}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(resolveModelId("sonnet")==="claude-sonnet-5"?"1":"0");' 2>/dev/null)
-K239_XHIGH_OVERRIDE=$(node -e 'const {getEfforts}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); const r=getEfforts("balanced",{programmer:"xhigh"}); console.log(r.programmer==="xhigh"?"1":"0");' 2>/dev/null)
-K239_QUALITY_XHIGH=$(node -e 'const {EFFORTS}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(EFFORTS.quality.programmer==="xhigh"&&EFFORTS.quality.debugger==="xhigh"?"1":"0");' 2>/dev/null)
-if [ "$K239_SONNET" = "1" ] && [ "$K239_XHIGH_OVERRIDE" = "1" ] && [ "$K239_QUALITY_XHIGH" = "1" ]; then
-  pass "K239: model/effort surface current — sonnet→claude-sonnet-5, xhigh override accepted, quality programmer/debugger=xhigh"
+K239_EFFORT_SUBST=$(/usr/bin/grep -c "{efforts\." "$ROOT/bin/modules/dispatch.cjs" || true)
+K239_FRONTMATTER=$(/usr/bin/grep -l "^effort:" "$ROOT"/agents/*.md 2>/dev/null | wc -l | tr -d " ")
+if [ "$K239_SONNET" = "1" ] && [ "${K239_EFFORT_SUBST:-1}" = "0" ] && [ "$K239_FRONTMATTER" = "11" ]; then
+  pass "K239: sonnet→claude-sonnet-5 + no {efforts.*} substitution in dispatch.cjs + all 11 agents pin frontmatter effort"
 else
-  fail "K239: model/effort surface stale — sonnet5=$K239_SONNET xhigh_override=$K239_XHIGH_OVERRIDE quality_xhigh=$K239_QUALITY_XHIGH"
+  fail "K239: model/effort surface drift — sonnet5=$K239_SONNET effort_subst_hits=$K239_EFFORT_SUBST frontmatter_agents=$K239_FRONTMATTER"
+fi
+
+# K240: governing-rules inlining excludes static-compress .original.md backups
+# (field bug: backups doubled the corpus per dispatch and cap-evicted live
+# rules) while surfacing them in paths_excluded (telemetry-on-reduction), and
+# scanDevRules listings skip them.
+K240_T=$(mktemp -d)
+mkdir -p "$K240_T/.devt/rules"
+printf 'live rule body\n' > "$K240_T/.devt/rules/team-rules.md"
+printf 'backup body\n' > "$K240_T/.devt/rules/team-rules.original.md"
+K240_CHECK=$(node -e '
+const { loadGoverningRules } = require(process.argv[2] + "/bin/modules/init.cjs");
+// realpath the tmpdir — macOS mktemp returns symlinked paths (/var -> /private/var)
+// that fail validatePath confinement inside loadGoverningRules.
+const r = loadGoverningRules(require("fs").realpathSync(process.argv[1]));
+const inlined = Object.keys(r.content);
+const hasLive = inlined.includes(".devt/rules/team-rules.md");
+const hasBackup = inlined.some(n => n.endsWith(".original.md"));
+const excluded = (r.paths_excluded || []).some(e => e.reason === "static_compress_backup" && e.name.endsWith("team-rules.original.md"));
+console.log(hasLive && !hasBackup && excluded ? "OK" : "FAIL:live=" + hasLive + " backup=" + hasBackup + " excluded=" + excluded);
+' "$K240_T" "$ROOT" 2>&1 || echo "FAIL:node error")
+rm -rf "$K240_T"
+if [ "$K240_CHECK" = "OK" ]; then
+  pass "K240: .original.md backups excluded from governing-rules inline set + surfaced in paths_excluded (static_compress_backup)"
+else
+  fail "K240: backup exclusion broken — $K240_CHECK"
 fi
 
 echo
