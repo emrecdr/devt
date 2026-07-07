@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.148.0] - 2026-07-07
+
+### Fold code-review substep 7 into a CLI (workflow body-weight)
+
+`code-review.md`'s context_init substep 7 carried ~110 lines of inline `jq` that ran on every review — deterministic post-processing of on-disk JSON (`graph-impact.md` + `preflight-brief.json`) with zero MCP and zero model judgment. Because it runs *after* the MCP tier call, it couldn't fold into the pre-MCP `contextInitBundle`; it needed its own post-MCP CLI. This is the same "don't dump logic into context" principle the session applied to per-dispatch payloads, now applied to the workflow body.
+
+- **New `graphify augment-impact-map` CLI** (`graphify.cjs::augmentImpactMap`) appends the same six sections to `graph-impact.md`, byte-identical to the prior inline output: file- and symbol-level god-node warnings (via `check-large-files` / `check-symbol-godnodes`), the dropped-symbol truncation banner + section, hyperedge-completeness, ambiguous-bindings, and the preflight god-node fallback (emitted only when both diff-anchored checks come back empty). Substep 7 shrinks from ~110 lines of `jq` to a single CLI call — lighter workflow context on every review, and the emission logic is now unit-tested instead of embedded in prose.
+- No behavior change: the CLI reproduces the exact section wording; a fixture test locks byte-identity. `git` stderr is suppressed on non-repo / bad-base so the CLI degrades quietly. The load-bearing `assert-preflight-fresh` / `assert-graphify-decision` gates at the end of substep 7 are untouched.
+- Gates: **K238** (behavioral — the CLI emits all six sections with byte-identical wording on a synthetic graph + brief, and the preflight fallback is correctly suppressed when diff god-nodes are present); F17c + M12 re-pointed to the CLI as the single source of the emitted section wording. Drift-guard stack 144 → 145 deep (K94–K238).
+
 ## [0.147.0] - 2026-07-06
 
 ### Slim the memory-pre-flight skill (per-dispatch weight)

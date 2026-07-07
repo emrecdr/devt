@@ -6354,12 +6354,15 @@ else
   fail "F17b: small-file threshold logic wrong"
 fi
 rm -rf "$F17_TMP"
-# F17c — workflow wiring in code-review.md
-if /usr/bin/grep -q "graphify check-large-files" "$ROOT/workflows/code-review.md" \
-   && /usr/bin/grep -q "God-node warning" "$ROOT/workflows/code-review.md"; then
-  pass "F17c: code-review.md wires check-large-files CLI + appends God-node warning to graph-impact.md"
+# F17c — workflow wiring in code-review.md. The god-node emission folded from
+# ~110 lines of inline jq into `graphify augment-impact-map`; the workflow now
+# wires that CLI and the "## God-node warning" section wording lives in
+# graphify.cjs::augmentImpactMap (single source of truth for the emitted text).
+if /usr/bin/grep -q "graphify augment-impact-map" "$ROOT/workflows/code-review.md" \
+   && /usr/bin/grep -q "## God-node warning" "$ROOT/bin/modules/graphify.cjs"; then
+  pass "F17c: code-review.md wires augment-impact-map CLI + graphify.cjs emits the God-node warning section"
 else
-  fail "F17c: workflow wiring missing from code-review.md"
+  fail "F17c: augment-impact-map wiring missing (workflow call or graphify.cjs emission)"
 fi
 
 # F16: multi-tier follow-up (post-blast_radius drill-down on top-3 dependents) in all 5 graphify workflows
@@ -8831,8 +8834,11 @@ fi
 # manually synthesized "## Symbol-level god-nodes" from preflight every
 # time. Drift gate verifies the workflow body carries the fallback bash +
 # the section header marker "(from preflight, not diff-anchored)".
-M11_BASH=$(/usr/bin/grep -c 'PREFLIGHT_GODS=$(jq' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-M11_HEADER=$(/usr/bin/grep -c "from preflight, not diff-anchored" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+# The fallback logic + section header folded into graphify.cjs::augmentImpactMap
+# (was inline jq in the workflow); the reviewer-facing signal-independence doc
+# stays in the workflow prose.
+M11_BASH=$(/usr/bin/grep -c 'preflight_godnodes_fallback' "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
+M11_HEADER=$(/usr/bin/grep -c "from preflight, not diff-anchored" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M11_SIGNAL=$(/usr/bin/grep -c "four signals now feed the reviewer" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "${M11_BASH:-0}" -ge 1 ] && [ "${M11_HEADER:-0}" -ge 1 ] && [ "${M11_SIGNAL:-0}" -ge 1 ]; then
   pass "M11: F17 cross-checks preflight.god_nodes when CLIs return 0 (bash=${M11_BASH}, header=${M11_HEADER}, signal-doc=${M11_SIGNAL})"
@@ -8842,13 +8848,14 @@ fi
 
 # M12: C7-2 — dropped-symbol capture. After cal #37 #3, the capture lives in
 # state.cjs::computeGraphifyImpactPlan (writes topic-symbols-dropped.json
-# when topic.symbols > TOPIC_CAP=32; deletes it otherwise). Workflow's
-# substep 7 still emits the truncation notice header. Drift gates verify
-# the touch points: capture+rm in state.cjs (atomicWriteJsonSync +
-# fs.unlinkSync), emission header in workflow, state registration.
+# when topic.symbols > TOPIC_CAP=32; deletes it otherwise). The truncation
+# notice header is emitted by graphify.cjs::augmentImpactMap (folded out of the
+# workflow's inline jq). Drift gates verify the touch points: capture+rm in
+# state.cjs (atomicWriteJsonSync + fs.unlinkSync), emission header in the CLI,
+# state registration.
 M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
 M12_RM=$(/usr/bin/grep -cE 'fs\.unlinkSync\(droppedPath\)' "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
-M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}' || true)
 if [ "${M12_CAPTURE:-0}" -ge 1 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
   pass "M12: dropped-symbol capture (computeGraphifyImpactPlan: write+unlink) + workflow header + state registration (capture=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state=${M12_REG})"
@@ -8911,7 +8918,7 @@ rm -rf "$M13_TMP"
 # new field.
 M14_GRAPHIFY=$(/usr/bin/grep -c "source_file: (node && node.source_file)" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M14_PERSIST=$(/usr/bin/grep -c "ambiguous_details: Array.isArray" "$ROOT/bin/modules/preflight.cjs" 2>/dev/null || echo 0)
-M14_WORKFLOW=$(/usr/bin/grep -c "## Ambiguous bindings" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M14_WORKFLOW=$(/usr/bin/grep -c "## Ambiguous bindings" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M14_AGENT=$(/usr/bin/grep -cE "ambiguous.*non-empty" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 M14_JQ=$(/usr/bin/grep -c "ambiguous: (brief.blast && brief.blast.ambiguous_details)" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
 if [ "${M14_GRAPHIFY:-0}" -ge 1 ] && [ "${M14_PERSIST:-0}" -ge 1 ] && [ "${M14_WORKFLOW:-0}" -ge 1 ] && [ "${M14_AGENT:-0}" -ge 1 ] && [ "${M14_JQ:-0}" -ge 1 ]; then
@@ -10369,10 +10376,10 @@ fi
 # hyperedge completeness when partial-coverage hyperedges exist. Structural
 # check (workflow .md contains the surfacing block) — full runtime exercise
 # requires graphify hyperedges which aren't reproducible in this smoke env.
-if grep -qE "Hyperedge completeness \(partial-coverage" "$ROOT/workflows/code-review.md"; then
-  pass "K39: code-review.md surfaces hyperedge completeness in graph-impact.md"
+if grep -qE "Hyperedge completeness \(partial-coverage" "$ROOT/bin/modules/graphify.cjs"; then
+  pass "K39: graphify augment-impact-map surfaces hyperedge completeness in graph-impact.md"
 else
-  fail "K39: code-review.md missing hyperedge completeness surface (WI-5 not wired)"
+  fail "K39: hyperedge completeness surface missing (augment-impact-map fold — WI-5 not wired)"
 fi
 
 # K40 (v0.73 Phase B-1): advance-phase CLI exists + blocks on gate failure
@@ -16029,6 +16036,58 @@ if [ -z "$K237_FAIL" ]; then
   pass "K237: memory-pre-flight keeps hot protocol inline (PREFLIGHT format + deny recovery), lazy-loads cold detail to references/ (${K237_LINES} lines)"
 else
   fail "K237: memory-pre-flight slim broke —$K237_FAIL"
+fi
+
+# K238: `graphify augment-impact-map` reproduces substep-7's six deterministic
+# sections (folded out of ~110 lines of inline jq). Functional test on a
+# synthetic graph + brief: a god-node file emits the file + symbol warnings;
+# a >5 dropped-symbol list emits the truncation banner + section; a partial
+# hyperedge and an ambiguous binding emit with byte-identical wording; and the
+# preflight-god fallback is correctly suppressed when diff god-nodes are present.
+# Behavior-preservation guard so the fold can't silently drop a reviewer signal.
+K238_T=$(mktemp -d)
+mkdir -p "$K238_T/.devt/state" "$K238_T/graphify-out"
+printf '{"graphify":{"enabled":true}}' > "$K238_T/.devt/config.json"
+node -e '
+  const fs=require("fs");
+  const nodes=[{id:"n_route",label:"handler",source_file:"app/routes.py"}];
+  const links=[];
+  for(let i=0;i<60;i++){nodes.push({id:"c"+i,label:"c"+i,source_file:"app/c"+i+".py"});links.push({source:"c"+i,target:"n_route",relation:"calls",confidence:"EXTRACTED"});}
+  fs.writeFileSync(process.argv[1], JSON.stringify({nodes,links,built_at_commit:"x"}));
+' "$K238_T/graphify-out/graph.json"
+printf '%s' '{"hyperedges_matched":[{"label":"lf","member_count":4,"members":["a","b","c","d"],"members_in_scope":["a"],"completeness":0.25}],"blast":{"ambiguous_bindings":1,"ambiguous_details":[{"symbol":"Foo","node":{"source_file":"app/legacy.py","label":"Foo"}}]},"god_nodes":[{"symbol":"GT","edge_count":120}]}' > "$K238_T/.devt/state/preflight-brief.json"
+printf '# Impact\nheadline\n' > "$K238_T/.devt/state/graph-impact.md"
+printf '%s' '["s1","s2","s3","s4","s5","s6","s7"]' > "$K238_T/.devt/state/topic-symbols-dropped.json"
+K238_CHECK=$(node -e '
+  const path = require("path"), fs = require("fs");
+  const root = process.argv[1];
+  // loadGraph() resolves the graph from process.cwd(), so chdir into the fixture
+  // before requiring/calling (matches how the CLI runs — from the project root).
+  process.chdir(root);
+  const g = require("'"$ROOT"'/bin/modules/graphify.cjs");
+  g.augmentImpactMap({ projectRoot: root, files: ["app/routes.py"], edgeThreshold: 50, rawCount: "20" });
+  const gi = fs.readFileSync(path.join(root, ".devt/state/graph-impact.md"), "utf8");
+  const f = [];
+  const want = [
+    ["## God-node warning", "- `app/routes.py` — `handler` has 60 edges; signature changes ripple to all callers. Prefer additive changes."],
+    ["## Symbol-level god-nodes", "- `handler` (app/routes.py) has 60 edges; any non-additive change cascades through every caller."],
+    ["> **Subject symbols truncated**: 7 of 20", null],
+    ["## Subject symbols dropped (truncation notice)", null],
+    ["## Hyperedge completeness (partial-coverage semantic groupings)", "- **lf** — 1 of 4 members in scope (25% complete). Out-of-scope members: b, c, d"],
+    ["## Ambiguous bindings", "- `Foo` → resolves at `app/legacy.py` (label: `Foo`)"],
+  ];
+  for (const [hdr, row] of want) {
+    if (!gi.includes(hdr)) f.push("missing section: " + hdr);
+    if (row && !gi.includes(row)) f.push("wrong row for " + hdr);
+  }
+  if (gi.includes("from preflight, not diff-anchored")) f.push("preflight fallback fired despite present god-nodes");
+  console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+' "$K238_T" 2>&1 || echo "FAIL:node error")
+rm -rf "$K238_T"
+if [ "$K238_CHECK" = "OK" ]; then
+  pass "K238: graphify augment-impact-map emits substep-7's six sections byte-identically (god-node file+symbol, truncation banner+section, hyperedge, ambiguous; fallback suppressed when god-nodes present)"
+else
+  fail "K238: augment-impact-map fold — $K238_CHECK"
 fi
 
 echo

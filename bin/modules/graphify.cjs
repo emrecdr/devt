@@ -1846,6 +1846,104 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   return out_;
 }
 
+// augmentImpactMap — the deterministic post-MCP augmentation that used to live
+// as ~113 lines of inline jq in code-review.md's context_init (substep 7). It
+// runs AFTER the MCP tier call wrote graph-impact.md, so it cannot fold into the
+// pre-MCP contextInitBundle. Pure post-processing of on-disk JSON — zero MCP,
+// zero model judgment — it appends up to six sections to graph-impact.md,
+// byte-identical to the prior workflow output:
+//   1. God-node warning (file-level, from check-large-files)
+//   2. Symbol-level god-nodes (from check-symbol-godnodes)
+//   3. Dropped-symbol truncation banner (prepended when >5) + section
+//   4. Hyperedge completeness (partial-coverage groupings, from the brief)
+//   5. Ambiguous bindings (from the brief's blast.ambiguous_details)
+//   6. Symbol-level god-nodes from preflight (fallback when 1 AND 2 are empty)
+// Returns a summary of what was appended so the workflow can echo it in one line.
+function augmentImpactMap(opts = {}) {
+  const proot = opts.projectRoot || (() => { try { return require("./config.cjs").findProjectRoot(); } catch { return process.cwd(); } })();
+  const edgeThreshold = Number.isInteger(opts.edgeThreshold) && opts.edgeThreshold > 0 ? opts.edgeThreshold : 50;
+  const rawCount = (opts.rawCount === undefined || opts.rawCount === null || opts.rawCount === "") ? "?" : String(opts.rawCount);
+  const stateDir = path.join(proot, ".devt", "state");
+  const giPath = path.join(stateDir, "graph-impact.md");
+  const briefPath = path.join(stateDir, "preflight-brief.json");
+  const droppedPath = path.join(stateDir, "topic-symbols-dropped.json");
+
+  const readJson = (p, fallback) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } };
+  const brief = readJson(briefPath, null);
+
+  // Resolve the diff files (the two god-node CLIs need them).
+  let diffFiles = Array.isArray(opts.files) ? opts.files.slice() : [];
+  if (diffFiles.length === 0) {
+    try {
+      const base = opts.baseRef || (brief && brief.git && brief.git.primary_branch) || "main";
+      const out = require("child_process").execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], { cwd: proot, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] });
+      diffFiles = out.split("\n").map(s => s.trim()).filter(Boolean);
+    } catch { diffFiles = []; }
+  }
+
+  const appended = [];
+  const append = (name, text) => { try { fs.appendFileSync(giPath, text); appended.push(name); } catch { /* graph-impact.md unwritable — skip */ } };
+
+  // 1. File-level god-node warning.
+  const fileGods = diffFiles.length ? checkLargeFilesGodNodes(diffFiles, edgeThreshold).filter(r => r.is_god_node) : [];
+  if (fileGods.length) {
+    const rows = fileGods.map(r => `- \`${r.file}\` — \`${r.top_symbol}\` has ${r.max_edges} edges; signature changes ripple to all callers. Prefer additive changes.`);
+    append("god_node_warning", `\n## God-node warning\n\n${rows.join("\n")}\n`);
+  }
+
+  // 2. Symbol-level god-nodes.
+  const symGods = diffFiles.length ? checkSymbolLevelGodNodes(diffFiles, edgeThreshold) : [];
+  if (symGods.length) {
+    const rows = symGods.map(r => `- \`${r.symbol}\` (${r.source_file}) has ${r.edge_count} edges; any non-additive change cascades through every caller.`);
+    append("symbol_godnodes", `\n## Symbol-level god-nodes\n\n${rows.join("\n")}\n`);
+  }
+
+  // 3. Dropped-symbol truncation banner + section.
+  const dropped = readJson(droppedPath, null);
+  if (Array.isArray(dropped) && dropped.length > 0) {
+    const n = dropped.length;
+    if (n > 5) {
+      const banner = `> **Subject symbols truncated**: ${n} of ${rawCount} extracted topic symbols were dropped by the MCP blast_radius 32-symbol cap. Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
+      try { fs.writeFileSync(giPath, banner + (fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "")); appended.push("dropped_banner"); } catch { /* skip */ }
+    }
+    const rows = dropped.map(s => `- ${s}`);
+    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n} of the ${rawCount} extracted topic symbols were truncated by the MCP blast_radius 32-symbol cap. Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
+  }
+
+  // 4. Hyperedge completeness (partial-coverage groupings).
+  const hyper = (brief && Array.isArray(brief.hyperedges_matched)) ? brief.hyperedges_matched.filter(h => (h.completeness ?? 1) < 1.0) : [];
+  if (hyper.length) {
+    const rows = hyper.map(h => {
+      const inScope = Array.isArray(h.members_in_scope) ? h.members_in_scope : [];
+      const members = Array.isArray(h.members) ? h.members : [];
+      const pct = Math.floor((h.completeness || 0) * 100);
+      const outOfScope = members.filter(m => !inScope.includes(m)).join(", ");
+      return `- **${h.label}** — ${inScope.length} of ${h.member_count} members in scope (${pct}% complete). Out-of-scope members: ${outOfScope}`;
+    });
+    append("hyperedge_completeness", `\n## Hyperedge completeness (partial-coverage semantic groupings)\n\n_${hyper.length} graphify-discovered semantic grouping(s) below 100% completeness. Members outside the current scope may indicate forgotten changes (related route/repo/migration/test/doc). Review whether scope should expand OR explicitly defer the missing members in your verdict._\n\n${rows.join("\n")}\n`);
+  }
+
+  // 5. Ambiguous bindings.
+  const ambCount = (brief && brief.blast && brief.blast.ambiguous_bindings) || 0;
+  if (ambCount) {
+    const details = (brief.blast.ambiguous_details || []);
+    const rows = details.map(d => `- \`${d.symbol}\` → resolves at \`${(d.node && d.node.source_file) || "(no source_file)"}\` (label: \`${d.node && d.node.label}\`)`);
+    append("ambiguous_bindings", `\n## Ambiguous bindings\n\n_${ambCount} symbol(s) resolve to multiple definition sites — reviewers should cite the module path explicitly when a finding references one of these symbols. Same-name modules from different packages can collide unflagged, forcing manual cross-check per finding._\n\n${rows.join("\n")}\n`);
+  }
+
+  // 6. Preflight god-node fallback — only when the diff-anchored CLIs (1 + 2)
+  // both found nothing, so the reviewer still gets structural signal.
+  if (fileGods.length === 0 && symGods.length === 0) {
+    const pgods = (brief && Array.isArray(brief.god_nodes)) ? brief.god_nodes : [];
+    if (pgods.length) {
+      const rows = pgods.map(g => `- \`${g.symbol}\` has ${g.edge_count} edges (graph-wide rank)`);
+      append("preflight_godnodes_fallback", `\n## Symbol-level god-nodes (from preflight, not diff-anchored)\n\n_File-level + symbol-level diff CLIs returned 0 — surfacing graph-global top god-nodes from preflight.god_nodes so severity calibration has structural signal. These symbols may not be in the diff; weight findings that touch them or their callers higher because changes ripple to many sites._\n\n${rows.join("\n")}\n`);
+    }
+  }
+
+  return { sections_appended: appended, god_node_count: fileGods.length, symbol_godnode_count: symGods.length, ambiguous_count: ambCount };
+}
+
 // B-XIII — group diff files by their dominant graphify community attribute.
 // Each node in graph.json may carry `community: <int>` from the Leiden
 // clustering step. For each input file, find its source-file node(s) and
@@ -3030,6 +3128,18 @@ function run(subcommand, args) {
       json(checkSymbolLevelGodNodes(files, threshold));
       return 0;
     }
+    case "augment-impact-map": {
+      const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
+      const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
+      const baseArg = args.find(a => a.startsWith("--base="));
+      const rawArg = args.find(a => a.startsWith("--raw-count="));
+      json(augmentImpactMap({
+        edgeThreshold: threshold,
+        baseRef: baseArg ? baseArg.split("=")[1] : undefined,
+        rawCount: rawArg ? rawArg.split("=")[1] : undefined,
+      }));
+      return 0;
+    }
     case "symbols-in-files": {
       const limitArg = args.find(a => a.startsWith("--limit="));
       // Input validation: --limit must be a positive integer when present.
@@ -3108,7 +3218,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown graphify subcommand: ${subcommand}\n` +
-        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | symbols-in-files | compose-drilldowns | lane-suggestions | adaptive-threshold | maybe-refresh | rebuild | write-memory\n`
+        `Valid: status | freshness | warm-cache | stats | query | node | neighbors | path | blast-radius | god-nodes | check-large-files | check-symbol-godnodes | augment-impact-map | symbols-in-files | compose-drilldowns | lane-suggestions | adaptive-threshold | maybe-refresh | rebuild | write-memory\n`
       );
       return 2;
   }
@@ -3267,6 +3377,7 @@ module.exports = {
   godNodes,
   checkLargeFilesGodNodes,
   checkSymbolLevelGodNodes,
+  augmentImpactMap,
   symbolsInFiles,
   laneSuggestions,
   adaptiveImpactThreshold,
