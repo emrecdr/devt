@@ -483,7 +483,7 @@ function initWorkflow(task, pluginRoot, initVerb) {
   const projectRoot = findProjectRoot();
   const config = getMergedConfig();
   const models = getModels(
-    config.model_profile || "quality",
+    config.model_profile || "balanced",
     config.model_overrides,
   );
   const state = readState();

@@ -16090,6 +16090,18 @@ else
   fail "K238: augment-impact-map fold — $K238_CHECK"
 fi
 
+# K239: model/effort surface currency — sonnet alias resolves to claude-sonnet-5,
+# xhigh accepted in effort_overrides, quality profile routes programmer/debugger
+# at xhigh (Anthropic's recommended coding/agentic starting point on Opus-class).
+K239_SONNET=$(node -e 'const {resolveModelId}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(resolveModelId("sonnet")==="claude-sonnet-5"?"1":"0");' 2>/dev/null)
+K239_XHIGH_OVERRIDE=$(node -e 'const {getEfforts}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); const r=getEfforts("balanced",{programmer:"xhigh"}); console.log(r.programmer==="xhigh"?"1":"0");' 2>/dev/null)
+K239_QUALITY_XHIGH=$(node -e 'const {EFFORTS}=require("'"$ROOT"'/bin/modules/model-profiles.cjs"); console.log(EFFORTS.quality.programmer==="xhigh"&&EFFORTS.quality.debugger==="xhigh"?"1":"0");' 2>/dev/null)
+if [ "$K239_SONNET" = "1" ] && [ "$K239_XHIGH_OVERRIDE" = "1" ] && [ "$K239_QUALITY_XHIGH" = "1" ]; then
+  pass "K239: model/effort surface current — sonnet→claude-sonnet-5, xhigh override accepted, quality programmer/debugger=xhigh"
+else
+  fail "K239: model/effort surface stale — sonnet5=$K239_SONNET xhigh_override=$K239_XHIGH_OVERRIDE quality_xhigh=$K239_QUALITY_XHIGH"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

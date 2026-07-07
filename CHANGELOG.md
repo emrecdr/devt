@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.149.0] - 2026-07-07
+
+### Platform calibration: current model + effort surface
+
+The model-routing surface had drifted behind the platform: the `sonnet` alias pinned a model now listed as legacy upstream, and the effort whitelist predated the `xhigh`/`max` API levels. Everything here was validated against the live model/effort docs before changing anything; the prose surfaces flagged by the same research pass (forcing language, reasoning-echo patterns, envelope cache ordering) were audited and came back clean — no de-prescription changes were warranted.
+
+- **`sonnet` → `claude-sonnet-5`** in `MODEL_ALIAS_MAP` (1M context, same list price as the prior pin, introductory pricing through 2026-08-31). Before: balanced/budget-profile sonnet agents dispatched on a legacy model. After: the same profiles dispatch on the current Sonnet at equal-or-lower cost — a free quality lift for tester/docs-writer/retro/curator/researcher (balanced) and all budget-profile sonnet agents.
+- **Effort surface accepts `xhigh` + `max`** (profiles + `effort_overrides`), matching the current Claude API effort levels; the override-rejection message names the full set. The quality profile now routes programmer + debugger at `xhigh` — Anthropic's recommended starting point for coding/agentic work on Opus-class models. Balanced/budget profiles are unchanged: their below-default calibration is the deliberate token-optimization posture.
+- **Fallback-default coherence**: `init.cjs` fell back to the `quality` profile where `config.cjs` DEFAULTS and `dispatch.cjs` use `balanced`. Unreachable today (DEFAULTS always supplies `model_profile`) but incoherent; all three sites now agree on `balanced`.
+- Gate **K239** (behavioral: sonnet alias resolves to the current pin, `xhigh` accepted as an effort override, quality profile routes programmer/debugger at `xhigh`). Drift-guard stack 145 → 146 deep (K94–K239).
+
 ## [0.148.0] - 2026-07-07
 
 ### Fold code-review substep 7 into a CLI (workflow body-weight)

@@ -13,7 +13,7 @@
  */
 const MODEL_ALIAS_MAP = {
   opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
   fable: "claude-fable-5",
 };
@@ -84,6 +84,9 @@ const PROFILES = {
  *   - code-reviewer/debugger benefit from medium-to-high (analysis-heavy)
  *   - programmer/researcher medium for balanced (synthesis tasks)
  *   - retro/tester/docs-writer/curator can drop to low for budget (mechanical)
+ *   - quality routes programmer/debugger at xhigh — Anthropic's recommended
+ *     starting point for coding/agentic work on Opus-class models; the other
+ *     profiles deliberately stay below it (token optimization first)
  *
  * Why this exists: Opus 4.8 flipped the API-level effort default from `medium`
  * to `high`. Without explicit per-agent settings, every devt dispatch silently
@@ -91,19 +94,22 @@ const PROFILES = {
  * dispatch envelopes (effort="{efforts.<agent>}") opt out of the silent
  * regression on a per-role basis.
  *
- * effort values follow Anthropic's Claude API surface: `low`, `medium`, `high`
- * (plus `inherit` for the inherit profile, which defers to the caller's env).
+ * effort values follow Anthropic's Claude API surface: `low`, `medium`,
+ * `high`, `xhigh`, `max` (plus `inherit` for the inherit profile, which
+ * defers to the caller's env). `xhigh`/`max` are only honored by models
+ * that support them (Fable 5, Opus 4.7+, Sonnet 5) — reserve overrides
+ * accordingly.
  */
 const EFFORTS = {
   quality: {
-    programmer: "high",
+    programmer: "xhigh",
     tester: "medium",
     "code-reviewer": "high",
     "docs-writer": "medium",
     architect: "high",
     retro: "medium",
     curator: "medium",
-    debugger: "high",
+    debugger: "xhigh",
     verifier: "high",
     researcher: "high",
   },
@@ -146,7 +152,7 @@ const EFFORTS = {
 };
 
 const VALID_AGENTS = new Set(Object.keys(PROFILES.balanced));
-const VALID_EFFORTS = new Set(["low", "medium", "high", "inherit"]);
+const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "inherit"]);
 
 function getModels(profileName, overrides) {
   const profile = PROFILES[profileName];
@@ -198,7 +204,7 @@ function getEfforts(profileName, overrides) {
       }
       const v = overrides[key];
       if (typeof v !== "string" || !VALID_EFFORTS.has(v)) {
-        warnings.push(`invalid effort for ${key}: ${v} (valid: low, medium, high, inherit)`);
+        warnings.push(`invalid effort for ${key}: ${v} (valid: low, medium, high, xhigh, max, inherit)`);
         continue;
       }
       validOverrides[key] = v;
