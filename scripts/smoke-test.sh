@@ -16125,6 +16125,30 @@ else
   fail "K240: backup exclusion broken — $K240_CHECK"
 fi
 
+# K241: legacy surfaces stay deleted — the debugger's pre-agent-memory
+# debug-knowledge-base.md compat shim and the context-monitor hook (harness
+# auto-compaction owns the context lifecycle) must not resurface.
+K241_DKB=$({ /usr/bin/grep -rl "debug-knowledge-base" "$ROOT/agents" "$ROOT/workflows" "$ROOT/docs/COMMANDS.md" 2>/dev/null || true; } | wc -l | tr -d " ")
+K241_CM_FILE=0
+if [ -f "$ROOT/hooks/context-monitor.sh" ]; then K241_CM_FILE=1; fi
+K241_CM_REFS=$({ /usr/bin/grep -c "context-monitor" "$ROOT/hooks/hooks.json" "$ROOT/hooks/run-hook.js" 2>/dev/null || true; } | /usr/bin/awk -F: '{s+=$NF} END {print s+0}')
+if [ "$K241_DKB" = "0" ] && [ "$K241_CM_FILE" = "0" ] && [ "${K241_CM_REFS:-1}" = "0" ]; then
+  pass "K241: legacy surfaces stay deleted — no debug-knowledge-base refs (agents/workflows/COMMANDS) + no context-monitor (script/hooks.json/run-hook.js)"
+else
+  fail "K241: legacy resurfaced — dkb_files=$K241_DKB cm_file=$K241_CM_FILE cm_refs=$K241_CM_REFS"
+fi
+
+# K242: dependency-legitimacy guardrail present — researcher must verify new
+# deps on their canonical registry (slopsquatting defense) and the guardrail
+# reaches programmer/code-reviewer via guardrails_inline.
+if /usr/bin/grep -q "## Dependency Legitimacy" "$ROOT/guardrails/engineering-principles.md" \
+   && /usr/bin/grep -q "slopsquatting" "$ROOT/guardrails/engineering-principles.md" \
+   && /usr/bin/grep -q "slopsquatting" "$ROOT/agents/researcher.md"; then
+  pass "K242: dependency-legitimacy guardrail present (engineering-principles section + researcher registry-verification clause)"
+else
+  fail "K242: dependency-legitimacy guardrail missing from engineering-principles.md or researcher.md"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

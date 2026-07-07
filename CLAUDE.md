@@ -38,7 +38,6 @@ The `DEVT_HOOK_PROFILE` env var (default `standard`) controls which hooks fire:
 | `bash-guard.sh` | – | ✓ | ✓ |
 | `dispatch-hygiene-guard.sh` | – | ✓ | ✓ |
 | `task-truncation-detector.sh` | – | ✓ | ✓ |
-| `context-monitor.sh` | – | – | ✓ |
 | `prompt-guard.sh` | – | – | ✓ |
 
 Use `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh` to selectively disable individual hooks regardless of profile.
@@ -130,7 +129,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 147-deep drift-guard stack K94-K240) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 149-deep drift-guard stack K94-K242) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

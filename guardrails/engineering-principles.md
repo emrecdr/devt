@@ -137,6 +137,21 @@ Each part of the system should address a **separate concern** with minimal overl
 
 ---
 
+## Dependency Legitimacy
+
+Never adopt a package on name plausibility alone — plausible-but-hallucinated
+package names are a real attack surface (slopsquatting: attackers register
+likely-sounding names on public registries).
+
+- Before installing a NEW dependency, verify it exists on its canonical
+  registry (npm/PyPI/crates.io/Maven/etc.) and sanity-check its adoption
+  (downloads, maintenance recency, source repository).
+- A package that cannot be verified is a blocker, not a judgment call — stop
+  and surface it rather than installing.
+- Version pins come from the registry, not from memory.
+
+---
+
 ## Applying These Principles
 
 These principles are **constraints, not goals**. You don't "implement SOLID" — you use SOLID to evaluate design decisions:

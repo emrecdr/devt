@@ -117,6 +117,13 @@ Identify things the implementation should NOT build from scratch:
 - Library functions that handle edge cases better than custom code
 - Framework features that provide this out of the box
 - Base classes or mixins the project already has for this pattern
+
+When a recommendation introduces a NEW external dependency, verify it exists on
+its canonical registry (npm/PyPI/crates.io/Maven/etc.) and sanity-check its
+adoption (downloads, maintenance recency, source repository) before recommending
+it. Plausible-but-hallucinated package names are an attack surface
+(slopsquatting) — an unverifiable package is a blocker to surface in the report,
+not a recommendation.
   </step>
 
 <step name="write_report">

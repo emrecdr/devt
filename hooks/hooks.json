@@ -50,16 +50,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" context-monitor.sh",
-            "async": true
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
           {

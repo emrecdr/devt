@@ -123,7 +123,7 @@ Systematic 4-phase debugging. No guessing, no "try this and see."
    - **Phase 2**: Pattern analysis (find working example, compare line-by-line)
    - **Phase 3**: Hypothesis (falsifiable, one variable at a time)
    - **Phase 4**: Fix (minimal change + tests + defense-in-depth)
-3. If FIXED: appends root cause to its agent memory at `.claude/agent-memory/devt-debugger/MEMORY.md` (future debug sessions skip re-investigation; legacy `debug-knowledge-base.md` at project root is still read for backwards compatibility but no longer written to)
+3. If FIXED: appends root cause to its agent memory at `.claude/agent-memory/devt-debugger/MEMORY.md` (future debug sessions skip re-investigation)
 4. If needs more investigation: offers to re-run with accumulated context
 
 ---

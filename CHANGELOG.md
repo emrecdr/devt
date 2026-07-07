@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.151.0] - 2026-07-07
+
+### Trim batch + receipt-gated model experiment
+
+- **Debugger legacy compat shim deleted.** The pre-agent-memory `debug-knowledge-base.md` read instruction is gone from the debugger's context loading, knowledge-base prose, and command docs — native agent memory (`memory: project`, auto-injected `MEMORY.md`) owns debugger persistence; the field deployment has no legacy file while its agent-memory dir is populated.
+- **`context-monitor.sh` deleted** (script, hooks.json registration, run-hook profile entry, profile-table rows). The harness's auto-compaction owns the context lifecycle end to end; a tool-call counter suggesting "consider a fresh session" is advice the platform made obsolete. It only ran in the `full` hook profile, so standard-profile users see no change.
+- **Receipt-gated experiment: balanced-profile `verifier` routes to `sonnet` (Claude Sonnet 5) instead of `opus`.** Sonnet 5's largest gains are in coding/agentic work, and the verifier is the safest demotion target — the deterministic pre-verifier gate and the grader loop measure its output quality on every workflow. Keep-or-revert belongs to the next field receipt; revert is a one-key change deliberately NOT drift-gated.
+- **Dependency-legitimacy guardrail** (slopsquatting defense): `engineering-principles.md` gains a "Dependency Legitimacy" section (reaches programmer + code-reviewer via `guardrails_inline`), and the researcher's don't-hand-roll step now requires registry-existence + adoption sanity checks before recommending a NEW dependency — an unverifiable package is a blocker, not a recommendation.
+- Gates **K241** (legacy surfaces stay deleted) + **K242** (dependency-legitimacy guardrail present). Drift-guard stack 147 → 149 deep (K94–K242).
+
 ## [0.150.0] - 2026-07-07
 
 ### Two loop-validated fixes: backup-inlining field bug + dead effort plumbing

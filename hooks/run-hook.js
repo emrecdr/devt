@@ -15,7 +15,7 @@
  * Hook profiles:
  *   minimal  — session-start, stop only (essential lifecycle)
  *   standard — all hooks except heavy analysis (default)
- *   full     — everything including prompt-guard and context-monitor
+ *   full     — everything including prompt-guard
  */
 
 const fs = require("fs");
@@ -30,7 +30,6 @@ const HOOK_PROFILES = {
   "stop.sh": ["minimal", "standard", "full"],
   "workflow-context-injector.sh": ["standard", "full"],
   "subagent-status.sh": ["standard", "full"],
-  "context-monitor.sh": ["full"],
   "prompt-guard.sh": ["full"],
   "read-before-edit-guard.sh": ["standard", "full"],
   // Two-Tier Pre-Flight enforcement hooks.

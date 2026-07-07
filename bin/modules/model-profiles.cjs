@@ -54,7 +54,7 @@ const PROFILES = {
     retro: "sonnet",
     curator: "sonnet",
     debugger: "opus",
-    verifier: "opus",
+    verifier: "sonnet",
     researcher: "sonnet",
   },
   budget: {
