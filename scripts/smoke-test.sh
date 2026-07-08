@@ -16214,8 +16214,9 @@ if ! /usr/bin/grep -q "^user-invocable: false" "$ROOT/commands/thread.md" \
    && /usr/bin/grep -q "Distill the current session yourself" "$ROOT/workflows/thread.md" \
    && /usr/bin/grep -q "Never overwrite an existing thread" "$ROOT/workflows/thread.md" \
    && /usr/bin/grep -q "^session: {workflow_id" "$ROOT/workflows/thread.md" \
-   && /usr/bin/grep -q '"workflow_id"' "$ROOT/workflows/pause-work.md"; then
-  pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids in generated files"
+   && /usr/bin/grep -q '"workflow_id"' "$ROOT/workflows/pause-work.md" \
+   && /usr/bin/grep -q "QUOTED VERBATIM" "$ROOT/workflows/thread.md"; then
+  pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids + verbatim task/correction anchors"
 else
   fail "K247: session-handoff contract incomplete"
 fi

@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.156.0] - 2026-07-08
+
+### Handoff hardening: verbatim anchors in thread distillation
+
+Cookbook-validated compaction-safety finding applied to session handoffs before the field exercises them: summaries that paraphrase the original request lose the task statement downstream — and for ad-hoc sessions the thread file is the ONLY task record the next session gets.
+
+- `thread create`/`update` distillation gains a third rule: Goal opens with the user's original request QUOTED VERBATIM, user corrections are carried verbatim in Context, and when distillation must drop content the cut order is completed work → active work → errors — never the corrections or the verbatim request. Template placeholders updated to match. K247 extended.
+
 ## [0.155.0] - 2026-07-08
 
 ### Verify-loop + review calibration (three-source-validated adoptions)

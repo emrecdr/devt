@@ -41,9 +41,10 @@ Not applicable — this workflow does not dispatch subagents.
 
 1. Create `.devt/state/threads/` if it doesn't exist
 2. Generate slug from title. **Never overwrite an existing thread**: if `threads/{slug}.md` already exists (another session may own it), suffix the slug with `-HHMM` from the current time and use that — every handoff file is uniquely named, so concurrent sessions cannot clobber each other
-3. **Distill the current session yourself** — Goal, Context (key findings, decisions with their reasons, artifact status), and Next Steps (what is left, as actionable checkboxes) come from the conversation and `.devt/state/` artifacts, NOT from quizzing the user. Ask at most one question, and only when the goal is genuinely ambiguous. Two rules:
+3. **Distill the current session yourself** — Goal, Context (key findings, decisions with their reasons, artifact status), and Next Steps (what is left, as actionable checkboxes) come from the conversation and `.devt/state/` artifacts, NOT from quizzing the user. Ask at most one question, and only when the goal is genuinely ambiguous. Three rules:
    - **Reference, don't duplicate**: point to artifacts (paths, URLs, commit hashes) instead of copying their content into the thread.
    - **Redact secrets**: API keys, tokens, passwords, PII never enter the thread file — name where the value lives instead.
+   - **Verbatim anchors**: open Goal with the user's original request QUOTED VERBATIM, and carry user corrections verbatim in Context — paraphrase drifts, and for ad-hoc sessions this file is the only task record the next session gets. When distillation must drop content, cut in this order: completed work first, then active work, then errors — never the corrections or the verbatim request.
 4. Write thread file:
 
 ```markdown
@@ -56,10 +57,10 @@ updated: YYYY-MM-DDTHH:MM:SSZ
 ---
 
 ## Goal
-{What are you trying to achieve?}
+{The user's original request, quoted verbatim, then one line of framing}
 
 ## Context
-{What do you know so far? Relevant files, findings, decisions.}
+{What happened: key findings, decisions with reasons, artifact status. User corrections quoted verbatim.}
 
 ## References
 {File paths, URLs, related issues}
