@@ -16215,8 +16215,9 @@ if ! /usr/bin/grep -q "^user-invocable: false" "$ROOT/commands/thread.md" \
    && /usr/bin/grep -q "Never overwrite an existing thread" "$ROOT/workflows/thread.md" \
    && /usr/bin/grep -q "^session: {workflow_id" "$ROOT/workflows/thread.md" \
    && /usr/bin/grep -q '"workflow_id"' "$ROOT/workflows/pause-work.md" \
-   && /usr/bin/grep -q "QUOTED VERBATIM" "$ROOT/workflows/thread.md"; then
-  pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids + verbatim task/correction anchors"
+   && /usr/bin/grep -q "QUOTED VERBATIM" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -A6 "const RESET_EXEMPT" "$ROOT/bin/modules/state.cjs" | /usr/bin/grep -q '"threads"'; then
+  pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids + verbatim anchors + threads RESET_EXEMPT"
 else
   fail "K247: session-handoff contract incomplete"
 fi

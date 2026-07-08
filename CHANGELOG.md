@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.157.0] - 2026-07-08
+
+### Fix: workflow reset destroyed cross-session threads + doc sync
+
+- **`threads/` added to `RESET_EXEMPT`.** `state reset` (and `/devt:workflow --cancel`) archives-or-deletes every non-exempt entry in `.devt/state/` — including directories. The threads dir was not exempt, so a workflow cancel would silently destroy every open cross-session handoff, whose entire contract is surviving session boundaries. Found by a docs-coherence sweep, not a field report. K247 extended.
+- Docs synced: `STATE-RULES.md` gains the `threads/` canonical-subdir row (with the now-verified reset-survival answer); `GRADER.md` documents the frozen acceptance-criteria contract in the outcome-grader loop.
+
 ## [0.156.0] - 2026-07-08
 
 ### Handoff hardening: verbatim anchors in thread distillation

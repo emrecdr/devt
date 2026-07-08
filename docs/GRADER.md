@@ -12,6 +12,8 @@
 
 **Currently verifier-using workflow types.** `dev`, `code_review`.
 
+**Frozen acceptance criteria.** The verifier's FIRST iteration derives acceptance criteria and writes `.devt/state/acceptance-criteria.json` (registered in `JSON_INPUT_SCHEMAS`); every later iteration grades against it verbatim — stable `AC-*` ids and `criteria_total` across the retry loop, so `revisions[]` stay comparable between iterations. → docs/STATE-RULES.md (Input-only JSON artifacts).
+
 **Output.** `verification.json` with:
 - Lowercase `verdict` — `satisfied | needs_revision | failed`
 - Structured `revisions[]` array — per-criterion gaps keyed by `AC-*` ids (dev) or `A-N` / `B-N` (code-review)

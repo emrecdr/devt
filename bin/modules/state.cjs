@@ -1297,6 +1297,7 @@ const ARCHIVE_DIR = ".archive";       // .devt/state/.archive/ — ring buffer o
 const RESET_EXEMPT = new Set([
   ".lock",                              // active locking — never delete
   ARCHIVE_DIR,                          // ring buffer survives reset (rolls off via pruneArchive)
+  "threads",                            // cross-session handoffs/threads — surviving session boundaries IS their contract; a workflow reset/cancel must never destroy another session's open threads
   path.basename(DEFERRED_FILE_REL),     // deferred.md — see bin/modules/deferred.cjs
   "preflight-denies.jsonl",             // forensic deny log — survives cancel so stuck-detector reads at canonical path
   "dispatch-warnings.jsonl",            // forensic dispatch-scope log — survives cancel for /devt:debug --mode=forensics post-hoc analysis

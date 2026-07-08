@@ -91,6 +91,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `.lock` | `state update` PID mutex | JSON | ✓ |
 | `.archive/` | `state reset` + `state cleanup` | directory (ring buffer, default 5 snapshots) | ✓ |
 | `lane-files/` | `state register-lane` + `register-lanes` (round 8 Tier C) | directory holding `<lane-id>.json` per-lane files sidecars (each: `{id, community, files[], registered_at}`); written because the lane-files array can't safely round-trip through `serializeSimpleYaml`'s primitive-only lane field encoder | ✓ |
+| `threads/` | `/devt:thread create` (session handoffs + cross-session threads) | directory of uniquely slug-named `<slug>.md` threads (frontmatter: `title`, `status`, `session:` id); canonical subdir — `state cleanup` never bulk-archives it; one-shot handoff threads auto-RESOLVE on resume | ✓ (`RESET_EXEMPT` — cross-session survival is the contract) |
 | `deferred.md` | `/devt:note --defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
 | `preflight-denies.jsonl` | preflight hook + bash-guard + graph_loader | JSONL (one record per deny) | ✓ |
 | `dispatch-warnings.jsonl` | dispatch-scope-guard hook | JSONL (advisory only) | ✓ |
