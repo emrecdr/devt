@@ -608,7 +608,7 @@ These are called automatically by workflows. You can invoke them directly for fi
 | `/devt:review --focus=arch` | Architecture violation scan | Workflow architect step |
 | `/devt:autoskill` | Propose plugin improvements from session patterns | Standalone or workflow autoskill step |
 | `/devt:status --report=weekly` | Git-based contribution report | Standalone utility |
-| `/devt:thread` | Cross-session context threads | Standalone utility |
+| `/devt:thread` | Session handoffs + cross-session context threads (create distills the session; prints a copy-paste resume prompt) | Standalone utility |
 | `/devt:memory` | ADR/Concept/Flow/REJ permanent layer | All dev agents at context_loading; curator at promote/reject |
 | `/devt:preflight` | Topic Pre-Flight Brief generator | Auto-fired by every dev workflow at context_init |
 

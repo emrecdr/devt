@@ -109,9 +109,10 @@ family-head parameter form. They're hidden from `/`-autocomplete (use
                                 Proposes additions to .devt/state/autoskill-proposals.md;
                                 curator decides what merges into skill-index.yaml.
 
-/devt:thread "<name>"           Persistent context threads for multi-session work.
-                                Subcommands: create, list, resume, update. Each thread
-                                carries its own scratch + decision log across sessions.
+/devt:thread "<name>"           Session handoffs + persistent context threads.
+                                create distills the current session (goal, context,
+                                what's left) and prints a copy-paste resume prompt.
+                                Subcommands: create, list, resume <N|slug>, update.
 
 /devt:council "<decision>"      Pressure-test a high-stakes engineering decision through
                                 5 advisors (Contrarian / First Principles / Generalizer /

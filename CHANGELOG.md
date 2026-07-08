@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.154.0] - 2026-07-08
+
+### Session handoffs: /devt:thread promoted + copy-paste resume contract
+
+The handoff surface existed but failed its consumer: `/devt:thread` (goal/context/next-steps files surviving session boundaries) was hidden from the `/`-menu, its create step quizzed the user instead of distilling the session, and neither handoff writer told the user what to paste into the next session.
+
+- **`/devt:thread` is user-discoverable** (`user-invocable: false` removed; command surface is now 16 visible + 3 specialized hidden). Description + argument-hint rewritten around the handoff use case.
+- **Create distills, not quizzes**: the session author fills Goal/Context/Next Steps from the conversation and `.devt/state/` artifacts (at most one question, only when genuinely ambiguous), references artifacts by path instead of copying them, and redacts secrets — a redaction rule now also covers `pause-work.md` capture.
+- **Copy-paste resume contract**: `thread create`/`update` end by printing `/devt:thread resume <slug>` (slug-based — stable across sessions, unlike list indices); `/devt:workflow --pause` ends by printing `/devt:next`. A fresh session pastes one line and reads its way back to exactly what was happening and what is left.
+- **`update <N|slug>` subcommand wired** (help already advertised it; the workflow now parses it).
+- **Concurrency + lifecycle**: thread files are uniquely slug-named with a never-overwrite collision guard (concurrent sessions cannot clobber each other) and carry a `session:` frontmatter id; `handoff.json` carries the pausing session's `workflow_id`. One-shot handoff threads auto-RESOLVE on resume (read once, done — files live in gitignored `.devt/state/threads/`, now a canonical subdir so `state cleanup` never bulk-archives an OPEN thread). `pause-work.md` documents the concurrent-session model: one active workflow per state root (lock), `state new-instance` per-session state dirs for deliberate parallelism.
+- Docs synced: README stratification counts + thread section, docs/COMMANDS.md, `/devt:help` entry. Gate **K247** (handoff contract) + **K94 recalibrated** (16/3 split). Drift-guard stack 153 → 154 deep (K94–K247).
+
 ## [0.153.0] - 2026-07-08
 
 ### Preload trims: graphify-helpers hot/cold split + forked council

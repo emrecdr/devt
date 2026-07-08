@@ -50,6 +50,8 @@ const EPHEMERAL_PATTERNS = [
 // canonical subdir convention ships.
 const CANONICAL_SUBDIRS = new Set([
   ".archive",     // reset/cleanup archive history
+  "threads",      // session handoffs + cross-session threads — an OPEN thread
+                  // must never be bulk-archived out from under a future session
   "lane-files",   // round 8 register-lane sidecar dir (per-lane files arrays)
 ]);
 

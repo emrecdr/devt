@@ -12179,11 +12179,12 @@ fi
 
 # K94: command-surface stratification contract.
 # Validates the post-Phase-3 visible-vs-hidden split.
-# Visible (15): do, workflow, specify, plan, research, implement, debug,
-# review, ship, status, next, setup, memory, help, note.
-# Hidden via `user-invocable: false` (4 specialized): preflight, autoskill,
-# thread, council. These 4 stayed direct-callable because their narrow
-# use cases don't fold cleanly into a family-head parameter form.
+# Visible (16): do, workflow, specify, plan, research, implement, debug,
+# review, ship, status, next, setup, memory, help, note, thread (promoted
+# to visible — a session-handoff command must be user-discoverable).
+# Hidden via `user-invocable: false` (3 specialized): preflight, autoskill,
+# council. These stayed direct-callable because their narrow use cases
+# don't fold cleanly into a family-head parameter form.
 # Phase 3 deleted the 18 fold-able commands (clarify, fast, docs, retro,
 # pause, cancel-workflow, defer, init, update, uninstall, health,
 # arch-health, quality, forensics, session-report, weekly-report, tokens,
@@ -12191,8 +12192,8 @@ fi
 # form (covered by K97).
 # Hidden specialized commands stay typed-callable — the frontmatter only
 # affects the `/`-menu autocomplete.
-K94_VISIBLE="do workflow specify plan research implement debug review ship status next setup memory help note"
-K94_HIDDEN="preflight autoskill thread council"
+K94_VISIBLE="do workflow specify plan research implement debug review ship status next setup memory help note thread"
+K94_HIDDEN="preflight autoskill council"
 K94_VISIBLE_OK=yes
 for cmd in $K94_VISIBLE; do
   if [ ! -f "$ROOT/commands/$cmd.md" ]; then K94_VISIBLE_OK=no; break; fi
@@ -16200,6 +16201,23 @@ if /usr/bin/grep -q "^context: fork" "$ROOT/skills/council/SKILL.md" \
   pass "K246: council forked — context:fork + general-purpose agent + fork-safe Stage-1 early return + fork output contract"
 else
   fail "K246: council fork wiring incomplete"
+fi
+
+# K247: session-handoff contract — /devt:thread is user-discoverable, create
+# distills the session (not quizzes the user), both handoff writers end with a
+# copy-paste resume prompt, and redaction rules cover captured context.
+if ! /usr/bin/grep -q "^user-invocable: false" "$ROOT/commands/thread.md" \
+   && /usr/bin/grep -q "Copy-paste to continue in a new session" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -q "Copy-paste to continue in a new session" "$ROOT/workflows/pause-work.md" \
+   && /usr/bin/grep -q "Redact secrets" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -q "Redact secrets" "$ROOT/workflows/pause-work.md" \
+   && /usr/bin/grep -q "Distill the current session yourself" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -q "Never overwrite an existing thread" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -q "^session: {workflow_id" "$ROOT/workflows/thread.md" \
+   && /usr/bin/grep -q '"workflow_id"' "$ROOT/workflows/pause-work.md"; then
+  pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids in generated files"
+else
+  fail "K247: session-handoff contract incomplete"
 fi
 
 echo

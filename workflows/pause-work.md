@@ -54,6 +54,9 @@ Record context that would otherwise be lost:
 - What the next step should focus on
 - Any concerns or risks discovered
 - Files that were being actively worked on
+
+**Redact secrets**: API keys, tokens, passwords, PII never enter handoff
+artifacts — name where the value lives instead.
   </step>
 
 <step name="write_handoff">
@@ -66,6 +69,7 @@ Write TWO files:
 ```json
 {
   "task": "...",
+  "workflow_id": "wf_...",
   "tier": "STANDARD",
   "phase": "implement",
   "iteration": 2,
@@ -117,6 +121,7 @@ Write TWO files:
 
 Field reference:
 
+- `workflow_id`: The pausing session's workflow id (from `workflow.yaml`) — the session discriminator; on resume, mismatched ids surface which session wrote the handoff
 - `last_commit`: Git hash for state reproducibility
 - `completed_tasks`: Array with per-task status and commit hash
 - `remaining_tasks`: What's left — enables intelligent routing on resume
@@ -131,6 +136,18 @@ Field reference:
    If `.devt/state/preflight-brief.md` exists, copy its `## Status` and `Generated <timestamp>` lines into both `handoff.json` (`preflight_brief` field) and `continue-here.md` (a "Pre-Flight Brief: FRESH/STALE/MISSING (generated ...)" line). On resume, the next session reads this and decides whether to re-run `/devt:preflight` (if STALE) or proceed with the existing Brief (if FRESH and the task is unchanged).
 
 **Lifecycle**: On successful resume, delete `handoff.json` to prevent stale reuse. The handoff is a one-shot artifact. The Brief itself is NOT deleted on resume — it stays valid for the resumed workflow.
+
+**Concurrent sessions**: `handoff.json` is safe at its fixed path because a state root holds at most ONE active workflow (the workflow lock enforces this); deliberate parallel sessions use `state new-instance`, which gives each session its own state directory — the instance id, not a filename suffix, is the session discriminator. Ad-hoc (non-workflow) sessions should hand off via `/devt:thread create` instead, where every file is uniquely slug-named.
+
+After writing both files, END by printing the copy-paste resume prompt — this is the handoff contract:
+
+```
+Paused. Handoff written to .devt/state/handoff.json + continue-here.md
+
+Copy-paste to continue in a new session:
+
+    /devt:next
+```
 </step>
 
 </process>
