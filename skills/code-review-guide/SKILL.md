@@ -134,6 +134,35 @@ Every finding gets a severity:
 | **Important** | -7              | Missing error handling, missing tests, performance issue, inconsistent pattern        |
 | **Minor**     | -3              | Naming issue, style inconsistency, missing type hint, documentation gap               |
 
+### Step 4.5: Confidence Gate (emission bar)
+
+Before a finding enters the report, self-score confidence 0-100 that it is
+REAL and evidence-established. This is an evidence-sufficiency bar, NOT a
+severity filter — the no-filtering contract stands: every finding supportable
+with cited evidence MUST be reported.
+
+Emission thresholds (higher severity tolerates more uncertainty):
+
+- Critical: confidence ≥ 50
+- Important: confidence ≥ 70
+- Minor: confidence ≥ 90
+
+Below threshold → not a finding. If the concern feels real but is
+under-evidenced, route it to `self_flagged_uncertainties` instead of the
+findings table. Never suppress silently: add one line to the Review Summary —
+`Suppressed: N sub-threshold findings (evidence-insufficient)`.
+
+Confidence killers (score low when): the issue predates this diff; a
+linter/type-checker/CI gate would catch it mechanically; it pattern-matches a
+change the task intentionally requested; the site explicitly silences the rule.
+
+### Evolution signal (when present)
+
+When your dispatch carries an `<evolution>` block and
+`.devt/state/evolution-report.md` exists, elevate finding severity one notch on
+files with high fix density — recurring-fix hotspots break again. Note the
+report's `generated_at`; treat a stale report as advisory only.
+
 ### Step 5: Calculate Score
 
 ```

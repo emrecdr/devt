@@ -81,6 +81,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | Filename | Written by | Read by | Schema |
 |---|---|---|---|
 | `handoff.json` | `/devt:workflow --pause` | `/devt:next` | `JSON_INPUT_SCHEMAS` |
+| `acceptance-criteria.json` | verifier (first iteration of the verify loop) | verifier (every later iteration — grades against it verbatim) | `JSON_INPUT_SCHEMAS` |
 | `preflight-brief.json` | `preflight.cjs::generate` | every dispatch (`scope_hint`, `scope_trust`) | inline shape; informally documented in `preflight.cjs::generate` |
 
 ### Forensic / persistent logs (RESET_EXEMPT)

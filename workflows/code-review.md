@@ -509,6 +509,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 {graph_impact_content}
 </graph_impact>
     <graph_impact_note>The above is orchestrator-mediated MCP output inlined from .devt/state/graph-impact.md — high-signal review map for changed symbols. Your tool surface does not include `mcp__*graphify*`, so consume the inlined data rather than issuing graph queries.</graph_impact_note>
+    <evolution>Read .devt/state/evolution-report.md (if it exists) — git-history hotspots, change coupling, fix density; check generated_at for staleness. Elevate finding severity one notch on high fix-density files: recurring-fix hotspots break again.</evolution>
     {prior_outputs}
     {provenance_protocol}
     <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>

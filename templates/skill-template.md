@@ -77,3 +77,11 @@ Guidelines:
 
 For detailed reference material, see:
 - `references/<topic>.md` — <what it covers>
+
+## Behavioral RED-baseline (authoring practice)
+
+Before shipping a new skill or a substantive section edit, run the target
+scenario in a fresh subagent WITHOUT the new prose and capture how it fails,
+verbatim. Write the prose against those observed failures, then re-test with
+another fresh subagent. A prompt edit that produces no behavioral delta is
+decoration — the smoke gates verify structure, not behavior.

@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.155.0] - 2026-07-08
+
+### Verify-loop + review calibration (three-source-validated adoptions)
+
+Four mechanisms adopted after validation against the current upstream kit tag, current platform docs, and executed-against-repo facts — plus one latent bug the validation itself uncovered.
+
+- **Frozen acceptance criteria across the verify loop.** Each verifier retry was a fresh dispatch that re-derived and re-numbered AC-1..AC-n from scratch (`revisions[]` flow to the programmer, never to the next verifier), so retries graded against moving targets. Now iteration 1 writes `.devt/state/acceptance-criteria.json` and every later iteration grades against it verbatim — stable ids, stable `criteria_total`, comparable revisions. Registered in `JSON_INPUT_SCHEMAS` + STATE-RULES inventory; validated that no platform primitive covers this (`/goal` is binary/session-scoped; per-criterion outcomes are API-only).
+- **Per-finding confidence gate (emission bar).** Junk findings were caught post-hoc by verifier revision loops at 5-15K tokens per iteration. The reviewer now self-scores confidence per finding with severity-progressive thresholds (Critical ≥50 / Important ≥70 / Minor ≥90) — an evidence-sufficiency bar, explicitly NOT a severity filter (the no-filtering contract stands); sub-threshold concerns route to `self_flagged_uncertainties`, and suppression is never silent (a `Suppressed: N` line per review). Lives in the preloaded `code-review-guide` skill — code-reviewer.md sits at its hard line cap. Thresholds ship as starting calibration for receipt tuning.
+- **Evolution signal reaches reviews.** `evolution.cjs` hotspot/fix-density reports were consumed only by arch-health; reviews were blind to them. The reviewer envelope (template + compiled region) now carries a by-reference `<evolution>` block — zero new scans, reviews read the persistent report when it exists and elevate severity one notch on high fix-density files.
+- **RED-baseline authoring practice** added to the agent + skill templates: capture how a fresh subagent fails WITHOUT the new prose before writing it — a prompt edit with no behavioral delta is decoration.
+- **Fixed: inline rubrics were silently dead.** `loadInlineRubrics` counted aliased workflow_types' shared rubric file twice (`code_review_parallel` → code_review.v1.md), pushing the shipped default trio over the 32KB cap — every dispatch fell back to path-only with `inline_rubrics: {}`. Aliases now share one byte count; the trio inlines at 27.8KB.
+- Gates **K248** (frozen criteria), **K249** (confidence gate + evolution wiring, template↔compiled agreement), **K250** (rubric dedup, behavioral). Drift-guard stack 154 → 157 deep (K94–K250).
+
 ## [0.154.0] - 2026-07-08
 
 ### Session handoffs: /devt:thread promoted + copy-paste resume contract

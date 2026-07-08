@@ -457,6 +457,12 @@ const JSON_INPUT_SCHEMAS = {
     // doesn't break resume; just surfaces as a soft note.
     recommended: ["tier", "iteration", "last_commit", "remaining_tasks", "next_action"],
   },
+  "acceptance-criteria.json": {
+    // Frozen by the verifier's FIRST iteration; later iterations grade against
+    // it verbatim so revisions[] ids stay comparable across the retry loop.
+    required: ["criteria"],
+    recommended: ["derived_at", "workflow_id"],
+  },
 };
 
 // artifacts that ALSO have a JSON sidecar in

@@ -101,3 +101,11 @@ Before marking as DONE:
 - [ ] Output artifact written to .devt/state/
 - [ ] Status field is set
 - [ ] No work outside the agent's scope
+
+## Behavioral RED-baseline (authoring practice)
+
+Before shipping a new agent prompt or a substantive section edit, run the
+target scenario in a fresh subagent WITHOUT the new prose and capture how it
+fails, verbatim. Write the prose against those observed failures, then re-test
+with another fresh subagent. A prompt edit that produces no behavioral delta is
+decoration — the smoke gates verify structure, not behavior.

@@ -97,6 +97,8 @@ Surface the same reason in verification.md and exit. Do NOT proceed through the 
 <step name="understand_goal">
 What was the original task? What should a successful implementation look like?
 
+**Frozen-criteria contract.** If `.devt/state/acceptance-criteria.json` exists, Read it and grade against its criteria verbatim — same ids, wording, and count; do NOT re-derive. Retry iterations must aim at the targets iteration 1 set, or `revisions[]` ids stop being comparable across the loop. Only when the file does not exist: derive per below, then write it BEFORE grading (canonical heredoc pattern): `{"criteria":[{"id":"AC-1","criterion":"...","source":"spec.md|plan.md|task"}],"derived_at":"<ISO timestamp>","workflow_id":"<workflow.yaml::workflow_id>"}`.
+
 Derive concrete acceptance criteria from the best available source:
 
 **If spec.md exists** (from `/devt:specify`), use it as the primary source:

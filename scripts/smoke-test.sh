@@ -16220,6 +16220,50 @@ else
   fail "K247: session-handoff contract incomplete"
 fi
 
+# K248: frozen acceptance-criteria contract — the verifier's first iteration
+# writes acceptance-criteria.json; later iterations grade against it verbatim
+# (retries were re-deriving + re-numbering AC-* per dispatch, making
+# revisions[] ids incomparable across the loop). Registered as an input schema.
+K248_SCHEMA=$(node -e 'const s=require("'"$ROOT"'/bin/modules/state.cjs"); const e=(s.JSON_INPUT_SCHEMAS||{})["acceptance-criteria.json"]; console.log(e && Array.isArray(e.required) && e.required.includes("criteria") ? "1" : "0");' 2>/dev/null)
+if [ "${K248_SCHEMA:-0}" = "1" ] \
+   && /usr/bin/grep -q "Frozen-criteria contract" "$ROOT/agents/verifier.md" \
+   && /usr/bin/grep -q "acceptance-criteria.json" "$ROOT/agents/verifier.md" \
+   && /usr/bin/grep -q "acceptance-criteria.json" "$ROOT/docs/STATE-RULES.md"; then
+  pass "K248: frozen acceptance-criteria — verifier freeze/load contract + JSON_INPUT_SCHEMAS entry + STATE-RULES inventory"
+else
+  fail "K248: frozen acceptance-criteria contract incomplete — schema=$K248_SCHEMA"
+fi
+
+# K249: review calibration signals — per-finding confidence gate lives in the
+# preloaded code-review-guide (code-reviewer.md is at its hard line cap), keeps
+# the no-filtering contract + telemetry-on-reduction, and the <evolution>
+# by-reference block reaches the reviewer in BOTH the template and its
+# compiled region (byte-agreement).
+K249_TMPL=$(/usr/bin/grep -c "<evolution>Read .devt/state/evolution-report.md" "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review.tmpl.md" || true)
+K249_COMPILED=$(/usr/bin/grep -c "<evolution>Read .devt/state/evolution-report.md" "$ROOT/workflows/code-review.md" || true)
+if /usr/bin/grep -q "Confidence Gate (emission bar)" "$ROOT/skills/code-review-guide/SKILL.md" \
+   && /usr/bin/grep -q "evidence-sufficiency bar, NOT a" "$ROOT/skills/code-review-guide/SKILL.md" \
+   && /usr/bin/grep -q "Suppressed: N sub-threshold findings" "$ROOT/skills/code-review-guide/SKILL.md" \
+   && [ "${K249_TMPL:-0}" = "1" ] && [ "${K249_COMPILED:-0}" = "1" ]; then
+  pass "K249: confidence gate in code-review-guide (no-filtering preserved + suppression telemetry) + <evolution> block in template AND compiled region"
+else
+  fail "K249: review calibration signals incomplete — tmpl=$K249_TMPL compiled=$K249_COMPILED"
+fi
+
+# K250: inline-rubric alias dedup — workflow_types sharing one rubric file must
+# not double-count its bytes; with shipped defaults the trio must inline (the
+# pre-fix behavior silently fell back to path-only for every dispatch).
+K250_CHECK=$(node -e '
+const { loadInlineRubrics } = require("'"$ROOT"'/bin/modules/init.cjs");
+const r = loadInlineRubrics("'"$ROOT"'", null, {dev:"dev.v1.md", code_review:"code_review.v1.md", code_review_parallel:"code_review.v1.md"});
+console.log(r.content !== null && Object.keys(r.content).length === 3 && r.bytes <= 32768 ? "OK" : "FAIL:bytes=" + r.bytes);
+' 2>/dev/null || echo "FAIL:node error")
+if [ "$K250_CHECK" = "OK" ]; then
+  pass "K250: inline rubrics dedup aliased files — shipped default trio inlines under the cap (was silently path-only)"
+else
+  fail "K250: rubric dedup broken — $K250_CHECK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

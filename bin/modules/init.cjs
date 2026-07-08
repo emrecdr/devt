@@ -64,6 +64,11 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   if (!pluginRoot || !rubrics) return { content: null, bytes: 0, warnings: [] };
   const result = {};
   const warnings = [];
+  // Aliased workflow_types sharing one rubric file (code_review_parallel →
+  // code_review.v1.md) must not double-count its bytes against the cap —
+  // without dedup the shipped default trio exceeds the cap and inlining
+  // silently falls back to path-only for everyone.
+  const seen = new Map();
   let totalBytes = 0;
   for (const [workflowType, filename] of Object.entries(rubrics)) {
     if (!filename || typeof filename !== "string") continue;
@@ -93,13 +98,19 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
       warnings.push(`rubric missing on disk for workflow_type=${workflowType}: ${filename}`);
       continue;
     }
+    if (seen.has(resolved)) {
+      result[workflowType] = seen.get(resolved);
+      continue;
+    }
     const buf = fs.readFileSync(resolved);
     totalBytes += buf.length;
     if (totalBytes > MAX_INLINE_RUBRIC_BYTES) {
       warnings.push(`inline-rubrics over ${MAX_INLINE_RUBRIC_BYTES} bytes — falling back to path-only`);
       return { content: null, bytes: totalBytes, warnings };
     }
-    result[workflowType] = buf.toString("utf8");
+    const text = buf.toString("utf8");
+    seen.set(resolved, text);
+    result[workflowType] = text;
   }
   return { content: result, bytes: totalBytes, warnings };
 }
