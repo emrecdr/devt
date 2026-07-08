@@ -47,7 +47,12 @@ run_json "hooks.json parses"  cat "${ROOT}/hooks/hooks.json"
 
 echo "== CLI smoke tests (in temp dir) =="
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# Abort tripwire: a gate crashing under set -e can end the run BEFORE the
+# Result line while still reading as green in a chained invocation. The
+# sentinel flips only after every gate has run; an exit without it is a
+# failure regardless of the exit path.
+SUITE_COMPLETED=0
+trap 'rm -rf "$TMP"; if [ "${SUITE_COMPLETED:-0}" != "1" ]; then echo "SMOKE SUITE ABORTED before the Result line — a gate crashed mid-run; treat as FAILURE"; exit 70; fi' EXIT
 cd "$TMP"
 
 run_json "init workflow"   node "$CLI" init workflow "smoke test task"
@@ -16278,6 +16283,7 @@ else
   fail "test-gates.cjs subsuite regression — run 'node scripts/test-gates.cjs' for details"
 fi
 
+SUITE_COMPLETED=1
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
 [[ $FAIL -eq 0 ]]

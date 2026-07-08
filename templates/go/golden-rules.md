@@ -249,6 +249,17 @@ All three must pass. Copy the terminal output as evidence. "I believe the tests 
 
 ---
 
+## Rule 13: Never Weaken Tests to Pass
+
+Never remove, skip, or weaken a failing test, gate, or assertion to make a run
+pass — fix the code, not the test. A deleted test cannot fail; pass/fail
+diffing is blind to it, and the gap ships as missing or buggy functionality.
+If a test is genuinely wrong, change it visibly and state why in the output
+artifact — the verifier diffs test counts against the baseline and flags
+silent drops.
+
+---
+
 ## Pre-Flight Protocol
 
 Before any non-trivial change, the **Two-Tier Pre-Flight Protocol** applies (see `${CLAUDE_PLUGIN_ROOT}/guardrails/golden-rules.md` Rule 14):

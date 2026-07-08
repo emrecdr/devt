@@ -223,3 +223,16 @@ When you own the type, put `impl Trait for Type` near the type definition. When 
 ## 20. Public API Changes Require Semver Bump
 
 Breaking changes to public types, functions, or trait signatures require a major version bump (or pre-1.0 minor bump). Run `cargo semver-checks` on release-prep cycles to catch unintentional breakages.
+
+---
+
+## 21. Never Weaken Tests to Pass
+
+Never remove, skip, or weaken a failing test, gate, or assertion to make a run
+pass — fix the code, not the test. A deleted test cannot fail; pass/fail
+diffing is blind to it, and the gap ships as missing or buggy functionality.
+If a test is genuinely wrong, change it visibly and state why in the output
+artifact — the verifier diffs test counts against the baseline and flags
+silent drops.
+
+---

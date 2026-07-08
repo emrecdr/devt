@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.158.0] - 2026-07-08
+
+### Straggler closure: rule propagation, rubric bootstrap docs, abort tripwire
+
+- **Never-weaken-tests rule propagated to all 6 project templates** (Rule 13 in python-fastapi/go/typescript-node/vue-bootstrap, Rule 7 in blank, §21 in rust) — the canonical guardrail already reached every dispatch via `guardrails_inline`; scaffolded projects' local copies now carry it too.
+- **Golden-artifact rubric bootstrap** documented in GRADER.md's custom-rubric escape hatch: derive gradeable criteria from a known-good artifact instead of writing them from imagination.
+- **Smoke-suite abort tripwire**: a gate crashing under `set -e` could end the run before the Result line while reading as green in a chained invocation (observed once in the field of this repo). A completion sentinel now flips only after every gate has run; any exit without it reports ABORTED and exits 70.
+
 ## [0.157.0] - 2026-07-08
 
 ### Fix: workflow reset destroyed cross-session threads + doc sync

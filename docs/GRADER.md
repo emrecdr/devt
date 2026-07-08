@@ -92,6 +92,8 @@ Drop a `.md` file at `.devt/rubrics/dev-lenient.md` and reference it by name in 
 
 The grader will find it via layer 2 before falling back to the plugin default.
 
+**Bootstrapping a rubric from a golden artifact.** A project with no rubric can derive one from a known-good example: point Claude at a representative finished artifact and ask for explicit, independently gradeable criteria ("the CSV has a numeric price column"), not vibes — then pin the result as `.devt/rubrics/<workflow_type>.md`. Deriving criteria from what "done" already looks like beats writing them from imagination.
+
 ### Friction note for custom-agent projects
 
 A project running its own `.claude/agents/programmer.md` that doesn't emit `impl-summary.json::gates` will see RETRY-loop-to-PRUNE on iteration 1 with `gate_failures` pointing at `gates.test.ran` / etc. The same applies to projects without a test runner that legitimately emit `gates.test.ran=false`.
