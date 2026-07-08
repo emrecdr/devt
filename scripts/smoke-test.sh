@@ -16173,6 +16173,35 @@ else
   fail "K244: anti-tampering defense missing (golden-rules rule or verifier count-diff)"
 fi
 
+# K245: graphify-helpers hot/cold split — hot protocol (fallback triggers,
+# decision tree, tagging invariants) stays preloaded; cold detail (per-skill
+# thresholds, parity table, ORCHESTRATOR-ONLY MCP surface) lazy-loads from
+# references/. The MCP table must NOT sit in the preloaded body — its only
+# frontmatter consumer (architect) is MCP-blind by contract.
+K245_LINES=$(wc -l < "$ROOT/skills/graphify-helpers/SKILL.md" | tr -d " ")
+if [ "$K245_LINES" -le 210 ] \
+   && /usr/bin/grep -q "Four Fallback Triggers" "$ROOT/skills/graphify-helpers/SKILL.md" \
+   && /usr/bin/grep -q "assert-graphify-source-tagged" "$ROOT/skills/graphify-helpers/SKILL.md" \
+   && ! /usr/bin/grep -q "Upstream MCP tool surface" "$ROOT/skills/graphify-helpers/SKILL.md" \
+   && /usr/bin/grep -q "graphify-helpers-details.md" "$ROOT/skills/graphify-helpers/SKILL.md" \
+   && /usr/bin/grep -q "Upstream MCP tool surface" "$ROOT/references/graphify-helpers-details.md"; then
+  pass "K245: graphify-helpers hot/cold split — hot invariants inline (${K245_LINES} lines), MCP surface + thresholds + parity in references/"
+else
+  fail "K245: graphify-helpers split broken — lines=$K245_LINES"
+fi
+
+# K246: council runs forked — advisor traffic stays out of the caller's context.
+# Frontmatter opts into context:fork + agent, and Stage 1's vague-question path
+# is a fork-safe early return (a fork cannot pause for mid-run user input).
+if /usr/bin/grep -q "^context: fork" "$ROOT/skills/council/SKILL.md" \
+   && /usr/bin/grep -q "^agent: general-purpose" "$ROOT/skills/council/SKILL.md" \
+   && /usr/bin/grep -q "cannot pause for mid-run user input" "$ROOT/skills/council/SKILL.md" \
+   && /usr/bin/grep -q "Forked execution" "$ROOT/skills/council/SKILL.md"; then
+  pass "K246: council forked — context:fork + general-purpose agent + fork-safe Stage-1 early return + fork output contract"
+else
+  fail "K246: council fork wiring incomplete"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

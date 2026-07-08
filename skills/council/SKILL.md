@@ -7,6 +7,8 @@ description: >-
   engineering trade-off. Distinct from strategic-analysis — adds adversarial peer review for decisions
   where the user suspects their first instinct is biased.
 allowed-tools: Bash Read Write Edit Grep Glob Skill Task
+context: fork
+agent: general-purpose
 ---
 
 # Council
@@ -129,8 +131,10 @@ prompt that all five advisors will receive. Include:
 Do not steer. Do not add your own opinion. But ensure each advisor has enough context
 to reason about *this* codebase, not engineering in general.
 
-If the question is too vague to frame ("council this: my code"), ask **one** clarifying
-question, then proceed.
+If the question is too vague to frame ("council this: my code"), END the run
+immediately with only **one** clarifying question as your final output — you run
+forked and cannot pause for mid-run user input; the user re-invokes the council
+with the answer.
 
 ### Stage 2 — Convene the council (5 advisors in parallel)
 
@@ -451,6 +455,12 @@ individual advisor responses or re-run the council against a previous transcript
 
 ## Important Notes
 
+- **Forked execution.** The council runs in a forked subagent (`context: fork`):
+  the 10 advisor/reviewer dispatches, their responses, and the anonymization
+  mapping stay OUT of the caller's context (~15-25K tokens per run that
+  previously accumulated in the main thread). Only your final message returns to
+  the caller — make it the chairman verdict + transcript path, nothing else. The
+  transcript file carries everything for downstream workflows.
 - **Always parallel.** Stages 2 and 3 must dispatch all 5 subagents in one tool call.
   Sequential dispatch is the most common implementation mistake and defeats the design.
 - **Always anonymize stage 3.** If reviewers see attribution, the peer review collapses
@@ -486,7 +496,7 @@ Per session:
 .devt/state/council-{slug}-{YYYYMMDD-HHMMSS}.md   # full transcript (markdown)
 ```
 
-In-chat: chairman verdict (5 sections), with the transcript path linked at the end.
+Final output returned to the caller: chairman verdict (5 sections), with the transcript path linked at the end.
 
 ## Credit
 

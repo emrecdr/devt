@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.153.0] - 2026-07-08
+
+### Preload trims: graphify-helpers hot/cold split + forked council
+
+- **graphify-helpers slimmed 249 → 196 lines (14.3KB → 9.7KB)** — the largest frontmatter-preloaded skill, paid on every architect dispatch. Hot protocol stays inline (four fallback triggers, decision tree, result shape, canonical Bash snippets, tagging invariants + their CLI enforcement); cold detail moved to `references/graphify-helpers-details.md` (per-skill thresholds, without-graphify parity, upstream MCP tool surface, lineage). The MCP table was not just cold — it instructed direct `mcp__graphify__*` calls that its only preloaded consumer (architect) cannot execute under the MCP-blind contract; the reference now marks it ORCHESTRATOR-ONLY. Also fixes a duplicated Hard-Invariant number.
+- **Council runs as a forked subagent** (`context: fork` + `agent: general-purpose` — the architecture-health-scanner pattern). Before: 10 advisor/reviewer dispatches, their 250-400-word responses, the anonymization mapping, and the chairman synthesis all accumulated in the main thread (~15-25K tokens per run) and persisted for the session's remainder. After: only the chairman verdict + transcript path return to the caller; the full transcript still lands at `.devt/state/council-{slug}-{ts}.md` for downstream workflows. Stage 1's vague-question path becomes a fork-safe early return (one clarifying question as the final output) because a fork cannot pause for mid-run user input.
+- Gates **K245** (split integrity + MCP surface out of the preload) + **K246** (fork wiring + fork-safe clarify path). Drift-guard stack 151 → 153 deep (K94–K246).
+
 ## [0.152.0] - 2026-07-07
 
 ### LSP-first caller lookup + test-tampering defense

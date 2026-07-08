@@ -14,14 +14,9 @@ grep's text-match results with AST-anchored symbol nodes from `graphify-out/grap
 When enabled, Graphify reduces token cost on typical code-search operations by ~10×;
 when disabled, devt falls back to grep with identical output shape.
 
-**Architecture note**: devt's CLI wrappers (`node bin/devt-tools.cjs graphify <subcmd>`)
-read `graphify-out/graph.json` **directly** — they do NOT shell out to the upstream
-`graphify` binary at the read path. The binary is needed only to *generate* the graph
-via `graphify update .`; projects with a checked-in or CI-built `graph.json` work
-without the binary on PATH. This decouples devt from upstream CLI flag drift (upstream's
-`graphify query` accepts only `--dfs`/`--budget`/`--context`/`--graph` — no `--json`,
-no `--neighbors`, no `--direction`). The wrappers parse `graph.json` in-process,
-build an adjacency map, and run BFS/lookup natively in Node.
+**Architecture note**: devt's CLI wrappers read `graphify-out/graph.json`
+in-process — the `graphify` binary is needed only to regenerate the graph.
+Detail: `references/graphify-helpers-details.md`.
 
 This skill is the canonical wrapper. Other developer skills (codebase-scan,
 code-review-guide, etc.) MUST route through this skill rather than calling Graphify
@@ -92,21 +87,8 @@ downstream agents and the user know how the result was obtained.
      - Tag results with `source: "grep"`
 ```
 
-## Per-Skill Threshold Defaults
-
-When skills consume graphify-helpers, they should pass an appropriate
-`min_results_threshold` based on what answer is expected:
-
-| Skill | Operation | Default threshold |
-|---|---|---|
-| `codebase-scan` | symbol search | 2 — we expect at least the definition + 1 reference |
-| `code-review-guide` | get-caller-set | 1 — even one caller is informative |
-| `verification-patterns` | get-dependent-set | 1 — same |
-| `complexity-assessment` | blast-radius | (uses `effect_size` heuristic, no threshold) |
-| `tdd-patterns` | find-tests-near-symbol | 1 — even one similar test is enough scaffolding |
-| `strategic-analysis` | get-dependent-set per option | 0 — empty is informative ("Option A touches 0 callers") |
-
-Callers SHOULD override the default when their use case demands richer evidence.
+Per-skill `min_results_threshold` defaults live in
+`references/graphify-helpers-details.md` — Read it when tuning thresholds.
 
 ## Result Shape (canonical)
 
@@ -165,39 +147,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify warm-cache
 # Returns { path: "graphify-out/wiki/index.md" } or { path: "GRAPH_REPORT.md" } or { path: null }
 ```
 
-## Without-Graphify Feature Parity
-
-When `graphify.enabled: false` (the default — Phase 1 ships with this), the skill falls
-back to grep cleanly. Output shape stays identical (just with `source: "grep"`). The
-following features become approximations rather than precise:
-
-| Feature | With Graphify | Without Graphify |
-|---|---|---|
-| Definition lookup | Exact AST node + 5-line context | grep matches the symbol name (false positives possible) |
-| Caller enumeration | AST-anchored callers via `direction=in` | grep + manual filter (substring match) |
-| Dependent enumeration | AST-anchored dependents via `direction=out` | grep + heuristic (imports / requires) |
-| Cross-module path | `shortest_path` via graph traversal | n/a (skipped — caller treats as "no info") |
-| Blast radius effect_size | LARGE/MEDIUM/SMALL from AST + god_node detection | Approximation: file count + module spread |
-| AMBIGUOUS binding flagging | Surfaced from Graphify's confidence taxonomy | n/a (no binding confidence available) |
-
-## Upstream MCP tool surface
-
-When the setup wizard registers Graphify in `.mcp.json` (auto-detected at `/devt:setup --init`), the upstream MCP server exposes 10 tools. devt's Node wrappers in `bin/modules/graphify.cjs` cover the first 4 directly; the remaining 6 are reachable by the AI agent via the Claude Code MCP system. One of them (`get_pr_impact`) is already wired into PR-scoped code review; the other 5 are available for ad-hoc agent use.
-
-| MCP tool | devt wrapper / wiring | When to use |
-|---|---|---|
-| `query_graph` | `graphify.queryGraph(text)` | Free-text symbol/concept search across the graph |
-| `get_node` | `graphify.getNode(nodeId)` | Fetch a single node's definition + references |
-| `get_neighbors` | `graphify.getNeighbors(sym, {direction, depth})` | Callers/dependents traversal |
-| `shortest_path` | `graphify.shortestPath(from, to)` | Cross-module relationship discovery |
-| `god_nodes` | (no wrapper — call MCP directly) | Top-N most-connected core abstractions. devt computes the same data locally via `graphify.godNodes()` from graph.json |
-| `get_community` | Upstream-only — call `mcp__graphify__get_community` directly. Removed from devt's vendored relay in round 6 (zero agent invocations field-observed); the JS function `graphify.getCommunity()` is still consumed internally by `graphify lane-suggestions`. Re-advertise on the relay if a documented agent use case emerges | All nodes in a community by ID — feature-cluster traversal |
-| `graph_stats` | (no wrapper — call MCP directly) | Node/edge/community counts + EXTRACTED/INFERRED/AMBIGUOUS confidence breakdown — devt's `graphify.graphStats()` covers density+trust locally but not confidence percentages |
-| `get_pr_impact` | **wired** in `workflows/code-review.md` — orchestrator writes the response to `.devt/state/graph-impact.md` when reviewing a PR | Blast-radius per PR: which graph communities the PR touches, files affected, node-impact list |
-| `list_prs` | (not wired) | Graph-aware PR dashboard — open PRs with CI/review state and blast-radius |
-| `triage_prs` | (not wired) | Actionable PRs sorted by blast-radius — useful for "which PR should I review next?" surfacing |
-
-For tools without a devt wrapper, call them via the registered `graphify` MCP server directly. The `blast_radius` tool exposed by devt's vendored `bin/devt-memory-mcp.cjs` aggregates `get_neighbors` calls — it is NOT a Graphify-native tool, but a devt-specific composition.
+Cold detail — the without-graphify parity table, the upstream MCP tool surface
+(ORCHESTRATOR-ONLY: sub-agents are MCP-blind and consume `graph-impact.md`
+instead), and lineage — lives in `references/graphify-helpers-details.md`.
+Read it when explaining degraded mode or working at the orchestrator level.
 
 ## Hard Invariants
 
@@ -227,10 +180,10 @@ For tools without a devt wrapper, call them via the registered `graphify` MCP se
    ```
 
    Trigger values: `empty | error | not_setup | below_threshold | none`. The trace records workflow_id/workflow_type/phase automatically. Analytics: high empty-result rate signals under-resolved queries; high not_setup rate signals graphify install adoption is low.
-3. **Setup wizard pitch is "strongly recommended", not required.** `/devt:setup --init` offers
+4. **Setup wizard pitch is "strongly recommended", not required.** `/devt:setup --init` offers
    Graphify install with a clear value prop, but a "no thanks" answer produces a fully
    working install. No feature is locked behind Graphify.
-4. **Respect Graphify's own config surface.** Honor `GRAPHIFY_OUT` env var,
+5. **Respect Graphify's own config surface.** Honor `GRAPHIFY_OUT` env var,
    `.graphifyignore`, `.graphifyinclude`. Do not override these. Do not duplicate the
    graphify-out/ contents elsewhere — devt reads what Graphify produces.
 
@@ -241,9 +194,3 @@ Per call:
 - stdout: JSON payload with `source`, `results`, `degraded`, `fallback_trigger`, `reason`
 - stderr: human-readable note when degraded (e.g. "graphify binary not found on PATH; using grep fallback")
 - exit code: 0 always (the skill never errors out — empty results are not errors)
-
-## Credit & Lineage
-
-Wraps [safishamsi/graphify](https://github.com/safishamsi/graphify) — a multi-language
-(26 langs) tree-sitter AST extractor with built-in MCP support and post-commit hooks.
-The four fallback triggers are devt-specific resilience policy, not Graphify's design.
