@@ -149,8 +149,10 @@ Emission thresholds (higher severity tolerates more uncertainty):
 
 Below threshold → not a finding. If the concern feels real but is
 under-evidenced, route it to `self_flagged_uncertainties` instead of the
-findings table. Never suppress silently: add one line to the Review Summary —
-`Suppressed: N sub-threshold findings (evidence-insufficient)`.
+findings table. ALWAYS end the Review Summary with one line —
+`Suppressed: N sub-threshold findings (evidence-insufficient)` — including
+`Suppressed: 0` when nothing was suppressed (the 0 proves the gate engaged;
+a missing line is indistinguishable from the gate not running).
 
 Confidence killers (score low when): the issue predates this diff; a
 linter/type-checker/CI gate would catch it mechanically; it pattern-matches a

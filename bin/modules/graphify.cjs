@@ -690,12 +690,19 @@ function getNeighbors(symbol, options) {
   // drill-down that filters a real caller is auditable, not a black box.
   const droppedSample = [];
   const droppedSeen = new Set();
+  const droppedByFile = new Map();
   const DROPPED_SAMPLE_CAP = 15;
   const recordDrop = (label, reason, srcFile, dep) => {
     if (!droppedSeen.has(label) && droppedSample.length < DROPPED_SAMPLE_CAP) {
       droppedSeen.add(label);
       droppedSample.push({ label, reason, source_file: srcFile || "", depth: dep });
     }
+    const key = srcFile || "(no source_file)";
+    let agg = droppedByFile.get(key);
+    if (!agg) { agg = { source_file: key, count: 0, reasons: {}, sample: [] }; droppedByFile.set(key, agg); }
+    agg.count++;
+    agg.reasons[reason] = (agg.reasons[reason] || 0) + 1;
+    if (agg.sample.length < 3) agg.sample.push(label);
   };
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
@@ -768,6 +775,14 @@ function getNeighbors(symbol, options) {
   // Carry the reason-coded dropped sample on the same envelope as the filter
   // counts, so every return path (plain / truncated / capped) surfaces it.
   if (filterTelemetry && droppedSample.length > 0) filterTelemetry.dropped_sample = droppedSample;
+  // When filtering leaves NOTHING, the drops ARE the answer — aggregate them
+  // per source file so the consumer sees the real caller set at a glance
+  // (field receipt: every DI/router caller was classified noise and the
+  // reviewer had to mine dropped_sample by hand to write the drill-down).
+  if (filterTelemetry && rankedItems.length === 0 && droppedByFile.size > 0) {
+    filterTelemetry.dropped_by_file = Array.from(droppedByFile.values())
+      .sort((a, b) => b.count - a.count).slice(0, 10);
+  }
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
   if (!maxBytes) {
     const base = { source: "graphify", results: rankedItems };
@@ -2567,6 +2582,7 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
   // Synthesized symbols carry source="diff-hunk" + edge_count=null so
   // consumers can distinguish them from graph-derived results.
   const fallbackSymbols = [];
+  const filesWithoutNodes = [];
   let fallbackFilesScanned = 0;
   let fallbackUbiquitousFiltered = 0;
   // Shared ubiquitous-type stoplist applied to the new-file fallback. The
@@ -2585,6 +2601,15 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
     let covered = false;
     for (const mf of matchedFiles) { if (_pathSuffixMatch(mf, nf)) { covered = true; break; } }
     if (covered) continue;
+    // Corpus-blind: the graph carries NO node for this changed CODE file
+    // (upstream token-filter exclusion or never indexed). The regex fallback
+    // below still extracts anchor names, but every graph query about this
+    // file's symbols returns silence — consumers must treat that as blindness,
+    // not safety. Prose/config files are excluded: the graph never indexes
+    // them, so listing them would cry wolf on every diff.
+    if (/\.(py|js|jsx|ts|tsx|go|rs|rb|java|kt|cs|php|swift|scala|c|cc|cpp|h|hpp)$/i.test(file)) {
+      filesWithoutNodes.push(file);
+    }
     const extracted = _extractSymbolsFromFile(file);
     if (extracted.length === 0) continue;
     fallbackFilesScanned++;
@@ -2634,7 +2659,72 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
     if (hunkFilteredCount > 0) envelope.hunk_filtered = hunkFilteredCount;
   }
   if (fallbackUbiquitousFiltered > 0) envelope.fallback_ubiquitous_filtered = fallbackUbiquitousFiltered;
+  if (filesWithoutNodes.length > 0) envelope.files_without_nodes = filesWithoutNodes;
   return envelope;
+}
+
+/**
+ * resolveExactSymbols — validate candidate anchor labels against the graph.
+ * A label resolves only when a node carries EXACTLY that label AND a real
+ * source_file. Dangling label-only nodes (edge-endpoint orphans left behind by
+ * upstream corpus exclusion) do NOT count — anchoring blast_radius on one
+ * yields a garbage neighborhood (field receipt: "TokenService" resolved to an
+ * orphan whose only neighbors were docstring nodes in an unrelated module),
+ * and prose words that match no node ("TTL", "ENV") must never become anchors.
+ */
+function resolveExactSymbols(labels) {
+  const out = { resolved: [], unresolved: [] };
+  if (!Array.isArray(labels) || labels.length === 0) return out;
+  const loaded = loadGraph();
+  if (!loaded.ok) {
+    out.unresolved = labels.map(l => ({ label: l, reason: "graph_not_loaded" }));
+    return out;
+  }
+  const byLabel = new Map();
+  for (const [, node] of loaded.cache.adj.nodeMap) {
+    const lb = node && node.label;
+    if (!lb) continue;
+    if (!byLabel.has(lb)) byLabel.set(lb, []);
+    byLabel.get(lb).push(node);
+  }
+  for (const l of labels) {
+    const nodes = byLabel.get(l) || [];
+    if (nodes.some(n => n.source_file)) out.resolved.push(l);
+    else if (nodes.length > 0) out.unresolved.push({ label: l, reason: "dangling_no_source_file" });
+    else out.unresolved.push({ label: l, reason: "no_exact_node" });
+  }
+  return out;
+}
+
+/**
+ * manifestFreshness — per-file freshness via graphify's own build manifest.
+ * The manifest records {mtime, ast_hash, semantic_hash} per relative path at
+ * build time. A scope file whose disk mtime equals the manifest mtime is what
+ * the graph indexed — FRESH regardless of commit lag (working-tree flows have
+ * no usable built_at anchor; the lag model told a reviewer to distrust a graph
+ * rebuilt 90 minutes earlier from the exact files under review). ast_hash is
+ * graphify's own hasher and is NOT recomputed here — mtime drift degrades to
+ * "drifted" (unverified), never to a false fresh. Paths resolve relative to
+ * cwd, mirroring loadGraph()'s cwd-based convention.
+ */
+function manifestFreshness(files) {
+  const outDir = getGraphifyOutDir();
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(outDir, "manifest.json"), "utf8")); }
+  catch { return { available: false }; }
+  const res = { available: true, checked: 0, matched: 0, drifted: [], missing_from_manifest: [] };
+  for (const f of Array.isArray(files) ? files : []) {
+    const entry = manifest[f] || manifest[_normPath(f)];
+    if (!entry || typeof entry.mtime !== "number") { res.missing_from_manifest.push(f); continue; }
+    res.checked++;
+    try {
+      const st = fs.statSync(f);
+      if (Math.abs(st.mtimeMs / 1000 - entry.mtime) < 0.002) res.matched++;
+      else res.drifted.push(f);
+    } catch { res.drifted.push(f); }
+  }
+  res.all_matched = res.checked > 0 && res.drifted.length === 0 && res.missing_from_manifest.length === 0;
+  return res;
 }
 
 // G5 (cal #31.B) — Identifier-introducing keyword extractor. Covers
@@ -3388,4 +3478,6 @@ module.exports = {
   parseReportSections,
   getGraphifyOutDir,
   probeBinary,
+  resolveExactSymbols,
+  manifestFreshness,
 };

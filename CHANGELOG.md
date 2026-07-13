@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.159.0] - 2026-07-13
+
+### Signal-layer calibration (second field receipt, filesystem-verified)
+
+A fully-instrumented greenfield review run showed the enforcement layer converting (the substance gate fired correctly and recovered; the verifier genuinely adjudicated) while the signal layer under-delivered — junk anchors, invisible caller sets, a distrusted-but-fresh graph, and a risk veto that never saw the files. Every fix below was validated against the run's on-disk artifacts and live-reproduced before implementation; the plan generator was re-run against the same project post-fix and now drops all three junk anchors with exact reasons.
+
+- **Diff-anchored impact-plan symbols.** The `symbol_anchored` tier took `topic.symbols` verbatim — keyword harvest from the scope TEXT, so prose words ("TTL policy", "ENV docs") became blast anchors, inflating `effect_size` and pointing every mandated drill-down at irrelevant modules. The plan now anchors on symbols extracted from the changed files' hunks first (the existing hunk-scoped extractor, previously wired only to PR tiers), plus topic symbols that **exact-resolve to a real graph node** (exact label + `source_file`). Dangling label-only orphans and prose words never become anchors; drops are recorded in `plan.anchors_dropped` with reasons, provenance in `plan.symbol_sources`.
+- **Corpus-blindness surfaced.** A changed code file can be manifest-hashed yet carry ZERO graph nodes (upstream token-filter exclusion) — every graph query about it returns silence that read as safety. Such files are now detected (`files_without_nodes`, code files only), listed in `plan.corpus_blind_files`, and prepended to graph-impact.md as a caveat: graph silence about them is blindness — use grep/LSP. Relayed upstream as graphify issue #4.
+- **Manifest-hash freshness.** Freshness was lag-commits-only, so a graph rebuilt 90 minutes earlier from the exact files under review was reported untrustworthy (`unverifiable_freshness` on working-tree flows). `graphify.manifestFreshness(files)` compares scope-file mtimes against graphify's own build manifest; when all changed files match, the plan carries a manifest-verified FRESH note and the working-tree caveat is suppressed.
+- **review-weight: three fixes.** (1) `effect_size` blocked LIGHT unconditionally, contradicting its own docblock ("corroborating term, never a sole gate") — now advisory-only, surfaced in `advisories[]` and announced non-blockingly. (2) Files came from `git diff base...HEAD` alone, so an uncommitted working tree yielded ZERO files and the risk-surface veto never evaluated — auth-path changes were invisible (and with zero files the count gates passed vacuously). File collection is now the union of committed range + working tree + untracked (shared `collectChangedFiles` helper), and an empty resolved set is itself a fail-safe block. (3) Unknown CLI flags errored silently into fail-safe — now exit 2 with usage; `--files=<csv>` added.
+- **`dropped_by_file` aggregation.** When neighbor filtering leaves zero results, the drops ARE the caller set (DI wiring + router consumers classified as noise) — the response now aggregates them per source file, and the drill-down prose consumes the aggregation instead of recording an empty section.
+- Ride-alongs: `Suppressed: N` line is now unconditional (N=0 proves the confidence gate engaged); empty `{}`/`[]` signal blocks documented as skip-me in the preloaded pre-flight skill (misdirection fix — the byte cost was measured trivial).
+- Gates **K251–K254** (working-tree veto + strict flags; anchor quality + corpus-blindness; manifest freshness; drop aggregation) + **K236 recalibrated** (effect_size advisory, empty-diff blocked). Drift-guard stack 157 → 161 deep (K94–K254).
+
 ## [0.158.0] - 2026-07-08
 
 ### Straggler closure: rule propagation, rubric bootstrap docs, abort tripwire

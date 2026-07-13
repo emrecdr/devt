@@ -7,6 +7,10 @@ user-invocable: false
 
 # Memory Pre-Flight Protocol
 
+**Empty signal blocks mean no signal.** A dispatch block rendering as `{}` or
+`[]` (memory_signal, scope_hint, auto_memory) carries nothing — skip it; do not
+hunt for meaning in it or mention it in output.
+
 The Two-Tier Pre-Flight Protocol stops silent ADR violations, REJ-tombstone
 re-proposals, and ungoverned scope creep. **Tier 1** (Topic Pre-Flight) builds a
 Brief at workflow start; **Tier 2** (File Pre-Flight) verifies coverage at each

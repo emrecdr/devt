@@ -14852,10 +14852,14 @@ fi
 # K190: state compute-impact-plan CLI replaces the inline workflow bash for
 # the graphify impact-plan tier-decision tree. Asserts the CLI returns the
 # expected JSON shape across 3 representative inputs: (a) graphify not-ready
-# → skip, (b) GitHub + PR → pr_scoped, (c) topic.symbols → symbol_anchored.
+# → skip, (b) GitHub + PR → pr_scoped, (c) topic.symbols → symbol_anchored
+# via EXACT-node resolution: a topic symbol that resolves to a real graph node
+# anchors; one that matches no node is dropped with a reason (prose words and
+# dangling orphans never become anchors).
 K190_TMP=$(mktemp -d)
-mkdir -p "$K190_TMP/.devt/state"
-echo '{"git":{"provider":"github","primary_branch":"main"}}' > "$K190_TMP/.devt/config.json"
+mkdir -p "$K190_TMP/.devt/state" "$K190_TMP/graphify-out"
+echo '{"git":{"provider":"github","primary_branch":"main"},"graphify":{"enabled":true}}' > "$K190_TMP/.devt/config.json"
+echo '{"nodes":[{"id":"f","label":"Foo","source_file":"app/foo.py"}],"links":[]}' > "$K190_TMP/graphify-out/graph.json"
 # Case A: not-ready
 echo '{"graph_stats":{"state":"not_ready"}}' > "$K190_TMP/.devt/state/preflight-brief.json"
 K190_A=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="x" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
@@ -14864,7 +14868,7 @@ echo '{"graph_stats":{"state":"ready","trust":"dense"},"topic":{"symbols":[]}}' 
 K190_B=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review PR #123" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
 # Case C: topic.symbols
 echo '{"graph_stats":{"state":"ready","trust":"dense"},"topic":{"symbols":["Foo","Bar"]}}' > "$K190_TMP/.devt/state/preflight-brief.json"
-K190_C=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review services" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).tier)}catch{console.log('err')}});" 2>/dev/null)
+K190_C=$(cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="review services" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const dropped=(j.anchors_dropped||[]).some(d=>d.label==='Bar');console.log(j.tier+':'+((j.args&&j.args.symbols)||[]).join(',')+':'+(dropped?'BarDropped':'BarKept'))}catch{console.log('err')}});" 2>/dev/null)
 # Case D: > 32 topic.symbols → dropped sidecar written
 python3 -c "
 import json
@@ -14873,10 +14877,10 @@ print(json.dumps({'graph_stats':{'state':'ready','trust':'dense'},'topic':{'symb
 cd "$K190_TMP" && node "$ROOT/bin/devt-tools.cjs" state compute-impact-plan --scope="x" >/dev/null 2>&1
 K190_DROPPED=$([ -f "$K190_TMP/.devt/state/topic-symbols-dropped.json" ] && echo "present" || echo "absent")
 rm -rf "$K190_TMP"
-if [ "$K190_A" = "skip" ] && [ "$K190_B" = "pr_scoped" ] && [ "$K190_C" = "symbol_anchored" ] && [ "$K190_DROPPED" = "present" ]; then
-  pass "K190: state compute-impact-plan CLI (cal #37 #3): tier-decision returns skip / pr_scoped / symbol_anchored + writes topic-symbols-dropped.json on > 32 symbols"
+if [ "$K190_A" = "skip" ] && [ "$K190_B" = "pr_scoped" ] && [ "$K190_C" = "symbol_anchored:Foo:BarDropped" ] && [ "$K190_DROPPED" = "present" ]; then
+  pass "K190: state compute-impact-plan CLI: tier-decision returns skip / pr_scoped / symbol_anchored with exact-resolved anchors (unresolvable topic symbol dropped with reason) + writes topic-symbols-dropped.json on > 32 symbols"
 else
-  fail "K190: compute-impact-plan wrong — A=$K190_A (expect skip), B=$K190_B (expect pr_scoped), C=$K190_C (expect symbol_anchored), dropped=$K190_DROPPED (expect present)"
+  fail "K190: compute-impact-plan wrong — A=$K190_A (expect skip), B=$K190_B (expect pr_scoped), C=$K190_C (expect symbol_anchored:Foo:BarDropped), dropped=$K190_DROPPED (expect present)"
 fi
 
 # K191: symbolsInFiles signal-quality overhaul (cal #38.A from receipt #10).
@@ -15992,8 +15996,10 @@ fi
 # single metric. Asserts: a small clean change is light-eligible; a risk-surface
 # path (auth) OR a god-node OR too-many-domains forces heavy (hard gates); a
 # graph-blind change (tier=skip / no blast headline) is NOT eligible (absence of
-# a headline is not evidence of safety); and a lockfile-heavy diff (many files
-# but few LOGIC files) stays light-eligible (file-count is the wrong trigger).
+# a headline is not evidence of safety); a lockfile-heavy diff (many files but
+# few LOGIC files) stays light-eligible (file-count is the wrong trigger); and
+# effect_size is ADVISORY-only (popularity-derived — a junk anchor inflates it;
+# second field receipt caught it blocking as a sole gate against its own docs).
 K236_CHECK=$(node -e '
   const { assessReviewWeight } = require("'"$ROOT"'/bin/modules/review-weight.cjs");
   const f = [];
@@ -16004,15 +16010,18 @@ K236_CHECK=$(node -e '
   E("migration", { files: ["app/migrations/0001.py"], ...graph }, false);
   E("god-node", { files: ["app/x.py"], effectSize: "small", godNodeMatch: true, tier: "symbol_anchored" }, false);
   E("graph-blind-skip", { files: ["app/x.py"], effectSize: null, godNodeMatch: null, tier: "skip" }, false);
-  E("effect-large", { files: ["app/x.py"], effectSize: "large", godNodeMatch: false, tier: "symbol_anchored" }, false);
+  const el = assessReviewWeight({ files: ["app/x.py"], effectSize: "large", godNodeMatch: false, tier: "symbol_anchored" });
+  if (!el.eligible) f.push("effect-large must be ADVISORY not blocking [" + (el.blocked_by||[]).join("|") + "]");
+  if (!(el.advisories||[]).some(a => a.includes("effect_size: large"))) f.push("effect-large advisory missing");
   E("lockfile-heavy", { files: ["uv.lock","requirements.txt","VERSION","README.md","app/svc/a.py"], ...graph }, true);
+  E("empty-diff", { files: [], ...graph }, false);
   // risk-surface pattern removable via config-style "!" (removal honored)
   const withRemoval = assessReviewWeight({ files: ["app/auth/token.py"], ...graph });
   if (!(withRemoval.risk_surface_hits||[]).length) f.push("auth path did not register a risk hit");
   console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
 ' 2>&1 || echo "FAIL:node error")
 if [ "$K236_CHECK" = "OK" ]; then
-  pass "K236: review-weight fail-safe verdict — small-clean light; auth/god-node/domains/effect-large force heavy; graph-blind not eligible; lockfile-heavy stays light"
+  pass "K236: review-weight fail-safe verdict — small-clean light; auth/god-node/domains force heavy; graph-blind + empty-diff not eligible; effect_size advisory-only; lockfile-heavy stays light"
 else
   fail "K236: review-weight — $K236_CHECK"
 fi
@@ -16269,6 +16278,137 @@ if [ "$K250_CHECK" = "OK" ]; then
   pass "K250: inline rubrics dedup aliased files — shipped default trio inlines under the cap (was silently path-only)"
 else
   fail "K250: rubric dedup broken — $K250_CHECK"
+fi
+
+# K251: review-weight sees the working tree — an uncommitted branch has an
+# empty base...HEAD diff and the risk veto used to go blind exactly then
+# (field receipt: an auth-path change was invisible, LIGHT refused for the
+# wrong reason). Asserts: an uncommitted auth file registers a risk hit via
+# the union collection; unknown CLI flags error (never silently no-op);
+# --files override parses.
+K251_T=$(mktemp -d)
+K251_CHECK=$( (cd "$K251_T" && git init -q . && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base && mkdir -p app/auth && printf 'x=1\n' > app/auth/token.py && node -e '
+const { assessReviewWeight, collectChangedFiles } = require("'"$ROOT"'/bin/modules/review-weight.cjs");
+const files = collectChangedFiles(process.cwd(), "main");
+const hasAuth = files.includes("app/auth/token.py");
+const r = assessReviewWeight({ projectRoot: process.cwd(), baseRef: "main", effectSize: "small", godNodeMatch: false, tier: "symbol_anchored" });
+const risk = (r.risk_surface_hits || []).some(h => h.file === "app/auth/token.py");
+console.log(hasAuth && risk && !r.eligible ? "OK" : "FAIL:hasAuth=" + hasAuth + " risk=" + risk + " eligible=" + r.eligible);
+') 2>&1 || echo "FAIL:fixture setup" )
+rm -rf "$K251_T"
+K251_STRICT_RC=0
+node "$ROOT/bin/devt-tools.cjs" review-weight assess --bogus-flag=1 >/dev/null 2>&1 || K251_STRICT_RC=$?
+K251_FILES=$(node "$ROOT/bin/devt-tools.cjs" review-weight assess --files=uv.lock --effect-size=small --god-node=false --tier=symbol_anchored 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(s);console.log(j.logic_file_count===0?"1":"0");}catch(e){console.log("0")}});' 2>/dev/null)
+if [ "$K251_CHECK" = "OK" ] && [ "$K251_STRICT_RC" = "2" ] && [ "${K251_FILES:-0}" = "1" ]; then
+  pass "K251: review-weight working-tree union (uncommitted auth file trips risk veto) + strict flags (unknown → exit 2) + --files override"
+else
+  fail "K251: review-weight fixes broken — check=$K251_CHECK strict_rc=$K251_STRICT_RC files=$K251_FILES"
+fi
+
+# K252: anchor quality — resolveExactSymbols refuses prose words (no node) and
+# dangling label-only orphans (no source_file); symbolsInFiles reports changed
+# CODE files with zero graph nodes as files_without_nodes, and never flags
+# prose/config files. Field receipt: "TTL"/"ENV" prose anchors + a dangling
+# "TokenService" orphan poisoned effect_size, review-weight, and drill-downs.
+K252_T=$(mktemp -d)
+mkdir -p "$K252_T/graphify-out" "$K252_T/app" "$K252_T/.devt"
+printf '{"graphify":{"enabled":true}}' > "$K252_T/.devt/config.json"
+printf 'class Real:\n    pass\n' > "$K252_T/app/real.py"
+printf 'class Ghost:\n    pass\n' > "$K252_T/app/ghost.py"
+printf 'prose\n' > "$K252_T/README.md"
+node -e '
+const fs = require("fs");
+const g = { nodes: [
+  { id: "n1", label: "Real", source_file: "app/real.py" },
+  { id: "n2", label: "Dangling" }
+], links: [] };
+fs.writeFileSync(process.argv[1] + "/graphify-out/graph.json", JSON.stringify(g));
+' "$K252_T"
+K252_CHECK=$( (cd "$K252_T" && node -e '
+const gm = require("'"$ROOT"'/bin/modules/graphify.cjs");
+const f = [];
+const r = gm.resolveExactSymbols(["Real", "Dangling", "TTL"]);
+if (!(r.resolved.length === 1 && r.resolved[0] === "Real")) f.push("resolved=" + JSON.stringify(r.resolved));
+const reasons = Object.fromEntries(r.unresolved.map(u => [u.label, u.reason]));
+if (reasons["Dangling"] !== "dangling_no_source_file") f.push("dangling=" + reasons["Dangling"]);
+if (reasons["TTL"] !== "no_exact_node") f.push("ttl=" + reasons["TTL"]);
+const s = gm.symbolsInFiles(["app/real.py", "app/ghost.py", "README.md"], 10);
+const fw = s.files_without_nodes || [];
+if (!fw.includes("app/ghost.py")) f.push("ghost not corpus-blind: " + JSON.stringify(fw));
+if (fw.includes("README.md")) f.push("prose file wrongly corpus-blind");
+console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+') 2>&1 || echo "FAIL:node error")
+rm -rf "$K252_T"
+if [ "$K252_CHECK" = "OK" ]; then
+  pass "K252: anchor quality — exact-node resolution (prose + dangling orphans refused) + corpus-blind CODE files surfaced, prose files not"
+else
+  fail "K252: anchor quality broken — $K252_CHECK"
+fi
+
+# K253: manifest-hash freshness — scope files whose disk mtime matches the
+# graphify build manifest are FRESH regardless of commit lag (working-tree
+# flows have no usable built_at anchor; the lag model told a reviewer to
+# distrust a 90-minute-old graph built from the exact files under review).
+K253_T=$(mktemp -d)
+mkdir -p "$K253_T/graphify-out" "$K253_T/.devt"
+printf 'x' > "$K253_T/a.py"
+printf 'y' > "$K253_T/b.py"
+node -e '
+const fs = require("fs");
+const t = process.argv[1];
+const m = {};
+m["a.py"] = { mtime: fs.statSync(t + "/a.py").mtimeMs / 1000, ast_hash: "h1" };
+m["b.py"] = { mtime: 1, ast_hash: "h2" };
+fs.writeFileSync(t + "/graphify-out/manifest.json", JSON.stringify(m));
+' "$K253_T"
+K253_CHECK=$( (cd "$K253_T" && node -e '
+const gm = require("'"$ROOT"'/bin/modules/graphify.cjs");
+const f = [];
+const r = gm.manifestFreshness(["a.py", "b.py", "c.py"]);
+if (!r.available) f.push("manifest unavailable");
+if (r.matched !== 1) f.push("matched=" + r.matched);
+if (!(r.drifted || []).includes("b.py")) f.push("b.py not drifted");
+if (!(r.missing_from_manifest || []).includes("c.py")) f.push("c.py not missing");
+if (r.all_matched) f.push("all_matched should be false");
+const ok = gm.manifestFreshness(["a.py"]);
+if (!ok.all_matched) f.push("single-file all_matched false");
+console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+') 2>&1 || echo "FAIL:node error")
+rm -rf "$K253_T"
+if [ "$K253_CHECK" = "OK" ]; then
+  pass "K253: manifest-hash freshness — mtime match=fresh, drift+missing surfaced, all_matched only when everything matches"
+else
+  fail "K253: manifest freshness broken — $K253_CHECK"
+fi
+
+# K254: dropped_by_file — when filtering leaves ZERO results, the drops are
+# aggregated per source file in the response (field receipt: every DI/router
+# caller was classified noise and the reviewer mined dropped_sample by hand;
+# the aggregation makes the real caller set consumable at a glance).
+K254_T=$(mktemp -d)
+mkdir -p "$K254_T/graphify-out" "$K254_T/.devt"
+printf '{"graphify":{"enabled":true}}' > "$K254_T/.devt/config.json"
+node -e '
+const fs = require("fs");
+const g = { nodes: [
+  { id: "t", label: "Target", source_file: "app/t.py" },
+  { id: "c", label: "A docstring sentence.", source_file: "app/c.py" }
+], links: [ { source: "c", target: "t", relation: "uses", confidence: "EXTRACTED" } ] };
+fs.writeFileSync(process.argv[1] + "/graphify-out/graph.json", JSON.stringify(g));
+' "$K254_T"
+K254_CHECK=$( (cd "$K254_T" && node -e '
+const gm = require("'"$ROOT"'/bin/modules/graphify.cjs");
+const r = gm.getNeighbors("Target", { direction: "in", depth: 1 });
+const empty = Array.isArray(r.results) && r.results.length === 0;
+const agg = r.dropped_by_file || [];
+const hit = agg.some(e => e.source_file === "app/c.py" && e.count >= 1);
+console.log(empty && hit ? "OK" : "FAIL:empty=" + empty + " agg=" + JSON.stringify(agg).slice(0, 120));
+') 2>&1 || echo "FAIL:node error")
+rm -rf "$K254_T"
+if [ "$K254_CHECK" = "OK" ]; then
+  pass "K254: dropped_by_file — zero-result neighbor queries aggregate their drops per source file (the real caller set stays consumable)"
+else
+  fail "K254: dropped_by_file broken — $K254_CHECK"
 fi
 
 echo

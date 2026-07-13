@@ -70,6 +70,23 @@ function _compilePatterns(defaults, extra) {
   return compiled;
 }
 
+/**
+ * collectChangedFiles — union of committed-range diff + uncommitted working-tree
+ * changes + untracked files. The one file-collection semantic every scope-
+ * sensitive consumer needs: an uncommitted tree has an EMPTY base...HEAD diff,
+ * and gating that only sees the committed range goes blind exactly when the
+ * review scope lives in the working tree.
+ */
+function collectChangedFiles(projectRoot, baseRef) {
+  const collect = (argv) => execFileSync("git", argv, { cwd: projectRoot, encoding: "utf8", timeout: 10000 })
+    .split("\n").map(s => s.trim()).filter(Boolean);
+  const union = new Set();
+  try { for (const f of collect(["diff", "--name-only", `${baseRef}...HEAD`])) union.add(f); } catch { /* base unreachable — working-tree passes below still apply */ }
+  for (const f of collect(["diff", "--name-only", "HEAD"])) union.add(f);
+  for (const f of collect(["ls-files", "--others", "--exclude-standard"])) union.add(f);
+  return Array.from(union);
+}
+
 function _reviewConfig() {
   try {
     const { getMergedConfig } = require("./config.cjs");
@@ -123,8 +140,7 @@ function assessReviewWeight(opts = {}) {
         const gc = getMergedConfig();
         base = (gc && gc.git && gc.git.primary_branch) || "main";
       }
-      const out = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], { cwd: proot, encoding: "utf8", timeout: 10000 });
-      files = out.split("\n").map(s => s.trim()).filter(Boolean);
+      files = collectChangedFiles(proot, base);
       filesReadable = true;
     } catch {
       files = [];
@@ -151,21 +167,28 @@ function assessReviewWeight(opts = {}) {
 
   const blocked = [];
   if (!filesReadable) blocked.push("diff unreadable (no base ref / no git) — cannot prove scope");
+  // Zero resolved files is NOT a safe diff — it means file detection failed
+  // (or there is nothing to review). Without this, the count gates pass
+  // vacuously and an invisible diff could earn LIGHT.
+  if (filesReadable && files.length === 0) blocked.push("empty diff — no changed files resolvable (committed range + working tree + untracked all empty); nothing to prove safe");
   if (graphBlind) blocked.push("graph-blind (blast headline unavailable or tier not graph-anchored) — safety not provable");
   if (godNodeMatch === true) blocked.push("god_node_match: a diff symbol is a high-blast-radius hub");
   if (riskHits.length > 0) blocked.push(`risk-surface path(s): ${riskHits.slice(0, 5).map(h => h.file).join(", ")}${riskHits.length > 5 ? ` (+${riskHits.length - 5})` : ""}`);
   if (logicFiles.length > maxLogic) blocked.push(`logic files ${logicFiles.length} > ${maxLogic}`);
   if (domains.length > maxDomains) blocked.push(`domains ${domains.length} > ${maxDomains}`);
-  // effect_size is a corroborating term, not a hard gate: it only blocks when it
-  // affirmatively says "not small" (a known-medium/large change). A null/absent
-  // effect_size does not block here — the graph-blind term already covers that.
-  if (effectSize && effectSize !== "small") blocked.push(`effect_size: ${effectSize} (not small)`);
+  // effect_size is popularity-derived and noisy — a corroborating signal only,
+  // NEVER a blocker (the hard gates above carry the safety weight; a junk
+  // anchor can inflate effect_size to large on a two-file change). Non-small
+  // values surface as advisories so the operator sees the corroboration state.
+  const advisories = [];
+  if (effectSize && effectSize !== "small") advisories.push(`effect_size: ${effectSize} — corroborating signal only, not blocking`);
 
   const eligible = blocked.length === 0;
   return {
     eligible,
     recommendation: eligible ? "light" : "heavy",
     blocked_by: blocked,
+    advisories,
     logic_files: logicFiles,
     logic_file_count: logicFiles.length,
     domains,
@@ -192,13 +215,30 @@ function _parseFlag(args, name) {
 
 function run(subcommand, args) {
   args = args || [];
+  const USAGE = "Usage: review-weight assess [--base=<ref>] [--files=<csv>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n";
   if (subcommand !== "assess") {
-    process.stderr.write("Usage: review-weight assess [--base=<ref>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n");
+    process.stderr.write(USAGE);
     return 2;
   }
+  // Strict flags: an unrecognized flag errors instead of silently no-oping.
+  // A silently-ignored flag on an advisory that builds an auto-light track
+  // record poisons the record (field receipt: a misspelled flag read as a
+  // legitimately-absent signal).
+  const ALLOWED_FLAGS = new Set(["base", "files", "effect-size", "god-node", "tier"]);
+  for (const a of args) {
+    if (a.startsWith("--")) {
+      const name = a.slice(2).split("=")[0];
+      if (!ALLOWED_FLAGS.has(name)) {
+        process.stderr.write(`unknown flag: --${name}\n` + USAGE);
+        return 2;
+      }
+    }
+  }
   const godRaw = _parseFlag(args, "god-node");
+  const filesRaw = _parseFlag(args, "files");
   const verdict = assessReviewWeight({
     baseRef: _parseFlag(args, "base"),
+    files: filesRaw === undefined ? undefined : filesRaw.split(",").map(s => s.trim()).filter(Boolean),
     effectSize: _parseFlag(args, "effect-size"),
     godNodeMatch: godRaw === undefined ? undefined : (godRaw === "true" ? true : godRaw === "false" ? false : undefined),
     tier: _parseFlag(args, "tier"),
@@ -207,4 +247,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, assessReviewWeight, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };
+module.exports = { run, assessReviewWeight, collectChangedFiles, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };

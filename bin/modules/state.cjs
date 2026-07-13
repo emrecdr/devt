@@ -2562,9 +2562,11 @@ function graphifyRoi() {
 //   2. PR# + github → tier="pr_scoped" (uses get_pr_impact)
 //   3. PR# + non-github → tier="pr_scoped_diff" (diff symbols + blast_radius)
 //      OR fallback to symbol_anchored on topic.symbols OR "skip"
-//   4. topic.symbols present → tier="symbol_anchored"
-//   5. scope >= IMPACT_THRESHOLD + dense graph → diff-symbol-driven
-//      symbol_anchored OR legacy bulk_scoped fallback
+//   4. any topic symbols OR scope files → DIFF-ANCHORED symbol_anchored:
+//      symbols from changed-file hunks first, plus topic symbols that
+//      exact-resolve to real graph nodes (dangling orphans + prose words
+//      never become anchors)
+//   5. no anchors + scope >= IMPACT_THRESHOLD + dense graph → bulk_scoped
 //   6. else → tier="skip"
 //
 // SIDE EFFECTS: writes the same files the bash used to:
@@ -2764,31 +2766,33 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     let symbols = [];
     let newFilesCount = 0;
     let totalFilesCount = 0;
+    let filesWithoutNodes = [];
+    let files = [];
     try {
       const { spawnSync } = require("child_process");
       const proot = findProjectRoot();
-      const diffRes = spawnSync("git", ["diff", "--name-only", `${primaryBranch}...HEAD`], {
-        cwd: proot, encoding: "utf8", timeout: 5000,
-      });
-      if (diffRes.status === 0) {
-        const files = diffRes.stdout.split("\n").map(s => s.trim()).filter(Boolean);
-        totalFilesCount = files.length;
-        if (files.length > 0) {
-          const graphifyMod = require("./graphify.cjs");
-          // Pass baseRef → enables hunk-scoping (keep only symbols DEFINED on
-          // changed lines, so god-nodes in touched files don't bury the
-          // actually-changed providers). limit=25: with hunk-scoping the
-          // candidate set is small, but the bump protects against truncation
-          // when a large changed set survives scoping.
-          const res = graphifyMod.symbolsInFiles(files, 25, { baseRef: primaryBranch });
-          symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
-          // Caveat reconciliation via the shared build-SHA ancestry check —
-          // see _countAddedAfterBuild above for the degrade-safe semantics.
-          newFilesCount = _countAddedAfterBuild(spawnSync, proot, _resolveBuiltAt());
-        }
+      // Union collection (committed range + working tree + untracked): an
+      // uncommitted branch has an EMPTY base...HEAD diff, which used to zero
+      // this extractor exactly when the review scope lived in the working tree.
+      const { collectChangedFiles } = require("./review-weight.cjs");
+      files = collectChangedFiles(proot, primaryBranch);
+      totalFilesCount = files.length;
+      if (files.length > 0) {
+        const graphifyMod = require("./graphify.cjs");
+        // Pass baseRef → enables hunk-scoping (keep only symbols DEFINED on
+        // changed lines, so god-nodes in touched files don't bury the
+        // actually-changed providers). limit=25: with hunk-scoping the
+        // candidate set is small, but the bump protects against truncation
+        // when a large changed set survives scoping.
+        const res = graphifyMod.symbolsInFiles(files, 25, { baseRef: primaryBranch });
+        symbols = Array.isArray(res && res.symbols) ? res.symbols.map(s => s.symbol).filter(Boolean) : [];
+        filesWithoutNodes = Array.isArray(res && res.files_without_nodes) ? res.files_without_nodes : [];
+        // Caveat reconciliation via the shared build-SHA ancestry check —
+        // see _countAddedAfterBuild above for the degrade-safe semantics.
+        newFilesCount = _countAddedAfterBuild(spawnSync, proot, _resolveBuiltAt());
       }
     } catch { /* defaults */ }
-    return { symbols, newFilesCount, totalFilesCount };
+    return { symbols, newFilesCount, totalFilesCount, files, files_without_nodes: filesWithoutNodes };
   };
 
   // Tier decision tree — explicit, no implicit fallbacks. Preserved
@@ -2798,6 +2802,10 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   let args = {};
   let skipReason = "";
   let prDiffCaveat = null;
+  let symbolSources = null;
+  let anchorsDropped = null;
+  let corpusBlindFiles = [];
+  let dsFilesForPlan = [];
 
   if (graphifyState !== "ready") {
     tier = "skip";
@@ -2808,6 +2816,8 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     args = { pr_number: Number(prNum) };
   } else if (prNum && gitProvider !== "github") {
     const ds = getDiffSymbols();
+    dsFilesForPlan = ds.files || [];
+    corpusBlindFiles = ds.files_without_nodes || [];
     if (ds.symbols.length > 0) {
       tier = "pr_scoped_diff";
       tool = "mcp__plugin_devt_devt-graphify__blast_radius";
@@ -2817,35 +2827,54 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
         prDiffCaveat = `${ds.newFilesCount} of ${ds.totalFilesCount} files are new — symbols extracted via diff-hunk fallback but blast_radius edge data unavailable until "graphify update ." rebuild`;
       }
     } else if (topicSymbolsCount > 0) {
-      tier = "symbol_anchored";
-      tool = "mcp__plugin_devt_devt-graphify__blast_radius";
-      args = { symbols: topicSymbols };
+      // Exact-resolution guard: same anchor-quality rule as the main branch.
+      let rt = { resolved: [], unresolved: [] };
+      try { rt = require("./graphify.cjs").resolveExactSymbols(topicSymbols); } catch { /* graph unavailable → no topic anchors */ }
+      anchorsDropped = rt.unresolved;
+      if (rt.resolved.length > 0) {
+        tier = "symbol_anchored";
+        tool = "mcp__plugin_devt_devt-graphify__blast_radius";
+        args = { symbols: rt.resolved };
+      } else {
+        tier = "skip";
+        skipReason = "non-GitHub PR: no diff symbols and no topic symbol resolves to a real graph node";
+      }
     } else {
       tier = "skip";
       skipReason = "non-GitHub PR but no diff symbols extracted (graph sparse) AND no topic symbols";
     }
-  } else if (topicSymbolsCount > 0) {
-    tier = "symbol_anchored";
-    tool = "mcp__plugin_devt_devt-graphify__blast_radius";
-    args = { symbols: topicSymbols };
-  } else if (scopeFileCount >= impactThreshold && graphifyTrust === "dense") {
-    // Prefer symbol_anchored driven from diff-file symbols over bulk_scoped
-    // text-search. blast_radius with symbols whose source_file is in the
-    // diff produces actual structural impact; query_graph(text=SCOPE) only
-    // returns keyword matches that don't reflect the call graph.
+  } else if (topicSymbolsCount > 0 || scopeFileCount > 0) {
+    // Diff-anchored first: symbols DEFINED in changed hunks are the ground
+    // truth of what a review is about. topic.symbols are keyword harvest from
+    // the scope TEXT and go junk whenever the prose mentions concepts (field
+    // receipt: "TTL"/"ENV"/"Settings" — words from the task sentence — anchored
+    // the blast, inflating effect_size and pointing every drill-down at
+    // irrelevant modules). Topic symbols participate only when they resolve to
+    // a real graph node (exact label + source_file); dangling orphans and
+    // prose words never become anchors.
     const ds = getDiffSymbols();
-    if (ds.symbols.length > 0) {
+    dsFilesForPlan = ds.files || [];
+    corpusBlindFiles = ds.files_without_nodes || [];
+    let rt = { resolved: [], unresolved: [] };
+    try { rt = require("./graphify.cjs").resolveExactSymbols(topicSymbols); } catch { /* graph unavailable → no topic anchors */ }
+    anchorsDropped = rt.unresolved;
+    const merged = Array.from(new Set([...ds.symbols, ...rt.resolved])).slice(0, TOPIC_CAP);
+    if (merged.length > 0) {
       tier = "symbol_anchored";
       tool = "mcp__plugin_devt_devt-graphify__blast_radius";
-      args = { symbols: ds.symbols };
-    } else {
+      args = { symbols: merged };
+      symbolSources = { diff_anchored: ds.symbols, topic_exact: rt.resolved };
+    } else if (scopeFileCount >= impactThreshold && graphifyTrust === "dense") {
       tier = "bulk_scoped";
       tool = "mcp__plugin_devt_devt-graphify__query_graph";
       args = { text: reviewScope, limit: 20 };
+    } else {
+      tier = "skip";
+      skipReason = "no anchors: the diff yields no symbols and no topic symbol resolves to a real graph node";
     }
   } else {
     tier = "skip";
-    skipReason = "no PR (or non-GitHub), no topic symbols, scope below threshold";
+    skipReason = "no PR (or non-GitHub), no topic symbols, no scope files";
   }
 
   // symbol_anchored working-tree caveat — mirrors pr_diff_caveat: warn when
@@ -2857,6 +2886,40 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     if (uw.total > 0) {
       symbolAnchoredCaveat = `${uw.total} working-tree file(s) invisible to the graph (${uw.untracked} untracked, ${uw.added_after_build} added after graph build) — blast_radius runs against the last-committed layout; verify hits on moved/new paths manually or rebuild via "graphify update ."`;
     }
+  }
+
+  // Manifest-based freshness for the changed files. Working-tree flows have no
+  // usable commit anchor (built_at missing or lagging), yet graphify's own
+  // manifest records exactly what the build indexed — when every changed file
+  // matches it, the graph IS fresh for this review and the working-tree caveat
+  // is noise (field receipt: a graph rebuilt 90 minutes earlier from the exact
+  // files under review was reported as untrustworthy by the lag model).
+  let manifestFreshnessSummary = null;
+  if ((tier === "symbol_anchored" || tier === "pr_scoped_diff") && dsFilesForPlan.length > 0) {
+    try {
+      const mf = require("./graphify.cjs").manifestFreshness(dsFilesForPlan);
+      if (mf && mf.available) {
+        manifestFreshnessSummary = {
+          checked: mf.checked,
+          matched: mf.matched,
+          drifted: (mf.drifted || []).slice(0, 5),
+          missing_from_manifest: (mf.missing_from_manifest || []).slice(0, 5),
+          all_matched: !!mf.all_matched,
+        };
+        if (mf.all_matched) {
+          manifestFreshnessSummary.note = "manifest-verified: every changed file matches the graph build (mtime) — treat the graph as FRESH for this scope even when the commit anchor is missing or lagging";
+          symbolAnchoredCaveat = null;
+        }
+      }
+    } catch { /* graph module unavailable — plan proceeds without manifest data */ }
+  }
+
+  // Corpus-blindness caveat: changed files the graph carries NO nodes for.
+  // Every graph query about them returns silence — the reviewer must know
+  // that silence is blindness, not safety.
+  let corpusBlindCaveat = null;
+  if (corpusBlindFiles.length > 0) {
+    corpusBlindCaveat = `graph has NO nodes for changed file(s): ${corpusBlindFiles.slice(0, 8).join(", ")}${corpusBlindFiles.length > 8 ? ` (+${corpusBlindFiles.length - 8})` : ""} — their symbols and callers are invisible to every graph query (upstream corpus exclusion); regex-fallback anchors from them carry no edge data. Use grep/LSP for their caller sets and treat graph silence about them as blindness, not safety.`;
   }
 
   // Hunk-type census → severity-calibration note. effect_size is computed
@@ -2941,6 +3004,11 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (census) plan.hunk_census = census;
   if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
   if (topicSymbolsDroppedCount > 0) plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
+  if (symbolSources) plan.symbol_sources = symbolSources;
+  if (anchorsDropped && anchorsDropped.length > 0) plan.anchors_dropped = anchorsDropped;
+  if (corpusBlindFiles.length > 0) plan.corpus_blind_files = corpusBlindFiles;
+  if (corpusBlindCaveat) plan.corpus_blind_caveat = corpusBlindCaveat;
+  if (manifestFreshnessSummary) plan.manifest_freshness = manifestFreshnessSummary;
 
   try { atomicWriteJsonSync(planPath, plan); } catch { /* best-effort */ }
   return plan;
