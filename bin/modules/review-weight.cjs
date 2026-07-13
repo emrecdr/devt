@@ -78,7 +78,10 @@ function _compilePatterns(defaults, extra) {
  * review scope lives in the working tree.
  */
 function collectChangedFiles(projectRoot, baseRef) {
-  const collect = (argv) => execFileSync("git", argv, { cwd: projectRoot, encoding: "utf8", timeout: 10000 })
+  // stderr ignored: an unreachable base ref makes git print "fatal: ambiguous
+  // argument" while the catch below already handles the failure — inherited
+  // stderr would leak that noise into every consumer's output stream.
+  const collect = (argv) => execFileSync("git", argv, { cwd: projectRoot, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] })
     .split("\n").map(s => s.trim()).filter(Boolean);
   const union = new Set();
   try { for (const f of collect(["diff", "--name-only", `${baseRef}...HEAD`])) union.add(f); } catch { /* base unreachable — working-tree passes below still apply */ }

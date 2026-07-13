@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.159.1] - 2026-07-13
+
+### Fix: collectChangedFiles stderr leak (CI-only K251 failure)
+
+- On systems where `git init` defaults to `master`, the unreachable `main` base ref made git print `fatal: ambiguous argument` to inherited stderr — the failure itself was already handled (working-tree passes still collect), but the noise leaked into every consumer's output stream and broke K251's captured check on CI (local runs passed — `init.defaultBranch=main` locally). Child stderr is now ignored in `collectChangedFiles`; verified against a reproduced master-branch fixture.
+
 ## [0.159.0] - 2026-07-13
 
 ### Signal-layer calibration (second field receipt, filesystem-verified)
