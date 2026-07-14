@@ -1395,11 +1395,28 @@ function cmdRenderLanes(target, options) {
     // lane regardless of how operators customize the prose. Falls back
     // to empty string when laneH found no matches.
     const autoMemorySummary = _laneAutoMemorySummary(3);
+    // Axis E pre-compute (field receipt: five lanes produced four different
+    // epistemologies for the same skip, including one false "CLI not present"
+    // claim). The orchestrator owns the memory layer — affects is deterministic
+    // and cheap, so every lane receives the SAME mechanical answer; [] means
+    // axis E is a verified skip, not an improvised one.
+    let memoryAffects = "[]";
+    try {
+      const mem = require("./memory.cjs");
+      const hits = [];
+      for (const f of files) {
+        const matches = mem.getByPath(f) || [];
+        for (const m of matches.slice(0, 5)) hits.push({ file: f, id: m.id || m.doc_id || "", title: m.title || "" });
+        if (hits.length >= 10) break;
+      }
+      memoryAffects = JSON.stringify(hits.slice(0, 10));
+    } catch { /* memory layer unavailable — [] is the honest answer */ }
     const blockLines = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
+      `    <memory_affects>${memoryAffects}</memory_affects>`,
     ];
     if (autoMemorySummary) {
       blockLines.push(`    <auto_memory>${autoMemorySummary}</auto_memory>`);

@@ -1871,6 +1871,7 @@ function run(subcommand, args) {
 module.exports = {
   run,
   init,
+  getByPath,
   rebuildIndex,
   validate,
   validateRefs,

@@ -228,6 +228,8 @@ fi
 
 **Foreground parallel dispatch.** Issue ONE message containing N `Task(subagent_type="devt:code-reviewer", …)` calls — one per lane in `workflow.yaml::lanes[]`. Sequential Task calls serialize; only multi-Task-in-one-message gets true parallelism per the Anthropic Task contract (same idiom as `dev-workflow.md:506` researcher+architect parallel dispatch).
 
+**Lane completion contract**: a lane is complete when its primary artifact + sidecar are written — teammate summary messages are NOT required (artifacts are canonical; a summary duplicates content the consolidator re-reads anyway).
+
 **Discoverability tip**: Each lane needs the canonical envelope per the Q8/Q11 contracts. Rather than hand-rolling N prompts (a documented failure mode), generate the paste-ready envelope per lane via:
 
 ```bash

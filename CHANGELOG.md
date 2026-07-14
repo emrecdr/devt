@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.160.0] - 2026-07-14
+
+### Third field receipt: signal recovery, freshness truth, lane epistemology
+
+The previous cal's receipt confirmed every shipped fix converting in the field and ranked the remaining defects; each fix below was design-locked by an answered follow-up (including two claims the field reporter tested and retracted themselves). North-star accounting: every addition here is smaller than the improvisation it replaces — the cal's trim ledger removes an AskUserQuestion round-trip, five lanes' improvised prose, hand-written severity notes, duplicate lane summaries, and up-to-85KB tool payloads.
+
+- **Node-kind-gated auto-promotion.** When neighbor filtering empties `results`, identifier-shaped dropped callers now return IN results (`recovered_from_noise: true`, confidence RECOVERED) — field-measured against 17 real drops: the 11 callables promote, 6 docstring + 3 container nodes stay down (a reviewer must never cite a prose node as a caller). The uniform `"noise"` reason splits into `noise`/`noise_docstring`/`noise_container` so telemetry stays legible. The workflow's empty-drill-down recovery doctrine shrinks accordingly — prose that compensated for the tool is now the tool's job.
+- **`manifest_fresh` staleness tier.** When lag is unverifiable, the bundle now checks graphify's build manifest for the changed code files; all-matched → `manifest_fresh`: no AskUserQuestion, no blanket trust downgrade. Deliberately orchestrator-side only — the receipt proved lanes ignore the scalar trust field and obey named per-file caveats instead.
+- **Per-lane `<memory_affects>` injection.** Five lanes produced four different epistemologies for the same axis-E skip, including one false "CLI not present" claim. render-lanes now pre-computes memory-affects hits per lane's files and injects them (empty `[]` included — a verified skip, not an improvised one). The rubric's bare `node bin/devt-tools.cjs` path (which misled a lane) becomes the resolvable `${CLAUDE_PLUGIN_ROOT}` form.
+- **God-node severity calibration, auto-emitted.** The hunk-census trigger structurally couldn't see blast data, so the note never fired on a 476-edge anchor and the operator hand-wrote one. `augment-impact-map` now emits it post-MCP, branching on the discrimination that matters: blast set merely CONTAINS god nodes → popularity-inflation discount (naming the inflating anchors); a CHANGED symbol IS a god node → severity UP, not down. Template taken from the operator's hand-written note verbatim.
+- **`blast_radius` max_bytes (parity + shape-aware).** The options parameter was literally unused; an uncapped 85KB response overflowed the MCP transport while ~3KB of it was consumed. Now: CLI `--max-bytes`, MCP default 60KB, with shape-aware retention — scalars and the ranked degrees array are kept, raw label arrays truncate FIRST (they're superseded by degrees), `truncated` + totals surfaced. `modules_touched_list` added alongside the bare count.
+- **Bounded telemetry chain + session stamps.** `mcp-stats --include-chain` now bounds the union to the workflow's `first_created_at` (an unbounded chain counted calls from 11 days earlier as "this run"); every trace record carries a session discriminator. Upstream relay gains issue #5 (no `_meta.correlation_id` in MCP responses — traceability gap).
+- **Lane completion contract**: artifacts are canonical; teammate summary messages are NOT required — consistency achieved by removing duplicate output, not adding it. `augment-impact-map` and lane tooling now use the same union file-collection (committed + working tree + untracked) as everything else.
+- Gates **K255–K257** (auto-promote behavioral, receipt-wiring greps, blast shape-aware cap behavioral). Drift-guard stack 161 → 164 deep (K94–K257).
+
 ## [0.159.1] - 2026-07-13
 
 ### Fix: collectChangedFiles stderr leak (CI-only K251 failure)

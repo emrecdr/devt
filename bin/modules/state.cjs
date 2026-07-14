@@ -3188,7 +3188,24 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     let threshold = 10;
     try { const cfg = require("./config.cjs").getMergedConfig(); threshold = (cfg.graphify && cfg.graphify.stale_threshold) || 10; } catch { /* default */ }
     const lag = freshness.lag_commits;
-    if (lag === null || lag === undefined) stalenessTier = "unknown_lag";
+    if (lag === null || lag === undefined) {
+      // Working-tree flows have no usable lag anchor. Before defaulting to
+      // unknown_lag (an AskUserQuestion + a blanket trust downgrade), check
+      // graphify's own build manifest: when every changed code file matches
+      // it, the graph IS fresh for this review (field receipt: lanes were
+      // told to distrust a graph rebuilt from the exact files under review).
+      let manifestFresh = false;
+      try {
+        const { collectChangedFiles } = require("./review-weight.cjs");
+        const files = collectChangedFiles(findProjectRoot(), primaryBranch)
+          .filter(f => /\.(py|js|jsx|ts|tsx|go|rs|rb|java|kt|cs|php|swift|scala|c|cc|cpp|h|hpp)$/i.test(f));
+        if (files.length > 0) {
+          const mf = require("./graphify.cjs").manifestFreshness(files);
+          manifestFresh = !!(mf && mf.available && mf.all_matched);
+        }
+      } catch { /* manifest unavailable → unknown_lag stands */ }
+      stalenessTier = manifestFresh ? "manifest_fresh" : "unknown_lag";
+    }
     else if (lag >= threshold) stalenessTier = "stale";
     else if (lag > 0) stalenessTier = "warn";
     else stalenessTier = "fresh";

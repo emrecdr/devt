@@ -153,6 +153,11 @@ function loadEntries(opts) {
   const parsed = readJsonlLines(tracePath);
   if (!parsed.exists) return { entries: [], path: tracePath, exists: false };
   const sinceMs = opts.since ? new Date(opts.since).getTime() : 0;
+  // Bounded chain: --include-chain unions across workflow_id rotations but
+  // ONLY within this workflow's lifetime — unbounded union counted calls from
+  // 11 days earlier as "this run" (field receipt). Set inside the chain block
+  // below from workflow.yaml::first_created_at (the immutable session anchor).
+  let chainBoundMs = 0;
   // Tool filter: exact match when no `*` wildcard, glob match otherwise.
   // Wildcards already in active use by workflows/code-review.md present_findings
   // (`mcp__devt-graphify__*`) — prior implementation did exact-only match,
@@ -178,6 +183,8 @@ function loadEntries(opts) {
         const wfPath = path.join(findProjectRoot(), ".devt", "state", "workflow.yaml");
         if (fs.existsSync(wfPath)) {
           const raw = fs.readFileSync(wfPath, "utf8");
+          const fcMatch = raw.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+          if (fcMatch) { const t = new Date(fcMatch[1].trim()).getTime(); if (Number.isFinite(t)) chainBoundMs = t; }
           const wfMatch = raw.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
           if (wfMatch && wfMatch[1].trim() === opts.workflow_id) {
             const origMatch = raw.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
@@ -200,6 +207,7 @@ function loadEntries(opts) {
   }
   const entries = parsed.entries.filter(e => {
     if (sinceMs > 0 && e.ts && new Date(e.ts).getTime() < sinceMs) return false;
+    if (chainBoundMs > 0 && e.ts && new Date(e.ts).getTime() < chainBoundMs) return false;
     if (toolMatcher && !toolMatcher(e.tool)) return false;
     // Workflow-context filters. Trace records emitted outside an active
     // workflow lack these fields → excluded when the corresponding filter

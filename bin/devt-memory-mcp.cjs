@@ -356,7 +356,11 @@ const TOOLS = {
     },
     handler: ({ symbols }) => {
       if (!Array.isArray(symbols) || symbols.length === 0) return { error: "symbols required (array of strings)" };
-      try { return graphify.blastRadius(symbols); }
+      // 60KB default cap with shape-aware retention — an uncapped response
+      // overflowed the MCP transport into a sidecar file (field: 85KB, of
+      // which ~3KB was consumed). getNeighbors has had the param for a while;
+      // this closes the parity gap.
+      try { return graphify.blastRadius(symbols, { max_bytes: 60000 }); }
       catch (e) { return { error: e.message }; }
     },
   },
@@ -521,7 +525,12 @@ function appendTrace(record) {
   // outside any workflow stays as compact as before. Existing record fields
   // (ts, tool, ok, duration_ms, …) win on the unlikely collision.
   const ctx = readWorkflowContext();
-  const merged = ctx ? { ...ctx, ...record } : record;
+  // Session discriminator: the MCP server is one long-lived process per
+  // session, so its pid IS a session id — lets attribution separate concurrent
+  // sessions on the same project (standing directive: generated records carry
+  // a session discriminator).
+  const session = { session: process.env.CLAUDE_SESSION_ID || `pid-${process.pid}` };
+  const merged = ctx ? { ...session, ...ctx, ...record } : { ...session, ...record };
   try {
     fs.appendFileSync(t.tracePath, JSON.stringify(merged) + "\n", "utf8");
   } catch {

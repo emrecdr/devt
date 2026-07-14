@@ -9543,8 +9543,14 @@ WID1=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';pr
 WID2=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);console.log(j.workflow_id||'')})")
 (cd "$N8_TMP" && node "$CLI" state update workflow_type=code_review_parallel >/dev/null 2>&1)
 WID3=$(cd "$N8_TMP" && node "$CLI" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);console.log(j.workflow_id||'')})")
+# Records must fall INSIDE the workflow's lifetime — the chain union is
+# bounded by first_created_at (records predating the workflow can't come
+# from its rotations). Derive the record ts from the workflow's OWN anchor
+# +5s: a wall-clock `date` at second granularity can land sub-second BEFORE
+# the millisecond-granularity anchor and flake the bound.
+N8_TS=$(cd "$N8_TMP" && node -e 'const y=require("fs").readFileSync(".devt/state/workflow.yaml","utf8");const m=y.match(/^first_created_at:\s*"?([^"\n]+)"?/m);const t=m?new Date(m[1]).getTime():0;console.log(new Date((t>0?t:0)+5000).toISOString());')
 for wid in "$WID1" "$WID2" "$WID3"; do
-  printf '{"ts":"2026-05-29T15:00:00Z","tool":"mcp__devt-graphify__query_graph","workflow_id":"%s","ok":true,"duration_ms":1,"args_size":0,"args_fp":"x","result_size":0}\n' "$wid" >> "$N8_TMP/.devt/memory/_mcp-trace.jsonl"
+  printf '{"ts":"%s","tool":"mcp__devt-graphify__query_graph","workflow_id":"%s","ok":true,"duration_ms":1,"args_size":0,"args_fp":"x","result_size":0}\n' "$N8_TS" "$wid" >> "$N8_TMP/.devt/memory/_mcp-trace.jsonl"
 done
 N8_CUR=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID3" --include-chain 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
 N8_HIST=$(cd "$N8_TMP" && node "$CLI" mcp-stats --workflow-id="$WID2" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.entries_considered);}catch(e){console.log('err');}})")
@@ -14397,17 +14403,19 @@ else
 fi
 
 # K170: mcp-stats --workflow-id is STRICT by default (current wid only).
-# --include-chain opts INTO the workflow_id_history union. --strict-wid is
-# retained as a deprecated alias matching default. Asserts: 5 records across
-# 3 chained workflow_ids → default = 2 (strict), --include-chain = 5 (union),
-# --strict-wid = 2 (deprecated alias matches default).
+# --include-chain opts INTO the workflow_id_history union, BOUNDED by the
+# workflow's first_created_at (an unbounded union counted 11-day-old calls as
+# "this run" in the field). --strict-wid is a deprecated alias matching
+# default. Asserts: 6 records across 3 chained workflow_ids, 1 predating the
+# workflow lifetime → default = 2 (strict), --include-chain = 5 (bounded
+# union excludes the pre-lifetime record), --strict-wid = 2.
 K170_TMP=$(mktemp -d)
 mkdir -p "$K170_TMP/.devt/state" "$K170_TMP/.devt/memory"
 cat > "$K170_TMP/.devt/state/workflow.yaml" <<YEOF
 workflow_id: current_wf
 original_workflow_id: original_wf
 workflow_id_history: "[\"old1\", \"old2\", \"current_wf\"]"
-first_created_at: "2026-06-25T00:00:00.000Z"
+first_created_at: "2026-06-18T00:00:00.000Z"
 YEOF
 cat > "$K170_TMP/.devt/memory/_mcp-trace.jsonl" <<TRACE
 {"ts":"2026-06-25T00:00:00Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"current_wf","duration_ms":100}
@@ -14415,13 +14423,14 @@ cat > "$K170_TMP/.devt/memory/_mcp-trace.jsonl" <<TRACE
 {"ts":"2026-06-20T00:00:00Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"old1","duration_ms":80}
 {"ts":"2026-06-20T00:00:01Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"old1","duration_ms":90}
 {"ts":"2026-06-19T00:00:00Z","tool":"mcp__devt-graphify__get_neighbors","workflow_id":"old2","duration_ms":40}
+{"ts":"2026-06-10T00:00:00Z","tool":"mcp__devt-graphify__blast_radius","workflow_id":"old1","duration_ms":70}
 TRACE
 DEFAULT_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
 INCLUDE_CHAIN_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --include-chain 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
 STRICT_ALIAS_CALLS=$(cd "$K170_TMP" && node "$ROOT/bin/devt-tools.cjs" mcp-stats --workflow-id=current_wf --strict-wid 2>/dev/null | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{const o=JSON.parse(s); const calls=(o.tools||[]).reduce((s,t)=>s+t.calls,0); console.log(calls)}catch{console.log('err')}});" 2>/dev/null)
 rm -rf "$K170_TMP"
 if [ "$DEFAULT_CALLS" = "2" ] && [ "$INCLUDE_CHAIN_CALLS" = "5" ] && [ "$STRICT_ALIAS_CALLS" = "2" ]; then
-  pass "K170: mcp-stats --workflow-id default=strict (2), --include-chain unions history (5), --strict-wid deprecated alias matches default (2)"
+  pass "K170: mcp-stats --workflow-id default=strict (2), --include-chain bounded union (5 — pre-lifetime record excluded), --strict-wid alias (2)"
 else
   fail "K170: wrong semantics — default=$DEFAULT_CALLS (expect 2), include-chain=$INCLUDE_CHAIN_CALLS (expect 5), strict-alias=$STRICT_ALIAS_CALLS (expect 2)"
 fi
@@ -16409,6 +16418,102 @@ if [ "$K254_CHECK" = "OK" ]; then
   pass "K254: dropped_by_file — zero-result neighbor queries aggregate their drops per source file (the real caller set stays consumable)"
 else
   fail "K254: dropped_by_file broken — $K254_CHECK"
+fi
+
+# K255: node-kind-gated auto-promote + noise sub-reasons — when filtering
+# empties results, identifier-shaped drops return in results marked
+# recovered_from_noise (confidence RECOVERED); docstring-shaped drops stay
+# down (a reviewer must never cite a prose node as a caller). The sub-reason
+# taxonomy splits the previously-uniform "noise" so telemetry stays legible.
+K255_T=$(mktemp -d)
+mkdir -p "$K255_T/graphify-out" "$K255_T/.devt"
+printf '{"graphify":{"enabled":true,"blast_radius_extra_noise":["MyCaller"]}}' > "$K255_T/.devt/config.json"
+node -e '
+const fs = require("fs");
+const g = { nodes: [
+  { id: "t", label: "Target", source_file: "app/t.py" },
+  { id: "c1", label: "MyCaller", source_file: "app/c1.py" },
+  { id: "c2", label: "A docstring sentence.", source_file: "app/c2.py" }
+], links: [
+  { source: "c1", target: "t", relation: "uses", confidence: "EXTRACTED" },
+  { source: "c2", target: "t", relation: "uses", confidence: "EXTRACTED" }
+] };
+fs.writeFileSync(process.argv[1] + "/graphify-out/graph.json", JSON.stringify(g));
+' "$K255_T"
+K255_CHECK=$( (cd "$K255_T" && node -e '
+const gm = require("'"$ROOT"'/bin/modules/graphify.cjs");
+const r = gm.getNeighbors("Target", { direction: "in", depth: 1 });
+const f = [];
+const labels = (r.results || []).map(x => x.label);
+if (!labels.includes("MyCaller")) f.push("MyCaller not promoted: " + JSON.stringify(labels));
+if (labels.some(l => /\s/.test(l))) f.push("prose node promoted");
+const promoted = (r.results || []).find(x => x.label === "MyCaller");
+if (!promoted || promoted.recovered_from_noise !== true || promoted.confidence !== "RECOVERED") f.push("promotion markers missing");
+const ds = r.dropped_sample || [];
+if (!ds.some(d => d.reason === "noise_docstring")) f.push("docstring sub-reason missing: " + JSON.stringify(ds.map(d => d.reason)));
+if (!(r.recovered_from_noise_count >= 1)) f.push("recovered count missing");
+console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+') 2>&1 || echo "FAIL:node error")
+rm -rf "$K255_T"
+if [ "$K255_CHECK" = "OK" ]; then
+  pass "K255: auto-promote (node-kind-gated) — identifier callers recovered on empty results, prose nodes stay down, sub-reasons split"
+else
+  fail "K255: auto-promote broken — $K255_CHECK"
+fi
+
+# K256: cal wiring greps — manifest_fresh tier (state + workflow decision tree
+# + case branch), lane <memory_affects> injection, rubric CLAUDE_PLUGIN_ROOT
+# path form, MCP blast 60KB default, bounded telemetry chain, god-node
+# severity section, modules_touched_list.
+if /usr/bin/grep -q '"manifest_fresh"' "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q 'staleness_tier == "manifest_fresh"' "$ROOT/workflows/code-review.md" \
+   && /usr/bin/grep -q 'manifest_fresh)' "$ROOT/workflows/code-review.md" \
+   && /usr/bin/grep -q '<memory_affects>' "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q 'CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs memory affects' "$ROOT/references/rubrics/code_review.v1.md" \
+   && /usr/bin/grep -q 'max_bytes: 60000' "$ROOT/bin/devt-memory-mcp.cjs" \
+   && /usr/bin/grep -q 'chainBoundMs' "$ROOT/bin/modules/mcp-stats.cjs" \
+   && /usr/bin/grep -q 'Severity Calibration (god-node)' "$ROOT/bin/modules/graphify.cjs" \
+   && /usr/bin/grep -q 'modules_touched_list' "$ROOT/bin/modules/graphify.cjs"; then
+  pass "K256: receipt-#17 wiring — manifest_fresh tier + lane memory_affects + rubric path form + blast 60KB MCP default + bounded chain + god-node severity section + modules list"
+else
+  fail "K256: receipt-#17 wiring incomplete"
+fi
+
+# K257: blast_radius shape-aware max_bytes — raw label arrays truncate FIRST,
+# the ranked degrees array is retained (field consumption: ~3KB of an 85KB
+# response was used, all from degrees; a naive tail-cut into degrees would be
+# strictly worse than no cap at all).
+K257_T=$(mktemp -d)
+mkdir -p "$K257_T/graphify-out" "$K257_T/.devt"
+printf '{"graphify":{"enabled":true}}' > "$K257_T/.devt/config.json"
+node -e '
+const fs = require("fs");
+const nodes = [{ id: "t", label: "Target", source_file: "app/t.py" }];
+const links = [];
+for (let i = 0; i < 300; i++) {
+  nodes.push({ id: "c" + i, label: "Caller_" + i + "_with_a_reasonably_long_label_for_bytes", source_file: "app/mod" + (i % 12) + "/c" + i + ".py" });
+  links.push({ source: "c" + i, target: "t", relation: "uses", confidence: "EXTRACTED" });
+}
+fs.writeFileSync(process.argv[1] + "/graphify-out/graph.json", JSON.stringify({ nodes, links }));
+' "$K257_T"
+K257_CHECK=$( (cd "$K257_T" && node -e '
+const gm = require("'"$ROOT"'/bin/modules/graphify.cjs");
+const full = gm.blastRadius(["Target"]);
+const capped = gm.blastRadius(["Target"], { max_bytes: 4000 });
+const f = [];
+if (JSON.stringify(capped).length > 12000) f.push("cap ineffective: " + JSON.stringify(capped).length);
+if (capped.truncated !== true) f.push("truncated flag missing");
+const deg = capped.direct_dependents_degrees || [];
+if (deg.length === 0 || deg.length > 40) f.push("degrees retention wrong: " + deg.length);
+if ((capped.indirect_dependents || []).length !== 0 || typeof capped.indirect_dependents_total !== "number") f.push("indirect not truncated-first");
+if (typeof full.modules_touched !== "number" || !Array.isArray(full.modules_touched_list)) f.push("modules_touched_list missing");
+console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+') 2>&1 || echo "FAIL:node error")
+rm -rf "$K257_T"
+if [ "$K257_CHECK" = "OK" ]; then
+  pass "K257: blast_radius shape-aware max_bytes — degrees retained, raw arrays truncate first, truncated flag + totals surfaced"
+else
+  fail "K257: blast max_bytes broken — $K257_CHECK"
 fi
 
 echo

@@ -691,8 +691,10 @@ function getNeighbors(symbol, options) {
   const droppedSample = [];
   const droppedSeen = new Set();
   const droppedByFile = new Map();
+  const droppedAll = [];
   const DROPPED_SAMPLE_CAP = 15;
   const recordDrop = (label, reason, srcFile, dep) => {
+    droppedAll.push({ label, reason, source_file: srcFile || "", depth: dep });
     if (!droppedSeen.has(label) && droppedSample.length < DROPPED_SAMPLE_CAP) {
       droppedSeen.add(label);
       droppedSample.push({ label, reason, source_file: srcFile || "", depth: dep });
@@ -707,7 +709,7 @@ function getNeighbors(symbol, options) {
   for (const [id, info] of visited) {
     const node = loaded.cache.adj.nodeMap.get(id);
     const label = node.label || id;
-    if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; recordDrop(label, "noise", node && node.source_file, info.depth); continue; }
+    if (_isBlastNoise(node, label, extraNoise, frameworkBuiltins)) { filteredNoiseCount++; recordDrop(label, _noiseSubReason(label), node && node.source_file, info.depth); continue; }
     if (_isTestPathNode(node, testPathPatterns)) { filteredTestPathCount++; recordDrop(label, "test_path", node && node.source_file, info.depth); continue; }
 
     // DI-aggregation collapse: when many nodes share one DI-pattern source_file,
@@ -783,18 +785,37 @@ function getNeighbors(symbol, options) {
     filterTelemetry.dropped_by_file = Array.from(droppedByFile.values())
       .sort((a, b) => b.count - a.count).slice(0, 10);
   }
+  // Auto-promote on empty results (node-kind-gated). Identifier-shaped drops
+  // in the plain consumer bucket ARE the caller set (field-measured: 11 of 17
+  // drops were real callables; docstring/container nodes stay down — a
+  // reviewer pattern-matching "callers" must never cite a prose node).
+  // Promotion is marked + confidence-demoted and fires ONLY on empty results,
+  // so healthy responses never grow.
+  let promotedItems = [];
+  if (rankedItems.length === 0 && droppedAll.length > 0) {
+    const seenPromo = new Set();
+    const idShaped = (l) => /^[A-Za-z_$][\w.$]*(\(\))?$/.test(String(l || ""));
+    for (const d of droppedAll) {
+      if (d.reason !== "noise" || !idShaped(d.label) || seenPromo.has(d.label)) continue;
+      seenPromo.add(d.label);
+      promotedItems.push({ label: d.label, source_file: d.source_file, relation: "", confidence: "RECOVERED", depth: d.depth, recovered_from_noise: true });
+      if (promotedItems.length >= 25) break;
+    }
+    if (filterTelemetry && promotedItems.length > 0) filterTelemetry.recovered_from_noise_count = promotedItems.length;
+  }
+  const finalItems = rankedItems.length > 0 ? rankedItems : promotedItems;
   const maxBytes = Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
   if (!maxBytes) {
-    const base = { source: "graphify", results: rankedItems };
+    const base = { source: "graphify", results: finalItems };
     if (filterTelemetry) Object.assign(base, filterTelemetry);
     return base;
   }
-  const totalCount = rankedItems.length;
+  const totalCount = finalItems.length;
   const results = [];
   let runningBytes = 0;
   // Approximate per-item byte cost via JSON.stringify of the item; cheap
   // enough at this granularity (god-node payloads are 10K-50K items).
-  for (const item of rankedItems) {
+  for (const item of finalItems) {
     const itemBytes = JSON.stringify(item).length + 1; // +1 for separator comma
     if (runningBytes + itemBytes > maxBytes) break;
     results.push(item);
@@ -878,7 +899,17 @@ function shortestPath(from, to, options) {
  *
  * Used by preflight to populate the JSON sidecar's suggested_reading field.
  */
-function blastRadius(symbols, _options) {
+// Sub-reason taxonomy for noise drops. A uniform "noise" label made
+// promote-except rules unimplementable (field receipt: 17 drops, all
+// "noise", ~40% docstring/container junk among the real callers).
+function _noiseSubReason(label) {
+  const l = String(label || "");
+  if (/\s/.test(l) && (/[.!?]$/.test(l) || l.length > 40)) return "noise_docstring";
+  if (/\.[a-z]{1,4}$/i.test(l) && !/\s/.test(l)) return "noise_container";
+  return "noise";
+}
+
+function blastRadius(symbols, options) {
   const loaded = loadGraph();
   if (!loaded.ok) {
     return {
@@ -1158,6 +1189,7 @@ function blastRadius(symbols, _options) {
     direct_dependents_degrees: directDegrees,
     indirect_dependents: Array.from(indirect),
     modules_touched: modules.size,
+    modules_touched_list: Array.from(modules).slice(0, 10),
     god_node_match: godNodeMatch,
     god_node_matches: godNodeMatches,
     discriminating_god_node_match: discriminatingGodNodeMatch,
@@ -1208,6 +1240,34 @@ function blastRadius(symbols, _options) {
     base.di_collapsed_caller_files = callerFiles;
     const shown = direct.size === 0 ? "direct_dependents: []" : `direct_dependents shows only ${direct.size}`;
     base.di_opaque_note = `${shown} — ${filteredDIAggregationCount} caller(s) collapsed via DI-aggregation (e.g. FastAPI Depends() factories); true blast radius is DI-opaque. Open these caller source_files to verify wiring: ${callerFiles.join(", ")}`;
+  }
+  // Shape-aware size cap (parity with getNeighbors --max-bytes). Field
+  // consumption profile of an 85KB response: ~3KB used — the scalars + the
+  // ranked degrees array; the raw label arrays were never read (degrees
+  // supersedes them). So truncate raw arrays FIRST and never cut the ranked
+  // signal; a naive tail-truncation that cut into degrees would be strictly
+  // worse than the MCP sidecar fallback it replaces.
+  const blastMaxBytes = options && Number.isInteger(options.max_bytes) && options.max_bytes > 0 ? options.max_bytes : null;
+  if (blastMaxBytes) {
+    const size = () => JSON.stringify(base).length;
+    if (size() > blastMaxBytes) {
+      base.truncated = true;
+      base.max_bytes = blastMaxBytes;
+      base.indirect_dependents_total = base.indirect_dependents.length;
+      base.indirect_dependents = [];
+      if (size() > blastMaxBytes) {
+        base.direct_dependents_total = base.direct_dependents.length;
+        base.direct_dependents = base.direct_dependents.slice(0, 20);
+      }
+      if (size() > blastMaxBytes && base.raw_direct_dependents) {
+        delete base.raw_direct_dependents;
+        base.raw_direct_dependents_omitted = true;
+      }
+      if (size() > blastMaxBytes) {
+        base.direct_dependents_degrees_total = base.direct_dependents_degrees.length;
+        base.direct_dependents_degrees = base.direct_dependents_degrees.slice(0, 40);
+      }
+    }
   }
   return base;
 }
@@ -1891,8 +1951,10 @@ function augmentImpactMap(opts = {}) {
   if (diffFiles.length === 0) {
     try {
       const base = opts.baseRef || (brief && brief.git && brief.git.primary_branch) || "main";
-      const out = require("child_process").execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], { cwd: proot, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] });
-      diffFiles = out.split("\n").map(s => s.trim()).filter(Boolean);
+      // Union collection (committed range + working tree + untracked) — the
+      // same semantic every scope-sensitive consumer uses; a bare base...HEAD
+      // diff goes blind on uncommitted trees.
+      diffFiles = require("./review-weight.cjs").collectChangedFiles(proot, base);
     } catch { diffFiles = []; }
   }
 
@@ -1953,6 +2015,30 @@ function augmentImpactMap(opts = {}) {
     if (pgods.length) {
       const rows = pgods.map(g => `- \`${g.symbol}\` has ${g.edge_count} edges (graph-wide rank)`);
       append("preflight_godnodes_fallback", `\n## Symbol-level god-nodes (from preflight, not diff-anchored)\n\n_File-level + symbol-level diff CLIs returned 0 — surfacing graph-global top god-nodes from preflight.god_nodes so severity calibration has structural signal. These symbols may not be in the diff; weight findings that touch them or their callers higher because changes ripple to many sites._\n\n${rows.join("\n")}\n`);
+    }
+  }
+
+  // 7. Severity calibration (god-node anchors). effect_size is popularity-
+  // derived; when god nodes are merely IN the blast set a "large" reading is
+  // inflated — but when a CHANGED symbol IS a god node, severity must go UP.
+  // The plan's anchors give the discrimination; both branches name names so
+  // reviewers weight findings by mechanism, not a bare scalar (template from
+  // an operator's hand-written note, field receipt).
+  const planForNote = readJson(path.join(stateDir, "graphify-impact-plan.json"), null);
+  const planSymbols = (planForNote && planForNote.args && Array.isArray(planForNote.args.symbols)) ? planForNote.args.symbols : [];
+  const effectSizeForNote = (brief && brief.blast && brief.blast.effect_size) || null;
+  const godPool = [
+    ...symGods.map(g => ({ symbol: g.symbol, edge_count: g.edge_count })),
+    ...(((brief && brief.god_nodes) || []).map(g => ({ symbol: g.symbol, edge_count: g.edge_count }))),
+  ];
+  if (godPool.length) {
+    const changedGods = godPool.filter(g => planSymbols.includes(g.symbol));
+    if (changedGods.length) {
+      const rows = changedGods.slice(0, 5).map(g => `\`${g.symbol}\` (${g.edge_count} edges)`).join(", ");
+      append("severity_calibration_godnode", `\n## Severity Calibration (god-node)\n\n- CHANGED symbol(s) ${rows} are themselves god nodes — severity weighting UP, not down: a defect here ripples to every caller.\n`);
+    } else if (effectSizeForNote === "large") {
+      const rows = godPool.slice(0, 4).map(g => `\`${g.symbol}\` (in=${g.edge_count})`).join(", ");
+      append("severity_calibration_godnode", `\n## Severity Calibration (god-node)\n\n- effect_size: large (popularity-inflated: the blast set contains god nodes ${rows}; no CHANGED symbol is itself a god node) — weight findings by semantic delta, not raw counts, while still using the caller sets to verify wiring.\n`);
     }
   }
 
@@ -3188,8 +3274,11 @@ function run(subcommand, args) {
       return 0;
     }
     case "blast-radius": {
-      if (args.length === 0) { process.stderr.write("Usage: graphify blast-radius <symbol> [<symbol>...]\n"); return 2; }
-      json(blastRadius(args));
+      const bMaxArg = args.find(a => a.startsWith("--max-bytes="));
+      const bMax = bMaxArg ? Math.max(1024, parseInt(bMaxArg.split("=")[1], 10) || 0) : null;
+      const bSymbols = args.filter(a => !a.startsWith("--"));
+      if (bSymbols.length === 0) { process.stderr.write("Usage: graphify blast-radius <symbol> [<symbol>...] [--max-bytes=N]\n"); return 2; }
+      json(blastRadius(bSymbols, bMax ? { max_bytes: bMax } : undefined));
       return 0;
     }
     case "god-nodes": {
