@@ -100,6 +100,7 @@ Report to the user:
 - The report is at `.devt/state/weekly-report.md`
 - Quick summary: total commits, PRs merged, contributors active
 - Ask if they want to see the full report or export to a different location
+- If a shareable page is requested, render via the platform Artifact tool — never hand-roll HTML
 
 Final status: **DONE**
 </step>

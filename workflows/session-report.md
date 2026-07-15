@@ -114,6 +114,8 @@ Status: {DONE | IN_PROGRESS}
 Report: .devt/state/session-report.md
 ```
 
+If a shareable page is requested, render via the platform Artifact tool — never hand-roll HTML.
+
 </step>
 
 <success_criteria>

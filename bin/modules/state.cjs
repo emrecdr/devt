@@ -6620,7 +6620,27 @@ function registerLanesFromYaml(filePath) {
     results.push({ id: entry.id, ok: r.ok, reason: r.reason || null });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
-  return { ok: errors.length === 0, registered: results, errors };
+  // Cross-lane disjointness check — WARN-only, never blocks. The parallel
+  // review workflow assumes disjoint file slices; hand-rolled partitions can
+  // double-assign a file, which costs duplicated review tokens + conflicting
+  // findings at consolidation. Surfaced per [[telemetry-on-reduction]]: the
+  // overlap is named, the operator decides.
+  const fileOwners = new Map();
+  for (const entry of lanes) {
+    for (const f of (entry.files || [])) {
+      if (!fileOwners.has(f)) fileOwners.set(f, []);
+      fileOwners.get(f).push(entry.id);
+    }
+  }
+  const overlaps = Array.from(fileOwners.entries())
+    .filter(([, owners]) => owners.length > 1)
+    .map(([file, owners]) => ({ file, lanes: owners }));
+  const out = { ok: errors.length === 0, registered: results, errors };
+  if (overlaps.length > 0) {
+    out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;
+    out.overlaps = overlaps.slice(0, 10);
+  }
+  return out;
 }
 
 function updateLane(laneId, kvPairs) {

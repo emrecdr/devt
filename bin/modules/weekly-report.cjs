@@ -8,7 +8,6 @@
  */
 
 const { execFileSync } = require("child_process");
-const fs = require("fs");
 const { atomicWriteFileSync } = require("./io.cjs");
 
 // ---------------------------------------------------------------------------
@@ -165,11 +164,11 @@ function renderMarkdown(stats, title) {
 }
 
 /**
- * Memory layer event aggregations — counts new ADRs/Concepts/Flows/REJ
+ * Memory layer event aggregations — counts new ADRs/Concepts/Flows/REJ/LES
  * created in the reporting window by reading file mtimes (cheap, no git log diff).
  *
  * Returns { adrs_added, concepts_added, flows_added, rejected_added,
- * total_active_adrs, briefs_invoked }.
+ * lessons_added, total_active_adrs, briefs_invoked }.
  *
  * "Briefs invoked" is approximated from the existence of `.devt/state/preflight-brief.md`
  * — a precise count would require parsing session logs (see bin/modules/token-report.cjs
@@ -182,12 +181,13 @@ function aggregateMemoryEvents(projectRoot, fromMs, toMs) {
   if (!fs.existsSync(memDir)) {
     return { available: false, reason: ".devt/memory/ not present" };
   }
-  const counts = { adrs_added: 0, concepts_added: 0, flows_added: 0, rejected_added: 0 };
+  const counts = { adrs_added: 0, concepts_added: 0, flows_added: 0, rejected_added: 0, lessons_added: 0 };
   const subdirs = [
     { dir: "decisions", key: "adrs_added" },
     { dir: "concepts", key: "concepts_added" },
     { dir: "flows", key: "flows_added" },
     { dir: "rejected", key: "rejected_added" },
+    { dir: "lessons", key: "lessons_added" },
   ];
   for (const { dir, key } of subdirs) {
     const full = path.join(memDir, dir);
@@ -232,6 +232,7 @@ function renderMemorySection(memoryEvents) {
   lines.push(`- New Concepts: ${m.concepts_added}`);
   lines.push(`- New Flows: ${m.flows_added}`);
   lines.push(`- New REJ tombstones: ${m.rejected_added}`);
+  lines.push(`- New Lessons: ${m.lessons_added}`);
   lines.push(`- Total active docs (snapshot): ${m.total_active_docs}`);
   lines.push("");
   return lines.join("\n");

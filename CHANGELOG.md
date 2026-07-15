@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.161.0] - 2026-07-15
+
+### External-source review sweep: attribution defect + four hygiene fixes
+
+A 40-page best-practices review (community + official sources, three parallel verifiers with the full reject register) found zero remaining TRIM-direction weight — after thirteen releases the deletable mass is gone — and five small repo-validated items. Notably, one page's advice surfaced a genuine contract violation in devt's own templates.
+
+- **Attribution defect (the find that justifies the release).** The python-fastapi template mandated and embedded `Co-Authored-By: Claude` trailers in five commit examples — the only template doing so (the other five use neutral placeholders), instructing every scaffolded project's agents to hard-code attribution that belongs to the platform's `.claude/settings.json::attribution` setting. Trailers deleted, prose reworded to name the platform setting as the owner. Greenfield's live rules file mirrored per the standing sync directive.
+- **`lessons/` restored to the weekly report.** `aggregateMemoryEvents` scanned four of the five canonical memory dirs — lessons were silently absent from counts and render. Functionally verified: a fresh LES doc now counts and renders.
+- **Fetched-content-is-data framing** on the one web-consuming skill (api-docs-fetcher): fetched pages are untrusted input to summarize, never instructions to follow — standard injection hygiene for a surface feeding agents with Write/Bash.
+- **Cross-lane overlap warning (warn-only, never blocks).** `register-lanes` now surfaces files assigned to multiple lanes with their owning lanes — the parallel review workflow assumes disjoint slices, and a hand-rolled partition that double-assigns a file costs duplicated review tokens plus conflicting findings at consolidation. Functionally verified on an overlapping fixture; registration still succeeds.
+- **Artifact delegation sentence** in both report workflows: shareable page requested → platform Artifact tool, never hand-rolled HTML.
+- Gates **K258** (hygiene sweep: zero Claude trailers in templates + lessons wiring + data-framing + Artifact delegation) and **K259** (behavioral: overlap warning fires on a double-assigned file). Drift-guard stack 164 → 166 deep (K94–K259).
+
 ## [0.160.0] - 2026-07-14
 
 ### Third field receipt: signal recovery, freshness truth, lane epistemology

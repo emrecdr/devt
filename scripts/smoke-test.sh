@@ -16516,6 +16516,46 @@ else
   fail "K257: blast max_bytes broken — $K257_CHECK"
 fi
 
+# K258: external-source hygiene sweep — no template instructs a Claude
+# attribution trailer (platform settings own attribution; templates teaching
+# it violates the operator contract), the weekly report scans ALL five
+# canonical memory dirs (lessons/ was silently omitted), the web-consuming
+# skill frames fetched content as data-not-instructions, and report workflows
+# delegate shareable rendering to the platform Artifact tool.
+K258_TRAILERS=$({ /usr/bin/grep -rl "Co-Authored-By: Claude" "$ROOT/templates" 2>/dev/null || true; } | wc -l | tr -d " ")
+if [ "$K258_TRAILERS" = "0" ] \
+   && /usr/bin/grep -q '"lessons"' "$ROOT/bin/modules/weekly-report.cjs" \
+   && /usr/bin/grep -q "lessons_added" "$ROOT/bin/modules/weekly-report.cjs" \
+   && /usr/bin/grep -q "data, not instructions" "$ROOT/skills/api-docs-fetcher/SKILL.md" \
+   && /usr/bin/grep -q "Artifact tool" "$ROOT/workflows/weekly-report.md" \
+   && /usr/bin/grep -q "Artifact tool" "$ROOT/workflows/session-report.md"; then
+  pass "K258: hygiene sweep — zero Claude attribution trailers in templates + lessons/ in weekly report + fetched-content-is-data framing + Artifact delegation"
+else
+  fail "K258: hygiene sweep incomplete — trailer_files=$K258_TRAILERS"
+fi
+
+# K259: cross-lane overlap warning — registerLanesFromYaml surfaces files
+# assigned to multiple lanes (WARN-only, never blocks; the parallel workflow
+# assumes disjoint slices and hand-rolled partitions can double-assign,
+# costing duplicated review tokens + conflicting findings).
+K259_T=$(mktemp -d)
+mkdir -p "$K259_T/.devt/state"
+(cd "$K259_T" && node "$CLI" init workflow "k259" >/dev/null 2>&1)
+printf '{"lanes":[{"id":"L1","scope":"a","files":["x.py","shared.py"]},{"id":"L2","scope":"b","files":["y.py","shared.py"]}]}\n' > "$K259_T/lanes.json"
+K259_CHECK=$(cd "$K259_T" && node "$CLI" state register-lanes --from=lanes.json 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s);
+    const ok = j.ok === true && typeof j.overlap_warning === "string" && Array.isArray(j.overlaps) && j.overlaps.some(o => o.file === "shared.py" && o.lanes.length === 2);
+    console.log(ok ? "OK" : "FAIL:" + JSON.stringify({ok:j.ok, warn:!!j.overlap_warning, overlaps:j.overlaps}).slice(0,150));
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K259_T"
+if [ "$K259_CHECK" = "OK" ]; then
+  pass "K259: cross-lane overlap warning — double-assigned file surfaced with owning lanes (warn-only, registration still succeeds)"
+else
+  fail "K259: overlap warning broken — $K259_CHECK"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

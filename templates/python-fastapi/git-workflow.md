@@ -33,15 +33,13 @@ git checkout -b feature/add-user-settings  # Pollutes PR with unrelated commits!
 
 ## Conventional Commit Format
 
-Use conventional commit format with a body and Co-Authored-By trailer:
+Use conventional commit format with a body. Commit attribution (Co-Authored-By trailers) is owned by the platform `.claude/settings.json::attribution` setting — never hard-code trailers in commit messages:
 
 ```bash
 git commit -m "$(cat <<'EOF'
 <type>(<scope>): <subject>
 
 <body>
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -89,8 +87,6 @@ Creates Session model for token management.
 Adds password validation with bcrypt.
 
 Tests: test_login_success, test_login_invalid_credentials
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -103,8 +99,6 @@ fix(identity): Correct session expiry calculation
 
 Previous implementation used local time instead of UTC.
 Now uses datetime.now(UTC) for consistency.
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -137,8 +131,6 @@ gh pr create --title "<type>: <description>" --body "$(cat <<'EOF'
 - [ ] Quality gates pass: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest tests/unit/ -x`
 - [ ] Run `uv run pytest app/services/<service>/tests -v` — all tests pass
 - [ ] Verify MODULE.md updated
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -184,8 +176,6 @@ git commit -m "$(cat <<'EOF'
 fix(identity): Correct session expiry calculation
 
 Previous implementation used local time instead of UTC.
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
