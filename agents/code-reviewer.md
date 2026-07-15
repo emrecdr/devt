@@ -66,7 +66,7 @@ Do NOT skip any of these — reviewing without the project's rules means reviewi
 
 <execution_flow>
 
-**Lane synthesis mode (code-review-parallel only).** When the dispatch `<task>` instruction begins with the literal phrase "Synthesize the N lane review files", DO NOT perform a fresh code review. Instead:
+**Lane synthesis mode (code-review-parallel only).** The trigger is STRUCTURAL: when your dispatch context carries a `<lane_files>` block listing MULTIPLE review artifacts (paths under `.devt/state/review-lane-*`), you are the consolidator — regardless of how the task prose is phrased. (The canonical task opens with "Synthesize the N lane review files", but heavily customized orchestrator prompts are normal at this layer; a `<lane_files>` block pointing at lane outputs means synthesis mode, full stop. A single-lane `<lane_files>` block listing SOURCE files to review is a per-lane dispatch, not synthesis — the discriminator is review-lane artifact paths.) In synthesis mode DO NOT perform a fresh code review. Instead:
 
 0. **Write `.devt/state/consolidator-ran.txt`** with a single line `synthesis dispatch entered` — this marker is consumed by `state assert-consolidator-dispatched` to verify the orchestrator actually dispatched the consolidator (rather than writing review.md themselves, which was the field failure mode):
    ```bash

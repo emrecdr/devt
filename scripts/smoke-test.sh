@@ -9268,13 +9268,12 @@ else
   fail "K28: narrowed-redispatch prose missing. SCOPED REDISPATCH=${K28_NARROWED} top-5=${K28_TOP5}"
 fi
 
-# K27: listLaneOutputs surfaces oversized-lane sizing fields (file_count,
-# est_loc, oversized) when present in workflow.yaml::lanes[]. Field signal
-# (field calibration #3 finding #1): Lane C with 25 files / 1577 LOC
-# consistently exhausted code-reviewer maxTurns. partition_lanes writes the
-# sizing; listLaneOutputs surfaces it so the oversized-lane warning bash in
-# code-review-parallel.md can iterate. Two cases: oversized=true present →
-# field surfaces, default sizing absent → defaults to 0/false (back-compat).
+# K27: listLaneOutputs surfaces lane sizing fields (file_count, est_loc,
+# size_class, size_basis, diff_artifact) when present in workflow.yaml::
+# lanes[]. Sizing is diff-LOC based (registerLane computes it); the split-lane
+# warning bash in code-review-parallel.md iterates on size_class. Lanes
+# registered by older tool versions carry no size_class → null (no signal
+# claimed, not a fake "ok").
 K27_TMP=$(mktemp -d)
 K27_TMP=$(cd "$K27_TMP" && pwd -P)
 mkdir -p "$K27_TMP/.devt/state"
@@ -9292,8 +9291,10 @@ lanes:
     status: "in_flight"
     redispatch_count: 0
     file_count: 25
-    est_loc: 1577
-    oversized: true
+    est_loc: 9500
+    size_class: "split"
+    size_basis: "diff"
+    diff_artifact: ".devt/state/lane-diff-L1.txt"
   - id: "L2"
     community: "src/util"
     slug: "util"
@@ -9302,13 +9303,12 @@ lanes:
     redispatch_count: 0
     file_count: 4
     est_loc: 120
-    oversized: false
 EOF
 K27_OUT=$(cd "$K27_TMP" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null)
-K27_L1_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L1');console.log(l && l.oversized===true && l.file_count===25 && l.est_loc===1577 ? '1':'0');}catch(e){console.log('err');}})")
-K27_L2_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L2');console.log(l && l.oversized===false ? '1':'0');}catch(e){console.log('err');}})")
+K27_L1_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L1');console.log(l && l.size_class==='split' && l.size_basis==='diff' && l.diff_artifact==='.devt/state/lane-diff-L1.txt' && l.est_loc===9500 ? '1':'0');}catch(e){console.log('err');}})")
+K27_L2_OVER=$(echo "$K27_OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const l=j.lanes.find(x=>x.id==='L2');console.log(l && l.size_class===null && l.file_count===4 ? '1':'0');}catch(e){console.log('err');}})")
 if [ "$K27_L1_OVER" = "1" ] && [ "$K27_L2_OVER" = "1" ]; then
-  pass "K27: list-lane-outputs surfaces oversized + file_count + est_loc (L1=25f/1577L/true, L2=4f/120L/false)"
+  pass "K27: list-lane-outputs surfaces size_class + size_basis + diff_artifact (L1=split/diff, L2 legacy lane → null, no fake class)"
 else
   fail "K27: sizing-field surface broken. L1=${K27_L1_OVER} L2=${K27_L2_OVER}"
 fi
@@ -16773,6 +16773,115 @@ if [ "$K266_CHECK" = "OK" ]; then
   pass "K266: CLI fallback trace — graphify neighbors writes get_neighbors trace record (workflow ctx + session + correlation_id) and echoes _meta"
 else
   fail "K266: CLI trace record broken — $K266_CHECK"
+fi
+
+# K267: diff-LOC lane sizing — registerLane generates lane-diff-<id>.txt
+# (merge-base diff incl. working tree + untracked) and sizes the lane on its
+# line count. Whole-file LOC fired the old threshold on every real lane
+# (field: six lanes at 14K–69K whole-file LOC, zero signal); diff LOC is the
+# quantity that predicts lane budget. Fallback: outside a usable git context,
+# size_basis=whole_file + size_class=unknown (no fake class).
+K267_T=$(mktemp -d)
+K267_T=$(cd "$K267_T" && pwd -P)
+(cd "$K267_T" && git init -q -b main && git config user.email t@t && git config user.name t \
+  && printf 'a\nb\n' > f.py && git add -A && git -c commit.gpgsign=false commit -qm base \
+  && git checkout -qb feature && printf 'a\nb\nc\n' > f.py \
+  && printf 'new\n' > untracked.py \
+  && node "$CLI" init workflow "k267" ) >/dev/null 2>&1
+K267_REG=$(cd "$K267_T" && node "$CLI" state register-lane --id=L1 --scope=core --files=f.py,untracked.py --base=main 2>/dev/null)
+K267_CHECK=$(printf '%s\n' "$K267_REG" | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s); const l = j.lane || {};
+    const f = [];
+    if (l.size_basis !== "diff") f.push("size_basis=" + l.size_basis);
+    if (l.size_class !== "ok") f.push("size_class=" + l.size_class);
+    if (!l.diff_artifact) f.push("no diff_artifact");
+    if (!(l.est_loc > 0)) f.push("est_loc=" + l.est_loc);
+    if (l.base_ref !== "main") f.push("base_ref=" + l.base_ref);
+    console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+K267_UNTRACKED=$({ /usr/bin/grep -c "^+new" "$K267_T/.devt/state/lane-diff-L1.txt" 2>/dev/null || true; } | tr -d " ")
+K267_FALLBACK=$(cd "$K267_T" && node "$CLI" state register-lane --id=L2 --scope=norepo --files=f.py --repo-root=/nonexistent-repo-root 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s); const l = j.lane || {};
+    console.log(l.size_basis === "whole_file" && l.size_class === "unknown" ? "OK" : "FAIL:" + l.size_basis + "/" + l.size_class);
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K267_T"
+if [ "$K267_CHECK" = "OK" ] && [ "$K267_UNTRACKED" = "1" ] && [ "$K267_FALLBACK" = "OK" ]; then
+  pass "K267: diff-LOC lane sizing — lane-diff artifact generated (untracked included), size_class from diff lines, whole-file fallback claims no class"
+else
+  fail "K267: diff sizing broken — reg=$K267_CHECK untracked=$K267_UNTRACKED fallback=$K267_FALLBACK"
+fi
+
+# K268: render-lanes diff-first method — every lane with a diff_artifact gets
+# <lane_diff> + <lane_method> injected, and chunked/split lanes additionally
+# get the hunk-enumeration read strategy (the field-proven mitigation that
+# made large lanes land; without auto-injection it only existed hand-rolled).
+if /usr/bin/grep -q "lane_diff" "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "lane_method" "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "diff IS the change under review" "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "enumerate per-file hunks first" "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "lane_diff" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "K268: render-lanes injects <lane_diff> + <lane_method> (diff-first review) + chunk strategy for chunked/split lanes; workflow documents the blocks"
+else
+  fail "K268: diff-first method injection missing from render-lanes or workflow prose"
+fi
+
+# K269: consolidator render path — render-filled on the synthesis template
+# pre-fills {lane_files_newline_separated} from the lane registry (terminal
+# lanes only, foreign cids out) and --notes-file injects <orchestrator_notes>.
+# Field failure: the placeholder + no notes slot made hand-rolling the
+# consolidator envelope the path of least resistance, which dropped the
+# synthesis-mode marker contract.
+K269_T=$(mktemp -d)
+K269_T=$(cd "$K269_T" && pwd -P)
+mkdir -p "$K269_T/.devt/state"
+echo '{}' > "$K269_T/.devt/config.json"
+(cd "$K269_T" && node "$CLI" init workflow "k269") >/dev/null 2>&1
+printf 'lane one done\n' > "$K269_T/.devt/state/review-lane-a.md"
+cat >> "$K269_T/.devt/state/workflow.yaml" <<'EOF'
+lanes:
+  - id: "L1"
+    community: "a"
+    review_file: ".devt/state/review-lane-a.md"
+    status: "substance_pass"
+  - id: "L2"
+    community: "b"
+    review_file: ".devt/state/review-lane-b.md"
+    status: "in_flight"
+EOF
+printf 'Reconciliation directive: prefer lane A severity.\n' > "$K269_T/notes.txt"
+K269_OUT=$(cd "$K269_T" && node "$CLI" dispatch render-filled code-reviewer:code_review_parallel --notes-file=notes.txt 2>/dev/null || echo "")
+K269_CHECK=$(printf '%s' "$K269_OUT" | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  const f = [];
+  if (s.includes("{lane_files_newline_separated}")) f.push("placeholder not filled");
+  if (!s.includes("review-lane-a.md")) f.push("terminal lane missing");
+  if (s.includes("review-lane-b.md")) f.push("non-terminal lane leaked");
+  if (!s.includes("<orchestrator_notes>") || !s.includes("Reconciliation directive")) f.push("notes not injected");
+  console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K269_T"
+if [ "$K269_CHECK" = "OK" ]; then
+  pass "K269: consolidator render — lane_files pre-filled (terminal only), --notes-file injects <orchestrator_notes>"
+else
+  fail "K269: consolidator render broken — $K269_CHECK"
+fi
+
+# K270: structural synthesis trigger + single-source partition — the
+# consolidator contract activates on the <lane_files> structure (custom task
+# prose can't silently skip the marker), and the auto-partitioner routes
+# through register-lanes instead of hand-building a lanes YAML splice (one
+# sizing implementation, sidecars + diff artifacts for both partition paths).
+if /usr/bin/grep -q "trigger is STRUCTURAL" "$ROOT/agents/code-reviewer.md" \
+   && /usr/bin/grep -qF 'register-lanes --from="$PARTITION_JSON"' "$ROOT/workflows/code-review-parallel.md" \
+   && ! /usr/bin/grep -q "devt-lanes-block.yaml" "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -q "render-filled code-reviewer:code_review_parallel" "$ROOT/workflows/code-review-parallel.md"; then
+  pass "K270: structural synthesis trigger in agent body + auto-partitioner routes through register-lanes + consolidate documents the render path"
+else
+  fail "K270: synthesis trigger or partition single-sourcing regressed"
 fi
 
 echo

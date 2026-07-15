@@ -97,8 +97,8 @@ node bin/devt-tools.cjs init review "task"
 node bin/devt-tools.cjs state read|update|reset|validate|sync|prune
 node bin/devt-tools.cjs state read-section --file plan.md --section "Phase 2"
 node bin/devt-tools.cjs state cleanup [--apply] [--stale-days=N]
-node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py
-node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
+node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=a.py,b.py [--repo-root=<dir>] [--base=<ref>]
+node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>  # per-lane repo_root/base_ref supported; generates lane-diff-<id>.txt + diff-LOC size_class
 
 # Config + agent/model profiles
 node bin/devt-tools.cjs config get|set
@@ -129,7 +129,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 173-deep drift-guard stack K94-K266) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 177-deep drift-guard stack K94-K270) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

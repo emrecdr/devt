@@ -86,7 +86,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 <step name="partition_lanes" gate="lanes[] registered via state update-lane OR fallback to single-dispatch">
 
-> **Hand-rolled-partition shortcut:** If the orchestrator already knows the right lane breakdown (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely. Write a YAML file `/tmp/lanes.yaml` with `lanes: [{id: L1, scope: identity, files: [...]}, ...]`, then run `node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml && node bin/devt-tools.cjs dispatch render-lanes` — render-lanes emits paste-ready per-lane envelopes carrying the rubric self-grade directive + scope blocks + governing rules **by reference** (rules_hash + read-from-disk stubs + the Context-Loaded contract; pass `--inline-rules` to restore full rule bodies for worktree-isolated lanes). Hygiene-guard silences the registered (lane_id × scope_hint × file_set) tuples so the raw_dispatch warnings that field-evidenced unbounded raw-dispatch accumulation in long sessions don't fire. The auto-partitioner below is the FALLBACK when the partition isn't known up-front.
+> **Hand-rolled-partition shortcut:** If the orchestrator already knows the right lane breakdown (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely. Write a YAML file `/tmp/lanes.yaml` with `lanes: [{id: L1, scope: identity, files: [...]}, ...]` — each lane optionally carries `repo_root:` + `base_ref:` for cross-repo lanes (a sibling repository with its own diff base; sizing + the lane-diff artifact are computed in that repo). Lens lanes (plan-compliance, coverage audit) are file buckets like any other — register them with the files they inspect. Then run `node bin/devt-tools.cjs state register-lanes --from=/tmp/lanes.yaml && node bin/devt-tools.cjs dispatch render-lanes` — render-lanes emits paste-ready per-lane envelopes carrying the rubric self-grade directive + scope blocks + governing rules **by reference** (rules_hash + read-from-disk stubs + the Context-Loaded contract; pass `--inline-rules` to restore full rule bodies for worktree-isolated lanes). Hygiene-guard silences the registered (lane_id × scope_hint × file_set) tuples so the raw_dispatch warnings that field-evidenced unbounded raw-dispatch accumulation in long sessions don't fire. The auto-partitioner below is the FALLBACK when the partition isn't known up-front.
 
 Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise tries service-boundary auto-detect (R7-W6), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, `mode: "service_boundary"` when the graph has no community labels but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `packages/X/`, etc. — community field carries the service name), or `mode: "fallback"` when neither applies. The fallback case is the legacy path partition. The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
@@ -149,74 +149,48 @@ UNIQUE_PREFIXES=$(cut -d'|' -f1 "$GROUPS_FILE" | sort -u)
 PREFIX_COUNT=$(echo "$UNIQUE_PREFIXES" | /usr/bin/grep -cE '.')
 echo "partition_lanes: ${PREFIX_COUNT} groups (cap=5 in next step)"
 
-# Build lanes block. Each prefix becomes one lane. The lanes block is then
-# injected into workflow.yaml (replacing any prior lanes: section).
-# Per-lane sizing (B-VIII): file count + estimated LOC are computed so an
-# oversized lane (> 15 files OR > 800 LOC) is flagged before dispatch. Why:
-# lanes with ~25 files / ~1500 LOC consistently exhaust code-reviewer's
-# maxTurns budget on both dispatches. The thresholds are heuristics tunable
-# via .devt/config.json::workflow.lane_oversized_thresholds in future,
-# hardcoded here for now.
-TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-LANE_NUM=1
-OVERSIZED_COUNT=0
-echo "$UNIQUE_PREFIXES" | head -5 | while IFS= read -r PREFIX; do
-  [ -z "$PREFIX" ] && continue
-  SLUG=$(PREFIX_NAME="$PREFIX" node -e "const {slugifyLaneName} = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state.cjs'); console.log(slugifyLaneName(process.env.PREFIX_NAME))")
-  # Files belonging to this lane (filter the prefix-tagged groups file).
-  LANE_FILES=$(awk -F'|' -v p="$PREFIX" '$1 == p { print $2 }' "$GROUPS_FILE")
-  LANE_FILE_COUNT=$(echo "$LANE_FILES" | /usr/bin/grep -cE '.' || echo 0)
-  # LOC: sum wc -l across existing files. Non-existent paths contribute 0.
-  LANE_LOC=$(echo "$LANE_FILES" | while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    [ -f "$f" ] && wc -l < "$f" 2>/dev/null || echo 0
-  done | awk '{s+=$1} END {print s+0}')
-  OVERSIZED="false"
-  if [ "$LANE_FILE_COUNT" -gt 15 ] || [ "$LANE_LOC" -gt 800 ]; then
-    OVERSIZED="true"
-    OVERSIZED_COUNT=$((OVERSIZED_COUNT + 1))
-    echo "WARN: lane L${LANE_NUM} (${PREFIX}) oversized — ${LANE_FILE_COUNT} files / ${LANE_LOC} LOC exceeds 15/800 threshold; may exhaust maxTurns budget" >&2
-  fi
-  echo "  - id: \"L${LANE_NUM}\""
-  echo "    community: \"${PREFIX}\""
-  echo "    slug: \"${SLUG}\""
-  echo "    review_file: \".devt/state/review-lane-${SLUG}.md\""
-  echo "    status: \"in_flight\""
-  echo "    redispatch_count: 0"
-  echo "    dispatched_at: \"${TS}\""
-  echo "    file_count: ${LANE_FILE_COUNT}"
-  echo "    est_loc: ${LANE_LOC}"
-  echo "    oversized: ${OVERSIZED}"
-  LANE_NUM=$((LANE_NUM + 1))
-done > /tmp/devt-lanes-block.yaml
-
+# Build a partition JSON from the grouped files (cap 5 lanes) and register
+# through the canonical CLI — sizing (diff-LOC size_class), per-lane diff
+# artifacts (lane-diff-<id>.txt), and lane-files sidecars all come from
+# register-lanes, identical to hand-rolled partitions. This replaces a
+# hand-built YAML splice that duplicated sizing with a different (whole-file)
+# metric and skipped the sidecars render-lanes needs.
+PARTITION_JSON=$(mktemp)
 node -e '
 const fs = require("fs");
-const path = ".devt/state/workflow.yaml";
-let yaml = fs.readFileSync(path, "utf8");
-yaml = yaml.replace(/\nlanes:(\n[ \t][^\n]*)*/g, "");
-const lanesBlock = "lanes:\n" + fs.readFileSync("/tmp/devt-lanes-block.yaml", "utf8");
-fs.writeFileSync(path, yaml.trimEnd() + "\n" + lanesBlock);
-'
-rm -f /tmp/devt-lanes-block.yaml "$GROUPS_FILE"
+const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
+const groups = new Map();
+for (const line of lines) {
+  const i = line.indexOf("|");
+  if (i < 1) continue;
+  const prefix = line.slice(0, i), file = line.slice(i + 1);
+  if (!groups.has(prefix)) groups.set(prefix, []);
+  groups.get(prefix).push(file);
+}
+const lanes = [...groups.entries()].slice(0, 5).map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files }));
+fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
+' "$GROUPS_FILE" "$PARTITION_JSON"
+REG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state register-lanes --from="$PARTITION_JSON")
+rm -f "$PARTITION_JSON" "$GROUPS_FILE"
+printf '%s\n' "$REG" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring)'
 
 LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 LANE_COUNT=$(printf '%s\n' "$LANES_OUT" | jq '.lanes | length')
-echo "Partitioned into ${LANE_COUNT} lanes (path-based, cap=5)"
+echo "Partitioned into ${LANE_COUNT} lanes (cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
 ```
 
-**Oversized-lane surface (B-VIII)**: when any lane carries `oversized: true` in `workflow.yaml::lanes[]`, surface a one-line summary to the user with paths-based remediation hints. The orchestrator may proceed (the dispatch will still attempt the lane) or use AskUserQuestion to offer narrowing — see the AskUserQuestion block below. Why: lanes with ~25 files / ~1500 LOC consistently hit the maxTurns ceiling before findings can be written.
+**Lane-size surface**: `register-lanes` computes each lane's `size_class` from **diff LOC** (the lane's generated `lane-diff-<id>.txt`): `ok` < 3000 / `chunked` ≥ 3000 / `split` ≥ 8000, or `unknown` when diff generation fell back to whole-file counting (no threshold signal — whole-file LOC fired on every real lane and carried none). `chunked` needs no interruption — render-lanes auto-attaches the hunk-enumeration read strategy to those envelopes (field-proven at ~8000 diff lines). Only `split` lanes are surfaced to the user with remediation hints; the orchestrator may proceed (the dispatch will still attempt the lane) or use AskUserQuestion to offer narrowing — see the AskUserQuestion block below.
 
 ```bash
-OVERSIZED_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
-  jq -r '.lanes[] | select(.oversized == true) | "  - " + .id + " (" + .community + "): " + (.file_count|tostring) + " files / " + (.est_loc|tostring) + " LOC"')
-if [ -n "$OVERSIZED_LANES" ]; then
+SPLIT_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
+  jq -r '.lanes[] | select(.size_class == "split") | "  - " + .id + " (" + .community + "): " + (.est_loc|tostring) + " diff lines / " + (.file_count|tostring) + " files"')
+if [ -n "$SPLIT_LANES" ]; then
   echo ""
-  echo "⚠️ Oversized lane(s) detected — may exhaust code-reviewer maxTurns budget:"
-  echo "$OVERSIZED_LANES"
+  echo "⚠️ Split-recommended lane(s) — diff exceeds the budget a single lane dispatch handles well:"
+  echo "$SPLIT_LANES"
   echo ""
-  echo "Consider: (1) split the review into multiple PRs, (2) restrict scope via /devt:review --scope=<subset>, or (3) proceed and accept that oversized lanes may produce DONE_WITH_CONCERNS verdicts when budget runs out."
+  echo "Consider: (1) split the lane into two scopes via register-lane --overwrite, (2) restrict scope via /devt:review --scope=<subset>, or (3) proceed — the envelope carries the chunk-and-prioritize read strategy, but expect DONE_WITH_CONCERNS if budget runs out."
 fi
 ```
 
@@ -230,19 +204,12 @@ fi
 
 **Lane completion contract**: a lane is complete when its primary artifact + sidecar are written — teammate summary messages are NOT required (artifacts are canonical; a summary duplicates content the consolidator re-reads anyway).
 
-**Discoverability tip**: Each lane needs the canonical envelope per the Q8/Q11 contracts. Rather than hand-rolling N prompts (a documented failure mode), generate the paste-ready envelope per lane via:
+**Discoverability tip — BOTH dispatch shapes have a render CLI; hand-roll neither:**
 
-```bash
-for LANE_ID in $(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | jq -r '.[].id'); do
-  # Pin the per-lane envelope to the per-file review template explicitly. Using
-  # `:auto` would resolve to `code_review_parallel` (the synthesis template)
-  # while this workflow is active — wrong for lane dispatch, which is per-file
-  # review, not synthesis.
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review > "/tmp/lane-${LANE_ID}-envelope.txt"
-done
-```
+- **Per-lane envelopes**: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-lanes [--out=<dir>]` — one paste-ready envelope per registered lane with `<lane_id>`/`<lane_files>`/`<correlation_id>`/`<memory_affects>`/`<lane_diff>`+`<lane_method>` already injected (it pins the per-file review template internally; you never pass `:auto`). Per-lane focus + task suffix ride via `dispatch run-lanes` directive flags.
+- **Consolidator envelope**: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review_parallel [--notes-file=<path>]` — resolves the synthesis template with `<lane_files>` pre-filled from the registry (terminal lanes, foreign cids excluded — the same filter the pre-gate bash uses). `--notes-file` injects free-text `<orchestrator_notes>` (cross-lane reconciliation directives, validation evidence, hand-included-lane annotations) so run-specific judgment never requires hand-rolling the envelope.
 
-Then customize each `/tmp/lane-*-envelope.txt` with per-lane `<lane_id>` + `<lane_files>` injection before pasting into the parallel Task() calls. See `skills/dispatch-helpers/SKILL.md` for the worked example.
+See `skills/dispatch-helpers/SKILL.md` for the worked example.
 
 ```bash
 LANES_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-lanes-registered)
@@ -267,6 +234,7 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<lane_id>L<N></lane_id>`
 - `<lane_community>{community}</lane_community>`
 - `<lane_files>{files for this lane}</lane_files>`
+- `<lane_diff>{diff_artifact from the registry, when present}</lane_diff>` + `<lane_method>Read the lane diff FIRST — that diff IS the change under review (merge-base: committed + working tree + untracked); read full files only for context around changed hunks and cascade effects.</lane_method>` — mirror `dispatch render-lanes`, which injects both automatically; for `size_class: chunked|split` lanes it also appends the hunk-enumeration read strategy (`Grep '^diff --git'` the diff, then read file-by-file in priority order). Field-proven: the diff-first method is what let large lanes land within budget.
 - `<scope_trust>{cached from workflow.yaml::scope_trust_json}</scope_trust>`
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
@@ -462,7 +430,7 @@ for LF in $(echo "$LANE_FILES" | tr ',' ' '); do
 done
 ```
 
-Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction:
+Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction. Generate it via `dispatch render-filled code-reviewer:code_review_parallel [--notes-file=<path>]` — `<lane_files>` arrives pre-filled from the registry and `--notes-file` carries any run-specific reconciliation directives as `<orchestrator_notes>`; the agent's synthesis mode triggers structurally on a `<lane_files>` block listing review-lane artifacts, so customized task prose cannot silently skip the consolidator contract (marker step 0 included). The canonical shape:
 
 ```
 <!-- BEGIN dispatch:code-reviewer:code_review_parallel -->

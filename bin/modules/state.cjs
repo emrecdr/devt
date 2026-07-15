@@ -1378,6 +1378,7 @@ const STATE_FILE_CONTRACT = {
     "^research-[A-Za-z0-9_.-]+\\.md$",
     "^spec-[A-Za-z0-9_.-]+\\.md$",
     "^debug-(context|investigation|summary)-[A-Za-z0-9_.-]+\\.md$",
+    "^lane-diff-L\\d+\\.txt$",   // per-lane diff artifact from register-lane
   ],
   ephemeral_patterns: [
     "^\\..*\\.tmp$",       // hidden temp files
@@ -1519,6 +1520,9 @@ const RESET_SOFT_EVICT_PATTERNS = [
   /^review\.json$/,
   /^review-lane-.+\.md$/,
   /^review-lane-.+\.json$/,
+  // Per-lane diff artifacts are scope-bound like the lane outputs they feed —
+  // a stale diff read as "the change under review" is silent-wrong-input.
+  /^lane-diff-.+\.txt$/,
   /^graphify-impact-plan\.json$/,
 ];
 
@@ -6456,16 +6460,18 @@ function listLaneOutputs() {
     const status = (block.match(/^\s+status:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
     const redispatchCount = parseInt(
       (block.match(/^\s+redispatch_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
-    // B-VIII oversized-lane sizing — file_count / est_loc / oversized are
-    // optional fields written by code-review-parallel.md::partition_lanes.
-    // Absent when the lane was registered manually (pre-B-VIII workflows) or
-    // when the fields were stripped during a manual workflow.yaml edit.
+    // Lane sizing fields written by registerLane (both the auto-partitioner
+    // and hand-rolled partitions route through it). size_class is diff-LOC
+    // based (ok/chunked/split) or "unknown" when diff generation fell back to
+    // whole-file counting. Absent on lanes registered by older tool versions
+    // or stripped during a manual workflow.yaml edit.
     const fileCount = parseInt(
       (block.match(/^\s+file_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
     const estLoc = parseInt(
       (block.match(/^\s+est_loc:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
-    const oversizedRaw = (block.match(/^\s+oversized:\s*(true|false)\s*$/m) || [])[1];
-    const oversized = oversizedRaw === "true";
+    const sizeClass = (block.match(/^\s+size_class:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
+    const sizeBasis = (block.match(/^\s+size_basis:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
+    const diffArtifact = (block.match(/^\s+diff_artifact:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
     if (!id) continue;
     let sizeBytes = 0;
     let exists = false;
@@ -6523,7 +6529,9 @@ function listLaneOutputs() {
       redispatch_count: redispatchCount,
       file_count: fileCount,
       est_loc: estLoc,
-      oversized,
+      size_class: sizeClass,
+      size_basis: sizeBasis,
+      diff_artifact: diffArtifact,
       file_exists: exists,
       file_size_bytes: sizeBytes,
       stale,
@@ -6546,7 +6554,62 @@ function listLaneOutputs() {
 // handles primitive values only; arrays would corrupt).
 //
 // Returns {ok, lane: {...full metadata}} or {ok: false, reason}.
-function registerLane({ id, scope, files, allowOverwrite }) {
+//
+// Sizing is DIFF-based: est_loc counts the lines of the lane's generated diff
+// artifact (.devt/state/lane-diff-<id>.txt), not whole-file LOC. Whole-file
+// counting made the old 800-LOC threshold fire on every real lane (field:
+// six lanes at 14K–69K whole-file LOC, zero signal) while the quantity that
+// actually predicts lane budget is diff size. Field-calibrated size_class:
+//   ok      < 3000 diff lines — no special handling needed
+//   chunked ≥ 3000 — lands, but the envelope auto-attaches a chunk-and-
+//                    prioritize read instruction (proven at ~8000)
+//   split   ≥ 8000 — recommend splitting the lane
+//   unknown — diff generation failed (not a git repo / unreachable base);
+//             est_loc falls back to whole-file LOC, which carries no
+//             threshold signal, so no class is claimed
+// repo_root + base_ref are per-lane: a lane may live in a SIBLING repository
+// (field case: a frontend repo reviewed alongside the API repo) with its own
+// diff base — sizing and the diff artifact must be computed in that repo.
+const LANE_DIFF_CHUNKED_THRESHOLD = 3000;
+const LANE_DIFF_SPLIT_THRESHOLD = 8000;
+
+// Generates .devt/state/lane-diff-<id>.txt: merge-base diff of the lane's
+// files (committed + staged + unstaged in one pass) plus /dev/null diffs for
+// untracked lane files. Returns {ok, artifact, diff_lines} or {ok: false}.
+function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
+  const { execFileSync } = require("child_process");
+  const git = (argv, okCodes) => {
+    try {
+      return execFileSync("git", argv, { cwd: repoRoot, encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+    } catch (e) {
+      // git diff --no-index exits 1 when the files differ — that's the
+      // expected success path there, so callers opt specific codes in.
+      if (okCodes && e.status !== undefined && okCodes.includes(e.status) && typeof e.stdout === "string") return e.stdout;
+      throw e;
+    }
+  };
+  try {
+    let mergeBase = baseRef;
+    try { mergeBase = git(["merge-base", baseRef, "HEAD"]).trim() || baseRef; }
+    catch { /* unreachable base — two-dot against the ref itself below */ }
+    let body = git(["diff", mergeBase, "--", ...files]);
+    const untracked = new Set(git(["ls-files", "--others", "--exclude-standard", "--", ...files]).split("\n").map(s => s.trim()).filter(Boolean));
+    for (const f of files) {
+      const rel = path.isAbsolute(f) ? path.relative(repoRoot, f) : f;
+      if (!untracked.has(rel) && !untracked.has(f)) continue;
+      body += git(["diff", "--no-index", "--", "/dev/null", f], [1]);
+    }
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const artifact = path.join(stateDir, `lane-diff-${id}.txt`);
+    atomicWriteFileSync(artifact, body);
+    const diffLines = body === "" ? 0 : body.split("\n").length - 1;
+    return { ok: true, artifact, diff_lines: diffLines };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
   if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
     return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
   }
@@ -6562,6 +6625,14 @@ function registerLane({ id, scope, files, allowOverwrite }) {
   if (!fs.existsSync(wfPath)) {
     return { ok: false, reason: "no workflow.yaml — initialize a workflow first" };
   }
+  const laneRepoRoot = repoRoot ? path.resolve(repoRoot) : findProjectRoot();
+  let laneBaseRef = baseRef;
+  if (!laneBaseRef) {
+    try {
+      const cfg = require("./config.cjs").getMergedConfig();
+      laneBaseRef = (cfg.git && cfg.git.primary_branch) || "main";
+    } catch { laneBaseRef = "main"; }
+  }
   // Lock so concurrent register-lane calls don't lose entries on the
   // read-modify-write cycle. acquireLock() defaults to getStateDir() —
   // matches updateState/resetState/syncState/pruneState's lock idiom.
@@ -6574,15 +6645,27 @@ function registerLane({ id, scope, files, allowOverwrite }) {
       return { ok: false, reason: `lane id "${id}" already registered; pass --overwrite to replace` };
     }
     const slug = slugifyLaneName(scope);
-    let estLoc = 0;
-    for (const f of files) {
-      try {
-        const content = fs.readFileSync(f, "utf8");
-        estLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
-      } catch { /* file missing or unreadable — counts as 0 LOC */ }
+    const diff = generateLaneDiff({ id, files, repoRoot: laneRepoRoot, baseRef: laneBaseRef, stateDir: dir });
+    let estLoc;
+    let sizeBasis;
+    let sizeClass;
+    if (diff.ok) {
+      estLoc = diff.diff_lines;
+      sizeBasis = "diff";
+      sizeClass = estLoc >= LANE_DIFF_SPLIT_THRESHOLD ? "split"
+        : estLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
+    } else {
+      estLoc = 0;
+      for (const f of files) {
+        try {
+          const content = fs.readFileSync(f, "utf8");
+          estLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
+        } catch { /* file missing or unreadable — counts as 0 LOC */ }
+      }
+      sizeBasis = "whole_file";
+      sizeClass = "unknown";
     }
     const fileCount = files.length;
-    const oversized = fileCount > 15 || estLoc > 800;
     const reviewFile = path.join(dir, `review-lane-${slug}.md`);
     const registeredAt = new Date().toISOString();
     const laneEntry = {
@@ -6595,8 +6678,12 @@ function registerLane({ id, scope, files, allowOverwrite }) {
       registered_at: registeredAt,
       file_count: fileCount,
       est_loc: estLoc,
-      oversized,
+      size_basis: sizeBasis,
+      size_class: sizeClass,
+      repo_root: laneRepoRoot,
+      base_ref: laneBaseRef,
     };
+    if (diff.ok) laneEntry.diff_artifact = diff.artifact;
     if (existing !== -1) {
       lanes[existing] = laneEntry;
     } else {
@@ -6612,7 +6699,12 @@ function registerLane({ id, scope, files, allowOverwrite }) {
     atomicWriteFileSync(
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       path.join(sidecarDir, `${id}.json`),
-      JSON.stringify({ id, community: scope, files, registered_at: registeredAt }, null, 2) + "\n",
+      JSON.stringify({
+        id, community: scope, files, registered_at: registeredAt,
+        repo_root: laneRepoRoot, base_ref: laneBaseRef,
+        size_class: sizeClass, size_basis: sizeBasis, est_loc: estLoc,
+        diff_artifact: diff.ok ? diff.artifact : null,
+      }, null, 2) + "\n",
     );
     return { ok: true, lane: { ...laneEntry, files } };
   } finally {
@@ -6655,6 +6747,10 @@ function registerLanesFromYaml(filePath) {
         inFiles = false;
         const m = line.match(/scope:\s*"?([^"\n]+)"?\s*$/);
         if (m) current.scope = m[1].trim();
+      } else if (current && /^\s+(repo_root|base_ref):/.test(line)) {
+        inFiles = false;
+        const m = line.match(/(repo_root|base_ref):\s*"?([^"\n]+)"?\s*$/);
+        if (m) current[m[1]] = m[2].trim();
       } else if (current && /^\s+files:\s*\[/.test(line)) {
         // Inline array form: files: [a.py, b.py]
         inFiles = false;
@@ -6682,9 +6778,14 @@ function registerLanesFromYaml(filePath) {
       id: entry.id,
       scope: entry.scope,
       files: entry.files,
+      // Per-lane repo/base passthrough for cross-repo lanes (sibling
+      // repository with its own diff base). Accepts both snake_case (JSON/
+      // YAML convention) and camelCase.
+      repoRoot: entry.repo_root || entry.repoRoot,
+      baseRef: entry.base_ref || entry.baseRef,
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
-    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null });
+    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
@@ -7311,6 +7412,8 @@ function run(subcommand, args) {
         id: getFlag("id"),
         scope: getFlag("scope"),
         files: filesRaw ? filesRaw.split(",").map(s => s.trim()).filter(Boolean) : [],
+        repoRoot: getFlag("repo-root"),
+        baseRef: getFlag("base"),
         allowOverwrite: args.includes("--overwrite"),
       });
     }

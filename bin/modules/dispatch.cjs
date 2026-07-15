@@ -594,6 +594,42 @@ function cmdRenderFilled(target, options) {
     out += `\n<!-- rules-excluded: ${totalSectionsCut} sections (${kb} KB saved) -->\n`;
   }
 
+  // Consolidator envelope fill: the code_review_parallel synthesis template
+  // carries {lane_files_newline_separated}, which the generic substitution
+  // table can't know — it comes from the lane registry. Fill it with the
+  // same filter the consolidate step uses (terminal lanes, foreign cids out)
+  // so `render-filled code-reviewer:code_review_parallel` is paste-ready
+  // instead of leaving a placeholder the operator must hand-edit — the top
+  // field-reported reason the consolidator envelope got hand-rolled.
+  if (out.includes("{lane_files_newline_separated}")) {
+    try {
+      const { lanes } = require("./state.cjs").listLaneOutputs();
+      const laneFiles = (lanes || [])
+        .filter(l => (l.status === "substance_pass" || l.status === "deferred") && l.cid_match !== "foreign")
+        .map(l => l.review_file)
+        .filter(Boolean);
+      if (laneFiles.length > 0) {
+        out = out.replace("{lane_files_newline_separated}", laneFiles.join("\n"));
+      }
+    } catch { /* no registry — placeholder stays visible; envelope_health flags it */ }
+  }
+
+  // <orchestrator_notes> injection (--notes-file). Free-text run-specific
+  // directives ride inside <context> so custom judgment doesn't require
+  // hand-rolling the whole envelope. Unreadable file is a loud error, not a
+  // silent omission — the operator asked for notes, dropping them would be
+  // a silent reduction.
+  if (options && options.notesFile) {
+    let notes;
+    try { notes = require("fs").readFileSync(options.notesFile, "utf8").trim(); }
+    catch (e) { throw new Error(`--notes-file unreadable: ${e.message}`); }
+    if (notes) {
+      const block = `    <orchestrator_notes>\n${notes}\n    </orchestrator_notes>\n  `;
+      const lastIdx = out.lastIndexOf("</context>");
+      out = lastIdx >= 0 ? out.slice(0, lastIdx) + block + out.slice(lastIdx) : out + "\n" + block;
+    }
+  }
+
   // Context-Loaded contract rides with by-reference rules: the agent must
   // record which rules files it actually Read, so the consolidator/verifier
   // can check that a lane's reads cover the rules its findings depend on.
@@ -1056,8 +1092,16 @@ function run(subcommand, args) {
         ? excludeArg.slice("--rules-exclude=".length).split(",").map(s => s.trim()).filter(Boolean)
         : [];
       const rulesExclude = _mergeConfigRulesExclude(flagList);
+      // --notes-file=<path>: free-text orchestrator directives injected as an
+      // <orchestrator_notes> context block. The consolidator envelope is the
+      // primary consumer (cross-lane reconciliation directives, validation
+      // notes, hand-included-lane annotations) — the static template has no
+      // slot for run-specific judgment, which is why it got hand-rolled in
+      // the field. Generic: works for any render-filled target.
+      const notesArg = args.find(a => a.startsWith("--notes-file="));
+      const notesFile = notesArg ? notesArg.slice("--notes-file=".length) : undefined;
       let out;
-      try { out = cmdRenderFilled(target, { rulesExclude }); }
+      try { out = cmdRenderFilled(target, { rulesExclude, notesFile }); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
@@ -1420,6 +1464,20 @@ function cmdRenderLanes(target, options) {
     ];
     if (autoMemorySummary) {
       blockLines.push(`    <auto_memory>${autoMemorySummary}</auto_memory>`);
+    }
+    // Diff-first review method. Field-proven pattern: the per-lane diff
+    // artifact is what let lanes over huge whole-file footprints land within
+    // budget — the lane reads the diff as THE change under review and opens
+    // full files only for context around changed hunks. size_class=chunked/
+    // split additionally gets the hunk-enumeration read strategy (proven at
+    // ~8000 diff lines; without it a large diff gets one shallow pass).
+    if (lane.diff_artifact) {
+      blockLines.push(`    <lane_diff>${lane.diff_artifact}</lane_diff>`);
+      let method = `Read ${lane.diff_artifact} FIRST — that diff IS the change under review for this lane (merge-base diff: committed + working tree + untracked). Read full files only to verify context around changed hunks and cascade effects.`;
+      if (lane.size_class === "chunked" || lane.size_class === "split") {
+        method += ` The diff is large (${lane.est_loc} lines): enumerate per-file hunks first (Grep '^diff --git' against the diff file), then read it file-by-file in priority order rather than one pass.`;
+      }
+      blockLines.push(`    <lane_method>${method}</lane_method>`);
     }
     // M3 (cal #30.5) — optional directive blocks. Per
     // [[feedback_canonical_path_expressiveness]]: operators hand-roll when
