@@ -154,15 +154,15 @@ Then run the three gates against `$COUNCIL_SLUG`:
 # Re-run prevention (offramp §4 anti-pattern). Blocks if a transcript for this
 # slug already exists at the project state root. Pass --warn to proceed anyway.
 RECENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-not-recent "$COUNCIL_SLUG")
-if [ "$(echo "$RECENT" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] $(echo "$RECENT" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$RECENT" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] $(printf '%s\n' "$RECENT" | jq -r '.reason')"
   # Surface existing transcripts and exit unless user opts in.
 fi
 
 # Soft-cap (offramp §4 anti-pattern). Default max 1 council per workflow window.
 BUDGET=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-council-budget --max-per-workflow=1)
-if [ "$(echo "$BUDGET" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] $(echo "$BUDGET" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$BUDGET" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] $(printf '%s\n' "$BUDGET" | jq -r '.reason')"
 fi
 
 # Observability emit. Cal cycles measure council usage via gate-trace.jsonl.
@@ -342,8 +342,8 @@ load-bearing mechanic of Karpathy's design — do not skip it.
 
 ```bash
 DIVERSITY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-advisor-diversity /tmp/council-advisors-${COUNCIL_ID})
-if [ "$(echo "$DIVERSITY" | jq -r '.ok')" != "true" ]; then
-  echo "[DIVERSITY-WARN] $(echo "$DIVERSITY" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$DIVERSITY" | jq -r '.ok')" != "true" ]; then
+  echo "[DIVERSITY-WARN] $(printf '%s\n' "$DIVERSITY" | jq -r '.reason')"
   # Surface to user — chairman synthesis may amplify noise. Options: re-dispatch
   # with mixed-models, narrow the question to actual viable alternatives, or
   # proceed and let the chairman flag the collapse explicitly.

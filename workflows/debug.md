@@ -42,8 +42,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state evict-graphify
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${BUG_DESCRIPTION}"
 PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
-if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(printf '%s\n' "$PFRESH" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -62,7 +62,7 @@ SCOPE_TRUST=$(jq -c '{trust: (.graph_stats.trust // "empty"), lag_commits: .stal
 # the orchestrator wrote scope_trust before the prose, then never re-wrote.
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 STALE_THRESHOLD=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get graphify.stale_threshold 2>/dev/null | jq -r '.value // 30')
-LAG=$(echo "$SCOPE_TRUST" | jq -r '.lag_commits // "null"')
+LAG=$(printf '%s\n' "$SCOPE_TRUST" | jq -r '.lag_commits // "null"')
 SUPPRESS=""
 if [ "$GRAPHIFY_STATE" = "ready" ]; then
   if [ "$LAG" = "null" ]; then
@@ -72,7 +72,7 @@ if [ "$GRAPHIFY_STATE" = "ready" ]; then
   fi
 fi
 if [ -n "$SUPPRESS" ]; then
-  SCOPE_TRUST=$(echo "$SCOPE_TRUST" | jq '.trust = "sparse"')
+  SCOPE_TRUST=$(printf '%s\n' "$SCOPE_TRUST" | jq '.trust = "sparse"')
   printf '%s — %s\n' "$(date -u +%FT%TZ)" "$SUPPRESS" > .devt/state/staleness-suppressed.txt
 fi
 
@@ -87,10 +87,10 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scope_hint_json="${
 DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
 TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
 SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
+SYMBOLS_COUNT=$(printf '%s\n' "$SYMBOLS_JSON" | jq 'length')
 if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
   CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${BUG_DESCRIPTION:-}" 2>/dev/null | head -1)
-  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(printf '%s\n' "$SYMBOLS_JSON" | jq -r '.[0]')
   echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
 elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
   echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
@@ -114,8 +114,8 @@ Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast r
 
 ```bash
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
-if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(printf '%s\n' "$ASSERT" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -171,8 +171,8 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present debugger)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 
@@ -256,9 +256,9 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 
 ```bash
 CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
-if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -267,9 +267,9 @@ fi
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
-if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$RD_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -279,9 +279,9 @@ Aggregate tags from `debug-summary.md` / `impl-summary*.md` first so the gate se
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```

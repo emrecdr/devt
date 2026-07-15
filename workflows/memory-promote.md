@@ -70,8 +70,8 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
-if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(printf '%s\n' "$HARVEST" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -113,8 +113,8 @@ Each approved promotion produces one .devt/memory/{decisions,concepts,flows,reje
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present curator)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 

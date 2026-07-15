@@ -101,9 +101,9 @@ Run the compound context-init wrapper ONCE. It performs `init review`, activates
 
 ```bash
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" --primary-branch="${PRIMARY_BRANCH:-main}")
-PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
-  echo "BLOCKED: compound init failed — review-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  echo "BLOCKED: compound init failed — review-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
   exit 1
 fi
 ```
@@ -145,7 +145,7 @@ if [[ " ${REVIEW_SCOPE} " == *" --no-refresh "* ]] || [[ " ${REVIEW_SCOPE} " == 
   echo "[staleness] --no-refresh / --stale-ok: skipping staleness gate; forcing scope_trust.trust=sparse"
   STALENESS_TIER="bypass"
 else
-  STALENESS_TIER=$(echo "$CTX" | jq -r '.staleness_tier // "unknown"')
+  STALENESS_TIER=$(printf '%s\n' "$CTX" | jq -r '.staleness_tier // "unknown"')
 fi
 case "$STALENESS_TIER" in
   warn)               echo "[staleness] graph behind HEAD; caller-sets may be slightly stale (lag<threshold)";;
@@ -162,11 +162,11 @@ When `STALENESS_TIER` is `stale` or `unknown_lag`: issue the AskUserQuestion abo
 
 ```bash
 ARCH_FRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null || echo '{}')
-if [ "$(echo "$ARCH_FRESH" | jq -r '.warn // false')" = "true" ]; then
-  echo "[STALE-ARCH-SCAN] $(echo "$ARCH_FRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARCH_FRESH" | jq -r '.warn // false')" = "true" ]; then
+  echo "[STALE-ARCH-SCAN] $(printf '%s\n' "$ARCH_FRESH" | jq -r '.reason')"
 fi
-if [ "$(echo "$ARCH_FRESH" | jq -r '.ok // false')" != "true" ]; then
-  echo "[ARCH-SCAN-MISSING] $(echo "$ARCH_FRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARCH_FRESH" | jq -r '.ok // false')" != "true" ]; then
+  echo "[ARCH-SCAN-MISSING] $(printf '%s\n' "$ARCH_FRESH" | jq -r '.reason')"
 fi
 ```
 
@@ -177,21 +177,21 @@ If the diff under review touches files that arch-scan has flagged (cross-referen
 The wrapper computed the tier-decision tree in-process and wrote `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, symbol_anchored_caveat?, hunk_census?, severity_calibration_note?, topic_symbols_dropped_count?}`. Read the plan from the bundle (identical to the on-disk JSON) — the orchestrator then has ONE imperative instruction in substep 6, no "run the first matching" prose to skip past:
 
 ```bash
-TIER=$(echo "$CTX" | jq -r '.impact_plan.tier')
-TOOL=$(echo "$CTX" | jq -r '.impact_plan.tool')
-GIT_PROVIDER=$(echo "$CTX" | jq -r '.impact_plan.git_provider')
+TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier')
+TOOL=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tool')
+GIT_PROVIDER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.git_provider')
 echo "graphify_impact_plan: tier=$TIER tool=$TOOL provider=$GIT_PROVIDER"
 # Echo the pr_diff_caveat (if any) so reviewers see the new-files-not-indexed signal in stdout.
-PR_DIFF_CAVEAT=$(echo "$CTX" | jq -r '.impact_plan.pr_diff_caveat // empty')
+PR_DIFF_CAVEAT=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.pr_diff_caveat // empty')
 [ -n "$PR_DIFF_CAVEAT" ] && echo "pr_scoped_diff caveat: $PR_DIFF_CAVEAT"
 # Same blind spot on symbol_anchored: untracked / added-after-build files are invisible to the graph.
-SA_CAVEAT=$(echo "$CTX" | jq -r '.impact_plan.symbol_anchored_caveat // empty')
+SA_CAVEAT=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.symbol_anchored_caveat // empty')
 [ -n "$SA_CAVEAT" ] && echo "symbol_anchored caveat: $SA_CAVEAT"
 # Cosmetic-heavy diff → effect_size popularity warning (lanes must not inflate severity off it).
-SEV_NOTE=$(echo "$CTX" | jq -r '.impact_plan.severity_calibration_note // empty')
+SEV_NOTE=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.severity_calibration_note // empty')
 [ -n "$SEV_NOTE" ] && echo "severity calibration: $SEV_NOTE"
 # Echo the topic-symbol pre-truncation signal so reviewers see the dropped-list sidecar exists.
-DROPPED_COUNT=$(echo "$CTX" | jq -r '.impact_plan.topic_symbols_dropped_count // empty')
+DROPPED_COUNT=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.topic_symbols_dropped_count // empty')
 [ -n "$DROPPED_COUNT" ] && echo "topic.symbols pre-truncated: $DROPPED_COUNT symbols dropped → .devt/state/topic-symbols-dropped.json"
 ```
 
@@ -239,7 +239,7 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 
 ```bash
 AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impact-map --edge-threshold=50 --raw-count=${TOPIC_SYMBOLS_RAW_COUNT:-?} 2>/dev/null || echo '{}')
-echo "graphify augment-impact-map: $(echo "$AUGMENT" | jq -r 'if (.sections_appended // []) | length == 0 then "no sections (clean)" else "appended " + (.sections_appended | join(", ")) end')"
+echo "graphify augment-impact-map: $(printf '%s\n' "$AUGMENT" | jq -r 'if (.sections_appended // []) | length == 0 then "no sections (clean)" else "appended " + (.sections_appended | join(", ")) end')"
 ```
 
 Why: a large module file (e.g. ~2,400 LOC) may be a god node, but the symbol-anchored anchor list can miss it because the diff's PascalCase symbols don't include module-level identifiers from that file. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
@@ -258,13 +258,13 @@ After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.t
 
 ```bash
 PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
-if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(printf '%s\n' "$PFRESH" | jq -r '.reason')"
   exit 1
 fi
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
-if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(printf '%s\n' "$ASSERT" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -298,8 +298,8 @@ EOF
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
-if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(printf '%s\n' "$HARVEST" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -309,20 +309,20 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 **Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline already cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6). It runs on every review so its recommendation accumulates a track record against reality: light must be EARNED (proven absence of god-node + risk-surface path), never granted by a single metric.
 
 ```bash
-RW_TIER=$(echo "$CTX" | jq -r '.impact_plan.tier // empty')
-RW_GOD=$(echo "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
+RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
+RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
 RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
 RW_ARGS="--base=${PRIMARY_BRANCH:-main}"
 [ -n "$RW_TIER" ]   && RW_ARGS="$RW_ARGS --tier=$RW_TIER"
 [ -n "$RW_GOD" ]    && RW_ARGS="$RW_ARGS --god-node=$RW_GOD"
 [ -n "$RW_EFFECT" ] && RW_ARGS="$RW_ARGS --effect-size=$RW_EFFECT"
 RW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight assess $RW_ARGS 2>/dev/null || echo '{}')
-if [ "$(echo "$RW" | jq -r '.eligible // false')" = "true" ]; then
-  echo "[review-weight] LIGHT-eligible — $(echo "$RW" | jq -r '.logic_file_count') logic file(s), $(echo "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
+if [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
+  echo "[review-weight] LIGHT-eligible — $(printf '%s\n' "$RW" | jq -r '.logic_file_count') logic file(s), $(printf '%s\n' "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
 else
-  echo "[review-weight] HEAVY recommended — $(echo "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
+  echo "[review-weight] HEAVY recommended — $(printf '%s\n' "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
 fi
-RW_ADV=$(echo "$RW" | jq -r '(.advisories // []) | join("; ")')
+RW_ADV=$(printf '%s\n' "$RW" | jq -r '(.advisories // []) | join("; ")')
 [ -n "$RW_ADV" ] && echo "[review-weight] advisories (non-blocking): $RW_ADV"
 ```
 </step>
@@ -339,13 +339,13 @@ Measure the file count in the review scope. If > 10 files AND graphify is ready,
 # measuring that artifact here read 0 on every fresh run — the file-size
 # path to parallel was only reachable via the operator-intent short-circuit
 # or a leftover file from a prior run. Prefer the artifact when it already
-# exists (pre-written scope escape hatch); otherwise count the same
-# merge-base-aware diff identify_scope strategy 2 uses.
+# exists (pre-written scope escape hatch); otherwise count the same union
+# (committed range + working tree + untracked) identify_scope strategy 2
+# uses — a raw base...HEAD count reads 0 on uncommitted work.
 if [ -s .devt/state/code-review-input.md ]; then
   SCOPE_FILE_COUNT=$(awk '/^- /{n++} END{print n+0}' .devt/state/code-review-input.md 2>/dev/null || echo 0)
 else
-  DIFF_FILES=$(git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null || echo "")
-  SCOPE_FILE_COUNT=$(printf '%s\n' "$DIFF_FILES" | sed '/^$/d' | wc -l | tr -d ' ')
+  SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.count // 0')
 fi
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 echo "scope_check: file_count=${SCOPE_FILE_COUNT}, graphify_state=${GRAPHIFY_STATE}"
@@ -413,9 +413,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check s
 
 ```bash
 SCOPE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-scope-check-handled)
-if echo "$SCOPE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$SCOPE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$SCOPE_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$SCOPE_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -423,14 +423,11 @@ fi
 Determine which files to review. Use ONE of these strategies (in priority order):
 
 1. **User-specified files**: If the user provided specific file paths or patterns, use those.
-2. **Git diff**: If no files were specified, detect changed files. Use the merge-base-aware triple-dot pattern (commits on HEAD not on the primary branch) — matches the canonical pattern at `scope_check` (L207/L252) and avoids the silent wrong-range bug on multi-commit feature branches where `HEAD~1` only captures the latest commit:
+2. **Git diff**: If no files were specified, detect changed files via the union CLI — committed range (merge-base-aware triple-dot) PLUS working tree PLUS untracked. Raw `git diff base...HEAD` returns an EMPTY set exactly when the review target is uncommitted work, silently under-scoping the review:
    ```bash
-   git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null \
-     || git diff --name-only HEAD~1 2>/dev/null \
-     || git diff --name-only --staged 2>/dev/null \
-     || echo "NO_DIFF"
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.files[]'
    ```
-   Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review.
+   Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review; without the flag the CLI defaults to `.devt/config.json::git.primary_branch`, then `main`.
 3. **Impl-summary**: If `.devt/state/impl-summary.md` exists from a prior workflow, extract the file list from it.
 4. **User prompt**: If none of the above yields results, ask the user which files to review.
 
@@ -463,9 +460,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scop
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 
 # Skip-context injection — when graphify-skip-reason.txt exists, the reviewer
 # should know the impact-map is intentionally absent (not "graphify failed").
@@ -573,8 +570,8 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present code-reviewer)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 
@@ -599,9 +596,9 @@ Grader-driven thoroughness check. The verifier reads `references/rubrics/code_re
 
 ```bash
 SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output .devt/state/review.md)
-if echo "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
+if printf '%s\n' "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
-  echo "BLOCKED: review.md looks like a stub — $(echo "$SUBSTANCE" | jq -r '.reason')"
+  echo "BLOCKED: review.md looks like a stub — $(printf '%s\n' "$SUBSTANCE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -612,7 +609,7 @@ When this gate trips, surface the substance reason to the user and recommend `/d
 
 ```bash
 SHORT_CIRCUIT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-short-circuit --agent=code-reviewer)
-if echo "$SHORT_CIRCUIT" | jq -e '.short_circuit == true' >/dev/null 2>&1; then
+if printf '%s\n' "$SHORT_CIRCUIT" | jq -e '.short_circuit == true' >/dev/null 2>&1; then
   # Write a synthetic verification.json so the downstream assert-verifier-ran
   # gate accepts the skip. Audit trail preserved via source=short_circuit.
   # Schema enums per JSON_SIDECAR_SCHEMAS::verification.json — VERIFICATION_STATUSES
@@ -624,13 +621,13 @@ if echo "$SHORT_CIRCUIT" | jq -e '.short_circuit == true' >/dev/null 2>&1; then
   "verdict": "satisfied",
   "agent": "verifier",
   "source": "short_circuit",
-  "reason": "$(echo "$SHORT_CIRCUIT" | jq -r '.reason')",
-  "sidecar_consulted": "$(echo "$SHORT_CIRCUIT" | jq -r '.sidecar_path')",
+  "reason": "$(printf '%s\n' "$SHORT_CIRCUIT" | jq -r '.reason')",
+  "sidecar_consulted": "$(printf '%s\n' "$SHORT_CIRCUIT" | jq -r '.sidecar_path')",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=DONE verdict=PASS
-  echo "VERIFIER SHORT-CIRCUITED: $(echo "$SHORT_CIRCUIT" | jq -r '.reason')"
+  echo "VERIFIER SHORT-CIRCUITED: $(printf '%s\n' "$SHORT_CIRCUIT" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -643,9 +640,9 @@ If short-circuit fires, the verify step is complete — skip the rest of this st
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute the JSON output into the `<memory_signal>` block in the dispatch prompt below. If `.devt/memory/` is empty or the query fails, the fallback `{}` keeps the block well-formed and the agent falls back to fresh queries.
@@ -706,10 +703,10 @@ VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.ver
 
 ```bash
 AXES_ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-graded-all-axes 2>/dev/null)
-AXES_OK=$(echo "$AXES_ASSERT" | jq -r '.ok // false')
+AXES_OK=$(printf '%s\n' "$AXES_ASSERT" | jq -r '.ok // false')
 AXES_COVERAGE_GAP=false
 if [ "$AXES_OK" = "false" ]; then
-  AXES_REASON=$(echo "$AXES_ASSERT" | jq -r '.reason // "verifier under-graded the rubric"')
+  AXES_REASON=$(printf '%s\n' "$AXES_ASSERT" | jq -r '.reason // "verifier under-graded the rubric"')
   echo "[axes-coverage] $AXES_REASON"
   AXES_COVERAGE_GAP=true
   # Force needs_revision regardless of verifier's self-reported verdict — its
@@ -815,9 +812,9 @@ When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch �
 
 ```bash
 CURATOR_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-auto-curator-considered)
-if echo "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CURATOR_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CURATOR_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -826,9 +823,9 @@ fi
 
 ```bash
 VERIF_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-ran)
-if echo "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$VERIF_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$VERIF_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -839,9 +836,9 @@ When the gate trips, surface the reason to the user and recommend re-running the
 
 ```bash
 CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
-if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -850,9 +847,9 @@ fi
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
-if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$RD_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -864,9 +861,9 @@ Aggregate first so any tags the reviewer placed in `review.md` / `impl-summary*.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```

@@ -152,9 +152,9 @@ Run the compound context-init wrapper ONCE. It performs `init workflow`, activat
 
 ```bash
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=dev --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
-PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
-  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
   exit 1
 fi
 ```
@@ -239,9 +239,9 @@ When `workflow.yaml::autonomous=true`, skip the prompt and force `scope_trust.tr
 # bash that was duplicated in quick-implement.md::graphify_scan_prep. Returns
 # {decision, central_symbol, dependents, trust, threshold, symbols_count, reason}.
 SCAN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scan-prep --scope="${TASK_DESCRIPTION}")
-DECISION=$(echo "$SCAN" | jq -r '.decision')
-CENTRAL_SYMBOL=$(echo "$SCAN" | jq -r '.central_symbol // empty')
-echo "graphify_scan_prep: $DECISION — $(echo "$SCAN" | jq -r '.reason // ("central=" + (.central_symbol // "?") + " dependents=" + (.dependents|tostring) + " trust=" + .trust)')"
+DECISION=$(printf '%s\n' "$SCAN" | jq -r '.decision')
+CENTRAL_SYMBOL=$(printf '%s\n' "$SCAN" | jq -r '.central_symbol // empty')
+echo "graphify_scan_prep: $DECISION — $(printf '%s\n' "$SCAN" | jq -r '.reason // ("central=" + (.central_symbol // "?") + " dependents=" + (.dependents|tostring) + " trust=" + .trust)')"
 ```
 
 The CLI emits exactly one of `graphify_scan_prep: ACTIVE` / `graphify_scan_prep: RECOVERY` / `graphify_scan_prep: SKIP` (also in `$DECISION`). Act on it:
@@ -261,13 +261,13 @@ Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast r
 
 ```bash
 PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
-if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(printf '%s\n' "$PFRESH" | jq -r '.reason')"
   exit 1
 fi
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
-if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(printf '%s\n' "$ASSERT" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -521,9 +521,9 @@ When building the programmer's prompt, omit the `<arch_review>` and `<research>`
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. Both blocks are byte-stable across retry iterations within a workflow run, so the cache hits across dispatches.
@@ -544,7 +544,7 @@ if [ -n "$TASK_TEXT" ]; then
   } > .devt/state/reuse-search-attempted.txt
   REUSE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state derive-reuse-candidates "$TASK_TEXT" 2>/dev/null || echo '{"ok":false,"error":"cli_failed"}')
   echo "result=${REUSE_RESULT}" >> .devt/state/reuse-search-attempted.txt
-  REUSE_COUNT=$(echo "$REUSE_RESULT" | jq -r '.candidates_total // 0')
+  REUSE_COUNT=$(printf '%s\n' "$REUSE_RESULT" | jq -r '.candidates_total // 0')
   echo "reuse-search: ${REUSE_COUNT} candidates → .devt/state/reuse-candidates.md"
 fi
 ```
@@ -613,8 +613,8 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present programmer)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 # Rate-limit-mid-section recovery diagnostic. The PARTIAL contract triggers
 # at section boundaries; a rate-limit mid-section leaves impl-summary.md at
@@ -622,17 +622,17 @@ fi
 # reads dispatch-warnings.jsonl::task_output_bytes + on-disk impl-summary
 # substance and returns a recovery decision the orchestrator routes on.
 PARTIAL_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state recover-partial-impl programmer 2>/dev/null || echo '{}')
-if [ "$(echo "$PARTIAL_CHECK" | jq -r '.recovery_needed // false')" = "true" ]; then
-  SUGGESTED=$(echo "$PARTIAL_CHECK" | jq -r '.suggested_action // ""')
+if [ "$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.recovery_needed // false')" = "true" ]; then
+  SUGGESTED=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.suggested_action // ""')
   if [ "$SUGGESTED" = "targeted-fix" ]; then
-    MODE=$(echo "$PARTIAL_CHECK" | jq -r '.mode // ""')
-    MISSING=$(echo "$PARTIAL_CHECK" | jq -r '.drift.missing_sections // [] | join(", ")')
+    MODE=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.mode // ""')
+    MISSING=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.drift.missing_sections // [] | join(", ")')
     echo "[STRUCTURAL_DRIFT_DETECTED] mode=${MODE}"
     echo "[STRUCTURAL_DRIFT_DETECTED] missing_sections=${MISSING}"
-    echo "[STRUCTURAL_DRIFT_DETECTED] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+    echo "[STRUCTURAL_DRIFT_DETECTED] $(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.reason // ""')"
   else
     echo "[PARTIAL_IMPL_RECOVERY] suggested_action=${SUGGESTED}"
-    echo "[PARTIAL_IMPL_RECOVERY] $(echo "$PARTIAL_CHECK" | jq -r '.reason // ""')"
+    echo "[PARTIAL_IMPL_RECOVERY] $(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.reason // ""')"
   fi
 fi
 ```
@@ -684,9 +684,9 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 ```bash
 # KEEP IN SYNC: mirrored in quick-implement.md test step
 REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
-if echo "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$REUSE_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$REUSE_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -775,9 +775,9 @@ _Skip this step if `review` is listed in `skipped_phases` from workflow state._
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below.
@@ -899,8 +899,8 @@ EOF
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
-if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(printf '%s\n' "$HARVEST" | jq -r '.reason')"
   exit 1
 fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
@@ -961,9 +961,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review_deferr
 
 ```bash
 CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
-if echo "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -972,9 +972,9 @@ fi
 
 ```bash
 RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
-if echo "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$RD_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -984,9 +984,9 @@ Aggregate any tags the programmer placed inside `impl-summary*.md` (the aggregat
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```

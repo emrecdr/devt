@@ -8754,8 +8754,10 @@ touch -d "3 minutes ago" "$M8_TMP/.devt/state/preflight-brief.json" 2>/dev/null 
 M8_PFRESH=$(cd "$M8_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.ok===true?'1':'0');}catch(e){console.log('err');}})")
 # For assert-graphify-decision: fabricate graph-impact.md + trace records.
 # Trace has 1 get_neighbors call under the ORIGINAL workflow_id (the rotated
-# id has zero). Without HF-1, gate counts 0 → fabricated; with HF-1, gate
-# unions both ids → 1 found → not fabricated.
+# id has zero), timestamped INSIDE the session window (after first_created_at)
+# — the gate accepts the whole session id chain but bounds records by ts >=
+# first_created_at (history survives reset-soft, so a pre-anchor record is a
+# prior session's). Without the chain union, gate counts 0 → fabricated.
 cat > "$M8_TMP/.devt/state/graph-impact.md" <<'EOF'
 # Graph Impact
 
@@ -8764,8 +8766,9 @@ cat > "$M8_TMP/.devt/state/graph-impact.md" <<'EOF'
 ## Drill-down: Bar
 - Real drill-down content with at least two hundred bytes of substantive narrative explaining the callers and their relationships. Each callsite is documented here to satisfy the substance gate's per-section minimum byte threshold check.
 EOF
-cat > "$M8_TMP/.devt/memory/_mcp-trace.jsonl" <<'EOF'
-{"ts":"2026-05-29T08:00:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true,"workflow_id":"original-anchor","correlation_id":"abcd1234"}
+M8_TRACE_TS=$(date -u -d "-4 minutes" +%FT%TZ 2>/dev/null || date -u -v-4M +%FT%TZ)
+cat > "$M8_TMP/.devt/memory/_mcp-trace.jsonl" <<EOF
+{"ts":"${M8_TRACE_TS}","tool":"mcp__devt-graphify__get_neighbors","ok":true,"workflow_id":"original-anchor","correlation_id":"abcd1234"}
 EOF
 M8_GDEC=$(cd "$M8_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log((j.mcp_get_neighbors_calls===1 && j.fabricated_drill_down===false)?'1':'0');}catch(e){console.log('err');}})")
 if [ "$M8_PFRESH" = "1" ] && [ "$M8_GDEC" = "1" ]; then
@@ -13526,13 +13529,13 @@ else
   fail "K135: docs/GRAPHIFY.md missing tier-semantics positioning string"
 fi
 
-# K136: code-review.md identify_scope uses merge-base-aware diff (not HEAD~1).
-# Field calibration: a field project's multi-commit feature branch was silently
+# K136: identify_scope diff resolution captures ALL branch commits (not just
+# HEAD~1). Field calibration: a multi-commit feature branch was silently
 # diffed at HEAD~1 (single commit) instead of merge-base (whole branch).
-# L207/L252 already use ${PRIMARY_BRANCH:-main}...HEAD; L495 had diverged.
-# This gate enforces alignment across all three sites in the same workflow.
-# Behavioral test: build 3-commit branch, run the corrected pattern, assert
-# diff captures all 3 commits' files (not just the latest).
+# The pattern now lives in `state changed-files` (collectChangedFiles union:
+# merge-base triple-dot + working tree + untracked), which identify_scope
+# consumes — so the behavioral assertion runs the CLI on a 3-commit fixture
+# and requires every commit's files plus an uncommitted one.
 K136_TMP=$(mktemp -d)
 (
   cd "$K136_TMP"
@@ -13544,20 +13547,24 @@ K136_TMP=$(mktemp -d)
   echo "c1" > c1.txt && git add c1.txt && git -c commit.gpgsign=false commit -q -m "c1"
   echo "c2" > c2.txt && git add c2.txt && git -c commit.gpgsign=false commit -q -m "c2"
   echo "c3" > c3.txt && git add c3.txt && git -c commit.gpgsign=false commit -q -m "c3"
+  echo "wt" > wt.txt
 ) >/dev/null 2>&1
-K136_MERGE_BASE_DIFF=$(cd "$K136_TMP" && git diff --name-only "${PRIMARY_BRANCH:-main}...HEAD" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+K136_UNION=$(cd "$K136_TMP" && node "$CLI" state changed-files --base=main 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { console.log(JSON.parse(s).files.sort().join(",")); } catch(e) { console.log("parse-error"); }
+});' 2>/dev/null || echo "cli-error")
 K136_HEAD1_DIFF=$(cd "$K136_TMP" && git diff --name-only HEAD~1 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
 rm -rf "$K136_TMP"
-# merge-base pattern must capture c1+c2+c3 (3 commits); HEAD~1 only captures c3 (1 commit)
-if [ "$K136_MERGE_BASE_DIFF" = "c1.txt,c2.txt,c3.txt" ] && [ "$K136_HEAD1_DIFF" = "c3.txt" ]; then
-  # Confirm the workflow actually uses the merge-base pattern at L495 (not HEAD~1 alone)
-  if /usr/bin/grep -qE 'PRIMARY_BRANCH:-main.*\.\.\.HEAD' "$ROOT/workflows/code-review.md"; then
-    pass "K136: code-review.md identify_scope uses merge-base-aware diff (captures all branch commits, not just HEAD~1)"
+# union must capture c1+c2+c3 (all branch commits) AND wt.txt (untracked);
+# HEAD~1 only captures c3 — the silent under-scope this gate exists to block
+if [ "$K136_UNION" = "c1.txt,c2.txt,c3.txt,wt.txt" ] && [ "$K136_HEAD1_DIFF" = "c3.txt" ]; then
+  if /usr/bin/grep -q 'state changed-files' "$ROOT/workflows/code-review.md"; then
+    pass "K136: identify_scope diff resolution — changed-files union captures all branch commits + working tree (not just HEAD~1)"
   else
-    fail "K136: code-review.md missing merge-base pattern \${PRIMARY_BRANCH:-main}...HEAD"
+    fail "K136: code-review.md identify_scope no longer consumes 'state changed-files'"
   fi
 else
-  fail "K136: diff-base behavior unexpected — merge-base=$K136_MERGE_BASE_DIFF head1=$K136_HEAD1_DIFF"
+  fail "K136: diff-base behavior unexpected — union=$K136_UNION head1=$K136_HEAD1_DIFF"
 fi
 
 # K137: state reset-soft clears per-workflow accumulators while preserving
@@ -15552,13 +15559,14 @@ fi
 # K219: scope_check measures its own scope source — the step runs before
 # identify_scope writes code-review-input.md, so the old wc-l read of that
 # artifact was always 0 on fresh runs (file-size path to parallel unreachable).
-# Lock: artifact-read-as-primary gone; git-diff-derived count present.
+# Lock: artifact-read-as-primary gone; count derives from the changed-files
+# union CLI (same source identify_scope consumes).
 K219_OLD=$(/usr/bin/grep -c 'wc -l < .devt/state/code-review-input.md' "$ROOT/workflows/code-review.md" || true)
-K219_DIFF=$(/usr/bin/grep -c 'DIFF_FILES=' "$ROOT/workflows/code-review.md" || true)
+K219_DIFF=$(/usr/bin/grep -cF 'SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files' "$ROOT/workflows/code-review.md" || true)
 if [ "$K219_OLD" = "0" ] && [ "$K219_DIFF" -ge 1 ]; then
-  pass "K219: scope_check derives file count from git diff (artifact wc-l read gone, DIFF_FILES source present)"
+  pass "K219: scope_check derives file count from the changed-files union CLI (artifact wc-l read gone)"
 else
-  fail "K219: scope_check source wrong — old_read=$K219_OLD(exp 0) diff_source=$K219_DIFF(exp >=1)"
+  fail "K219: scope_check source wrong — old_read=$K219_OLD(exp 0) union_source=$K219_DIFF(exp >=1)"
 fi
 
 # K220: update-lane override_reason audit ledger — an override with a reason
@@ -16554,6 +16562,217 @@ if [ "$K259_CHECK" = "OK" ]; then
   pass "K259: cross-lane overlap warning — double-assigned file surfaced with owning lanes (warn-only, registration still succeeds)"
 else
   fail "K259: overlap warning broken — $K259_CHECK"
+fi
+
+# K260: chain-aware lane cid matching — a lane stamped under an INTERMEDIATE
+# workflow_id rotation must classify "current" (field failure: the
+# code_review → code_review_parallel transition rotated the id and the
+# foreign-cid filter dropped a live lane from consolidation). Outside-chain
+# cids stay foreign; chain-matched but pre-anchor mtime stays foreign
+# (prior-session leak defense — history survives resetSoft).
+K260_T=$(mktemp -d)
+mkdir -p "$K260_T/.devt/state"
+cat > "$K260_T/.devt/state/workflow.yaml" <<'K260EOF'
+active: true
+workflow_type: code_review_parallel
+first_created_at: "2026-01-01T10:00:00.000Z"
+original_workflow_id: aaaaaaaa-1111-2222-3333-444444444444
+workflow_id_history: "[\"aaaaaaaa-1111-2222-3333-444444444444\",\"bbbbbbbb-1111-2222-3333-444444444444\",\"cccccccc-1111-2222-3333-444444444444\"]"
+workflow_id: cccccccc-1111-2222-3333-444444444444
+lanes:
+  - id: "L1"
+    community: "intermediate"
+    review_file: ".devt/state/review-lane-a.md"
+    status: "substance_pass"
+  - id: "L2"
+    community: "outside"
+    review_file: ".devt/state/review-lane-b.md"
+    status: "substance_pass"
+  - id: "L3"
+    community: "pre-anchor"
+    review_file: ".devt/state/review-lane-c.md"
+    status: "substance_pass"
+K260EOF
+echo "lane cid_bbbbbbbb_L1" > "$K260_T/.devt/state/review-lane-a.md"
+echo "lane cid_99999999_L2" > "$K260_T/.devt/state/review-lane-b.md"
+echo "lane cid_aaaaaaaa_L3" > "$K260_T/.devt/state/review-lane-c.md"
+touch -t 202501010900 "$K260_T/.devt/state/review-lane-c.md"
+K260_CHECK=$(cd "$K260_T" && node "$CLI" state list-lane-outputs 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s);
+    const by = Object.fromEntries((j.lanes||[]).map(l=>[l.id,l]));
+    const f = [];
+    if (!by.L1 || by.L1.cid_match !== "current") f.push("intermediate-chain cid not current: " + (by.L1 && by.L1.cid_match));
+    if (!by.L2 || by.L2.cid_match !== "foreign") f.push("outside-chain cid not foreign");
+    if (!by.L3 || by.L3.cid_match !== "foreign") f.push("pre-anchor chain cid not foreign");
+    if (!by.L1 || by.L1.cid_prefix !== "bbbbbbbb") f.push("cid_prefix not surfaced");
+    console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K260_T"
+if [ "$K260_CHECK" = "OK" ]; then
+  pass "K260: chain-aware lane cid — intermediate-rotation lane stays current, outside-chain + pre-anchor stay foreign, cid_prefix surfaced"
+else
+  fail "K260: chain-aware cid broken — $K260_CHECK"
+fi
+
+# K261: chain-aware fabricated-drill-down gate — get_neighbors trace records
+# under an intermediate rotation id count as real; pre-anchor and
+# outside-chain records are excluded (same field failure as K260, gate
+# surface: 3 real MCP calls counted as zero → false "fabricated" verdict).
+K261_T=$(mktemp -d)
+mkdir -p "$K261_T/.devt/state" "$K261_T/.devt/memory" "$K261_T/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K261_T/.devt/config.json"
+echo '{"nodes":[],"links":[]}' > "$K261_T/graphify-out/graph.json"
+echo '{"tier":"symbol_anchored"}' > "$K261_T/.devt/state/graphify-impact-plan.json"
+cat > "$K261_T/.devt/state/workflow.yaml" <<'K261EOF'
+active: true
+workflow_type: code_review_parallel
+first_created_at: "2026-01-01T10:00:00.000Z"
+original_workflow_id: aaaaaaaa-1111-2222-3333-444444444444
+workflow_id_history: "[\"aaaaaaaa-1111-2222-3333-444444444444\",\"bbbbbbbb-1111-2222-3333-444444444444\",\"cccccccc-1111-2222-3333-444444444444\"]"
+workflow_id: cccccccc-1111-2222-3333-444444444444
+K261EOF
+{
+  echo "# Graph Impact"
+  echo ""
+  echo "## Drill-down: FooService [call: cid_deadbeef]"
+  echo ""
+  printf 'Substantive neighbor analysis body — enough bytes to clear the two-hundred-byte drill-down substance threshold used by the gate. %.0s' 1 2 3
+  echo ""
+} > "$K261_T/.devt/state/graph-impact.md"
+cat > "$K261_T/.devt/memory/_mcp-trace.jsonl" <<'K261EOF'
+{"workflow_id":"bbbbbbbb-1111-2222-3333-444444444444","ts":"2026-01-01T09:00:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true}
+{"workflow_id":"bbbbbbbb-1111-2222-3333-444444444444","ts":"2026-01-01T10:30:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true}
+{"workflow_id":"99999999-1111-2222-3333-444444444444","ts":"2026-01-01T10:31:00.000Z","tool":"mcp__devt-graphify__get_neighbors","ok":true}
+K261EOF
+K261_CHECK=$(cd "$K261_T" && node "$CLI" state assert-graphify-decision 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s);
+    const ok = j.mcp_get_neighbors_calls === 1 && j.fabricated_drill_down === false;
+    console.log(ok ? "OK" : "FAIL:calls=" + j.mcp_get_neighbors_calls + " fabricated=" + j.fabricated_drill_down);
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K261_T"
+if [ "$K261_CHECK" = "OK" ]; then
+  pass "K261: chain-aware drill-down gate — intermediate-rotation trace record counts, pre-anchor + outside-chain excluded"
+else
+  fail "K261: gate chain matching broken — $K261_CHECK"
+fi
+
+# K262: zsh-safe JSON piping — no prose surface pipes a shell variable into
+# jq via echo. zsh's builtin echo interprets backslash escapes, so JSON
+# carrying regex sources (e.g. review-weight risk_surface patterns with
+# `\\.`) becomes invalid mid-pipe (field failure: jq "Invalid escape" on
+# perfectly valid CLI output). printf '%s\n' is the byte-safe idiom.
+K262_COUNT=$({ /usr/bin/grep -rE 'echo "\$[A-Za-z_][A-Za-z0-9_]*" \| jq' "$ROOT/workflows" "$ROOT/agents" "$ROOT/commands" "$ROOT/skills" "$ROOT/templates" 2>/dev/null || true; } | wc -l | tr -d " ")
+if [ "$K262_COUNT" = "0" ]; then
+  pass "K262: zsh-safe JSON piping — zero 'echo \"\$VAR\" | jq' sites in prose surfaces (printf '%s\\n' everywhere)"
+else
+  fail "K262: $K262_COUNT echo-to-jq site(s) reintroduced — zsh echo eats backslashes in JSON; use printf '%s\\n' \"\$VAR\" | jq"
+fi
+
+# K263: changed-files union CLI — committed-range-only diffs return an EMPTY
+# set on uncommitted work (field failure: scope detection under-scoped a
+# working-tree review). The CLI must include untracked files, and the
+# review workflow prose must consume it at both scope surfaces.
+K263_T=$(mktemp -d)
+(cd "$K263_T" && git init -q && git config user.email t@t && git config user.name t \
+  && echo a > committed.txt && git add committed.txt && git commit -qm init \
+  && echo b > untracked.txt) >/dev/null 2>&1
+K263_CHECK=$(cd "$K263_T" && node "$CLI" state changed-files --base=nonexistent-branch 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+  try { const j = JSON.parse(s);
+    const ok = j.ok === true && Array.isArray(j.files) && j.files.includes("untracked.txt");
+    console.log(ok ? "OK" : "FAIL:" + JSON.stringify(j).slice(0,120));
+  } catch(e) { console.log("FAIL:parse"); }
+});' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K263_T"
+if [ "$K263_CHECK" = "OK" ] \
+   && /usr/bin/grep -q 'state changed-files' "$ROOT/workflows/code-review.md" \
+   && ! /usr/bin/grep -q 'git diff --name-only' "$ROOT/workflows/code-review.md"; then
+  pass "K263: changed-files union — untracked files included, scope_check + identify_scope consume the CLI (no raw name-only diffs left)"
+else
+  fail "K263: changed-files union broken — cli=$K263_CHECK"
+fi
+
+# K264: devt-graphify MCP parity — blast_radius applies the 60KB default cap
+# (field failure: 100KB response landed verbatim in orchestrator context;
+# the cap shipped on devt-memory-mcp only) and appendTrace carries the
+# session discriminator (standing directive: generated records name their
+# session; also shipped memory-side only).
+if /usr/bin/grep -q 'graphify.blastRadius(symbols, opts)' "$ROOT/bin/devt-graphify-mcp.cjs" \
+   && /usr/bin/grep -A 30 'blast_radius: {' "$ROOT/bin/devt-graphify-mcp.cjs" | /usr/bin/grep -q 'max_bytes' \
+   && /usr/bin/grep -A 12 'function appendTrace' "$ROOT/bin/devt-graphify-mcp.cjs" | /usr/bin/grep -q 'CLAUDE_SESSION_ID'; then
+  pass "K264: devt-graphify MCP parity — blast_radius 60KB default cap + max_bytes schema + session discriminator on trace records"
+else
+  fail "K264: devt-graphify MCP parity regressed (cap or session discriminator missing)"
+fi
+
+# K265: auto-reset on completed prior — a finished workflow (phase=complete,
+# active off, not paused) older than 1h auto-resets WITHOUT requiring a task
+# change (field friction: every back-to-back same-type review prompted).
+# Paused workflows (stopped_at set) must NOT classify completed.
+K265_T=$(mktemp -d)
+mkdir -p "$K265_T/.devt/state"
+cat > "$K265_T/.devt/state/workflow.yaml" <<'K265EOF'
+active: false
+workflow_type: code_review
+task: "review branch A"
+phase: complete
+status: DONE
+stopped_at: null
+resume_context: null
+created_at: "2026-01-01T10:00:00.000Z"
+K265EOF
+K265_A=$(cd "$K265_T" && node "$CLI" state staleness-check --task="review branch A" --workflow-type=code_review 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{ try { const j=JSON.parse(s); console.log(j.prior_completed === true && j.auto_reset_recommended === true ? "OK" : "FAIL:" + JSON.stringify({pc:j.prior_completed, ar:j.auto_reset_recommended})); } catch(e){ console.log("FAIL:parse"); } });' 2>/dev/null || echo "FAIL:node error")
+sed -i.bak 's/stopped_at: null/stopped_at: "2026-01-01T11:00:00.000Z"/' "$K265_T/.devt/state/workflow.yaml"
+K265_B=$(cd "$K265_T" && node "$CLI" state staleness-check --task="review branch A" --workflow-type=code_review 2>/dev/null | node -e '
+let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{ try { const j=JSON.parse(s); console.log(j.prior_completed === false && j.auto_reset_recommended === false ? "OK" : "FAIL:paused classified completed"); } catch(e){ console.log("FAIL:parse"); } });' 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K265_T"
+if [ "$K265_A" = "OK" ] && [ "$K265_B" = "OK" ]; then
+  pass "K265: auto-reset on completed prior — same-task back-to-back run auto-resets after 1h; paused workflow protected"
+else
+  fail "K265: completed-prior auto-reset broken — completed=$K265_A paused=$K265_B"
+fi
+
+# K266: CLI fallback trace records — `graphify neighbors` (the documented
+# oversize fallback) writes a get_neighbors trace record with workflow
+# context + correlation_id, and echoes _meta.correlation_id in its output
+# (field failure: an all-CLI drill-down set looked "fabricated" to the gate
+# because only MCP calls left trace evidence).
+K266_T=$(mktemp -d)
+mkdir -p "$K266_T/.devt/state" "$K266_T/.devt/memory" "$K266_T/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K266_T/.devt/config.json"
+echo '{"nodes":[],"links":[]}' > "$K266_T/graphify-out/graph.json"
+printf 'workflow_id: dddddddd-1111-2222-3333-444444444444\nworkflow_type: code_review\nphase: context_init\n' > "$K266_T/.devt/state/workflow.yaml"
+K266_OUT=$(cd "$K266_T" && node "$CLI" graphify neighbors FooService --direction=in 2>/dev/null || echo "{}")
+K266_CHECK=$(cd "$K266_T" && node -e '
+const fs = require("fs");
+const f = [];
+let rec = null;
+try {
+  const lines = fs.readFileSync(".devt/memory/_mcp-trace.jsonl", "utf8").trim().split("\n");
+  rec = JSON.parse(lines[lines.length - 1]);
+} catch(e) { f.push("no trace record"); }
+if (rec) {
+  if (rec.tool !== "cli__graphify__get_neighbors") f.push("tool name: " + rec.tool);
+  if (rec.workflow_id !== "dddddddd-1111-2222-3333-444444444444") f.push("workflow context missing");
+  if (!rec.correlation_id) f.push("no correlation_id");
+  if (!rec.session) f.push("no session discriminator");
+}
+try {
+  const out = JSON.parse(process.argv[1]);
+  if (!out._meta || !out._meta.correlation_id) f.push("no _meta.correlation_id in CLI output");
+} catch(e) { f.push("CLI output not JSON"); }
+console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
+' "$K266_OUT" 2>/dev/null || echo "FAIL:node error")
+rm -rf "$K266_T"
+if [ "$K266_CHECK" = "OK" ]; then
+  pass "K266: CLI fallback trace — graphify neighbors writes get_neighbors trace record (workflow ctx + session + correlation_id) and echoes _meta"
+else
+  fail "K266: CLI trace record broken — $K266_CHECK"
 fi
 
 echo

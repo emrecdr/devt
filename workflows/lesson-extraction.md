@@ -118,8 +118,8 @@ Task(subagent_type="devt:retro", model="{models.retro}", prompt="
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present retro)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 
@@ -141,8 +141,8 @@ If MCP unavailable / zero observations / errors: write `.devt/state/claude-mem-s
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
-if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(printf '%s\n' "$HARVEST" | jq -r '.reason')"
   exit 1
 fi
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
@@ -160,8 +160,8 @@ Dispatch the curator agent. Both lessons and architectural candidates flow throu
 
 ```bash
 HARVEST=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claude-mem-harvest)
-if [ "$(echo "$HARVEST" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: claude-mem decision artifact missing — $(echo "$HARVEST" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$HARVEST" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: claude-mem decision artifact missing — $(printf '%s\n' "$HARVEST" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -196,8 +196,8 @@ Task(subagent_type="devt:curator", model="{models.curator}", prompt="
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present curator)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 

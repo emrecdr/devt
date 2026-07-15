@@ -133,18 +133,18 @@ Graphify's hyperedges are machine-discovered semantic groupings — multi-file s
 
 ```bash
 HYPEREDGES_JSON=$(jq -c '.hyperedges_matched // []' .devt/state/preflight-brief.json 2>/dev/null || echo "[]")
-HYPER_COUNT=$(echo "$HYPEREDGES_JSON" | jq 'length')
+HYPER_COUNT=$(printf '%s\n' "$HYPEREDGES_JSON" | jq 'length')
 if [ "${HYPER_COUNT:-0}" -eq 0 ]; then
   echo "hyperedge_completeness_scan: no hyperedges matched — skipping"
 else
   # Partial-coverage hyperedges = completeness < 1.0
-  PARTIAL=$(echo "$HYPEREDGES_JSON" | jq -c '[.[] | select(.completeness < 1.0)]')
-  PARTIAL_COUNT=$(echo "$PARTIAL" | jq 'length')
+  PARTIAL=$(printf '%s\n' "$HYPEREDGES_JSON" | jq -c '[.[] | select(.completeness < 1.0)]')
+  PARTIAL_COUNT=$(printf '%s\n' "$PARTIAL" | jq 'length')
   if [ "${PARTIAL_COUNT:-0}" -eq 0 ]; then
     echo "hyperedge_completeness_scan: all $HYPER_COUNT matched hyperedges fully covered"
   else
     echo "hyperedge_completeness_scan: $PARTIAL_COUNT of $HYPER_COUNT hyperedges have partial coverage:"
-    echo "$PARTIAL" | jq -r '.[] | "  - " + .id + " (" + (.completeness * 100 | floor | tostring) + "% covered, members missing: " + ((.members | length) - (.members_in_scope | length) | tostring) + ")"'
+    printf '%s\n' "$PARTIAL" | jq -r '.[] | "  - " + .id + " (" + (.completeness * 100 | floor | tostring) + "% covered, members missing: " + ((.members | length) - (.members_in_scope | length) | tostring) + ")"'
   fi
 fi
 ```

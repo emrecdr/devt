@@ -203,9 +203,9 @@ Do NOT dispatch the verifier with incomplete context — it will waste a subagen
 ```bash
 for ARTIFACT in impl-summary.md test-summary.md review.md; do
   SUBSTANCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state check-agent-output ".devt/state/$ARTIFACT")
-  if echo "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
+  if printf '%s\n' "$SUBSTANCE" | jq -e '.looks_like_stub == true' >/dev/null 2>&1; then
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
-    echo "BLOCKED: $ARTIFACT looks like a stub — $(echo "$SUBSTANCE" | jq -r '.reason')"
+    echo "BLOCKED: $ARTIFACT looks like a stub — $(printf '%s\n' "$SUBSTANCE" | jq -r '.reason')"
     exit 0
   fi
 done
@@ -250,9 +250,9 @@ If BOTH gates pass, proceed to the memory_signal prep and LLM verifier dispatch 
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Substitute `MEMORY_SIGNAL` into `<memory_signal>` and `SCOPE_HINT` into `<scope_hint>` below. If `.devt/memory/` is empty or either query fails, the `{}`/`[]` fallbacks keep the blocks well-formed and the agent falls back to fresh queries.

@@ -37,7 +37,7 @@ const { findProjectRoot } = require("./modules/config.cjs");
 const { safeJsonParse } = require("./modules/security.cjs");
 
 const SERVER_NAME = "devt-graphify-mcp";
-const SERVER_VERSION = "0.45.0";
+const SERVER_VERSION = "0.46.0";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // ----------------------------------------------------------------------------
@@ -159,7 +159,7 @@ const TOOLS = {
   },
 
   blast_radius: {
-    description: "Compute the depth-2 incoming dependency set for a list of symbols. Returns {effect_size: 'small'|'medium'|'large'|null, direct_dependents, indirect_dependents, modules_touched, god_node_match, ambiguous_bindings}. Use to size a change's risk before dispatching tests.",
+    description: "Compute the depth-2 incoming dependency set for a list of symbols. Returns {effect_size: 'small'|'medium'|'large'|null, direct_dependents, indirect_dependents, modules_touched, god_node_match, ambiguous_bindings}. max_bytes caps the serialized response size (default 60000) via the shape-aware truncator (scalars and effect_size always survive; raw label arrays go first). Use to size a change's risk before dispatching tests.",
     inputSchema: {
       type: "object",
       required: ["symbols"],
@@ -172,11 +172,16 @@ const TOOLS = {
         // most-reviewable symbols. 256 covers realistic PR scope;
         // revisit only if a real response-size overflow is observed.
         symbols: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 256, description: "Subject symbols (cap 256, see schema comment)" },
+        max_bytes: { type: "integer", minimum: 1024, maximum: 524288, description: "Cap serialized response size in bytes (default 60000). When exceeded, response carries truncated:true and sheds detail shape-aware (raw label arrays first, scalar verdict last)." },
       },
     },
-    handler: ({ symbols }) => {
+    handler: ({ symbols, max_bytes }) => {
       if (!Array.isArray(symbols) || symbols.length === 0) return { error: "symbols required (array of strings)" };
-      try { return graphify.blastRadius(symbols); }
+      // Default cap mirrors get_neighbors: an uncapped high-fan-in response
+      // lands verbatim in orchestrator context (field-observed 100KB single
+      // response, which then pushed drill-downs onto the CLI fallback path).
+      const opts = { max_bytes: Number.isInteger(max_bytes) && max_bytes >= 1024 ? max_bytes : 60000 };
+      try { return graphify.blastRadius(symbols, opts); }
       catch (e) { return { error: e.message }; }
     },
   },
@@ -299,7 +304,12 @@ function appendTrace(record) {
   if (!t.enabled || !t.tracePath) return;
   if (!fs.existsSync(path.dirname(t.tracePath))) return;
   const ctx = readWorkflowContext();
-  const merged = ctx ? { ...ctx, ...record } : record;
+  // Session discriminator: the MCP server is one long-lived process per
+  // session, so its pid IS a session id — lets attribution separate concurrent
+  // sessions on the same project (standing directive: generated records carry
+  // a session discriminator). Mirrors devt-memory-mcp.cjs.
+  const session = { session: process.env.CLAUDE_SESSION_ID || `pid-${process.pid}` };
+  const merged = ctx ? { ...session, ...ctx, ...record } : { ...session, ...record };
   try {
     fs.appendFileSync(t.tracePath, JSON.stringify(merged) + "\n", "utf8");
   } catch {

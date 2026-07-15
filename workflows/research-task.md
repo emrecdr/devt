@@ -30,15 +30,15 @@ Before dispatching the researcher agent, read `resolved_skills.researcher` from 
 
 ```bash
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=research --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
-PREREQ_FAILED=$(echo "$CTX" | jq -r '.prerequisite_failed // empty')
+PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
-  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(echo "$CTX" | jq -r '.detail // ""')"
+  echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
   exit 1
 fi
 # Preflight freshness gate stays separate (the wrapper gathers; the gate enforces).
 PFRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-preflight-fresh)
-if [ "$(echo "$PFRESH" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: preflight-brief is stale — $(echo "$PFRESH" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$PFRESH" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: preflight-brief is stale — $(printf '%s\n' "$PFRESH" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -55,10 +55,10 @@ The wrapper performs `init workflow`, activates the workflow (`workflow_type=res
 DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
 TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
 SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SYMBOLS_COUNT=$(echo "$SYMBOLS_JSON" | jq 'length')
+SYMBOLS_COUNT=$(printf '%s\n' "$SYMBOLS_JSON" | jq 'length')
 if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
   CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${TASK_DESCRIPTION:-}" 2>/dev/null | head -1)
-  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(echo "$SYMBOLS_JSON" | jq -r '.[0]')
+  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(printf '%s\n' "$SYMBOLS_JSON" | jq -r '.[0]')
   echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
 elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
   echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
@@ -82,8 +82,8 @@ Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast r
 
 ```bash
 ASSERT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision)
-if [ "$(echo "$ASSERT" | jq -r '.ok')" != "true" ]; then
-  echo "BLOCKED: graphify decision artifact missing — $(echo "$ASSERT" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ASSERT" | jq -r '.ok')" != "true" ]; then
+  echo "BLOCKED: graphify decision artifact missing — $(printf '%s\n' "$ASSERT" | jq -r '.reason')"
   exit 1
 fi
 ```
@@ -143,8 +143,8 @@ Write findings to .devt/state/research.md
 
 ```bash
 ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present researcher)
-if [ "$(echo "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(echo "$ARTIFACT_CHECK" | jq -r '.reason')"
+if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
 fi
 ```
 

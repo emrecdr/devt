@@ -3109,6 +3109,57 @@ function graphStats() {
 // CLI dispatcher
 // ---------------------------------------------------------------------------
 
+// CLI-side trace records for the drill-down-bearing subcommands. The
+// documented oversize fallback ("re-run via CLI with --max-bytes when an MCP
+// response overflows") previously produced ZERO trace evidence, so a
+// drill-down legitimately built from CLI output was indistinguishable from a
+// hand-typed one — assert-graphify-decision counts get_neighbors trace
+// records and flagged such runs as fabricated. Record shape and telemetry
+// kill switch (memory.mcp_telemetry) mirror the MCP servers'; the cli__
+// tool names still match the gate's /graphify.*get_neighbors/ matcher.
+// Returns the correlation_id (so the CLI response can carry _meta and
+// drill-down headings can cite `[call: <id>]` exactly like MCP responses),
+// or null when tracing is off/unavailable. Best-effort: a trace failure
+// must never affect CLI output or exit code.
+function appendCliTrace(toolName, result, args, startedMs) {
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    const cfg = getMergedConfig();
+    if (cfg.memory && cfg.memory.mcp_telemetry === false) return null;
+    const root = findProjectRoot();
+    const tracePath = path.join(root, ".devt", "memory", "_mcp-trace.jsonl");
+    if (!fs.existsSync(path.dirname(tracePath))) return null;
+    let workflow_id = null, workflow_type = null, phase = null;
+    try {
+      const y = fs.readFileSync(path.join(root, ".devt", "state", "workflow.yaml"), "utf8");
+      workflow_id = ((y.match(/^workflow_id:\s*"?([^"\n\r]+)"?\s*$/m) || [])[1] || "").trim() || null;
+      workflow_type = ((y.match(/^workflow_type:\s*"?([^"\n\r]+)"?\s*$/m) || [])[1] || "").trim() || null;
+      phase = ((y.match(/^phase:\s*"?([^"\n\r]+)"?\s*$/m) || [])[1] || "").trim() || null;
+    } catch { /* no active workflow — context fields stay null */ }
+    const crypto = require("crypto");
+    let argsStr = "{}";
+    try { argsStr = JSON.stringify(args || {}); } catch { /* keep {} */ }
+    let resultSize = 0;
+    try { resultSize = JSON.stringify(result, null, 2).length; } catch { /* keep 0 */ }
+    const correlationId = crypto.randomBytes(4).toString("hex");
+    const rec = {
+      workflow_id, workflow_type, phase,
+      ts: new Date().toISOString(),
+      tool: toolName,
+      ok: !(result && typeof result === "object" && result.error),
+      error_code: result && typeof result === "object" && result.error ? "TOOL_ERROR" : null,
+      duration_ms: Date.now() - startedMs,
+      args_size: argsStr.length,
+      args_fp: crypto.createHash("sha256").update(argsStr).digest("hex").slice(0, 12),
+      result_size: resultSize,
+      correlation_id: correlationId,
+      session: process.env.CLAUDE_SESSION_ID || `pid-${process.pid}`,
+    };
+    fs.appendFileSync(tracePath, JSON.stringify(rec) + "\n", "utf8");
+    return correlationId;
+  } catch { return null; }
+}
+
 function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 
@@ -3265,7 +3316,11 @@ function run(subcommand, args) {
         }
         opts.max_bytes = mbN;
       }
-      json(getNeighbors(args[0], opts));
+      const startedMs = Date.now();
+      const nResult = getNeighbors(args[0], opts);
+      const cid = appendCliTrace("cli__graphify__get_neighbors", nResult, { symbol: args[0], ...opts }, startedMs);
+      if (cid && nResult && typeof nResult === "object") nResult._meta = { correlation_id: cid, via: "cli" };
+      json(nResult);
       return 0;
     }
     case "path": {
@@ -3278,7 +3333,11 @@ function run(subcommand, args) {
       const bMax = bMaxArg ? Math.max(1024, parseInt(bMaxArg.split("=")[1], 10) || 0) : null;
       const bSymbols = args.filter(a => !a.startsWith("--"));
       if (bSymbols.length === 0) { process.stderr.write("Usage: graphify blast-radius <symbol> [<symbol>...] [--max-bytes=N]\n"); return 2; }
-      json(blastRadius(bSymbols, bMax ? { max_bytes: bMax } : undefined));
+      const bStartedMs = Date.now();
+      const bResult = blastRadius(bSymbols, bMax ? { max_bytes: bMax } : undefined);
+      const bCid = appendCliTrace("cli__graphify__blast_radius", bResult, { symbols: bSymbols, max_bytes: bMax }, bStartedMs);
+      if (bCid && bResult && typeof bResult === "object") bResult._meta = { correlation_id: bCid, via: "cli" };
+      json(bResult);
       return 0;
     }
     case "god-nodes": {

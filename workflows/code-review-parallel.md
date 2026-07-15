@@ -67,11 +67,11 @@ Initialize the workflow (delegated from code-review.md; the upstream step alread
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-REVIEW_SCOPE=$(echo "$STATE" | jq -r '.task // ""')
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
-WORKFLOW_ID=$(echo "$STATE" | jq -r '.workflow_id // empty')
+REVIEW_SCOPE=$(printf '%s\n' "$STATE" | jq -r '.task // ""')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
+WORKFLOW_ID=$(printf '%s\n' "$STATE" | jq -r '.workflow_id // empty')
 ```
 
 Update the workflow_type to mark this as the parallel path:
@@ -112,7 +112,7 @@ fi
 # attributes from Leiden clustering. Otherwise mode=fallback and the bash
 # branch below uses the legacy top-2-level path partition.
 LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions --target-lanes=5 2>/dev/null || echo '{"mode":"fallback"}')
-LANE_MODE=$(echo "$LANE_SUG" | jq -r '.mode // "fallback"')
+LANE_MODE=$(printf '%s\n' "$LANE_SUG" | jq -r '.mode // "fallback"')
 
 GROUPS_FILE=$(mktemp)
 if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MODE" = "service_boundary" ]; then
@@ -121,13 +121,13 @@ if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MO
   # "community-<service>" for service-boundary groups (R7-W6 — the community
   # field carries the service name string), or "ungrouped" for partial-mode
   # uncovered files. The downstream slug generation handles all three labels.
-  echo "$LANE_SUG" | jq -r '.groups[] | (if .community == null then "ungrouped" else "community-" + (.community|tostring) end) as $c | .files[] | $c + "|" + .' | sort > "$GROUPS_FILE"
+  printf '%s\n' "$LANE_SUG" | jq -r '.groups[] | (if .community == null then "ungrouped" else "community-" + (.community|tostring) end) as $c | .files[] | $c + "|" + .' | sort > "$GROUPS_FILE"
   if [ "$LANE_MODE" = "partial" ]; then
-    COVERED=$(echo "$LANE_SUG" | jq -r '.covered_count')
-    UNCOVERED=$(echo "$LANE_SUG" | jq -r '.uncovered_count')
+    COVERED=$(printf '%s\n' "$LANE_SUG" | jq -r '.covered_count')
+    UNCOVERED=$(printf '%s\n' "$LANE_SUG" | jq -r '.uncovered_count')
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED})"
   elif [ "$LANE_MODE" = "service_boundary" ]; then
-    SB_REASON=$(echo "$LANE_SUG" | jq -r '.reason')
+    SB_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason')
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → service-boundary partition (${SB_REASON}) (R7-W6)"
   else
     echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
@@ -141,7 +141,7 @@ else
     PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
     echo "$PREFIX|$FILE"
   done | sort > "$GROUPS_FILE"
-  FALLBACK_REASON=$(echo "$LANE_SUG" | jq -r '.reason // "graphify disabled"')
+  FALLBACK_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason // "graphify disabled"')
   echo "partition_lanes: ${SCOPE_FILE_COUNT} files → path-based partition (community fallback: ${FALLBACK_REASON})"
 fi
 
@@ -201,7 +201,7 @@ fs.writeFileSync(path, yaml.trimEnd() + "\n" + lanesBlock);
 rm -f /tmp/devt-lanes-block.yaml "$GROUPS_FILE"
 
 LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
-LANE_COUNT=$(echo "$LANES_OUT" | jq '.lanes | length')
+LANE_COUNT=$(printf '%s\n' "$LANES_OUT" | jq '.lanes | length')
 echo "Partitioned into ${LANE_COUNT} lanes (path-based, cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
 ```
@@ -246,12 +246,12 @@ Then customize each `/tmp/lane-*-envelope.txt` with per-lane `<lane_id>` + `<lan
 
 ```bash
 LANES_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-lanes-registered)
-if echo "$LANES_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$LANES_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=dispatch_lanes status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$LANES_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$LANES_GATE" | jq -r '.reason')"
   exit 0
 fi
-LANE_COUNT=$(echo "$LANES_GATE" | jq -r '.lane_count')
+LANE_COUNT=$(printf '%s\n' "$LANES_GATE" | jq -r '.lane_count')
 echo "dispatch_lanes: ${LANE_COUNT} lanes registered"
 ```
 
@@ -276,10 +276,10 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 **L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Why: a prose-only README lane otherwise receives the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
 
 ```bash
-LANE_FILES_PROSE_ONLY=$(echo "$LANE_FILES_JSON" | jq -r 'all(. as $f | ["md","rst","txt","adoc"] | any($f | test("\\.\(.)$"; "i")))' 2>/dev/null || echo "false")
+LANE_FILES_PROSE_ONLY=$(printf '%s\n' "$LANE_FILES_JSON" | jq -r 'all(. as $f | ["md","rst","txt","adoc"] | any($f | test("\\.\(.)$"; "i")))' 2>/dev/null || echo "false")
 if [ "$LANE_FILES_PROSE_ONLY" = "true" ]; then
   LANE_GRAPH_IMPACT_BLOCK="<graph_impact>not_applicable: prose-only lane — graphify cache suppressed (no AST relationships on prose files)</graph_impact>"
-  LANE_SCOPE_HINT_BLOCK="<scope_hint>$(echo "$LANE_FILES_JSON" | jq -c '.')</scope_hint>"
+  LANE_SCOPE_HINT_BLOCK="<scope_hint>$(printf '%s\n' "$LANE_FILES_JSON" | jq -c '.')</scope_hint>"
 else
   LANE_GRAPH_IMPACT_BLOCK='<graph_impact>Read .devt/state/graph-impact.md — pre-computed caller set + blast radius for this lane scope</graph_impact>'
   LANE_SCOPE_HINT_BLOCK="<scope_hint>${SCOPE_HINT}</scope_hint>"
@@ -315,9 +315,9 @@ After dispatch_lanes returns, run `state check-agent-output` on each lane's revi
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 STUB_LANE_IDS=""
-for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
-  LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
-  LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
+for LANE_ID in $(printf '%s\n' "$LANES_JSON" | jq -r '.lanes[].id'); do
+  LANE_FILE=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
+  LANE_SIZE=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
   # Substance-check race guard — mtime-stability before any
   # read. Mechanically robust against premature substance checks regardless
   # of orchestrator polling discipline. Stats the file at T0, sleeps 500ms,
@@ -325,11 +325,11 @@ for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
   # writer). Default 5s timeout; on timeout, proceeds with sentinel warning
   # rather than blocking forever (lane behaves as if the agent never wrote).
   QUIESCE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-file-quiescent "$LANE_FILE" 2>/dev/null || echo '{}')
-  if [ "$(echo "$QUIESCE" | jq -r '.ok // false')" != "true" ]; then
-    echo "[QUIESCE-WARN] lane $LANE_ID: $(echo "$QUIESCE" | jq -r '.reason // "file not quiescent"') — proceeding with current read; result may be premature"
+  if [ "$(printf '%s\n' "$QUIESCE" | jq -r '.ok // false')" != "true" ]; then
+    echo "[QUIESCE-WARN] lane $LANE_ID: $(printf '%s\n' "$QUIESCE" | jq -r '.reason // "file not quiescent"') — proceeding with current read; result may be premature"
   fi
   # Re-stat after quiescence wait so LANE_SIZE reflects post-settle state.
-  LANE_SIZE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
+  LANE_SIZE=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
   if [ -f "$LANE_FILE" ]; then LANE_SIZE=$(wc -c < "$LANE_FILE" | tr -d ' '); fi
   # Per-lane Layer-1 — persists file-existence + size > 0 record + substance
   # verdict (post-substance-aware Layer-1) to claim-check-failures.jsonl.
@@ -347,7 +347,7 @@ for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[].id'); do
   # grep -F avoids jq parse failure: stub_phrases_found[] contains raw regex
   # source strings with unescaped backslashes (\b, \s) that are invalid JSON.
   if echo "$RESULT" | grep -qF '"looks_like_stub":true'; then
-    REDISPATCH_COUNT=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .redispatch_count')
+    REDISPATCH_COUNT=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .redispatch_count')
     if [ "$REDISPATCH_COUNT" -ge 1 ]; then
       node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" status=deferred
       echo "Lane $LANE_ID deferred after retry (second stub)"
@@ -373,7 +373,7 @@ For each lane with `status=stub_redispatched`, issue ONE re-dispatch with a NARR
 
 ```bash
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
-for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
+for LANE_ID in $(printf '%s\n' "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update-lane "$LANE_ID" redispatch_count=1
 done
 ```
@@ -393,8 +393,8 @@ After all Task() calls return, re-run substance_check_lanes via the bash loop �
 # Lanes with redispatch_count >= 1 that still look like stubs route to a
 # terminal failure — deferred (thin) vs lane_failed (no output at all).
 LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
-for LANE_ID in $(echo "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
-  LANE_FILE=$(echo "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
+for LANE_ID in $(printf '%s\n' "$LANES_JSON" | jq -r '.lanes[] | select(.status == "stub_redispatched") | .id'); do
+  LANE_FILE=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .review_file')
   # Per-lane Layer-1 — overwrites the prior stub-redispatched failure record
   # with the new verdict. Successful re-dispatch resolves the failure for
   # Layer-2; another stub leaves the failure record in place for finalize.
@@ -446,7 +446,9 @@ if [ -n "$FAILED_LANES" ]; then
   echo "[consolidator] ⚠️ lane(s) produced NO output (lane_failed): ${FAILED_LANES} — their scope is UNREVIEWED. Record under '## Uncovered Scope' in review.md; do NOT report these as covered."
 fi
 if [ "$FOREIGN_CID_COUNT" -gt 0 ]; then
-  echo "[consolidator] dropped $FOREIGN_CID_COUNT lane file(s) with foreign cid (stale from rotated workflow); reset-soft eviction should have cleared these — investigate if recurring"
+  FOREIGN_CID_LANES=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs | \
+    jq -r '[.lanes[] | select(.cid_match == "foreign") | "\(.id) (cid_\(.cid_prefix // "?"))"] | join(", ")')
+  echo "[consolidator] ⚠️ dropped $FOREIGN_CID_COUNT lane file(s) with foreign cid: ${FOREIGN_CID_LANES} — stale from a prior session (cid outside the workflow_id_history chain or file predates first_created_at). If a listed lane belongs to THIS review, do NOT proceed: re-check with 'state list-lane-outputs' and hand-include the lane path in <lane_files> so its scope isn't silently unreviewed."
 fi
 # Context-Loaded honesty check (advisory) — lanes receive governing rules
 # by-reference, so each substance_pass review must record which rules files
@@ -556,9 +558,9 @@ fi
 
 ```bash
 CONS_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-consolidator-dispatched)
-if echo "$CONS_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CONS_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CONS_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CONS_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -569,9 +571,9 @@ fi
 # Re-derive scope_trust from current preflight-brief.json so the cached value reflects current graph state, not the value computed at workflow start. Fail-open: stale cache used if no brief.
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state refresh-scope-context >/dev/null 2>&1 || true
 STATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read)
-MEMORY_SIGNAL=$(echo "$STATE" | jq -r '.memory_signal_json // "{}"')
-SCOPE_HINT=$(echo "$STATE" | jq -r '.scope_hint_json // "[]"')
-SCOPE_TRUST=$(echo "$STATE" | jq -r '.scope_trust_json // "{}"')
+MEMORY_SIGNAL=$(printf '%s\n' "$STATE" | jq -r '.memory_signal_json // "{}"')
+SCOPE_HINT=$(printf '%s\n' "$STATE" | jq -r '.scope_hint_json // "[]"')
+SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 ```
 
 Dispatch the verifier:
@@ -656,9 +658,9 @@ Route on `verdict`:
 
 ```bash
 CURATOR_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-auto-curator-considered)
-if echo "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$CURATOR_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$CURATOR_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$CURATOR_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -667,9 +669,9 @@ fi
 
 ```bash
 VERIF_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-verifier-ran)
-if echo "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$VERIF_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$VERIF_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$VERIF_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```
@@ -684,9 +686,9 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candid
 
 ```bash
 KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if echo "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(echo "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```

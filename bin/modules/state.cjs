@@ -1645,12 +1645,23 @@ function resetSoft() {
 function stalenessCheck({ task, workflowType } = {}) {
   const filePath = getWorkflowPath();
   if (!fs.existsSync(filePath)) {
-    return { stale: false, reason: "no prior workflow.yaml — fresh start", age_hours: null, task_changed: false, prior_task: null, workflow_type_changed: false, prior_workflow_type: null, auto_reset_recommended: false };
+    return { stale: false, reason: "no prior workflow.yaml — fresh start", age_hours: null, task_changed: false, prior_task: null, workflow_type_changed: false, prior_workflow_type: null, prior_completed: false, auto_reset_recommended: false };
   }
   const prev = parseSimpleYaml(fs.readFileSync(filePath, "utf8"));
   const priorTask = prev.task || null;
   const priorCreatedAt = prev.created_at || prev.first_created_at || null;
   const priorWorkflowType = prev.workflow_type || null;
+  // A COMPLETED prior workflow has nothing to resume — its counters and
+  // artifacts are preserved by resetSoft either way. `status: DONE` alone is
+  // NOT a completion marker (phase updates write `phase=X status=DONE`
+  // mid-pipeline); the terminal marker is phase=complete with active off.
+  // stopped_at/resume_context exclude paused workflows, which are mid-flight
+  // resumes regardless of what their last finished phase recorded.
+  const priorCompleted = Boolean(
+    prev.active !== true &&
+    String(prev.phase || "").toLowerCase() === "complete" &&
+    !prev.stopped_at && !prev.resume_context
+  );
 
   const taskChanged = Boolean(typeof task === "string" && task.length > 0 && priorTask && priorTask !== task);
   const workflowTypeChanged = Boolean(typeof workflowType === "string" && workflowType.length > 0 && priorWorkflowType && priorWorkflowType !== workflowType);
@@ -1664,19 +1675,31 @@ function stalenessCheck({ task, workflowType } = {}) {
   const ageStale = ageHours !== null && ageHours > 1;
   const stale = Boolean(taskChanged && ageStale);
 
-  // Auto-reset recommendation — non-destructive resetSoft auto-fire when
-  // task_changed AND workflow_type_changed AND age>1h. The double signal
-  // (task + type both changed) is an unambiguous new working session; a
-  // prior extra age>24h leg forced an interactive staleness prompt on real
-  // session turnover (field case: task+type changed at 16h, silent reset
-  // verified lossless). The >1h floor excludes same-session typo retries.
-  // Single-signal cases (same-type re-review with a reworded task) still go
-  // through the operator prompt — counters and artifacts may legitimately
-  // continue there.
-  const autoResetRecommended = Boolean(taskChanged && workflowTypeChanged && ageStale);
+  // Auto-reset recommendation — non-destructive resetSoft auto-fire on
+  // either of two signals, both with the >1h floor (excludes same-session
+  // typo retries):
+  //   1. task_changed AND workflow_type_changed — unambiguous new working
+  //      session (a prior extra age>24h leg forced an interactive prompt on
+  //      real session turnover; field case: task+type changed at 16h, silent
+  //      reset verified lossless).
+  //   2. prior workflow COMPLETED — nothing to resume, so back-to-back runs
+  //      of the SAME type (re-review after fixes) auto-reset too. No
+  //      task-change requirement here: task equality is fuzzy string
+  //      comparison that false-negatives on rephrasings, and a finished
+  //      workflow's counters deserve rotation either way (field case:
+  //      every back-to-back review prompted despite a 26h-old completed
+  //      prior).
+  // Interrupted (non-complete) workflows still go through the operator
+  // prompt — counters and artifacts may legitimately continue there.
+  const autoResetRecommended = Boolean(
+    (taskChanged && workflowTypeChanged && ageStale) ||
+    (priorCompleted && ageStale)
+  );
 
   let reason = "fresh";
-  if (autoResetRecommended) {
+  if (autoResetRecommended && !(taskChanged && workflowTypeChanged)) {
+    reason = `auto-reset recommended: prior workflow completed (phase=complete, ${ageHours.toFixed(1)}h old) — nothing to resume, counters rotate for the new run`;
+  } else if (autoResetRecommended) {
     reason = `auto-reset recommended: task changed ('${priorTask}' → '${task}'), workflow_type changed ('${priorWorkflowType}' → '${workflowType}'), prior workflow ${ageHours.toFixed(1)}h old — unambiguous new working session`;
   } else if (stale) {
     reason = `task changed ('${priorTask}' → '${task}') and prior workflow is ${ageHours.toFixed(1)}h old; raw_dispatch/claim-check counters carry from prior session and may fire KILL gate on first state update`;
@@ -1686,7 +1709,7 @@ function stalenessCheck({ task, workflowType } = {}) {
     reason = `task matches prior workflow (${ageHours.toFixed(1)}h old) — legitimate resume`;
   }
 
-  return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask, workflow_type_changed: workflowTypeChanged, prior_workflow_type: priorWorkflowType, auto_reset_recommended: autoResetRecommended };
+  return { stale, reason, age_hours: ageHours, task_changed: taskChanged, prior_task: priorTask, workflow_type_changed: workflowTypeChanged, prior_workflow_type: priorWorkflowType, prior_completed: priorCompleted, auto_reset_recommended: autoResetRecommended };
 }
 
 // auto-reset-if-stale orchestration helper. Combines
@@ -2225,17 +2248,15 @@ function assertGraphifyDecision() {
       const wfPath = path.join(dir, "workflow.yaml");
       if (fs.existsSync(wfPath)) {
         const wfYaml = fs.readFileSync(wfPath, "utf8");
-        // Build a Set of acceptable workflow_ids — current rotated value
-        // PLUS the original anchor — so trace records emitted BEFORE the
-        // workflow_type transition still match. Without the original anchor,
-        // get_neighbors calls landing under a prior workflow_id cause a false
-        // "fabricated drill-down" positive after rotation. When original is
-        // absent (legacy workflow.yaml), only the current id is accepted.
-        const wfIdMatch = wfYaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        const origIdMatch = wfYaml.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-        const acceptedIds = new Set();
-        if (wfIdMatch) acceptedIds.add(wfIdMatch[1].trim());
-        if (origIdMatch) acceptedIds.add(origIdMatch[1].trim());
+        // Accept the whole session id chain (current + original +
+        // workflow_id_history), not just current + original — a session can
+        // rotate several times between the calls and this gate, and records
+        // emitted under an INTERMEDIATE rotation caused a false "fabricated
+        // drill-down" positive (field case: 3 real get_neighbors calls under
+        // the 5th of 6 chain ids counted as zero). The ts >= anchor bound
+        // keeps prior-session records out, since history survives resetSoft.
+        const chain = workflowIdChainSet(wfYaml);
+        const acceptedIds = chain.ids;
         if (acceptedIds.size > 0) {
           // _mcp-trace.jsonl is in .devt/memory/ — sibling of .devt/state/
           const memDir = path.join(path.dirname(dir), "memory");
@@ -2249,6 +2270,7 @@ function assertGraphifyDecision() {
               try {
                 const rec = JSON.parse(line);
                 if (acceptedIds.has(rec.workflow_id) &&
+                    (chain.anchor_ms === 0 || Date.parse(rec.ts) >= chain.anchor_ms) &&
                     typeof rec.tool === "string" &&
                     /graphify.*get_neighbors/.test(rec.tool)) {
                   mcpGetNeighborsCalls++;
@@ -6359,6 +6381,44 @@ function aggregateKnowledgeCandidates() {
   };
 }
 
+// Chain-aware workflow-id set. workflow_id rotates on every workflow_type
+// transition (a single review session can hop preflight → code_review →
+// code_review_parallel and rotate several times), so any consumer filtering
+// artifacts or trace records by "this workflow's id" MUST match the whole
+// session chain — current + original + workflow_id_history — or real
+// same-session records classify as foreign (field failure: a lane stamped
+// under an intermediate rotation was dropped from consolidation, and real
+// get_neighbors trace records were counted as fabricated). Membership alone
+// is NOT sufficient: resetSoft PRESERVES history across working sessions, so
+// consumers must pair the chain with an mtime/ts >= anchor_ms bound to keep
+// prior-session artifacts out.
+// Returns { ids: Set<full-id>, prefixes: Set<8-char>, anchor_ms }.
+function workflowIdChainSet(yaml) {
+  const ids = new Set();
+  const addId = (v) => {
+    const t = String(v || "").trim();
+    if (t) ids.add(t);
+  };
+  addId((yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m) || [])[1]);
+  addId((yaml.match(/^original_workflow_id:\s*"?([^"\n]+)"?\s*$/m) || [])[1]);
+  const histLine = (yaml.match(/^workflow_id_history:\s*(.+)$/m) || [])[1];
+  if (histLine) {
+    // History is a JSON array serialized into a quoted YAML scalar; UUID
+    // extraction sidesteps the double-escaping rather than re-parsing it.
+    const uuids = histLine.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) || [];
+    for (const u of uuids) ids.add(u);
+  }
+  let anchorMs = 0;
+  const anchorMatch = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
+  if (anchorMatch) {
+    const parsed = new Date(anchorMatch[1].trim()).getTime();
+    if (Number.isFinite(parsed)) anchorMs = parsed;
+  }
+  const prefixes = new Set();
+  for (const id of ids) prefixes.add(id.slice(0, 8));
+  return { ids, prefixes, anchor_ms: anchorMs };
+}
+
 // Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
 // each lane's review file existence + size. Consumed by code-review-parallel.md's
 // substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
@@ -6375,19 +6435,16 @@ function listLaneOutputs() {
   // predates the current session anchor — calibration #8 surfaced lanes
   // registered in a prior workflow whose physical files were long gone
   // (file_exists:false) but whose metadata still satisfied consumers.
-  const anchorMatch = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
-  let anchorMs = 0;
-  if (anchorMatch) {
-    const parsed = new Date(anchorMatch[1].trim()).getTime();
-    if (Number.isFinite(parsed)) anchorMs = parsed;
-  }
+  //
   // Cid-match correctness defense. Dispatch envelope stamps
   // `cid_<workflow_id_prefix>_<lane_id>` and the lane reviewer's file body
-  // surfaces it. Extracting the prefix here lets the consolidator filter
-  // `select(.cid_match != "foreign")` to defend against eviction misses
-  // (stale review-lane-*.md from a rotated workflow leaking into a fresh run).
-  const wfIdMatch = yaml.match(/^workflow_id:\s*"?([^"\n]+)"?\s*$/m);
-  const currentWorkflowIdPrefix = wfIdMatch ? wfIdMatch[1].trim().slice(0, 8) : null;
+  // surfaces it. Matching against the whole session id chain (not just the
+  // current id) keeps lanes stamped before a workflow_type rotation from
+  // classifying as foreign; the mtime >= anchor bound keeps genuinely stale
+  // files (prior session, eviction miss) out even when their id survives in
+  // the preserved history.
+  const chain = workflowIdChainSet(yaml);
+  const anchorMs = chain.anchor_ms;
   // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
   // line-based parsing to avoid pulling in a YAML library (zero-deps rule).
   const lanes = [];
@@ -6428,15 +6485,21 @@ function listLaneOutputs() {
     const stale = exists && anchorMs > 0 && mtimeMs < anchorMs;
 
     // Cid-match extraction. Reads first 2KB of the lane file looking for
-    // a `cid_<8hex>` pattern (F6's correlation_id format). Three outcomes:
-    //   "current" — cid prefix matches workflow.yaml's workflow_id prefix
-    //   "foreign" — cid prefix differs (stale from a rotated workflow)
-    //   "absent"  — no cid found (legacy lane file pre-F6 OR file missing)
+    // a `cid_<8hex>` pattern (the dispatch correlation-id format). Outcomes:
+    //   "current" — cid prefix ∈ session id chain AND file mtime >= anchor
+    //   "foreign" — prefix outside the chain, OR chain-matched but written
+    //               before this session's anchor (prior-session leftover
+    //               surviving eviction — history is preserved across resets,
+    //               so id membership alone cannot vouch for freshness)
+    //   "absent"  — no cid found (legacy lane file pre-cid OR file missing)
     // Consumers (consolidator query, gate checks) select `cid_match != "foreign"`
     // to defend against the eviction-misses-a-file case. Bounded 2KB read so
-    // huge review files don't slow listLaneOutputs.
+    // huge review files don't slow listLaneOutputs. cid_prefix is surfaced so
+    // an exclusion is diagnosable (which rotation stamped the lane) instead of
+    // a bare count.
     let cidMatch = "absent";
-    if (exists && reviewFile && currentWorkflowIdPrefix) {
+    let cidPrefix = null;
+    if (exists && reviewFile && chain.prefixes.size > 0) {
       try {
         const fd = fs.openSync(reviewFile, "r");
         const buf = Buffer.alloc(2048);
@@ -6444,7 +6507,10 @@ function listLaneOutputs() {
         const head = buf.toString("utf-8");
         const cidM = head.match(/cid_([0-9a-f]{8})/);
         if (cidM) {
-          cidMatch = cidM[1] === currentWorkflowIdPrefix ? "current" : "foreign";
+          cidPrefix = cidM[1];
+          const inChain = chain.prefixes.has(cidM[1]);
+          const mtimeOk = anchorMs > 0 ? mtimeMs >= anchorMs : true;
+          cidMatch = inChain && mtimeOk ? "current" : "foreign";
         }
       } catch { /* read error — leave as "absent" */ }
     }
@@ -6462,6 +6528,7 @@ function listLaneOutputs() {
       file_size_bytes: sizeBytes,
       stale,
       cid_match: cidMatch,
+      cid_prefix: cidPrefix,
     });
   }
   return { lanes };
@@ -7025,6 +7092,24 @@ function run(subcommand, args) {
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
       return computeGraphifyImpactPlan({ reviewScope, primaryBranch });
     }
+    case "changed-files": {
+      // Canonical review scope file list: committed range + working tree +
+      // untracked, via review-weight's collectChangedFiles union. Workflow
+      // prose (scope_check / identify_scope) consumes this instead of raw
+      // `git diff base...HEAD` chains, which return an EMPTY set exactly when
+      // the review target is uncommitted work.
+      const baseArg = args.find(a => a.startsWith("--base="));
+      let base = baseArg ? baseArg.slice("--base=".length) : "";
+      if (!base) {
+        try {
+          const cfg = require("./config.cjs").getMergedConfig();
+          base = (cfg.git && cfg.git.primary_branch) || "main";
+        } catch { base = "main"; }
+      }
+      const { collectChangedFiles } = require("./review-weight.cjs");
+      const files = collectChangedFiles(findProjectRoot(), base);
+      return { ok: true, base, count: files.length, files };
+    }
     case "review-context-init": {
       const scopeArg = args.find(a => a.startsWith("--scope="));
       const branchArg = args.find(a => a.startsWith("--primary-branch="));
@@ -7247,7 +7332,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
       );
   }
 }
