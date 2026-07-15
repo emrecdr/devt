@@ -16884,6 +16884,30 @@ else
   fail "K270: synthesis trigger or partition single-sourcing regressed"
 fi
 
+# K271: python-fastapi template currency — the FastAPI/Pydantic best-practice
+# calibration holds: no unmaintained security stack (python-jose gone; pwdlib
+# is the hashing prescription), the Pydantic conventions add-on exists with
+# its load-bearing sections, mechanical rule enforcement is wired (ruff FAST +
+# ASYNC groups), the async trap kit is prescribed (lazy="raise"), and the
+# pytest-asyncio 1.x config idiom is present.
+K271_T="$ROOT/templates/python-fastapi"
+# python-jose may appear ONLY as a prohibition ("Never `python-jose`"), never
+# as a prescription — compare total mentions against prohibition-line mentions.
+K271_JOSE_ALL=$({ /usr/bin/grep -rh "python-jose" "$K271_T" 2>/dev/null || true; } | wc -l | tr -d " ")
+K271_JOSE_BANNED=$({ /usr/bin/grep -rh "python-jose" "$K271_T" 2>/dev/null || true; } | { /usr/bin/grep -c "Never" || true; } | tr -d " ")
+if [ -f "$K271_T/pydantic-patterns.md" ] \
+   && /usr/bin/grep -q "exclude_unset" "$K271_T/pydantic-patterns.md" \
+   && /usr/bin/grep -q "validate_by_name" "$K271_T/pydantic-patterns.md" \
+   && [ "$K271_JOSE_ALL" = "$K271_JOSE_BANNED" ] \
+   && /usr/bin/grep -q "pwdlib" "$K271_T/architecture.md" \
+   && /usr/bin/grep -q '"FAST", "ASYNC"' "$K271_T/architecture.md" \
+   && /usr/bin/grep -q 'lazy="raise"' "$K271_T/coding-standards.md" \
+   && /usr/bin/grep -q "asyncio_default_fixture_loop_scope" "$K271_T/architecture.md"; then
+  pass "K271: python-fastapi template currency — pydantic-patterns add-on + PyJWT/pwdlib stack + FAST/ASYNC enforcement + async trap kit + pytest-asyncio 1.x idiom"
+else
+  fail "K271: template currency regressed (stale security stack, missing pydantic-patterns, or dropped enforcement wiring)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

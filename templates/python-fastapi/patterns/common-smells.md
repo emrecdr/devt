@@ -247,11 +247,11 @@ async def upload_photo(request: PhotoRequest, service: PhotoService = Depends())
 
 **What it looks like**:
 ```python
-# In photos/service.py
-from app.services.licences.service import LicenceService
+# In orders/service.py
+from app.services.billing.service import BillingService
 
-# In licences/service.py
-from app.services.photos.service import PhotoService  # Circular!
+# In billing/service.py
+from app.services.orders.service import OrderService  # Circular!
 ```
 
 **Why it's bad**: Creates import errors, tight coupling, and makes both services impossible to test independently.
@@ -330,7 +330,18 @@ import httpx
 async def fetch_data():
     async with httpx.AsyncClient() as client:
         result = await client.get(url)
+
+# No async client exists for the library? Route around the loop:
+from fastapi.concurrency import run_in_threadpool
+async def mixed_handler():
+    report = await run_in_threadpool(legacy_sdk.generate_report)  # blocking call, off-loop
 ```
+
+If the WHOLE handler is blocking work, declare it plain `def` — FastAPI runs
+it in the threadpool. But that pool is ~40 threads total for the app, so
+heavy sync routes exhaust it under load; CPU-bound work goes to a task queue,
+not the web process. Also enable ruff's `ASYNC` rules — they detect this
+class mechanically.
 
 ---
 
@@ -753,3 +764,119 @@ import structlog
 logger = structlog.get_logger()
 logger.info("order_created", user_id=user_id, order_id=order_id, total=total)
 ```
+
+---
+
+## Lazy Loading in Async Code (MissingGreenlet / Hidden N+1)
+
+**Smell**: Accessing an ORM relationship in async code without an explicit loading strategy.
+
+**What it looks like**:
+```python
+orders = (await session.scalars(select(Order))).all()
+for order in orders:
+    print(order.items)  # lazy load per row: MissingGreenlet OR silent N+1
+```
+
+**Why it's bad**: Async SQLAlchemy cannot lazy-load implicitly — the access either raises `MissingGreenlet` (visible) or, in configurations that allow it, issues one query per row (invisible until production load).
+
+**How to detect**:
+```bash
+# Relationships declared without an explicit lazy strategy
+grep -rn "relationship(" app/ --include="*.py" | grep -v "lazy="
+# Queries on relationship-bearing entities without eager loading
+grep -rn "select(.*)" app/ --include="*.py" | grep -vc "selectinload\|joinedload"
+```
+
+**How to fix**: Declare relationships `lazy="raise"` so a missing strategy fails loudly, then load explicitly per query — `selectinload()` for collections, `joinedload()` for to-one. Set `expire_on_commit=False` on the async session factory so post-commit attribute access doesn't trigger implicit IO.
+
+---
+
+## ValueError Leaking Internals into 422 Responses
+
+**Smell**: Pydantic validator messages containing internals — or custom exception classes raised inside validators.
+
+**What it looks like**:
+```python
+@field_validator("token")
+@classmethod
+def check_token(cls, v: str) -> str:
+    if not verify(v):
+        raise TokenSignatureError(f"HMAC mismatch against key {KEY_ID}")  # custom class → 500
+    return v
+```
+
+**Why it's bad**: `ValueError` messages surface VERBATIM in 422 response bodies (internals leak to clients); any other exception class escapes Pydantic entirely and becomes a 500.
+
+**How to detect**:
+```bash
+grep -rn "raise [A-Z]" app/ --include="*.py" -A 1 | grep -B 1 "field_validator\|model_validator"
+```
+
+**How to fix**: Raise `ValueError` (or `PydanticCustomError`) with a client-safe message: `raise ValueError("invalid token")`. Never `assert` in validators — it vanishes under `python -O`.
+
+---
+
+## Legacy Test-Client and Event-Loop Idioms
+
+**Smell**: Test code using removed APIs — `AsyncClient(app=app)` or an `event_loop` fixture override.
+
+**What it looks like**:
+```python
+async with AsyncClient(app=app, base_url="http://test") as client:  # removed in httpx 0.28
+    ...
+
+@pytest.fixture
+def event_loop():  # removed in pytest-asyncio 1.0 — dead code that shadows nothing
+    ...
+```
+
+**Why it's bad**: Both idioms are removed upstream — they fail on current versions or silently do nothing, and they mark the test suite as copy-pasted from stale tutorials.
+
+**How to detect**:
+```bash
+grep -rn "AsyncClient(app=" tests/ --include="*.py"
+grep -rn "def event_loop" tests/ --include="*.py"
+```
+
+**How to fix**: `AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`; loop scoping via `asyncio_default_fixture_loop_scope` config, never a fixture override.
+
+---
+
+## exclude_none in PATCH Flows
+
+**Smell**: Partial-update handlers dumping the request model with `exclude_none=True`.
+
+**What it looks like**:
+```python
+changes = patch.model_dump(exclude_none=True)  # drops explicit nulls!
+```
+
+**Why it's bad**: A client sending `{"album_id": null}` to CLEAR a field is indistinguishable from a client that didn't send the field — the explicit null is silently discarded and the clear never happens.
+
+**How to detect**:
+```bash
+grep -rn "exclude_none" app/ --include="*.py" | grep -i "patch\|update"
+```
+
+**How to fix**: `patch.model_dump(exclude_unset=True)` — excludes only fields the client did not send, preserving explicit nulls.
+
+---
+
+## Superseded Pydantic Config Flags
+
+**Smell**: `populate_by_name=True` (or `json_encoders`) in new code.
+
+**What it looks like**:
+```python
+model_config = ConfigDict(populate_by_name=True, json_encoders={datetime: iso})
+```
+
+**Why it's bad**: `populate_by_name` is officially superseded by the explicit `validate_by_name` + `validate_by_alias` pair (deprecation planned); `json_encoders` is already deprecated with real performance overhead.
+
+**How to detect**:
+```bash
+grep -rn "populate_by_name\|json_encoders" app/ --include="*.py"
+```
+
+**How to fix**: `ConfigDict(validate_by_name=True, validate_by_alias=True, serialize_by_alias=True)` for aliasing; `@field_serializer` for custom serialization. Full patterns in `pydantic-patterns.md`.

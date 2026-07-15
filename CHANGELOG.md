@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.164.0] - 2026-07-15
+
+### python-fastapi template: FastAPI + Pydantic best-practice calibration
+
+Four-agent research sweep (official FastAPI docs + release timeline, community production consensus, ecosystem stack, dedicated Pydantic pass — every prescription live-verified against primary sources, cross-corroborated, UNVERIFIED claims excluded). The template's bones held up (Annotated DI, lifespan, UUIDv7, uv, structlog+OTel, testcontainers, ASGITransport all still current); what follows fixes the parts the ecosystem moved out from under.
+
+- **Security stack corrected**: `python-jose` (unmaintained, dropped from official guidance) → **PyJWT**; `passlib`/`bcrypt` → **pwdlib[argon2]** with `PasswordHash.recommended()` (the official tutorial stack; passlib survives only as a read-legacy-hashes note).
+- **Async story rewritten** (was self-contradictory: prescribed sync-DB-by-default while showing async testing): explicit decision tree (non-blocking → `async def`; blocking lib → `def`/threadpool of ~40; mixed → `run_in_threadpool`; CPU-bound → task queue), async-first DB as the default posture, and the async-SQLAlchemy trap kit — engine-once-in-lifespan, session-per-request yield dependency (+ the new `scope` parameter), `expire_on_commit=False`, `selectinload`/`joinedload`, **`lazy="raise"` relationship default**, `MissingGreenlet` explained.
+- **New `pydantic-patterns.md` add-on** (~300 lines): ConfigDict essentials (`extra="forbid"` at API boundaries, the 2.11 aliasing trio replacing `populate_by_name`), validator rules (ValueError-only — anything else 500s; messages leak verbatim into 422 bodies; no `assert`), `field_serializer` over deprecated `json_encoders`, `computed_field`, TypeAdapter reuse, `exclude_unset`-vs-`exclude_none` semantics + the official PATCH pattern, discriminated unions, `AwareDatetime`, `Optional ≠ default`, `polymorphic_serialization`, settings (secrets_dir, the BaseSettings `extra="forbid"` default gotcha, eager fail-fast + `lru_cache` dependency), and the validate-at-boundaries performance doctrine.
+- **Enforcement over prose**: ruff `FAST` + `ASYNC` rule groups added to the pyproject example — FAST002 mechanically enforces the template's own Annotated-DI rule; ASYNC detects blocking-in-async. Compatibility-floor table added to coding-standards (FastAPI ≥0.128 = Pydantic-v2-only; 0.132 strict JSON Content-Type; pytest-asyncio 1.x; httpx 0.28).
+- **Response-model idiom**: return-type annotation as primary (now also the fast Rust-serialization path), `response_model=` only when types diverge; second-validation-pass cost noted; self-contradicting `= Depends()` example fixed.
+- **pytest idiom coherence**: pytest-asyncio 1.x config (`asyncio_mode=auto` + explicit `asyncio_default_fixture_loop_scope`), no per-test markers, `event_loop`-fixture and `AsyncClient(app=)` flagged as removed-upstream.
+- **Six new common-smells entries**: lazy-loading-in-async (MissingGreenlet/hidden N+1), ValueError-internals-leak, legacy test-client/event-loop idioms, `exclude_none`-in-PATCH, superseded config flags; sync-in-async entry gains the `run_in_threadpool` escape and threadpool-exhaustion context.
+- **architecture.md additions**: BackgroundTasks-vs-queue boundary (ARQ async-native default, Celery for heavy pipelines), workers guidance (K8s single-process; gunicorn is legacy; uvicorn is HTTP/1.1-only), correlation-id middleware + double-access-log note, alembic `pyproject_async` init template, structure-tradeoff note (deliberate Clean-Architecture sublayers vs community flat-per-domain).
+- **HURL 8 notes** in hurl-reference: RFC 9535 JSONPath engine, removed multiline-string attributes, secrets redaction (`--secrets-file`), parallel-by-default `--test` mode vs ordered chains.
+- **De-contamination sweep**: field-project domain vocabulary in generic examples (ownership table, HURL domain map + foundation chain, changelog example rows, scope table, service-name lists, circular-dep examples) replaced with generic Users/Orders/Catalog/Billing/Notifications shapes.
+- Gate **K271** (template currency: pydantic-patterns present + PyJWT/pwdlib + FAST/ASYNC wiring + trap kit + pytest-asyncio idiom). Drift-guard stack 177 → 178 deep (K94–K271).
+
 ## [0.163.0] - 2026-07-15
 
 ### Fourth field receipt, lane ergonomics: diff-first lanes + un-droppable consolidator contract

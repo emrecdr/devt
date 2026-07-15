@@ -96,7 +96,7 @@ Tests execute in `metadata.json` array order. Follow these rules when inserting 
 ### Foundation Chain (positions 1-7, DO NOT reorder)
 
 ```
-b01_auth_setup → c01_client_relationships → c02_client_updates → c03_client_security_delete → c10_client_import → d01_licenses → g01_rbac_advanced
+b01_auth_setup → c01_user_profile → d01_orders_crud → g01_rbac_advanced (example — document YOUR project's chain)
 ```
 
 These establish shared state (tokens, users, orgs, clients, licenses, roles). The token scope chain is critical — `c02` switches `jan_token` to `head_relative`, `d01` restores to `org_admin`.

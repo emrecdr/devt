@@ -27,7 +27,7 @@ This guide covers HURL E2E test organization, structure, and best practices.
 tests/hurl/
 ├── .env.hurl               # Hurl test variables (NOT a .env.* file)
 ├── TEMPLATE.hurl.example   # MANDATORY template for new tests
-├── {letter}{nn}_{name}.hurl # Domain-prefixed test files (e.g., c01_client_relationships.hurl)
+├── {letter}{nn}_{name}.hurl # Domain-prefixed test files (e.g., d01_orders_crud.hurl)
 ├── metadata.json           # Execution order + phase labels (EDIT THIS when adding tests)
 ├── README.md               # E2E testing guide
 └── scripts/                # Runner scripts
@@ -110,7 +110,7 @@ Every HTTP request MUST have metadata comments for the Hurl Dashboard:
 # Examples:
 # @ACTOR: System Admin (SYSTEM:MANAGE permission)
 # @ACTOR: Organization Admin (ORGANIZATION:MANAGE permission)
-# @ACTOR: Caregiver (RELATIVE:VIEW permission)
+# @ACTOR: Support Agent (TICKET:VIEW permission)
 # @ACTOR: Anonymous (No authentication)
 ```
 
@@ -138,33 +138,29 @@ Every HTTP request MUST have metadata comments for the Hurl Dashboard:
 - **Number** (01-99) = order within domain — tens digit groups related sub-topics
 - **Name** = descriptive snake_case name
 
+Assign one letter per domain in YOUR project (generic example shape):
+
 ```
 tests/hurl/
 ├── a01_health_probes.hurl           # a = Infrastructure
 ├── b01_auth_setup.hurl              # b = Auth & Identity
-├── c01_client_relationships.hurl    # c = Clients
-├── d01_licenses.hurl                # d = Licenses
-├── e01_user_api.hurl                # e = User Profile
+├── c01_user_profile.hurl            # c = Users
+├── d01_orders_crud.hurl             # d = Orders
+├── e01_catalog_products.hurl        # e = Catalog
 ├── f01_2fa_email.hurl               # f = Two-Factor Auth
 ├── g01_rbac_advanced.hurl           # g = RBAC & Permissions
 ├── h01_organization_users.hurl      # h = Organizations
-├── j01_photo_albums.hurl            # j = Photos
-├── k01_agenda.hurl                  # k = Agenda
-├── l01_devices.hurl                 # l = Devices
-├── m01_app_versions.hurl            # m = Tablet Communication
-├── n01_video_calling.hurl           # n = Communication
-├── o01_invoices.hurl                # o = Billing
-├── p01_dashboard.hurl               # p = Dashboards
-├── q01_countries.hurl               # q = Cross-Cutting
+├── j01_billing_invoices.hurl        # j = Billing
+├── k01_notifications.hurl           # k = Notifications
 ├── r01_token_single_use.hurl        # r = Security
-├── s01_family_journey.hurl          # s = Integration Journeys
+├── s01_checkout_journey.hurl        # s = Integration Journeys
 ```
 
 > **Note**: Letter `i` is skipped to avoid confusion with `1` in monospace fonts.
 
 ### Execution Order
 
-Files execute in `metadata.json` array order (not filename order). A foundation chain of 7 files must run first: `b01→c01→c02→c03→c10→d01→g01`. See `tests/hurl/README.md` for full execution order documentation.
+Files execute in `metadata.json` array order (not filename order). Auth/setup foundation files must run before the domains that consume their captured tokens — document the foundation chain in `tests/hurl/README.md`.
 
 ---
 
@@ -470,6 +466,25 @@ SMS 2FA uses a two-file split pattern for code injection:
 **Why split?** The first file triggers the SMS code, the second uses it:
 1. `f10_2fa_sms.hurl` triggers final challenge → SMS code captured via testing endpoint
 2. `f11_2fa_sms_verification.hurl` uses captured `{{sms_2fa_code}}` to complete verification
+
+---
+
+## HURL 8 Notes (engine + execution)
+
+- **JSONPath is RFC 9535** since HURL 8 — standard filter/slice/negative-index
+  semantics. Files written against older HURL versions using non-standard
+  JSONPath behaviors may assert differently; re-run the suite after a HURL
+  major upgrade before trusting green.
+- **Deprecated multiline-string attributes were removed in 8.0** — request
+  bodies use raw inline JSON or plain multiline strings.
+- **Secrets stay out of reports**: pass tokens/passwords as secrets, not
+  plain variables — `--secrets-file secrets.env` or `HURL_SECRET_admin_password=...`
+  env vars. Secret values are redacted from HTML/JSON/JUnit reports and logs;
+  plain `--variable` values are NOT.
+- **`--test` mode runs files in PARALLEL by default.** Ordered, state-chaining
+  suites (create → capture → reuse across files) must pin `--jobs 1` — or
+  rely on the project runner (`make test-hurl`) which does. Independent files
+  may exploit parallelism freely.
 
 ---
 

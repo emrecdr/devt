@@ -3,17 +3,27 @@
 ## Language & Runtime
 
 - Python 3.13+
-- FastAPI with Pydantic v2 for validation
-- SQLModel for ORM / database models
+- FastAPI with Pydantic v2 for validation — full Pydantic conventions in `pydantic-patterns.md`
+- SQLModel for ORM / database models (rides on SQLAlchemy 2.0; SQLModel pins SQLAlchemy < 2.1)
 - `uv` as package manager (never `pip`)
+
+### Compatibility floor (assumptions the rules below rely on)
+
+| Component | Floor | Consequence |
+|-----------|-------|-------------|
+| FastAPI | ≥ 0.128 | Pydantic v2 ONLY — any `pydantic.v1` import hard-fails |
+| FastAPI | ≥ 0.132 | JSON request bodies REQUIRE a JSON `Content-Type` header (`strict_content_type` default) |
+| Pydantic | ≥ 2.11 | `validate_by_name`/`validate_by_alias`/`serialize_by_alias` replace `populate_by_name` |
+| pytest-asyncio | ≥ 1.0 | The `event_loop` fixture no longer exists — overriding it is dead code |
+| httpx | 0.28.x | `AsyncClient(app=...)` is removed — use `ASGITransport(app=...)` |
 
 ## Type Safety
 
 - Mandatory type hints on all function signatures, return types, and class attributes
 - Use `T | None` union syntax (not `Optional[T]`)
 - Use `list[int]`, `dict[str, Any]` (not `List[int]`, `Dict[str, Any]` from typing)
-- No `Any` unless absolutely unavoidable — prefer `Unknown` patterns or generics
-- Pydantic models for all request/response schemas (automatic validation)
+- No `Any` unless absolutely unavoidable — prefer `object` with narrowing, or generics
+- Pydantic models for all request/response schemas (automatic validation) — see `pydantic-patterns.md`
 - Run `mypy` (or `pyright`) on every change — type errors are blocking
 
 ## Naming Conventions
@@ -28,11 +38,43 @@
 
 ## Async Rules
 
-- `async def` for I/O operations (HTTP calls, file I/O, message queues)
-- Regular `def` for database operations with synchronous SQLModel sessions
-- For async database access, use async drivers (`asyncpg`) with `AsyncSession`
-- Never mix — if a function calls sync DB, it must be sync itself
-- Never use `requests` in async handlers — use `httpx.AsyncClient` instead
+One blocking call inside an `async def` route stalls EVERY in-flight request —
+the event loop is shared. Sync (`def`) routes run in a threadpool that holds
+only ~40 threads total, so they don't block the loop but do exhaust under
+load. Decision tree per route/dependency:
+
+| Situation | Form |
+|-----------|------|
+| Only non-blocking I/O (async DB driver, `httpx.AsyncClient`, async queue client) | `async def` |
+| Only a blocking library (sync SDK, no async client exists) | plain `def` — FastAPI runs it in the threadpool |
+| Mostly async but one blocking call is unavoidable | `async def` + wrap the call in `run_in_threadpool(...)` / `asyncio.to_thread(...)` |
+| CPU-bound work (image processing, crypto, ML inference) | Neither — hand it to an external worker (task queue) |
+
+- **Async-first database access is the default posture**: async driver
+  (`asyncpg`) + `AsyncSession`. A fully-sync service (plain `def` routes +
+  sync sessions throughout) is acceptable for small internal tools — but pick
+  ONE posture per service and never mix sync sessions into async routes.
+- Never call a sync DB session, `requests`, `time.sleep`, or any blocking SDK
+  directly inside `async def` — `httpx.AsyncClient`, `asyncio.sleep`, async
+  drivers, or `run_in_threadpool` are the substitutes.
+- Prefer async dependencies over sync ones — every sync dependency burns a
+  threadpool token even when trivial.
+
+### Async SQLAlchemy/SQLModel rules (the trap kit)
+
+- Engine is created ONCE in the lifespan handler — never per request. Every
+  engine owns its own connection pool; accidental extra engines multiply pool
+  size past the database's `max_connections`.
+- Session-per-request via a yield dependency; the session closes in `finally`.
+- `async_sessionmaker(engine, expire_on_commit=False)` — otherwise every
+  post-commit attribute access triggers implicit IO and fails in async.
+- **Never rely on lazy loading in async code** — it either raises
+  `MissingGreenlet` or silently issues N+1 queries. Declare relationships
+  `lazy="raise"` by default and load explicitly per query:
+  `selectinload()` for collections, `joinedload()` for to-one.
+- Loading strategy is part of the query, not the model: fetching a list
+  endpoint without `selectinload` on a rendered relationship is an N+1 even
+  when it happens to work.
 
 ## Import Rules
 
@@ -232,15 +274,16 @@ Repository interfaces live at the module root in `repository_interfaces.py`. Oth
 
 ### Ownership Table
 
+Maintain a table like this for YOUR project's domains (generic example shape):
+
 | Domain | Owner Service | Interface Location |
 |--------|---------------|-------------------|
 | Users, Roles, RBAC | Identity | `identity/repository_interfaces.py` |
-| Clients, Relationships | Clients | `clients/repository_interfaces.py` |
-| Organizations | Organizations | `organizations/repository_interfaces.py` |
-| Photos, Albums | Photos | `photos/repository_interfaces.py` |
-| Licenses, SKUs | Licences | `licences/repository_interfaces.py` |
+| Orders, Line Items | Orders | `orders/repository_interfaces.py` |
+| Products, Inventory | Catalog | `catalog/repository_interfaces.py` |
+| Invoices, Payments | Billing | `billing/repository_interfaces.py` |
+| Notifications | Notifications | `notifications/repository_interfaces.py` |
 | Audit Logs | Audit | `audit/repository_interfaces.py` |
-| Devices | Devices | `devices/repository_interfaces.py` |
 
 ### Cross-Service Access Pattern
 
@@ -249,28 +292,28 @@ Inject the owning module's repository interface via DI:
 ```python
 # CORRECT: Import from owning service
 from app.services.identity.repository_interfaces import RoleRepositoryInterface
-from app.services.clients.repository_interfaces import ClientRelationshipRepositoryInterface
+from app.services.orders.repository_interfaces import OrderRepositoryInterface
 
 class MyService:
     def __init__(
         self,
         role_repo: RoleRepositoryInterface,
-        relationship_repo: ClientRelationshipRepositoryInterface,
+        order_repo: OrderRepositoryInterface,
     ):
         self.role_repo = role_repo
-        self.relationship_repo = relationship_repo
+        self.order_repo = order_repo
 
 # WRONG: Creating duplicate protocol
 class RoleRepositoryProtocol(Protocol):  # Already exists in Identity!
     def get_by_code(self, code: str) -> Role | None: ...
 
 # WRONG: Adding another domain's query to your own repo
-class DeviceRepository:
+class NotificationRepository:
     def get_by_user_id(self, user_id: UUID): ...  # Users belong to Identity!
 
 # WRONG: Duplicating logic that exists in the owning repo
-class DeviceRepository:
-    def reset_licenses_by_user(self, user_id: UUID): ...  # Use LicenseRepository!
+class NotificationRepository:
+    def cancel_orders_by_user(self, user_id: UUID): ...  # Use OrderRepository!
 ```
 
 ---
@@ -316,19 +359,31 @@ class PhotoData(BaseModel): ...    # Too generic
 
 ### DTOs Cross Boundaries
 
-Only DTOs cross the API boundary — never models:
+Only DTOs cross the API boundary — never models. Declare the response type as
+the **return-type annotation** (the primary style; it also enables FastAPI's
+fast Rust-path serialization). Reserve `response_model=` for the rare case
+where the returned value's type differs from the declared schema — then
+annotate `-> Any`:
 
 ```python
-# CORRECT: DTO crosses boundary
-@router.get("/users/{user_id}", response_model=UserResponse)
-def get_user(user_id: UUID, service: UserService = Depends()):
-    user = service.get_user(user_id)
+UserServiceDep = Annotated[UserService, Depends(get_user_service)]
+
+# CORRECT: DTO crosses boundary, return type declares the schema
+@router.get("/users/{user_id}")
+async def get_user(user_id: UUID, service: UserServiceDep) -> UserResponse:
+    user = await service.get_user(user_id)
     return UserResponse.model_validate(user)
 
-# WRONG: Model crosses boundary
+# WRONG: Model crosses boundary + legacy default-value Depends style
 @router.get("/users/{user_id}", response_model=User)  # Model!
-def get_user(user_id: UUID, db: Session = Depends()):
+def get_user(user_id: UUID, db: Session = Depends(get_db)):
     return db.query(User).filter(User.id == user_id).first()
 ```
+
+FastAPI validates the return value against the declared response type — a
+second validation pass. Keep response models flat and cheap, especially on
+list endpoints. Partial updates (PATCH) use an all-optional request model +
+`model_dump(exclude_unset=True)` — the full pattern is in
+`pydantic-patterns.md`.
 
 > **ADR override note**: if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

@@ -219,7 +219,7 @@ Seeing a function with `user_data: Any` return type while modifying the same fil
 
 ### Why It Matters
 
-Failure leads to duplicate systems (creating a Logger when obslog exists), models in the wrong service (UserMeta in licences instead of identity), and circular dependencies.
+Failure leads to duplicate systems (creating a Logger when obslog exists), models in the wrong service (UserMeta in billing instead of identity), and circular dependencies.
 
 ### Required Reading
 
@@ -327,7 +327,7 @@ Security: prevents unauthorized data access. RBAC enforcement at the data layer.
 | `DOMAIN` | All data within a domain | Domain admin |
 | `ORGANIZATION` | All data within an organization | Org admin |
 | `SUPPORT` | Read-only access to organization | Support staff |
-| `RELATIVE` | Only related client data | Family member |
+| `MEMBER` | Only own-account data | End user |
 
 ### Implementation Pattern
 

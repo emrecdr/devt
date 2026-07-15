@@ -64,7 +64,7 @@ app/services/<service_name>/MODULE.md
 
 **YOU MUST read MODULE.md files BEFORE implementation.** Failure leads to:
 - Duplicate systems (creating a Logger when obslog exists)
-- Models in wrong service (UserMeta in licences instead of identity)
+- Models in wrong service (UserMeta in billing instead of identity)
 - Circular dependencies (services depending on each other incorrectly)
 
 ### Which Files to Read
@@ -101,7 +101,7 @@ core (no dependencies)
 identity (depends on core)
   ^
   +-- clients (depends on identity + core)
-  +-- licences (depends on identity + core)
+  +-- billing (depends on identity + core)
   +-- organizations (depends on identity + core)
 ```
 

@@ -58,7 +58,7 @@ EOF
 
 ### Scope Examples
 
-- Service names: `identity`, `licences`, `photos`, `agenda`
+- Service names: `identity`, `orders`, `billing`, `notifications`
 - `core` — Changes in core infrastructure
 - `api` — API layer changes
 

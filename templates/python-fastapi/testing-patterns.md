@@ -128,12 +128,13 @@ def db_url():
 
 ### Async Endpoint Testing
 
-Use `httpx.AsyncClient` with `ASGITransport` for true async testing:
+Use `httpx.AsyncClient` with `ASGITransport` for true async testing. With
+`asyncio_mode = "auto"` in pyproject.toml (pytest-asyncio 1.x), async tests
+need NO marker:
 
 ```python
 from httpx import ASGITransport, AsyncClient
 
-@pytest.mark.anyio
 async def test_create_item(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -141,7 +142,12 @@ async def test_create_item(app):
         assert response.status_code == 201
 ```
 
-`TestClient` (sync) is fine for sync route handlers. Use `AsyncClient` when routes use `async def`.
+- `AsyncClient(app=...)` no longer exists (removed in httpx 0.28) — the
+  `transport=ASGITransport(app=...)` form is the only one.
+- pytest-asyncio 1.x removed the `event_loop` fixture — never override it;
+  loop scoping is config (`asyncio_default_fixture_loop_scope = "function"`).
+- `TestClient` (sync) is fine when the test itself is a plain `def` — it
+  drives async routes correctly. It cannot be used INSIDE an async test.
 
 ## E2E Test Patterns
 
@@ -189,9 +195,9 @@ tests/hurl/
 ```
 a01_health_probes.hurl        # Infrastructure
 b01_auth_setup.hurl           # Auth & Identity
-c01_client_relationships.hurl # Clients
-d01_licenses.hurl             # Licenses
-e01_user_api.hurl             # User Profile
+c01_orders_crud.hurl          # Orders
+d01_billing_invoices.hurl     # Billing
+e01_user_profile.hurl         # User Profile
 ```
 
 ### Creating New HURL Test Files
@@ -507,7 +513,7 @@ Content-Type: application/json
 HTTP 200
 
 # Retrieve code from test SMS backend
-GET {{base_url}}/api/v1/testing/sms-code/+31612345678
+GET {{base_url}}/api/v1/testing/sms-code/+15550100
 HTTP 200
 [Captures]
 sms_code: jsonpath "$.code"
@@ -568,5 +574,5 @@ header "Content-Type" contains "application/json"
 
 # JSONPath for first/last items
 jsonpath "$.tokens[0].token"   # First
-jsonpath "$.tokens[-1].token"  # Last (NO slice notation — use negative index)
+jsonpath "$.tokens[-1].token"  # Last (negative index per RFC 9535 — HURL 8's JSONPath engine)
 ```

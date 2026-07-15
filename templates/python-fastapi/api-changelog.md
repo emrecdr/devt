@@ -203,24 +203,24 @@ The summary cell is a **one-line index**, not a mini-section. Cells longer than 
 ❌ **Bad — bloated summary (773 chars, broke Bitbucket rendering):**
 
 ```
-| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (TICKET-184 / TICKET-132 Phase 1a)**: `PATCH /api/v1/licenses/{id}/rights` now accepted for `head_relative` on B2C licenses (new `LICENSE_UPDATE_RIGHTS` permission, new `LicenseRightsUpdatedEvent` audit). **Added (TICKET-144 / TICKET-176)**: `DELETE /api/v1/clients/{client_id}/messages?sender_user_id=<uid>` (moderation) and `DELETE /api/v1/clients/{client_id}/messages/mine` (self-delete) + new `MessageDeletedEvent`. **Added (TICKET-177)**: `DELETE /api/v1/clients/{client_id}/photos/mine` (self-delete; reuses `PhotoBulkDeletedEvent`). **Changed (TICKET-134)**: `POST /api/v1/licenses/{id}/unlock` rejects RELATIVE-scope callers on organisation-owned licenses with `403`. **Operational**: ... |
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added (TICKET-184 / TICKET-132 Phase 1a)**: `PATCH /api/v1/orders/{id}/items` now accepted for `account_owner` on self-service accounts (new `ORDER_UPDATE_ITEMS` permission, new `OrderItemsUpdatedEvent` audit). **Added (TICKET-144 / TICKET-176)**: `DELETE /api/v1/users/{user_id}/comments?author_user_id=<uid>` (moderation) and `DELETE /api/v1/users/{user_id}/comments/mine` (self-delete) + new `CommentDeletedEvent`. **Added (TICKET-177)**: `DELETE /api/v1/users/{user_id}/uploads/mine` (self-delete; reuses `UploadBulkDeletedEvent`). **Changed (TICKET-134)**: `POST /api/v1/orders/{id}/unlock` rejects MEMBER-scope callers on organisation-owned orders with `403`. **Operational**: ... |
 ```
 
 ✅ **Good — concise summary (212 chars):**
 
 ```
-| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added**: `head_relative` self-service rights edit on B2C licenses; tablet message moderation + self-delete; self-service photo delete. **Changed**: unlock rejects RELATIVE-scope callers on org-owned licenses. |
+| [0.52.0](#0520---2026-06-03) | 2026-06-03 | **Added**: `account_owner` self-service order edits; comment moderation + self-delete; self-service upload delete. **Changed**: unlock rejects MEMBER-scope callers on org-owned orders. |
 ```
 
 **Rules of thumb for keeping the cell short:**
 
 | What | In summary cell? | In section body? |
 |---|---|---|
-| Thematic high-level change (e.g., "tablet message moderation") | ✅ yes | ✅ also expanded |
+| Thematic high-level change (e.g., "comment moderation") | ✅ yes | ✅ also expanded |
 | `Added` / `Changed` / `Fixed` group labels | ✅ yes | ✅ section headings |
-| Full endpoint paths (`PATCH /api/v1/licenses/{id}/rights`) | ❌ no | ✅ yes |
-| Ticket IDs (GFBUGS-XXX, GF-XXX) | ❌ no | ✅ yes |
-| Event class names (`LicenseRightsUpdatedEvent`) | ❌ no | ✅ yes |
+| Full endpoint paths (`PATCH /api/v1/orders/{id}/items`) | ❌ no | ✅ yes |
+| Ticket IDs (PROJ-XXX, BUG-XXX) | ❌ no | ✅ yes |
+| Event class names (`OrderItemsUpdatedEvent`) | ❌ no | ✅ yes |
 | Permission codes, error codes, status codes | ❌ no | ✅ yes |
 | Before/After JSON examples | ❌ no | ✅ yes |
 | Migration checklist | ❌ no | ✅ yes |

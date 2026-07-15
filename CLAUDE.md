@@ -82,7 +82,7 @@ When adding a new workflow that sets `active=true`, add its `workflow_type` to `
 
 ### Templates
 
-Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank) provide `.devt/rules/` scaffolding files. The 9-file baseline (`architecture.md`, `coding-standards.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `quality-gates.md`, `review-checklist.md`, `testing-patterns.md`, `patterns/common-smells.md`) is enforced by smoke gate K70 — every template registered in `bin/modules/setup.cjs::AVAILABLE_TEMPLATES` MUST ship all 9. Optional add-ons vary per template's domain: `api-changelog.md` (HTTP-API-serving templates), `canonical-entities.yaml` (entity-aware projects), `arch-scan.py` + `detectors/` (Python arch-scanner). Authoring templates for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
+Project templates in `templates/` (python-fastapi, go, typescript-node, vue-bootstrap, rust, blank) provide `.devt/rules/` scaffolding files. The 9-file baseline (`architecture.md`, `coding-standards.md`, `documentation.md`, `git-workflow.md`, `golden-rules.md`, `quality-gates.md`, `review-checklist.md`, `testing-patterns.md`, `patterns/common-smells.md`) is enforced by smoke gate K70 — every template registered in `bin/modules/setup.cjs::AVAILABLE_TEMPLATES` MUST ship all 9. Optional add-ons vary per template's domain: `api-changelog.md` (HTTP-API-serving templates), `canonical-entities.yaml` (entity-aware projects), `arch-scan.py` + `detectors/` (Python arch-scanner), `pydantic-patterns.md` (Pydantic v2 conventions, python-fastapi). Authoring templates for new agents and skills are at `templates/agent-template.md` and `templates/skill-template.md`.
 
 ## Development Commands
 
@@ -129,7 +129,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 177-deep drift-guard stack K94-K270) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 178-deep drift-guard stack K94-K271) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

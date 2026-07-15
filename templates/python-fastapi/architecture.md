@@ -39,6 +39,13 @@ API (presentation) -> Application (use cases) -> Domain (entities)
 
 ## Service Module Structure
 
+Domain-first packaging (one package per bounded context) is the ecosystem
+consensus. The `{domain,application,infrastructure,api}` sublayers inside each
+service are this ruleset's deliberate Clean-Architecture choice — the common
+community alternative is a flat per-domain file set (`router.py, service.py,
+models.py, schemas.py, ...`). The sublayered form costs more files per domain
+and buys mechanically checkable boundaries (the arch scanner enforces them).
+
 ```
 app/services/<service_name>/
     domain/
@@ -76,10 +83,21 @@ app/services/<service_name>/
 
 ## Dependency Injection
 
-- FastAPI `Depends()` for wiring dependencies
+- FastAPI `Depends()` for wiring dependencies — always in `Annotated[T, Depends(...)]` form
 - Repository implementations injected into services
 - Services injected into route handlers
-- Configuration via Pydantic `Settings` classes
+- Prefer async dependencies — each sync dependency consumes a threadpool token per request
+- DB session-per-request via a yield dependency (close in `finally`); yield dependencies exit AFTER the response is sent by default — pass `Depends(dep, scope="function")` when cleanup must complete before the response goes out
+- Configuration via `pydantic_settings.BaseSettings` injected as a dependency (testable via `dependency_overrides`) and instantiated eagerly at startup so invalid config fails the boot — pattern in `pydantic-patterns.md`
+
+## Background Work
+
+`BackgroundTasks` is for short, non-critical, fire-and-forget work only (send
+a notification, invalidate a cache): it runs in-process on the serving event
+loop, has no status, no retry, and is lost on crash or deploy. Anything
+critical, heavy, or observable belongs in a task queue — **ARQ** as the
+async-native default pairing, **Celery** for heavy multi-worker pipelines.
+CPU-bound work never runs in the web process at all.
 
 ## Module Documentation
 
@@ -127,6 +145,12 @@ structlog.contextvars.bind_contextvars(request_id=request_id, user_id=user_id)
 logger.info("order_created", order_id=order.id, total=order.total)
 ```
 
+Correlation IDs: use `asgi-correlation-id`'s `CorrelationIdMiddleware` and
+bind the ID into structlog contextvars — every log line for a request carries
+the same ID, and it round-trips to clients via the `X-Request-ID` header.
+When middleware does request logging, disable uvicorn's own access log
+(`access_log=False`) so every request isn't logged twice.
+
 ### Distributed Tracing
 
 Use OpenTelemetry for traces and metrics:
@@ -143,6 +167,7 @@ Export to Jaeger, Tempo, Datadog, or any OTLP-compatible backend.
 
 ## Database Migrations (Alembic)
 
+- New projects: `alembic init -t pyproject_async` (PEP 621 pyproject.toml config + async engine template; migrations themselves stay sync, bridged via `connection.run_sync`)
 - All schema changes go through Alembic migrations — never manual DDL
 - Migration naming: `YYYYMMDD_HHMM_<description>.py` or Alembic auto-generated
 - Every migration must be reversible (`upgrade()` + `downgrade()`)
@@ -188,8 +213,8 @@ app.add_middleware(
 
 - Short-lived access tokens (15 min) + refresh tokens (7 days)
 - Store refresh tokens in httpOnly cookies (never localStorage)
-- Use `python-jose` or `PyJWT` for JWT encode/decode
-- Password hashing: `bcrypt` via `passlib` or `bcrypt` library directly
+- JWT encode/decode: **PyJWT** (`import jwt`). Never `python-jose` — unmaintained, dropped from official guidance
+- Password hashing: **`pwdlib[argon2]`** with `PasswordHash.recommended()` (Argon2 is the recommended algorithm). `passlib` is unmaintained (its `crypt` dependency was removed from the standard library) — use it only to READ legacy hashes during migration
 - Define reusable dependency: `CurrentUser = Annotated[User, Depends(get_current_user)]`
 
 ### Rate Limiting
@@ -200,10 +225,11 @@ app.add_middleware(
 
 ### Input Validation
 
-- Pydantic models handle request validation automatically
-- Use `Field(min_length=..., max_length=..., pattern=...)` for string constraints
-- Use `conint(ge=0, le=100)` for numeric bounds
+- Pydantic models handle request validation automatically — full conventions in `pydantic-patterns.md`
+- String constraints: `Annotated[str, StringConstraints(min_length=..., max_length=..., pattern=...)]`
+- Numeric bounds: `Annotated[int, Field(ge=0, le=100)]` — never `conint`/`constr` (deprecated for removal in Pydantic 3.0)
 - Never trust path/query params — validate UUIDs via type annotations
+- `extra="forbid"` on request models so unknown keys 422 instead of being silently dropped
 
 ## Docker & Deployment
 
@@ -235,6 +261,16 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 - `--frozen` ensures lockfile is respected
 - Never install dev dependencies in production image
 
+### Workers
+
+- Kubernetes / any replicated container platform: **one uvicorn process per
+  container** (as in the CMD above) — replicate at the cluster level
+- Single-host deployments: `uvicorn --workers N` (or `fastapi run --workers N`)
+- gunicorn+uvicorn-workers is a legacy pattern — dropped from official FastAPI
+  guidance; uvicorn's built-in worker management (monitoring, auto-restart,
+  rolling SIGHUP restarts) replaced it
+- uvicorn speaks HTTP/1.1 only — terminate HTTP/2+ at the reverse proxy
+
 ### Graceful Shutdown
 
 Handled by the lifespan context manager. On SIGTERM:
@@ -259,7 +295,10 @@ target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+# FAST = FastAPI-specific rules (FAST002 mechanically enforces Annotated
+# dependencies); ASYNC = blocking-call-in-async detection — both enforce
+# rules this ruleset otherwise only states as prose.
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "FAST", "ASYNC"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -271,7 +310,8 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
+asyncio_mode = "auto"                          # async tests need no marker
+asyncio_default_fixture_loop_scope = "function"  # required explicit on pytest-asyncio 1.x
 markers = ["integration: marks integration tests", "e2e: marks end-to-end tests"]
 ```
 
