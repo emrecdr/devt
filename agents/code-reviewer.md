@@ -79,8 +79,8 @@ Do NOT skip any of these — reviewing without the project's rules means reviewi
 4. Reconcile severity using the rubric (Critical > Important > Minor > Suggestion). When two lanes assign different severities to the same finding, keep the highest.
 5. Preserve all Critical findings even when only one lane flagged them.
 6. Group the consolidated finding list by file in the output `review.md`.
-7. Write `review.md` + `review.json` exactly as the single-dispatch path does (same schema, same severity buckets).
-8. In `review.md`, add a `## Lane Provenance` section listing each lane id, community, status, and finding count contributed.
+7. Write `review.md` + `review.json` as the single-dispatch path does (same severity buckets) with ONE exception — **no merged 0–100 score**: set `"score": null` in `review.json` and add `"lane_scores": [{id, community, score, verdict, findings_contributed}]`. A consolidated deduction score saturates at the 0 floor on multi-lane merges (field case: −171 in deductions rendered a shippable branch as 0/100) and, as a structured field, is one automation hook away from a CI gate acting on it. The per-lane spread IS the signal — a 91-lane and a 24-lane must stay distinguishable, not collapse into a fake middle number. The 0–100 model applies to individual lane reviews and serial single-dispatch reviews only.
+8. In `review.md`, add a `## Lane Provenance` section listing each lane id, community, status, and finding count contributed. The review headline is **verdict + severity counts + the per-lane score distribution** (e.g. `NEEDS_WORK — 2 Critical / 12 Important / 19 Minor; lanes 61/56/77/91/24`) — never a single merged number.
 
 Do NOT issue new graphify queries, do NOT re-read source files beyond what the lane authors cite, do NOT add findings the lanes didn't surface. Your job is dedup + reconciliation, not fresh review.
 
@@ -257,6 +257,8 @@ You MUST report every valid finding. The following thoughts are BANNED:
 - "This would be over-engineering to fix" — Report the finding. Let the implementer decide the approach.
 
 Every finding that is valid according to project rules MUST appear in the review. No filtering, no categorizing by origin, no mercy.
+
+**Repro-spec contract for behaviorally-testable claims.** When a finding asserts runtime behavior ("flag X does nothing", "this raises", "rows are silently dropped"), the finding MUST carry a minimal repro spec: the EXACT placement/configuration that makes the behavior observable + the expected observable at that placement (e.g. "`polymorphic_serialization=True` on the BASE class `Animal` → subclass fields appear in a `pet: Animal` response; on the container model → no effect"). Two reasons: (1) you must run that exact test yourself before filing — a claim you couldn't reproduce at its own spec is not a finding (field case: a hallucinated-flag finding died three verify rounds later because finder, verifier, and operator each tested a DIFFERENT placement); (2) the verifier reproduces your spec verbatim — an ambiguous placement guarantees a wasted revision loop. Static findings (naming, structure, missing docs) need no repro spec.
 </anti_rationalization>
 
 <finding_integrity>
@@ -315,7 +317,7 @@ Track all out-of-scope discoveries in review.md as findings, not as fixes.
 Before writing the final review.md, verify your own work:
 
 1. **Every finding has a real file:line citation** — open the cited location and confirm the issue exists there. A finding without a real anchor is unverifiable.
-2. **Score math checks out** — sum the deductions; the result must equal `100 - score`. The math must be auditable.
+2. **Score math checks out** — sum the deductions; the result must equal `100 - score`. The math must be auditable. Synthesis mode instead: `score` is `null` by contract, every terminal lane appears in `lane_scores`, and the headline carries counts + the lane distribution — a merged 0–100 anywhere in synthesis output is a defect.
 3. **Verdict matches the score band** — 90-100 → APPROVED, 80-89 → APPROVED_WITH_NOTES, 0-79 → NEEDS_WORK. No rounding up.
 4. **Spec compliance came first** — if spec compliance failed, verdict is NEEDS_WORK regardless of score.
 5. **Verdict field is one of**: APPROVED | APPROVED_WITH_NOTES | NEEDS_WORK. No other values are valid. (The sidecar's separate `status` field is DONE for a finished review or BLOCKED for an unrecoverable upstream gap.)

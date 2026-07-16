@@ -31,6 +31,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       severities) when lanes disagree — promote to the higher severity when evidence supports it.
     - Preserve EVERY Critical finding. Important and Minor may be deduped but never silently
       dropped — when you drop one, note it in the per-lane provenance.
+    - NO merged 0-100 score: review.json carries "score": null + "lane_scores": [{id,
+      community, score, verdict, findings_contributed}]; the review.md headline is verdict +
+      severity counts + the per-lane score distribution. A consolidated deduction score
+      saturates at the 0 floor and misleads any consumer that trusts it.
     - Group findings by file for the consolidated output.
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so

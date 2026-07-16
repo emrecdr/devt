@@ -16956,6 +16956,63 @@ else
   fail "K273: copy exclusion broken — pollution=$K273_POLLUTION (exp 0) content=$K273_CONTENT (exp 1)"
 fi
 
+# K274: receipt-driven signal-integrity batch — each sub-check pins one cal
+# fix whose shared root cause was "a signal that's only safe because a smart
+# consumer happens to distrust it" (artifacts must carry their own guard
+# rails):
+#  a) synthesis-mode score contract: consolidated review.json carries
+#     score:null + lane_scores[] (a merged deduction score saturates at the
+#     0 floor and misleads any automation that trusts the field)
+#  b) repro-spec contract: finder must attach exact placement/config to
+#     behaviorally-testable claims; verifier must reproduce that spec
+#     VERBATIM (improvised-placement refutation shipped a wrong withdrawal
+#     twice in the field)
+#  c) cost preview never ships without the value caveat + no mid-loop cost
+#     readout (one-sided cost biases toward false economy)
+#  d) code-review-input.md session-distance eviction (prep-window rule:
+#     stale leftovers die, deliberate pre-writes survive)
+#  e) the --raw-count glob sentinel is quoted with a non-glob default
+#     (unquoted ? made zsh abort the augment step)
+K274_OK=1
+K274_WHY=""
+/usr/bin/grep -q '"score": null' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="a:score-null"; }
+/usr/bin/grep -q 'lane_scores' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="a:lane_scores"; }
+/usr/bin/grep -q 'NO merged 0-100 score' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || { K274_OK=0; K274_WHY="a:template"; }
+/usr/bin/grep -q 'Lane score distribution' "$ROOT/workflows/code-review-parallel.md" || { K274_OK=0; K274_WHY="a:present_findings"; }
+/usr/bin/grep -q 'Repro-spec contract' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="b:finder"; }
+/usr/bin/grep -q 'reproduce the finding.s exact spec' "$ROOT/agents/verifier.md" || { K274_OK=0; K274_WHY="b:verifier"; }
+/usr/bin/grep -q 'NEVER present cost alone' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="c:preview"; }
+/usr/bin/grep -q 'Do NOT add mid-verify-loop cost readouts' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="c:no-midloop"; }
+/usr/bin/grep -q 'code-review-input.md: session-distance eviction' "$ROOT/bin/modules/state.cjs" || { K274_OK=0; K274_WHY="d:eviction"; }
+/usr/bin/grep -q '"--raw-count=\${TOPIC_SYMBOLS_RAW_COUNT:-unknown}"' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="e:glob"; }
+if /usr/bin/grep -q -- '--raw-count=\${TOPIC_SYMBOLS_RAW_COUNT:-?}' "$ROOT/workflows/code-review.md"; then K274_OK=0; K274_WHY="e:unquoted-sentinel-back"; fi
+if [ "$K274_OK" = "1" ]; then
+  pass "K274: signal-integrity batch — score-null synthesis contract + repro-spec both sides + cost-with-value preview + session-distance eviction + glob sentinel"
+else
+  fail "K274: signal-integrity batch regressed at $K274_WHY"
+fi
+
+# K274b: session-distance eviction BEHAVIORAL — stale leftover (>1h) dies on
+# reset-soft, minutes-old deliberate pre-write survives.
+K274B_T=$(mktemp -d)
+K274B_T=$(cd "$K274B_T" && pwd -P)
+mkdir -p "$K274B_T/.devt/state"
+echo '{}' > "$K274B_T/.devt/config.json"
+printf 'active: false\nworkflow_type: code_review\ntask: "old"\nphase: complete\ncreated_at: "2026-01-01T10:00:00.000Z"\n' > "$K274B_T/.devt/state/workflow.yaml"
+echo "# stale scope" > "$K274B_T/.devt/state/code-review-input.md"
+touch -t 202601011200 "$K274B_T/.devt/state/code-review-input.md"
+(cd "$K274B_T" && node "$CLI" state reset-soft) >/dev/null 2>&1
+K274B_STALE_GONE=$([ -f "$K274B_T/.devt/state/code-review-input.md" ] && echo 0 || echo 1)
+echo "# deliberate pre-write" > "$K274B_T/.devt/state/code-review-input.md"
+(cd "$K274B_T" && node "$CLI" state reset-soft) >/dev/null 2>&1
+K274B_FRESH_KEPT=$([ -f "$K274B_T/.devt/state/code-review-input.md" ] && echo 1 || echo 0)
+rm -rf "$K274B_T"
+if [ "$K274B_STALE_GONE" = "1" ] && [ "$K274B_FRESH_KEPT" = "1" ]; then
+  pass "K274b: code-review-input eviction behavioral — stale leftover evicted, fresh pre-write survives reset-soft"
+else
+  fail "K274b: eviction behavior wrong — stale_gone=$K274B_STALE_GONE fresh_kept=$K274B_FRESH_KEPT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

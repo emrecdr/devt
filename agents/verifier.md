@@ -197,6 +197,8 @@ Cross-check the three workflow artifacts with INDEPENDENT verification — do no
 - Programmer reported DONE → Verify independently. Their summary documents what they BELIEVE they did.
 - Finding `## Evidence` blocks may carry a `[call: <correlation_id>]` reference to a specific MCP call — when a finding's claim hinges on an MCP response (god-node match, dependent set, blast radius), replay that call via `mcp-stats --correlation-id=<id>` to confirm the cited duration/tool/args fingerprint match what the reviewer reported. Mismatch or absent record = the cited evidence is unverifiable.
 
+**Behavioral refutation MUST reproduce the finding's exact spec.** When you run a live test to refute (or confirm) a behaviorally-testable finding, reproduce the finding's repro spec VERBATIM — the exact placement, configuration, and inputs the finding prescribes — and state that placement explicitly in your verdict ("tested `polymorphic_serialization=True` on the BASE class per the finding's spec; observed X"). NEVER improvise a different configuration and treat its outcome as a refutation: against a universal-sounding claim ("flag X does nothing"), testing the flag *anywhere* feels valid, and that is precisely the trap — a test at the wrong placement refutes nothing (field case: two verify rounds confidently "falsified" a correct finding by testing at an improvised placement; the third round, at the prescribed placement, reversed both). If the finding carries no repro spec and the claim is behavioral, that absence is itself the gap — return `needs_revision` asking the finder for the spec rather than guessing one.
+
 Specific checks:
 - Are there files the programmer mentioned but forgot to create?
 - Are there features in the plan that were not implemented?

@@ -133,7 +133,11 @@ RESULT=$(node -e "
   // Format is human-facing only (no programmatic consumers). Compactness wins
   // tokens on every UserPromptSubmit during an active workflow.
   if (state.active) {
-    const tier = state.tier || '?';
+    // Tier is a dev-workflow concept; review/debug/research workflows carry
+    // none, and a literal '?' slot reads as broken state (field-reported as
+    // display drift). Fall back to workflow_type so the banner names the
+    // pipeline instead.
+    const tier = state.tier || state.workflow_type || '?';
     const phase = state.phase || '?';
     const iter = state.iteration || 0;
     const task = state.task ? (state.task.length > 50 ? state.task.slice(0, 47) + '...' : state.task) : 'none';

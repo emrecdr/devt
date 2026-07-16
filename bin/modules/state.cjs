@@ -1611,6 +1611,27 @@ function resetSoft() {
       }
     } catch { /* state dir read failure non-fatal — log entries already exist */ }
 
+    // code-review-input.md: session-distance eviction, NOT blanket. The file
+    // is double-duty — scope_check's documented pre-written-scope escape
+    // hatch (operator authors it minutes before launching the review — must
+    // survive) AND a prior session's leftover (field: a 123-file stale scope
+    // nearly reviewed against a 42-file live diff — must die). The
+    // discriminator is the prep window: a deliberate pre-write is minutes
+    // old at reset time; anything older than 1h demonstrably predates this
+    // session's prep (every auto-reset leg already requires the prior
+    // workflow to be >1h old, so mid-prior-session writes fall outside the
+    // window too — which a prior-created_at comparison would miss).
+    try {
+      const criPath = path.join(stateDir, "code-review-input.md");
+      if (fs.existsSync(criPath)) {
+        const ageMs = Date.now() - fs.statSync(criPath).mtimeMs;
+        if (ageMs > 60 * 60 * 1000) {
+          fs.unlinkSync(criPath);
+          evicted.push("code-review-input.md (stale: " + (ageMs / 3600000).toFixed(1) + "h old — prior-session leftover; pre-writes within 1h survive)");
+        }
+      }
+    } catch { /* stat/unlink failure non-fatal */ }
+
     return {
       ok: true,
       new_workflow_id: newWorkflowId,

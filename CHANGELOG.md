@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.166.0] - 2026-07-16
+
+### Fifth field receipt: signals that carry their own guard rails
+
+A six-lane parallel run (receipt-validated against its on-disk artifacts) confirmed cal #48's machinery converting — zero raw dispatches, gates blocking real skips, corpus-blind caveats steering lanes correctly — and surfaced a shared root cause across its top defects: **signals that are only safe because a smart consumer happens to distrust them**. Every fix below makes the artifact carry its own guard rails instead. Each design parameter was locked by the reporter's answered follow-ups, including one self-correction of my proposed mechanism.
+
+- **No merged 0–100 on consolidation.** The −15/−7/−3 deduction model saturates at the 0 floor on multi-lane merges (field: −171 in deductions rendered a shippable branch as 0/100; two LLM layers independently routed around the number, but the structured `"score": 0` field was one CI hook away from being trusted). Synthesis-mode reviews now emit `score: null` + `lane_scores[]`, and the headline is **verdict + severity counts + the per-lane score distribution** — the 91-vs-24 lane spread is the signal; averaging it manufactures false precision. Serial single-dispatch reviews keep their number (no distribution to hide). Contract lives in the agent body AND the dispatch template, per the structural-trigger lesson.
+- **Repro-spec contract for behaviorally-testable claims.** A three-round verify saga (finder, verifier, and operator each tested a hallucination claim at a DIFFERENT placement; two rounds confidently "falsified" a correct finding) locked the fix finder-first: findings asserting runtime behavior must carry the exact placement/config + expected observable — and the finder must have run that exact test to file. The verifier reproduces the spec **verbatim**, states the tested placement in its verdict, and returns `needs_revision` rather than improvising a configuration when the spec is missing. Prevention at author time, enforcement at verify time.
+- **Cost preview with mandatory value caveat at scope_check.** The parallel-offer now pairs a rough banded estimate (single vs ~N lanes + consolidation + verify, with the field-measured 6–8× anchor) with the coverage signal (domain spread, where single-dispatch confidence drops) — a naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (the "expensive" run caught two cross-lane Criticals). Explicitly banned: mid-verify-loop cost readouts — they cannot distinguish convergence spend from waste, and the field's ~800K third round was the one that reversed a wrong refutation.
+- **Session-distance eviction for `code-review-input.md`.** The file is double-duty — documented pre-written-scope escape hatch AND prior-session leftover (field: a stale 123-file scope nearly reviewed against a 42-file live diff). Blanket eviction would kill the escape hatch; the reporter's own correction showed a prior-`created_at` comparison under-evicts mid-session leftovers. Shipped their prep-window rule: reset-soft evicts only when the file is >1h old — a deliberate pre-write minutes before launch survives, anything demonstrably pre-dating this session's prep dies.
+- **Mechanical**: the `--raw-count=${VAR:-?}` unquoted glob sentinel (zsh aborts on `?`) is quoted with a non-glob default; the phase banner renders `workflow_type` instead of a literal `?` when tier is absent (review workflows have no tier); `verify_iteration`'s 0-based retries-not-dispatches semantics documented at the read site.
+- Gates **K274** (all five fixes pinned) + **K274b** (eviction behavioral: stale dies, pre-write survives). Drift-guard stack 180 → 182 deep (K94–K274b).
+
 ## [0.165.1] - 2026-07-16
 
 ### Fix: template copy shipped ephemeral dirs into scaffolded projects

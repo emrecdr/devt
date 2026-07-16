@@ -468,6 +468,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       severities) when lanes disagree — promote to the higher severity when evidence supports it.
     - Preserve EVERY Critical finding. Important and Minor may be deduped but never silently
       dropped — when you drop one, note it in the per-lane provenance.
+    - NO merged 0-100 score: review.json carries "score": null + "lane_scores": [{id,
+      community, score, verdict, findings_contributed}]; the review.md headline is verdict +
+      severity counts + the per-lane score distribution. A consolidated deduction score
+      saturates at the 0 floor and misleads any consumer that trusts it.
     - Group findings by file for the consolidated output.
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so
@@ -661,13 +665,13 @@ if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
 fi
 ```
 
-Read `.devt/state/review.md` and present to the user:
+Read `.devt/state/review.md` and present to the user (consolidated reviews carry NO merged 0–100 — the deduction model saturates at the 0 floor on multi-lane merges and the resulting headline misleads; the lane spread is the real signal):
 
 - **Verdict**: APPROVED / APPROVED_WITH_NOTES / NEEDS_WORK
-- **Score**: N / 100
+- **Severity counts**: N Critical / N Important / N Minor — this plus the verdict IS the one-glance signal
+- **Lane score distribution**: per-lane scores with community labels (e.g. `core 61 · api 56 · infra 77 · migrations 91 · tests 24`) — the spread tells the reader which areas are shippable and which are not; never average it
 - **Summary**: 2-3 sentence overview
 - **Findings by severity**: Critical, Important, Minor (with file and line references)
-- **Score breakdown**: by category (architecture, security, performance, etc.)
 - **Graphify activity** (one line; the telemetry surface below populates it)
 
 Additionally, surface the `## Lane Provenance` section verbatim so the user sees which communities contributed which findings.

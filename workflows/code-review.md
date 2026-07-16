@@ -238,7 +238,7 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 **Deterministic post-MCP augmentation.** After the tier executes (or even when it skipped), run ONE CLI that appends up to six deterministic sections to `graph-impact.md` — file- and symbol-level god-node warnings (via `check-large-files` / `check-symbol-godnodes`), the dropped-symbol truncation banner + section, hyperedge-completeness, ambiguous-bindings, and the preflight god-node fallback (emitted only when both diff-anchored checks come back empty). Pure post-processing of on-disk JSON — no MCP, no model judgment — folded from ~110 lines of inline jq into `graphify augment-impact-map` (the section wording is emitted by the CLI, byte-identical to the prior inline output):
 
 ```bash
-AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impact-map --edge-threshold=50 --raw-count=${TOPIC_SYMBOLS_RAW_COUNT:-?} 2>/dev/null || echo '{}')
+AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impact-map --edge-threshold=50 "--raw-count=${TOPIC_SYMBOLS_RAW_COUNT:-unknown}" 2>/dev/null || echo '{}')
 echo "graphify augment-impact-map: $(printf '%s\n' "$AUGMENT" | jq -r 'if (.sections_appended // []) | length == 0 then "no sections (clean)" else "appended " + (.sections_appended | join(", ")) end')"
 ```
 
@@ -378,18 +378,29 @@ fi
 
 If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
 
-If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: ask the user:
+If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user.
+
+**Cost preview with value caveat — NEVER present cost alone.** A naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (field case: the "expensive" parallel run was the one that caught two cross-lane Criticals a single pass would plausibly have missed). The preview pairs a rough banded estimate with the coverage signal:
+
+```bash
+# Domain spread — the value-side variable. Top-2 path segments of the scope files.
+DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.files[]' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | wc -l | tr -d ' ')
+EXPECTED_LANES=$(( DOMAIN_COUNT < 5 ? DOMAIN_COUNT : 5 ))
+echo "[scope_check] cost/value preview: single-dispatch ≈ 1 reviewer + 1-2 verify rounds; parallel ≈ ${EXPECTED_LANES} lanes + consolidator + 1-3 verify rounds (field-measured: a 5-lane run with 3 verify rounds cost roughly 6-8x a single dispatch). Value side: scope spans ${DOMAIN_COUNT} domain(s) — single-dispatch coverage-confidence drops as attention spreads past ~15 files / 3+ domains; cross-cutting findings need reconciliation only parallel lanes surface independently."
+```
 
 ```yaml
-question: "Review scope is {SCOPE_FILE_COUNT} files. Split into parallel lanes (one reviewer per graphify community, capped at 5)?"
+question: "Review scope is {SCOPE_FILE_COUNT} files across {DOMAIN_COUNT} domains. Split into parallel lanes (one reviewer per graphify community, capped at 5)? Rough cost: parallel ≈ {EXPECTED_LANES} lane dispatches + consolidation + verify (~6-8x single-dispatch tokens); single ≈ one reviewer whose coverage-confidence drops above ~15 files / 3+ domains."
 header: "Parallel Review"
 multiSelect: false
 options:
-  - label: "Yes — parallel lanes (recommended for >15 files)"
-    description: "Foreground multi-Task dispatch by community; substance-gated per lane; consolidated into single review.md"
+  - label: "Yes — parallel lanes (recommended for >15 files or 3+ domains)"
+    description: "Higher token cost, buys independent per-domain attention + cross-lane reconciliation — the configuration that catches cascade findings single passes miss"
   - label: "No — single dispatch with community-filter"
-    description: "One reviewer; deep review restricted to affected_communities; rest deferred"
+    description: "Fraction of the cost; one reviewer, deep review restricted to affected_communities, rest deferred — right call for single-domain or shallow diffs"
 ```
+
+Do NOT add mid-verify-loop cost readouts: a "you've spent N tokens re-litigating this finding, continue?" prompt cannot distinguish convergence spend from waste, and the field case where round 3 cost ~800K is the round that reversed a wrong refutation — the spend was buying correctness.
 
 **After the user answers, write the choice to `.devt/state/scope-check-answer.txt`** — this is the mechanical signal that satisfies `state assert-scope-check-handled` (the gate at the start of the next step). The answer must be one of: `parallel`, `single`, `cancel`. Example:
 
@@ -696,6 +707,10 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read-sidecar verification.json
 MAX_ITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get | jq -r '.workflow.max_iterations // 3')
+# verify_iteration is 0-BASED and increments only on RETRY re-dispatch: a run
+# with 3 verifier dispatches finalizes at verify_iteration=2 (0 → first
+# dispatch, +1 per retry). Read it as "retries so far", never "dispatch count"
+# — field-reported as apparent state drift when misread.
 VITER=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.verify_iteration // 0')
 ```
 
