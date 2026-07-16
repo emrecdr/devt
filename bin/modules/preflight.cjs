@@ -456,7 +456,19 @@ function extractTopic(taskText, opts = {}) {
   // Lowercased word stream for domain + keyword extraction. Uses the
   // path-stripped view so absolute paths don't leak segments into keywords.
   const words = (tokenizableText.toLowerCase().match(/[a-z][a-z0-9_-]{1,30}/g) || []);
-  const domains = Array.from(new Set(words.filter(w => DOMAIN_HINTS.includes(w)))).sort();
+  // Built-in hints are English framework-generic vocabulary — a project whose
+  // domain terms fall outside them (or aren't English) would get lane A ≈ ∅
+  // permanently with no recourse. `preflight.domain_hints` APPENDS project
+  // vocabulary (never replaces — the built-ins stay as the generic floor).
+  let domainHints = DOMAIN_HINTS;
+  try {
+    const hintCfg = getMergedConfig();
+    const extra = hintCfg && hintCfg.preflight && Array.isArray(hintCfg.preflight.domain_hints)
+      ? hintCfg.preflight.domain_hints.map(h => String(h).toLowerCase().trim()).filter(Boolean)
+      : [];
+    if (extra.length) domainHints = Array.from(new Set([...DOMAIN_HINTS, ...extra]));
+  } catch { /* config unavailable — built-in hints only */ }
+  const domains = Array.from(new Set(words.filter(w => domainHints.includes(w)))).sort();
 
   // Keywords: words ≥3 chars, not stop-words, not domains, not symbols (lowered)
   const symbolLower = new Set(symbols.map(s => s.toLowerCase()));
@@ -1017,7 +1029,7 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   try {
     const dbPath = path.join(findProjectRoot(), ".devt", "memory", "index.db");
     if (!fs.existsSync(dbPath)) {
-      lines.push("> ⚠️ **Memory index not built** — governing-doc lanes (A/B/D/F) will be empty even if `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` contain docs. Run `node bin/devt-tools.cjs memory init` then re-run preflight to enable ADR/CON/FLOW/REJ/LES discovery.");
+      lines.push("> ⚠️ **Memory index not built** — governing-doc lanes (A/B/D/F/G) will be empty even if `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` contain docs. Run `node bin/devt-tools.cjs memory init` then re-run preflight to enable ADR/CON/FLOW/REJ/LES discovery.");
       lines.push("");
     }
   } catch { /* findProjectRoot may throw in tests — skip the check */ }
@@ -1047,10 +1059,10 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
     governing = dedupSortById([...lanes.A, ...lanes.B, ...lanes.C, ...lanes.D]);
   }
 
-  // Per-doc lane attribution: A wins on tie, then B, C, D. Build once (O(n))
-  // instead of running 3 Array.find probes per governing doc.
+  // Per-doc lane attribution: A wins on tie, then B, C, D, G. Build once (O(n))
+  // instead of running Array.find probes per governing doc.
   const laneOf = new Map();
-  for (const [letter, arr] of [["A", lanes.A], ["B", lanes.B], ["C", lanes.C], ["D", lanes.D]]) {
+  for (const [letter, arr] of [["A", lanes.A], ["B", lanes.B], ["C", lanes.C], ["D", lanes.D], ["G", lanes.G || []]]) {
     for (const d of arr) if (d && d.id && !laneOf.has(d.id)) laneOf.set(d.id, letter);
   }
 
@@ -1060,7 +1072,12 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   } else {
     for (const d of governing) {
       const lane = laneOf.get(d.id) || "D";
-      lines.push(`- [${d.id}] ${d.title || "(untitled)"} — ${d.summary || ""} _(lane ${lane})_`);
+      // status·confidence makes lifecycle visible at the consumption surface:
+      // a `candidate·speculative` doc should be weighed differently than an
+      // `active·verified` one, and the reader can only do that if the Brief
+      // says which is which.
+      const lifecycle = [d.status, d.confidence].filter(Boolean).join("·");
+      lines.push(`- [${d.id}] ${d.title || "(untitled)"} — ${d.summary || ""} _(${lifecycle ? `${lifecycle}, ` : ""}lane ${lane})_`);
     }
   }
   lines.push("");
@@ -1456,7 +1473,32 @@ function generate(taskText, opts) {
   const H = laneH(cfg, taskText);
   // Hoist the deduped union once: laneF filters it for lessons, renderBrief reuses
   // it for the governing docs section. Avoids two separate dedupSortById passes.
-  const governingUnion = dedupSortById([...A, ...B, ...C, ...D, ...G]);
+  const governingUnionRaw = dedupSortById([...A, ...B, ...C, ...D, ...G]);
+  // Lifecycle eligibility gate. Lanes B/G read raw FTS rows and lane D
+  // resolves link targets by bare id — none carry a status predicate (unlike
+  // laneA/laneC, which filter to active/candidate in SQL). Without this gate
+  // a superseded doc that FTS-matches the task, or that any doc still links
+  // to, re-enters the governing union and flows into governing_ids →
+  // <scope_hint> dispatches looking exactly as authoritative as an active
+  // ADR. Same predicate also keeps REJ tombstones out of the governing
+  // framing — lane E is their surface, framed as "pre-rejected", never
+  // "governing". Enrichment rides the same join: FTS rows lack `confidence`,
+  // so the Brief's status·confidence rendering needs the authoritative
+  // `documents` row anyway. Superseded docs remain visible in the Memory
+  // Graph triples section as lineage — excluded from governance, not erased.
+  let governingUnion = governingUnionRaw;
+  try {
+    const meta = asArray(memory.getDocsMeta(governingUnionRaw.map(d => d.id)));
+    const metaById = new Map(meta.map(m => [m.id, m]));
+    governingUnion = governingUnionRaw.map(d => {
+      const m = metaById.get(d.id);
+      return m ? { ...d, status: m.status, confidence: m.confidence, doc_type: m.doc_type } : d;
+    });
+  } catch { /* index unavailable — rows keep their lane-carried fields */ }
+  governingUnion = governingUnion.filter(d => {
+    const status = d.status || "active";
+    return (status === "active" || status === "candidate") && d.doc_type !== "rejected";
+  });
   const F = laneF(governingUnion);
 
   // Blast radius
@@ -1531,7 +1573,7 @@ function generate(taskText, opts) {
   // existing semantic: "did we generate ANY suggestions, of any kind").
   const suggestedReadingTotal = suggestedReading.files.length + suggestedReading.symbols.length;
 
-  const lanes = { A, B, C, D, E, F, H };
+  const lanes = { A, B, C, D, E, F, G, H };
   const generatedAt = new Date().toISOString();
   const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
 
@@ -1694,6 +1736,14 @@ function generate(taskText, opts) {
     status: "FRESH",
     topic: topicWithConfidence,
     governing_ids: governingUnion.map(d => d.id),
+    // Lifecycle projection of governing_ids — same order, same docs. Kept as
+    // a parallel field (not a replacement) so existing jq consumers of the
+    // bare id array never break.
+    governing: governingUnion.map(d => ({
+      id: d.id,
+      status: d.status || null,
+      confidence: d.confidence || null,
+    })),
     suggested_reading: suggestedReading,
     scope_hint: { confidence: scopeHintConfidence },
     hyperedges_matched: hyperedgesMatched,

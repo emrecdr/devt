@@ -17054,6 +17054,160 @@ else
   fail "K275: shared-steps partition regressed at $K275_WHY"
 fi
 
+# K276/K277/K278: memory-lifecycle behavioral trio — one fixture, three gates.
+# K276: a superseded doc and a REJ tombstone that both FTS-match the task must
+# stay OUT of the governing union (the lanes-B/D/G lifecycle-eligibility gate)
+# while remaining visible to an explicit `memory query`; Brief lines carry
+# status·confidence and the sidecar carries the parallel `governing` array.
+# K277: `memory supersede` retires two-sided atomically (status flip + stamps
+# on the old doc, supersedes link on the successor) and validate stays clean.
+# K278: validate errors on a seeded one-sided supersedes link (target still
+# active) and warns on an orphaned retirement (superseded ADR nothing links to).
+K276_T=$(mktemp -d); K276_T=$(cd "$K276_T" && pwd -P)
+mkdir -p "$K276_T/.devt/memory/decisions" "$K276_T/.devt/memory/rejected" "$K276_T/.devt/state"
+echo '{}' > "$K276_T/.devt/config.json"
+cat > "$K276_T/.devt/memory/decisions/ADR-001-live.md" <<'K276EOF'
+---
+id: ADR-001
+title: "Paymentflow retries use exponential backoff"
+doc_type: decision
+domain: payment
+status: active
+confidence: verified
+summary: "Paymentflow retry policy: exponential backoff with jitter."
+---
+
+Live decision body.
+K276EOF
+cat > "$K276_T/.devt/memory/decisions/ADR-002-retired.md" <<'K276EOF'
+---
+id: ADR-002
+title: "Paymentflow retries use fixed delay"
+doc_type: decision
+domain: payment
+status: superseded
+confidence: explicit
+summary: "OLD paymentflow retry policy: fixed 5s delay between attempts."
+---
+
+Retired decision body.
+K276EOF
+cat > "$K276_T/.devt/memory/rejected/REJ-003-queue.md" <<'K276EOF'
+---
+id: REJ-003
+title: "Do NOT queue paymentflow retries through the job runner"
+doc_type: rejected
+domain: payment
+status: active
+confidence: verified
+summary: "Rejected paymentflow retry policy: job-runner queue double-charges."
+reason: maintainability
+search_keywords:
+  - "paymentflow queue"
+---
+
+Tombstone body.
+K276EOF
+(cd "$K276_T" && node "$CLI" memory index && node "$CLI" preflight generate "paymentflow retry policy") >/dev/null 2>&1
+K276_OK=1; K276_WHY=""
+K276_SIDE="$K276_T/.devt/state/preflight-brief.json"
+jq -e '.governing_ids | index("ADR-001") != null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="active-doc-missing"; }
+jq -e '.governing_ids | index("ADR-002") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="superseded-leaked"; }
+jq -e '.governing_ids | index("REJ-003") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="rej-as-governing"; }
+jq -e '.governing[0].status == "active" and .governing[0].confidence == "verified"' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="governing-lifecycle-field"; }
+jq -e '.rej_keyword_matches | length > 0' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="laneE-silent"; }
+/usr/bin/grep -q '_(active·verified, lane' "$K276_T/.devt/state/preflight-brief.md" || { K276_OK=0; K276_WHY="brief-lifecycle-render"; }
+(cd "$K276_T" && node "$CLI" memory query "paymentflow retry policy") 2>/dev/null | /usr/bin/grep -q '"ADR-002"' || { K276_OK=0; K276_WHY="query-hides-superseded"; }
+if [ "$K276_OK" = "1" ]; then
+  pass "K276: governing-lane lifecycle gate — superseded + REJ FTS-matches excluded from governing_ids, status·confidence rendered, explicit query still surfaces all"
+else
+  fail "K276: lifecycle gate regressed at $K276_WHY"
+fi
+
+cat > "$K276_T/.devt/memory/decisions/ADR-004-successor.md" <<'K276EOF'
+---
+id: ADR-004
+title: "Paymentflow retries move to token buckets"
+doc_type: decision
+domain: payment
+status: active
+confidence: explicit
+summary: "New paymentflow retry policy: token-bucket rate limiting."
+---
+
+Successor body.
+K276EOF
+K277_OK=1; K277_WHY=""
+(cd "$K276_T" && node "$CLI" memory index && node "$CLI" memory supersede ADR-001 ADR-004 --reason="probe") >/dev/null 2>&1 || { K277_OK=0; K277_WHY="supersede-exit"; }
+/usr/bin/grep -q '^status: superseded' "$K276_T/.devt/memory/decisions/ADR-001-live.md" || { K277_OK=0; K277_WHY="old-status"; }
+/usr/bin/grep -q '^superseded_by: ADR-004' "$K276_T/.devt/memory/decisions/ADR-001-live.md" || { K277_OK=0; K277_WHY="old-stamp"; }
+/usr/bin/grep -q 'type: supersedes' "$K276_T/.devt/memory/decisions/ADR-004-successor.md" || { K277_OK=0; K277_WHY="successor-link"; }
+(cd "$K276_T" && node "$CLI" memory validate) 2>/dev/null | jq -e '[.issues[] | select(.category == "supersession-contradiction")] | length == 0' >/dev/null 2>&1 || { K277_OK=0; K277_WHY="post-supersede-contradiction"; }
+if [ "$K277_OK" = "1" ]; then
+  pass "K277: memory supersede round-trip — two-sided retirement atomic (status flip + stamps + successor link), validate contradiction-free after"
+else
+  fail "K277: supersede round-trip regressed at $K277_WHY"
+fi
+
+cat > "$K276_T/.devt/memory/decisions/ADR-005-onesided.md" <<'K276EOF'
+---
+id: ADR-005
+title: "One-sided supersession seed"
+doc_type: decision
+domain: payment
+status: active
+confidence: explicit
+summary: "Claims to supersede ADR-004 which is still active."
+links:
+  - id: ADR-004
+    type: supersedes
+---
+
+Seed body.
+K276EOF
+K278_OK=1; K278_WHY=""
+K278_VAL=$( (cd "$K276_T" && node "$CLI" memory index >/dev/null 2>&1 && node "$CLI" memory validate) 2>/dev/null )
+printf '%s\n' "$K278_VAL" | jq -e '[.issues[] | select(.category == "supersession-contradiction")] | length >= 1' >/dev/null 2>&1 || { K278_OK=0; K278_WHY="contradiction-not-detected"; }
+printf '%s\n' "$K278_VAL" | jq -e '[.issues[] | select(.category == "orphaned-retirement" and (.error | contains("ADR-002")))] | length >= 1' >/dev/null 2>&1 || { K278_OK=0; K278_WHY="orphan-warning-missing"; }
+rm -rf "$K276_T"
+if [ "$K278_OK" = "1" ]; then
+  pass "K278: validate supersession consistency — one-sided supersedes link errors, orphaned retirement warns (lineage-bearing types only)"
+else
+  fail "K278: supersession validation regressed at $K278_WHY"
+fi
+
+# K279: lifecycle-mechanism drift pins — exact-string anchors on the moving
+# parts the K276-K278 fixtures exercise, so a rename/refactor that silently
+# reroutes around the eligibility gate fails here even if a behavioral
+# fixture happens to still pass.
+K279_OK=1; K279_WHY=""
+/usr/bin/grep -q 'getDocsMeta' "$ROOT/bin/modules/preflight.cjs" || { K279_OK=0; K279_WHY="preflight:meta-join"; }
+/usr/bin/grep -q 'd.doc_type !== "rejected"' "$ROOT/bin/modules/preflight.cjs" || { K279_OK=0; K279_WHY="preflight:rej-exclusion"; }
+/usr/bin/grep -q 'status === "active" || status === "candidate"' "$ROOT/bin/modules/preflight.cjs" || { K279_OK=0; K279_WHY="preflight:status-filter"; }
+/usr/bin/grep -q 'domain_hints' "$ROOT/bin/modules/preflight.cjs" || { K279_OK=0; K279_WHY="preflight:domain-hints-ext"; }
+/usr/bin/grep -q 'function supersede' "$ROOT/bin/modules/memory.cjs" || { K279_OK=0; K279_WHY="memory:supersede-fn"; }
+/usr/bin/grep -q 'case "supersede"' "$ROOT/bin/modules/memory.cjs" || { K279_OK=0; K279_WHY="memory:supersede-case"; }
+if [ "$K279_OK" = "1" ]; then
+  pass "K279: lifecycle-mechanism drift pins — eligibility chokepoint + REJ exclusion + domain_hints extension + supersede surface all anchored"
+else
+  fail "K279: lifecycle mechanism pin lost at $K279_WHY"
+fi
+
+# K280: documented-CLI routing coverage — every `devt-tools.cjs <cmd>` named
+# in CLAUDE.md must resolve to a real `case "<cmd>"` in the CLI router. The
+# `semantic` surface was documented for months after its module was deleted;
+# this gate makes that ghost-command class structurally impossible.
+K280_OK=1; K280_WHY=""
+K280_CMDS=$(/usr/bin/grep -oE 'devt-tools\.cjs [a-z-]+' "$ROOT/CLAUDE.md" | awk '{print $2}' | sort -u)
+for K280_CMD in $K280_CMDS; do
+  /usr/bin/grep -q "case \"$K280_CMD\"" "$ROOT/bin/devt-tools.cjs" || { K280_OK=0; K280_WHY="$K280_CMD"; }
+done
+if [ "$K280_OK" = "1" ]; then
+  pass "K280: documented-CLI routing coverage — every CLAUDE.md devt-tools command has a live routing case (ghost-surface guard)"
+else
+  fail "K280: documented command '$K280_WHY' has no routing case in devt-tools.cjs"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

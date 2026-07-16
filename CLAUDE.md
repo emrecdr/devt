@@ -110,15 +110,14 @@ node bin/devt-tools.cjs health [--repair]
 node bin/devt-tools.cjs update check|status|local-version|install-type|dirty|clear-cache|changelog
 
 # Memory layer (multi-root, FTS5)
-node bin/devt-tools.cjs memory init|index|query|get|affects|list|links|active|rejected-keywords|validate|suggest
+node bin/devt-tools.cjs memory init|index|query|get|affects|list|links|active|rejected-keywords|validate|supersede|suggest
 node bin/devt-tools.cjs memory candidates-footer
 
 # Dispatch — envelope render + per-lane fan-out
 node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list]
 node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]  # lanes default to rules-by-reference
 
-# Semantic search + reports
-node bin/devt-tools.cjs semantic sync|query|compact|status
+# Reports
 node bin/devt-tools.cjs report window|generate [--weeks N]
 
 # Evolution scan — git-history behavioral metrics (hotspots, change coupling, fix density)
@@ -129,7 +128,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 183-deep drift-guard stack K94-K275) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 188-deep drift-guard stack K94-K280) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

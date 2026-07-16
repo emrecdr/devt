@@ -58,8 +58,12 @@ links:                         # optional, typed cross-refs
     type: supersedes           # supersedes | depends_on | implements | relates_to
 created_at: "2026-05-05T10:30:00Z"
 created_by: curator | user     # provenance
+superseded_at: "2026-07-16"    # stamped by `memory supersede` on retirement
+superseded_by: ADR-050         # successor id; the successor carries the matching supersedes link
 ---
 ```
+
+Retirement is **two-sided**: the retired doc flips to `status: superseded` (+ `superseded_at`/`superseded_by`) AND the successor gains a `supersedes` link. Never hand-edit one side — `memory supersede <old> <new>` does both atomically, and `memory validate` errors on the one-sided state (`supersession-contradiction`: a supersedes link whose target is still active/candidate) and warns on the other (`orphaned-retirement`: a superseded ADR/CON/FLOW nothing links to; lessons and REJ docs are exempt — curator archival retires them without successors).
 
 For REJ tombstones, additional fields:
 
@@ -69,6 +73,8 @@ search_keywords:               # AI suppression triggers — surface these to di
   - "Redis caching"
   - "in-memory KV"
 ```
+
+**REJ status convention**: tombstones carry `status: active` — the *rejection* is a living rule; `status` describes the doc, not the approach. Retrieval treats REJ docs by `doc_type`, never by status: they are excluded from the Brief's governing union unconditionally (their surface is lane E, framed as "pre-rejected") and their `search_keywords` suppress re-proposals regardless of status. A tombstone that is itself retracted gets `status: superseded` like any other doc.
 
 ## The Two-Tier Pre-Flight Protocol
 
@@ -147,7 +153,8 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
       "reason": "..."          // human-readable; +0.2 overlap bonus when CamelCase-split symbol tokens match keywords
     }
   },
-  "governing_ids": [...],      // deduped union of lanes A-D
+  "governing_ids": [...],      // deduped union of lanes A-D ∪ G, lifecycle-filtered: status active|candidate only, REJ excluded
+  "governing": [...],          // same docs with lifecycle attached: [{id, status, confidence}]
   "suggested_reading": [...],  // capped at 8 — see below
   "scope_hint": {
     "confidence": {            // placeholder pending v0.69 R3 calibration
@@ -303,6 +310,11 @@ node bin/devt-tools.cjs memory backlinks <id>    # incoming refs
 node bin/devt-tools.cjs memory orphans           # no-link docs
 node bin/devt-tools.cjs memory stale-links       # broken cross-refs
 node bin/devt-tools.cjs memory affects-symbol <name>  # case-insensitive
+node bin/devt-tools.cjs memory supersede <old-id> <new-id> [--reason=…]
+                                                 # atomic two-sided retirement: old doc → status: superseded +
+                                                 # superseded_at/superseded_by stamps, successor gains the supersedes
+                                                 # link, both files rewritten via the frontmatter serializer, one reindex.
+                                                 # Curator-invoked — the command is the mechanism, the curator stays the authority.
 
 # Bundle export/import
 node bin/devt-tools.cjs memory export --out=PATH [--include=...] [--all-roots]
@@ -323,7 +335,7 @@ node bin/devt-tools.cjs memory candidates-touch-surface  # set the cooldown time
 node bin/devt-tools.cjs memory candidates-footer         # one-shot finalize-footer: status + threshold + cooldown + emit + touch in one call. Used by code-review.md, code-review-parallel.md, quick-implement.md::finalize, dev-workflow.md::finalize (replaces a 7-line inline bash block previously duplicated across all four — round 5 cut). workflows/next.md keeps the lower-level candidates-status primitive because its variant uses ready_to_surface as a shell variable to gate a downstream AskUserQuestion
 
 # Pre-Flight
-node bin/devt-tools.cjs preflight generate <task>   # Lanes A-F + blast radius; auto-loads ~/.claude/plans/*.md referenced in <task>
+node bin/devt-tools.cjs preflight generate <task>   # Lanes A-H + blast radius; auto-loads ~/.claude/plans/*.md referenced in <task>
 node bin/devt-tools.cjs preflight topic <task>      # debug topic extraction (returns extraction_confidence)
 node bin/devt-tools.cjs preflight status            # FRESH/STALE/MISSING + timestamp
 node bin/devt-tools.cjs preflight mark-stale [reason]
@@ -386,7 +398,7 @@ Vendored at `bin/devt-memory-mcp.cjs` — read-only stdio JSON-RPC server. Regis
 | `list_active(domain?)` | Active docs filter |
 | `list_rejected_keywords()` | All REJ search_keywords |
 | `list_links(doc_id, depth?)` | Transitive link traversal |
-| `preflight(task)` | Run lanes A-F + blast radius |
+| `preflight(task)` | Run lanes A-H + blast radius |
 | `blast_radius(symbols)` | Graphify-derived blast radius |
 | `query_index(sql)` | Raw SQL escape hatch — SELECT-only |
 | `query_fts_count(terms)` | Aggregate-first FTS — returns `{count}` only |
@@ -439,6 +451,7 @@ Before proposing any new candidate, the discovery engine consults `rejected/` fo
 | `memory.auto_index_on_change` | `true` | PostToolUse hook on `.devt/memory/**.md` edits |
 | `memory.mcp_telemetry` | `true` | MCP tool-call trace JSONL log |
 | `memory.paths` | `null` | List of memory roots to scan + index. `null` = single-root behavior. See "Multi-Root Memory" below. |
+| `preflight.domain_hints` | `[]` | Project vocabulary APPENDED to the built-in English domain-hint list for lane A / topic extraction (never replaces the generic floor). Lowercased on load. |
 | `graphify.enabled` | `false` (auto-set to `true` by `setup.cjs` when the `graphify` binary is on PATH at first setup) | Opt-in AST symbol anchoring |
 
 Override per-project in `.devt/config.json`:

@@ -835,6 +835,79 @@ function upsertDoc(doc) {
 }
 
 // ---------------------------------------------------------------------------
+// Supersession — atomic two-sided retirement
+// ---------------------------------------------------------------------------
+
+/**
+ * Retire `oldId` in favor of `newId` as ONE operation. The manual ritual is
+ * two-sided (flip old doc's status + add the supersedes link in the new doc)
+ * across two files with no atomicity — forget side one and the retired doc
+ * stays `active` in every retrieval lane forever; forget side two and the
+ * lineage is untraceable. This command does both edits, stamps
+ * `superseded_at`/`superseded_by`, validates the mutated frontmatter BEFORE
+ * touching disk, and reindexes once.
+ *
+ * Writes to each doc's EXISTING file path (from scanDocs) — never a
+ * recomputed `<id>-<slug>.md` path, which would fork a second file for
+ * hand-named docs. Curator remains the authority: this is the mechanism the
+ * curator (or operator) invokes, not an auto-supersession path.
+ */
+function supersede(oldId, newId, opts = {}) {
+  if (!oldId || !newId) {
+    return { ok: false, errors: [{ error: "usage: memory supersede <old-id> <new-id> [--reason=...]" }] };
+  }
+  if (oldId === newId) {
+    return { ok: false, errors: [{ error: "a doc cannot supersede itself" }] };
+  }
+  const docs = scanDocs();
+  const oldDoc = docs.find(d => d.frontmatter && d.frontmatter.id === oldId);
+  const newDoc = docs.find(d => d.frontmatter && d.frontmatter.id === newId);
+  if (!oldDoc) return { ok: false, errors: [{ error: `doc not found: ${oldId}` }] };
+  if (!newDoc) return { ok: false, errors: [{ error: `doc not found: ${newId}` }] };
+  if (newDoc.frontmatter.status === "superseded") {
+    return { ok: false, errors: [{ error: `${newId} is itself superseded — supersede with its live successor instead` }] };
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const oldFm = {
+    ...oldDoc.frontmatter,
+    status: "superseded",
+    superseded_at: stamp,
+    superseded_by: newId,
+    ...(opts.reason ? { superseded_reason: String(opts.reason) } : {}),
+  };
+
+  const newFm = { ...newDoc.frontmatter };
+  const links = Array.isArray(newFm.links) ? [...newFm.links] : [];
+  const linkExists = links.some(l => l && l.id === oldId && l.type === "supersedes");
+  if (!linkExists) links.push({ id: oldId, type: "supersedes" });
+  newFm.links = links;
+
+  const errors = [
+    ...validateFrontmatter(oldFm, oldDoc.relativePath),
+    ...validateFrontmatter(newFm, newDoc.relativePath),
+  ];
+  if (errors.length) return { ok: false, errors };
+
+  const render = (fm, body) =>
+    `---\n${serializeFrontmatter(fm)}\n---\n\n${String(body || "").replace(/^\s+/, "").replace(/\s+$/, "")}\n`;
+  try {
+    atomicWriteFileSync(oldDoc.filePath, render(oldFm, oldDoc.body));
+    atomicWriteFileSync(newDoc.filePath, render(newFm, newDoc.body));
+  } catch (e) {
+    return { ok: false, errors: [{ error: `write failed: ${e.message}` }] };
+  }
+
+  const indexed = rebuildIndex();
+  return {
+    ok: true,
+    superseded: { id: oldId, file: oldDoc.relativePath, superseded_by: newId, superseded_at: stamp },
+    successor: { id: newId, file: newDoc.relativePath, link_added: !linkExists },
+    indexed,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
 
@@ -872,6 +945,20 @@ function getAffectsPathsByIds(ids) {
       `SELECT DISTINCT pattern FROM affects WHERE doc_id IN (${placeholders}) AND pattern IS NOT NULL`
     ).all(...ids);
     return rows.map(r => r.pattern);
+  });
+}
+
+// Batch id → lifecycle metadata from the authoritative `documents` table.
+// FTS rows carry status but not confidence; getLinks targets carry everything
+// but arrive shape-mixed. One IN-query normalizes both for the preflight
+// governing-union eligibility gate + Brief rendering.
+function getDocsMeta(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  return withDb(db => {
+    const placeholders = ids.map(() => "?").join(",");
+    return db.prepare(
+      `SELECT id, doc_type, status, confidence FROM documents WHERE id IN (${placeholders})`
+    ).all(...ids);
   });
 }
 
@@ -1378,6 +1465,46 @@ function validate() {
           error: `doc links to itself (${s.link_type}) — likely authoring mistake`,
         });
       }
+
+      // Supersession consistency. A `supersedes` link asserts its target is
+      // retired; a target still active/candidate means the retirement never
+      // happened (or was reverted) — retrieval would surface BOTH docs as
+      // governing, which is exactly the contradiction the link exists to
+      // prevent.
+      const contradictions = db.prepare(`
+        SELECT l.source_id, l.target_id, d.status AS target_status
+        FROM links l JOIN documents d ON d.id = l.target_id
+        WHERE l.link_type = 'supersedes' AND d.status IN ('active', 'candidate')
+      `).all();
+      for (const c of contradictions) {
+        issues.push({
+          filePath: `(link from ${c.source_id})`,
+          severity: "error",
+          category: "supersession-contradiction",
+          error: `${c.source_id} supersedes ${c.target_id}, but ${c.target_id} is still status: ${c.target_status} — run \`memory supersede ${c.target_id} ${c.source_id}\` to retire it atomically`,
+        });
+      }
+
+      // Orphaned retirement: a superseded ADR/CON/FLOW with no incoming
+      // supersedes link has untraceable lineage. Scoped to lineage-bearing
+      // types — lessons and REJ tombstones legitimately retire without a
+      // successor (curator archival), so they are exempt.
+      const orphanedRetirements = db.prepare(`
+        SELECT d.id, d.doc_type FROM documents d
+        WHERE d.status = 'superseded'
+          AND d.doc_type IN ('decision', 'concept', 'flow')
+          AND NOT EXISTS (
+            SELECT 1 FROM links l WHERE l.target_id = d.id AND l.link_type = 'supersedes'
+          )
+      `).all();
+      for (const o of orphanedRetirements) {
+        issues.push({
+          filePath: `(doc ${o.id})`,
+          severity: "warning",
+          category: "orphaned-retirement",
+          error: `${o.id} is superseded but no doc carries a supersedes link to it — lineage is untraceable (use \`memory supersede\` for two-sided retirement)`,
+        });
+      }
     } finally {
       db.close();
     }
@@ -1570,6 +1697,15 @@ function run(subcommand, args) {
     case "validate": {
       json(validate());
       return 0;
+    }
+    case "supersede": {
+      const positional = args.filter(a => !a.startsWith("--"));
+      const reasonArg = args.find(a => a.startsWith("--reason="));
+      const result = supersede(positional[0], positional[1], {
+        reason: reasonArg ? reasonArg.slice("--reason=".length) : null,
+      });
+      json(result);
+      return result.ok ? 0 : 1;
     }
     case "backlinks": {
       if (!args[0]) { process.stderr.write("Usage: memory backlinks <doc-id>\n"); return 2; }
@@ -1859,7 +1995,7 @@ function run(subcommand, args) {
       process.stderr.write(
         `Unknown memory subcommand: ${subcommand}\n` +
         `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
-        `       validate | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
+        `       validate | supersede | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
         `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
         `       paths | diff | export | import |\n` +
         `       promote (via /devt:memory) | reject (via /devt:memory)\n`
@@ -1876,9 +2012,11 @@ module.exports = {
   validate,
   validateRefs,
   getDoc,
+  getDocsMeta,
   getAffectsPathsByIds,
   getByPath,
   getBySymbol,
+  supersede,
   listActive,
   listRejectedKeywords,
   queryFTS,
