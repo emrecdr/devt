@@ -191,6 +191,59 @@ class PaginatedResponse(BaseModel, Generic[T]):
 - Always return `total` count for UI pagination controls
 - For high-volume endpoints, prefer cursor-based (`?after=<id>`) over offset
 
+## Error Responses (RFC 9457 Problem Details)
+
+The recommended error response shape is RFC 9457 problem details —
+`application/problem+json` with typed, machine-readable fields. This is the
+current community-recommended format, NOT the FastAPI default (which remains
+`{"detail": ...}`); adopt it deliberately, per service, via the exception
+handler that maps the `AppError` hierarchy:
+
+```json
+{
+  "type": "https://api.example.com/errors/order-not-found",
+  "title": "Order not found",
+  "status": 404,
+  "detail": "Order 019d... does not exist or is not visible to this account",
+  "instance": "/api/v1/orders/019d..."
+}
+```
+
+- One registered exception handler renders every `AppError` subclass into
+  this shape — the error classes already carry the status mapping; the
+  handler adds `type`/`title` from a per-class registry
+- `type` is a stable URI identifying the error CLASS (documentable,
+  client-switchable); `detail` is the human sentence for THIS occurrence
+- Domain-specific extension fields are allowed alongside the standard five
+- The `fastapi-problem` library (actively maintained) implements this
+  marshaling if you'd rather not hand-roll the handler
+- Keep validation errors (422) consistent: either translate
+  `RequestValidationError` into the same shape, or document the two formats —
+  never mix ad-hoc shapes per endpoint
+
+## Streaming Responses & SSE
+
+JSON-lines streaming and Server-Sent Events are first-class: stream by
+`yield`ing from an async generator, and for SSE use
+`response_class=EventSourceResponse` — an `AsyncIterable[Item]` return
+annotation gets full Pydantic validation per item, and keep-alive pings are
+automatic.
+
+Rules that keep streams from taking down the service:
+
+- **Never block inside a streaming generator** — `time.sleep`, sync DB reads,
+  or sync file I/O mid-stream stall the event loop for EVERY request, not
+  just the stream. Use async equivalents or `run_in_threadpool` per chunk
+- **Handle client disconnect**: wrap the generator body in `try/finally` (or
+  check `request.is_disconnected()` in long loops) so DB cursors, file
+  handles, and subscriptions are released when the client goes away —
+  abandoned generators are a slow leak
+- **Backpressure for produce/consume streams**: when a producer outpaces the
+  client, buffer through a bounded `asyncio.Queue` — an unbounded buffer
+  turns one slow consumer into unbounded memory growth
+- Streaming responses bypass `response_model` re-validation only for raw
+  bytes; typed SSE items are validated per item — keep item models flat
+
 ## Security
 
 ### CORS

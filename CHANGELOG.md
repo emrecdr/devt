@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.165.0] - 2026-07-16
+
+### python-fastapi template: error-shape + streaming sections (cal #49 follow-up)
+
+The two research-validated items deferred from the FastAPI/Pydantic calibration, re-verified against live sources 24h apart with zero drift before shipping:
+
+- **RFC 9457 problem-details section** in architecture.md — the community-recommended error response shape (`application/problem+json` with `type`/`title`/`status`/`detail`/`instance`), framed explicitly as *recommended shape, not FastAPI default* (core still emits `{"detail": ...}`). Wires into the template's existing `AppError` hierarchy via the exception handler + per-class type/title registry; points at the actively-maintained `fastapi-problem` library; requires a deliberate decision on the 422 validation-error format rather than mixed shapes.
+- **Streaming & SSE section** — JSON-lines streaming and Server-Sent Events are now first-class framework surface; the section carries the four rules that keep streams from taking down the service: never block inside a streaming generator (stalls the loop for every request), release resources on client disconnect (`try/finally` — abandoned generators are a slow leak), bounded `asyncio.Queue` backpressure, and flat item models (typed SSE items validate per item).
+- **K271 extended** to guard both sections. Deliberately still held back: `lazy=` relationship detector (receipt-gated — the only field consumer runs 94-to-1 sync sessions, nothing to fire on), httpx2 migration (upstream hasn't moved), other-template calibrations (own research loops).
+
 ## [0.164.1] - 2026-07-16
 
 ### Fix: graphify MCP scaffold path + dead registration hint

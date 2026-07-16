@@ -16906,10 +16906,12 @@ if [ -f "$K271_T/pydantic-patterns.md" ] \
    && /usr/bin/grep -q "pwdlib" "$K271_T/architecture.md" \
    && /usr/bin/grep -q '"FAST", "ASYNC"' "$K271_T/architecture.md" \
    && /usr/bin/grep -q 'lazy="raise"' "$K271_T/coding-standards.md" \
-   && /usr/bin/grep -q "asyncio_default_fixture_loop_scope" "$K271_T/architecture.md"; then
-  pass "K271: python-fastapi template currency — pydantic-patterns add-on + PyJWT/pwdlib stack + FAST/ASYNC enforcement + async trap kit + pytest-asyncio 1.x idiom"
+   && /usr/bin/grep -q "asyncio_default_fixture_loop_scope" "$K271_T/architecture.md" \
+   && /usr/bin/grep -q "RFC 9457" "$K271_T/architecture.md" \
+   && /usr/bin/grep -q "Never block inside a streaming generator" "$K271_T/architecture.md"; then
+  pass "K271: python-fastapi template currency — pydantic-patterns add-on + PyJWT/pwdlib stack + FAST/ASYNC enforcement + async trap kit + pytest-asyncio 1.x idiom + RFC 9457 shape + streaming/SSE rules"
 else
-  fail "K271: template currency regressed (stale security stack, missing pydantic-patterns, or dropped enforcement wiring)"
+  fail "K271: template currency regressed (stale security stack, missing pydantic-patterns, dropped enforcement wiring, or missing error-shape/streaming sections)"
 fi
 
 # K272: graphify MCP scaffold correctness — the graph-path arg carries the
