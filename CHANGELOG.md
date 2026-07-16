@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.165.1] - 2026-07-16
+
+### Fix: template copy shipped ephemeral dirs into scaffolded projects
+
+- `setup --template python-fastapi` delivered `__pycache__` (compiled bytecode caches from the template's own arch-scan tests running in CI) into every scaffolded project's `.devt/rules/`, and would likewise have shipped a stray `.devt/state/` hook-trace residue scaffolded into the template by an agent running with its cwd there. These directories regenerate — deleting them doesn't stick — so the copy layer is the enforcement point: `copyDirRecursive` + `copyMissingFiles` now skip `__pycache__`, `.ruff_cache`, `.pytest_cache`, `.mypy_cache`, `.devt`, `.git`, `node_modules`.
+- Behaviorally verified both directions: pollution gone from a fresh scaffold AND intentional template content (`tests/architecture/`, `detectors/`, `pydantic-patterns.md`) still ships.
+- Gate **K273** (plants pollution in the template, scaffolds, asserts zero ships + content intact, cleans up). Drift-guard stack 179 → 180 deep (K94–K273).
+
 ## [0.165.0] - 2026-07-16
 
 ### python-fastapi template: error-shape + streaming sections (cal #49 follow-up)

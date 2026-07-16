@@ -16929,6 +16929,33 @@ else
   fail "K272: graphify MCP scaffold regressed (bare-relative graph path or dead registration form reintroduced)"
 fi
 
+# K273: template copy excludes ephemeral/tooling dirs — a working repo drops
+# __pycache__/.ruff_cache beside template sources (arch-scan tests execute in
+# CI), and agents running with cwd inside a template scaffold a nested .devt/;
+# without copy-layer exclusion these SHIP into every scaffolded project
+# (field: fresh setup delivered compiled bytecode caches into .devt/rules/).
+# Also guards against over-exclusion: intentional template content
+# (tests/architecture, detectors, pydantic-patterns) must still ship.
+K273_T=$(mktemp -d)
+K273_T=$(cd "$K273_T" && pwd -P)
+mkdir -p "$ROOT/templates/python-fastapi/__pycache__" 2>/dev/null || true
+touch "$ROOT/templates/python-fastapi/__pycache__/junk.pyc" 2>/dev/null || true
+mkdir -p "$ROOT/templates/python-fastapi/.devt/state" 2>/dev/null || true
+printf '{}' > "$ROOT/templates/python-fastapi/.devt/state/status.json" 2>/dev/null || true
+(cd "$K273_T" && git init -q && node "$CLI" setup --template python-fastapi --mode create) >/dev/null 2>&1
+K273_POLLUTION=$(cd "$K273_T" && { find .devt/rules -name "__pycache__" -o -name ".ruff_cache" -o -name ".devt" 2>/dev/null || true; } | wc -l | tr -d " ")
+K273_CONTENT=1
+[ -f "$K273_T/.devt/rules/tests/architecture/test_arch_scan_internals.py" ] || K273_CONTENT=0
+[ -f "$K273_T/.devt/rules/detectors/layer_imports.py" ] || K273_CONTENT=0
+[ -f "$K273_T/.devt/rules/pydantic-patterns.md" ] || K273_CONTENT=0
+rm -rf "$K273_T" "$ROOT/templates/python-fastapi/.devt"
+rm -f "$ROOT/templates/python-fastapi/__pycache__/junk.pyc"
+if [ "$K273_POLLUTION" = "0" ] && [ "$K273_CONTENT" = "1" ]; then
+  pass "K273: template copy exclusion — no __pycache__/.ruff_cache/.devt ships into scaffolds; intentional tests/detectors/pydantic-patterns content still does"
+else
+  fail "K273: copy exclusion broken — pollution=$K273_POLLUTION (exp 0) content=$K273_CONTENT (exp 1)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

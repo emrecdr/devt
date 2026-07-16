@@ -549,6 +549,18 @@ function atomicWriteJson(filePath, data) {
   atomicWriteJsonSync(filePath, data);
 }
 
+// Ephemeral/tooling directories that must never ship from a template into a
+// scaffolded project. Templates live in a working repo: running their
+// arch-scan tests drops __pycache__/.ruff_cache beside the sources, and a
+// hook or agent executing with its cwd inside the template scaffolds a
+// nested .devt/. These regenerate — deletion doesn't stick — so the copy
+// layer is the enforcement point (field: a fresh `setup --template
+// python-fastapi` shipped compiled bytecode caches into .devt/rules/).
+const COPY_EXCLUDED_DIRS = new Set([
+  "__pycache__", ".ruff_cache", ".pytest_cache", ".mypy_cache",
+  ".devt", ".git", "node_modules",
+]);
+
 function copyDirRecursive(src, dest) {
   if (!fs.existsSync(src)) {
     throw new Error(`Template directory not found: ${src}`);
@@ -557,6 +569,7 @@ function copyDirRecursive(src, dest) {
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (isUnsafeEntryName(entry.name, entry.isSymbolicLink())) continue;
+    if (entry.isDirectory() && COPY_EXCLUDED_DIRS.has(entry.name)) continue;
     const srcCheck = validatePath(entry.name, src);
     if (!srcCheck.safe) continue;
     const destCheck = validatePath(entry.name, dest);
@@ -575,6 +588,7 @@ function copyMissingFiles(src, dest, prefix) {
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (isUnsafeEntryName(entry.name, entry.isSymbolicLink())) continue;
+    if (entry.isDirectory() && COPY_EXCLUDED_DIRS.has(entry.name)) continue;
     const srcCheck = validatePath(entry.name, src);
     if (!srcCheck.safe) continue;
     const destCheck = validatePath(entry.name, dest);
