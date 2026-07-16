@@ -49,7 +49,7 @@ const CHECKS = {
   // .mcp.json. Setup wizard's MCP probe is one-shot at install time; users who install
   // Graphify AFTER /devt:setup --init don't auto-pick up the MCP entry. Warn-only by design — auto-
   // editing .mcp.json risks stomping user customizations.
-  GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Add to .mcp.json mcpServers: `\"graphify\": { \"command\": \"graphify\", \"args\": [\"mcp\", \"--project\", \".\"] }` (or re-run `node bin/devt-tools.cjs setup --mode update` to regenerate)" },
+  GRAPHIFY_MCP_UNREGISTERED: { severity: "info", message: "Graphify is on PATH but not registered in .mcp.json — MCP queries will fall back to grep", repairable: false, fix: "Re-run `node bin/devt-tools.cjs setup --mode update` to register it (probes uv/pip and writes the launch entry), or add to .mcp.json mcpServers manually: `\"graphify\": { \"command\": \"uv\", \"args\": [\"run\", \"--with\", \"graphifyy\", \"--with\", \"mcp\", \"-m\", \"graphify.serve\", \"${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json\"] }`" },
   // Graphify silently emits empty hyperedges when skill/binary versions
   // drift. Drift is invisible without this surfaced check.
   GRAPHIFY_SKILL_DRIFT: { severity: "warning", message: "Graphify skill version drifted from binary — hyperedges may silently return empty", repairable: false, fix: "Run `graphify install` to refresh the local skill bundle to match the binary version" },

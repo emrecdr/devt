@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.164.1] - 2026-07-16
+
+### Fix: graphify MCP scaffold path + dead registration hint
+
+Both surfaced by a live platform-doc check on the `.mcp.json` location question:
+
+- The scaffolded graphify server's graph-path arg was bare-relative (`graphify-out/graph.json`), resolving against the spawned server's working directory — which Claude Code does not guarantee to be the project root. Now `${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json`, the platform-documented form for project-scoped `.mcp.json` (the `:-.` default degrades to today's behavior where the variable isn't substituted, and self-heals wherever it is). Existing projects reconcile on `setup --mode reinit`; `create`/`update` leave user entries untouched as before.
+- `health`'s `GRAPHIFY_MCP_UNREGISTERED` fix message instructed users to register `graphify mcp --project .` — a subcommand upstream removed (setup.cjs has scaffolded `python -m graphify.serve` for months; the hint was never updated). Anyone following it registered a server that cannot start. The message now leads with re-running setup and shows the current uv launch form.
+- Gate **K272** (prefixed graph path + no dead registration hint anywhere). Drift-guard stack 178 → 179 deep (K94–K272).
+
 ## [0.164.0] - 2026-07-15
 
 ### python-fastapi template: FastAPI + Pydantic best-practice calibration

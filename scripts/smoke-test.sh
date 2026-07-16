@@ -5503,8 +5503,12 @@ echo "== setup.cjs::reconcileMcpServers honors mode semantics =="
 # user's install method changed (pip → uv or vice versa).
 RECONCILE_OUT=$(node -e '
   const { reconcileMcpServers } = require("'"$ROOT"'/bin/modules/setup.cjs");
+  // stalePip carries the legacy bare-relative graph path deliberately — it
+  // mirrors real pre-existing project entries; probedUv is the current
+  // canonical form (${CLAUDE_PROJECT_DIR:-.} prefix), so case 1 exercises the
+  // exact legacy→canonical reconciliation that reinit performs in the field.
   const stalePip = { graphify: { command: "python3", args: ["-m", "graphify.serve", "graphify-out/graph.json"], env: {} } };
-  const probedUv = { graphify: { command: "uv", args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "graphify-out/graph.json"], env: {} } };
+  const probedUv = { graphify: { command: "uv", args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json"], env: {} } };
 
   // Case 1: reinit + stale pip + uv probe → replace command + args
   const r1 = reconcileMcpServers(stalePip, probedUv, "reinit");
@@ -16906,6 +16910,21 @@ if [ -f "$K271_T/pydantic-patterns.md" ] \
   pass "K271: python-fastapi template currency — pydantic-patterns add-on + PyJWT/pwdlib stack + FAST/ASYNC enforcement + async trap kit + pytest-asyncio 1.x idiom"
 else
   fail "K271: template currency regressed (stale security stack, missing pydantic-patterns, or dropped enforcement wiring)"
+fi
+
+# K272: graphify MCP scaffold correctness — the graph-path arg carries the
+# platform-documented ${CLAUDE_PROJECT_DIR:-.} prefix (bare-relative resolves
+# against the server's cwd, which the platform does not guarantee is the
+# project root), and no surface recommends the removed `graphify mcp`
+# subcommand as a registration form (health's fix message previously
+# instructed users to register a server that cannot start).
+if /usr/bin/grep -q 'CLAUDE_PROJECT_DIR:-\.}/graphify-out/graph.json' "$ROOT/bin/modules/setup.cjs" \
+   && ! /usr/bin/grep -q '"mcp", "--project"' "$ROOT/bin/modules/health.cjs" \
+   && ! /usr/bin/grep -q '\\"mcp\\", \\"--project\\"' "$ROOT/bin/modules/health.cjs" \
+   && /usr/bin/grep -q 'graphify.serve' "$ROOT/bin/modules/health.cjs"; then
+  pass "K272: graphify MCP scaffold — CLAUDE_PROJECT_DIR-prefixed graph path + no dead 'graphify mcp' registration hint"
+else
+  fail "K272: graphify MCP scaffold regressed (bare-relative graph path or dead registration form reintroduced)"
 fi
 
 echo

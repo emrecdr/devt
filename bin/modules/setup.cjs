@@ -416,16 +416,24 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     }
     return true;
   }
+  // Graph path arg: ${CLAUDE_PROJECT_DIR:-.} prefix, the platform-documented
+  // form for project-scoped .mcp.json. A bare-relative path resolves against
+  // the spawned server's working directory, which Claude Code does not
+  // guarantee to be the project root; the docs prescribe exactly this
+  // default-carrying expansion (the var is absent from Claude Code's own
+  // environment at expansion time, so `:-.` degrades to the cwd — today's
+  // behavior — and self-heals in every context that substitutes the root).
+  const graphArg = "${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json";
   if (probeGraphifyBinary("uv") && probeGraphifyBinary()) {
     probedServers["graphify"] = {
       command: "uv",
-      args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", "graphify-out/graph.json"],
+      args: ["run", "--with", "graphifyy", "--with", "mcp", "-m", "graphify.serve", graphArg],
       env: {},
     };
   } else if (probePythonGraphifyMcp()) {
     probedServers["graphify"] = {
       command: "python3",
-      args: ["-m", "graphify.serve", "graphify-out/graph.json"],
+      args: ["-m", "graphify.serve", graphArg],
       env: {},
     };
   } else if (probeGraphifyBinary()) {
