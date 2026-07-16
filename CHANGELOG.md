@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.167.0] - 2026-07-16
+
+### Review verify + present_findings single-sourced (the KEEP-IN-SYNC banners were lying)
+
+The receipt ranked the ~1,670-line two-file review workflow's copy-paste duplication as its #5 fix. Validation before implementation found something worse than duplication: **the sync had already failed silently**. The parallel path was missing four gates the single path gained over time — the verifier short-circuit, the walk-all-axes coverage override, the Layer-2 claim-check resolution gate, and the raw-dispatch finalize gate (two of which are the load-bearing blocks of the three-layer dispatch defense). A parallel review could finalize without the enforcement the single path guarantees, while both files displayed banners claiming they were identical.
+
+- **New `workflows/code-review.steps.md`** — single source for the `verify` and `present_findings` step bodies, loaded by both parents at `SHARED-STEP` pointers via the dev-workflow tier-partition mechanism (mandatory Read + pipeline-position markers + mode branches: unmarked blocks run in both modes, `SINGLE-DISPATCH ONLY` / `PARALLEL ONLY` blocks in one). The verifier dispatch envelope — which had stayed byte-identical in both copies — now exists once.
+- **Parallel path gains the four lost gates**: axes-coverage override, claim-check resolution, raw-dispatch finalize enforcement (all unconditional now), and the finalize migrates to `advance-phase`. The short-circuit gate stays deliberately single-only — a consolidator's self-flags summarize other agents' work, and short-circuiting synthesis on second-hand self-certification is unvalidated (receipt-gated, reason documented in the block).
+- **Deliberate divergences are now explicit** instead of hidden in drift: consolidator-dispatched gate (parallel), short-circuit (single), RETRY re-dispatch target, report format (single keeps its 0–100; parallel headlines verdict + counts + lane distribution per the score-model fix).
+- Net: 1,690 → 1,527 lines across the three files, ~440 formerly-drifting lines single-sourced, stale KEEP-IN-SYNC banners replaced with the real contract.
+- Nine smoke gates repointed at the new single source (verifier-dispatch pair, allow-list, graphify-surface, F28a, I7a, M15, K43, K222, K274) + **K275** (partition integrity: bodies present once with all four recovered gates, parents carry pointers + mandatory-Read, resident copies banned) + **O5 fixture de-flaked** (anchor stamped before the fresh touch — the anchor-after-touch order raced the second boundary under suite load, same class as the N8 flake). Drift-guard stack 182 → 183 deep (K94–K275).
+
 ## [0.166.0] - 2026-07-16
 
 ### Fifth field receipt: signals that carry their own guard rails

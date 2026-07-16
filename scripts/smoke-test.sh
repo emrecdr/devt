@@ -3887,13 +3887,17 @@ echo "== Verifier rubric coverage (v0.34.0+, D-16) =="
 # below AND author the corresponding rubric — the smoke test will fail until
 # both land. Workflows that don't dispatch the verifier have no rubric
 # obligation (debug/code-review/arch-health use their own terminal agents).
-VERIFIER_USING_WORKFLOWS=("dev" "code_review" "code_review_parallel")
+VERIFIER_USING_WORKFLOWS=("dev" "code_review" "code_review_parallel" "code-review.steps")
+# code-review.steps is the shared verify/present_findings step file (not a
+# workflow_type) — it carries the single verifier dispatch both review paths
+# load; its rubric obligation is code_review's, checked above.
 # rubrics are version-pinned. The smoke test resolves each
 # workflow_type to its pinned filename via the `rubrics` config map in
 # DEFAULTS, then asserts the file exists. When a project bumps its rubric
 # (e.g., dev.v1.md → dev.v2.md), both DEFAULTS and the new file must land
 # in the same commit.
 for wt in "${VERIFIER_USING_WORKFLOWS[@]}"; do
+  [ "$wt" = "code-review.steps" ] && continue  # shared step file, not a workflow_type
   pinned=$(node -e "console.log(require('$ROOT/bin/modules/config.cjs').DEFAULTS.rubrics?.['$wt'] || '')")
   if [ -z "$pinned" ]; then
     fail "no pinned rubric in DEFAULTS.rubrics.${wt} (config.cjs)"
@@ -3923,14 +3927,18 @@ else
   fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
 fi
 # Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag.
-if grep -q '<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.md"; then
+# The dispatch lives in the shared step file (single source for both review paths).
+if grep -q '<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.steps.md"; then
   pass "code-review verifier dispatch injects <rubric_path>"
 else
   fail "code-review verifier dispatch missing <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>"
 fi
-# Code-review workflow must dispatch the verifier (subagent_type=devt:verifier) AND set workflow_type=code_review.
-if grep -q 'subagent_type="devt:verifier"' "$ROOT/workflows/code-review.md" && \
-   grep -q '<workflow_type>code_review</workflow_type>' "$ROOT/workflows/code-review.md"; then
+# Code-review must dispatch the verifier (subagent_type=devt:verifier) with workflow_type=code_review.
+# Both live in the shared step file; the parents carry SHARED-STEP pointers to it.
+if grep -q 'subagent_type="devt:verifier"' "$ROOT/workflows/code-review.steps.md" && \
+   grep -q '<workflow_type>code_review</workflow_type>' "$ROOT/workflows/code-review.steps.md" && \
+   grep -q 'SHARED-STEP:verify' "$ROOT/workflows/code-review.md" && \
+   grep -q 'SHARED-STEP:verify' "$ROOT/workflows/code-review-parallel.md"; then
   pass "code-review workflow dispatches verifier with workflow_type=code_review"
 else
   fail "code-review workflow missing verifier dispatch or workflow_type tag"
@@ -4932,8 +4940,8 @@ if grep -q "EXACTLY ONE.*graph-impact.md.*graphify-skip-reason.txt.*MUST exist" 
 else
   fail "code-review missing the hard gate that catches orchestrator skip"
 fi
-# Telemetry surface in present_findings
-if grep -q "Graphify activity surface" "$ROOT/workflows/code-review.md" && grep -q "mcp-stats --workflow-id" "$ROOT/workflows/code-review.md"; then
+# Telemetry surface in present_findings (shared step file — single source)
+if grep -q "Graphify activity surface" "$ROOT/workflows/code-review.steps.md" && grep -q "mcp-stats --workflow-id" "$ROOT/workflows/code-review.steps.md"; then
   pass "code-review present_findings step surfaces graphify tool invocation telemetry to user"
 else
   fail "code-review present_findings missing graphify activity surface"
@@ -6847,9 +6855,9 @@ rm -rf "$F27_TMP"
 # Presence check (a) confirms the workflow body invokes check-agent-output on
 # review.md before dispatching the verifier; behavioral check (b) confirms the
 # CLI's looks_like_stub=true output is what the workflow gates on.
-if /usr/bin/grep -q "state check-agent-output .devt/state/review.md" "$ROOT/workflows/code-review.md" \
-  && /usr/bin/grep -q "looks_like_stub == true" "$ROOT/workflows/code-review.md"; then
-  pass "F28a: code-review.md wires state check-agent-output + looks_like_stub gate before verifier dispatch"
+if /usr/bin/grep -q "state check-agent-output review.md" "$ROOT/workflows/code-review.steps.md" \
+  && /usr/bin/grep -q "looks_like_stub == true" "$ROOT/workflows/code-review.steps.md"; then
+  pass "F28a: shared verify step wires state check-agent-output + looks_like_stub gate before verifier dispatch"
 else
   fail "F28a: code-review.md missing F27 substance pre-gate wiring before verifier dispatch"
 fi
@@ -7599,7 +7607,7 @@ fi
 rm -rf "$I6_TMP"
 
 # I7: namespace drift — mcp-stats uses unprefixed form, workflow prose uses prefixed form
-MCP_STATS_OK=$(/usr/bin/grep -c "mcp-stats.*--tool='mcp__devt-graphify__\*'" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+MCP_STATS_OK=$(/usr/bin/grep -c "mcp-stats.*--tool='mcp__devt-graphify__\*'" "$ROOT/workflows/code-review.steps.md" 2>/dev/null || echo 0)
 PROSE_PREFIXED=$(/usr/bin/grep -c "mcp__plugin_devt_devt-graphify__" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "$MCP_STATS_OK" -ge 1 ] && [ "$PROSE_PREFIXED" -ge 3 ]; then
   pass "I7a: code-review.md mcp-stats uses UNPREFIXED form (matches trace records) + prose uses PREFIXED form (orchestrator calls)"
@@ -8946,7 +8954,9 @@ fi
 # guards the split: inline stays for the reviewer, by-reference everywhere else
 # (north-stars #1 coordination, #3 token efficiency).
 M15_REVIEWER_INLINE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
-M15_PATH_REFS=$(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+# Reviewer rubric_path lives in code-review.md (review step); the verifier's
+# lives in the shared step file both paths load — count the pair across both.
+M15_PATH_REFS=$(( $(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0) + $(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.steps.md" 2>/dev/null || echo 0) ))
 M15_PARALLEL_BYREF=$(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
 M15_AGENT=$(/usr/bin/grep -c "Rubric self-check" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 if [ "${M15_REVIEWER_INLINE:-0}" -ge 1 ] && [ "${M15_PATH_REFS:-0}" -ge 2 ] && [ "${M15_PARALLEL_BYREF:-0}" -ge 1 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
@@ -9717,13 +9727,15 @@ touch -t 202604010000.00 "$O5_TMP/.devt/state/review.md"
 touch -t 202604010000.00 "$O5_TMP/.devt/state/review.json"
 touch -t 202604010000.00 "$O5_TMP/.devt/state/test-summary.md"
 touch -t 202604010000.00 "$O5_TMP/.devt/state/verification.md"
-sleep 1
-touch "$O5_TMP/.devt/state/impl-summary.md"
+# Anchor stamped BEFORE the fresh touch: fresh mtime >= anchor deterministically
+# (anchor-after-touch raced the second boundary and flaked under suite load).
 ANCHOR=$(date -u +%FT%TZ)
 cat > "$O5_TMP/.devt/state/workflow.yaml" <<EOF
 active: true
 first_created_at: "$ANCHOR"
 EOF
+sleep 1
+touch "$O5_TMP/.devt/state/impl-summary.md"
 (cd "$O5_TMP" && node "$CLI" state evict-workflow-artifacts >/dev/null 2>&1)
 O5_STALE_GONE=$([ ! -f "$O5_TMP/.devt/state/review.md" ] && [ ! -f "$O5_TMP/.devt/state/review.json" ] && [ ! -f "$O5_TMP/.devt/state/test-summary.md" ] && [ ! -f "$O5_TMP/.devt/state/verification.md" ] && echo 1 || echo 0)
 O5_FRESH_KEPT=$([ -f "$O5_TMP/.devt/state/impl-summary.md" ] && echo 1 || echo 0)
@@ -10453,7 +10465,7 @@ fi
 # advance-phase at finalize-deactivation. v0.73.2 added arch-health-scan.md
 # to close the cycle-coherence gap.
 K43_FAIL=""
-for wf in workflows/code-review.md workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md workflows/arch-health-scan.md; do
+for wf in workflows/code-review.steps.md workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md workflows/arch-health-scan.md; do
   if ! grep -q "state advance-phase" "$ROOT/$wf" 2>/dev/null; then
     K43_FAIL="$K43_FAIL $(basename $wf)"
   fi
@@ -15645,12 +15657,11 @@ fi
 # mcp-stats calls must union the id chain (their context_init MCP calls land
 # under the pre-rotation workflow_id; the strict default would report zero
 # graphify usage for a run that demonstrably used it).
-K222_CR=$(/usr/bin/grep -c -- '--workflow-id="$WID" --include-chain' "$ROOT/workflows/code-review.md" || true)
-K222_CRP=$(/usr/bin/grep -c -- '--workflow-id="$WID" --include-chain' "$ROOT/workflows/code-review-parallel.md" || true)
-if [ "$K222_CR" = "2" ] && [ "$K222_CRP" = "2" ]; then
-  pass "K222: Graphify-activity telemetry uses --include-chain in both code-review.md and code-review-parallel.md (2 call sites each)"
+K222_SHARED=$(/usr/bin/grep -c -- '--workflow-id="$WID" --include-chain' "$ROOT/workflows/code-review.steps.md" || true)
+if [ "$K222_SHARED" = "2" ]; then
+  pass "K222: Graphify-activity telemetry uses --include-chain (2 call sites in the shared step file both review paths load)"
 else
-  fail "K222: --include-chain missing — code-review=$K222_CR(exp 2) parallel=$K222_CRP(exp 2)"
+  fail "K222: --include-chain missing — shared=$K222_SHARED(exp 2)"
 fi
 
 # K225: evolution scan — git-history behavioral metrics. On a synthetic repo:
@@ -16978,7 +16989,7 @@ K274_WHY=""
 /usr/bin/grep -q '"score": null' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="a:score-null"; }
 /usr/bin/grep -q 'lane_scores' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="a:lane_scores"; }
 /usr/bin/grep -q 'NO merged 0-100 score' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || { K274_OK=0; K274_WHY="a:template"; }
-/usr/bin/grep -q 'Lane score distribution' "$ROOT/workflows/code-review-parallel.md" || { K274_OK=0; K274_WHY="a:present_findings"; }
+/usr/bin/grep -q 'Lane score distribution' "$ROOT/workflows/code-review.steps.md" || { K274_OK=0; K274_WHY="a:present_findings"; }
 /usr/bin/grep -q 'Repro-spec contract' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="b:finder"; }
 /usr/bin/grep -q 'reproduce the finding.s exact spec' "$ROOT/agents/verifier.md" || { K274_OK=0; K274_WHY="b:verifier"; }
 /usr/bin/grep -q 'NEVER present cost alone' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="c:preview"; }
@@ -17011,6 +17022,36 @@ if [ "$K274B_STALE_GONE" = "1" ] && [ "$K274B_FRESH_KEPT" = "1" ]; then
   pass "K274b: code-review-input eviction behavioral — stale leftover evicted, fresh pre-write survives reset-soft"
 else
   fail "K274b: eviction behavior wrong — stale_gone=$K274B_STALE_GONE fresh_kept=$K274B_FRESH_KEPT"
+fi
+
+# K275: review shared-steps partition integrity — the verify +
+# present_findings bodies live ONCE in code-review.steps.md; both parents
+# carry SHARED-STEP pointers + the mandatory-Read directive and contain NO
+# resident copy of body-only content (the copy-paste era let the parallel
+# path silently lose four gates the single path gained — this gate makes
+# that drift class structurally impossible).
+K275_OK=1; K275_WHY=""
+S="$ROOT/workflows/code-review.steps.md"
+/usr/bin/grep -q '<step name="verify"' "$S" || { K275_OK=0; K275_WHY="steps:verify-missing"; }
+/usr/bin/grep -q '<step name="present_findings"' "$S" || { K275_OK=0; K275_WHY="steps:pf-missing"; }
+/usr/bin/grep -q 'assert-verifier-graded-all-axes' "$S" || { K275_OK=0; K275_WHY="steps:axes-gate-missing"; }
+/usr/bin/grep -q 'assert-no-raw-dispatches-this-session' "$S" || { K275_OK=0; K275_WHY="steps:rd-gate-missing"; }
+/usr/bin/grep -q 'assert-claim-checks-resolved' "$S" || { K275_OK=0; K275_WHY="steps:cc-gate-missing"; }
+/usr/bin/grep -q 'PARALLEL ONLY' "$S" || { K275_OK=0; K275_WHY="steps:mode-branches-missing"; }
+for wf in code-review.md code-review-parallel.md; do
+  P="$ROOT/workflows/$wf"
+  /usr/bin/grep -q 'SHARED-STEP:verify' "$P" || { K275_OK=0; K275_WHY="$wf:verify-pointer"; }
+  /usr/bin/grep -q 'SHARED-STEP:present_findings' "$P" || { K275_OK=0; K275_WHY="$wf:pf-pointer"; }
+  /usr/bin/grep -q 'Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now' "$P" || { K275_OK=0; K275_WHY="$wf:mandatory-read"; }
+  # Disjointness: body-only markers must NOT reappear in the parents
+  # (a resident copy silently shadows the shared source and drift restarts).
+  /usr/bin/grep -q 'assert-verifier-graded-all-axes' "$P" && { K275_OK=0; K275_WHY="$wf:resident-verify-body"; }
+  /usr/bin/grep -q 'Graphify activity surface' "$P" && { K275_OK=0; K275_WHY="$wf:resident-pf-body"; }
+done
+if [ "$K275_OK" = "1" ]; then
+  pass "K275: review shared-steps partition — bodies single-sourced in code-review.steps.md (incl. axes/raw-dispatch/claim-check gates for BOTH paths), parents carry pointers + mandatory-Read, no resident copies"
+else
+  fail "K275: shared-steps partition regressed at $K275_WHY"
 fi
 
 echo

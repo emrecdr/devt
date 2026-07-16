@@ -129,7 +129,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 182-deep drift-guard stack K94-K274b) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 183-deep drift-guard stack K94-K275) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -172,6 +172,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 - Cache-friendly dispatch ordering — `<task>` AFTER `</context>`. → docs/AGENT-CONTRACTS.md (Cache-friendly dispatch ordering).
 - Workflow body loading is explicit (Read after `@`-ref). → docs/AGENT-CONTRACTS.md (Workflow body loading).
 - **dev-workflow.md tier-partition** — `dev-workflow.md` is a spine (all-tier steps) that lazily loads `dev-workflow.standard.md` (STANDARD+ steps: risk_warning, scan, regression_baseline, simplify, verify, docs_retro, autoskill) + `dev-workflow.complex.md` (COMPLEX-only: auto_research_plan, architect, curate) via the `load_tier_steps` step after tier detection; a `TIER-STEP:<name>` pointer marks each relocated step's pipeline position. SIMPLE/TRIVIAL load the spine only. Smoke gates K210 (complete + disjoint partition) + K211 (mandatory-Read directive + per-step pointers) enforce it. When editing a STANDARD+/COMPLEX step, edit it in its tier file, not the spine.
+- **Review shared-steps partition** — the `verify` + `present_findings` step bodies for BOTH review paths live once in `workflows/code-review.steps.md`, loaded at `SHARED-STEP:<name>` pointers with MODE=single (code-review.md) / MODE=parallel (code-review-parallel.md); mode-marked blocks run in one mode, unmarked blocks in both. Never re-add a resident copy to a parent — the copy-paste era silently cost the parallel path four gates (K275 enforces the partition).
 - Questioning protocol for `/devt:clarify` + `/devt:specify`. → docs/AGENT-CONTRACTS.md (Questioning Protocol).
 - Rejected pattern: sub-conversation JSON returns (Anthropic specialist-team cookbook). devt deliberately does NOT adopt this — file-based state is load-bearing for `/devt:next` + `/devt:pause` resume. → docs/AGENT-CONTRACTS.md (Rejected Patterns).
 
