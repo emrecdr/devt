@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.168.1] - 2026-07-16
+
+### Verification-pass hardening: ghost surfaces, the lean sidecar, and the fork-free write path
+
+Independent verification of v0.168.0 confirmed all eight shipped claims; the follow-up rounds it triggered grew well past the two one-line residuals it opened with — a third ghost surface gated, a 12-site doc-drift class swept and scanned, the sidecar contract cut to a single field, a real fork bug in the curator's write path fixed behaviorally, and the deferred queue's size triggers given a watcher:
+
+- **`memory supersede` added to the top-level `printUsage`** — it was routed, module-usage-listed, and CLAUDE.md-documented, but absent from the third surface: the CLI's own help text. **K281** extends the ghost-surface class gate there (curated list, so the invariant runs one direction: everything advertised must route; supersede must stay advertised). Drift-guard stack 188 → 189 deep (K94–K281).
+- **REJ template aligned with the documented convention** — it scaffolded `status: rejected` with a comment claiming that value was mandatory, contradicting docs/MEMORY.md's `status: active` living-tombstone convention. Template now scaffolds `active` and the comment states the real contract: retrieval keys on `doc_type`, either status behaves identically, no migration.
+- **Deferred size-triggers get a watcher.** DEF items parked behind "corpus >N docs" had no evaluator — receipt triggers arrive by their nature, but a size trigger would fire silently, noticed only if someone happened to run `deferred list` and happened to check the count. `health` now parses the unlock condition from each open item's own context and emits `DEF_TRIGGER_FIRED: DEF-001 (corpus 34 > 30)` when met — items declare their triggers, the watcher stays generic.
+- **Failed-gate names travel with the suite's Result line.** A red run captured via `| tail -N` counted failures without naming them (this session's own unreproduced flake was unidentifiable for exactly that reason); the summary now lists failed gates so a transient red is investigable instead of noise.
+- **`upsertDoc` no longer forks retitled docs.** The write path recomputed the target filename from the current title on every call — updating an existing hand-named or retitled doc via MCP `memory_upsert_doc` (the curator's preferred route) would silently create `<ID>-<new-slug>.md` alongside the original, the same trap `supersede()` guards against. An existing id now keeps its current file; only new ids get the canonical slug name. The rebuild-failure rollback learned the same distinction — it deletes only files the call created, never a pre-existing doc it just updated. K277 gains the no-fork behavioral check.
+- **`governing_ids` removed — `governing[]` is the single sidecar interface.** v0.168.0 shipped the lifecycle array alongside the bare-id array "so jq consumers keep working"; a consumer inventory found zero such consumers outside the suite's own gates — the parallel field was hedging against an audience that didn't exist. One field now, `[{id, status, confidence}]`; bare ids project via `[.governing[].id]`. K276 additionally asserts the legacy field stays gone.
+- **Lane-count drift swept AND gated** — the Brief has been 8 lanes (A–H) since lanes G/H shipped, but "6 lanes"/"Lanes A-F" survived at 12 sites across README, CLAUDE.md, docs (COMMANDS/INTERNALS/the preflight workflow's step list), commands, three workflows, both CLI usage surfaces, the MCP tool description, and preflight.cjs's own docblock (whose lane enumeration also gained G/H + the lifecycle-gate note). Three successive manual sweeps each missed some — so K279 now carries a narrow class scan ("anes A-F" + the Topic-Brief-specific 6-lane phrasings; variable-lane-count prose like a 5-lane render example can't false-positive, and the "5-lane" File Pre-Flight mentions are a different mechanism, correct as written).
+
 ## [0.168.0] - 2026-07-16
 
 ### Memory lifecycle made live: retired knowledge can no longer masquerade as governing

@@ -3,7 +3,7 @@ id: REJ-000
 title: "Rejected Idea"
 doc_type: rejected
 domain: "general"
-status: rejected               # always 'rejected' for REJ docs
+status: active                 # living tombstone — retrieval keys on doc_type, not status ('rejected' also works; see docs/MEMORY.md)
 confidence: explicit
 summary: "What we are NOT doing and why. ≤ 200 chars."
 reason: user_preference        # user_preference | performance | security | maintainability | compliance | complexity

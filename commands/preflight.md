@@ -57,7 +57,7 @@ materially (the File Pre-Flight tier in agents handles minor scope drift via
 
 | Subcommand | Description |
 |---|---|
-| `generate <task>` (default) | Run lanes A-F + blast radius; write the Brief |
+| `generate <task>` (default) | Run lanes A-H + blast radius; write the Brief |
 | `topic <task>` | Just extract domains/symbols/keywords (debug) |
 | `status` | Read current Brief metadata (FRESH/STALE/MISSING) |
 | `mark-stale [reason]` | Mark current Brief STALE — used by File Pre-Flight when scope expanded |

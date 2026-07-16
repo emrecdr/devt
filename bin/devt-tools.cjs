@@ -228,7 +228,9 @@ Commands:
   memory links <id> [--depth=N]  Transitive link traversal (default depth 2)
   memory active [domain]    All status:active docs, optionally domain-filtered
   memory rejected-keywords  All REJ tombstones with their AI-suppression keywords
-  memory validate           Frontmatter + path-resolution + broken-link checks
+  memory validate           Frontmatter + path-resolution + broken-link + supersession-consistency checks
+  memory supersede <old> <new>  Atomic two-sided retirement: old doc → status:superseded + stamps,
+                            successor gains the supersedes link, one reindex [--reason=...]
   memory backlinks <id>     What links TO this doc (load-bearing for safe ADR supersession)
   memory orphans            Docs with no incoming or outgoing links (possibly stale)
   memory stale-links        Links pointing to non-existent target docs
@@ -261,7 +263,7 @@ Commands:
   dispatch warnings          Summarize .devt/state/dispatch-warnings.jsonl (raw_dispatch incidents). Flags: --by-source, --by-agent, --limit=N, --since=ISO, --raw, --all (include task_output_bytes signal=healthy events; default filters them as noise)
   discovery harvest         Same as 'memory suggest' — full discovery sweep
   discovery wiki-links      Just the wiki-link enrichment proposals
-  preflight generate <task> Run Lanes A-F + blast radius; write .devt/state/preflight-brief.md
+  preflight generate <task> Run Lanes A-H + blast radius; write .devt/state/preflight-brief.md
   preflight topic <task>    Just extract domains/symbols/keywords from a task description
   preflight status          Read current brief metadata (FRESH/STALE/MISSING + timestamp)
   preflight mark-stale [r]  Mark current brief STALE (called by File Pre-Flight on scope expansion)

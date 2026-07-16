@@ -19,7 +19,8 @@ PASS=0
 FAIL=0
 
 pass() { echo "  PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); FAILED_GATES="${FAILED_GATES}  - ${1}"$'\n'; }
+FAILED_GATES=""
 
 run() {
   local name="$1"; shift
@@ -988,11 +989,11 @@ if [ -f .devt/state/preflight-brief.json ]; then
     if (!j.suggested_reading || typeof j.suggested_reading !== 'object') process.exit(1);
     if (!Array.isArray(j.suggested_reading.files)) process.exit(1);
     if (!Array.isArray(j.suggested_reading.symbols)) process.exit(1);
-    if (!Array.isArray(j.governing_ids)) process.exit(1);
+    if (!Array.isArray(j.governing)) process.exit(1);
     if (typeof j.status !== 'string') process.exit(1);
     if (!j.blast || typeof j.blast.direct_dependents_count !== 'number') process.exit(1);
   " 2>/dev/null; then
-    pass "preflight-brief.json has expected shape (suggested_reading.{files,symbols}, governing_ids, status, blast.*)"
+    pass "preflight-brief.json has expected shape (suggested_reading.{files,symbols}, governing, status, blast.*)"
   else
     fail "preflight-brief.json shape validation failed"
   fi
@@ -17111,15 +17112,21 @@ K276EOF
 (cd "$K276_T" && node "$CLI" memory index && node "$CLI" preflight generate "paymentflow retry policy") >/dev/null 2>&1
 K276_OK=1; K276_WHY=""
 K276_SIDE="$K276_T/.devt/state/preflight-brief.json"
-jq -e '.governing_ids | index("ADR-001") != null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="active-doc-missing"; }
-jq -e '.governing_ids | index("ADR-002") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="superseded-leaked"; }
-jq -e '.governing_ids | index("REJ-003") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="rej-as-governing"; }
+jq -e '[.governing[].id] | index("ADR-001") != null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="active-doc-missing"; }
+jq -e '[.governing[].id] | index("ADR-002") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="superseded-leaked"; }
+jq -e '[.governing[].id] | index("REJ-003") == null' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="rej-as-governing"; }
+jq -e 'has("governing_ids") | not' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="legacy-parallel-field-back"; }
+# String-level keep-dead: a consumer resurrecting `.governing_ids` under a
+# `// []`-style guard would null-eval silently — scan product surfaces, not
+# just the emitted artifact. (scripts/ holds this pin; CHANGELOG is history.)
+K276_RESURRECT=$(/usr/bin/grep -rln "governing_ids" "$ROOT/README.md" "$ROOT/CLAUDE.md" "$ROOT/bin" "$ROOT/workflows" "$ROOT/agents" "$ROOT/commands" "$ROOT/skills" "$ROOT/templates" "$ROOT/hooks" "$ROOT/references" "$ROOT/docs" 2>/dev/null | /usr/bin/grep -v archive | head -1 || true)
+[ -z "$K276_RESURRECT" ] || { K276_OK=0; K276_WHY="governing_ids-resurrected:$K276_RESURRECT"; }
 jq -e '.governing[0].status == "active" and .governing[0].confidence == "verified"' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="governing-lifecycle-field"; }
 jq -e '.rej_keyword_matches | length > 0' "$K276_SIDE" >/dev/null 2>&1 || { K276_OK=0; K276_WHY="laneE-silent"; }
 /usr/bin/grep -q '_(active·verified, lane' "$K276_T/.devt/state/preflight-brief.md" || { K276_OK=0; K276_WHY="brief-lifecycle-render"; }
 (cd "$K276_T" && node "$CLI" memory query "paymentflow retry policy") 2>/dev/null | /usr/bin/grep -q '"ADR-002"' || { K276_OK=0; K276_WHY="query-hides-superseded"; }
 if [ "$K276_OK" = "1" ]; then
-  pass "K276: governing-lane lifecycle gate — superseded + REJ FTS-matches excluded from governing_ids, status·confidence rendered, explicit query still surfaces all"
+  pass "K276: governing-lane lifecycle gate — superseded + REJ FTS-matches excluded from governing[], no legacy parallel field, status·confidence rendered, explicit query still surfaces all"
 else
   fail "K276: lifecycle gate regressed at $K276_WHY"
 fi
@@ -17143,6 +17150,31 @@ K277_OK=1; K277_WHY=""
 /usr/bin/grep -q '^superseded_by: ADR-004' "$K276_T/.devt/memory/decisions/ADR-001-live.md" || { K277_OK=0; K277_WHY="old-stamp"; }
 /usr/bin/grep -q 'type: supersedes' "$K276_T/.devt/memory/decisions/ADR-004-successor.md" || { K277_OK=0; K277_WHY="successor-link"; }
 (cd "$K276_T" && node "$CLI" memory validate) 2>/dev/null | jq -e '[.issues[] | select(.category == "supersession-contradiction")] | length == 0' >/dev/null 2>&1 || { K277_OK=0; K277_WHY="post-supersede-contradiction"; }
+# upsertDoc path stability — updating an EXISTING id under a new title must
+# rewrite the doc in place, never fork <ID>-<new-slug>.md alongside it. The
+# MCP memory_upsert_doc curator path hits this on every retitle of a
+# hand-named doc; supersede() guards the same trap on its side.
+cat > "$K276_T/upsert-probe.cjs" <<'K277EOF'
+const m = require(process.env.DEVT_MEMORY_MOD);
+const r = m.upsertDoc({
+  frontmatter: {
+    id: "ADR-004",
+    title: "Completely retitled token bucket decision",
+    doc_type: "decision",
+    domain: "payment",
+    status: "active",
+    confidence: "explicit",
+    summary: "Retitled in place - path must not fork.",
+    links: [{ id: "ADR-001", type: "supersedes" }],
+  },
+  body: "Retitled body.",
+});
+process.exit(r && r.ok ? 0 : 1);
+K277EOF
+(cd "$K276_T" && DEVT_MEMORY_MOD="$ROOT/bin/modules/memory.cjs" node upsert-probe.cjs) >/dev/null 2>&1 || { K277_OK=0; K277_WHY="upsert-retitle-failed"; }
+K277_FORK_COUNT=$(ls "$K276_T/.devt/memory/decisions" 2>/dev/null | /usr/bin/grep -c '^ADR-004-' || true)
+[ "$K277_FORK_COUNT" = "1" ] || { K277_OK=0; K277_WHY="upsert-forked-file:count=$K277_FORK_COUNT"; }
+/usr/bin/grep -q 'Completely retitled token bucket decision' "$K276_T/.devt/memory/decisions/ADR-004-successor.md" || { K277_OK=0; K277_WHY="upsert-wrote-elsewhere"; }
 if [ "$K277_OK" = "1" ]; then
   pass "K277: memory supersede round-trip — two-sided retirement atomic (status flip + stamps + successor link), validate contradiction-free after"
 else
@@ -17187,6 +17219,17 @@ K279_OK=1; K279_WHY=""
 /usr/bin/grep -q 'domain_hints' "$ROOT/bin/modules/preflight.cjs" || { K279_OK=0; K279_WHY="preflight:domain-hints-ext"; }
 /usr/bin/grep -q 'function supersede' "$ROOT/bin/modules/memory.cjs" || { K279_OK=0; K279_WHY="memory:supersede-fn"; }
 /usr/bin/grep -q 'case "supersede"' "$ROOT/bin/modules/memory.cjs" || { K279_OK=0; K279_WHY="memory:supersede-case"; }
+/usr/bin/grep -q 'DEF_TRIGGER_FIRED' "$ROOT/bin/modules/health.cjs" || { K279_OK=0; K279_WHY="health:def-trigger-watcher"; }
+# Stale lane-count class scan — "Lanes A-F"/"6-lane Topic" escaped THREE
+# successive sweeps (12 instances across docs, workflows, commands, both CLI
+# usage surfaces, and the MCP tool description). Pattern is deliberately
+# narrow: "anes A-F" + the two Topic-Brief-specific 6-lane phrasings, so
+# legitimate variable-lane-count prose (e.g. a 5-lane render example) never
+# false-positives. docs/archive is historical record — exempt.
+K279_STALE=$(/usr/bin/grep -rln "anes A-F\|anes A–F\|6-lane Topic\|Brief surfaces 6 lanes" \
+  "$ROOT/README.md" "$ROOT/CLAUDE.md" "$ROOT/docs" "$ROOT/commands" "$ROOT/workflows" \
+  "$ROOT/agents" "$ROOT/skills" "$ROOT/references" "$ROOT/bin" 2>/dev/null | /usr/bin/grep -v archive | head -1 || true)
+[ -z "$K279_STALE" ] || { K279_OK=0; K279_WHY="stale-lane-count:$K279_STALE"; }
 if [ "$K279_OK" = "1" ]; then
   pass "K279: lifecycle-mechanism drift pins — eligibility chokepoint + REJ exclusion + domain_hints extension + supersede surface all anchored"
 else
@@ -17208,6 +17251,25 @@ else
   fail "K280: documented command '$K280_WHY' has no routing case in devt-tools.cjs"
 fi
 
+# K281: printUsage ⊆ routing for memory subcommands — the top-level help is a
+# THIRD surface (besides CLAUDE.md and the module's own usage string) where a
+# ghost subcommand can live. The list is deliberately curated (not every
+# routed subcommand is shown), so the invariant runs one direction only:
+# everything shown must be routed. Field-found: `memory supersede` shipped
+# routed + CLAUDE.md-documented but absent here — no gate watched this surface.
+K281_OK=1; K281_WHY=""
+K281_SUBS=$(/usr/bin/grep -oE '^  memory [a-z-]+' "$ROOT/bin/devt-tools.cjs" | awk '{print $2}' | sort -u)
+[ -n "$K281_SUBS" ] || { K281_OK=0; K281_WHY="no-memory-usage-lines-found"; }
+for K281_SUB in $K281_SUBS; do
+  /usr/bin/grep -q "case \"$K281_SUB\"" "$ROOT/bin/modules/memory.cjs" || { K281_OK=0; K281_WHY="$K281_SUB"; }
+done
+/usr/bin/grep -qE '^  memory supersede' "$ROOT/bin/devt-tools.cjs" || { K281_OK=0; K281_WHY="supersede-not-in-usage"; }
+if [ "$K281_OK" = "1" ]; then
+  pass "K281: printUsage memory-subcommand coverage — every advertised subcommand routes, supersede advertised"
+else
+  fail "K281: printUsage memory coverage regressed at $K281_WHY"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
@@ -17223,4 +17285,12 @@ fi
 SUITE_COMPLETED=1
 echo
 echo "== Result: ${PASS} passed, ${FAIL} failed =="
+# Failed-gate names travel WITH the result line — a `| tail -N` capture of a
+# red run must identify the gates, not just count them (a red whose name was
+# swallowed by the pipe reads as noise and trains re-running over
+# investigating).
+if [ -n "$FAILED_GATES" ]; then
+  echo "== Failed gates =="
+  printf '%s' "$FAILED_GATES"
+fi
 [[ $FAIL -eq 0 ]]

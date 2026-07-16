@@ -45,6 +45,7 @@ const CHECKS = {
   MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
   MEM_PATH_UNREACHABLE: { severity: "warning", message: "memory.paths references a directory that doesn't exist", repairable: false, fix: "Initialize the missing root: git submodule init, mount the NFS share, or remove the entry from .devt/config.json" },
   MEM_CONFLICT_HIGH: { severity: "info", message: "Memory layer has ID collisions across configured roots (last-wins applied)", repairable: false, fix: "Inspect with `node bin/devt-tools.cjs memory index` to see the collisions; rename project-local docs OR accept the override as intentional" },
+  DEF_TRIGGER_FIRED: { severity: "info", message: "A deferred item's declared corpus-size unlock condition is now met", repairable: false, fix: "Review the item: node bin/devt-tools.cjs deferred get <DEF-ID> — implement it or re-gate with a new trigger" },
   // Graphify integration drift — `graphify` binary on PATH but MCP server not registered in
   // .mcp.json. Setup wizard's MCP probe is one-shot at install time; users who install
   // Graphify AFTER /devt:setup --init don't auto-pick up the MCP entry. Warn-only by design — auto-
@@ -438,6 +439,27 @@ function runChecks(pluginRoot) {
               { errors: v.summary.errors, warnings: v.summary.warnings || 0 });
         }
       } catch { /* validate may throw if index missing — skipped already */ }
+
+      // DEF_TRIGGER_FIRED — deferred items may declare a corpus-size unlock
+      // condition in their context ("corpus >30 docs"). Receipt triggers
+      // arrive by their nature; corpus counts don't — without this line a
+      // size trigger fires silently and the item stays deferred-until-
+      // remembered. Threshold is parsed from the item's own text, so items
+      // declare their triggers and the watcher stays generic.
+      try {
+        const deferredMod = require("./deferred.cjs");
+        const docs = memMod.listDocs();
+        const corpusSize = Array.isArray(docs) ? docs.length : 0;
+        if (corpusSize > 0) {
+          for (const item of deferredMod.listItems({ status: "open" })) {
+            const m = /corpus\s*>\s*(\d+)/i.exec(item.context || "");
+            if (m && corpusSize > Number(m[1])) {
+              add("DEF_TRIGGER_FIRED", `${item.id} (corpus ${corpusSize} > ${m[1]}): ${item.title}`,
+                  { def_id: item.id, corpus: corpusSize, threshold: Number(m[1]) });
+            }
+          }
+        }
+      } catch { /* deferred file absent or index missing — skip */ }
     } catch { /* memory module load failed — skip silently */ }
   }
 

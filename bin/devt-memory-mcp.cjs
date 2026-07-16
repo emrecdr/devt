@@ -25,7 +25,7 @@
  * - list_active(domain?) → enumerate status:active docs
  * - list_rejected_keywords() → REJ tombstones with their search_keywords
  * - list_links(doc_id, depth?) → transitive link expansion (depth-1 default)
- * - preflight(task) → run lanes A-F + blast radius; same as CLI
+ * - preflight(task) → run lanes A-H + blast radius; same as CLI
  * - blast_radius(symbols) → Graphify-derived blast radius (degraded payload when disabled)
  * - query_index(sql) → SELECT-only escape hatch
  */
@@ -332,7 +332,7 @@ const TOOLS = {
   },
 
   preflight: {
-    description: "Run the full Topic Pre-Flight (lanes A-F + blast radius). Writes .devt/state/preflight-brief.md and returns lane counts.",
+    description: "Run the full Topic Pre-Flight (lanes A-H + blast radius). Writes .devt/state/preflight-brief.md and returns lane counts.",
     inputSchema: {
       type: "object",
       required: ["task"],

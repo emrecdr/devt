@@ -153,8 +153,7 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
       "reason": "..."          // human-readable; +0.2 overlap bonus when CamelCase-split symbol tokens match keywords
     }
   },
-  "governing_ids": [...],      // deduped union of lanes A-D ∪ G, lifecycle-filtered: status active|candidate only, REJ excluded
-  "governing": [...],          // same docs with lifecycle attached: [{id, status, confidence}]
+  "governing": [...],          // deduped union of lanes A-D ∪ G, lifecycle-filtered (status active|candidate only, REJ excluded); [{id, status, confidence}] — project bare ids via [.governing[].id]
   "suggested_reading": [...],  // capped at 8 — see below
   "scope_hint": {
     "confidence": {            // placeholder pending v0.69 R3 calibration
@@ -371,7 +370,7 @@ SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
 
 ## Native MEM_* Health Checks
 
-`bin/devt-tools.cjs health` runs five memory-specific checks natively (no agent in the loop, suitable for CI):
+`bin/devt-tools.cjs health` runs six memory-adjacent checks natively (no agent in the loop, suitable for CI):
 
 | Check | Severity | Triggered when |
 |-------|----------|----------------|
@@ -379,6 +378,7 @@ SELECT id, age_days FROM stale_speculative ORDER BY age_days DESC LIMIT 10
 | `MEM_INDEX_STALE` | warning | `index.db` is older than the newest `.md` mtime across all roots |
 | `MEM_VALIDATE_ERRORS` | error | Frontmatter schema violations from `memory validate` |
 | `MEM_CONFLICT_HIGH` | info | High count of cross-root ID collisions (last-wins applied) |
+| `DEF_TRIGGER_FIRED` | info | An open deferred item declares a corpus-size unlock ("corpus >N docs" in its context) and the indexed doc count now exceeds N — receipt triggers arrive on their own; size triggers need this watcher or they fire silently |
 | `GRAPHIFY_MCP_UNREGISTERED` | info | `graphify` binary is on PATH but `.mcp.json` lacks the server entry — MCP queries silently fall back to grep |
 
 The `MEM_PATH_UNREACHABLE` check pairs with `memory paths --validate` — both surface actionable hints ("git submodule init / NFS mount / sibling clone") rather than bare "missing directory" errors.

@@ -47,7 +47,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${FEATURE_IDEA}"
 ```
 
-The third call auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the feature topic. Surfaces governing ADRs/Concepts/Flows so the PRD aligns with permanent architectural truth, AND surfaces REJ tombstones so the spec doesn't propose pre-rejected approaches (e.g. spec asking for Redis sessions when REJ-001 tombstoned that). The Brief lives at `.devt/state/preflight-brief.md`. Skip silently on failure.
+The third call auto-fires the **Topic Pre-Flight Brief** — Lanes A-H + blast radius for the feature topic. Surfaces governing ADRs/Concepts/Flows so the PRD aligns with permanent architectural truth, AND surfaces REJ tombstones so the spec doesn't propose pre-rejected approaches (e.g. spec asking for Redis sessions when REJ-001 tombstoned that). The Brief lives at `.devt/state/preflight-brief.md`. Skip silently on failure.
 
 Load project context:
 - Read `${CLAUDE_PLUGIN_ROOT}/references/questioning-guide.md` — how to interview effectively. Pay particular attention to "Before You Ask" (codebase-first), "Walk the Decision Tree" (dependency ordering), and "One at a Time" (AskUserQuestion sequencing) —+

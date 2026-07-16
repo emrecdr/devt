@@ -37,7 +37,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflo
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight generate "${TASK_DESCRIPTION}"
 ```
 
-The third call auto-fires the **Topic Pre-Flight Brief** — Lanes A-F + blast radius for the planning subject. Output goes to `.devt/state/preflight-brief.md`. The architect/planner agent reads it before drafting plan.md so the plan honors all governing ADRs and acknowledges any REJ tombstones in scope. Skip silently on failure (legacy fallback to `.devt/rules/` only).
+The third call auto-fires the **Topic Pre-Flight Brief** — Lanes A-H + blast radius for the planning subject. Output goes to `.devt/state/preflight-brief.md`. The architect/planner agent reads it before drafting plan.md so the plan honors all governing ADRs and acknowledges any REJ tombstones in scope. Skip silently on failure (legacy fallback to `.devt/rules/` only).
 
 Read `.devt/rules/` for project conventions:
 

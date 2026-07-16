@@ -398,15 +398,15 @@ The Brief drives Tier 1 of the Two-Tier Pre-Flight Protocol. Tier 2 = `hooks/pre
 Subcommands:
 
 ```bash
-/devt:preflight generate "<task>"   # default — runs Lanes A-F + blast radius
+/devt:preflight generate "<task>"   # default — runs Lanes A-H + blast radius
 /devt:preflight topic "<task>"      # debug topic extraction (domains/symbols/keywords)
 /devt:preflight status              # FRESH | STALE | MISSING + generated_at
 /devt:preflight mark-stale [reason] # called by File Pre-Flight on scope expansion
 ```
 
-The Brief surfaces 6 lanes: A (domain match), B (FTS expansion), C (symbol match), D (wiki-link transitive closure depth-2), E (REJ tombstone overlap), F (operational lessons). When `memory.paths` is set, all lanes span every configured root.
+The Brief surfaces 8 lanes: A (domain match), B (FTS expansion), C (symbol match), D (wiki-link transitive closure depth-2), E (REJ tombstone overlap), F (operational lessons), G (project-context tokens), H (auto-memory + claude-mem read path). The governing union (A–D ∪ G) is lifecycle-filtered: `active|candidate` only, REJ excluded. When `memory.paths` is set, all lanes span every configured root.
 
-**JSON sidecar**: alongside the markdown Brief, `preflight generate` writes `.devt/state/preflight-brief.json` — a deterministic interface workflows consume via `jq`. Fields: `status`, `topic`, `governing_ids`, `suggested_reading` (deduped union of governing-doc `affects_paths` + blast-radius direct dependents, capped at 8), `blast` (effect size, source, dependent count), `graph_stats`, `staleness`, `rej_keyword_matches`, `generated_at`. Five workflows (`dev`, `quick-implement`, `code-review`, `debug`, `research`) cache and inject this as `<scope_hint>` and `<scope_trust>` blocks into subagent dispatches so agents start with high-signal paths instead of discovering scope from the task description.
+**JSON sidecar**: alongside the markdown Brief, `preflight generate` writes `.devt/state/preflight-brief.json` — a deterministic interface workflows consume via `jq`. Fields: `status`, `topic`, `governing` (lifecycle-filtered `[{id, status, confidence}]`), `suggested_reading` (deduped union of governing-doc `affects_paths` + blast-radius direct dependents, capped at 8), `blast` (effect size, source, dependent count), `graph_stats`, `staleness`, `rej_keyword_matches`, `generated_at`. Five workflows (`dev`, `quick-implement`, `code-review`, `debug`, `research`) cache and inject this as `<scope_hint>` and `<scope_trust>` blocks into subagent dispatches so agents start with high-signal paths instead of discovering scope from the task description.
 
 **`<scope_trust>` dispatch signal** — `{trust, lag_commits, fresh}` projected from the sidecar's `graph_stats.trust` + `staleness`. Trust values: `dense` (full graph, fresh), `sparse` (graph exists but partial), `empty` (no graph or Graphify disabled). When `trust ∈ {sparse, empty}` OR `lag_commits > 10`, the 7 receiving agents (programmer/tester/code-reviewer/verifier/researcher/architect/debugger) fall back to their role-specific low-confidence behavior (e.g., programmer leans on impl-summary, verifier verifies path existence). Each agent's fallback is tailored to its role — the signal carries low-confidence guidance, not blocks.
 

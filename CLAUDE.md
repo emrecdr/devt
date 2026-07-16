@@ -128,7 +128,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 188-deep drift-guard stack K94-K280) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 189-deep drift-guard stack K94-K281) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -178,7 +178,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 ### Memory Layer
 
 - Two-layer memory model: ephemeral `.devt/state/` + permanent `.devt/memory/{decisions,concepts,flows,rejected,lessons}/` indexed by FTS5. → docs/MEMORY.md.
-- Topic Pre-Flight Brief auto-fires `/devt:preflight` at context_init (6 lanes, JSON sidecar, 2-hop subgraph, tier-aware lane budget). → docs/MEMORY.md (Topic Pre-Flight).
+- Topic Pre-Flight Brief auto-fires `/devt:preflight` at context_init (8 lanes, JSON sidecar, 2-hop subgraph, tier-aware lane budget). → docs/MEMORY.md (Topic Pre-Flight).
 - Two-Tier Pre-Flight Protocol — Tier 1 the Brief; Tier 2 `pre-flight-guard.sh` PreToolUse hook. Deny log at `.devt/state/preflight-denies.jsonl` (RESET_EXEMPT) with `source` field discriminator. → docs/HOOKS.md (Tier 2 Pre-Flight Guard).
 - Pre-Flight Brief JSON sidecar shape + `<scope_hint>` / `<scope_trust>` workflow injection. → docs/MEMORY.md (Pre-Flight Brief JSON Sidecar).
 - Curator gates ALL writes to `.devt/memory/`; discovery never writes permanent files. → docs/MEMORY.md (Curator Promotion Flow).

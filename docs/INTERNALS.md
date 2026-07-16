@@ -108,7 +108,7 @@ Memory layer details (frontmatter shape, multi-root, MCP tools, aggregate flags)
 
 ### `preflight.cjs`
 
-6-lane Topic Pre-Flight Brief generator. Lanes A–D query `index.db`; Lane E pulls REJ keyword overlap; Lane F filters the deduped governing union for `doc_type='lesson'` so the Brief renders LES entries under their own header.
+8-lane Topic Pre-Flight Brief generator. Lanes A–D query `index.db`; Lane E pulls REJ keyword overlap; Lane F filters the deduped governing union for `doc_type='lesson'` so the Brief renders LES entries under their own header; Lane G runs per-project-context-token FTS; Lane H reads auto-memory + claude-mem harvest. The governing union (A–D ∪ G) passes a lifecycle-eligibility gate (`active|candidate` only, REJ excluded) before rendering.
 
 **Tier-aware lane budget.** `detectTier(taskText)` heuristically classifies tasks as `trivial | simple | standard | complex`:
 - Keyword-first: refactor/architecture/migration → complex; small fix/hotfix → simple; typo/rename → trivial.

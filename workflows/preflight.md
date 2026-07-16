@@ -64,9 +64,11 @@ The CLI:
 4. Runs Lane C (`memory getBySymbol` per extracted symbol)
 5. Runs Lane D (`memory getLinks` depth-2 from A+B+C union)
 6. Runs Lane E (`memory listRejectedKeywords` filtered to topic)
-7. Runs Lane F (filters governing docs A∪B∪C∪D for `doc_type='lesson'` — surfaces LES-NNNN entries from `.devt/memory/lessons/`)
-8. Computes blast radius via `graphify.blastRadius` (or degrades to grep heuristics)
-9. Atomically writes `.devt/state/preflight-brief.md`
+7. Runs Lane G (per-project-context-token FTS — provider + topic domains)
+8. Runs Lane H (auto-memory + claude-mem harvest read path)
+9. Runs Lane F (filters the lifecycle-filtered governing union A∪B∪C∪D∪G for `doc_type='lesson'` — surfaces LES-NNNN entries from `.devt/memory/lessons/`)
+10. Computes blast radius via `graphify.blastRadius` (or degrades to grep heuristics)
+11. Atomically writes `.devt/state/preflight-brief.md`
 
 JSON returned on stdout includes `brief_path`, `topic`, `counts` (per lane),
 `blast` (effect_size + source), and `generated_at`.

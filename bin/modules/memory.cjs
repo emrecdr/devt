@@ -763,9 +763,11 @@ function slugify(text) {
  * Atomic upsert of a single memory doc — single MCP call replaces the legacy
  * 4-tool curator ritual (Write .tmp + Bash mv + Bash memory index + state read).
  *
- * Steps (in order; any failure rolls back the file write):
+ * Steps (in order; failures roll back files this call CREATED):
  * 1. Validate frontmatter via validateFrontmatter
- * 2. Resolve target path: `.devt/memory/<subdir>/<ID>-<slug>.md`
+ * 2. Resolve target path: existing id → its current file (never recomputed;
+ *    a retitle must update in place, not fork `<ID>-<new-slug>.md`);
+ *    new id → `.devt/memory/<subdir>/<ID>-<slug>.md`
  * 3. Render markdown (YAML frontmatter + body)
  * 4. atomicWriteFileSync (tmp + rename)
  * 5. rebuildIndex() — refreshes FTS5, affects, links, rejected_keywords
@@ -794,13 +796,20 @@ function upsertDoc(doc) {
 
   if (!fs.existsSync(subdirPath)) fs.mkdirSync(subdirPath, { recursive: true });
 
-  const filename = `${fm.id}-${slugify(fm.title)}.md`;
+  // An EXISTING id keeps its current file. Recomputing from the current
+  // title would fork a second file for any hand-named or retitled doc —
+  // and the MCP memory_upsert_doc curator path hits this on every in-place
+  // update. Only brand-new ids get the canonical <ID>-<slug>.md name.
+  // supersede() applies the same rule for the same reason.
+  const existing = scanDocs().find(d => d.frontmatter && d.frontmatter.id === fm.id);
   // path.join(<trusted subdirPath>, <validated-id>-<sanitized-slug>.md) — both
   // components fully constrained: subdirPath comes from the hardcoded
   // SUBDIR_BY_TYPE map, id is regex-validated by validateFrontmatter, slug is
   // ASCII-alphanum-hyphen via slugify. No untrusted input reaches path.join.
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const targetPath = path.join(subdirPath, filename);
+  const targetPath = existing
+    ? existing.filePath
+    : path.join(subdirPath, `${fm.id}-${slugify(fm.title)}.md`);
 
   // 3. Render — wrap the existing serializer's body with the YAML doc delimiters.
   // Field order is whatever Object.entries() yields; callers wanting stable
@@ -827,8 +836,15 @@ function upsertDoc(doc) {
       };
     }
   } catch (e) {
-    try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch { /* swallow */ }
-    return { ok: false, errors: [{ error: `index rebuild failed (file rolled back): ${e.message}` }] };
+    // Roll back ONLY files this call created — unlinking an in-place update
+    // would destroy a pre-existing doc (its old content is already
+    // overwritten; deletion would make a bad state worse). Updated docs stay
+    // on disk and the next auto-index pass picks them up.
+    if (!existing) {
+      try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch { /* swallow */ }
+      return { ok: false, errors: [{ error: `index rebuild failed (new file rolled back): ${e.message}` }] };
+    }
+    return { ok: false, errors: [{ error: `index rebuild failed (in-place update kept on disk; next auto-index pass will reindex): ${e.message}` }] };
   }
 
   return { ok: true, file_path: targetPath, indexed };

@@ -82,7 +82,7 @@ a FRESH brief on demand.
 |---|---|---|
 | `memory.preflight_mode` | `block` | Hook behavior on missing PREFLIGHT line — `off` no-op, `warn` advisory, `block` denies the edit |
 | `memory.enabled` | `true` | Master switch — false disables Brief generation entirely |
-| `memory.paths` | `null` | List of memory roots to scan. `null` = single-root (`.devt/memory`). When set, lanes A-F return docs from EVERY configured root with last-wins precedence on ID collisions. The Brief surfaces the union — a shared org-wide REJ tombstone shadows the same approach in your project just as effectively as a local one. |
+| `memory.paths` | `null` | List of memory roots to scan. `null` = single-root (`.devt/memory`). When set, the index-backed lanes (A-G) return docs from EVERY configured root with last-wins precedence on ID collisions. The Brief surfaces the union — a shared org-wide REJ tombstone shadows the same approach in your project just as effectively as a local one. |
 | `graphify.enabled` | `false` | Opt-in; controls Lanes 0/3 and blast radius |
 
 Override per-project in `.devt/config.json`:

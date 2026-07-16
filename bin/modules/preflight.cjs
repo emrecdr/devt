@@ -3,7 +3,7 @@
 /**
  * Topic Pre-Flight Brief generator.
  *
- * Orchestrates Lanes A-F + Graphify blast radius for a development task,
+ * Orchestrates Lanes A-H + Graphify blast radius for a development task,
  * producing `.devt/state/preflight-brief.md` — a single document that lists
  * every governing ADR/Concept/Flow, all relevant REJ tombstones, related
  * lessons, and (when Graphify is enabled) blast-radius analysis.
@@ -14,10 +14,15 @@
  * C: Symbol match (Graphify) — getBySymbol(sym) per subject symbol
  * D: Wiki-link closure — getLinks(id, depth=2) from initial matches
  * E: Rejected check — listRejectedKeywords() filtered to topic
- * F: Lessons filter — filters governing docs (A∪B∪C∪D) for doc_type='lesson'
+ * F: Lessons filter — filters the governing union for doc_type='lesson'
+ * G: Project-context match — per-token FTS over provider + topic domains
+ * H: Auto-memory read path — ~/.claude auto-memory + claude-mem harvest
+ *
+ * Governing union: A∪B∪C∪D∪G, passed through the lifecycle-eligibility
+ * gate (status active|candidate only, REJ excluded) before laneF/render.
  *
  * Memory Graph: a flat `{source, predicate, target}` triples view of
- * the depth-2 subgraph rooted at the governing union (A∪B∪C∪D). Rendered as a
+ * the depth-2 subgraph rooted at the governing union. Rendered as a
  * dedicated section between Governing Documentation and Rejected Approaches.
  *
  * Determinism: lanes are independent and ordered; merging is by doc_id;
@@ -1478,8 +1483,8 @@ function generate(taskText, opts) {
   // resolves link targets by bare id — none carry a status predicate (unlike
   // laneA/laneC, which filter to active/candidate in SQL). Without this gate
   // a superseded doc that FTS-matches the task, or that any doc still links
-  // to, re-enters the governing union and flows into governing_ids →
-  // <scope_hint> dispatches looking exactly as authoritative as an active
+  // to, re-enters the governing union and flows into the sidecar governing
+  // set → <scope_hint> dispatches looking exactly as authoritative as an active
   // ADR. Same predicate also keeps REJ tombstones out of the governing
   // framing — lane E is their surface, framed as "pre-rejected", never
   // "governing". Enrichment rides the same join: FTS rows lack `confidence`,
@@ -1735,10 +1740,8 @@ function generate(taskText, opts) {
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
     topic: topicWithConfidence,
-    governing_ids: governingUnion.map(d => d.id),
-    // Lifecycle projection of governing_ids — same order, same docs. Kept as
-    // a parallel field (not a replacement) so existing jq consumers of the
-    // bare id array never break.
+    // Governing docs with lifecycle attached — the single machine interface.
+    // Consumers needing bare ids project via `[.governing[].id]`.
     governing: governingUnion.map(d => ({
       id: d.id,
       status: d.status || null,

@@ -193,7 +193,7 @@ Stale Graphify artifacts were already evicted by the wrapper (`state evict-graph
 
 ### Substep 4: Pre-Flight Brief (done by the wrapper)
 
-The wrapper's `preflight generate "${TASK_DESCRIPTION}"` wrote `.devt/state/preflight-brief.md` (Lanes A-F + blast radius) so every subsequent agent reads the same governing rules (degrades silently on failure → agents fall back to `codebase-scan`). The PreToolUse `pre-flight-guard` hook warns or blocks edits whose target file isn't covered by a scratchpad PREFLIGHT line.
+The wrapper's `preflight generate "${TASK_DESCRIPTION}"` wrote `.devt/state/preflight-brief.md` (Lanes A-H + blast radius) so every subsequent agent reads the same governing rules (degrades silently on failure → agents fall back to `codebase-scan`). The PreToolUse `pre-flight-guard` hook warns or blocks edits whose target file isn't covered by a scratchpad PREFLIGHT line.
 
 ### Substep 5: memory_signal (cached by the wrapper)
 
