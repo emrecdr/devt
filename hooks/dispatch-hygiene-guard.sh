@@ -212,6 +212,13 @@ node -e "
       const promptPreview = prompt.slice(0, 200).replace(/\n+/g, ' ');
       const record = JSON.stringify({
         ts: new Date().toISOString(),
+        // Stable per-record id so 'dispatch warnings resolve <id>' can target
+        // THIS record — blanket clear-by-type races a legitimate warning
+        // landing between list and resolve, so scoped remediation needs an
+        // address. Resolution is an annotation, never a deletion.
+        // (NOTE: this comment lives inside a bash double-quoted node -e
+        // string — backticks here are command substitution; never use them.)
+        warning_id: 'w_' + require('crypto').randomBytes(4).toString('hex'),
         source: 'raw_dispatch',
         agent: subagent,
         prompt_bytes: Buffer.byteLength(prompt, 'utf8'),

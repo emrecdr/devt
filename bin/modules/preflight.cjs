@@ -2153,11 +2153,21 @@ function scopeCache() {
   try { brief = JSON.parse(fs.readFileSync(briefPath, "utf8")); }
   catch (e) { return { ok: false, error: `parse preflight-brief.json: ${e.message}`, scope_hint: [], scope_trust: {} }; }
 
-  // Cal #33.B-2: suggested_reading is {files, symbols} object. scope_hint
+  // suggested_reading is {files, symbols} object. scope_hint
   // for dispatch envelope injection wants FILES (navigable paths agents
   // open); symbols flow through topic.symbols already.
   const sr = brief.suggested_reading;
-  const scope_hint = sr && Array.isArray(sr.files) ? sr.files : [];
+  let scope_hint = sr && Array.isArray(sr.files) ? sr.files : [];
+  // Generic-entry suppression: when the blast radius produced concrete
+  // dependents (specific files an agent can open), drop the generic
+  // orientation entries — the wiki index and bare directory wildcards read
+  // as "pure noise next to the blast-radius map" (field verdict). They stay
+  // ONLY when they are the best available signal (no concrete dependents).
+  const genericRe = /(?:^|\/)wiki\/index\.md$|^[^*]*\/\*\*$/;
+  const concrete = scope_hint.filter(f => typeof f === "string" && !genericRe.test(f));
+  if (concrete.length > 0 && concrete.length < scope_hint.length) {
+    scope_hint = concrete;
+  }
   const scope_trust = {
     trust: (brief.graph_stats && brief.graph_stats.trust) || "empty",
     lag_commits: brief.staleness ? brief.staleness.lag_commits : null,

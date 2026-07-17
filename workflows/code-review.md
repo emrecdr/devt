@@ -61,7 +61,7 @@ Read `resolved_skills.code-reviewer` from the compound `init` output (`$CTX.init
 
 Before any state update, detect whether `workflow.yaml` is stale relative to this new review. KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Failure mode: a stale raw-dispatch counter left over from a days-old prior workflow blocks a brand-new review at substep 1.
 
-**Auto-reset path**: when ALL hold — task changed AND prior workflow > 24h old AND workflow_type changed — this is unambiguously a new working session. Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value.
+**Auto-reset path**: fires on EITHER signal — (task changed AND workflow_type changed AND prior > 1h old: unambiguous new working session) OR (prior workflow COMPLETED — phase=complete, not paused — AND > 1h old: nothing to resume, so back-to-back same-type reviews reset silently too). Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value. Note the `--workflow-type="code_review"` below is correct even for reviews that later go parallel — scope_check's delegation rotates `workflow_type` to `code_review_parallel` mid-run, which also rotates `workflow_id`; every same-run consumer is chain-aware (`workflow_id_history` + `first_created_at` bound), and cross-rotation telemetry queries use `mcp-stats --include-chain`.
 
 **Operator-override path**: if the operator types `/devt:review --fresh` (or includes `--fresh` in the task), skip the staleness check and unconditionally call `state reset-soft` before substep 1. This is the operator-explicit form of "I know it's stale, just reset and go."
 
@@ -118,7 +118,7 @@ The wrapper's `preflight generate` auto-fires the **Topic Pre-Flight Brief** for
 
 ### Substep 2: memory_signal (cached by the wrapper)
 
-The wrapper ran the `memory query "${REVIEW_SCOPE}" --signal=3 --json-compact` aggregate once and cached it in `workflow.yaml::memory_signal_json` — consumed by both the code-reviewer and verifier dispatches (read back into each `<memory_signal>` block below). It is also in the bundle as `$CTX.memory_signal`; no separate query round-trip is needed.
+The wrapper computed `memory_signal` and cached it in `workflow.yaml::memory_signal_json` — consumed by both the code-reviewer and verifier dispatches (read back into each `<memory_signal>` block below). The signal is diff-anchored: the PRIMARY lane (`source: "affects-union"`) is the union of `memory affects` hits across the changed files (every doc in it governs at least one file in the diff), with the prose-FTS aggregate merged in as a `supplement` only when non-empty. An empty primary renders a checkable claim ("no affects-matched docs across N changed files") — never a bare `{}` that reads as "no governance applies" while per-file governance exists. It is also in the bundle as `$CTX.memory_signal`; no separate query round-trip is needed.
 
 ### Substep 3: scope_hint + scope_trust + god_node_warnings (cached by the wrapper)
 
@@ -596,71 +596,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 <!-- SHARED-STEP:verify — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `verify` step at THIS pipeline position with MODE=single — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
 
-<step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
-
-**Conditional auto-curator.** When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh discovery harvest and fire a curator dispatch. Skipped silently otherwise — default `false` keeps the workflow cost-neutral for users who don't opt in.
-
-Decision logic (bash):
-
-```bash
-AUTO_CURATOR_ENABLED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
-if [ "$AUTO_CURATOR_ENABLED" = "true" ]; then
-  echo "FIRE" > .devt/state/auto-curator-considered.txt
-else
-  echo "DISABLED" > .devt/state/auto-curator-considered.txt
-fi
-
-AUTO=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
-if [ "$AUTO" = "true" ]; then
-  MIN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_min_candidates 2>/dev/null | jq -r '.value // 3')
-  COOLDOWN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_cooldown_days 2>/dev/null | jq -r '.value // 7')
-  CANDIDATES=$(/usr/bin/grep -cE '^###\s+[⚖️🔵]' .devt/memory/_suggestions.md 2>/dev/null || echo 0)
-  LAST_RUN_FILE=.devt/state/last-curator-run.txt
-  COOLDOWN_OK=1
-  if [ -f "$LAST_RUN_FILE" ]; then
-    LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$(cat "$LAST_RUN_FILE")" "+%s" 2>/dev/null || echo 0)
-    NOW_EPOCH=$(date "+%s")
-    AGE_DAYS=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
-    if [ "$AGE_DAYS" -lt "$COOLDOWN" ]; then COOLDOWN_OK=0; fi
-  fi
-  if [ "$CANDIDATES" -ge "$MIN" ] && [ "$COOLDOWN_OK" = "1" ]; then
-    echo "auto_curator: ACTIVE — candidates=$CANDIDATES min=$MIN age=${AGE_DAYS:-never}d cooldown=${COOLDOWN}d"
-    # Refresh _suggestions.md from the latest scratchpad #KNOWLEDGE-CANDIDATE tags + decisions before dispatch
-    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
-    # Record run timestamp BEFORE dispatch so a curator crash doesn't trigger immediate re-runs
-    date -u "+%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
-  else
-    echo "auto_curator: SKIP — candidates=$CANDIDATES (need $MIN) cooldown_ok=$COOLDOWN_OK"
-  fi
-else
-  echo "auto_curator: DISABLED — memory.auto_curator_on_review=false (default; opt-in via .devt/config.json)"
-fi
-```
-
-When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
-
-```
-<!-- BEGIN dispatch:curator:code_review -->
-<!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-code_review.tmpl.md -->
-Task(subagent_type="devt:curator", model="{models.curator}", prompt="
-  <context>
-    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing)</files_to_read>
-    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
-  </context>
-  <task>
-    Auto-curator triggered by /devt:review post-review threshold (≥${MIN} candidates pending, last run ≥${COOLDOWN}d ago).
-    Evaluate ⚖️/🔵 entries in .devt/memory/_suggestions.md. For each that passes the 5-filter (Specificity, Durability,
-    Non-obviousness, Evidence, Actionability), present an AskUserQuestion proposal per memory-curation skill.
-    Accepted candidates land in .devt/memory/{decisions,concepts,flows,rejected}/.
-    Write .devt/state/curation-summary.md with verdicts per candidate (accepted / edited / rejected with reason).
-  </task>
-")
-<!-- END dispatch:curator:code_review -->
-```
-
-When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch — proceed to `present_findings`.
-
-</step>
+<!-- SHARED-STEP:auto_curator — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the parallel path previously had NO auto_curator step while the shared present_findings gate demanded its artifact — field-reported as a hand-run workaround). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `auto_curator` step at THIS pipeline position with MODE=single — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
 
 <!-- SHARED-STEP:present_findings — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `present_findings` step at THIS pipeline position with MODE=single — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
 

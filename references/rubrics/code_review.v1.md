@@ -47,14 +47,16 @@ A seventh axis — **REJ tombstone alignment** — is a hard fail rather than a 
 
 Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `review.md` MUST include a `## Dispatch warnings (session-scoped)` section.
 
+**Source contract — LIVE READ, never inherited.** The section MUST be produced from a read of `.devt/state/dispatch-warnings.jsonl` performed while writing `review.md` — never from lane files, prior summaries, or memory. This axis is an orchestrator-level, dispatch-time signal: warnings are written AT dispatch, so any earlier snapshot (a lane's own section, an envelope rendered before dispatch) is stale by construction. In synthesis mode this is an explicit exception to "consolidate, don't re-review": lane sections about dispatch warnings are lane-local claims about a file that changed after they were written — discard them and read the file. Field incident: a consolidator honestly synthesized five lanes' "file is absent" claims while its own dispatch's warning sat in the log.
+
 **What goes in the section:**
 
-- Either `raw_dispatch + cliff_signal counts since workflow_start: N + M` on a single line (sufficient when both signals are noise).
-- OR a structured triage when counts are non-trivial (≥3 of either): one bullet per incident class with the corrective action taken or deferred.
+- First line (machine-checked): `counts: raw_dispatch=N resolved=M cliff_signal=K` — the live totals from the file (resolved = records with a matching `source: "resolution"` annotation).
+- Then either nothing more (when the counts are noise), OR a structured triage when counts are non-trivial (≥3 unresolved of either class): one bullet per incident class with the corrective action taken or deferred. Resolved records render as `resolved: <reason>` — a resolution is an annotation, not a deletion.
 
 **Verifier check (axis H grading):**
 
-This is the H axis in the rubric's grading taxonomy (A–H). If the section is missing from `review.md`, axis H fails. The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings.
+This is the H axis in the rubric's grading taxonomy (A–H). If the section is missing from `review.md`, axis H fails. The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings. The claimed counts themselves are checked mechanically at present_findings (`state assert-dispatch-warnings-acknowledged` compares the section's counts line against the file) — that gate runs last and needs no model honesty, so the verifier does not need to re-derive the numbers.
 
 **Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, the section may state `n/a (no incidents logged this session)` in one line and pass.
 

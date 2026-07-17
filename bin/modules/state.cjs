@@ -1867,7 +1867,24 @@ function readSidecar(fileName) {
     valid_verdict: Array.isArray(schema.verdict) ? schema.verdict.includes(data.verdict) : true,
     valid_agent: Array.isArray(schema.agent) ? schema.agent.includes(data.agent) : true,
   };
-  return { ok: true, file: safe, data, validation };
+  // A validation false without the allowed set is unactionable; surface what
+  // WOULD pass so the consumer can route on it.
+  if (!validation.valid_status && Array.isArray(schema.status)) validation.allowed_status = schema.status;
+  if (!validation.valid_verdict && Array.isArray(schema.verdict)) validation.allowed_verdict = schema.verdict;
+  // Routing fields hoisted to the TOP level alongside the full payload —
+  // `read-sidecar verification.json | jq '.status'` previously returned null
+  // (the fields live under .data) while the assert gates read the same file
+  // directly and saw them fine. Field-reported as "confusing to route on";
+  // the top-level mirror makes the obvious jq path the correct one.
+  return {
+    ok: true,
+    file: safe,
+    status: data.status !== undefined ? data.status : null,
+    verdict: data.verdict !== undefined ? data.verdict : null,
+    agent: data.agent !== undefined ? data.agent : null,
+    data,
+    validation,
+  };
 }
 
 function readSection(fileName, sectionQuery) {
@@ -3209,13 +3226,68 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   const pfGen = sh(["preflight", "generate", scope || taskDefault]);
   if (!pfGen.ok) degraded.push("preflight_brief");
 
-  // ── memory_signal (enhancer; degrade to empty) ─────────────────────────
+  // ── memory_signal: affects-union PRIMARY + prose-FTS supplement ────────
+  // The primary lane is diff-anchored (union of `memory affects` hits over
+  // the changed files) for the same reason blast anchors are: a review's
+  // anchor genuinely is the diff. Prose FTS stays as a merge-in supplement —
+  // its marginal cost is one query — but is OMITTED when empty; only the
+  // PRIMARY renders an empty result, and it renders it as a checkable claim
+  // ("no affects-matched docs across N changed files"), never as a bare {}
+  // that reads as "no governance applies". Field failure: the prose query
+  // returned counts:{} while per-file affects correctly carried ADR/FLOW
+  // governance for the same diff. Dev/research workflows deliberately keep
+  // the prose-anchored signal — pre-implementation work has no diff yet.
   let memorySignal = null;
+  const affectsById = new Map();
+  let filesChecked = 0;
+  let memAvailable = true;
+  try {
+    const { collectChangedFiles } = require("./review-weight.cjs");
+    const mem = require("./memory.cjs");
+    const changed = collectChangedFiles(findProjectRoot(), primaryBranch || "main");
+    filesChecked = changed.length;
+    for (const f of changed) {
+      let hits = [];
+      try { hits = mem.getByPath(f) || []; } catch { hits = []; }
+      for (const h of hits) {
+        const id = h.id || h.doc_id;
+        if (!id) continue;
+        if (!affectsById.has(id)) affectsById.set(id, { id, title: h.title || "", doc_type: h.doc_type || null, matched_files: [] });
+        const e = affectsById.get(id);
+        if (e.matched_files.length < 5 && !e.matched_files.includes(f)) e.matched_files.push(f);
+      }
+    }
+  } catch { memAvailable = false; }
+  let supplement = null;
   const memRes = sh(["memory", "query", scope || taskDefault, "--signal=3", "--json-compact"]);
   if (memRes.ok && memRes.stdout) {
-    try { memorySignal = JSON.parse(memRes.stdout); } catch { memorySignal = null; }
+    try {
+      const fts = JSON.parse(memRes.stdout);
+      const hasCounts = fts && fts.counts && Object.keys(fts.counts).length > 0;
+      const hasTop = fts && Array.isArray(fts.top) && fts.top.length > 0;
+      if (hasCounts || hasTop) supplement = { source: "prose-fts", ...fts };
+    } catch { /* unparseable — supplement stays absent */ }
   }
-  if (memorySignal === null) { memorySignal = {}; degraded.push("memory_signal"); }
+  if (!memAvailable && !memRes.ok) {
+    // Memory layer genuinely unavailable — an empty {} is the honest shape
+    // here ("we could not check"), NOT a no-docs claim.
+    memorySignal = {};
+    degraded.push("memory_signal");
+  } else {
+    const docs = Array.from(affectsById.values());
+    memorySignal = {
+      mode: "signal",
+      primary: {
+        source: "affects-union",
+        files_checked: filesChecked,
+        count: docs.length,
+        docs: docs.slice(0, 20),
+        ...(docs.length > 20 ? { truncated_from: docs.length } : {}),
+        ...(docs.length === 0 ? { claim: `no affects-matched docs across ${filesChecked} changed file(s)` } : {}),
+      },
+      ...(supplement ? { supplement } : {}),
+    };
+  }
   try { updateState([`memory_signal_json=${JSON.stringify(memorySignal)}`]); } catch { /* best-effort cache */ }
 
   // ── scope-cache → scope_trust (enhancer; honest "empty" on degrade) ────
@@ -6267,20 +6339,47 @@ function assertNoRawDispatchesThisSession() {
   }
 
   const body = fs.readFileSync(warningsPath, "utf8");
-  const agents = [];
+  // Two passes: collect in-window raw_dispatch records AND resolution
+  // annotations (source='resolution', written by `dispatch warnings resolve
+  // <warning_id> --reason=…`). A resolved-with-reason record stops counting
+  // against the gate — the proportional remediation for a substantively
+  // compliant dispatch the guard couldn't read (e.g. pointer dispatch),
+  // replacing the all-or-nothing --skip-gates escape. Records persist either
+  // way; resolution is an annotation, never a deletion.
+  const rawRecords = [];
+  const resolvedIds = new Set();
+  const resolvedTsAgent = new Set();
   for (const line of body.split("\n")) {
     if (!line) continue;
     try {
       const rec = JSON.parse(line);
+      if (rec.source === "resolution") {
+        if (typeof rec.resolves === "string") resolvedIds.add(rec.resolves);
+        // Fallback address for legacy records that predate warning_id.
+        if (typeof rec.resolves_ts === "string") resolvedTsAgent.add(`${rec.resolves_ts}|${rec.resolves_agent || ""}`);
+        continue;
+      }
       if (rec.source !== "raw_dispatch") continue;
       if (typeof rec.ts !== "string") continue;
       if (new Date(rec.ts).getTime() < anchorMs) continue;
-      agents.push(rec.agent || "(unknown)");
+      rawRecords.push(rec);
     } catch { /* malformed line — skip */ }
   }
+  const unresolved = rawRecords.filter(r =>
+    !(r.warning_id && resolvedIds.has(r.warning_id)) &&
+    !resolvedTsAgent.has(`${r.ts}|${r.agent || ""}`));
+  const resolvedCount = rawRecords.length - unresolved.length;
+  const agents = unresolved.map(r => r.agent || "(unknown)");
   const rawDispatchCount = agents.length;
   if (rawDispatchCount === 0) {
-    return { ok: true, raw_dispatch_count: 0, reason: "no raw dispatches in this workflow's window" };
+    return {
+      ok: true,
+      raw_dispatch_count: 0,
+      resolved_count: resolvedCount,
+      reason: resolvedCount > 0
+        ? `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`
+        : "no raw dispatches in this workflow's window",
+    };
   }
   // Kill-threshold runs BEFORE the mode check — hard-limit safety
   // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
@@ -6298,6 +6397,7 @@ function assertNoRawDispatchesThisSession() {
       ok: false,
       killed: true,
       raw_dispatch_count: rawDispatchCount,
+      resolved_count: resolvedCount,
       kill_threshold: killThreshold,
       agents,
       mode,
@@ -6315,6 +6415,7 @@ function assertNoRawDispatchesThisSession() {
       ok: true,
       warn: true,
       raw_dispatch_count: rawDispatchCount,
+      resolved_count: resolvedCount,
       agents,
       mode,
       reason: `${rawDispatchCount} raw devt:* dispatch(es) detected in this workflow (${_agentSummary}); dispatch_hygiene_mode=${mode} so gate does not block. Set mode=block to enforce.`,
@@ -6325,13 +6426,113 @@ function assertNoRawDispatchesThisSession() {
     raw_dispatch_count: rawDispatchCount,
     agents,
     mode,
+    resolved_count: resolvedCount,
+    unresolved: unresolved.map(r => ({ warning_id: r.warning_id || null, ts: r.ts, agent: r.agent || "(unknown)" })),
     reason:
-      `${rawDispatchCount} raw devt:* dispatch(es) detected in THIS workflow: ${agents.join(", ")}. ` +
+      `${rawDispatchCount} unresolved raw devt:* dispatch(es) detected in THIS workflow: ${agents.join(", ")}. ` +
       `These bypassed the workflow contract (no <scope_trust>/<scope_hint>/<memory_signal> blocks injected) — agents fell back to grep-quality discovery without graphify-anchored impact maps. ` +
       `Remediation: re-dispatch the agents via the workflow path (/devt:review, /devt:workflow, /devt:debug) which injects the canonical context envelope. ` +
+      `If a specific dispatch was substantively compliant (e.g. pointer dispatch that consumed a rendered envelope), resolve THAT record with evidence: dispatch warnings resolve <warning_id> --reason="..." — never --skip-gates, which bypasses every gate on the transition. ` +
       `If raw dispatch was intentional (ad-hoc orchestration), set 'dispatch_hygiene_mode: "warn"' in .devt/config.json to opt the gate out. ` +
       `Note: scope is THIS workflow only (since workflow.yaml::created_at) — prior workflows in the same session are excluded.`,
   };
+}
+
+// Mechanical check of review.md's Axis-H claims against the warnings file.
+// The axis is graded by the verifier for PRESENCE; the numbers themselves are
+// checked here — this gate runs last and needs no model honesty (field: a
+// consolidator honestly synthesized lanes' stale "file absent" claims while
+// its own dispatch's warning sat in the log; the review's BEHAVIOR was gated,
+// its CLAIMS about warnings were not).
+//
+// Fairness bounds: records are counted in [workflow created_at, review.md
+// mtime] — a warning written after the review was authored cannot be blamed
+// on its author. Equality required within that window.
+function assertDispatchWarningsAcknowledged() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const reviewPath = path.join(dir, "review.md");
+  if (!fs.existsSync(reviewPath)) {
+    return { ok: false, reason: "review.md absent — nothing to check (run after the review step)" };
+  }
+  const review = fs.readFileSync(reviewPath, "utf8");
+  const secMatch = review.match(/^##\s+Dispatch warnings \(session-scoped\)\s*$([\s\S]*?)(?=^##\s|\n*$(?![\s\S]))/m);
+  if (!secMatch) {
+    return { ok: false, reason: "review.md has no '## Dispatch warnings (session-scoped)' section (rubric axis H)" };
+  }
+  const section = secMatch[1];
+  const reviewMtime = fs.statSync(reviewPath).mtimeMs;
+
+  // Anchor: same workflow window as assert-no-raw-dispatches.
+  let anchorMs = 0;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfYaml = fs.readFileSync(path.join(dir, "workflow.yaml"), "utf8");
+    const m = wfYaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (m) {
+      const parsed = new Date(m[1].trim()).getTime();
+      if (Number.isFinite(parsed)) anchorMs = parsed;
+    }
+  } catch { /* no anchor — window unbounded below */ }
+
+  // Actual counts from the file, bounded to [anchor, review mtime].
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
+  const actual = { raw_dispatch: 0, resolved: 0, cliff_signal: 0 };
+  let fileEmpty = true;
+  if (fs.existsSync(warningsPath)) {
+    const body = fs.readFileSync(warningsPath, "utf8");
+    if (body.trim().length > 0) fileEmpty = false;
+    const rawInWindow = [];
+    const resolvedIds = new Set();
+    for (const line of body.split("\n")) {
+      if (!line) continue;
+      try {
+        const rec = JSON.parse(line);
+        const tsMs = rec.ts ? new Date(rec.ts).getTime() : NaN;
+        if (rec.source === "resolution") {
+          if (Number.isFinite(tsMs) && tsMs <= reviewMtime && typeof rec.resolves === "string") resolvedIds.add(rec.resolves);
+          continue;
+        }
+        if (!Number.isFinite(tsMs) || tsMs < anchorMs || tsMs > reviewMtime) continue;
+        if (rec.source === "raw_dispatch") rawInWindow.push(rec);
+        else if (rec.source === "task_output_bytes" && rec.signal && rec.signal !== "healthy") actual.cliff_signal++;
+      } catch { /* malformed line — skip */ }
+    }
+    actual.raw_dispatch = rawInWindow.length;
+    actual.resolved = rawInWindow.filter(r => r.warning_id && resolvedIds.has(r.warning_id)).length;
+  }
+
+  // n/a form is valid only when there is genuinely nothing to report.
+  if (/\bn\/a\b/i.test(section) && !/counts:/.test(section)) {
+    if (fileEmpty || (actual.raw_dispatch === 0 && actual.cliff_signal === 0)) {
+      return { ok: true, claimed: null, actual, reason: "n/a claim consistent — no in-window incidents" };
+    }
+    return {
+      ok: false, claimed: null, actual,
+      reason: `review.md claims 'n/a' but the file carries in-window incidents (raw_dispatch=${actual.raw_dispatch}, cliff_signal=${actual.cliff_signal}) — Axis H must be a live read, not inherited from lane sections`,
+    };
+  }
+
+  const cm = section.match(/counts:\s*raw_dispatch=(\d+)\s+resolved=(\d+)\s+cliff_signal=(\d+)/);
+  if (!cm) {
+    return {
+      ok: false, claimed: null, actual,
+      reason: "section lacks the machine-readable first line 'counts: raw_dispatch=N resolved=M cliff_signal=K' (or a valid 'n/a' when nothing is logged)",
+    };
+  }
+  const claimed = { raw_dispatch: parseInt(cm[1], 10), resolved: parseInt(cm[2], 10), cliff_signal: parseInt(cm[3], 10) };
+  const mismatches = [];
+  for (const k of ["raw_dispatch", "resolved", "cliff_signal"]) {
+    if (claimed[k] !== actual[k]) mismatches.push(`${k}: claimed ${claimed[k]} vs actual ${actual[k]}`);
+  }
+  if (mismatches.length > 0) {
+    return {
+      ok: false, claimed, actual,
+      reason: `Axis-H counts diverge from dispatch-warnings.jsonl (window: workflow start → review.md mtime): ${mismatches.join("; ")}. The section must come from a live read of the file at synthesis time.`,
+    };
+  }
+  return { ok: true, claimed, actual, reason: "Axis-H counts match the file" };
 }
 
 function aggregateKnowledgeCandidates() {
@@ -7368,6 +7569,8 @@ function run(subcommand, args) {
       return traceGate("assert-preflight-semantic-quality", () => assertPreflightSemanticQuality(args));
     case "assert-no-raw-dispatches-this-session":
       return traceGate("assert-no-raw-dispatches-this-session", () => assertNoRawDispatchesThisSession());
+    case "assert-dispatch-warnings-acknowledged":
+      return traceGate("assert-dispatch-warnings-acknowledged", () => assertDispatchWarningsAcknowledged());
     case "assert-artifact-present":
       return traceGate("assert-artifact-present", () => assertArtifactPresent(args[0]));
     case "assert-claim-checks-resolved":
@@ -7456,7 +7659,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
       );
   }
 }

@@ -107,9 +107,9 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### Verifier memory signal
 
-**Rule.** Every verifier dispatch in `workflows/dev-workflow.standard.md` (the tier-partitioned verify step) and `workflows/code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step that runs `node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact`. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan.
+**Rule.** Every verifier dispatch in `workflows/dev-workflow.standard.md` (the tier-partitioned verify step) and `workflows/code-review.md` includes a `<memory_signal>` block in `<context>` populated at orchestrator prep. **Review workflows** derive it diff-anchored: PRIMARY = union of `memory affects` hits across the changed files (`{mode: "signal", primary: {source: "affects-union", files_checked, count, docs[], claim?}, supplement?}`), with the prose-FTS aggregate merged as `supplement` only when non-empty; an empty primary carries a checkable `claim` ("no affects-matched docs across N changed files") — never a bare `{}` (reserved for memory-layer-unavailable). **Dev/research workflows** keep the prose-anchored `memory query "<task>" --signal=3 --json-compact` shape (`{counts, top}`) — pre-implementation work has no diff to anchor on. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan.
 
-**Why.** Saves 3–4 MCP round trips per verify iteration. The CLI's `--signal` mode returns `{counts: {<domain>: N}, top: [{id, title, doc_type}]}` in one call — bypassing the mutually-exclusive precedence trap of the standalone `--count` / `--domain-counts` / `--top` flags.
+**Why.** Saves 3–4 MCP round trips per verify iteration — and, for reviews, anchors governance on what actually changed: field-observed, the prose query returned `counts: {}` (reading as "no governance applies") while per-file affects carried ADR/FLOW governance for the same diff.
 
 **Maintenance discipline.** A `KEEP IN SYNC` comment keeps both verifier dispatches' block ordering aligned.
 

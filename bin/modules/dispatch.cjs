@@ -942,6 +942,47 @@ function cmdCompile(mode) {
 //   { ts, source, agent, prompt_bytes, prompt_preview }
 function cmdWarnings(args) {
   const tracePath = path.join(process.cwd(), ".devt/state/dispatch-warnings.jsonl");
+  // `warnings resolve <warning_id> --reason="…" [--evidence="…"]` — scoped,
+  // per-record remediation. Resolution is an ANNOTATION appended to the same
+  // JSONL (source='resolution'); the original record persists and Axis-H /
+  // gate output render it as resolved-with-reason. Never deletes, never
+  // clears by type — a legitimate warning landing between `list` and a
+  // blanket clear would be silently absolved. Consumed by
+  // `state assert-no-raw-dispatches-this-session` (resolved records stop
+  // counting) and rendered by the list modes below.
+  if (args[0] === "resolve") {
+    const warningId = args[1] && !args[1].startsWith("--") ? args[1] : null;
+    const reasonArg = args.find(a => a.startsWith("--reason="));
+    const evidenceArg = args.find(a => a.startsWith("--evidence="));
+    const reason = reasonArg ? reasonArg.slice("--reason=".length).trim() : "";
+    if (!warningId) throw new Error('usage: dispatch warnings resolve <warning_id> --reason="…" [--evidence="…"]');
+    if (!reason) throw new Error("--reason is mandatory and must be non-empty — a resolution without a reason is just a quieter --skip-gates");
+    if (!fs.existsSync(tracePath)) throw new Error("no dispatch-warnings.jsonl — nothing to resolve");
+    const lines = fs.readFileSync(tracePath, "utf8").split("\n").filter(Boolean);
+    let target = null;
+    let alreadyResolved = false;
+    for (const line of lines) {
+      try {
+        const rec = JSON.parse(line);
+        if (rec.source === "resolution" && rec.resolves === warningId) alreadyResolved = true;
+        if (rec.warning_id === warningId) target = rec;
+      } catch { /* malformed line — skip */ }
+    }
+    if (!target) throw new Error(`warning_id "${warningId}" not found in dispatch-warnings.jsonl (see: dispatch warnings --raw)`);
+    if (alreadyResolved) throw new Error(`warning_id "${warningId}" is already resolved`);
+    const resolution = {
+      ts: new Date().toISOString(),
+      source: "resolution",
+      resolves: warningId,
+      resolves_ts: target.ts,
+      resolves_agent: target.agent || null,
+      reason,
+      ...(evidenceArg ? { evidence: evidenceArg.slice("--evidence=".length) } : {}),
+      resolved_by: "orchestrator",
+    };
+    fs.appendFileSync(tracePath, JSON.stringify(resolution) + "\n", "utf8");
+    return { ok: true, resolved: warningId, agent: target.agent || null, reason, evidence: resolution.evidence || null };
+  }
   let mode = "summary";
   let limit = null;
   let limitRaw = null;
@@ -1105,6 +1146,45 @@ function run(subcommand, args) {
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
+      }
+      // Mint a correlation_id into every render-filled envelope (render-lanes
+      // already stamps per-lane cids; render-filled minted NONE — the field
+      // gap that made a compliant consolidator dispatch read as raw). The tag
+      // is what dispatch-hygiene-guard matches, whether the envelope is
+      // pasted or pointer-dispatched via the stub below.
+      const stateModRF = require("./state.cjs");
+      const wfIdRF = String((stateModRF.readState() || {}).workflow_id || "noworkflow");
+      const agentSlugRF = target.split(":")[0].replace(/[^A-Za-z0-9_-]/g, "") || "agent";
+      const cidRF = `cid_${wfIdRF.split("-")[0]}_${agentSlugRF}`;
+      if (!/<correlation_id>cid_/.test(out)) {
+        const lastCtx = out.lastIndexOf("</context>");
+        const tagLine = `    <correlation_id>${cidRF}</correlation_id>\n  `;
+        out = lastCtx >= 0 ? out.slice(0, lastCtx) + tagLine + out.slice(lastCtx) : out + "\n" + tagLine;
+      }
+      // --out[=path]: write the envelope to disk and print a ~200-byte
+      // paste-ready POINTER STUB instead of the full body. Field-measured on a
+      // six-lane run: pointer dispatch kept ~222KB of envelopes (~50K tokens)
+      // out of the orchestrator's output entirely. The stub carries the cid
+      // (guard passes on content — no path-pattern matching, which would be
+      // spoofable), the rules_hash for drift detection, and the
+      // read-and-execute contract. Bare --out uses the canonical dispatch dir.
+      const outArgRF = args.find(a => a === "--out" || a.startsWith("--out="));
+      if (outArgRF) {
+        const fsRF = require("fs");
+        const pathRF = require("path");
+        const explicit = outArgRF.startsWith("--out=") ? outArgRF.slice("--out=".length) : null;
+        const outPath = explicit && explicit.length > 0
+          ? explicit
+          : pathRF.join(process.cwd(), ".devt", "state", "dispatch", `${target.replace(/[^A-Za-z0-9_-]/g, "-")}.txt`);
+        fsRF.mkdirSync(pathRF.dirname(outPath), { recursive: true });
+        fsRF.writeFileSync(outPath, out.endsWith("\n") ? out : out + "\n");
+        const rulesHashRF = (out.match(/rules_hash=\\?"([0-9a-f]{6,})/) || [])[1] || null;
+        const stub = [
+          `<correlation_id>${cidRF}</correlation_id>`,
+          `<envelope path="${outPath}"${rulesHashRF ? ` rules_hash="${rulesHashRF}"` : ""}>Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`,
+        ].join("\n");
+        process.stdout.write(stub + "\n");
+        return 0;
       }
       process.stdout.write(out + (out.endsWith("\n") ? "" : "\n"));
       return 0;
@@ -1509,7 +1589,12 @@ function cmdRenderLanes(target, options) {
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       const outPath = pathLocal.join(options.outDir, `lane-${lane.id}.txt`);
       fsLocal.writeFileSync(outPath, injected + (injected.endsWith("\n") ? "" : "\n"));
-      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length });
+      // Paste-ready pointer stub per lane — the field-validated dispatch shape
+      // (the operator hand-built exactly this by copying cid tags into pointer
+      // prompts; the guard passed on content with zero matcher changes).
+      const laneRulesHash = (injected.match(/rules_hash=\\?"([0-9a-f]{6,})/) || [])[1] || null;
+      const stub = `<correlation_id>${correlationId}</correlation_id>\n<envelope path="${outPath}"${laneRulesHash ? ` rules_hash="${laneRulesHash}"` : ""}>Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`;
+      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length, stub });
     } else {
       out.push(`<!-- LANE: ${lane.id} (community=${community}, correlation_id=${correlationId}, files=${files.length}) -->`);
       out.push(injected);

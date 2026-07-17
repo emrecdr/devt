@@ -4195,10 +4195,13 @@ else
 fi
 
 # C1: orchestrator-prep step present in both workflows
-if grep -q 'memory query .* --signal=3' "$ROOT/workflows/dev-workflow.md" && grep -q 'memory query .* --signal=3' "$ROOT/workflows/code-review.md"; then
-  pass "both verifier dispatches invoke 'memory query --signal=3' in orchestrator-prep step"
+# dev-workflow keeps the prose-anchored CLI form; code-review's signal is now
+# derived diff-anchored inside review-context-init (affects-union primary) —
+# its prose documents that derivation instead of invoking the CLI.
+if grep -q 'memory query .* --signal=3' "$ROOT/workflows/dev-workflow.md" && grep -q 'affects-union' "$ROOT/workflows/code-review.md"; then
+  pass "verifier memory_signal prep — dev-workflow prose-anchored CLI + code-review diff-anchored (affects-union) derivation"
 else
-  fail "orchestrator-prep step missing memory query --signal=3 in one or both workflows"
+  fail "orchestrator-prep memory_signal derivation missing (dev prose-CLI or review affects-union)"
 fi
 
 # C1: agent guidance
@@ -4397,17 +4400,22 @@ else
   fail "memory_signal missing from $((5-SITE_HITS))/5 dispatch sites"
 fi
 
-# Orchestrator-prep step (memory query --signal=3) must appear in all 3 workflow files
+# Orchestrator-prep memory_signal: dev + quick-implement carry the
+# prose-anchored CLI form; code-review derives diff-anchored (affects-union)
+# inside review-context-init.
 PREP_HITS=0
-for f in workflows/dev-workflow.md workflows/code-review.md workflows/quick-implement.md; do
+for f in workflows/dev-workflow.md workflows/quick-implement.md; do
   if grep -q 'memory query .* --signal=3' "$ROOT/$f"; then
     PREP_HITS=$((PREP_HITS+1))
   fi
 done
+if grep -q 'affects-union' "$ROOT/workflows/code-review.md"; then
+  PREP_HITS=$((PREP_HITS+1))
+fi
 if [ "$PREP_HITS" -eq 3 ]; then
-  pass "orchestrator-prep step (memory query --signal=3) present in dev/code-review/quick-implement workflows"
+  pass "orchestrator-prep memory_signal present in all 3 workflows (prose-CLI × 2 + diff-anchored review derivation)"
 else
-  fail "orchestrator-prep step missing from $((3-PREP_HITS))/3 workflow files"
+  fail "orchestrator-prep memory_signal missing from $((3-PREP_HITS))/3 workflow files"
 fi
 
 # Agent guidance — programmer + code-reviewer reference memory signal preference
@@ -6326,7 +6334,7 @@ else
 fi
 # 6c — workflow wiring: code-review.md + debug.md both have auto_curator step + dispatch + cooldown gate
 F6C_OK=0
-for wf in workflows/code-review.md workflows/debug.md; do
+for wf in workflows/code-review.steps.md workflows/debug.md; do
   if /usr/bin/grep -q "auto_curator: ACTIVE" "$ROOT/$wf" \
      && /usr/bin/grep -q "auto_curator: SKIP" "$ROOT/$wf" \
      && /usr/bin/grep -q "auto_curator: DISABLED" "$ROOT/$wf" \
@@ -6336,7 +6344,7 @@ for wf in workflows/code-review.md workflows/debug.md; do
   fi
 done
 if [ "$F6C_OK" -eq 2 ]; then
-  pass "F6c: auto-curator step wired in code-review.md + debug.md (ACTIVE/SKIP/DISABLED branches + cooldown + dispatch)"
+  pass "F6c: auto-curator step wired in code-review.steps.md (shared, both review modes) + debug.md (ACTIVE/SKIP/DISABLED branches + cooldown + dispatch)"
 else
   fail "F6c: auto-curator wiring missing in $((2 - F6C_OK)) of 2 workflows"
 fi
@@ -17268,6 +17276,108 @@ if [ "$K281_OK" = "1" ]; then
   pass "K281: printUsage memory-subcommand coverage — every advertised subcommand routes, supersede advertised"
 else
   fail "K281: printUsage memory coverage regressed at $K281_WHY"
+fi
+
+# K282: scoped warning resolution — hygiene hook stamps warning_id; `dispatch
+# warnings resolve <id> --reason` appends an annotation (never deletes);
+# resolved records stop counting against assert-no-raw-dispatches (the
+# proportional remediation replacing all-or-nothing --skip-gates). Reason is
+# mandatory; double-resolve rejected.
+K282_T=$(mktemp -d); K282_T=$(cd "$K282_T" && pwd -P); mkdir -p "$K282_T/.devt/state"
+printf 'active: true\nworkflow_type: code_review\ntask: "t"\ncreated_at: "2026-01-01T00:00:00.000Z"\n' > "$K282_T/.devt/state/workflow.yaml"
+K282_NOW=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+printf '{"ts":"%s","warning_id":"w_aa","source":"raw_dispatch","agent":"devt:code-reviewer","prompt_bytes":1}\n' "$K282_NOW" > "$K282_T/.devt/state/dispatch-warnings.jsonl"
+K282_BEFORE=$(cd "$K282_T" && node "$CLI" state assert-no-raw-dispatches-this-session 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).ok===false?"blocked":"open")}catch{console.log("err")}})')
+K282_NOREASON=$(cd "$K282_T" && node "$CLI" dispatch warnings resolve w_aa 2>&1 | /usr/bin/grep -c "mandatory" || true)
+(cd "$K282_T" && node "$CLI" dispatch warnings resolve w_aa --reason="pointer dispatch, envelope consumed" --evidence="cid_x" >/dev/null 2>&1)
+K282_DOUBLE=$(cd "$K282_T" && node "$CLI" dispatch warnings resolve w_aa --reason="again" 2>&1 | /usr/bin/grep -c "already resolved" || true)
+K282_AFTER=$(cd "$K282_T" && node "$CLI" state assert-no-raw-dispatches-this-session 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(s);console.log(j.ok===true&&j.resolved_count===1?"pass":"fail")}catch{console.log("err")}})')
+K282_HOOK=$(/usr/bin/grep -c "warning_id: 'w_'" "$ROOT/hooks/dispatch-hygiene-guard.sh" || true)
+rm -rf "$K282_T"
+if [ "$K282_BEFORE" = "blocked" ] && [ "$K282_NOREASON" -ge 1 ] && [ "$K282_DOUBLE" -ge 1 ] && [ "$K282_AFTER" = "pass" ] && [ "$K282_HOOK" -ge 1 ]; then
+  pass "K282: scoped warning resolution — hook stamps warning_id, resolve annotates (reason mandatory, no double-resolve), gate passes on resolved-with-reason"
+else
+  fail "K282: resolution loop broken — before=$K282_BEFORE noreason=$K282_NOREASON double=$K282_DOUBLE after=$K282_AFTER hook=$K282_HOOK"
+fi
+
+# K283: pointer-dispatch stubs — render-filled mints a correlation_id, --out
+# writes the envelope to the canonical dispatch dir and prints the ~200-byte
+# stub (cid + envelope path + read-and-execute contract); render-lanes
+# summaries carry per-lane stubs. Field-measured: pointer dispatch kept ~50K
+# tokens of envelope bodies out of orchestrator output on one run.
+if /usr/bin/grep -qF 'correlation_id>${cidRF}' "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -qF '".devt", "state", "dispatch"' "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "execute its contents as your complete dispatch instructions" "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q "bytes: injected.length, stub" "$ROOT/bin/modules/dispatch.cjs"; then
+  pass "K283: pointer-dispatch stubs — render-filled cid + --out stub emission + render-lanes per-lane stubs"
+else
+  fail "K283: pointer stub surface regressed in dispatch.cjs"
+fi
+
+# K284: Axis-H mechanical count gate — a stale "n/a" claim fails while
+# in-window incidents exist (the exact field failure: consolidator honestly
+# synthesized lanes' stale claims), honest live-read counts pass, and a
+# warning written AFTER review.md's mtime is never blamed on its author.
+K284_T=$(mktemp -d); K284_T=$(cd "$K284_T" && pwd -P); mkdir -p "$K284_T/.devt/state"
+printf 'active: true\nworkflow_type: code_review_parallel\ntask: "t"\ncreated_at: "2026-01-01T00:00:00.000Z"\n' > "$K284_T/.devt/state/workflow.yaml"
+K284_NOW=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+printf '{"ts":"%s","warning_id":"w_h1","source":"raw_dispatch","agent":"devt:code-reviewer","prompt_bytes":1}\n' "$K284_NOW" > "$K284_T/.devt/state/dispatch-warnings.jsonl"
+sleep 1
+printf '# R\n\n## Dispatch warnings (session-scoped)\n\nn/a (no incidents logged this session)\n' > "$K284_T/.devt/state/review.md"
+K284_STALE=$(cd "$K284_T" && node "$CLI" state assert-dispatch-warnings-acknowledged 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).ok===false?"caught":"missed")}catch{console.log("err")}})')
+printf '# R\n\n## Dispatch warnings (session-scoped)\n\ncounts: raw_dispatch=1 resolved=0 cliff_signal=0\n' > "$K284_T/.devt/state/review.md"
+K284_HONEST=$(cd "$K284_T" && node "$CLI" state assert-dispatch-warnings-acknowledged 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).ok===true?"pass":"fail")}catch{console.log("err")}})')
+sleep 1
+printf '{"ts":"%s","warning_id":"w_h2","source":"raw_dispatch","agent":"devt:verifier","prompt_bytes":1}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "$K284_T/.devt/state/dispatch-warnings.jsonl"
+K284_FAIR=$(cd "$K284_T" && node "$CLI" state assert-dispatch-warnings-acknowledged 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).ok===true?"pass":"fail")}catch{console.log("err")}})')
+rm -rf "$K284_T"
+if [ "$K284_STALE" = "caught" ] && [ "$K284_HONEST" = "pass" ] && [ "$K284_FAIR" = "pass" ] \
+   && /usr/bin/grep -q "assert-dispatch-warnings-acknowledged" "$ROOT/workflows/code-review.steps.md" \
+   && /usr/bin/grep -q "LIVE READ, never inherited" "$ROOT/references/rubrics/code_review.v1.md"; then
+  pass "K284: Axis-H count gate — stale n/a caught, honest counts pass, post-write warnings not blamed; wired in shared step + rubric live-read contract"
+else
+  fail "K284: Axis-H gate broken — stale=$K284_STALE honest=$K284_HONEST fair=$K284_FAIR"
+fi
+
+# K285: auto_curator single-sourced — step body lives once in the shared
+# steps file (parallel path previously had NO step while the shared gate
+# demanded its artifact); both parents carry MODE-tagged pointers; no
+# resident copy remains in either parent.
+K285_BODY=$(/usr/bin/grep -c '<step name="auto_curator"' "$ROOT/workflows/code-review.steps.md" || true)
+K285_P1=$(/usr/bin/grep -c "SHARED-STEP:auto_curator" "$ROOT/workflows/code-review.md" || true)
+K285_P2=$(/usr/bin/grep -c "SHARED-STEP:auto_curator" "$ROOT/workflows/code-review-parallel.md" || true)
+K285_RES=$({ /usr/bin/grep -c '<step name="auto_curator"' "$ROOT/workflows/code-review.md" "$ROOT/workflows/code-review-parallel.md" || true; } | awk -F: '{s+=$2} END{print s+0}')
+if [ "$K285_BODY" = "1" ] && [ "$K285_P1" = "1" ] && [ "$K285_P2" = "1" ] && [ "$K285_RES" = "0" ]; then
+  pass "K285: auto_curator single-sourced in code-review.steps.md — pointers in both parents, no resident copies"
+else
+  fail "K285: auto_curator partition broken — body=$K285_BODY p1=$K285_P1 p2=$K285_P2 resident=$K285_RES"
+fi
+
+# K286: diff-anchored memory_signal — review-context-init derives the PRIMARY
+# from affects-union over changed files (field: prose FTS returned counts:{}
+# while per-file affects carried real governance); empty primary renders a
+# checkable claim; empty supplement is omitted; consumers document the shape.
+if /usr/bin/grep -q '"affects-union"' "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "no affects-matched docs across" "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "affects-union" "$ROOT/agents/code-reviewer.md" \
+   && /usr/bin/grep -q "affects-union" "$ROOT/agents/verifier.md" \
+   && /usr/bin/grep -q "affects-union" "$ROOT/docs/MEMORY.md"; then
+  pass "K286: diff-anchored memory_signal — affects-union primary + checkable empty claim + consumer docs synced"
+else
+  fail "K286: memory_signal derivation or consumer docs regressed"
+fi
+
+# K287: small-surface fixes — read-sidecar hoists status/verdict/agent to the
+# top level (jq '.status' routes correctly; validation carries allowed values
+# on mismatch) and scope-cache suppresses generic entries (wiki index, bare
+# dir wildcards) when concrete blast-derived paths exist.
+if /usr/bin/grep -q "Routing fields hoisted to the TOP level" "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "allowed_status = schema.status" "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "Generic-entry suppression" "$ROOT/bin/modules/preflight.cjs" \
+   && /usr/bin/grep -qF 'wiki\/index\.md$|^[^*]*\/\*\*$' "$ROOT/bin/modules/preflight.cjs"; then
+  pass "K287: read-sidecar top-level routing fields + scope_hint generic-entry suppression"
+else
+  fail "K287: small-surface fixes regressed (read-sidecar hoist or scope_hint suppression)"
 fi
 
 echo

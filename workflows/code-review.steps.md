@@ -1,4 +1,4 @@
-# Shared review steps — verify + present_findings (single source)
+# Shared review steps — verify + auto_curator + present_findings (single source)
 
 This file is the SINGLE SOURCE for the `verify` and `present_findings` step
 bodies shared by `workflows/code-review.md` (MODE=single) and
@@ -195,6 +195,72 @@ Route on `verdict`:
 
 ---
 
+<step name="auto_curator" gate="curator dispatched if config + threshold + cooldown all permit">
+
+**Conditional auto-curator.** When `memory.auto_curator_on_review = true` AND `_suggestions.md` has ≥ `memory.auto_curator_min_candidates` (default 3) AND last curator run was ≥ `memory.auto_curator_cooldown_days` (default 7) ago, refresh discovery harvest and fire a curator dispatch. Skipped silently otherwise — default `false` keeps the workflow cost-neutral for users who don't opt in.
+
+Decision logic (bash):
+
+```bash
+AUTO_CURATOR_ENABLED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
+if [ "$AUTO_CURATOR_ENABLED" = "true" ]; then
+  echo "FIRE" > .devt/state/auto-curator-considered.txt
+else
+  echo "DISABLED" > .devt/state/auto-curator-considered.txt
+fi
+
+AUTO=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_on_review 2>/dev/null | jq -r '.value // false')
+if [ "$AUTO" = "true" ]; then
+  MIN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_min_candidates 2>/dev/null | jq -r '.value // 3')
+  COOLDOWN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get memory.auto_curator_cooldown_days 2>/dev/null | jq -r '.value // 7')
+  CANDIDATES=$(/usr/bin/grep -cE '^###\s+[⚖️🔵]' .devt/memory/_suggestions.md 2>/dev/null || echo 0)
+  LAST_RUN_FILE=.devt/state/last-curator-run.txt
+  COOLDOWN_OK=1
+  if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$(cat "$LAST_RUN_FILE")" "+%s" 2>/dev/null || echo 0)
+    NOW_EPOCH=$(date "+%s")
+    AGE_DAYS=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
+    if [ "$AGE_DAYS" -lt "$COOLDOWN" ]; then COOLDOWN_OK=0; fi
+  fi
+  if [ "$CANDIDATES" -ge "$MIN" ] && [ "$COOLDOWN_OK" = "1" ]; then
+    echo "auto_curator: ACTIVE — candidates=$CANDIDATES min=$MIN age=${AGE_DAYS:-never}d cooldown=${COOLDOWN}d"
+    # Refresh _suggestions.md from the latest scratchpad #KNOWLEDGE-CANDIDATE tags + decisions before dispatch
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" memory suggest >/dev/null 2>&1 || true
+    # Record run timestamp BEFORE dispatch so a curator crash doesn't trigger immediate re-runs
+    date -u "+%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
+  else
+    echo "auto_curator: SKIP — candidates=$CANDIDATES (need $MIN) cooldown_ok=$COOLDOWN_OK"
+  fi
+else
+  echo "auto_curator: DISABLED — memory.auto_curator_on_review=false (default; opt-in via .devt/config.json)"
+fi
+```
+
+When bash prints `auto_curator: ACTIVE`, orchestrator dispatches curator:
+
+```
+<!-- BEGIN dispatch:curator:code_review -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/curator-code_review.tmpl.md -->
+Task(subagent_type="devt:curator", model="{models.curator}", prompt="
+  <context>
+    <files_to_read>.devt/memory/_suggestions.md, .devt/memory/lessons/*.md (existing)</files_to_read>
+    <agent_skills>{injected from .devt/config.json — must include devt:memory-curation}</agent_skills>
+  </context>
+  <task>
+    Auto-curator triggered by /devt:review post-review threshold (≥${MIN} candidates pending, last run ≥${COOLDOWN}d ago).
+    Evaluate ⚖️/🔵 entries in .devt/memory/_suggestions.md. For each that passes the 5-filter (Specificity, Durability,
+    Non-obviousness, Evidence, Actionability), present an AskUserQuestion proposal per memory-curation skill.
+    Accepted candidates land in .devt/memory/{decisions,concepts,flows,rejected}/.
+    Write .devt/state/curation-summary.md with verdicts per candidate (accepted / edited / rejected with reason).
+  </task>
+")
+<!-- END dispatch:curator:code_review -->
+```
+
+When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch — proceed to `present_findings`.
+
+</step>
+
 <step name="present_findings" gate="findings are reported to the user (parallel: with lane provenance)">
 
 **Auto-curator-considered gate.** Before presenting findings, assert that auto-curation was considered (not silently skipped):
@@ -239,6 +305,19 @@ RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-di
 if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
   echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
+  exit 0
+fi
+```
+
+When this gate blocks on a dispatch that was substantively compliant (e.g. a pointer dispatch that consumed a rendered envelope from disk), resolve THAT record — `dispatch warnings resolve <warning_id> --reason="…" [--evidence="…"]` — and re-run the gate. Never `--skip-gates`: it bypasses every gate on the transition, not just this one. The `unresolved[]` array in the gate's output carries the warning_ids.
+
+**Axis-H claims gate.** The verifier grades that the `## Dispatch warnings (session-scoped)` section EXISTS; this gate checks its NUMBERS against the file mechanically — it runs last and needs no model honesty. Counts are bounded to [workflow start, review.md mtime], so a warning written after the review was authored is never blamed on its author. Failure means the section was inherited or derived instead of live-read: re-dispatch is unnecessary — fix is appending a corrected section from a live read (`dispatch warnings` CLI or a direct file read), then re-run.
+
+```bash
+AXH_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-dispatch-warnings-acknowledged)
+if printf '%s\n' "$AXH_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=present_findings status=BLOCKED verdict=FAILED
+  echo "BLOCKED: $(printf '%s\n' "$AXH_GATE" | jq -r '.reason')"
   exit 0
 fi
 ```

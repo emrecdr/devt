@@ -261,19 +261,31 @@ opts.budget → config.preflight.max_triples → config.preflight.lane_budget[ti
 
 ## Verifier Memory Signal
 
-Every verifier dispatch in `dev-workflow.md` and `code-review.md` includes a `<memory_signal>` block in `<context>` populated by an orchestrator-prep step:
+Every verifier dispatch in `dev-workflow.md` and `code-review.md` includes a `<memory_signal>` block in `<context>` populated at orchestrator prep. The derivation differs by workflow family:
 
-```bash
-node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact
-```
-
-The `--signal=N` mode returns:
+**Review workflows (diff-anchored).** `state review-context-init` builds the signal from the union of `memory affects` hits across the changed files (committed + working tree + untracked) — every doc in the primary lane governs at least one file in the diff. The prose-FTS aggregate merges in as a supplement only when non-empty:
 
 ```jsonc
 {
-  "counts": {"<domain>": <n>, ...},
-  "top": [{"id": "...", "title": "...", "doc_type": "..."}]
+  "mode": "signal",
+  "primary": {
+    "source": "affects-union",
+    "files_checked": 42,
+    "count": 2,
+    "docs": [{"id": "ADR-002", "title": "...", "doc_type": "decision", "matched_files": ["tests/hurl/..."]}],
+    "claim": "no affects-matched docs across 42 changed file(s)"   // present ONLY when docs is empty
+  },
+  "supplement": {"source": "prose-fts", "counts": {...}, "top": [...]}  // omitted when empty
 }
+```
+
+Rendering rules: an empty **supplement** disappears; an empty **primary** states the checkable claim above; a literal `{}` is reserved for memory-layer-unavailable ("could not check" — consumers fall back to fresh queries). Field failure this fixes: the prose query returned `counts: {}` — reading as "no governance applies" — while per-file affects carried ADR/FLOW governance for the same diff.
+
+**Dev/research workflows (prose-anchored).** Pre-implementation work has no diff to anchor on, so the signal stays:
+
+```bash
+node bin/devt-tools.cjs memory query "<task>" --signal=3 --json-compact
+# → {"counts": {"<domain>": n, ...}, "top": [{"id", "title", "doc_type"}]}
 ```
 
 …in one call — bypassing the mutually-exclusive precedence trap of the standalone `--count` / `--domain-counts` / `--top` flags. `agents/verifier.md` prefers the inline block over fresh `memory query` calls during the initial scan, saving 3–4 MCP round trips per verify iteration.
