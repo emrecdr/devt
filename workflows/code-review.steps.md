@@ -104,7 +104,7 @@ Dispatch the verifier:
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
-    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
     <original_task>{review_scope_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
@@ -264,6 +264,8 @@ When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch �
 </step>
 
 <step name="present_findings" gate="findings are reported to the user (parallel: with lane provenance)">
+
+**Execution-receipt shortcut — one call for the whole finalize gate set.** `state assert-all --phase=complete` runs every gate registered for this workflow_type's complete transition (same YAML registry `advance-phase` consults) and returns one JSON verdict — per-gate `{gate, ok, reason, elapsed_ms, detail}` plus `all_ok` — with a NONZERO EXIT CODE on any failure. Prefer it when composing gates into pipelines: a mangled pipeline (unquoted-var no-op, jq on empty stdin) renders the inline blocks below as blank output that reads like a pass, while an exit code survives any output mangling. The inline per-gate blocks remain canonical for step-by-step remediation (each carries its fix guidance); on assert-all failure, consult the failing gate's block below.
 
 **Auto-curator-considered gate.** Before presenting findings, assert that auto-curation was considered (not silently skipped):
 

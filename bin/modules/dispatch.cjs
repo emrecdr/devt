@@ -375,6 +375,7 @@ function applySubstitutions(template, subs) {
     bug_description: () => subs.task || "",
     review_scope_description: () => subs.task || "",
     CLAUDE_PLUGIN_ROOT: () => subs.CLAUDE_PLUGIN_ROOT || "",
+    plugin_root: () => subs.plugin_root || subs.CLAUDE_PLUGIN_ROOT || "",
   };
   for (const [key, getter] of Object.entries(DATA_REFS)) {
     // Anchor with negative-lookahead to skip prose-description placeholders
@@ -478,6 +479,13 @@ function buildSubstitutionTable(agent, loadOpts) {
     graphify_status_json: s.graphify_status_json,
     task: s.task || s.task_description || "",
     CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
+    // Same value under the init-payload field name, so {plugin_root} fills
+    // identically from render-side substitution AND orchestrator LLM-fill
+    // ($CTX.init.plugin_root). Rubric paths must render ABSOLUTE — a
+    // plugin-root-relative <rubric_path> is unresolvable from every project
+    // cwd (field: all 5 lanes concluded the rubric didn't exist and
+    // self-graded ad hoc; lane_scores came back all-null).
+    plugin_root: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
   };
 }
 
@@ -735,7 +743,16 @@ function computeEnvelopeHealth(rendered) {
     // non-populated verdict. When the path is ALSO unusable, the inline
     // placeholder/empty verdict is preserved so a genuine substitution miss
     // still surfaces.
-    if (name === "rubric_content" && state !== "populated") {
+    if (name === "rubric_content" && state === "populated" && (bodyOf(name) || "").trim().startsWith("(by-reference:")) {
+      // A by-reference stub is only a healthy rubric anchor when the path it
+      // delegates to actually resolves — field incident: health reported
+      // "populated" for the stub while every lane failed to resolve the
+      // (then-relative) rubric path, green-lighting exactly the broken field.
+      const fsH = require("fs");
+      const pathH = require("path");
+      const p = (bodyOf("rubric_path") || "").trim();
+      state = p && pathH.isAbsolute(p) && fsH.existsSync(p) ? "populated" : "empty";
+    } else if (name === "rubric_content" && state !== "populated") {
       const pathState = classifyBlockBody(bodyOf("rubric_path"));
       if (pathState === "populated") state = "populated";
       else if (state === "absent" && pathState !== "absent") state = pathState;
@@ -1188,6 +1205,16 @@ function run(subcommand, args) {
         const tagLine = `    <correlation_id>${cidRF}</correlation_id>\n  `;
         out = lastCtx >= 0 ? out.slice(0, lastCtx) + tagLine + out.slice(lastCtx) : out + "\n" + tagLine;
       }
+      // Provenance stamp: record dispatch INTENT at render time (cid + ts).
+      // assert-consolidator-dispatched accepts stamp + the same cid embedded
+      // in review.md + artifact-mtime > stamp as proof of dispatched
+      // synthesis — a side-file the agent must remember to write is a
+      // model-memory contract; a CLI stamp is not. Best-effort append.
+      try {
+        const stampCid = (out.match(/<correlation_id>(cid_[A-Za-z0-9_-]+)<\/correlation_id>/) || [])[1] || cidRF;
+        const stampPath = require("path").join(process.cwd(), ".devt", "state", "dispatch-stamps.jsonl");
+        require("fs").appendFileSync(stampPath, JSON.stringify({ agent: agentSlugRF, workflow_id: wfIdRF, cid: stampCid, ts: new Date().toISOString() }) + "\n");
+      } catch { /* state dir absent — stamp is optional evidence, never blocking */ }
       // --out[=path]: write the envelope to disk and print a ~200-byte
       // paste-ready POINTER STUB instead of the full body. Field-measured on a
       // six-lane run: pointer dispatch kept ~222KB of envelopes (~50K tokens)
@@ -1206,9 +1233,10 @@ function run(subcommand, args) {
         fsRF.mkdirSync(pathRF.dirname(outPath), { recursive: true });
         fsRF.writeFileSync(outPath, out.endsWith("\n") ? out : out + "\n");
         const rulesHashRF = (out.match(/rules_hash=\\?"([0-9a-f]{6,})/) || [])[1] || null;
+        const envShaRF = require("crypto").createHash("sha256").update(out).digest("hex").slice(0, 16);
         const stub = [
           `<correlation_id>${cidRF}</correlation_id>`,
-          `<envelope path="${outPath}"${rulesHashRF ? ` rules_hash="${rulesHashRF}"` : ""}>Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`,
+          `<envelope path="${outPath}"${rulesHashRF ? ` rules_hash="${rulesHashRF}"` : ""} sha256="${envShaRF}">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`,
         ].join("\n");
         process.stdout.write(stub + "\n");
         return 0;
@@ -1624,13 +1652,29 @@ function cmdRenderLanes(target, options) {
       // (the operator hand-built exactly this by copying cid tags into pointer
       // prompts; the guard passed on content with zero matcher changes).
       const laneRulesHash = (injected.match(/rules_hash=\\?"([0-9a-f]{6,})/) || [])[1] || null;
-      const stub = `<correlation_id>${correlationId}</correlation_id>\n<envelope path="${outPath}"${laneRulesHash ? ` rules_hash="${laneRulesHash}"` : ""}>Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`;
-      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length, stub });
+      // sha256 covers the FULL envelope body (rules_hash covers rules only) —
+      // the integrity anchor that upgrades pointer dispatch from convention
+      // to contract: a consumer can verify the file it Reads is the file the
+      // orchestrator rendered.
+      const envShaLane = require("crypto").createHash("sha256").update(injected).digest("hex").slice(0, 16);
+      const stub = `<correlation_id>${correlationId}</correlation_id>\n<envelope path="${outPath}"${laneRulesHash ? ` rules_hash="${laneRulesHash}"` : ""} sha256="${envShaLane}">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`;
+      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length, envelope_sha256: envShaLane, stub });
     } else {
       out.push(`<!-- LANE: ${lane.id} (community=${community}, correlation_id=${correlationId}, files=${files.length}) -->`);
       out.push(injected);
       out.push("");
     }
+  }
+  // Tail-safe trailer on STDERR: operators habitually pipe long CLI output
+  // through `tail -N` and never see the stub field buried in the JSON
+  // (field: pointer dispatch got hand-reinvented because tail -3 ate the
+  // stubs). Stderr keeps stdout pure JSON for jq consumers while a combined
+  // or tailed view still shows the paste-ready stubs LAST.
+  if (options.outDir && summary.length) {
+    process.stderr.write(
+      "\n--- pointer stubs (paste-ready; same content as stdout .lanes[].stub) ---\n" +
+      summary.map((s) => s.stub).join("\n---\n") + "\n",
+    );
   }
   const result = {
     lane_count: lanes.length,

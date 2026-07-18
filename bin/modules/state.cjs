@@ -429,6 +429,15 @@ const JSON_SIDECAR_SCHEMAS = {
     status: VERIFICATION_STATUSES,
     verdict: VERIFICATION_VERDICTS,
     agent: ["verifier"],
+    checks: [
+      // The walk-all-axes gate documents criteria_total as its comparison
+      // basis — a verifier that omits it writes a sidecar the gate's doc
+      // names but the write-time schema never enforced. Short-circuit
+      // synthetics are exempt (no axes were walked; source records that).
+      (d) => (d.source !== "short_circuit" && typeof d.criteria_total !== "number")
+        ? 'missing "criteria_total" (number) — required for the walk-all-axes gate unless source="short_circuit"'
+        : null,
+    ],
   },
   // review.md emits "## Verdict" instead of "## Status", so the legacy
   // extractStatus parser returned null on every code-review verify advance
@@ -438,6 +447,17 @@ const JSON_SIDECAR_SCHEMAS = {
     status: ["DONE", "PARTIAL", "BLOCKED"],
     verdict: ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
     agent: ["code-reviewer"],
+    checks: [
+      // A silent all-null lane_scores[] reads as a working feature (the lane
+      // score distribution is the parallel report's headline) — field: every
+      // lane failed to self-score and nothing mechanical noticed. Null scores
+      // demand a stated reason.
+      (d) => (Array.isArray(d.lane_scores)
+              && d.lane_scores.some((l) => l && l.score == null)
+              && typeof d.lane_scores_null_reason !== "string")
+        ? 'lane_scores[] contains null score(s) without "lane_scores_null_reason" — a silent null distribution masks a broken self-grading path'
+        : null,
+    ],
   },
 };
 
@@ -820,9 +840,14 @@ function validateInputJson(body, schema) {
 }
 
 function describeMismatch(m) {
+  // Sidecar mismatches carry a .json artifact name — the markdown wording
+  // ("## Status line") on a JSON field check reads as a bogus check and
+  // erodes trust in the validator (field-reported).
+  const isSidecar = typeof m.expected_artifact === "string" && m.expected_artifact.endsWith(".json");
   switch (m.reason) {
     case MISMATCH_REASONS.MISSING: return "is missing";
-    case MISMATCH_REASONS.NO_STATUS_LINE: return "has no `## Status` line";
+    case MISMATCH_REASONS.NO_STATUS_LINE:
+      return isSidecar ? 'is missing its "status" field (JSON sidecar routing contract)' : "has no `## Status` line";
     case MISMATCH_REASONS.UNREADABLE: return "is unreadable";
     case MISMATCH_REASONS.INVALID_STATUS: return `has invalid status "${m.actual}" (allowed: ${(m.allowed || []).join(", ")})`;
     default: return `failed validation (${m.reason || "unknown"})`;
@@ -1353,6 +1378,7 @@ const STATE_FILE_CONTRACT = {
     "scope-check-required.txt", // marker written when >10-file + graphify-ready gate fires
     "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
     "review-depth.txt",         // diff-LOC banding (standard|chunked + measured LOC) written at scope_check; reset-soft evicted
+    "dispatch-stamps.jsonl",    // render-time dispatch-intent stamps (cid + ts) — provenance evidence for assert-consolidator-dispatched; reset-soft evicted
     "consolidator-ran.txt",     // marker written by consolidator synthesis entry (assert-consolidator-dispatched)
     "auto-curator-considered.txt", // marker written by auto_curator step (assert-auto-curator-considered)
     "reuse-candidates.md",      // written by state derive-reuse-candidates (reuse pre-search)
@@ -1527,6 +1553,7 @@ const RESET_SOFT_EVICT_PATTERNS = [
   // Depth banding is measured per review scope — a stale "chunked" marker
   // would bolt the large-diff strategy onto a small follow-up review.
   /^review-depth\.txt$/,
+  /^dispatch-stamps\.jsonl$/,
   /^graphify-impact-plan\.json$/,
 ];
 
@@ -1875,6 +1902,16 @@ function readSidecar(fileName) {
   // WOULD pass so the consumer can route on it.
   if (!validation.valid_status && Array.isArray(schema.status)) validation.allowed_status = schema.status;
   if (!validation.valid_verdict && Array.isArray(schema.verdict)) validation.allowed_verdict = schema.verdict;
+  // Per-schema custom checks — field-driven guards the enum trio can't express
+  // (e.g. verification.json requiring criteria_total, review.json requiring a
+  // reason when lane scores are all null). Each check returns a reason string
+  // or null; failures surface as schema_warnings, never a hard ok:false —
+  // routing consumers decide severity, same contract as the enum validators.
+  if (Array.isArray(schema.checks)) {
+    const warnings = schema.checks.map((fn) => { try { return fn(data); } catch { return null; } }).filter(Boolean);
+    if (warnings.length) validation.schema_warnings = warnings;
+    validation.valid_fields = warnings.length === 0;
+  }
   // Routing fields hoisted to the TOP level alongside the full payload —
   // `read-sidecar verification.json | jq '.status'` previously returned null
   // (the fields live under .data) while the assert gates read the same file
@@ -4035,15 +4072,50 @@ function assertConsolidatorDispatched() {
     };
   }
   const dir = getStateDir();
+  // Provenance-stamp path (preferred): render-filled stamped dispatch intent
+  // (cid + ts) and the synthesis agent embedded the same cid in review.md's
+  // header. Proves "review.md came from a dispatched synthesis agent" without
+  // a side-file duty the agent can forget — field: a consolidator produced
+  // perfect artifacts but never wrote the marker until nudged. Still catches
+  // hand-written review.md (no stamp / no embedded cid) and
+  // died-before-artifact (stamp, no artifact / mtime precedes stamp).
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const stampsPath = path.join(dir, "dispatch-stamps.jsonl");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const reviewPath = path.join(dir, "review.md");
+    if (fs.existsSync(stampsPath) && fs.existsSync(reviewPath)) {
+      const embedded = (fs.readFileSync(reviewPath, "utf8").match(/Correlation:\s*(cid_[A-Za-z0-9_-]+)/) || [])[1];
+      if (embedded) {
+        for (const line of fs.readFileSync(stampsPath, "utf8").split("\n").filter(Boolean)) {
+          let rec; try { rec = JSON.parse(line); } catch { continue; }
+          if (rec && rec.cid === embedded && rec.agent === "code-reviewer") {
+            const stampTs = Date.parse(rec.ts);
+            if (!isNaN(stampTs) && fs.statSync(reviewPath).mtimeMs > stampTs) {
+              return {
+                ok: true,
+                source: "provenance_stamp",
+                cid: embedded,
+                substance_pass_count: substancePassCount,
+                reason: `review.md embeds ${embedded} matching a render stamp that predates the artifact — dispatched synthesis proven`,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch { /* stamp evidence unavailable — legacy marker path below */ }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const markerPath = path.join(dir, "consolidator-ran.txt");
   if (!fs.existsSync(markerPath)) {
     return {
       ok: false,
       reason:
-        `${substancePassCount} lanes passed substance but consolidator-ran.txt absent — ` +
-        "orchestrator skipped synthesis-mode dispatch. Dispatch the code-reviewer " +
-        "with synthesis task instruction; the agent body writes the marker.",
+        `${substancePassCount} lanes passed substance but no provenance evidence — ` +
+        "neither a render stamp matched by a `Correlation: cid_…` header in review.md " +
+        "nor the legacy consolidator-ran.txt marker. Dispatch the code-reviewer with " +
+        "the synthesis envelope (render-filled stamps intent automatically; the " +
+        "template mandates the Correlation header).",
       substance_pass_count: substancePassCount,
     };
   }
@@ -5436,9 +5508,17 @@ function assertArchScanFresh(args) {
     if (fs.existsSync(p)) { reportPath = p; break; }
   }
   if (!reportPath) {
+    // A nag without an on-ramp is a dead end (field-reported): name the exact
+    // command that creates the baseline. arch_scanner.command configured →
+    // that command IS the on-ramp; unconfigured → say how to wire one.
+    let onramp = "no arch_scanner configured — set arch_scanner.command in .devt/config.json (or place a scanner at .devt/rules/arch-scan.py) and run /devt:review --focus=arch once to create the baseline";
+    try {
+      const cmd = ((require("./config.cjs").getMergedConfig() || {}).arch_scanner || {}).command;
+      if (cmd) onramp = `create the baseline once with: ${cmd} (one scanner pass; then /devt:review --focus=arch keeps it current)`;
+    } catch { /* config unreadable — generic on-ramp stands */ }
     return {
       ok: false,
-      reason: "arch-scan-report.md not found in either per-instance dir or legacy root — no arch scan has run for this project. Suggest /devt:review --focus=arch before review.",
+      reason: `arch-scan-report.md not found in either per-instance dir or legacy root — no arch scan has run for this project. On-ramp: ${onramp}`,
     };
   }
   let mtime;
@@ -6054,14 +6134,54 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
     if (!fn) {
       result = { ok: false, reason: `unknown gate name in registry: ${gateName} (typo in _phase-gates.yaml or missing GATE_FNS entry)` };
     } else {
+      const t0 = Date.now();
       try { result = fn(); }
       catch (e) { result = { ok: false, reason: `gate ${gateName} threw: ${e.message}` }; }
+      result._elapsed_ms = Date.now() - t0;
     }
     persistGateTrace(`${tracePrefix}:${gateName}`, result);
-    gateResults.push({ gate: gateName, ok: !!result.ok, reason: result.reason || "" });
+    // detail carries the gate's own evidence payload (claim-check unresolved
+    // ids, axis-H counts, warning ids …) — a bare ok/reason pair forces the
+    // consumer back to per-gate re-runs to see what actually failed.
+    gateResults.push({ gate: gateName, ok: !!result.ok, reason: result.reason || "", elapsed_ms: result._elapsed_ms ?? null, detail: result });
     if (result.ok === false) blockedBy.push({ gate: gateName, reason: result.reason || "" });
   }
   return { fired: true, gateResults, blockedBy };
+}
+
+// One-call gate runner for a declared phase: every registered gate for
+// (current workflow_type, --phase) in one JSON verdict, with a NONZERO EXIT
+// CODE on any failure. The exit code is the load-bearing part — orchestrator
+// shell pipelines that mangle output (unquoted-var no-ops, jq on empty
+// stdin) render failures as blank text that reads like a pass; an exit code
+// survives any output mangling. Sources the SAME registry advance-phase
+// consults — a hand-listed gate set would drift exactly like the copy-pasted
+// step bodies once did.
+function cmdAssertAll(args) {
+  const phase = _getFlag(args || [], "--phase");
+  if (!phase) {
+    process.exitCode = 1;
+    return { ok: false, reason: "Usage: state assert-all --phase=<phase>" };
+  }
+  let st = {};
+  try { st = readState(); } catch { /* empty state — gates run with null type below */ }
+  const workflowType = st.workflow_type || null;
+  const run = runPhaseGates(workflowType, phase, { tracePrefix: "assert-all" });
+  if (!run.fired) {
+    return { ok: true, all_ok: true, phase, workflow_type: workflowType, workflow_id: st.workflow_id || null, registry_count: 0, gates_run: 0, gates: [], note: run.note };
+  }
+  const allOk = run.blockedBy.length === 0;
+  if (!allOk) process.exitCode = 1;
+  return {
+    ok: allOk,
+    all_ok: allOk,
+    phase,
+    workflow_type: workflowType,
+    workflow_id: st.workflow_id || null,
+    registry_count: run.gateResults.length,
+    gates_run: run.gateResults.length,
+    gates: run.gateResults,
+  };
 }
 
 function advanceState(targetPhase, kvUpdates) {
@@ -6841,7 +6961,11 @@ function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const artifact = path.join(stateDir, `lane-diff-${id}.txt`);
     atomicWriteFileSync(artifact, body);
-    const diffLines = body === "" ? 0 : body.split("\n").length - 1;
+    // Diffstat basis: count only +/- change lines (not context, hunk headers,
+    // or the +++/--- file headers). Raw artifact line count field-measured
+    // ~25% over the true changed-line count, which breaks any comparison
+    // against a real `git diff --stat`.
+    const diffLines = body === "" ? 0 : (body.match(/^(\+(?!\+\+)|-(?!--))/gm) || []).length;
     return { ok: true, artifact, diff_lines: diffLines };
   } catch {
     return { ok: false };
@@ -7024,7 +7148,7 @@ function registerLanesFromYaml(filePath) {
       baseRef: entry.base_ref || entry.baseRef,
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
-    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null });
+    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
@@ -7614,6 +7738,11 @@ function run(subcommand, args) {
       return archScanTrace(args[0], args.slice(1));
     case "assert-arch-scan-fresh":
       return traceGate("assert-arch-scan-fresh", () => assertArchScanFresh(args));
+    case "assert-all":
+      // No traceGate wrapper — runPhaseGates already persists a per-gate
+      // trace under the assert-all prefix; double-wrapping would record the
+      // aggregate as one more gate.
+      return cmdAssertAll(args);
     case "assert-wired":
       return traceGate("assert-wired", () => assertWired(args[0], args.slice(1)));
     case "assert-scope-complete":
@@ -7676,7 +7805,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
       );
   }
 }

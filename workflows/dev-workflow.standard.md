@@ -270,7 +270,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
          .devt/config.json. The verifier reads this block instead of computing
          the path from <workflow_type>, so we can ship rubric updates as new
          files (dev.v2.md) without breaking projects pinned to v1. -->
-    <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>
+    <rubric_path>{plugin_root}/references/rubrics/{rubrics.dev}</rubric_path>
     <original_task>{task_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>

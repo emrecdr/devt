@@ -26,7 +26,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <evolution>Read .devt/state/evolution-report.md (if it exists) — git-history hotspots, change coupling, fix density; check generated_at for staleness. Elevate finding severity one notch on high fix-density files: recurring-fix hotspots break again.</evolution>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
     <!-- Inline rubric body from init payload — reviewer self-checks against
          the same axes the verifier will grade, reducing verifier-revision
          loops. Falls back to <rubric_path> on-disk Read when omitted

@@ -3930,17 +3930,17 @@ else
   fail "init payload missing or wrong rubrics.dev (expected dev.v1.md)"
 fi
 # Dev-workflow verifier dispatch must reference {rubrics.dev} in a <rubric_path> tag.
-if grep -q '<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.standard.md"; then
+if grep -q '<rubric_path>{plugin_root}/references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.standard.md"; then
   pass "dev-workflow verifier dispatch injects <rubric_path>"
 else
-  fail "dev-workflow verifier dispatch missing <rubric_path>references/rubrics/{rubrics.dev}</rubric_path>"
+  fail "dev-workflow verifier dispatch missing <rubric_path>{plugin_root}/references/rubrics/{rubrics.dev}</rubric_path>"
 fi
 # Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag.
 # The dispatch lives in the shared step file (single source for both review paths).
-if grep -q '<rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.steps.md"; then
+if grep -q '<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.steps.md"; then
   pass "code-review verifier dispatch injects <rubric_path>"
 else
-  fail "code-review verifier dispatch missing <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>"
+  fail "code-review verifier dispatch missing <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>"
 fi
 # Code-review must dispatch the verifier (subagent_type=devt:verifier) with workflow_type=code_review.
 # Both live in the shared step file; the parents carry SHARED-STEP pointers to it.
@@ -17317,7 +17317,7 @@ fi
 if /usr/bin/grep -qF 'correlation_id>${cidRF}' "$ROOT/bin/modules/dispatch.cjs" \
    && /usr/bin/grep -qF '".devt", "state", "dispatch"' "$ROOT/bin/modules/dispatch.cjs" \
    && /usr/bin/grep -q "execute its contents as your complete dispatch instructions" "$ROOT/bin/modules/dispatch.cjs" \
-   && /usr/bin/grep -q "bytes: injected.length, stub" "$ROOT/bin/modules/dispatch.cjs"; then
+   && /usr/bin/grep -q "bytes: injected.length, envelope_sha256" "$ROOT/bin/modules/dispatch.cjs"; then
   pass "K283: pointer-dispatch stubs — render-filled cid + --out stub emission + render-lanes per-lane stubs"
 else
   fail "K283: pointer stub surface regressed in dispatch.cjs"
@@ -17584,6 +17584,66 @@ if [ "$K291_OK" -eq 1 ]; then
   pass "K291: field-receipt fixes (bare-name state-dir resolution, by-ref byte-cap bypass + inline cap kept, axis-H last-section + registered on complete, warm-resume adoption, window prose, cross-project recipe)"
 else
   fail "K291: field-receipt fix surface regressed:$K291_MISS"
+fi
+
+# K292: trust batch from the native-run receipt — (a) rubric_path renders
+# ABSOLUTE (plugin-root-relative broke rubric resolution for every
+# project-cwd lane: ad-hoc self-grades, all-null lane_scores) and no
+# template/workflow carries the relative value form; (b) pointer stubs carry
+# a full-envelope sha256 + render-lanes prints a tail-safe stderr trailer;
+# (c) `state assert-all --phase=X` runs the registered gate set with a
+# NONZERO EXIT on failure (the silent-empty pipeline class); (d) the
+# consolidator gate accepts render-stamp + embedded Correlation-cid + mtime
+# provenance (side-file marker now legacy fallback); (e) sidecar schema
+# checks (verification.json criteria_total unless short_circuit; review.json
+# null lane scores demand lane_scores_null_reason) surface as
+# schema_warnings; (f) candidates-footer emits its always-on status line;
+# (g) prose/CLI pins: sidecar-aware mismatch wording, est_loc diffstat
+# basis, file_count in register response, arch-scan on-ramp, stub-first-class
+# dispatch prose, base_ref non-default-base doc, envelope_health stub check.
+K292_OK=1
+K292_MISS=""
+K292_TMP=$(mktemp -d)
+mkdir -p "$K292_TMP/.devt/state" "$K292_TMP/.devt/rules"
+printf 'active: true\nworkflow_id: "fx-4"\nworkflow_type: "code_review"\nphase: "review"\ncreated_at: "2026-07-19T00:00:00Z"\nfirst_created_at: "2026-07-19T00:00:00Z"\n' > "$K292_TMP/.devt/state/workflow.yaml"
+printf '# CS\nK292_RULES_MARKER.\n' > "$K292_TMP/.devt/rules/coding-standards.md"
+K292_DEF=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review 2>/dev/null) || true)
+printf '%s' "$K292_DEF" | /usr/bin/grep -qF "<rubric_path>$ROOT/references/rubrics/" || { K292_OK=0; K292_MISS="$K292_MISS rubric-abs-render"; }
+if /usr/bin/grep -rq 'rubric_path>references/rubrics' "$ROOT/templates" "$ROOT/workflows"; then K292_OK=0; K292_MISS="$K292_MISS rubric-relative-residue"; fi
+K292_STUB=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review --out="$K292_TMP/env.txt" 2>/dev/null) || true)
+printf '%s' "$K292_STUB" | /usr/bin/grep -q ' sha256="[0-9a-f]\{16\}"' || { K292_OK=0; K292_MISS="$K292_MISS stub-sha256"; }
+{ [ -s "$K292_TMP/.devt/state/dispatch-stamps.jsonl" ] && /usr/bin/grep -q '"cid":"cid_' "$K292_TMP/.devt/state/dispatch-stamps.jsonl"; } || { K292_OK=0; K292_MISS="$K292_MISS render-stamp"; }
+K292_CID=$(/usr/bin/grep -o '"cid":"cid_[A-Za-z0-9_-]*"' "$K292_TMP/.devt/state/dispatch-stamps.jsonl" 2>/dev/null | head -1 | cut -d'"' -f4)
+(cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=core --files=x.py >/dev/null 2>&1; CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state update-lane L1 status=substance_pass >/dev/null 2>&1)
+printf 'Correlation: %s\n\n# Consolidated Review\n\nSubstantive synthesis body over the registered lanes with findings.\n' "$K292_CID" > "$K292_TMP/.devt/state/review.md"
+K292_CONS=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state assert-consolidator-dispatched 2>/dev/null) || true)
+printf '%s' "$K292_CONS" | /usr/bin/grep -q '"source": *"provenance_stamp"' || { K292_OK=0; K292_MISS="$K292_MISS provenance-stamp-gate"; }
+printf '{"status":"GAPS_FOUND","verdict":"needs_revision","agent":"verifier"}' > "$K292_TMP/.devt/state/verification.json"
+K292_VSC=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state read-sidecar verification.json 2>/dev/null) || true)
+printf '%s' "$K292_VSC" | /usr/bin/grep -q 'criteria_total' || { K292_OK=0; K292_MISS="$K292_MISS schema-criteria-total"; }
+printf '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer","score":null,"lane_scores":[{"id":"L1","score":null}]}' > "$K292_TMP/.devt/state/review.json"
+K292_RSC=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state read-sidecar review.json 2>/dev/null) || true)
+printf '%s' "$K292_RSC" | /usr/bin/grep -q 'lane_scores_null_reason' || { K292_OK=0; K292_MISS="$K292_MISS schema-lane-scores"; }
+K292_AA_EXIT=0
+(cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state assert-all --phase=complete >/dev/null 2>&1) || K292_AA_EXIT=$?
+[ "$K292_AA_EXIT" != "0" ] || { K292_OK=0; K292_MISS="$K292_MISS assert-all-exit"; }
+K292_FOOT=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" memory candidates-footer 2>/dev/null) || true)
+printf '%s' "$K292_FOOT" | /usr/bin/grep -q '\[memory\] candidates-footer: [0-9]* pending / threshold' || { K292_OK=0; K292_MISS="$K292_MISS footer-line"; }
+rm -rf "$K292_TMP"
+{ /usr/bin/grep -qF 'is missing its "status" field (JSON sidecar routing contract)' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'Diffstat basis: count only +/- change lines' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'file_count: r.ok && r.lane' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'On-ramp:' "$ROOT/bin/modules/state.cjs"; } || { K292_OK=0; K292_MISS="$K292_MISS cli-pins"; }
+{ /usr/bin/grep -qF 'Dispatch via the POINTER STUB' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF 'non-default base in THIS repo' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF 'state assert-all --phase=complete' "$ROOT/workflows/code-review.steps.md" \
+  && /usr/bin/grep -qF 'startsWith("(by-reference:' "$ROOT/bin/modules/dispatch.cjs" \
+  && /usr/bin/grep -qF 'MANDATORY provenance header' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" \
+  && /usr/bin/grep -qF 'lane_scores_null_reason' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md"; } || { K292_OK=0; K292_MISS="$K292_MISS prose-pins"; }
+if [ "$K292_OK" -eq 1 ]; then
+  pass "K292: trust batch (rubric_path absolute behavioral + no relative residue, stub sha256, render stamp + provenance gate behavioral, sidecar schema checks behavioral, assert-all nonzero exit, footer always-on line, CLI+prose pins)"
+else
+  fail "K292: trust-batch surface regressed:$K292_MISS"
 fi
 
 echo

@@ -15,7 +15,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
@@ -36,6 +36,13 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       community, score, verdict, findings_contributed}]; the review.md headline is verdict +
       severity counts + the per-lane score distribution. A consolidated deduction score
       saturates at the 0 floor and misleads any consumer that trusts it.
+    - review.json MUST carry the routing fields: "status" ("DONE" | "PARTIAL" | "BLOCKED") and
+      "verdict" — status absent fails the sidecar consistency check on every later state update.
+      When any lane_scores[].score is null, add "lane_scores_null_reason" (one line: why lanes
+      could not self-score) — a silent all-null distribution reads as a working feature.
+    - MANDATORY provenance header: the FIRST lines of review.md include `Correlation: <your
+      correlation_id>` — the consolidator-dispatched gate verifies this id against the render
+      stamp, which is what proves review.md came from a dispatched synthesis agent.
     - Group findings by file for the consolidated output.
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so

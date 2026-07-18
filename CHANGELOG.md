@@ -8,6 +8,35 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.174.0] - 2026-07-19
+
+### The trust batch — receipt #22's confirmed small bugs and contract fixes (cal #56, first of two)
+
+Receipt #22 (the first NATIVE-context run: a greenfield session reviewing a merged PR end-to-end, followed by a 14-question clarification round answered with on-disk verification) split its findings into a headline input-shape gap (`--range`, next release) and this batch: small, source-verified defects that silently degraded marquee features, plus contract fixes the run's own workarounds designed. Every fix is behaviorally gated in K292.
+
+### Fixed
+
+- **`<rubric_path>` now renders ABSOLUTE.** It was plugin-root-relative in every envelope; all five native-run lanes resolved it against the project cwd, concluded the rubric didn't exist, and self-graded ad hoc — the lane-score distribution (a parallel-report headline) came back all-null with nothing noticing. Templates carry `{plugin_root}/references/rubrics/…` (fills identically from render substitution and orchestrator LLM-fill via `$CTX.init.plugin_root`); no relative value form remains anywhere.
+- **envelope_health no longer green-lights an unresolvable rubric.** A by-reference rubric stub classified as "populated" while pointing at a path no lane could resolve — health now stats the `rubric_path` target when the content is a stub; unresolvable = degraded.
+- **Sidecar schema checks with teeth**: `verification.json` requires `criteria_total` (the walk-all-axes gate's documented basis) unless `source="short_circuit"`; `review.json` with null `lane_scores[].score` requires `lane_scores_null_reason`. Surfaced as `schema_warnings` from `read-sidecar` — routing consumers decide severity. The synthesis template now also mandates the `status` routing field the field run omitted.
+- **Sidecar consistency wording**: the shadow checker told a JSON sidecar it "has no `## Status` line" (markdown language on a field check, re-warning every state update) — sidecar mismatches now say what's actually missing.
+- **Lane telemetry honesty**: `register-lanes` results carry `file_count` (displayed 0-shaped for every lane before); `est_loc` counts true +/− change lines instead of raw diff-artifact lines (~25% field-measured inflation vs a real diffstat).
+- **`memory candidates-footer` is never silent**: an always-on `[memory] candidates-footer: N pending / threshold M / cooldown ok|blocked` line — below-threshold was indistinguishable from the command never executing.
+- **Arch-scan advisory carries its on-ramp**: the missing-baseline reason names the exact command that creates one (the configured `arch_scanner.command` when present) instead of recommending a scan nothing ever seeds.
+
+### Changed
+
+- **Consolidator provenance is CLI-stamped, not agent-remembered.** `render-filled` appends a dispatch-intent stamp (cid + ts → `dispatch-stamps.jsonl`, state-contract registered, reset-soft evicted); `assert-consolidator-dispatched` passes on stamp + the same cid embedded in review.md's now-mandatory `Correlation:` header + artifact-mtime > stamp — proving "review.md came from a dispatched synthesis agent" while still catching hand-written reviews and died-before-artifact. The side-file marker (which the field consolidator forgot until nudged, despite perfect artifacts) remains a legacy fallback.
+- **`state assert-all --phase=X`**: every gate registered for the phase in one JSON verdict — per-gate `{ok, reason, elapsed_ms, detail}` with evidence passthrough, `gates_run` vs registry count, and a NONZERO EXIT CODE on any failure. Kills the silent-empty pipeline class (field: a shell quirk rendered never-executed gates as blank output visually identical to passes). Sourced from the same registry `advance-phase` consults; inline blocks remain canonical for per-gate remediation.
+- **Pointer dispatch is a contract, not a convention**: stubs carry a full-envelope `sha256` (rules_hash covers rules only); `render-lanes --out` prints the stubs as a tail-safe stderr trailer (the field operator's `tail -3` ate the stub field and they hand-reinvented pointer dispatch); `dispatch_lanes` prose presents the stub as the sanctioned first-class dispatch form.
+- **Per-lane `base_ref` documented as the sanctioned non-default-base mechanism** (merged PRs, commit ranges) — it carried the entire field run and was load-bearing but underdocumented.
+- Gate **K292** pins the batch behaviorally (absolute rubric render + zero relative residue, stub sha256, render-stamp → provenance-gate round trip, both schema checks, assert-all exit code, footer line). Drift-guard stack 199 → 200 deep (K94–K292).
+
+### Deliberately deferred (named owners)
+
+- `--range=<a>..<b>` first-class scope threading + empty-diff verdict + topic-anchor validation + attested args override → next release (the range work; threading spec captured from the field run).
+- Step-manifest architecture (~15–20K orchestrator tokens of process prose per review), RESET_EXEMPT ledger-growth audit, graphify PreToolUse hook scoping + NL-query upstream relay, `run-lanes` discoverability → parked in the receipt ledger with owners.
+
 ## [0.173.0] - 2026-07-18
 
 ### First field receipt of the by-reference stack (cal #55)

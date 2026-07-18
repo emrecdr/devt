@@ -1954,9 +1954,11 @@ function run(subcommand, args) {
       // by hand. Centralizing here eliminates the drift surface their
       // KEEP IN SYNC prose comments had been trying to enforce.
       //
-      // Contract: silent (no stdout) when not ready; emits a leading blank
-      // line + the canonical 💭 hint when ready_to_surface, then touches the
-      // cooldown. Always exits 0 — surface failure is best-effort.
+      // Contract: ALWAYS emits one status line carrying the three decision
+      // inputs (count / threshold / cooldown) — silence below threshold was
+      // field-indistinguishable from the command never executing at all.
+      // When ready_to_surface, additionally emits the canonical 💭 hint and
+      // touches the cooldown. Always exits 0 — surface failure is best-effort.
       //
       // Does NOT serve /devt:next's variant, which needs ready_to_surface as
       // a shell variable to gate a downstream AskUserQuestion. That call site
@@ -1982,7 +1984,9 @@ function run(subcommand, args) {
           if (!isNaN(parsed)) hoursSinceLast = (Date.now() - parsed) / 3_600_000;
         } catch { /* stays null */ }
       }
-      const ready = count >= threshold && (hoursSinceLast === null || hoursSinceLast >= cooldownHours);
+      const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
+      const ready = count >= threshold && cooldownOk;
+      process.stdout.write(`[memory] candidates-footer: ${count} pending / threshold ${threshold} / cooldown ${cooldownOk ? "ok" : "blocked"}\n`);
       if (ready) {
         process.stdout.write(`\n💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.\n`);
         try {
