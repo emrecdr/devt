@@ -24,7 +24,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
     <spec>Read .devt/state/spec.md (if exists — from /devt:specify)</spec>
     <research>Read .devt/state/research.md (if exists — from /devt:research)</research>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
-    <review_feedback>Read .devt/state/review.md (if this is a fix iteration)</review_feedback>
+    <review_feedback>Read .devt/state/review.md (if this is a fix iteration). Fix iterations are delta-shaped: work from the findings and the files they cite — do not redo prior-iteration context reads or rewrite untouched impl-summary sections.</review_feedback>
     <learning_context>{learning_context from context_init — relevant lessons from .devt/memory/lessons/ via Pre-Flight Brief, if any}</learning_context>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>

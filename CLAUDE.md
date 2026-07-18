@@ -114,7 +114,7 @@ node bin/devt-tools.cjs memory init|index|query|get|affects|list|links|active|re
 node bin/devt-tools.cjs memory candidates-footer
 
 # Dispatch — envelope render + per-lane fan-out
-node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list]
+node bin/devt-tools.cjs dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list] [--inline-rules]  # rules+rubric ride by-reference by default (config dispatch.rules_mode/rubric_mode); --inline-rules restores inlining for worktree-isolated dispatches
 node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]  # lanes default to rules-by-reference
 
 # Reports
@@ -128,7 +128,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 196-deep drift-guard stack K94-K288) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 197-deep drift-guard stack K94-K289) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

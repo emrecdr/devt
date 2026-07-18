@@ -1352,6 +1352,7 @@ const STATE_FILE_CONTRACT = {
     "review.md", "code-review-input.md",
     "scope-check-required.txt", // marker written when >10-file + graphify-ready gate fires
     "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
+    "review-depth.txt",         // diff-LOC banding (standard|chunked + measured LOC) written at scope_check; reset-soft evicted
     "consolidator-ran.txt",     // marker written by consolidator synthesis entry (assert-consolidator-dispatched)
     "auto-curator-considered.txt", // marker written by auto_curator step (assert-auto-curator-considered)
     "reuse-candidates.md",      // written by state derive-reuse-candidates (reuse pre-search)
@@ -1523,6 +1524,9 @@ const RESET_SOFT_EVICT_PATTERNS = [
   // Per-lane diff artifacts are scope-bound like the lane outputs they feed —
   // a stale diff read as "the change under review" is silent-wrong-input.
   /^lane-diff-.+\.txt$/,
+  // Depth banding is measured per review scope — a stale "chunked" marker
+  // would bolt the large-diff strategy onto a small follow-up review.
+  /^review-depth\.txt$/,
   /^graphify-impact-plan\.json$/,
 ];
 

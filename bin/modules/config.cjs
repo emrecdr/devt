@@ -407,6 +407,17 @@ const DEFAULTS = {
   dispatch: {
     max_prompt_bytes: 24576,
     max_files_hint: 12,
+    // Envelope delivery mode for `dispatch render-filled` (lanes have their own
+    // by-reference default). "by-reference": governing_rules bodies + the inline
+    // rubric are swapped for read-from-disk stubs — the Context-Loaded contract
+    // is auto-injected and rules_hash keeps drift detection, so selective reads
+    // stay honest; the harness also auto-injects project CLAUDE.md into every
+    // subagent, so inlining it pays its byte cost twice. "inline" restores full
+    // inlining — the right call for worktree-isolated dispatches whose disk view
+    // may not match the orchestrator's. Per-call overrides: --inline-rules
+    // (both inline), --rules-by-reference / --rubric-by-reference (force-enable).
+    rules_mode: "by-reference",
+    rubric_mode: "by-reference",
   },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug

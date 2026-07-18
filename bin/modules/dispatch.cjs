@@ -518,7 +518,7 @@ function stripMarkdownSections(content, excludeHeadings) {
 
 function cmdRenderFilled(target, options) {
   if (!target || !target.includes(":")) {
-    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list] (colon-joined) OR dispatch render-filled <agent> <workflow_id|auto> (space-separated)");
+    throw new Error("Usage: dispatch render-filled <agent>:<workflow_id|auto> [--rules-exclude=heading,list] [--inline-rules | --rules-by-reference --rubric-by-reference] (colon-joined) OR dispatch render-filled <agent> <workflow_id|auto> (space-separated)");
   }
   let [agent, workflowId] = target.split(":");
   if (workflowId === "auto") {
@@ -527,6 +527,25 @@ function cmdRenderFilled(target, options) {
   const template = renderEnvelope(agent, workflowId, readContracts());
   const subs = buildSubstitutionTable(agent);
   const { CLAUDE_MD_BY_REFERENCE_STUB } = require("./init.cjs");
+
+  // Delivery-mode resolution: an explicit option (true OR false) always wins —
+  // render-lanes passes explicit values so its worktree opt-out (--inline-rules)
+  // can never be overridden by project config. Only when the caller leaves the
+  // option undefined does `dispatch.rules_mode` / `dispatch.rubric_mode`
+  // (default by-reference) decide. Resolved here rather than in the CLI router
+  // so every render path — CLI, render-lanes base, hygiene-guard canonical
+  // envelope — agrees on the mode.
+  let modeCfg = {};
+  try {
+    const { getMergedConfig } = require("./config.cjs");
+    modeCfg = (getMergedConfig() || {}).dispatch || {};
+  } catch { /* config read failure — fall through to by-reference defaults */ }
+  const rulesByRef = options && options.rulesByReference !== undefined
+    ? !!options.rulesByReference
+    : (modeCfg.rules_mode || "by-reference") !== "inline";
+  const rubricByRef = options && options.rubricByReference !== undefined
+    ? !!options.rubricByReference
+    : (modeCfg.rubric_mode || "by-reference") !== "inline";
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
   // entries) section strip by exact `## Heading` match. Per-dispatch opt-in
@@ -544,7 +563,7 @@ function cmdRenderFilled(target, options) {
   // the corpus, targeted) with zero verifier-flagged quality gaps.
   // Inline content remains the right call for worktree-isolated agents whose
   // disk view may not match the orchestrator's — hence opt-out, not removal.
-  if (options && options.rulesByReference && subs.governing_rules && subs.governing_rules.content) {
+  if (rulesByRef && subs.governing_rules && subs.governing_rules.content) {
     const refContent = {};
     for (const key of Object.keys(subs.governing_rules.content)) {
       refContent[key] = key === "CLAUDE.md"
@@ -561,7 +580,7 @@ function cmdRenderFilled(target, options) {
   // worktree-isolated lanes, so no inline fallback is needed. The axis-walk
   // instruction stays STRONG — a weak or absent "walk EVERY declared axis"
   // directive is what degrades lane reviews to topic-shape output.
-  if (options && options.rubricByReference && subs.inline_rubrics) {
+  if (rubricByRef && subs.inline_rubrics) {
     const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently including axis H). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
     // Stub every configured rubric key — not just the ones loadInlineRubrics
     // returned — so an oversized-rubric empty map still resolves each template's
@@ -635,7 +654,7 @@ function cmdRenderFilled(target, options) {
   // can check that a lane's reads cover the rules its findings depend on.
   // This is the cheap gate that keeps selective reading honest — without it,
   // a weaker model skipping every Read is invisible.
-  if (options && options.rulesByReference) {
+  if (rulesByRef) {
     const contract = `    <context_loaded_contract>governing_rules are by-reference: Read the rules files relevant to your scope from disk, and record every file you actually read in a "## Context Loaded" section of your output artifact (name + full/section read). The verifier checks that your reads cover the rules your findings depend on.</context_loaded_contract>\n  `;
     const lastIdx = out.lastIndexOf("</context>");
     if (lastIdx >= 0) {
@@ -1141,8 +1160,17 @@ function run(subcommand, args) {
       // the field. Generic: works for any render-filled target.
       const notesArg = args.find(a => a.startsWith("--notes-file="));
       const notesFile = notesArg ? notesArg.slice("--notes-file=".length) : undefined;
+      // Delivery-mode flags. Left undefined when no flag is given so
+      // cmdRenderFilled falls through to `dispatch.rules_mode`/`rubric_mode`
+      // config (default by-reference). --inline-rules restores full inlining
+      // of both — the worktree-isolation escape hatch, same flag name as
+      // render-lanes.
+      let rulesByReference, rubricByReference;
+      if (args.includes("--inline-rules")) { rulesByReference = false; rubricByReference = false; }
+      if (args.includes("--rules-by-reference")) rulesByReference = true;
+      if (args.includes("--rubric-by-reference")) rubricByReference = true;
       let out;
-      try { out = cmdRenderFilled(target, { rulesExclude, notesFile }); }
+      try { out = cmdRenderFilled(target, { rulesExclude, notesFile, rulesByReference, rubricByReference }); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
@@ -1489,9 +1517,13 @@ function cmdRenderLanes(target, options) {
   const rulesByReference = !options.inlineRules;
   // Render base envelope once (substitution is identical across lanes — the
   // per-lane variation is injected on top, not re-substituted).
+  // Explicit true/false both ways — leaving the keys off when --inline-rules is
+  // set would let the config-level by-reference default silently override the
+  // lane worktree opt-out inside cmdRenderFilled's mode resolution.
   const base = cmdRenderFilled(target, {
     ...(baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : {}),
-    ...(rulesByReference ? { rulesByReference: true, rubricByReference: true } : {}),
+    rulesByReference: rulesByReference,
+    rubricByReference: rulesByReference,
   });
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");

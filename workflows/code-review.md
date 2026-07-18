@@ -348,7 +348,23 @@ else
   SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.count // 0')
 fi
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
-echo "scope_check: file_count=${SCOPE_FILE_COUNT}, graphify_state=${GRAPHIFY_STATE}"
+
+# Diff mass — same union basis (merge-base committed range + working tree +
+# untracked). File count alone under-informs the depth decision: Anthropic's
+# review data shows finding rates scale with diff LOC (31% under 50 changed
+# lines vs 84% at 1,000+), and the parallel path already sizes lanes by
+# diff-LOC (ok<3000 / chunked>=3000) while this single path was size-blind.
+MB=$(git merge-base HEAD "${PRIMARY_BRANCH:-main}" 2>/dev/null || echo HEAD)
+DIFF_LOC=$({ git diff --numstat "$MB" 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
+UNTRACKED_LOC=$({ git ls-files --others --exclude-standard 2>/dev/null || true; } | while IFS= read -r f; do [ -f "$f" ] && wc -l < "$f"; done | awk '{s+=$1} END{print s+0}')
+DIFF_LOC=$((DIFF_LOC + UNTRACKED_LOC))
+# Same field-calibrated banding the lane registry uses (state.cjs registerLane).
+if [ "${DIFF_LOC:-0}" -ge 3000 ]; then
+  printf 'chunked %s\n' "$DIFF_LOC" > .devt/state/review-depth.txt
+else
+  printf 'standard %s\n' "$DIFF_LOC" > .devt/state/review-depth.txt
+fi
+echo "scope_check: file_count=${SCOPE_FILE_COUNT}, diff_loc=${DIFF_LOC}, graphify_state=${GRAPHIFY_STATE}"
 
 if [ "${SCOPE_FILE_COUNT:-0}" -gt 10 ] && [ "${GRAPHIFY_STATE:-not_ready}" = "ready" ]; then
   echo "scope=${SCOPE_FILE_COUNT} graphify=ready" > .devt/state/scope-check-required.txt
@@ -386,7 +402,7 @@ If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECI
 # Domain spread — the value-side variable. Top-2 path segments of the scope files.
 DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.files[]' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | wc -l | tr -d ' ')
 EXPECTED_LANES=$(( DOMAIN_COUNT < 5 ? DOMAIN_COUNT : 5 ))
-echo "[scope_check] cost/value preview: single-dispatch ≈ 1 reviewer + 1-2 verify rounds; parallel ≈ ${EXPECTED_LANES} lanes + consolidator + 1-3 verify rounds (field-measured: a 5-lane run with 3 verify rounds cost roughly 6-8x a single dispatch). Value side: scope spans ${DOMAIN_COUNT} domain(s) — single-dispatch coverage-confidence drops as attention spreads past ~15 files / 3+ domains; cross-cutting findings need reconciliation only parallel lanes surface independently."
+echo "[scope_check] cost/value preview: single-dispatch ≈ 1 reviewer + 1-2 verify rounds; parallel ≈ ${EXPECTED_LANES} lanes + consolidator + 1-3 verify rounds (field-measured: a 5-lane run with 3 verify rounds cost roughly 6-8x a single dispatch). Value side: scope spans ${DOMAIN_COUNT} domain(s) at ${DIFF_LOC} changed lines — single-dispatch coverage-confidence drops as attention spreads past ~15 files / 3+ domains, and finding rates scale with diff mass; cross-cutting findings need reconciliation only parallel lanes surface independently."
 ```
 
 ```yaml
@@ -491,6 +507,8 @@ fi
 ```
 
 Substitute into the `<memory_signal>` block below.
+
+**Large-diff read strategy** — when `.devt/state/review-depth.txt` starts with `chunked` (diff ≥ 3000 changed lines; written at scope_check), append this line to the `<task>` block before dispatching — the same hunk-enumeration strategy lane envelopes auto-attach at that size: `The diff is large (see review-depth.txt for the measured LOC): enumerate per-file hunks first (git diff --stat against the merge-base), then review file-by-file in priority order rather than one pass.`
 
 Dispatch the code-reviewer agent with the identified file scope:
 

@@ -17418,6 +17418,55 @@ else
   fail "K288: platform-alignment surface regressed:$K288_MISS"
 fi
 
+# K289: token-cut behavioral batch — (a) render-filled defaults BOTH rules and
+# rubric to by-reference from config (behavioral: fixture render carries the
+# context_loaded_contract; --inline-rules removes it), with explicit lane-side
+# values so config can never override the worktree opt-out; (b) six consumer
+# agents recognize the by-reference stub as a read-instruction, not content;
+# (c) single-path review measures diff-LOC at scope_check (banded artifact,
+# reset-soft evicted) + chunked hunk strategy; (d) pre-flight covered-allow
+# writes deny-outcome records (behavioral via aggregator) and weekly-report
+# surfaces the guard funnel; (e) fix iterations are delta-shaped in BOTH the
+# template source and its compiled workflow region (compile-sync proof).
+K289_OK=1
+K289_MISS=""
+{ /usr/bin/grep -qF 'rules_mode: "by-reference"' "$ROOT/bin/modules/config.cjs" \
+  && /usr/bin/grep -qF 'rubric_mode: "by-reference"' "$ROOT/bin/modules/config.cjs" \
+  && /usr/bin/grep -qF 'options.rulesByReference !== undefined' "$ROOT/bin/modules/dispatch.cjs" \
+  && /usr/bin/grep -qF 'rulesByReference: rulesByReference,' "$ROOT/bin/modules/dispatch.cjs"; } || { K289_OK=0; K289_MISS="$K289_MISS mode-config"; }
+K289_TMP=$(mktemp -d)
+mkdir -p "$K289_TMP/.devt/state"
+printf 'active: true\nworkflow_id: "fx-1"\nworkflow_type: "dev"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K289_TMP/.devt/state/workflow.yaml"
+K289_DEF=$( (cd "$K289_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev 2>/dev/null) || true)
+K289_INL=$( (cd "$K289_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev --inline-rules 2>/dev/null) || true)
+if ! { printf '%s' "$K289_DEF" | /usr/bin/grep -q "context_loaded_contract" \
+  && ! printf '%s' "$K289_INL" | /usr/bin/grep -q "context_loaded_contract"; }; then
+  K289_OK=0; K289_MISS="$K289_MISS by-reference-default-behavioral"
+fi
+K289_STUBAWARE=$(/usr/bin/grep -lF 'a `(by-reference: …)` stub' "$ROOT/agents/programmer.md" "$ROOT/agents/code-reviewer.md" "$ROOT/agents/verifier.md" "$ROOT/agents/architect.md" "$ROOT/agents/researcher.md" "$ROOT/agents/tester.md" 2>/dev/null | wc -l | tr -d ' ')
+[ "$K289_STUBAWARE" = "6" ] || { K289_OK=0; K289_MISS="$K289_MISS stub-awareness($K289_STUBAWARE/6)"; }
+{ /usr/bin/grep -qF 'review-depth.txt' "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qF 'diff_loc=${DIFF_LOC}' "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qF 'enumerate per-file hunks first' "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qF '/^review-depth\.txt$/' "$ROOT/bin/modules/state.cjs"; } || { K289_OK=0; K289_MISS="$K289_MISS diff-loc-review"; }
+printf '{"source":"preflight","ts":"2026-07-18T08:05:00Z","file_path":"/x/a.py"}\n{"source":"deny-outcome","ts":"2026-07-18T08:06:00Z","file_path":"/x/a.py","resolves_ts":"2026-07-18T08:05:00Z","outcome":"recovered-governed"}\n{"source":"preflight","ts":"2026-07-18T08:07:00Z","file_path":"/x/b.py"}\n' > "$K289_TMP/.devt/state/preflight-denies.jsonl"
+K289_GUARD=$(node -e "
+const wr=require('$ROOT/bin/modules/weekly-report.cjs');
+const g=wr.aggregateGuardTelemetry('$K289_TMP', 0, 9999999999999);
+if (g.available && g.total_denies===2 && g.recovered_governed===1 && g.preflight_unrecovered===1 && wr.renderGuardSection(g).includes('## Guard Telemetry')) process.stdout.write('ok');
+" 2>/dev/null || true)
+rm -rf "$K289_TMP"
+[ "$K289_GUARD" = "ok" ] || { K289_OK=0; K289_MISS="$K289_MISS guard-telemetry"; }
+/usr/bin/grep -qF "deny-outcome" "$ROOT/hooks/pre-flight-guard.sh" || { K289_OK=0; K289_MISS="$K289_MISS hook-outcome-writer"; }
+{ /usr/bin/grep -qF 'delta-shaped' "$ROOT/templates/dispatch/envelopes/programmer.tmpl.md" \
+  && /usr/bin/grep -qF 'delta-shaped' "$ROOT/workflows/dev-workflow.md" \
+  && /usr/bin/grep -qF 'delta-shaped' "$ROOT/workflows/quick-implement.md"; } || { K289_OK=0; K289_MISS="$K289_MISS delta-fix-sync"; }
+if [ "$K289_OK" -eq 1 ]; then
+  pass "K289: token-cut batch (by-reference default behavioral, stub-awareness x6, diff-LOC review depth, guard-telemetry funnel, delta-shaped fix sync)"
+else
+  fail "K289: token-cut batch surface regressed:$K289_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

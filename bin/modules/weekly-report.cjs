@@ -7,6 +7,8 @@
  * Zero external dependencies.
  */
 
+const fs = require("fs");
+const path = require("path");
 const { execFileSync } = require("child_process");
 const { atomicWriteFileSync } = require("./io.cjs");
 
@@ -239,6 +241,70 @@ function renderMemorySection(memoryEvents) {
 }
 
 // ---------------------------------------------------------------------------
+// Guard telemetry — deny/recovery funnel from .devt/state/preflight-denies.jsonl.
+// Surfaces per-source deny counts plus the outcome split the pre-flight guard
+// records on covered re-edits (recovered-governed vs recovered-ungoverned) and
+// the unrecovered remainder. Both strict signal (governed recoveries) and the
+// noise class (ungoverned) are shown — a single aggregate would hide which
+// lever to pull (tune the guard vs grow the memory layer's affects coverage).
+// ---------------------------------------------------------------------------
+
+function aggregateGuardTelemetry(projectRoot, fromMs, toMs) {
+  const logPath = path.join(projectRoot, ".devt", "state", "preflight-denies.jsonl");
+  if (!fs.existsSync(logPath)) return { available: false };
+  let recs;
+  try {
+    recs = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((r) => r && typeof r.ts === "string");
+  } catch {
+    return { available: false };
+  }
+  const inWindow = recs.filter((r) => {
+    const t = new Date(r.ts).getTime();
+    return Number.isFinite(t) && t >= fromMs && t < toMs;
+  });
+  const denies = inWindow.filter((r) => r.source !== "deny-outcome" && r.source !== "resolution");
+  const outcomes = inWindow.filter((r) => r.source === "deny-outcome");
+  const bySource = {};
+  for (const d of denies) {
+    const key = d.rule_id ? `${d.source}/${d.rule_id}` : (d.source || "unknown");
+    bySource[key] = (bySource[key] || 0) + 1;
+  }
+  // Resolution matching runs against the FULL record set, not just the window —
+  // a deny near the window edge may recover just outside it; counting that as
+  // unrecovered would overstate the stuck signal.
+  const resolvedTs = new Set(recs.filter((r) => r.source === "deny-outcome").map((r) => r.resolves_ts));
+  const preflightDenies = denies.filter((d) => d.source === "preflight");
+  const unrecovered = preflightDenies.filter((d) => !resolvedTs.has(d.ts)).length;
+  return {
+    available: true,
+    total_denies: denies.length,
+    by_source: bySource,
+    recovered_governed: outcomes.filter((o) => o.outcome === "recovered-governed").length,
+    recovered_ungoverned: outcomes.filter((o) => o.outcome === "recovered-ungoverned").length,
+    preflight_unrecovered: unrecovered,
+  };
+}
+
+function renderGuardSection(guard) {
+  if (!guard || !guard.available) return "";
+  const g = guard;
+  const lines = ["## Guard Telemetry", ""];
+  lines.push(`- Denies in window: ${g.total_denies}`);
+  for (const [key, n] of Object.entries(g.by_source).sort((a, b) => b[1] - a[1])) {
+    lines.push(`  - ${key}: ${n}`);
+  }
+  lines.push(`- Pre-flight recoveries — governed: ${g.recovered_governed}, ungoverned: ${g.recovered_ungoverned}`);
+  lines.push(`- Pre-flight denies never recovered: ${g.preflight_unrecovered}`);
+  if (g.recovered_ungoverned > g.recovered_governed && g.recovered_ungoverned > 3) {
+    lines.push(`- Signal: recoveries are mostly ':: ungoverned' — the guard is firing on paths the memory layer does not govern; extend affects_paths coverage or tune memory.preflight_mode.`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -265,14 +331,15 @@ function run(subcommand, args) {
       const fromMs = new Date(window.from).getTime();
       const toMs = new Date(window.to).getTime() + 24 * 3600 * 1000;
       const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);
-      const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents);
+      const guard = aggregateGuardTelemetry(projectRoot, fromMs, toMs);
+      const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents) + renderGuardSection(guard);
 
       if (outputPath) {
         atomicWriteFileSync(outputPath, report);
-        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents };
+        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents, guard_telemetry: guard };
       }
 
-      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents };
+      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents, guard_telemetry: guard };
     }
 
     default:
@@ -280,4 +347,4 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, computeWindow, parseGitLog, renderMarkdown, aggregateMemoryEvents, renderMemorySection };
+module.exports = { run, computeWindow, parseGitLog, renderMarkdown, aggregateMemoryEvents, renderMemorySection, aggregateGuardTelemetry, renderGuardSection };

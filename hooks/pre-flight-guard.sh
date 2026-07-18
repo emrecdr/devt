@@ -110,7 +110,34 @@ node -e "
     const esc = (s) => s.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\\$&');
     const covered = new RegExp('^PREFLIGHT [^\\\\n]*(' + esc(fp) + '|' + esc(fileBase) + ')', 'm').test(body);
 
-    if (covered) process.exit(0);
+    if (covered) {
+      // Deny-outcome telemetry: a covered edit following a same-file deny is
+      // the guard's success case. Record which class the recovery took so
+      // weekly-report can split governed recoveries from ungoverned noise —
+      // the funnel must not be silent. Best-effort: failure falls through to
+      // plain allow; each deny is resolved at most once.
+      try {
+        const oLogPath = path.join(dir, '.devt', 'state', 'preflight-denies.jsonl');
+        if (fs.existsSync(oLogPath)) {
+          const recs = fs.readFileSync(oLogPath, 'utf8').split('\\n').filter(Boolean)
+            .map(function (l) { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          const lastDeny = recs.slice().reverse().find(function (r) { return r.source === 'preflight' && r.file_path === fp; });
+          const alreadyResolved = lastDeny && recs.some(function (r) { return r.source === 'deny-outcome' && r.resolves_ts === lastDeny.ts; });
+          if (lastDeny && !alreadyResolved) {
+            const ungov = new RegExp('^PREFLIGHT [^\\\\n]*(' + esc(fp) + '|' + esc(fileBase) + ')[^\\\\n]*:: ungoverned', 'm').test(body);
+            const rec = JSON.stringify({
+              source: 'deny-outcome',
+              ts: new Date().toISOString(),
+              file_path: fp,
+              resolves_ts: lastDeny.ts,
+              outcome: ungov ? 'recovered-ungoverned' : 'recovered-governed'
+            });
+            fs.appendFileSync(oLogPath, rec + '\\n');
+          }
+        }
+      } catch { /* telemetry is best-effort — never block the allow */ }
+      process.exit(0);
+    }
 
     // Governance check — only short-circuit when a memory layer EXISTS and
     // no doc's affects_paths matches this file. That's the field-observed

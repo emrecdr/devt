@@ -33,6 +33,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       - Code-review retry: read `.devt/state/review.md` (full quality findings)
       - Verifier retry: read `.devt/state/verification.json` and address each entry in `revisions[]` by AC id. The structured `revisions[]` list IS the contract — each entry contains `id`, `criterion`, `gap`, and `evidence`. Address the gap directly; do not re-parse `verification.md`. The verifier rubric (`references/rubrics/dev.v1.md`) defines the verdict semantics.
       - Both: address review findings first, then verification gaps.
+      - Fix iterations are delta-shaped: work from the feedback entries and the files they cite. Do NOT redo reuse analysis, do NOT re-read scan/plan/research artifacts a prior iteration already consumed, and do NOT rewrite untouched impl-summary sections — update only the sections the fix changes, plus Deviations.
     </review_feedback>
     <scope_requirements>
       Extract every discrete requirement from the best available source (spec.md, plan.md, or task description) and list them numbered:

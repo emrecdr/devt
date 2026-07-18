@@ -45,7 +45,7 @@ BEFORE verifying, load the following in order:
 6. Read `.devt/state/review.md` — what the reviewer approved
 7. Read `.devt/state/plan.md` if it exists — the original plan (from `/devt:plan`)
 8. Read `.devt/state/decisions.md` if it exists — captured decisions (from `/devt:workflow --mode=clarify`)
-9. **Governing rules (project)** — Project `CLAUDE.md` is auto-injected into your context by the harness: never Read it from disk (the `<claude_md>` tag carries only a by-reference note). When the dispatch includes a `<governing_rules>` block with a `<quality_gates>` sub-tag, treat its contents as authoritative and SKIP the on-disk Read of `.devt/rules/quality-gates.md`. Only Read from disk when the block is absent or the sub-tag is empty.
+9. **Governing rules (project)** — Project `CLAUDE.md` is auto-injected into your context by the harness: never Read it from disk (the `<claude_md>` tag carries only a by-reference note). When the dispatch includes a `<governing_rules>` block with a `<quality_gates>` sub-tag, treat its contents as authoritative and SKIP the on-disk Read of `.devt/rules/quality-gates.md`. Only Read from disk when the block is absent, the sub-tag is empty, or the sub-tag carries a `(by-reference: …)` stub — the default dispatch mode: the stub instructs you to Read the named file from disk; it is not the content.
 10. Read `guardrails/golden-rules.md` (especially Rule 10: Evidence Before Claims)
 11. Read `guardrails/generative-debt-checklist.md` (AFTER coding verification gates)
 

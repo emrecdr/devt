@@ -390,6 +390,8 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 **Agent behavior.** Those agents prefer inline content over on-disk Reads when the block is present; fall back to disk Reads when a specific sub-tag is empty (project lacks that file) or `governing_rules.content` is empty (no project rules). The `<claude_md>` sub-tag carries only the by-reference stub — agents never Read `CLAUDE.md` from disk, since the harness has already injected it.
 
+**Delivery mode.** `dispatch render-filled` swaps every `governing_rules.content` body (and the inline rubric) for a read-from-disk stub by default — config `dispatch.rules_mode` / `dispatch.rubric_mode`, per-call flags win — and auto-injects the `<context_loaded_contract>` so selective reading stays verifier-checkable. `--inline-rules` restores full inlining for worktree-isolated dispatches. Agents recognize the `(by-reference: …)` stub as an instruction to Read from disk, not as content (stub-awareness clause in each consumer agent's context_loading). Lanes have always defaulted to by-reference; this extends the same economics to single dispatches.
+
 **Drift detection.** The `rules_hash` (SHA-256 first 16 chars over all discovered rule file contents in stable order) lets agents detect mid-workflow drift if a rule file is edited between init and agent dispatch.
 
 ---
