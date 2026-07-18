@@ -4,6 +4,10 @@
 
 [One sentence: what this builds and why]
 
+## Key Decisions (most-likely-to-change first)
+
+[One line per decision the plan commits to, ordered by how likely the user is to want it changed — data model changes, new interfaces/contracts, anything user-facing first; mechanical choices last. Format: decision — alternative considered]
+
 ## Files
 
 | Action | Path                  | Purpose        |

@@ -161,6 +161,10 @@ The plan must include:
 
 One sentence: what this builds and why.
 
+### Key Decisions (most-likely-to-change first)
+
+The decisions the plan commits to, ordered by how likely the user is to want them changed — data model changes, new interfaces/contracts, and anything user-facing first; mechanical or internal choices last. One line each: the decision plus the alternative considered. This section leads the plan body so review attention lands where wrongness is most expensive.
+
 ### Files Table
 
 | Action | Path                  | Purpose        |
@@ -283,6 +287,7 @@ If the plan touches fewer than 3 modules, skip this step.
 Show the plan summary:
 
 - **Task goal**: one sentence
+- **Key decisions**: the most-likely-to-change decisions, in plan order
 - **Files to change**: count of create vs modify
 - **Tasks**: count and brief description of each
 - **Estimated complexity**: SIMPLE / STANDARD / COMPLEX

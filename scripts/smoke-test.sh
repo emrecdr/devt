@@ -17380,6 +17380,44 @@ else
   fail "K287: small-surface fixes regressed (read-sidecar hoist or scope_hint suppression)"
 fi
 
+# K288: platform-alignment surfaces — (a) read-before-edit-guard demoted to
+# full-only (native runtime enforces Edit-without-Read); (b) bash-guard deny
+# carries the recover-don't-halt grammar (behavioral, run from a bare temp dir
+# so the deny is NOT logged into this repo's preflight-denies.jsonl / stuck
+# counter); (c) setup scaffolds machine-resolved narrow devt-CLI allow rules
+# (auto mode drops broad rules; ${CLAUDE_PLUGIN_ROOT} never substituted in
+# settings files); (d) RETIREMENT-WATCH register carries both standing
+# disciplines; (e) prompt-surface lines (plan Key Decisions, questioning
+# tiebreak, conservative deviation default, verifier anti-self-downgrade +
+# functional-surface declaration + rubric reversal bar); (f) root CHANGELOG
+# stays rotated (released sections capped; archive holds the rest).
+K288_OK=1
+K288_MISS=""
+/usr/bin/grep -qF '"read-before-edit-guard.sh": ["full"]' "$ROOT/hooks/run-hook.js" || { K288_OK=0; K288_MISS="$K288_MISS read-before-edit-profile"; }
+K288_TMP=$(mktemp -d)
+K288_BG=$( (cd "$K288_TMP" && printf '%s' '{"tool_input":{"command":"git commit --no-verify -m x"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null) || true)
+rmdir "$K288_TMP" 2>/dev/null || true
+if ! { printf '%s' "$K288_BG" | /usr/bin/grep -q '"decision":"deny"' && printf '%s' "$K288_BG" | /usr/bin/grep -q "Deny is a redirect, not a stop"; }; then
+  K288_OK=0; K288_MISS="$K288_MISS bash-guard-recovery-grammar"
+fi
+/usr/bin/grep -qF 'Bash(node "${cliPath}" *)' "$ROOT/bin/modules/setup.cjs" || { K288_OK=0; K288_MISS="$K288_MISS setup-narrow-allow"; }
+{ /usr/bin/grep -q "Strip-candidate ledger" "$ROOT/docs/RETIREMENT-WATCH.md" && /usr/bin/grep -q "Native-convergence table" "$ROOT/docs/RETIREMENT-WATCH.md"; } || { K288_OK=0; K288_MISS="$K288_MISS retirement-watch"; }
+{ /usr/bin/grep -qF 'Key Decisions (most-likely-to-change first)' "$ROOT/workflows/create-plan.md" \
+  && /usr/bin/grep -qF 'Key Decisions (most-likely-to-change first)' "$ROOT/templates/implementation-plan-template.md" \
+  && /usr/bin/grep -qF 'Tiebreak by architectural impact' "$ROOT/references/questioning-guide.md" \
+  && /usr/bin/grep -qF 'default to the most conservative one' "$ROOT/agents/programmer.md" \
+  && /usr/bin/grep -qF 'Downgrades demand evidence' "$ROOT/agents/verifier.md" \
+  && /usr/bin/grep -qF 'Declare your functional surface' "$ROOT/agents/verifier.md" \
+  && /usr/bin/grep -qF 'A self-downgrade without evidence is itself a shortcut' "$ROOT/references/rubrics/dev.v1.md" \
+  && /usr/bin/grep -qF 'claude --bg' "$ROOT/docs/operator-guide/DISPATCH-RECIPES.md"; } || { K288_OK=0; K288_MISS="$K288_MISS prompt-surfaces"; }
+K288_RELN=$({ /usr/bin/grep -c '^## \[0' "$ROOT/CHANGELOG.md" || true; })
+{ [ "$K288_RELN" -le 40 ] && /usr/bin/grep -q '^## \[0\.' "$ROOT/docs/archive/CHANGELOG-historical.md"; } || { K288_OK=0; K288_MISS="$K288_MISS changelog-rotation($K288_RELN)"; }
+if [ "$K288_OK" -eq 1 ]; then
+  pass "K288: platform-alignment surfaces (guard demotion, deny grammar, narrow allow scaffold, retirement watch, prompt lines, changelog rotation)"
+else
+  fail "K288: platform-alignment surface regressed:$K288_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

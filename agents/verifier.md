@@ -184,6 +184,7 @@ Execute concrete verification checks:
 4. For new services: verify DI wiring (grep for the class in dependency injection)
 5. For new events: verify event registration and handler wiring
 6. For new models: verify migration exists and model is imported
+7. **Declare your functional surface**: in verification.md's Quality Gates section, list which project-declared runnable surfaces (quality-gate commands, test suites, E2E suites named in `.devt/rules/`) you executed and which you did not, with a one-line reason per skip (`NOT RUN — unaffected by this diff`). This is a legibility contract, not an execution mandate — an honest "not run" beats an implied "covered".
 
 Record pass/fail for each check with the exact command and output.
 </step>
@@ -268,6 +269,7 @@ Before writing the final verification.md, verify your own verdict:
 3. **Status field is one of**: VERIFIED | GAPS_FOUND | FAILED | DONE_WITH_CONCERNS. Any other value is invalid.
 4. **VERIFIED requires zero unmet criteria** — if any criterion is "Not Met", the verdict is GAPS_FOUND, not VERIFIED. No exceptions.
 5. **NEEDS_HUMAN items do not block VERIFIED** — they are explicit non-verdicts; report them in their own row but do not downgrade the overall verdict over them.
+6. **Downgrades demand evidence** — if you identified an issue during verification and then decided it is not serious, the report must show the downgrade WITH the evidence that justified it (a passing test, a spec line permitting the behavior). Identifying a problem and then talking yourself out of it without new evidence is the known evaluator failure mode; silent downgrades are banned.
 
 **Banned phrases**: "appears to work", "should be verified", "tests likely pass" — replace each with the actual command output or remove the criterion.
 </self_check>

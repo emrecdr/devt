@@ -94,6 +94,7 @@ When multiple gray areas exist, they often have dependencies — the answer to o
 1. **Identify root decisions** — the choices that cascade into others (e.g., "is this a CLI tool or a daemon?" gates almost everything else).
 2. **Walk depth-first** — resolve roots first, then their dependents.
 3. **Cut subtrees** — if a root answer eliminates a branch entirely, don't ask the dependents in that branch.
+4. **Tiebreak by architectural impact** — when two candidate questions compete for the next slot, ask the one whose answer would change the architecture (data model, interfaces, contracts) first; a late answer there invalidates the most downstream work.
 
 This prevents contradictions where Q3's answer invalidates Q1's framing. It also keeps the user's cognitive load minimal — they're never asked about a sub-branch that won't apply.
 

@@ -32,7 +32,7 @@ The `DEVT_HOOK_PROFILE` env var (default `standard`) controls which hooks fire:
 | `stop.sh` | ✓ | ✓ | ✓ |
 | `workflow-context-injector.sh` | – | ✓ | ✓ |
 | `subagent-status.sh` | – | ✓ | ✓ |
-| `read-before-edit-guard.sh` | – | ✓ | ✓ |
+| `read-before-edit-guard.sh` | – | – | ✓ |
 | `pre-flight-guard.sh` | – | ✓ | ✓ |
 | `memory-auto-index.sh` | – | ✓ | ✓ |
 | `bash-guard.sh` | – | ✓ | ✓ |
@@ -128,7 +128,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 195-deep drift-guard stack K94-K287) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 196-deep drift-guard stack K94-K288) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 

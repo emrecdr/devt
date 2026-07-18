@@ -31,7 +31,11 @@ const HOOK_PROFILES = {
   "workflow-context-injector.sh": ["standard", "full"],
   "subagent-status.sh": ["standard", "full"],
   "prompt-guard.sh": ["full"],
-  "read-before-edit-guard.sh": ["standard", "full"],
+  // read-before-edit-guard.sh: demoted to full-only — Claude Code natively
+  // errors on Edit-without-Read, making the per-Edit reminder redundant in
+  // normal operation; kept at full for environments where the native check
+  // is absent or a pre-emptive cue is worth the per-fire cost.
+  "read-before-edit-guard.sh": ["full"],
   // Two-Tier Pre-Flight enforcement hooks.
   // pre-flight-guard.sh: PreToolUse on Edit/Write — verifies scratchpad has a
   //   PREFLIGHT line covering the target file. memory.preflight_mode controls

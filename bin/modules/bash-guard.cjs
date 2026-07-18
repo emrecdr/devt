@@ -182,13 +182,20 @@ function run(subcommand) {
     /* never block on log failure */
   }
 
+  // Recovery grammar appended once at emit time (not per-pattern): a deny is
+  // a redirect, not a halt — the agent should keep working via a safer path.
+  // The jsonl record above keeps the raw rule reason for telemetry classification.
+  const reasonOut =
+    verdict.reason +
+    " Deny is a redirect, not a stop: continue the task via a safer path to the same goal — do not retry the exact command and do not work around the guard. If no safer path exists, ask the user.";
+
   process.stdout.write(
     JSON.stringify({
       decision: "deny",
       source: verdict.source,
       rule_id: verdict.rule_id,
-      reason: verdict.reason,
-      hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: verdict.reason },
+      reason: reasonOut,
+      hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: reasonOut },
     }),
   );
   return 0;

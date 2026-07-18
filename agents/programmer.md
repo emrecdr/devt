@@ -241,7 +241,7 @@ If implementation surfaced non-obvious patterns worth promoting (hidden constrai
 <deviation_rules>
 When encountering unexpected issues during implementation:
 
-**Shared process for Rules 1-3**: Fix inline → add/update tests if applicable → verify fix → continue task → track deviation in summary.
+**Shared process for Rules 1-3**: Fix inline (when several fixes are valid, default to the most conservative one) → add/update tests if applicable → verify fix → continue task → track deviation in summary.
 
 **Rule 1 (Auto-fix): Bugs** — Code doesn't work as intended (logic errors, type errors, null references, security flaws, race conditions). Fix inline, no permission needed.
 

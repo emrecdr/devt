@@ -177,6 +177,13 @@ node bin/devt-tools.cjs init review --bundle "<task>"
 # Cal #31.D G6 — opt-in compound CLI. Default `init review` returns the standard envelope-context payload. With `--bundle` flag, attaches the 3 most common post-init data-fetch steps in one call: preflight-generate, memory-signal count probe, graphify impact-plan computation (when graph is ready). Best-effort: any sub-step failure aggregates into bundle.errors[] so init.workflow_id always succeeds. Reduces 4-6 sequential CLI round-trips to 1; receipt #5 Q7b evidence: setup friction is dominated by CLI calls, not MCP or file reads
 ```
 
+## Auto-mode permissions
+
+Auto mode drops broad allow rules at entry (bare `Bash`, wildcarded interpreters like `Bash(node:*)`) — every devt CLI call then routes through the permission classifier, paying latency + a nonzero flag rate. Two ways to keep the CLI frictionless:
+
+- **Fresh projects**: `setup` scaffolds two narrow machine-resolved rules into `.claude/settings.json` — `Bash(node "<plugin-root>/bin/devt-tools.cjs" *)` in quoted and unquoted form. Narrow literal rules carry over into auto mode; the path is resolved at scaffold time because `${CLAUDE_PLUGIN_ROOT}` is never substituted inside settings files.
+- **Existing projects**: run any devt CLI call once in an auto-mode session and choose "Yes, don't ask again" — Claude Code saves a machine-specific allow rule to `.claude/settings.local.json`.
+
 ## Cross-references
 
 - `docs/AGENT-CONTRACTS.md` — agent + workflow contracts (consumed by these mechanisms)

@@ -513,6 +513,14 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
     if (!fs.existsSync(claudeDir)) {
       fs.mkdirSync(claudeDir, { recursive: true });
     }
+    // Narrow, machine-resolved allow rules for the devt CLI. Auto mode drops
+    // broad rules (bare "Bash", wildcarded interpreters like "Bash(node:*)")
+    // but carries narrow literal rules over — without these, every devt CLI
+    // call in an auto-mode session routes through the permission classifier.
+    // ${CLAUDE_PLUGIN_ROOT} is never substituted inside settings files, so the
+    // absolute path must be resolved at scaffold time; rule matching is literal
+    // text, so both the quoted and unquoted invocation forms are covered.
+    const cliPath = path.join(pluginRoot, "bin", "devt-tools.cjs");
     const defaultSettings = {
       $schema: "https://json.schemastore.org/claude-code-settings.json",
       permissions: {
@@ -527,6 +535,8 @@ function setupProject(templateName, pluginRoot, extraConfig, options) {
           "WebSearch",
           "Skill",
           "Task",
+          `Bash(node "${cliPath}" *)`,
+          `Bash(node ${cliPath} *)`,
         ],
         ask: [
           "Bash(rm -rf:*)",

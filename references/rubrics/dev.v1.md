@@ -42,6 +42,8 @@ For the `dev` workflow, every acceptance criterion must reach **Level 3 (Wired) 
 
 L5 (scope completeness) is the most common source of `needs_revision`: implementation works for AC-1..3 but silently dropped AC-4. Compare requirements from spec/plan against impl-summary evidence; any requirement without evidence becomes a `revisions[]` entry unless explicitly deferred to a later phase.
 
+L4 legibility: verification.md's Quality Gates section states which project-declared runnable surfaces (quality-gate commands, test/E2E suites named in `.devt/rules/`) were executed and which were not, one-line reason per skip. Legibility only — a declared "not run" does not by itself gate the verdict.
+
 ## Reject these shortcuts
 
 The verifier MUST NOT pass on any of the following signals alone — each is a verification shortcut that bypasses real verification. When encountered, emit `needs_revision` with the shortcut named in the `revisions[]` entry's `gap` field. This list anticipates the cheap-but-wrong paths a writer-agent will try first under iteration pressure (cookbook outcome-grader pattern: anticipate shortcuts).
@@ -54,6 +56,8 @@ The verifier MUST NOT pass on any of the following signals alone — each is a v
 - **Inferring AC coverage from `impl-summary.md::files_changed` count.** "12 files changed = probably covers all 6 ACs" is correlation, not evidence. Verifier MUST map each AC to specific impl-summary evidence (file:line, test name, or stated artifact).
 
 When a `revisions[]` entry references a shortcut, prefix the `gap` field with `[shortcut]:` so the next programmer pass recognizes the rejection pattern (e.g. `"gap": "[shortcut]: passed on absence of red tests for AC-3; what affirmative test exercises the empty-list path?"`).
+
+The same evidence bar binds the verifier's own reversals: an issue identified during verification may only be dropped (or excluded from `revisions[]`) with the downgrade and its justifying evidence recorded in verification.md — a passing test, a spec line permitting the behavior. A self-downgrade without evidence is itself a shortcut.
 
 ## `revisions[]` Array Shape
 

@@ -46,6 +46,10 @@ node bin/devt-tools.cjs dispatch render-lanes --out=/tmp/lane-envelopes/
 
 Paste each `/tmp/lane-envelopes/lane-L*.txt` into a parallel `Task()` call (one message, N Task tools). Lanes get the full canonical envelope + rubric self-grade directive without the orchestrator hand-rolling task text. This makes the hand-rolled-task-text-omits-rubric bypass structurally impossible.
 
+## Recipe 6 — Side audit in a separate headless session
+
+For an audit that should not share the current session's context or workflow state, `claude --bg "<task>"` (Research Preview) launches a detached background session instead of a subagent. Pair it with the concurrent-session discipline: generated/handoff files carry the spawning session's discriminator, and canonical `.devt/state/` writes belong to per-instance dirs (`state new-instance`).
+
 ## Gap not covered above?
 
 Raise it — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.
