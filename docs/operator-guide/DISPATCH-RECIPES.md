@@ -50,6 +50,15 @@ Paste each `/tmp/lane-envelopes/lane-L*.txt` into a parallel `Task()` call (one 
 
 For an audit that should not share the current session's context or workflow state, `claude --bg "<task>"` (Research Preview) launches a detached background session instead of a subagent. Pair it with the concurrent-session discipline: generated/handoff files carry the spawning session's discriminator, and canonical `.devt/state/` writes belong to per-instance dirs (`state new-instance`).
 
+## Recipe 7 — Cross-project orchestration (review a sibling project from this session)
+
+Field-proven shape for running a full `/devt:review` (single or parallel) against a project that is NOT this session's working directory — the orchestrator stays here, the target project's `.devt/state/` carries the workflow. Four blind spots and their compensations:
+
+1. **CLI calls**: prefix every devt-tools invocation with `cd <target-root> && ` — state, lanes, preflight, and diff-LOC all resolve from cwd. Render envelopes from the target cwd (`dispatch render-lanes --out=<dir>` / `render-filled --out=<file>`) and dispatch the emitted pointer stubs, which keep 50KB envelopes out of orchestrator context.
+2. **Subagents inherit the SESSION's cwd, not the target's**: prepend a root-pin preamble to every dispatch prompt — declare `<project_root>`, instruct `cd <target-root>` for Bash and absolute paths for Read/Grep/Glob, and note that the harness-injected CLAUDE.md belongs to the session project (the agent must Read the target's CLAUDE.md instead).
+3. **MCP servers bind the session root**: graphify MCP tools query the wrong graph — execute the impact plan through the Bash-callable `devt-tools graphify` wrappers (`blast-radius`, `neighbors`, `augment-impact-map`), which are cwd-resolved. Same args-VERBATIM contract.
+4. **Hooks log to the session project's ledger**: dispatch-hygiene warnings land in the session's `dispatch-warnings.jsonl`, not the target's — advisory noise here, and the target's finalize gates read the target's own ledger.
+
 ## Gap not covered above?
 
 Raise it — the workflow pattern probably warrants a new slash command or workflow file rather than a raw dispatch.

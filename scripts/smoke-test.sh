@@ -17541,6 +17541,51 @@ else
   fail "K290: delivery-completion surface regressed:$K290_MISS"
 fi
 
+# K291: first-field-receipt fixes — (a) check-agent-output resolves bare
+# artifact names against the STATE DIR (previously joined to project root:
+# every `state check-agent-output review.md` call reported the artifact
+# missing); (b) by-reference delivery bypasses the 96KB inline byte-cap so
+# oversized rules files still get stubs (field: 5 project rules invisible
+# to reviewers); inline mode keeps the cap; (c) the Axis-H claims gate reads
+# the LAST '## Dispatch warnings (session-scoped)' section, making the
+# documented append-a-corrected-section remedy satisfiable; (d) the Axis-H
+# gate is REGISTERED on both review workflow types' complete transitions
+# (advance-phase enforces it mechanically — the ordering-slip class); (e)
+# warm SendMessage-resume adopted for delta-shaped revisions + window
+# semantics in the Axis-H writer contracts + cross-project Recipe 7.
+K291_OK=1
+K291_MISS=""
+K291_TMP=$(mktemp -d)
+mkdir -p "$K291_TMP/.devt/state" "$K291_TMP/.devt/rules"
+printf 'active: true\nworkflow_id: "fx-3"\nworkflow_type: "code_review"\ncreated_at: "2026-07-18T08:00:00Z"\nfirst_created_at: "2026-07-18T08:00:00Z"\n' > "$K291_TMP/.devt/state/workflow.yaml"
+printf '# Review\n\nSubstantive content with several findings and enough body to pass the stub detector heuristics comfortably.\n\n## Dispatch warnings (session-scoped)\n\ncounts: raw_dispatch=5 resolved=0 cliff_signal=0\n\nstale first section\n\n## Dispatch warnings (session-scoped)\n\ncounts: raw_dispatch=0 resolved=0 cliff_signal=0\n\ncorrected append from window-scoped live read\n' > "$K291_TMP/.devt/state/review.md"
+K291_BARE=$( (cd "$K291_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state check-agent-output review.md 2>/dev/null) || true)
+if printf '%s' "$K291_BARE" | /usr/bin/grep -q '"missing":true'; then K291_OK=0; K291_MISS="$K291_MISS bare-name-resolution"; fi
+K291_AXH=$( (cd "$K291_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state assert-dispatch-warnings-acknowledged 2>/dev/null) || true)
+if ! printf '%s' "$K291_AXH" | /usr/bin/grep -q '"ok": *true'; then K291_OK=0; K291_MISS="$K291_MISS axis-h-last-section"; fi
+head -c 99000 /dev/zero | tr '\0' 'a' > "$K291_TMP/.devt/rules/coding-standards.md"
+K291_BYREF=$( (cd "$K291_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" init workflow "k291 bypass probe" 2>/dev/null) || true)
+{ printf '%s' "$K291_BYREF" | /usr/bin/grep -q 'by-reference: Read .devt/rules/coding-standards' \
+  && ! printf '%s' "$K291_BYREF" | /usr/bin/grep -q '"reason": *"over_budget"'; } || { K291_OK=0; K291_MISS="$K291_MISS byref-cap-bypass"; }
+printf '{"dispatch":{"rules_mode":"inline"}}' > "$K291_TMP/.devt/config.json"
+K291_INL=$( (cd "$K291_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" init workflow "k291 bypass probe" 2>/dev/null) || true)
+printf '%s' "$K291_INL" | /usr/bin/grep -q '"reason": *"over_budget"' || { K291_OK=0; K291_MISS="$K291_MISS inline-cap-kept"; }
+rm -rf "$K291_TMP"
+K291_REG=$({ /usr/bin/grep -c 'assert-dispatch-warnings-acknowledged' "$ROOT/workflows/_phase-gates.yaml" || true; })
+[ "$K291_REG" = "2" ] || { K291_OK=0; K291_MISS="$K291_MISS phase-gate-registry($K291_REG/2)"; }
+/usr/bin/grep -qF '"assert-dispatch-warnings-acknowledged": assertDispatchWarningsAcknowledged' "$ROOT/bin/modules/state.cjs" || { K291_OK=0; K291_MISS="$K291_MISS gate-fns-map"; }
+{ /usr/bin/grep -qF 'Delta-shaped revisions prefer a warm resume' "$ROOT/workflows/code-review.steps.md" \
+  && /usr/bin/grep -qF 'ADOPTED' "$ROOT/docs/RETIREMENT-WATCH.md"; } || { K291_OK=0; K291_MISS="$K291_MISS warm-resume-adoption"; }
+{ /usr/bin/grep -qF 'first_created_at' "$ROOT/agents/code-reviewer.md" \
+  && /usr/bin/grep -qF 'first_created_at' "$ROOT/references/rubrics/code_review.v1.md" \
+  && /usr/bin/grep -qF -- '--since=<first_created_at>' "$ROOT/workflows/code-review.steps.md"; } || { K291_OK=0; K291_MISS="$K291_MISS axis-h-window-prose"; }
+/usr/bin/grep -qF 'Recipe 7 — Cross-project orchestration' "$ROOT/docs/operator-guide/DISPATCH-RECIPES.md" || { K291_OK=0; K291_MISS="$K291_MISS recipe-7"; }
+if [ "$K291_OK" -eq 1 ]; then
+  pass "K291: field-receipt fixes (bare-name state-dir resolution, by-ref byte-cap bypass + inline cap kept, axis-H last-section + registered on complete, warm-resume adoption, window prose, cross-project recipe)"
+else
+  fail "K291: field-receipt fix surface regressed:$K291_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

@@ -44,7 +44,7 @@ Real improvements with no current consumer — do NOT ship before the named trig
 
 - **Headless-Ask audit** (AskUserQuestion surfaces terminate headless `claude -p` runs): audit arch-scanner auto-wire, curator promotion, post-impl graphify refresh for config-backed non-interactive defaults. TRIGGER: first field evidence of devt running under headless/auto-mode.
 - **Enforced active-interaction verification** (verifier must execute declared runnable surfaces at STANDARD+; the legible declare-what-ran contract ships already). TRIGGER: a receipt showing the static verifier missing a wiring-class bug.
-- **Warm SendMessage-resume for verifier revision loops**. TRIGGER: see persistent-subagent row above.
+- **Warm SendMessage-resume for verifier revision loops** — ADOPTED (field receipt: a two-anchor revision round closed warm at roughly a sixth of cold-dispatch cost — writer fix 4 tool calls vs 10, verifier re-grade 4 vs 22) as the preferred RETRY path for delta-shaped revisions in the shared review steps, with automatic cold fallback (fresh-eyes preserved for structural revisions; handles die at compaction). The persistent-subagent convergence row above stays a watch item for platform-managed handles.
 
 ## Cross-references
 

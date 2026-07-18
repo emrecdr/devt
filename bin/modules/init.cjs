@@ -297,9 +297,16 @@ const CLAUDE_MD_BY_REFERENCE_STUB =
 const RULES_BY_REFERENCE_STUB = (key) =>
   `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
 
-function loadGoverningRules(projectRoot) {
+function loadGoverningRules(projectRoot, opts) {
   const result = { content: {}, paths_included: [], paths_excluded: [], rules_hash: null, total_bytes: 0, warnings: [] };
   if (!projectRoot) return result;
+  // inlineByteCap=false (by-reference callers): the 96KB cap exists to protect
+  // DISPATCH size, so it must not apply when bodies become ~120B stubs — an
+  // over_budget exclusion in by-ref mode means the file never even gets a stub
+  // and agents are never told it exists (field-observed: 5 project rules
+  // invisible to reviewers). rules_hash is unaffected either way — it is
+  // computed over ALL candidates before the budget branch.
+  const inlineByteCap = !opts || opts.inlineByteCap !== false;
 
   // Discover candidate files in priority order. All path.join calls use
   // either project-root + fixed constant suffix, or rulesDir + a name from
@@ -366,7 +373,7 @@ function loadGoverningRules(projectRoot) {
       result.paths_excluded.push({ name: c.name, bytes: buf.length, reason: "harness_injected" });
       continue;
     }
-    if (totalBytes + buf.length <= MAX_GOVERNING_RULES_BYTES) {
+    if (!inlineByteCap || totalBytes + buf.length <= MAX_GOVERNING_RULES_BYTES) {
       result.content[c.name] = buf.toString("utf8");
       result.paths_included.push({ name: c.name, bytes: buf.length });
       totalBytes += buf.length;
@@ -769,8 +776,6 @@ function initWorkflow(task, pluginRoot, initVerb) {
       return r.content;
     })(),
     governing_rules: (() => {
-      const r = loadGoverningRules(projectRoot);
-      warnings.push(...r.warnings);
       // Delivery-mode resolution mirrors cmdRenderFilled: config
       // dispatch.rules_mode (default by-reference) decides whether the
       // compound payload carries full rule bodies or per-file stubs. The
@@ -778,8 +783,11 @@ function initWorkflow(task, pluginRoot, initVerb) {
       // stubbing HERE is what makes the canonical LLM-fill dispatch paths
       // by-reference — and keeps the rules corpus out of orchestrator
       // context entirely. CLAUDE.md is already stubbed at load. Inline mode
-      // (config escape) returns full bodies unchanged.
+      // (config escape) returns full bodies unchanged. By-ref bypasses the
+      // inline byte-cap so oversized rules still get stubs.
       const byRef = ((config.dispatch || {}).rules_mode || "by-reference") !== "inline";
+      const r = loadGoverningRules(projectRoot, { inlineByteCap: !byRef });
+      warnings.push(...r.warnings);
       let content = r.content;
       let stubbedBytes = 0;
       if (byRef) {

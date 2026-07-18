@@ -68,6 +68,7 @@ workflow_types:
         - assert-knowledge-candidates-tagged
         - assert-auto-curator-considered
         - assert-verifier-ran
+        - assert-dispatch-warnings-acknowledged
 
   code_review_parallel:
     # Intermediate phases — raw-dispatch gate only
@@ -97,6 +98,7 @@ workflow_types:
         - assert-knowledge-candidates-tagged
         - assert-auto-curator-considered
         - assert-verifier-ran
+        - assert-dispatch-warnings-acknowledged
 
   dev:
     # Intermediate phases — raw-dispatch gate only

@@ -389,7 +389,7 @@ function applySubstitutions(template, subs) {
   return out;
 }
 
-function buildSubstitutionTable(agent) {
+function buildSubstitutionTable(agent, loadOpts) {
   const { findProjectRoot } = require("./config.cjs");
   const { getMergedConfig } = require("./config.cjs");
   const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars } = require("./init.cjs");
@@ -406,7 +406,7 @@ function buildSubstitutionTable(agent) {
   // loadGoverningRules / loadInlineGuardrails return { content, ... } shapes;
   // we hoist `content` to the top level so the regex substitution can index
   // by-key without an extra .content prop dance.
-  const gr = loadGoverningRules(projectRoot);
+  const gr = loadGoverningRules(projectRoot, loadOpts);
   const ig = loadInlineGuardrails(PLUGIN_ROOT);
   const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
   const gi = loadGraphImpact(projectRoot);
@@ -528,7 +528,6 @@ function cmdRenderFilled(target, options) {
     workflowId = resolveAutoWorkflowId();
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
-  const subs = buildSubstitutionTable(agent);
   const { CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB } = require("./init.cjs");
 
   // Delivery-mode resolution: an explicit option (true OR false) always wins —
@@ -537,7 +536,9 @@ function cmdRenderFilled(target, options) {
   // option undefined does `dispatch.rules_mode` / `dispatch.rubric_mode`
   // (default by-reference) decide. Resolved here rather than in the CLI router
   // so every render path — CLI, render-lanes base, hygiene-guard canonical
-  // envelope — agrees on the mode.
+  // envelope — agrees on the mode. Resolved BEFORE the substitution table is
+  // built: by-ref bypasses the inline byte-cap in loadGoverningRules so
+  // oversized rules still get stubs.
   let modeCfg = {};
   try {
     const { getMergedConfig } = require("./config.cjs");
@@ -549,6 +550,7 @@ function cmdRenderFilled(target, options) {
   const rubricByRef = options && options.rubricByReference !== undefined
     ? !!options.rubricByReference
     : (modeCfg.rubric_mode || "by-reference") !== "inline";
+  const subs = buildSubstitutionTable(agent, { inlineByteCap: !rulesByRef });
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
   // entries) section strip by exact `## Heading` match. Per-dispatch opt-in

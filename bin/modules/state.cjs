@@ -3424,10 +3424,17 @@ function checkAgentOutput(filePath, opts) {
   if (!filePath || typeof filePath !== "string") {
     return { ok: false, reason: "no path provided" };
   }
+  // Relative resolution tries project root first (preserves `.devt/state/x`
+  // style callers), then the state dir — workflow prose passes bare artifact
+  // names (`check-agent-output review.md`), which previously joined to the
+  // project ROOT and reported every state artifact as missing.
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const abs = path.isAbsolute(filePath)
-    ? filePath
-    : path.join(findProjectRoot(), filePath);
+  let abs = path.isAbsolute(filePath) ? filePath : path.join(findProjectRoot(), filePath);
+  if (!path.isAbsolute(filePath) && !fs.existsSync(abs)) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const inState = path.join(getStateDir(), filePath);
+    if (fs.existsSync(inState)) abs = inState;
+  }
   if (!fs.existsSync(abs)) {
     // A missing output is a substance FAILURE, not a pass. Consumers grep
     // `looks_like_stub == true` to detect non-substantive output; the prior
@@ -6023,6 +6030,7 @@ function _phaseGateFns() {
     "assert-lanes-registered": assertLanesRegistered,
     "assert-consolidator-dispatched": assertConsolidatorDispatched,
     "assert-reuse-analyzed": assertReuseAnalyzed,
+    "assert-dispatch-warnings-acknowledged": assertDispatchWarningsAcknowledged,
   };
   return PHASE_GATE_FNS_MEMO.value;
 }
@@ -6460,7 +6468,12 @@ function assertDispatchWarningsAcknowledged() {
     return { ok: false, reason: "review.md absent — nothing to check (run after the review step)" };
   }
   const review = fs.readFileSync(reviewPath, "utf8");
-  const secMatch = review.match(/^##\s+Dispatch warnings \(session-scoped\)\s*$([\s\S]*?)(?=^##\s|\n*$(?![\s\S]))/m);
+  // LAST section wins: the documented divergence remedy is appending a
+  // corrected section from a live read — a first-match parser made that
+  // remedy unsatisfiable (field-observed), and edit-in-place erases the
+  // pass-1 audit trail.
+  const secMatches = [...review.matchAll(/^##\s+Dispatch warnings \(session-scoped\)\s*$([\s\S]*?)(?=^##\s|\n*$(?![\s\S]))/gm)];
+  const secMatch = secMatches.length ? secMatches[secMatches.length - 1] : null;
   if (!secMatch) {
     return { ok: false, reason: "review.md has no '## Dispatch warnings (session-scoped)' section (rubric axis H)" };
   }

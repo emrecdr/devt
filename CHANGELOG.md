@@ -8,6 +8,26 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.173.0] - 2026-07-18
+
+### First field receipt of the by-reference stack (cal #55)
+
+The same evening v0.172.0 shipped, a full cross-project parallel review ran against a real consumer project — 3 community lanes + consolidator + verifier, APPROVED with VERIFIED 8/8 axes after one revision round. The by-reference layer held (97 KB of rules kept out of the payload; all three lanes honored the Context-Loaded contract; the verifier caught a from-memory citation), and the run surfaced five defects/gaps — all fixed here, each behaviorally gated. Two receipt items closed as not-bugs during diagnosis: the post-reset survival of dispatch-warnings records is documented RESET_EXEMPT forensics behavior, and the lane-echo field-count zero was the operator's own display artifact.
+
+### Fixed
+
+- **`state check-agent-output` resolved bare artifact names against the project ROOT, not the state dir** — every documented `check-agent-output review.md` call reported the artifact missing (`looks_like_stub: true`), which turns the verify step's substance pre-gate into a false BLOCK on any run that follows the prose verbatim. Relative names now try the project root first (preserving `.devt/state/x` callers) and fall back to the state dir. Caught live when the substance pre-gate flagged a 15 KB consolidated review as a stub.
+- **By-reference delivery now bypasses the 96 KB inline byte-cap.** The cap exists to protect dispatch size, but it ran before mode resolution — oversized rules files were excluded from `content` entirely, so in by-ref mode they never even became stubs and agents were never told they exist (field: 5 of a consumer project's 16 rules files invisible to reviewers; `stubbed_bytes_saved` 97,044 → 170,133 after the fix). `loadGoverningRules` gains an `inlineByteCap` option threaded from both delivery pipelines; inline mode keeps the cap; `rules_hash` semantics unchanged (it always covered all candidates).
+- **The Axis-H claims gate now reads the LAST `## Dispatch warnings (session-scoped)` section.** Its documented divergence remedy — append a corrected section from a live read — was unsatisfiable against a first-match parser; edit-in-place worked but erased the pass-1 audit trail. Appending under the same exact heading now supersedes while preserving history.
+- **Axis-H writer contract is window-scoped.** The ledger is RESET_EXEMPT (prior-session records persist by design), the gate counts only inside [workflow start, review.md mtime], but the writer instruction said "live read" with no window — a synthesis that honestly counted a prior day's record diverged systematically. The reviewer/rubric/steps contracts now state the window (`ts >= first_created_at`) and name the mechanical path (`dispatch warnings --since=<first_created_at>`).
+
+### Changed
+
+- **`assert-dispatch-warnings-acknowledged` is registered on both review workflow types' `complete` transitions** in the phase-gate registry — `advance-phase` now enforces it mechanically. Field-observed slip: an orchestrator ran the gate and `advance-phase complete` in one compound command without routing on the gate result, completing a workflow with the gate red; a registered gate makes that ordering error impossible.
+- **Warm SendMessage-resume adopted for delta-shaped revision rounds** (previously receipt-gated; the receipt landed): when every `revisions[]` entry is a point-fix and the writer agent is still resumable, the shared verify step's RETRY operator prefers resuming it with the revisions verbatim — field-measured a two-anchor fix at 4 tool calls warm vs 10 cold, and the paired verifier re-grade at 4 vs 22. Cold re-dispatch stays the automatic fallback (post-compaction, and fresh-eyes for structural revisions). RETIREMENT-WATCH row flipped to ADOPTED; the platform persistent-subagent row remains a watch item.
+- **DISPATCH-RECIPES Recipe 7 — cross-project orchestration**: the field-proven shape for reviewing a sibling project from the current session (cwd-pinned CLI, root-pin dispatch preamble, harness-injected CLAUDE.md caveat, cwd-resolved graphify CLI in place of session-bound MCP, hook-ledger location).
+- Gate **K291** pins the batch with behavioral checks (bare-name resolution from a fixture, byte-cap bypass vs inline-kept via a 99 KB fixture rule, last-section Axis-H pass on a two-section review.md, registry + prose greps). Drift-guard stack 198 → 199 deep (K94–K291).
+
 ## [0.172.0] - 2026-07-18
 
 ### By-reference delivery completed on the canonical dispatch paths (cal #54)
