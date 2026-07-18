@@ -291,6 +291,11 @@ const GOVERNING_RULES_PRIORITY = [
 const MAX_GOVERNING_RULES_BYTES = 96 * 1024;
 const CLAUDE_MD_BY_REFERENCE_STUB =
   "(not inlined: the harness auto-injects project CLAUDE.md into every devt subagent's context — content covered by rules_hash)";
+// Single source for the per-file by-reference stub. Both delivery pipelines
+// must emit byte-identical stub text — the consumer agents' stub-awareness
+// clause and the smoke gates pin this exact phrase.
+const RULES_BY_REFERENCE_STUB = (key) =>
+  `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
 
 function loadGoverningRules(projectRoot) {
   const result = { content: {}, paths_included: [], paths_excluded: [], rules_hash: null, total_bytes: 0, warnings: [] };
@@ -766,8 +771,29 @@ function initWorkflow(task, pluginRoot, initVerb) {
     governing_rules: (() => {
       const r = loadGoverningRules(projectRoot);
       warnings.push(...r.warnings);
+      // Delivery-mode resolution mirrors cmdRenderFilled: config
+      // dispatch.rules_mode (default by-reference) decides whether the
+      // compound payload carries full rule bodies or per-file stubs. The
+      // orchestrator fills dispatch placeholders verbatim from content, so
+      // stubbing HERE is what makes the canonical LLM-fill dispatch paths
+      // by-reference — and keeps the rules corpus out of orchestrator
+      // context entirely. CLAUDE.md is already stubbed at load. Inline mode
+      // (config escape) returns full bodies unchanged.
+      const byRef = ((config.dispatch || {}).rules_mode || "by-reference") !== "inline";
+      let content = r.content;
+      let stubbedBytes = 0;
+      if (byRef) {
+        content = {};
+        for (const [key, value] of Object.entries(r.content)) {
+          if (key === "CLAUDE.md") { content[key] = value; continue; }
+          content[key] = RULES_BY_REFERENCE_STUB(key);
+          stubbedBytes += Buffer.byteLength(String(value), "utf8");
+        }
+      }
       return {
-        content: r.content,
+        content,
+        delivery_mode: byRef ? "by-reference" : "inline",
+        stubbed_bytes_saved: stubbedBytes,
         paths_included: r.paths_included,
         paths_excluded: r.paths_excluded,
         rules_hash: r.rules_hash,
@@ -916,4 +942,4 @@ function runReviewBundle(taskText) {
   };
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB };

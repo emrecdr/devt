@@ -45,6 +45,8 @@ Every question costs the user time. Before asking, ask yourself: **can this be a
 
 A question the codebase could have answered is a question that wasted a turn.
 
+**Close with a blind-spot check.** The most expensive unknowns are the ones neither side thought to raise. Before finishing any questioning round, ask yourself: given the user's stated expertise level and what the codebase revealed, what unknown-unknowns has this interview not touched? Surface the top candidates as one final question — or explicitly record that none surfaced.
+
 ---
 
 ## How to Question

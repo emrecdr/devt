@@ -7,6 +7,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <guardrails_inline>
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>

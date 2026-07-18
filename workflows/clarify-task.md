@@ -85,6 +85,8 @@ For each gray area:
 
 4. **When the user picks the council option**, follow `${CLAUDE_PLUGIN_ROOT}/references/council-offramp.md` §3 to invoke and resume. After the council returns, capture the verdict per §3.2 (clarify caller writes a new `DEC-xxx` entry in `.devt/state/decisions.md` referencing the transcript).
 
+5. **Blind-spot round (last)**: before moving to Step 3, ask yourself — given the user's stated expertise level and the codebase context, what unknown-unknowns did the gray-area walk not touch? Surface the top 1-3 as ONE final AskUserQuestion, or note "no blind spots surfaced" in decisions.md.
+
 **Scope guardrail**: If the user suggests adding features beyond the task scope, acknowledge the idea and suggest capturing it as a follow-up. Do NOT expand the current task scope.
 </step>
 

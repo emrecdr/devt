@@ -331,9 +331,12 @@ function applySubstitutions(template, subs) {
   // Structured lookups — order matters: replace the bracketed forms BEFORE
   // any prefix-overlapping simple ref (e.g. {governing_rules.rules_hash}
   // would partial-match if the .content[X] regex were too loose).
-  out = out.replace(/\{governing_rules\.content\[\\?"([^"\\]+)\\?"\]\}/g, (m, key) => {
+  out = out.replace(/\{governing_rules\.content\[\\?"([^"\\]+)\\?"\]\}/g, (_m, key) => {
     const v = subs.governing_rules && subs.governing_rules.content && subs.governing_rules.content[key];
-    return v !== undefined ? v : m;
+    // A key absent from content means the file doesn't exist in this project.
+    // Emit the "(no … available — " fallback-notice grammar (classifyBlockBody:
+    // "empty") instead of leaking literal template syntax into the dispatch.
+    return v !== undefined ? v : `(no ${key} available — file not present in this project)`;
   });
   out = out.replace(/\{governing_rules\.rules_hash\}/g, () =>
     (subs.governing_rules && subs.governing_rules.rules_hash) || ""
@@ -526,7 +529,7 @@ function cmdRenderFilled(target, options) {
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
   const subs = buildSubstitutionTable(agent);
-  const { CLAUDE_MD_BY_REFERENCE_STUB } = require("./init.cjs");
+  const { CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB } = require("./init.cjs");
 
   // Delivery-mode resolution: an explicit option (true OR false) always wins —
   // render-lanes passes explicit values so its worktree opt-out (--inline-rules)
@@ -568,7 +571,7 @@ function cmdRenderFilled(target, options) {
     for (const key of Object.keys(subs.governing_rules.content)) {
       refContent[key] = key === "CLAUDE.md"
         ? CLAUDE_MD_BY_REFERENCE_STUB
-        : `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
+        : RULES_BY_REFERENCE_STUB(key);
     }
     subs.governing_rules = { ...subs.governing_rules, content: refContent };
   }
@@ -649,18 +652,12 @@ function cmdRenderFilled(target, options) {
     }
   }
 
-  // Context-Loaded contract rides with by-reference rules: the agent must
-  // record which rules files it actually Read, so the consolidator/verifier
-  // can check that a lane's reads cover the rules its findings depend on.
-  // This is the cheap gate that keeps selective reading honest — without it,
-  // a weaker model skipping every Read is invisible.
-  if (rulesByRef) {
-    const contract = `    <context_loaded_contract>governing_rules are by-reference: Read the rules files relevant to your scope from disk, and record every file you actually read in a "## Context Loaded" section of your output artifact (name + full/section read). The verifier checks that your reads cover the rules your findings depend on.</context_loaded_contract>\n  `;
-    const lastIdx = out.lastIndexOf("</context>");
-    if (lastIdx >= 0) {
-      out = out.slice(0, lastIdx) + contract + out.slice(lastIdx);
-    }
-  }
+  // Context-Loaded contract is single-sourced in the envelope templates
+  // (static <context_loaded_contract> after each </governing_rules>, worded
+  // structurally: stubs mean read-and-record, inline content means neither).
+  // It keeps selective reading honest — without it, a weaker model skipping
+  // every Read is invisible. No render-time injection: both delivery modes
+  // carry the same contract text and the sub-tags themselves signal the mode.
 
   // Inject <envelope_health> block before </context>. Surfaces (not gates)
   // the substantive payload state of 5 monitored context blocks so the

@@ -6,6 +6,7 @@ devt stays lightweight in two directions: it avoids building what the platform i
 
 - **Freeze zone**: where a native Claude Code / platform feature is converging on devt machinery, new devt features in that area require a field receipt the native path cannot serve. The cheapest kind of lightweight is the machinery never built.
 - **Retirement**: when a trigger in the table fires, evaluate delegating to the native path and retiring the devt-side machinery. Retire loudly — CHANGELOG entry, and a REJ tombstone when the retirement encodes a decision future sessions might re-litigate.
+- **Gates retire with their subject**: a smoke gate whose guarded surface is deleted or retired goes out in the same commit — a gate census that only grows is its own maintenance debt. When trimming a gate whose surface still exists, that's a strip-audit call, not housekeeping: apply the ledger discipline above.
 - **Strip audit**: at every model-generation boundary, walk the strip-candidate ledger below. Every harness component encodes an assumption about what the model cannot do on its own; those assumptions go stale silently. A/B where cheap (`DEVT_HOOK_PROFILE=minimal` vs `standard`, config-disabled steps) using the existing grader verdicts + token/duration telemetry. Mechanism-firing ≠ value-conversion applies to *existing* machinery, not just new proposals.
 
 Review cadence: each Claude Code release for the convergence table; each model-generation boundary for the strip ledger.

@@ -8,6 +8,32 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.172.0] - 2026-07-18
+
+### By-reference delivery completed on the canonical dispatch paths (cal #54)
+
+A third-pass external verification of the two fresh batches, plus a one-line user probe ("what about code-review.md?"), surfaced two defects in the just-shipped by-reference layer: a placeholder leak on missing rules files, and a coverage gap — the by-reference default lived only in the CLI render pipeline, while the canonical dev / quick-implement / single-review dispatches fill their envelopes LLM-side from the init compound payload with full rule bodies. Both external sweeps had tested the CLI path only; the mechanism fired, the value didn't convert on the paths that run most. This release closes both, plus the two validated small items from the same verification.
+
+### Fixed
+
+- **Suite runs no longer leave a phantom active workflow.** Several gates exercise the CLI against the repo's own state dir; the last seeder's workflow ("K4 hook envelope test") persisted after every run as a live active-workflow nag — and a mid-task suite run would stomp the operator's real state. The suite now snapshots `workflow.yaml` at start and restores (or removes) it in the EXIT trap.
+- **Placeholder leak on missing rules files.** `loadGoverningRules` maps only files that exist; the substitution replacer returned the literal `{governing_rules.content["…"]}` on a missing key; the by-reference stub loop iterates existing keys only — so any template-referenced rules file absent on disk (un-scaffolded projects, partial rule sets, absent CLAUDE.md) shipped literal template syntax into the dispatch in BOTH modes. The rubric loop had been deliberately fixed for this exact leak class; the rules side never mirrored it. Fixed at the replacer, covering every template and both modes at once: missing keys resolve to the `(no <path> available — file not present in this project)` fallback-notice grammar `classifyBlockBody` already treats as "empty". Reproduced on a bare fixture before fixing.
+
+### Changed
+
+- **The init compound payloads now deliver rule bodies per `dispatch.rules_mode`.** By-reference default: each `.devt/rules/*.md` value in `$CTX.init.governing_rules.content` arrives as the same read-from-disk stub `render-filled` emits — single-sourced as `RULES_BY_REFERENCE_STUB` in init.cjs, consumed by both pipelines — with `delivery_mode` surfaced and `stubbed_bytes_saved` counted, never silent. The canonical LLM-fill dispatch paths (38 compiled-envelope placeholder sites across the dev-workflow/quick-implement/code-review spines and tier files) previously rode full bodies twice: once into orchestrator context via the payload, again into every dispatched subagent. Now the corpus stays out of both; config `dispatch.rules_mode: inline` restores full bodies end-to-end.
+- **Context-Loaded contract single-sourced into the envelope templates.** Previously injected at render time — by-reference CLI renders only, so the LLM-filled canonical paths never carried it. Now a static `<context_loaded_contract>` with structurally-conditional wording (stubs mean read-and-record in `## Context Loaded`; inline content means neither) rides after `</governing_rules>` in all 14 governing-rules-carrying templates and their compiled workflow regions; the render-time injection is deleted. Both delivery modes carry the same contract — the sub-tags themselves signal the mode.
+- **Spine fill-prose is delivery-mode aware.** The three fill instructions say: fill placeholders VERBATIM from content (stubs are the payload, not something to expand), and fill `(no <path> available — file not present in this project)` for any key absent from content — the LLM-fill twin of the replacer fix, byte-identical grammar so one gate pins both.
+- RETIREMENT-WATCH gains the gate-retirement leg: **gates retire with their subject** — a smoke gate whose guarded surface is deleted goes out in the same commit; trimming a gate whose surface still exists is a strip-audit call, not housekeeping.
+- Specify and clarify close their interviews with a **blind-spot round** — given the user's stated expertise level and what the codebase revealed, what unknown-unknowns has the interview not touched; one final AskUserQuestion or an explicit "none surfaced" — and the questioning guide carries the principle. Unknown-reduction up front is cheaper than enforcement mid-flight.
+- Gates: **K223 + K289** updated to the template-static contract semantics (contract rides in both modes; K289's mode distinction is now behavioral via a fixture rule body — stubbed by default, inlined under `--inline-rules`); new **K290** pins the batch (leak-fix behavioral in both modes on a bare fixture, init payload stubbing + inline escape behavioral, spine fill-prose ×3, template contract census, single-sourced stub, gate-retirement leg, blind-spot round). Drift-guard stack 197 → 198 deep (K94–K290).
+
+### Validated, deliberately not shipped (for the record)
+
+- Boilerplate single-sourcing (the turn-limit block duplicated across 10 agents): duplication is real and near-byte-identical, but each copy loads only in its own agent's spawn context — relocating the prose saves ~zero tokens. Drift is the only cost; if it ever bites, an identity gate is the cheaper answer than restructuring the agent/envelope boundary.
+- Smoke-suite split/tiering: 17.5K lines, but the full suite completes in ~1m39s of CI wall time — a maintainability question today, not a cost one.
+- Rubric few-shot graded examples stay sequenced behind the by-reference field receipt.
+
 ## [0.171.0] - 2026-07-18
 
 ### The token-cut behavioral batch (cal #53)

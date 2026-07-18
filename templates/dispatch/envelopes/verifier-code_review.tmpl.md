@@ -12,6 +12,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
     {prior_outputs}
     {provenance_protocol}
     <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>

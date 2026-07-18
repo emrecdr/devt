@@ -165,7 +165,7 @@ Then load project context (orchestrator-side reads, NOT CLI round-trips):
 
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/status-enum.md` for status values and transition mapping
 - Read `${CLAUDE_PLUGIN_ROOT}/protocols/checkpoint-protocol.md` for checkpoint format
-- Governing-rule file contents (`.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are already in `$CTX.init.governing_rules.content` — no separate Reads needed to fill the dispatch envelopes. `CLAUDE.md` is carried as a by-reference stub: the harness auto-injects it into every subagent, so it is never inlined.
+- Governing-rule values (`.devt/rules/coding-standards.md`, `architecture.md`, `quality-gates.md`, `testing-patterns.md`) are in `$CTX.init.governing_rules.content` — fill the dispatch placeholders VERBATIM from it, no separate Reads. Under the default `delivery_mode: by-reference` each value is a short `(by-reference: …)` stub — agents Read the named file from disk when relevant, kept honest by the envelope's Context-Loaded contract; with config `dispatch.rules_mode: inline` full bodies ride instead. For any placeholder whose key is absent from content, fill `(no <path> available — file not present in this project)`. `CLAUDE.md` is always a stub: the harness auto-injects it into every subagent, so it is never inlined.
 - Lessons live in the memory layer at `.devt/memory/lessons/` (LES-NNNN, FTS5-indexed). The Pre-Flight Brief surfaces task-relevant lessons via Lane F. Read `.devt/state/preflight-brief.md` and lift its "Related Operational Lessons" section into `learning_context`; empty if none (normal for new projects).
 - Read `.devt/state/spec.md` if it exists (from `/devt:specify`) — primary requirements source (decisions, API design, test scenarios); else derive requirements from the task description.
 - Read `.devt/state/plan.md` if it exists (from `/devt:plan`) — guides implementation (programmer reads it as context).
@@ -563,6 +563,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <guardrails_inline>
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
@@ -715,6 +716,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <testing_patterns>{governing_rules.content[\".devt/rules/testing-patterns.md\"]}</testing_patterns>
     </governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
@@ -797,6 +799,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>

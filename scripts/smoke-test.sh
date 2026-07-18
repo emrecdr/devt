@@ -48,12 +48,20 @@ run_json "hooks.json parses"  cat "${ROOT}/hooks/hooks.json"
 
 echo "== CLI smoke tests (in temp dir) =="
 TMP=$(mktemp -d)
+# Repo-state tripwire: several later gates (K4 envelope seeding among them)
+# exercise the CLI against the repo's own .devt/state. Snapshot workflow.yaml
+# now and restore it on EXIT — otherwise every suite run leaves the last
+# seeded workflow live (a phantom active-workflow nag on every prompt), and a
+# mid-task suite run would stomp the operator's real workflow state.
+WF_STATE="$ROOT/.devt/state/workflow.yaml"
+WF_BAK="$TMP/workflow.yaml.pre-suite"
+if [ -f "$WF_STATE" ]; then cp "$WF_STATE" "$WF_BAK"; fi
 # Abort tripwire: a gate crashing under set -e can end the run BEFORE the
 # Result line while still reading as green in a chained invocation. The
 # sentinel flips only after every gate has run; an exit without it is a
 # failure regardless of the exit path.
 SUITE_COMPLETED=0
-trap 'rm -rf "$TMP"; if [ "${SUITE_COMPLETED:-0}" != "1" ]; then echo "SMOKE SUITE ABORTED before the Result line — a gate crashed mid-run; treat as FAILURE"; exit 70; fi' EXIT
+trap 'if [ -f "$WF_BAK" ]; then cp "$WF_BAK" "$WF_STATE"; elif [ -d "$ROOT/.devt/state" ]; then rm -f "$WF_STATE"; fi; rm -rf "$TMP"; if [ "${SUITE_COMPLETED:-0}" != "1" ]; then echo "SMOKE SUITE ABORTED before the Result line — a gate crashed mid-run; treat as FAILURE"; exit 70; fi' EXIT
 cd "$TMP"
 
 run_json "init workflow"   node "$CLI" init workflow "smoke test task"
@@ -15628,8 +15636,9 @@ fi
 # must NOT inline rule bodies or CLAUDE.md (harness auto-injects the latter
 # into subagents; the former is byte-identical across N lanes — field-measured
 # 73% of a 391KB 5-lane render), must carry rules_hash + read-from-disk stubs
-# + the Context-Loaded contract; --inline-rules restores full bodies and
-# drops the contract.
+# + the Context-Loaded contract; --inline-rules restores full bodies. The
+# contract is template-static (structurally-conditional wording) and rides
+# in BOTH modes.
 K223_T=$(mktemp -d); mkdir -p "$K223_T/.devt/state" "$K223_T/.devt/rules"; echo '{}' > "$K223_T/.devt/config.json"
 printf '# Coding Standards\nK223_RULES_BODY_MARKER every function documented.\n' > "$K223_T/.devt/rules/coding-standards.md"
 printf '# Project\nK223_CLAUDEMD_MARKER\n' > "$K223_T/CLAUDE.md"
@@ -15644,10 +15653,10 @@ K223_REF_HASH=$(printf '%s' "$K223_REF" | /usr/bin/grep -c 'governing_rules rule
 K223_INL_BODY=$(printf '%s' "$K223_INL" | /usr/bin/grep -c 'K223_RULES_BODY_MARKER' || true)
 K223_INL_CONTRACT=$(printf '%s' "$K223_INL" | /usr/bin/grep -c 'context_loaded_contract' || true)
 rm -rf "$K223_T"
-if [ "$K223_REF_OK" = "0" ] && [ "$K223_REF_STUB" -ge 1 ] && [ "$K223_REF_CONTRACT" -ge 1 ] && [ "$K223_REF_HASH" -ge 1 ] && [ "$K223_INL_BODY" -ge 1 ] && [ "$K223_INL_CONTRACT" = "0" ]; then
-  pass "K223: render-lanes rules-by-reference default — no rule/CLAUDE.md bodies inlined, rules_hash + stubs + Context-Loaded contract present; --inline-rules restores bodies + drops contract"
+if [ "$K223_REF_OK" = "0" ] && [ "$K223_REF_STUB" -ge 1 ] && [ "$K223_REF_CONTRACT" -ge 1 ] && [ "$K223_REF_HASH" -ge 1 ] && [ "$K223_INL_BODY" -ge 1 ] && [ "$K223_INL_CONTRACT" -ge 1 ]; then
+  pass "K223: render-lanes rules-by-reference default — no rule/CLAUDE.md bodies inlined, rules_hash + stubs present; --inline-rules restores bodies; template-static Context-Loaded contract rides in both modes"
 else
-  fail "K223: rules-by-reference wrong — ref_leak=$K223_REF_OK(exp 0) stub=$K223_REF_STUB(exp>=1) contract=$K223_REF_CONTRACT(exp>=1) hash=$K223_REF_HASH(exp>=1) inl_body=$K223_INL_BODY(exp>=1) inl_contract=$K223_INL_CONTRACT(exp 0)"
+  fail "K223: rules-by-reference wrong — ref_leak=$K223_REF_OK(exp 0) stub=$K223_REF_STUB(exp>=1) contract=$K223_REF_CONTRACT(exp>=1) hash=$K223_REF_HASH(exp>=1) inl_body=$K223_INL_BODY(exp>=1) inl_contract=$K223_INL_CONTRACT(exp>=1)"
 fi
 
 # K224: the Context-Loaded contract survives on the prose surfaces — the lane
@@ -17419,8 +17428,9 @@ else
 fi
 
 # K289: token-cut behavioral batch — (a) render-filled defaults BOTH rules and
-# rubric to by-reference from config (behavioral: fixture render carries the
-# context_loaded_contract; --inline-rules removes it), with explicit lane-side
+# rubric to by-reference from config (behavioral: fixture rule body stubbed by
+# default, inlined under --inline-rules; the Context-Loaded contract is
+# template-static and rides in both modes), with explicit lane-side
 # values so config can never override the worktree opt-out; (b) six consumer
 # agents recognize the by-reference stub as a read-instruction, not content;
 # (c) single-path review measures diff-LOC at scope_check (banded artifact,
@@ -17435,12 +17445,16 @@ K289_MISS=""
   && /usr/bin/grep -qF 'options.rulesByReference !== undefined' "$ROOT/bin/modules/dispatch.cjs" \
   && /usr/bin/grep -qF 'rulesByReference: rulesByReference,' "$ROOT/bin/modules/dispatch.cjs"; } || { K289_OK=0; K289_MISS="$K289_MISS mode-config"; }
 K289_TMP=$(mktemp -d)
-mkdir -p "$K289_TMP/.devt/state"
+mkdir -p "$K289_TMP/.devt/state" "$K289_TMP/.devt/rules"
 printf 'active: true\nworkflow_id: "fx-1"\nworkflow_type: "dev"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K289_TMP/.devt/state/workflow.yaml"
+printf '# CS\nK289_RULES_BODY_MARKER every function documented.\n' > "$K289_TMP/.devt/rules/coding-standards.md"
 K289_DEF=$( (cd "$K289_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev 2>/dev/null) || true)
 K289_INL=$( (cd "$K289_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev --inline-rules 2>/dev/null) || true)
-if ! { printf '%s' "$K289_DEF" | /usr/bin/grep -q "context_loaded_contract" \
-  && ! printf '%s' "$K289_INL" | /usr/bin/grep -q "context_loaded_contract"; }; then
+if ! { printf '%s' "$K289_DEF" | /usr/bin/grep -q "by-reference: Read .devt/rules/coding-standards" \
+  && ! printf '%s' "$K289_DEF" | /usr/bin/grep -q "K289_RULES_BODY_MARKER" \
+  && printf '%s' "$K289_DEF" | /usr/bin/grep -q "context_loaded_contract" \
+  && printf '%s' "$K289_INL" | /usr/bin/grep -q "K289_RULES_BODY_MARKER" \
+  && printf '%s' "$K289_INL" | /usr/bin/grep -q "context_loaded_contract"; }; then
   K289_OK=0; K289_MISS="$K289_MISS by-reference-default-behavioral"
 fi
 K289_STUBAWARE=$(/usr/bin/grep -lF 'a `(by-reference: …)` stub' "$ROOT/agents/programmer.md" "$ROOT/agents/code-reviewer.md" "$ROOT/agents/verifier.md" "$ROOT/agents/architect.md" "$ROOT/agents/researcher.md" "$ROOT/agents/tester.md" 2>/dev/null | wc -l | tr -d ' ')
@@ -17465,6 +17479,66 @@ if [ "$K289_OK" -eq 1 ]; then
   pass "K289: token-cut batch (by-reference default behavioral, stub-awareness x6, diff-LOC review depth, guard-telemetry funnel, delta-shaped fix sync)"
 else
   fail "K289: token-cut batch surface regressed:$K289_MISS"
+fi
+
+# K290: by-reference delivery completion + placeholder-leak fix — (a) a bare
+# project (no rules files, no CLAUDE.md) renders with ZERO literal
+# {governing_rules.content[...]} placeholders in BOTH modes: missing keys
+# resolve to the "(no ... available — " fallback-notice grammar instead of
+# leaking template syntax into the dispatch; (b) the init compound payload
+# stubs rule bodies per dispatch.rules_mode (default by-reference,
+# delivery_mode surfaced, reduction counted) so the canonical LLM-fill
+# dispatch paths are by-reference too; the config inline escape returns full
+# bodies; (c) the three spine fill-prose blocks carry the verbatim-fill +
+# missing-key grammar; (d) every envelope template carrying governing_rules
+# carries the static Context-Loaded contract; (e) the stub text is
+# single-sourced (RULES_BY_REFERENCE_STUB in init.cjs, consumed by
+# dispatch.cjs); (f) RETIREMENT-WATCH carries the gates-retire-with-subject
+# leg; (g) the blind-spot round exists in specify + clarify +
+# questioning-guide.
+K290_OK=1
+K290_MISS=""
+K290_TMP=$(mktemp -d)
+mkdir -p "$K290_TMP/.devt/state"
+printf 'active: true\nworkflow_id: "fx-2"\nworkflow_type: "code_review"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K290_TMP/.devt/state/workflow.yaml"
+K290_DEF=$( (cd "$K290_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review 2>/dev/null) || true)
+K290_INL=$( (cd "$K290_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review --inline-rules 2>/dev/null) || true)
+K290_DEF_LEAK=$({ printf '%s' "$K290_DEF" | /usr/bin/grep -c '{governing_rules\.content\[' || true; })
+K290_INL_LEAK=$({ printf '%s' "$K290_INL" | /usr/bin/grep -c '{governing_rules\.content\[' || true; })
+K290_DEF_NOTICE=$({ printf '%s' "$K290_DEF" | /usr/bin/grep -c 'no .devt/rules/.* available — file not present in this project' || true; })
+{ [ "$K290_DEF_LEAK" = "0" ] && [ "$K290_INL_LEAK" = "0" ] && [ "$K290_DEF_NOTICE" -ge 1 ]; } || { K290_OK=0; K290_MISS="$K290_MISS leak-fix(def=$K290_DEF_LEAK inl=$K290_INL_LEAK notice=$K290_DEF_NOTICE)"; }
+mkdir -p "$K290_TMP/.devt/rules"
+printf '# CS\nK290_RULES_BODY_MARKER tabs everywhere.\n' > "$K290_TMP/.devt/rules/coding-standards.md"
+K290_INIT=$( (cd "$K290_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" init workflow "k290 fixture" 2>/dev/null) || true)
+printf '{"dispatch":{"rules_mode":"inline"}}' > "$K290_TMP/.devt/config.json"
+K290_INIT_INL=$( (cd "$K290_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" init workflow "k290 fixture" 2>/dev/null) || true)
+rm -rf "$K290_TMP"
+{ printf '%s' "$K290_INIT" | /usr/bin/grep -q 'by-reference: Read .devt/rules/coding-standards' \
+  && ! printf '%s' "$K290_INIT" | /usr/bin/grep -q 'K290_RULES_BODY_MARKER' \
+  && printf '%s' "$K290_INIT" | /usr/bin/grep -q '"delivery_mode": *"by-reference"' \
+  && printf '%s' "$K290_INIT" | /usr/bin/grep -Eq '"stubbed_bytes_saved": *[1-9]' \
+  && printf '%s' "$K290_INIT_INL" | /usr/bin/grep -q 'K290_RULES_BODY_MARKER' \
+  && printf '%s' "$K290_INIT_INL" | /usr/bin/grep -q '"delivery_mode": *"inline"'; } || { K290_OK=0; K290_MISS="$K290_MISS init-payload-stubbing"; }
+K290_PROSE=0
+for K290_F in dev-workflow.md quick-implement.md code-review.md; do
+  { /usr/bin/grep -qF 'file not present in this project' "$ROOT/workflows/$K290_F" \
+    && /usr/bin/grep -qF 'delivery_mode: by-reference' "$ROOT/workflows/$K290_F" \
+    && K290_PROSE=$((K290_PROSE+1)); } || true
+done
+[ "$K290_PROSE" = "3" ] || { K290_OK=0; K290_MISS="$K290_MISS fill-prose($K290_PROSE/3)"; }
+K290_GR_T=$({ /usr/bin/grep -l '</governing_rules>' "$ROOT"/templates/dispatch/envelopes/*.tmpl.md | wc -l | tr -d ' '; } || true)
+K290_CT_T=$({ /usr/bin/grep -l 'context_loaded_contract' "$ROOT"/templates/dispatch/envelopes/*.tmpl.md | wc -l | tr -d ' '; } || true)
+{ [ "$K290_GR_T" = "$K290_CT_T" ] && [ "$K290_GR_T" -ge 1 ]; } || { K290_OK=0; K290_MISS="$K290_MISS template-contract($K290_CT_T/$K290_GR_T)"; }
+{ /usr/bin/grep -qF 'RULES_BY_REFERENCE_STUB' "$ROOT/bin/modules/init.cjs" \
+  && /usr/bin/grep -qF 'RULES_BY_REFERENCE_STUB(key)' "$ROOT/bin/modules/dispatch.cjs"; } || { K290_OK=0; K290_MISS="$K290_MISS stub-single-source"; }
+/usr/bin/grep -qF 'Gates retire with their subject' "$ROOT/docs/RETIREMENT-WATCH.md" || { K290_OK=0; K290_MISS="$K290_MISS gate-retirement-leg"; }
+{ /usr/bin/grep -qF 'Blind-spot round' "$ROOT/workflows/specify.md" \
+  && /usr/bin/grep -qF 'Blind-spot round' "$ROOT/workflows/clarify-task.md" \
+  && /usr/bin/grep -qF 'blind-spot check' "$ROOT/references/questioning-guide.md"; } || { K290_OK=0; K290_MISS="$K290_MISS blind-spot"; }
+if [ "$K290_OK" -eq 1 ]; then
+  pass "K290: by-reference delivery completion (leak-fix both modes, init payload stubbing + inline escape, spine fill-prose x3, template contract census, single-sourced stub, gate-retirement leg, blind-spot round)"
+else
+  fail "K290: delivery-completion surface regressed:$K290_MISS"
 fi
 
 echo
