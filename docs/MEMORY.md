@@ -36,6 +36,8 @@ devt persists structured knowledge across **two distinct layers**, each with a d
 | "We tried Redis caching and rejected it for compliance." | **Layer 2** — REJ tombstone. Future agents must NOT propose Redis. |
 | "AuthService talks to PaymentService via this 4-step handshake." | **Layer 2** — FLOW. Permanent named sequence. |
 
+> **Note on FLOW.** `flows/` is a supported doc type but devt's own vault carries no FLOW docs — devt's processes live as executable plugin content in `workflows/`, not as memory records. FLOW is available for consumer projects that want to document cross-workflow runtime sequences (event chains, multi-service handshakes) the code doesn't make obvious. An empty `flows/` is expected here, not a gap.
+
 ## Layer 2: `.devt/memory/` Frontmatter Schema
 
 Every ADR/Concept/Flow/REJ markdown file starts with strict YAML frontmatter:
