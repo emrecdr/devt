@@ -2914,7 +2914,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
       // uncommitted branch has an EMPTY base...HEAD diff, which used to zero
       // this extractor exactly when the review scope lived in the working tree.
       const { collectChangedFiles } = require("./review-weight.cjs");
-      files = collectChangedFiles(proot, primaryBranch);
+      files = collectChangedFiles(proot, primaryBranch, _activeRange() ? { range: _activeRange() } : undefined);
       totalFilesCount = files.length;
       if (files.length > 0) {
         const graphifyMod = require("./graphify.cjs");
@@ -3202,7 +3202,18 @@ function contextInitScopeSig(primaryBranch) {
   } catch { return null; }
 }
 
-function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, taskDefault = "code review" } = {}) {
+// Active commit-range scope, persisted in workflow.yaml by contextInitBundle.
+// All scope consumers (affects union, diff-symbol extraction, manifest
+// freshness — plus every child CLI the bundle shells out to) read it from
+// state instead of threading a parameter through a dozen signatures.
+function _activeRange() {
+  try {
+    const r = readState().range;
+    return typeof r === "string" && r.trim() && r !== "null" ? r.trim() : null;
+  } catch { return null; }
+}
+
+function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, range, taskDefault = "code review" } = {}) {
   const { spawnSync } = require("child_process");
   const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
   const initMode = mode === "workflow" ? "workflow" : "review";
@@ -3214,6 +3225,10 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     } catch { primaryBranch = "main"; }
   }
   const degraded = [];
+  // Range is written before any child CLI runs so the entire bundle tree
+  // (init, preflight generate, impact-plan) sees one consistent scope; an
+  // absent range EXPLICITLY clears any prior value.
+  try { updateState([range ? `range=${range}` : "range=null"], { skipGates: true }); } catch { /* state write races handled by callers */ }
   const sh = (args) => {
     try {
       const r = spawnSync("node", [selfBin, ...args], { cwd: proot, encoding: "utf8", timeout: 30000 });
@@ -3319,7 +3334,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   try {
     const { collectChangedFiles } = require("./review-weight.cjs");
     const mem = require("./memory.cjs");
-    const changed = collectChangedFiles(findProjectRoot(), primaryBranch || "main");
+    const changed = collectChangedFiles(findProjectRoot(), primaryBranch || "main", _activeRange() ? { range: _activeRange() } : undefined);
     filesChecked = changed.length;
     for (const f of changed) {
       let hits = [];
@@ -3391,7 +3406,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
       let manifestFresh = false;
       try {
         const { collectChangedFiles } = require("./review-weight.cjs");
-        const files = collectChangedFiles(findProjectRoot(), primaryBranch)
+        const files = collectChangedFiles(findProjectRoot(), primaryBranch, _activeRange() ? { range: _activeRange() } : undefined)
           .filter(f => /\.(py|js|jsx|ts|tsx|go|rs|rb|java|kt|cs|php|swift|scala|c|cc|cpp|h|hpp)$/i.test(f));
         if (files.length > 0) {
           const mf = require("./graphify.cjs").manifestFreshness(files);
@@ -3453,8 +3468,8 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
 // envelopes + the still-separate gates/MCP/scan-prep steps consume them
 // uniformly. memory_signal is gathered for EVERY mode — closing the gap where
 // debug + research dispatches previously received no <memory_signal> block.
-function reviewContextInit({ scope, primaryBranch } = {}) {
-  return contextInitBundle({ mode: "review", workflowType: "code_review", scope, primaryBranch, taskDefault: "code review" });
+function reviewContextInit({ scope, primaryBranch, range } = {}) {
+  return contextInitBundle({ mode: "review", workflowType: "code_review", scope, primaryBranch, range, taskDefault: "code review" });
 }
 
 function workflowContextInit({ workflowType = "dev", scope, primaryBranch } = {}) {
@@ -7616,9 +7631,11 @@ function run(subcommand, args) {
     case "review-context-init": {
       const scopeArg = args.find(a => a.startsWith("--scope="));
       const branchArg = args.find(a => a.startsWith("--primary-branch="));
+      const rangeArg = args.find(a => a.startsWith("--range="));
       const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
-      return reviewContextInit({ scope, primaryBranch });
+      const range = rangeArg ? rangeArg.slice("--range=".length) : undefined;
+      return reviewContextInit({ scope, primaryBranch, range });
     }
     case "workflow-context-init": {
       const wtArg = args.find(a => a.startsWith("--workflow-type="));

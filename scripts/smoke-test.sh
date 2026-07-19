@@ -17646,6 +17646,57 @@ else
   fail "K292: trust-batch surface regressed:$K292_MISS"
 fi
 
+# K293: the range release — (a) --range persists through review-context-init
+# into workflow.yaml and scopes the memory_signal affects union (end-to-end on
+# a real two-commit git fixture: files_checked reflects the RANGE, not the
+# empty base...HEAD union); (b) topic symbols are identifier-shape gated
+# (docstring fragments + filename anchors rejected, dotted identifiers kept);
+# (c) hex-shrapnel tokens (split commit SHAs) never become topic keywords;
+# (d) empty-range review-weight returns the scope-unresolvable verdict naming
+# --range; (e) wiring pins — augment-impact-map --range, workflow RANGE
+# extraction at scope_check + substep-7 + RW_ARGS, partition RANGE_BASE
+# base_ref auto-wire, command doc, attestation contract fields.
+K293_OK=1
+K293_MISS=""
+K293_TMP=$(mktemp -d)
+(cd "$K293_TMP" \
+  && git init -q . && git config user.email k293@test && git config user.name k293 \
+  && printf 'one\n' > a.txt && git add a.txt && git commit -qm c1 \
+  && printf 'two\n' > b.txt && git add b.txt && git commit -qm c2) >/dev/null 2>&1
+mkdir -p "$K293_TMP/.devt/state"
+printf '{}' > "$K293_TMP/.devt/config.json"
+K293_SHA1=$(cd "$K293_TMP" && git rev-parse HEAD~1)
+K293_CTX=$( (cd "$K293_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state review-context-init "--scope=k293 range probe" "--range=${K293_SHA1}..HEAD" 2>/dev/null) || true)
+/usr/bin/grep -q '^range: ' "$K293_TMP/.devt/state/workflow.yaml" 2>/dev/null || { K293_OK=0; K293_MISS="$K293_MISS range-persist"; }
+printf '%s' "$K293_CTX" | /usr/bin/grep -q '"files_checked": *1' || { K293_OK=0; K293_MISS="$K293_MISS range-affects-union"; }
+K293_RANGEFILES=$( (cd "$K293_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state changed-files "--range=${K293_SHA1}..HEAD" 2>/dev/null) || true)
+printf '%s' "$K293_RANGEFILES" | /usr/bin/grep -q '"count": *1' || { K293_OK=0; K293_MISS="$K293_MISS range-changed-files"; }
+rm -rf "$K293_TMP"
+K293_TOPIC=$(node -e "
+const pf = require('$ROOT/bin/modules/preflight.cjs');
+const t = pf.extractTopic('fix b9344 tablet sync', { gitDiffSymbols: ['Calculate rights string from vidcall_minutes (brownfield compatible).      All b', 'multi_container.py', 'License.effective_rights', 'TabletSyncService'] });
+const symsOk = t.symbols.includes('License.effective_rights') && t.symbols.includes('TabletSyncService') && !t.symbols.some(function(s){ return /\s/.test(s) || /\.py$/.test(s); });
+const kwOk = !t.keywords.includes('b9344');
+process.stdout.write((symsOk && kwOk) ? 'ok' : 'shape=' + symsOk + ' kw=' + kwOk);
+" 2>/dev/null || true)
+[ "$K293_TOPIC" = "ok" ] || { K293_OK=0; K293_MISS="$K293_MISS topic-hygiene($K293_TOPIC)"; }
+K293_RW=$( (cd "$ROOT" && node "$ROOT/bin/devt-tools.cjs" review-weight assess --range=HEAD~1..HEAD~1 2>/dev/null) || true)
+printf '%s' "$K293_RW" | /usr/bin/grep -q "scope unresolvable" || { K293_OK=0; K293_MISS="$K293_MISS scope-unresolvable"; }
+{ /usr/bin/grep -qF -- '--range=' "$ROOT/bin/modules/graphify.cjs" \
+  && /usr/bin/grep -qF 'missing_attestation_fields' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'args_overridden' "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qF 'low marginal yield' "$ROOT/bin/modules/review-weight.cjs"; } || { K293_OK=0; K293_MISS="$K293_MISS cli-pins"; }
+K293_WF=$({ /usr/bin/grep -c 'RANGE=$(echo " ${REVIEW_SCOPE}' "$ROOT/workflows/code-review.md" || true; })
+{ [ "$K293_WF" -ge 3 ] \
+  && /usr/bin/grep -qF 'RANGE_BASE=${RANGE%%..*}' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF -- '--range=<a>..<b>' "$ROOT/commands/review.md" \
+  && /usr/bin/grep -qF 'readWorkflowRange' "$ROOT/bin/modules/preflight.cjs"; } || { K293_OK=0; K293_MISS="$K293_MISS workflow-pins(range-blocks=$K293_WF)"; }
+if [ "$K293_OK" -eq 1 ]; then
+  pass "K293: range release (range persist + affects-union + changed-files behavioral on a git fixture, topic identifier-shape + hex-shrapnel behavioral, scope-unresolvable verdict, attestation + workflow wiring pins)"
+else
+  fail "K293: range surface regressed:$K293_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

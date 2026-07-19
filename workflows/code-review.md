@@ -238,7 +238,8 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 **Deterministic post-MCP augmentation.** After the tier executes (or even when it skipped), run ONE CLI that appends up to six deterministic sections to `graph-impact.md` — file- and symbol-level god-node warnings (via `check-large-files` / `check-symbol-godnodes`), the dropped-symbol truncation banner + section, hyperedge-completeness, ambiguous-bindings, and the preflight god-node fallback (emitted only when both diff-anchored checks come back empty). Pure post-processing of on-disk JSON — no MCP, no model judgment — folded from ~110 lines of inline jq into `graphify augment-impact-map` (the section wording is emitted by the CLI, byte-identical to the prior inline output):
 
 ```bash
-AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impact-map --edge-threshold=50 "--raw-count=${TOPIC_SYMBOLS_RAW_COUNT:-unknown}" 2>/dev/null || echo '{}')
+RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impact-map --edge-threshold=50 "--raw-count=${TOPIC_SYMBOLS_RAW_COUNT:-unknown}" ${RANGE:+--range=$RANGE} 2>/dev/null || echo '{}')
 echo "graphify augment-impact-map: $(printf '%s\n' "$AUGMENT" | jq -r 'if (.sections_appended // []) | length == 0 then "no sections (clean)" else "appended " + (.sections_appended | join(", ")) end')"
 ```
 

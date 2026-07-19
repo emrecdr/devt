@@ -64,6 +64,30 @@ const DEFAULT_SCOPE_HINT_CAP = 8;
 // Read the current workflow's complexity tier from workflow.yaml. Returns
 // undefined when no workflow is active or tier is absent — callers fall back
 // to DEFAULT_SCOPE_HINT_CAP. Never throws.
+// Read the persisted commit-range scope (workflow.yaml::range) — written by
+// contextInitBundle when the operator passed --range. Same walk as the tier
+// reader; never throws; "null" clears.
+function readWorkflowRange() {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    let dir = process.cwd();
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, ".devt", "state", "workflow.yaml");
+      if (fs.existsSync(candidate)) {
+        const content = fs.readFileSync(candidate, "utf8");
+        const m = content.match(/^range:\s*"?([^"\n]+?)"?\s*$/m);
+        const v = m ? m[1].trim() : "";
+        return v && v !== "null" ? v : undefined;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch { /* fall through */ }
+  return undefined;
+}
+
 function readWorkflowTier() {
   try {
     const fs = require("fs");
@@ -282,8 +306,15 @@ function extractDiffSymbols(opts = {}) {
   // primary branch) and in-progress work (uncommitted working tree). On a
   // feature branch with no uncommitted edits, `git diff HEAD` returns 0
   // files — the merged range catches those.
-  const ranges = ["HEAD"];
+  const ranges = [];
+  const wfRange = readWorkflowRange();
+  if (wfRange) {
+    ranges.push(wfRange);
+  } else {
+    ranges.push("HEAD");
+  }
   try {
+    if (wfRange) throw new Error("range-scoped");
     const { getMergedConfig } = require("./config.cjs");
     const cfg = getMergedConfig();
     const primary = (cfg && cfg.git && typeof cfg.git.primary_branch === "string" && cfg.git.primary_branch) || "main";
@@ -380,11 +411,32 @@ function extractSymbolsFromPlan(planPath) {
 //   - not in SYMBOL_DENYLIST (PascalCase verbs, project labels, etc.)
 //   - not isAllCapsNoise (CHANGELOG, GFBUGS, etc.)
 //   - not /^Test[A-Z]/ (pytest test classes)
+// Identifier-shape gate: a topic symbol must LOOK like a code identifier
+// (optionally dotted/called). The graph label space includes docstring
+// pseudo-nodes — prose fragments truncated at ~80 chars — and any leg that
+// harvests labels can leak them into topic.symbols, where the args contract
+// then forces a wasted MCP call on them (field: "Calculate rights string
+// from vidcall_minutes (brownfield compatible).      All b" shipped as a
+// blast_radius anchor).
+function isIdentifierShaped(s) {
+  if (typeof s !== "string") return false;
+  const v = s.trim();
+  if (v.length < 3 || v.length > 64) return false;
+  if (/\s/.test(v)) return false;
+  // Filenames are not graph symbols — a dotted identifier is fine
+  // (License.effective_rights) but a known code/file extension means this is
+  // a path fragment the anchor list can't use (field: multi_container.py
+  // shipped as a blast_radius anchor).
+  if (/\.(py|js|jsx|ts|tsx|go|rs|rb|java|kt|cs|php|swift|scala|c|cc|cpp|h|hpp|md|txt|json|ya?ml|sh|sql|proto|html|css|hurl|lock|toml|cfg|ini)$/i.test(v)) return false;
+  return /^[A-Za-z_][A-Za-z0-9_.]*(\(\))?$/.test(v);
+}
+
 function applySymbolFilter(symbols) {
   if (!Array.isArray(symbols)) return [];
   return symbols.filter(s =>
     typeof s === "string" &&
     s.length >= 3 &&
+    isIdentifierShaped(s) &&
     !SYMBOL_DENYLIST.has(s.toLowerCase()) &&
     !isAllCapsNoise(s) &&
     !/^Test[A-Z]/.test(s)
@@ -478,8 +530,9 @@ function extractTopic(taskText, opts = {}) {
   // Keywords: words ≥3 chars, not stop-words, not domains, not symbols (lowered)
   const symbolLower = new Set(symbols.map(s => s.toLowerCase()));
   const domainSet = new Set(domains);
+  const hexShrapnel = /^(?=.*[0-9])[0-9a-f]{4,40}$/;
   const keywords = Array.from(new Set(
-    words.filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !domainSet.has(w) && !symbolLower.has(w))
+    words.filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !domainSet.has(w) && !symbolLower.has(w) && !hexShrapnel.test(w))
   )).sort();
 
   // Service-directory fallback. Tasks like "tablet_communication permission"
@@ -604,7 +657,7 @@ function extractTopic(taskText, opts = {}) {
 
   const result = {
     domains,
-    symbols: reorderedSymbols,
+    symbols: reorderedSymbols.filter(isIdentifierShaped),
     keywords,
     raw: text,
     resolution_path: resolutionPath,

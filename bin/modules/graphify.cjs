@@ -1954,7 +1954,7 @@ function augmentImpactMap(opts = {}) {
       // Union collection (committed range + working tree + untracked) — the
       // same semantic every scope-sensitive consumer uses; a bare base...HEAD
       // diff goes blind on uncommitted trees.
-      diffFiles = require("./review-weight.cjs").collectChangedFiles(proot, base);
+      diffFiles = require("./review-weight.cjs").collectChangedFiles(proot, base, opts.range ? { range: opts.range } : undefined);
     } catch { diffFiles = []; }
   }
 
@@ -3370,10 +3370,12 @@ function run(subcommand, args) {
       const thresholdArg = args.find(a => a.startsWith("--edge-threshold="));
       const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
       const baseArg = args.find(a => a.startsWith("--base="));
+      const rangeArgA = args.find(a => a.startsWith("--range="));
       const rawArg = args.find(a => a.startsWith("--raw-count="));
       json(augmentImpactMap({
         edgeThreshold: threshold,
         baseRef: baseArg ? baseArg.split("=")[1] : undefined,
+        range: rangeArgA ? rangeArgA.split("=")[1] : undefined,
         rawCount: rawArg ? rawArg.split("=")[1] : undefined,
       }));
       return 0;

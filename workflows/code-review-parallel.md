@@ -155,6 +155,10 @@ echo "partition_lanes: ${PREFIX_COUNT} groups (cap=5 in next step)"
 # register-lanes, identical to hand-rolled partitions. This replaces a
 # hand-built YAML splice that duplicated sizing with a different (whole-file)
 # metric and skipped the sidecars render-lanes needs.
+# Range-scoped review: every lane diffs against the range start (the proven
+# per-lane base_ref plumbing, now auto-wired from --range).
+RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+export RANGE_BASE=${RANGE%%..*}
 PARTITION_JSON=$(mktemp)
 node -e '
 const fs = require("fs");
@@ -167,7 +171,8 @@ for (const line of lines) {
   if (!groups.has(prefix)) groups.set(prefix, []);
   groups.get(prefix).push(file);
 }
-const lanes = [...groups.entries()].slice(0, 5).map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files }));
+const rangeBase = (process.env.RANGE_BASE || "").trim();
+const lanes = [...groups.entries()].slice(0, 5).map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
 fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
 ' "$GROUPS_FILE" "$PARTITION_JSON"
 REG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state register-lanes --from="$PARTITION_JSON")
