@@ -17752,6 +17752,41 @@ else
   fail "K295: learning-entry ghost surface regressed:$K295_MISS"
 fi
 
+# K296: ghost-surface CLASS gate (OPT-2, .cjs-module scope). The learning-entry
+# ghost was the THIRD semantic.cjs-class instance — a *.cjs module referenced
+# inside schemas/agents that no longer exists. K280/K281 gate CLI routing +
+# printUsage but NOT module references buried in schema/agent prose, which is
+# where the ghost survived twice. This closes the class for the .cjs subset:
+# every *.cjs token in agents/**.{md,yaml} + schemas/**.{yaml} must resolve on
+# disk. Empirically 0 false positives on the tree (only devt-tools/memory/
+# state.cjs are referenced, all resolve). Artifact-path scope (.devt/**,
+# docs/**) is intentionally EXCLUDED — runtime-created + example-prone, would
+# false-positive; the recurring ghost was always a module reference.
+K296_RESULT=$(node -e '
+const fs=require("fs"), path=require("path");
+const root=process.argv[1];
+const bad=[];
+for (const d of ["agents","schemas"]) {
+  const full=path.join(root,d);
+  if(!fs.existsSync(full)) continue;
+  for (const f of fs.readdirSync(full)) {
+    if(!/\.(md|ya?ml)$/.test(f)) continue;
+    const t=fs.readFileSync(path.join(full,f),"utf8");
+    for (const m of t.matchAll(/\b([a-z][\w-]*\.cjs)\b/g)) {
+      const tok=m[1];
+      const ok=["bin/modules","bin","scripts",""].some(b=>fs.existsSync(path.join(root,b,tok)));
+      if(!ok) bad.push(d+"/"+f+": "+tok);
+    }
+  }
+}
+process.stdout.write(bad.length?("FAIL "+bad.join("; ")):"OK");
+' "$ROOT" 2>/dev/null)
+if [ "$K296_RESULT" = "OK" ]; then
+  pass "K296: ghost-surface class gate — every .cjs module referenced in agents/ + schemas/ resolves on disk (OPT-2, .cjs scope; closes the semantic.cjs class K280/K281 missed)"
+else
+  fail "K296: unresolved .cjs module reference (ghost surface): ${K296_RESULT#FAIL }"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
