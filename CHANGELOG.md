@@ -8,6 +8,26 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.182.0] - 2026-07-19
+
+### Shared-root trust tier + REJ attribution (DEF-009 M2+M4 — sequence complete)
+
+The last legs of the multi-root provenance work. Before: a shared-root doc coerced under block-mode pre-flight with the same authority as a locally-curated one, and a shared-root REJ tombstone vetoed proposals with no indication of which root said NO. After: shared roots always govern and advise, but coercive denial over edits is an explicit config grant — and every REJ suppression names its root. With provenance markers, the index delta, the trust model doc, and now the tier, the full mitigation sequence for the curator-gate bypass is in place.
+
+### Added
+
+- **Config `memory.shared_roots_coerce`** (default `false`) — when false, an edit governed *solely* by shared-root docs logs a `PREFLIGHT … :: shared-advisory <ids>` scratchpad line and proceeds; the docs still ride the Brief and scope hints, only the block-mode deny is withheld. Any local governing doc in the match set keeps the full deny path. Provenance-unresolvable rows count as local (fail-coercive — preserves prior behavior). Opt-in restores the old always-coerce semantics.
+- **REJ suppression is root-attributed** — Brief tombstone lines gain `_(shared:<label>)_` for shared-root REJs (local lines unchanged), the recommendations line renders `REJ-NNN (shared:<label>)`, and `listRejectedKeywords` carries `source_root`.
+- Gate **K299** — behavioral fixture across the matrix: shared-only governance → advisory allow with scratchpad line; local governance on an **absolute** path → deny; `shared_roots_coerce: true` → deny restored; Brief REJ attribution on shared, absent on local. Drift-guard stack 206 → 207 deep (K94–K299).
+
+### Fixed
+
+- **`pre-flight-guard.sh` never matched governance on absolute paths** — `getByPath` received the raw `tool_input.file_path` (usually absolute) while `affects_paths` globs are repo-relative, so every absolutely-pathed edit auto-logged `:: ungoverned` and bypassed the guard whenever the plugin root was resolvable. Discovered while wiring the trust tier into that exact block; the guard now relativizes against the canonical project root (both sides already realpath'd for the descendant check) before matching. The deny path for governed files works for both path forms — pinned by K299.
+
+### Changed
+
+- `docs/MEMORY.md` — config-table row for `shared_roots_coerce`; trust-model section rewritten to the completed state (tiered coercion, attributed suppression; the inherent residual — shared content never passes the local curator gate — is the documented trust decision).
+
 ## [0.181.0] - 2026-07-19
 
 ### Shared-root change delta on `memory index` (DEF-009 M3)

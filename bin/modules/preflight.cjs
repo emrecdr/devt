@@ -789,7 +789,15 @@ function laneE(topic) {
       || kw.split(/\s+/).some(t => haystack.has(t))
       || (topic.raw && topic.raw.toLowerCase().includes(kw));
     if (hit && !matchedById.has(row.id)) {
-      matchedById.set(row.id, { id: row.id, title: row.title, summary: row.summary, keyword: row.keyword });
+      // REJ suppression must be attributable: a shared-root tombstone vetoes
+      // proposals across every consuming project, so the Brief says which
+      // root the NO came from. Null for local tombstones (no marker).
+      let sharedRoot = null;
+      try {
+        const info = memory.sourceRootInfo(row.source_root);
+        if (!info.local) sharedRoot = info.label;
+      } catch { /* provenance unresolvable — render as local */ }
+      matchedById.set(row.id, { id: row.id, title: row.title, summary: row.summary, keyword: row.keyword, shared_root: sharedRoot });
     }
   }
   return Array.from(matchedById.values()).sort((a, b) => a.id.localeCompare(b.id));
@@ -1181,7 +1189,8 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
     lines.push("_No matching REJ tombstones — no prior NOs in this topic area._");
   } else {
     for (const r of lanes.E) {
-      lines.push(`- [${r.id}] ${r.title} — matched on keyword \`${r.keyword}\``);
+      const provenance = r.shared_root ? ` _(shared:${r.shared_root})_` : "";
+      lines.push(`- [${r.id}] ${r.title} — matched on keyword \`${r.keyword}\`${provenance}`);
       if (r.summary) lines.push(`  > ${r.summary}`);
     }
   }
@@ -1343,7 +1352,7 @@ function synthesizeRecommendations(governing, rejected, blast) {
     recs.push(`Re-read ${ids} before any change — they constrain this topic area.`);
   }
   if (rejected.length > 0) {
-    const ids = rejected.map(r => r.id).join(", ");
+    const ids = rejected.map(r => r.shared_root ? `${r.id} (shared:${r.shared_root})` : r.id).join(", ");
     recs.push(`${ids} govern: any solution involving the matched keywords is pre-rejected. Read these tombstones before proposing.`);
   }
   if (blast && blast.effect_size === "large") {

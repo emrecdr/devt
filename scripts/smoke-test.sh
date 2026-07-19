@@ -17882,6 +17882,61 @@ else
 fi
 rm -rf "$K298_SHARED" "$K298_PROJ"
 
+# K299: shared-root trust tier + REJ attribution (DEF-009 M2+M4). Shared
+# (non-local) roots govern and advise but trigger block-mode pre-flight
+# denial only under config memory.shared_roots_coerce: true — an edit
+# governed solely by shared-root docs logs a shared-advisory scratchpad line
+# and proceeds; any local governing doc keeps the deny. Also pins the guard's
+# path relativization (absolute tool_input paths must match repo-relative
+# affects globs — the raw-path form silently disarmed the guard) and the
+# Brief's REJ root attribution.
+K299_SHARED=$(mktemp -d)
+K299_PROJ=$(mktemp -d)
+mkdir -p "$K299_SHARED/decisions" "$K299_SHARED/rejected"
+printf -- '---\nid: ADR-921\ntitle: "Shared widget rule"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: verified\nsummary: "Org-wide widget constraint."\naffects_paths:\n  - "src/widget/**"\n---\nbody\n' > "$K299_SHARED/decisions/ADR-921-shared.md"
+printf -- '---\nid: REJ-923\ntitle: "No widgetfoo polling"\ndoc_type: rejected\ndomain: caching\nstatus: active\nconfidence: verified\nsummary: "Org-wide rejection."\nreason: "performance"\nsearch_keywords:\n  - widgetfoo\n---\nbody\n' > "$K299_SHARED/rejected/REJ-923-shared.md"
+(cd "$K299_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K299_PROJ/.devt/memory/rejected" "$K299_PROJ/src/widget" "$K299_PROJ/.devt/state"
+printf -- '---\nid: ADR-922\ntitle: "Local widget core rule"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: explicit\nsummary: "Local constraint on widget core."\naffects_paths:\n  - "src/widget/core.py"\n---\nbody\n' > "$K299_PROJ/.devt/memory/decisions/ADR-922-local.md"
+printf -- '---\nid: REJ-924\ntitle: "No widgetbar retries"\ndoc_type: rejected\ndomain: caching\nstatus: active\nconfidence: verified\nsummary: "Local rejection."\nreason: "complexity"\nsearch_keywords:\n  - widgetbar\n---\nbody\n' > "$K299_PROJ/.devt/memory/rejected/REJ-924-local.md"
+node -e "
+  const fs = require('fs');
+  const p = '$K299_PROJ/.devt/config.json';
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.memory = cfg.memory || {};
+  cfg.memory.paths = ['$K299_SHARED', '.devt/memory'];
+  cfg.memory.preflight_mode = 'block';
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+"
+printf 'active: true\nworkflow_type: dev\n' > "$K299_PROJ/.devt/state/workflow.yaml"
+(cd "$K299_PROJ" && node "$CLI" memory index >/dev/null 2>&1 && node "$CLI" preflight generate "widgetfoo widgetbar" >/dev/null 2>&1)
+K299_LABEL=$(basename "$K299_SHARED")
+K299_OK=1
+K299_WHY=""
+/usr/bin/grep -q "\[REJ-923\].*_(shared:$K299_LABEL)_" "$K299_PROJ/.devt/state/preflight-brief.md" 2>/dev/null || { K299_OK=0; K299_WHY="rej-shared-marker"; }
+if /usr/bin/grep "\[REJ-924\]" "$K299_PROJ/.devt/state/preflight-brief.md" 2>/dev/null | /usr/bin/grep -q "shared:"; then K299_OK=0; K299_WHY="$K299_WHY rej-local-marked"; fi
+rm -f "$K299_PROJ/.devt/state/scratchpad.md"
+K299_A=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":"src/widget/alpha.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh")
+case "$K299_A" in *deny*) K299_OK=0; K299_WHY="$K299_WHY shared-only-denied";; esac
+/usr/bin/grep -q ":: shared-advisory ADR-921" "$K299_PROJ/.devt/state/scratchpad.md" 2>/dev/null || { K299_OK=0; K299_WHY="$K299_WHY no-advisory-line"; }
+K299_E=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$K299_PROJ"'/src/widget/core.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh")
+case "$K299_E" in *'"decision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY abs-local-not-denied";; esac
+node -e "
+  const fs = require('fs');
+  const p = '$K299_PROJ/.devt/config.json';
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.memory.shared_roots_coerce = true;
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+"
+K299_C=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$K299_PROJ"'/src/widget/beta.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh")
+case "$K299_C" in *'"decision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY coerce-not-denied";; esac
+if [ "$K299_OK" = "1" ]; then
+  pass "K299: shared-root trust tier + REJ attribution — shared-only governance advises (shared-advisory line) not denies, local governance denies on absolute paths (relativization fix), coerce opt-in restores deny, Brief REJ lines root-attributed (DEF-009 M2+M4)"
+else
+  fail "K299: trust tier broken ($K299_WHY)"
+fi
+rm -rf "$K299_SHARED" "$K299_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

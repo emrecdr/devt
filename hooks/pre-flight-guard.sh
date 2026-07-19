@@ -76,12 +76,14 @@ node -e "
     // the memory.enabled master switch (when false, the entire memory layer
     // is opted out — guard becomes a no-op).
     let mode = 'warn';
+    let sharedCoerce = false;
     try {
       const projectCfgPath = path.join(dir, '.devt', 'config.json');
       if (fs.existsSync(projectCfgPath)) {
         const cfg = JSON.parse(fs.readFileSync(projectCfgPath, 'utf8'));
         if (cfg.memory && cfg.memory.enabled === false) process.exit(0);
         if (cfg.memory && cfg.memory.preflight_mode) mode = cfg.memory.preflight_mode;
+        if (cfg.memory && cfg.memory.shared_roots_coerce === true) sharedCoerce = true;
       }
     } catch { /* fall through with default */ }
 
@@ -155,13 +157,39 @@ node -e "
         const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
         if (pluginRoot) {
           const memMod = require(path.join(pluginRoot, 'bin', 'modules', 'memory.cjs'));
-          const matches = memMod.getByPath(fp);
+          // affects_paths globs are repo-relative; tool_input.file_path is
+          // usually ABSOLUTE. Matching the raw path against relative globs
+          // finds nothing, mislabels every governed edit \"ungoverned\", and
+          // silently disarms the guard. Relativize against the canonical
+          // project root (both sides already realpath'd above).
+          const relFp = path.relative(canonDir, canonFp);
+          const matches = memMod.getByPath(relFp);
           if (!Array.isArray(matches) || matches.length === 0) {
             const ts = new Date().toISOString();
             const action = (d.tool_name || 'edit').toLowerCase();
             const line = 'PREFLIGHT ' + ts + ' ' + action + ' ' + fp + ' :: ungoverned\\n';
             try { fs.appendFileSync(scratch, line); } catch { /* best-effort */ }
             process.exit(0);
+          }
+          // Trust tier (memory.shared_roots_coerce, default false): shared-root
+          // docs advise but do not coerce. When EVERY matching doc is
+          // shared-root and coercion has not been granted, log a
+          // shared-advisory line and allow — the docs still surface in the
+          // Brief; only the deny is withheld. A mixed match set (any local
+          // doc) keeps the full deny path. Provenance-unresolvable rows count
+          // as local — fail-coercive, preserving prior behavior.
+          if (!sharedCoerce) {
+            const coercive = matches.filter(function (m) {
+              try { return memMod.sourceRootInfo(m.source_root).local; } catch { return true; }
+            });
+            if (coercive.length === 0) {
+              const ids = Array.from(new Set(matches.map(function (m) { return m.id; }))).slice(0, 5).join(',');
+              const ts = new Date().toISOString();
+              const action = (d.tool_name || 'edit').toLowerCase();
+              const line = 'PREFLIGHT ' + ts + ' ' + action + ' ' + fp + ' :: shared-advisory ' + ids + '\\n';
+              try { fs.appendFileSync(scratch, line); } catch { /* best-effort */ }
+              process.exit(0);
+            }
           }
         }
       }

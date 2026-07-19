@@ -165,6 +165,11 @@ const DEFAULTS = {
     // The MCP query layer is gated separately via .mcp.json registration.
     enabled: true,
     preflight_mode: "block",
+    // Trust tier for multi-root: shared (non-local) roots always govern and
+    // advise, but their docs trigger block-mode pre-flight denial only when
+    // this is explicitly true. Coercive authority over edits is an explicit
+    // grant, not a side effect of adding a shared root.
+    shared_roots_coerce: false,
     auto_index_on_change: true,
     // mcp_telemetry: when true, the vendored devt-memory-mcp server
     // appends one JSONL line per tools/call to .devt/memory/_mcp-trace.jsonl

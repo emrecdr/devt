@@ -1158,7 +1158,7 @@ function listActive(domain) {
 
 function listRejectedKeywords() {
   return withDb(db => db.prepare(`
-    SELECT d.id, d.title, d.summary, rk.keyword
+    SELECT d.id, d.title, d.summary, d.source_root, rk.keyword
     FROM documents d JOIN rejected_keywords rk ON d.id = rk.doc_id
     WHERE d.doc_type = 'rejected'
   `).all());
