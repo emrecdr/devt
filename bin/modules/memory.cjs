@@ -2099,9 +2099,18 @@ function run(subcommand, args) {
       }
       const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
       const ready = count >= threshold && cooldownOk;
-      process.stdout.write(`[memory] candidates-footer: ${count} pending / threshold ${threshold} / cooldown ${cooldownOk ? "ok" : "blocked"}\n`);
+      // --hint-only: the Stop-hook mode. The hook fires on EVERY Stop event,
+      // so the always-on status line (designed for once-per-workflow finalize
+      // steps) would be per-turn noise there. Silence below readiness is fine
+      // for this caller: invocation is recorded by the hook trace, and the
+      // threshold+cooldown pair bounds the hint to at most once per cooldown
+      // window.
+      const hintOnly = Array.isArray(args) && args.includes("--hint-only");
+      if (!hintOnly) {
+        process.stdout.write(`[memory] candidates-footer: ${count} pending / threshold ${threshold} / cooldown ${cooldownOk ? "ok" : "blocked"}\n`);
+      }
       if (ready) {
-        process.stdout.write(`\n💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.\n`);
+        process.stdout.write(`${hintOnly ? "" : "\n"}💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.\n`);
         try {
           const memDir = path.join(root, ".devt", "memory");
           if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });

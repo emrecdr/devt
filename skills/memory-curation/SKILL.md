@@ -43,6 +43,9 @@ Trigger on:
 - Direct user request: `/devt:memory promote DEC-003`, `/devt:memory reject "<idea>"`,
   `/devt:memory suggest` (then review)
 - When `_suggestions.md` is non-empty and the user wants to triage
+- Session end, when the Stop hook's curation hint fires (💭 N candidates pending) — the
+  catch-all for sessions that never hit a workflow finalize step (raw-dispatch maintainer
+  work); also the natural moment to spot an anomalous candidate before it is promoted
 
 Skip for:
 

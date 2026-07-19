@@ -40,6 +40,15 @@ STATE_JSON=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null || 
 # shutdown.
 node "${PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
 
+# Session-end curation surface. Curation triggers are otherwise
+# workflow-finalize-bound, so raw-dispatch maintainer sessions (which never
+# hit a finalize step) accumulate candidates nobody sees. --hint-only is
+# silent unless count>=threshold AND the cooldown window allows, so despite
+# Stop firing on every response turn this adds at most one line per cooldown
+# window — and session end is also the moment a human would notice an
+# anomalous candidate.
+CURATION_HINT=$(node "${PLUGIN_ROOT}/bin/devt-tools.cjs" memory candidates-footer --hint-only 2>/dev/null || true)
+
 # Parse state and extract fields in a single node call
 IFS=$'\n' read -r IS_WORKFLOW_ACTIVE IS_COMPLETE PHASE TASK <<< "$(node -e "
   const s = JSON.parse(process.argv[1]);
@@ -61,6 +70,9 @@ if [[ "$IS_WORKFLOW_ACTIVE" == "true" && "$IS_COMPLETE" == "false" ]]; then
     CONTEXT="${CONTEXT} Task: ${TASK}."
   fi
   CONTEXT="${CONTEXT} State preserved in .devt/state/. Run /devt:next to resume or /devt:workflow --cancel to reset."
+  if [[ -n "$CURATION_HINT" ]]; then
+    CONTEXT="${CONTEXT} ${CURATION_HINT}"
+  fi
 
   node -e "
     const ctx = process.argv[1];
@@ -70,4 +82,8 @@ if [[ "$IS_WORKFLOW_ACTIVE" == "true" && "$IS_COMPLETE" == "false" ]]; then
 fi
 
 # Workflow is complete or inactive — clean exit
-echo '{"stopReason": "Workflow stopped. State preserved in .devt/state/"}'
+node -e "
+  const hint = (process.argv[1] || '').trim();
+  const base = 'Workflow stopped. State preserved in .devt/state/';
+  process.stdout.write(JSON.stringify({ stopReason: hint ? base + ' | ' + hint : base }));
+" "$CURATION_HINT"

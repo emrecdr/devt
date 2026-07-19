@@ -17937,6 +17937,41 @@ else
 fi
 rm -rf "$K299_SHARED" "$K299_PROJ"
 
+# K300: session-end curation surface (DEF-008). Curation triggers are
+# workflow-finalize-bound; raw-dispatch sessions never hit one, so pending
+# candidates were invisible. stop.sh now appends the curation hint to its
+# stopReason via `memory candidates-footer --hint-only` — silent below
+# threshold, once per cooldown window when ready, default footer mode
+# unchanged (the finalize contract's always-on line stays).
+K300_PROJ=$(mktemp -d)
+(cd "$K300_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+printf -- '### \342\232\226\357\270\217 c1\n### \360\237\224\265 c2\n' > "$K300_PROJ/.devt/memory/_suggestions.md"
+K300_OK=1
+K300_WHY=""
+K300_S1=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
+[ -z "$K300_S1" ] || { K300_OK=0; K300_WHY="below-threshold-not-silent"; }
+printf -- '### \342\232\226\357\270\217 c1\n### \360\237\224\265 c2\n### \360\237\224\204 c3\n### \342\232\226\357\270\217 c4\n### \360\237\224\265 c5\n' > "$K300_PROJ/.devt/memory/_suggestions.md"
+rm -f "$K300_PROJ/.devt/memory/.last-candidate-surface"
+K300_S2=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
+case "$K300_S2" in *"5 memory candidates pending"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY ready-no-hint";; esac
+[ -f "$K300_PROJ/.devt/memory/.last-candidate-surface" ] || { K300_OK=0; K300_WHY="$K300_WHY no-stamp"; }
+K300_S3=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
+[ -z "$K300_S3" ] || { K300_OK=0; K300_WHY="$K300_WHY cooldown-not-silent"; }
+K300_S4=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer 2>/dev/null)
+case "$K300_S4" in "[memory] candidates-footer:"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY default-line-missing";; esac
+rm -f "$K300_PROJ/.devt/memory/.last-candidate-surface"
+K300_S5=$(cd "$K300_PROJ" && echo '{"stop_hook_active":false}' | bash "$ROOT/hooks/stop.sh" 2>/dev/null)
+case "$K300_S5" in *"memory candidates pending"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY stop-no-hint";; esac
+K300_S6=$(cd "$K300_PROJ" && echo '{"stop_hook_active":false}' | bash "$ROOT/hooks/stop.sh" 2>/dev/null)
+case "$K300_S6" in *"memory candidates pending"*) K300_OK=0; K300_WHY="$K300_WHY stop-hint-repeated";; *) : ;; esac
+case "$K300_S6" in *stopReason*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY stop-base-broken";; esac
+if [ "$K300_OK" = "1" ]; then
+  pass "K300: session-end curation surface — hint-only silent below threshold, hint+stamp when ready, cooldown suppresses, default footer line intact, stop.sh stopReason carries hint once per window (DEF-008)"
+else
+  fail "K300: curation surface broken ($K300_WHY)"
+fi
+rm -rf "$K300_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

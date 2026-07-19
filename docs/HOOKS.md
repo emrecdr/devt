@@ -185,6 +185,14 @@ Use log-all mode when computing return-size histograms, latency baselines, or an
 
 The mechanism is announcement-only. It does NOT change CLI behavior, does NOT block, and degrades gracefully when `CHANGELOG.md` is missing or the version section is absent (empty surfacing → no stamp update).
 
+## Session-End Curation Surface
+
+**`hooks/stop.sh`** (universal Stop hook, all profiles) appends a curation hint to its `stopReason` when memory candidates are ready for triage: `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`
+
+**How it works.** After the unconditional knowledge-candidate harvest, the hook calls `memory candidates-footer --hint-only` — a mode that emits ONLY the hint, and only when `count >= memory.candidates_surface_threshold` (default 5) AND the `memory.candidates_surface_cooldown_hours` window (default 24h, stamp `.devt/memory/.last-candidate-surface`) allows. Emitting touches the cooldown, so despite Stop firing on every response turn, the hint appears at most once per cooldown window. Below readiness the hook's messages are byte-identical to before.
+
+**Why.** Curation triggers are otherwise workflow-finalize-bound (`skills/memory-curation/SKILL.md`), so raw-dispatch maintainer sessions — which never hit a finalize step — accumulate candidates nobody ever sees. Session end is also the moment a human is most likely to notice an anomalous candidate before it reaches the curator (the memory-trust angle: candidates are the untrusted inbox). The `--hint-only` mode deliberately drops the always-on status line the finalize-footer contract requires — that contract exists for once-per-workflow call sites where silence is indistinguishable from never-executing; a per-turn hook has the invocation trace for that, and the always-on line would be per-turn noise.
+
 ## Hook Messaging Is Right-Sized for Cost
 
 **Rule.** Per-fire hook output (advisories, deny/warn messages, context-injection lines) is intentionally compact — the action cue + load-bearing recovery hints, not full re-explanation of protocols agents already know from preloaded skills.

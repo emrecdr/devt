@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.183.0] - 2026-07-20
+
+### Session-end curation surface (DEF-008)
+
+Curation triggers were exclusively workflow-finalize-bound (`skills/memory-curation` "When to Run It"), so sessions that never complete a workflow — raw-dispatch maintainer work, exactly where devt's densest decision-making happens — accumulated candidates in `_suggestions.md` that nobody ever saw. Before: the Stop hook harvested candidates silently and said nothing. After: when candidates cross the surface threshold and the cooldown allows, the Stop hook's `stopReason` carries `💭 N memory candidates pending … — run /devt:memory promote to triage`, at most once per cooldown window.
+
+### Added
+
+- **`memory candidates-footer --hint-only`** — Stop-hook mode: emits ONLY the 💭 hint when `count >= threshold && cooldown ok` (touching the cooldown stamp), silent otherwise. The finalize-footer contract's always-on status line is deliberately dropped in this mode — that contract exists for once-per-workflow call sites where silence is indistinguishable from never-executing; Stop fires per turn, invocation is already recorded by the hook trace, and an always-on line there would be noise. Default (flag-less) behavior byte-identical.
+- **`hooks/stop.sh` appends the curation hint to `stopReason`** in both exit paths (incomplete-workflow warning and clean exit), right after the existing unconditional candidate harvest — the write side and the surface side of session-end curation now live in the same hook.
+- `skills/memory-curation` gains the session-end trigger line (the weak form, shipping alongside the wiring that makes it fire).
+- Gate **K300** — behavioral: hint-only silent below threshold, hint+stamp at threshold, cooldown suppresses the rerun, default footer line intact, and stop.sh end-to-end emits the hint exactly once per window. Drift-guard stack 207 → 208 deep (K94–K300).
+- `docs/HOOKS.md` gains a "Session-End Curation Surface" section; `docs/MEMORY.md` CLI reference documents the mode.
+
 ## [0.182.0] - 2026-07-19
 
 ### Shared-root trust tier + REJ attribution (DEF-009 M2+M4 — sequence complete)
