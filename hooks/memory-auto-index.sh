@@ -59,7 +59,7 @@ node -e "
     if (!enabled) process.exit(0);
 
     // Debounce: skip if a previous auto-index ran within the window. The stamp
-    // file is touched only by this hook, so manual `memory index` calls don't
+    // file is touched only by this hook, so manual 'memory index' calls don't
     // suppress auto-index. Curator batch-promotes (N writes back-to-back) collapse
     // to a single rebuild.
     const debounceSec = Number(process.env.DEVT_AUTO_INDEX_DEBOUNCE_SEC || 5);
@@ -101,6 +101,22 @@ node -e "
     } else {
       // Touch the debounce stamp on success so the next hook fire skips if soon.
       try { fs.writeFileSync(stampPath, ''); } catch { /* non-fatal */ }
+      // Shared-root delta: the silent re-governance path (an external edit in
+      // a shared root re-governs consuming projects on the next index, with
+      // no per-project review). Emit ONLY when non-empty — requires
+      // multi-root AND changed shared docs, so this fires near-never and
+      // stays inside the hook-messaging byte budget.
+      try {
+        const out = JSON.parse(r.stdout || '{}');
+        const delta = out.shared_delta;
+        if (delta) {
+          const a = (delta.added || []).length, c = (delta.changed || []).length, rm = (delta.removed || []).length;
+          if (a + c + rm > 0) {
+            const ids = [].concat(delta.added || [], delta.changed || [], delta.removed || []).slice(0, 3).map(e => e.id).join(', ');
+            process.stdout.write('[memory-auto-index] shared-root memory changed: +' + a + ' ~' + c + ' -' + rm + ' (' + ids + ') — governs without local curator review; inspect: node ' + toolsPath + ' memory index' + '\\n');
+          }
+        }
+      } catch { /* result unparseable — stay silent */ }
     }
     process.exit(0);
   } catch { process.exit(0); }

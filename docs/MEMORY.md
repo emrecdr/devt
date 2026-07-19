@@ -531,6 +531,23 @@ When the same `id` appears in multiple roots, `memory index` returns:
 
 Collisions are **always reported** — never silent. CI can fail on `conflict_count > 0` if a project wants strict no-overlap policy.
 
+### Shared-root change delta
+
+When multi-root is configured, `memory index` also reports which **shared-root docs** were added/changed/removed since the previous index — converting shared-root re-governance (an external edit, then any index) into a reviewable event:
+
+```jsonc
+{
+  "shared_delta": {
+    "baseline": "previous-index",   // "unavailable" on the first indexed run (arrays stay empty — no everything-is-added noise)
+    "added":   [{ "id": "ADR-014", "root": "engineering-adrs" }],
+    "changed": [{ "id": "ADR-003", "root": "engineering-adrs" }],
+    "removed": []
+  }
+}
+```
+
+Mechanics: the baseline manifest (`{id: {root, hash}}` over post-precedence *winners* — a shared doc shadowed by a local one doesn't govern, so it isn't tracked) persists in the index DB's `meta` table, which the rebuild transaction never clears; deleting the DB honestly resets the baseline to `unavailable`. Local-doc churn is excluded by design. The three surfaces: the `memory index` result above, a `MEM_SHARED_DELTA` info line in `health` (self-clearing — the next no-change index writes an empty delta), and a compact `memory-auto-index` hook line emitted only when the delta is non-empty. Single-root projects see none of this — the `shared_delta` key is omitted entirely.
+
 ### Sharing mechanism
 
 The shared root can come from any source:
@@ -576,9 +593,9 @@ Permanent memory is not just read at retrieval time; it **acts on future dispatc
 
 **The curator gate is the control.** Untrusted candidates land in `_suggestions.md`; nothing reaches `.devt/memory/` except through the curator's 5-filter review and an explicit `AskUserQuestion` approval. Free-form writes to the trusted store are not a supported path — by design.
 
-**Multi-root shared roots are the exception, so trust them accordingly.** Curator writes always go local; shared roots are read-only from devt and edited directly by their maintainers, so **shared-root docs never pass the curator gate** — and a change in a shared root silently re-governs every consuming project on the next `memory index` / `memory-auto-index`, with no per-project review. A shared-root ADR governs (and coerces, under block-mode) with the same authority as a locally-curated one; a shared-root REJ tombstone suppresses proposals across all consumers. Add a shared root only when you trust its contents as much as your own curated memory — treat it like a dependency you grant commit-blocking authority. Normal use (an org ADR repo behind PR review) is low-risk; the caution is for roots outside your review control.
+**Multi-root shared roots are the exception, so trust them accordingly.** Curator writes always go local; shared roots are read-only from devt and edited directly by their maintainers, so **shared-root docs never pass the curator gate** — a change in a shared root re-governs every consuming project on the next `memory index` / `memory-auto-index` with no per-project review, though the change is now *surfaced* (not blocked) by the shared-root delta in the index result, `health`, and the auto-index hook line. A shared-root ADR governs (and coerces, under block-mode) with the same authority as a locally-curated one; a shared-root REJ tombstone suppresses proposals across all consumers. Add a shared root only when you trust its contents as much as your own curated memory — treat it like a dependency you grant commit-blocking authority. Normal use (an org ADR repo behind PR review) is low-risk; the caution is for roots outside your review control.
 
-**Provenance is legible at the governance surface.** Shared-root docs are marked in the Brief's governing lines (`_(active·verified·shared:<label>, lane B)_` — the label is the root's basename, parent-qualified only on basename collision) and in the sidecar's `governing[]` (`shared_root: "<label>" | null`). Local docs render unchanged, so single-root projects see zero provenance noise. **Remaining limitation:** block-mode denial does not yet tier on provenance — a shared-root doc still coerces with full authority. The optional trust tier (shared roots advise without coercing) and a shared-root change delta on `memory index` are tracked as `DEF-009` in the deferred queue.
+**Provenance is legible at the governance surface.** Shared-root docs are marked in the Brief's governing lines (`_(active·verified·shared:<label>, lane B)_` — the label is the root's basename, parent-qualified only on basename collision) and in the sidecar's `governing[]` (`shared_root: "<label>" | null`). Local docs render unchanged, so single-root projects see zero provenance noise. **Remaining limitation:** block-mode denial does not yet tier on provenance — a shared-root doc still coerces with full authority — and shared-root REJ suppression is not attributed to its root. The optional trust tier (shared roots advise without coercing) and REJ-suppression attribution are tracked as `DEF-009` in the deferred queue.
 
 ## Related Documentation
 

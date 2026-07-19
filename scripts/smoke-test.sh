@@ -17832,6 +17832,56 @@ else
 fi
 rm -rf "$K297_SHARED" "$K297_PROJ"
 
+# K298: shared-root change delta on memory index (DEF-009 M3). External edits
+# in a shared root re-govern consuming projects at the next index with no
+# per-project review — the delta converts that into a reviewable event. The
+# baseline manifest lives in the index DB meta table (survives the rebuild
+# transaction). First-ever run reports baseline "unavailable" with EMPTY
+# arrays; local-doc churn is excluded; single-root output omits the key and
+# clears the persisted delta.
+K298_SHARED=$(mktemp -d)
+K298_PROJ=$(mktemp -d)
+mkdir -p "$K298_SHARED/decisions"
+printf -- '---\nid: ADR-911\ntitle: "Shared delta rule"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: verified\nsummary: "Shared doc for delta tracking."\n---\nbody\n' > "$K298_SHARED/decisions/ADR-911-shared.md"
+(cd "$K298_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+printf -- '---\nid: ADR-912\ntitle: "Local delta policy"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: explicit\nsummary: "Local doc for delta exclusion."\n---\nbody\n' > "$K298_PROJ/.devt/memory/decisions/ADR-912-local.md"
+node -e "
+  const fs = require('fs');
+  const p = '$K298_PROJ/.devt/config.json';
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.memory = cfg.memory || {};
+  cfg.memory.paths = ['$K298_SHARED', '.devt/memory'];
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+"
+k298_delta() {
+  (cd "$K298_PROJ" && node "$CLI" memory index 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const d=j.shared_delta;if(d===undefined){process.stdout.write('ABSENT');return;}process.stdout.write(d.baseline+'|a:'+d.added.map(e=>e.id)+'|c:'+d.changed.map(e=>e.id)+'|r:'+d.removed.map(e=>e.id))}catch{process.stdout.write('parse-error')}});"
+}
+K298_S1=$(k298_delta)
+K298_S2=$(k298_delta)
+printf -- '\namended by shared maintainer\n' >> "$K298_SHARED/decisions/ADR-911-shared.md"
+K298_S3=$(k298_delta)
+rm "$K298_SHARED/decisions/ADR-911-shared.md"
+printf -- '\nlocal churn\n' >> "$K298_PROJ/.devt/memory/decisions/ADR-912-local.md"
+K298_S4=$(k298_delta)
+K298_H1=$( (cd "$K298_PROJ" && node "$CLI" health 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.code==='MEM_SHARED_DELTA').length))}catch{process.stdout.write('parse-error')}});" )
+node -e "
+  const fs = require('fs');
+  const p = '$K298_PROJ/.devt/config.json';
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.memory.paths = null;
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+"
+K298_S5=$(k298_delta)
+K298_H2=$( (cd "$K298_PROJ" && node "$CLI" health 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.code==='MEM_SHARED_DELTA').length))}catch{process.stdout.write('parse-error')}});" )
+if [ "$K298_S1" = "unavailable|a:|c:|r:" ] && [ "$K298_S2" = "previous-index|a:|c:|r:" ] \
+  && [ "$K298_S3" = "previous-index|a:|c:ADR-911|r:" ] && [ "$K298_S4" = "previous-index|a:|c:|r:ADR-911" ] \
+  && [ "$K298_H1" = "1" ] && [ "$K298_S5" = "ABSENT" ] && [ "$K298_H2" = "0" ]; then
+  pass "K298: shared-root delta on memory index — first-run unavailable+empty, no-change empty, changed/removed tracked, local churn excluded, health MEM_SHARED_DELTA fires + clears on single-root flip (DEF-009 M3)"
+else
+  fail "K298: shared-root delta broken (s1=$K298_S1 s2=$K298_S2 s3=$K298_S3 s4=$K298_S4 h1=$K298_H1 s5=$K298_S5 h2=$K298_H2)"
+fi
+rm -rf "$K298_SHARED" "$K298_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

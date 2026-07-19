@@ -45,6 +45,7 @@ const CHECKS = {
   MEM_VALIDATE_ERRORS: { severity: "warning", message: "Memory layer has frontmatter validation errors", repairable: false, fix: "Run `node bin/devt-tools.cjs memory validate` for the full list and fix the offending markdown" },
   MEM_PATH_UNREACHABLE: { severity: "warning", message: "memory.paths references a directory that doesn't exist", repairable: false, fix: "Initialize the missing root: git submodule init, mount the NFS share, or remove the entry from .devt/config.json" },
   MEM_CONFLICT_HIGH: { severity: "info", message: "Memory layer has ID collisions across configured roots (last-wins applied)", repairable: false, fix: "Inspect with `node bin/devt-tools.cjs memory index` to see the collisions; rename project-local docs OR accept the override as intentional" },
+  MEM_SHARED_DELTA: { severity: "info", message: "Most recent memory index detected shared-root doc changes (docs that govern without passing the local curator gate)", repairable: false, fix: "Review the changed docs in their shared root; a follow-up `node bin/devt-tools.cjs memory index` with no further changes clears this" },
   DEF_TRIGGER_FIRED: { severity: "info", message: "A deferred item's declared corpus-size unlock condition is now met", repairable: false, fix: "Review the item: node bin/devt-tools.cjs deferred get <DEF-ID> — implement it or re-gate with a new trigger" },
   // Graphify integration drift — `graphify` binary on PATH but MCP server not registered in
   // .mcp.json. Setup wizard's MCP probe is one-shot at install time; users who install
@@ -430,6 +431,23 @@ function runChecks(pluginRoot) {
               { db_mtime_ms: dbMtime, newest_md_mtime_ms: newestMdMtime });
         }
       }
+
+      // MEM_SHARED_DELTA — shared-root re-governance is silent by nature
+      // (external edit + auto-index, no per-project review); the persisted
+      // last-index delta makes it a reviewable event. Self-clearing: the next
+      // multi-root index with no shared changes writes an empty delta.
+      try {
+        const delta = memMod.getLastSharedDelta();
+        if (delta) {
+          const a = (delta.added || []).length, c = (delta.changed || []).length, r = (delta.removed || []).length;
+          if (a + c + r > 0) {
+            const ids = [...(delta.added || []), ...(delta.changed || []), ...(delta.removed || [])]
+              .slice(0, 5).map(e => e.id).join(", ");
+            add("MEM_SHARED_DELTA", `+${a} ~${c} -${r} at ${delta.generated_at || "?"} (${ids})`,
+                { added: a, changed: c, removed: r, generated_at: delta.generated_at || null });
+          }
+        }
+      } catch { /* index absent — skip */ }
 
       // MEM_VALIDATE_ERRORS — surface count from memory.validate
       try {

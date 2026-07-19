@@ -21,6 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
 // Sub-modules lazy-require this file inside their function bodies (for shared
 // utilities like withDb / parseYamlSubset / serializeFrontmatter), so requiring
@@ -441,6 +442,7 @@ function scanDocs() {
           frontmatter: fm,
           body: content.replace(/^---[\s\S]*?\n---\n?/, ""),
           source_root: root,
+          content_hash: crypto.createHash("sha256").update(content).digest("hex"),
         };
 
         const id = fm && typeof fm.id === "string" ? fm.id : null;
@@ -640,6 +642,50 @@ function rebuildIndexLocked() {
   }
 
   const db = ensureDb();
+
+  // Shared-root delta baseline. The previous manifest survives the rebuild
+  // because the transaction below clears the content tables but never `meta`
+  // (same mechanism that preserves last_built_at). Deleting the DB deletes
+  // the baseline with it — the next run honestly reports it unavailable.
+  let prevManifest = null;
+  try {
+    const row = db.prepare("SELECT value FROM meta WHERE key = 'shared_manifest'").get();
+    if (row && row.value) prevManifest = JSON.parse(row.value);
+  } catch { /* absent or corrupt manifest — baseline unavailable */ }
+
+  const localRoot = getMemoryRoot();
+  const roots = getMemoryRoots();
+  // Manifest covers post-precedence WINNERS only: a shared doc shadowed by a
+  // local one does not govern, so it does not belong in the delta either.
+  const newManifest = {};
+  for (const doc of validDocs) {
+    if (doc.source_root && doc.source_root !== localRoot) {
+      newManifest[doc.frontmatter.id] = { root: doc.source_root, hash: doc.content_hash };
+    }
+  }
+
+  // Delta only when multi-root is configured — single-root projects must see
+  // zero new surface. First-ever baseline reports "unavailable" with empty
+  // arrays rather than enumerating every shared doc as "added" (noise).
+  let sharedDelta = null;
+  if (roots.length > 1) {
+    const rootLabel = (r) => {
+      try { const info = sourceRootInfo(r); return info.local ? r : info.label; }
+      catch { return path.basename(r); }
+    };
+    sharedDelta = { baseline: prevManifest ? "previous-index" : "unavailable", added: [], changed: [], removed: [] };
+    if (prevManifest) {
+      for (const [id, cur] of Object.entries(newManifest)) {
+        const prev = prevManifest[id];
+        if (!prev) sharedDelta.added.push({ id, root: rootLabel(cur.root) });
+        else if (prev.hash !== cur.hash) sharedDelta.changed.push({ id, root: rootLabel(cur.root) });
+      }
+      for (const [id, prev] of Object.entries(prevManifest)) {
+        if (!newManifest[id]) sharedDelta.removed.push({ id, root: rootLabel(prev.root) });
+      }
+    }
+  }
+
   let inserted = 0;
   try {
     db.prepare("BEGIN").run();
@@ -714,6 +760,18 @@ function rebuildIndexLocked() {
     db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run(
       "last_built_at", new Date().toISOString()
     );
+    db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run(
+      "shared_manifest", JSON.stringify(newManifest)
+    );
+    if (sharedDelta) {
+      db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run(
+        "last_shared_delta", JSON.stringify({ generated_at: new Date().toISOString(), ...sharedDelta })
+      );
+    } else {
+      // Config flipped multi→single: a lingering delta row would keep health
+      // flagging shared changes that no longer govern anything.
+      db.prepare("DELETE FROM meta WHERE key = 'last_shared_delta'").run();
+    }
 
     db.prepare("COMMIT").run();
   } catch (err) {
@@ -724,7 +782,6 @@ function rebuildIndexLocked() {
   db.close();
 
   const conflicts = (docs && docs._conflicts) || [];
-  const roots = getMemoryRoots();
   return {
     inserted,
     skipped: validationErrors.length,
@@ -734,6 +791,7 @@ function rebuildIndexLocked() {
     memory_roots: roots,
     conflicts,
     conflict_count: conflicts.length,
+    ...(sharedDelta ? { shared_delta: sharedDelta } : {}),
   };
 }
 
@@ -976,6 +1034,19 @@ function getDocsMeta(ids) {
       `SELECT id, doc_type, status, confidence, source_root FROM documents WHERE id IN (${placeholders})`
     ).all(...ids);
   });
+}
+
+// Most recent shared-root delta as persisted at index time (meta table).
+// Null when the index has never run multi-root, the DB is absent, or the
+// record is unparseable — consumers (health) treat null as nothing-to-report.
+function getLastSharedDelta() {
+  try {
+    return withDb(db => {
+      const row = db.prepare("SELECT value FROM meta WHERE key = 'last_shared_delta'").get();
+      if (!row || !row.value) return null;
+      try { return JSON.parse(row.value); } catch { return null; }
+    });
+  } catch { return null; }
 }
 
 // Classify a doc's source_root as local vs shared and derive a short display
@@ -2076,6 +2147,7 @@ module.exports = {
   getDoc,
   getDocsMeta,
   sourceRootInfo,
+  getLastSharedDelta,
   getAffectsPathsByIds,
   getByPath,
   getBySymbol,

@@ -8,6 +8,28 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.181.0] - 2026-07-19
+
+### Shared-root change delta on `memory index` (DEF-009 M3)
+
+Shared-root re-governance was structurally silent: an external edit in a shared memory root (git pull, maintainer commit) re-governs every consuming project at its next `memory index` — and the auto-index hook that usually triggers that index printed nothing on success. Before: the only trace of a shared-root change was diffing the root by hand. After: every multi-root index reports exactly which shared-root docs were added/changed/removed since the previous index, on three surfaces.
+
+### Added
+
+- **`shared_delta` in the `memory index` result** — `{baseline, added, changed, removed}` with entries `{id, root: <label>}` (labels via the provenance helper). The baseline manifest (`{id: {root, hash}}` over post-precedence *winners* — a shared doc shadowed by a local one doesn't govern and isn't tracked) persists in the index DB's `meta` table, which the rebuild transaction never clears (the same mechanism that preserves `last_built_at`); deleting the regenerable DB honestly resets the baseline. First-ever run reports `baseline: "unavailable"` with empty arrays instead of enumerating every shared doc as added. Local-doc churn is excluded by design. Single-root projects: key omitted entirely, zero new surface.
+- **`health` gains `MEM_SHARED_DELTA`** (info severity) — reads the persisted last delta and reports `+a ~c -r` with doc ids. Self-clearing: the next multi-root index with no shared changes writes an empty delta, and a multi→single config flip deletes the row.
+- **`memory-auto-index` hook emits a compact line when the delta is non-empty** — the one silent re-governance path now surfaces `[memory-auto-index] shared-root memory changed: +a ~c -r (ids) …` on the hook's stdout. Fires only when multi-root AND shared docs changed (near-never), honoring the hook-messaging byte budget; silent-on-success behavior is otherwise unchanged.
+- **`memory.cjs::getLastSharedDelta()`** export (health's reader) and a `content_hash` (sha256) computed per doc at scan time to drive change detection.
+- Gate **K298** — behavioral two-root fixture walking the full lifecycle: first-run unavailable+empty, no-change empty, shared modify → `changed`, shared remove → `removed` with local churn excluded, health fires, single-root flip omits the key and clears health. Drift-guard stack 205 → 206 deep (K94–K298).
+
+### Fixed
+
+- **`memory-auto-index.sh` backtick command-substitution noise** — a JS comment inside the double-quoted `node -e` block contained a backticked phrase, which bash command-substituted on every hook fire (`memory: command not found` on stderr, empty string spliced into the comment). Harmless to behavior but a latent landmine of the known no-backticks-in-double-quoted-`node -e` class; the backticks are now plain quotes.
+
+### Changed
+
+- `docs/MEMORY.md` — new "Shared-root change delta" subsection under Multi-Root Memory; trust-model section updated (re-governance is now surfaced-not-blocked; remaining DEF-009 gap narrowed to the trust tier and REJ-suppression attribution).
+
 ## [0.180.0] - 2026-07-19
 
 ### Shared-root provenance at the governance surface (DEF-009 M1)
