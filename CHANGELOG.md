@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.176.0] - 2026-07-19
+
+### Affects-coverage: the first instrument for the primary memory signal (DEF-007 part 1)
+
+A second external memory-layer review (validated filesystem-first) surfaced that since prose-FTS was demoted to a supplement and the affects-union became the primary review-time `memory_signal`, a governing doc with no `affects_paths` is structurally invisible to that signal — and nothing measured or flagged it. `affects_paths` is optional and `memory validate` only walked it when present, so a doc with none was silently absent from governance. This ships the small, unambiguous half of the fix.
+
+### Added
+
+- **`memory validate` warns on active `decision`/`concept`/`flow` docs with no `affects_paths`.** Scoped to lineage-bearing types exactly like the orphaned-retirement check — REJ tombstones, lessons, and superseded docs are exempt. It is a **warning** (never touches the `errors` count the validate-clean gates key on), with a message that names why: the doc can't reach the affects-union signal until it declares the paths it governs. Gate K294 (behavioral: warn on active-no-paths, exempt REJ, clear when a path is added). Drift-guard stack 201 → 202 deep (K94–K294).
+
+### Deferred (DEF-007 part 2)
+
+- The coverage **trend** number (what fraction of a governing doc's claimed domain actually gets affects hits) remains open — it needs a denominator scoped to governed domains and a trend-not-target framing (a raw fraction rewards broad globs that govern nothing). Captured in the backlog for a fresh session.
+
 ## [0.175.0] - 2026-07-19
 
 ### The range release — receipt #22's headline gap closed (cal #56b)

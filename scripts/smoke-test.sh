@@ -17697,6 +17697,40 @@ else
   fail "K293: range surface regressed:$K293_MISS"
 fi
 
+# K294: missing-affects validate warning (DEF-007 part 1). An active
+# decision/concept/flow doc with no affects_paths is structurally invisible to
+# the affects-union memory_signal (the primary review-time governance signal),
+# so `memory validate` now warns on it — scoped to lineage-bearing types like
+# the orphaned-retirement check; REJ tombstones + lessons + superseded docs are
+# exempt; it is a WARNING (never touches the errors count the validate-clean
+# gates key on). Behavioral on a fixture: warn on active-no-paths, exempt
+# REJ/superseded, clear when a path is added.
+K294_OK=1
+K294_MISS=""
+K294_TMP=$(mktemp -d)
+mkdir -p "$K294_TMP/.devt/memory/concepts" "$K294_TMP/.devt/memory/rejected"
+printf -- '---\nid: CON-K294\ntitle: "no paths"\ndoc_type: concept\nstatus: active\nconfidence: verified\nsummary: "an active concept deliberately without affects paths for K294"\n---\nbody\n' > "$K294_TMP/.devt/memory/concepts/CON-K294.md"
+printf -- '---\nid: REJ-K294\ntitle: "tombstone"\ndoc_type: rejected\nstatus: active\nconfidence: verified\nsummary: "a rejected tombstone with no affects paths for K294"\nreason: "net negative"\n---\nbody\n' > "$K294_TMP/.devt/memory/rejected/REJ-K294.md"
+K294_WARN=$( (cd "$K294_TMP" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const ma=(j.issues||[]).filter(i=>i.category==='missing-affects');const errAdds=ma.filter(i=>i.severity!=='warning').length;process.stdout.write(ma.length+'|'+ma.map(i=>i.filePath).join(',')+'|'+errAdds)}catch{process.stdout.write('parse-error')}});" 2>/dev/null)
+# Exactly one missing-affects (the concept), flagged file is the concept, and it is a warning (0 non-warning).
+case "$K294_WARN" in
+  1\|*CON-K294*\|0) : ;;
+  *) K294_OK=0; K294_MISS="$K294_MISS warn-active-concept($K294_WARN)";;
+esac
+# REJ must NOT be flagged.
+printf '%s' "$K294_WARN" | /usr/bin/grep -q 'REJ-K294' && { K294_OK=0; K294_MISS="$K294_MISS rej-not-exempt"; }
+# Add a path → clears.
+printf -- '---\nid: CON-K294\ntitle: "has path"\ndoc_type: concept\nstatus: active\nconfidence: verified\nsummary: "an active concept now carrying an affects path for K294"\naffects_paths:\n  - "bin/x.js"\n---\nbody\n' > "$K294_TMP/.devt/memory/concepts/CON-K294.md"
+K294_CLEAR=$( (cd "$K294_TMP" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.category==='missing-affects').length))}catch{process.stdout.write('x')}});" 2>/dev/null)
+[ "$K294_CLEAR" = "0" ] || { K294_OK=0; K294_MISS="$K294_MISS not-cleared-on-add($K294_CLEAR)"; }
+rm -rf "$K294_TMP"
+/usr/bin/grep -qF 'category: "missing-affects"' "$ROOT/bin/modules/memory.cjs" || { K294_OK=0; K294_MISS="$K294_MISS category-pin"; }
+if [ "$K294_OK" -eq 1 ]; then
+  pass "K294: missing-affects validate warning (active decision/concept/flow no-paths warns; REJ exempt; warning-not-error; clears on add; DEF-007 part 1)"
+else
+  fail "K294: missing-affects surface regressed:$K294_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

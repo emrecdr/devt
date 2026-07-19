@@ -1447,6 +1447,25 @@ function validate() {
         }
       }
     }
+
+    // Missing-affects: an active governing doc with no affects_paths is
+    // structurally invisible to the affects-union memory_signal — the primary
+    // review-time governance signal (prose-FTS is a demoted supplement that
+    // never uniquely converted across field runs). Scoped to lineage-bearing
+    // types, matching the orphaned-retirement check; lessons + REJ tombstones
+    // legitimately carry no affects_paths.
+    const _apDocType = doc.frontmatter.doc_type;
+    const _apPaths = doc.frontmatter.affects_paths;
+    if (["decision", "concept", "flow"].includes(_apDocType)
+        && doc.frontmatter.status === "active"
+        && (!Array.isArray(_apPaths) || _apPaths.length === 0)) {
+      issues.push({
+        filePath: doc.relativePath,
+        severity: "warning",
+        category: "missing-affects",
+        error: `active ${_apDocType} has no affects_paths — invisible to the affects-union memory_signal (the primary review-time governance signal); add affects_paths so it can govern the files it applies to`,
+      });
+    }
   }
 
   const dbPath = getDbPath();
