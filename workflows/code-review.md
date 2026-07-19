@@ -214,7 +214,7 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 
 **EXECUTE THE PLAN.** Read `.devt/state/graphify-impact-plan.json`. This is not optional and not a "consider running it" — the next step gates on the output existing:
 
-**ARGS CONTRACT** — the `args` field in `graphify-impact-plan.json` is the single source of truth for what gets passed to the MCP tool. Use it VERBATIM. Do NOT substitute symbols, narrow the list, "pick anchors", or improvise an alternative parameter set — those changes are unauditable and degrade tier signal. If the args look wrong, fix the bash that wrote them; do not override at the call site.
+**ARGS CONTRACT (verbatim-OR-attested)** — the `args` field in `graphify-impact-plan.json` is the single source of truth for what gets passed to the MCP tool. Default: use it VERBATIM — do NOT substitute symbols, narrow the list, "pick anchors", or improvise an alternative parameter set; silent changes are unauditable and degrade tier signal. Exception, when the generated args are demonstrably bad (e.g. non-identifier docstring fragments): you may override, PROVIDED you first write the full attestation into `graphify-impact-plan.json` — `args_overridden: true`, `original_args`, `override_args`, `override_reason`, `override_evidence` (the derivation, e.g. "symbols extracted from git diff <a>..<b>"), `override_by`, `timestamp` — then call the MCP tool with `override_args`. `state assert-graphify-decision` FAILS on a declared override with incomplete attestation; an undeclared override remains a contract violation.
 
 - If `tier == "skip"`: write `.devt/state/graphify-skip-reason.txt` containing the `skip_reason` field verbatim. Do NOT call any MCP tool. The reviewer falls back to `<scope_hint>` plus raw file list and graph-impact analysis is correctly absent.
 - If `tier == "pr_scoped"`: call `mcp__graphify__get_pr_impact(args)` using the `args` object from the plan VERBATIM. **For Bitbucket projects this tier never fires** — the bash step routed past it. If the call errors (e.g. PR not found because the user-installed graphify MCP cannot reach the repo), fall back: write `graphify-skip-reason.txt` with the error and continue. Otherwise write the response verbatim to `.devt/state/graph-impact.md`.
@@ -313,6 +313,8 @@ RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
 RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
 RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
 RW_ARGS="--base=${PRIMARY_BRANCH:-main}"
+RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+[ -n "$RANGE" ] && RW_ARGS="$RW_ARGS --range=$RANGE"
 [ -n "$RW_TIER" ]   && RW_ARGS="$RW_ARGS --tier=$RW_TIER"
 [ -n "$RW_GOD" ]    && RW_ARGS="$RW_ARGS --god-node=$RW_GOD"
 [ -n "$RW_EFFECT" ] && RW_ARGS="$RW_ARGS --effect-size=$RW_EFFECT"
@@ -320,7 +322,11 @@ RW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight assess $RW_AR
 if [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
   echo "[review-weight] LIGHT-eligible — $(printf '%s\n' "$RW" | jq -r '.logic_file_count') logic file(s), $(printf '%s\n' "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
 else
-  echo "[review-weight] HEAVY recommended — $(printf '%s\n' "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
+  if printf '%s\n' "$RW" | jq -r '(.blocked_by // []) | join("; ")' | /usr/bin/grep -q "scope unresolvable"; then
+    echo "[review-weight] SCOPE UNRESOLVABLE — the diff resolved to zero files; this is a scope failure, not a safety verdict. For a merged PR or historical range, re-run with --range=<a>..<b> in the task text."
+  else
+    echo "[review-weight] HEAVY recommended — $(printf '%s\n' "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
+  fi
 fi
 RW_ADV=$(printf '%s\n' "$RW" | jq -r '(.advisories // []) | join("; ")')
 [ -n "$RW_ADV" ] && echo "[review-weight] advisories (non-blocking): $RW_ADV"
@@ -342,10 +348,14 @@ Measure the file count in the review scope. If > 10 files AND graphify is ready,
 # exists (pre-written scope escape hatch); otherwise count the same union
 # (committed range + working tree + untracked) identify_scope strategy 2
 # uses — a raw base...HEAD count reads 0 on uncommitted work.
+# --range=<a>..<b> in the task text scopes a merged-PR / historical-range
+# review: the base...HEAD union is empty by construction there, which starves
+# file count, diff-LOC, and every downstream consumer at once.
+RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
 if [ -s .devt/state/code-review-input.md ]; then
   SCOPE_FILE_COUNT=$(awk '/^- /{n++} END{print n+0}' .devt/state/code-review-input.md 2>/dev/null || echo 0)
 else
-  SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.count // 0')
+  SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} | jq -r '.count // 0')
 fi
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 
@@ -354,10 +364,16 @@ GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight
 # review data shows finding rates scale with diff LOC (31% under 50 changed
 # lines vs 84% at 1,000+), and the parallel path already sizes lanes by
 # diff-LOC (ok<3000 / chunked>=3000) while this single path was size-blind.
-MB=$(git merge-base HEAD "${PRIMARY_BRANCH:-main}" 2>/dev/null || echo HEAD)
-DIFF_LOC=$({ git diff --numstat "$MB" 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
-UNTRACKED_LOC=$({ git ls-files --others --exclude-standard 2>/dev/null || true; } | while IFS= read -r f; do [ -f "$f" ] && wc -l < "$f"; done | awk '{s+=$1} END{print s+0}')
-DIFF_LOC=$((DIFF_LOC + UNTRACKED_LOC))
+if [ -n "$RANGE" ]; then
+  # Range scope: diff mass comes from the range itself; no working-tree or
+  # untracked contribution (they are not part of the range under review).
+  DIFF_LOC=$({ git diff --numstat $RANGE 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
+else
+  MB=$(git merge-base HEAD "${PRIMARY_BRANCH:-main}" 2>/dev/null || echo HEAD)
+  DIFF_LOC=$({ git diff --numstat "$MB" 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
+  UNTRACKED_LOC=$({ git ls-files --others --exclude-standard 2>/dev/null || true; } | while IFS= read -r f; do [ -f "$f" ] && wc -l < "$f"; done | awk '{s+=$1} END{print s+0}')
+  DIFF_LOC=$((DIFF_LOC + UNTRACKED_LOC))
+fi
 # Same field-calibrated banding the lane registry uses (state.cjs registerLane).
 if [ "${DIFF_LOC:-0}" -ge 3000 ]; then
   printf 'chunked %s\n' "$DIFF_LOC" > .devt/state/review-depth.txt
@@ -452,9 +468,9 @@ Determine which files to review. Use ONE of these strategies (in priority order)
 1. **User-specified files**: If the user provided specific file paths or patterns, use those.
 2. **Git diff**: If no files were specified, detect changed files via the union CLI — committed range (merge-base-aware triple-dot) PLUS working tree PLUS untracked. Raw `git diff base...HEAD` returns an EMPTY set exactly when the review target is uncommitted work, silently under-scoping the review:
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.files[]'
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} | jq -r '.files[]'
    ```
-   Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review; without the flag the CLI defaults to `.devt/config.json::git.primary_branch`, then `main`.
+   When the task text carries `--range=<a>..<b>` (merged-PR / historical-range review), re-derive it in this block with the same one-liner scope_check uses — range mode diffs exactly that range and excludes working-tree/untracked files. Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review; without the flag the CLI defaults to `.devt/config.json::git.primary_branch`, then `main`.
 3. **Impl-summary**: If `.devt/state/impl-summary.md` exists from a prior workflow, extract the file list from it.
 4. **User prompt**: If none of the above yields results, ask the user which files to review.
 

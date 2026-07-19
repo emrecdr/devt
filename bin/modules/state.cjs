@@ -2214,6 +2214,40 @@ function assertGraphifyDecision() {
     };
   }
   const dir = getStateDir();
+  // Verbatim-OR-attested args contract: the plan's args are the single source
+  // of truth for what reaches the MCP tool — but when the GENERATOR is known
+  // bad (field: topic.symbols carried truncated docstring fragments and the
+  // verbatim rule forced a wasted MCP call on them), an orchestrator may
+  // override PROVIDED the override is fully attested in the plan itself. A
+  // post-hoc auditor reconstructs: what the generator produced (original_args),
+  // what was sent (override_args, cross-checkable via mcp-stats correlation),
+  // and why (reason + evidence + who + when). Partial attestation fails —
+  // an unexplained override is indistinguishable from improvisation.
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const planPath = path.join(dir, "graphify-impact-plan.json");
+    if (fs.existsSync(planPath)) {
+      const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+      if (plan && plan.args_overridden === true) {
+        const required = ["original_args", "override_args", "override_reason", "override_evidence", "override_by", "timestamp"];
+        const missing = required.filter((k) => {
+          const v = plan[k];
+          if (v === undefined || v === null) return true;
+          if (typeof v === "string") return v.trim() === "";
+          if (typeof v === "object") return Object.keys(v).length === 0;
+          return false;
+        });
+        if (missing.length > 0) {
+          return {
+            ok: false,
+            reason: `graphify-impact-plan.json declares args_overridden=true but attestation is incomplete — missing/empty: ${missing.join(", ")}. Verbatim-OR-attested: either send the plan args unmodified, or record the full override attestation in the plan file.`,
+            graphify_state: "ready",
+            missing_attestation_fields: missing,
+          };
+        }
+      }
+    }
+  } catch { /* unreadable plan handled by the artifact checks below */ }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const graphImpactPath = path.join(dir, "graph-impact.md");
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -7570,9 +7604,14 @@ function run(subcommand, args) {
           base = (cfg.git && cfg.git.primary_branch) || "main";
         } catch { base = "main"; }
       }
+      // --range=<a>..<b> (or a single ref): explicit commit-range scope for
+      // merged-PR / historical reviews where the base...HEAD union is empty
+      // by construction. Range mode excludes working-tree/untracked files.
+      const rangeArg = args.find(a => a.startsWith("--range="));
+      const range = rangeArg ? rangeArg.slice("--range=".length) : null;
       const { collectChangedFiles } = require("./review-weight.cjs");
-      const files = collectChangedFiles(findProjectRoot(), base);
-      return { ok: true, base, count: files.length, files };
+      const files = collectChangedFiles(findProjectRoot(), base, range ? { range } : undefined);
+      return { ok: true, base, range: range || null, count: files.length, files };
     }
     case "review-context-init": {
       const scopeArg = args.find(a => a.startsWith("--scope="));

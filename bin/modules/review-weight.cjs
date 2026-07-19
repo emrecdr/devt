@@ -77,12 +77,27 @@ function _compilePatterns(defaults, extra) {
  * and gating that only sees the committed range goes blind exactly when the
  * review scope lives in the working tree.
  */
-function collectChangedFiles(projectRoot, baseRef) {
+function collectChangedFiles(projectRoot, baseRef, opts) {
   // stderr ignored: an unreachable base ref makes git print "fatal: ambiguous
   // argument" while the catch below already handles the failure — inherited
   // stderr would leak that noise into every consumer's output stream.
   const collect = (argv) => execFileSync("git", argv, { cwd: projectRoot, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] })
     .split("\n").map(s => s.trim()).filter(Boolean);
+  // Explicit commit range (a..b / a...b / single ref): the scope IS that
+  // range — no working-tree/untracked union, which would contaminate a
+  // merged-PR or historical-range review with unrelated local edits. This is
+  // the choke point that starves every scope consumer when a review targets
+  // work already ON the primary branch (field: merged-PR review returned 0
+  // changed files and four subsystems degraded politely).
+  const range = opts && typeof opts.range === "string" && opts.range.trim() ? opts.range.trim() : null;
+  if (range) {
+    try {
+      const argv = range.includes("..")
+        ? ["diff", "--name-only", range]
+        : ["diff", "--name-only", `${range}...HEAD`];
+      return Array.from(new Set(collect(argv)));
+    } catch { return []; }
+  }
   const union = new Set();
   try { for (const f of collect(["diff", "--name-only", `${baseRef}...HEAD`])) union.add(f); } catch { /* base unreachable — working-tree passes below still apply */ }
   for (const f of collect(["diff", "--name-only", "HEAD"])) union.add(f);
@@ -143,7 +158,7 @@ function assessReviewWeight(opts = {}) {
         const gc = getMergedConfig();
         base = (gc && gc.git && gc.git.primary_branch) || "main";
       }
-      files = collectChangedFiles(proot, base);
+      files = collectChangedFiles(proot, base, opts.range ? { range: opts.range } : undefined);
       filesReadable = true;
     } catch {
       files = [];
@@ -173,7 +188,11 @@ function assessReviewWeight(opts = {}) {
   // Zero resolved files is NOT a safe diff — it means file detection failed
   // (or there is nothing to review). Without this, the count gates pass
   // vacuously and an invisible diff could earn LIGHT.
-  if (filesReadable && files.length === 0) blocked.push("empty diff — no changed files resolvable (committed range + working tree + untracked all empty); nothing to prove safe");
+  // Empty diff is SCOPE FAILURE, not a safety verdict: recommending HEAVY on
+  // zero evidence reads as analysis when it is absence (field: a merged-PR
+  // review got "HEAVY — nothing to prove safe" from an empty union and the
+  // operator rightly discarded the output). Name the likely fix instead.
+  if (filesReadable && files.length === 0) blocked.push("scope unresolvable — empty diff (committed range + working tree + untracked all empty); if reviewing a merged PR or historical range, pass --range=<a>..<b>");
   if (graphBlind) blocked.push("graph-blind (blast headline unavailable or tier not graph-anchored) — safety not provable");
   if (godNodeMatch === true) blocked.push("god_node_match: a diff symbol is a high-blast-radius hub");
   if (riskHits.length > 0) blocked.push(`risk-surface path(s): ${riskHits.slice(0, 5).map(h => h.file).join(", ")}${riskHits.length > 5 ? ` (+${riskHits.length - 5})` : ""}`);
@@ -185,6 +204,23 @@ function assessReviewWeight(opts = {}) {
   // values surface as advisories so the operator sees the corroboration state.
   const advisories = [];
   if (effectSize && effectSize !== "small") advisories.push(`effect_size: ${effectSize} — corroborating signal only, not blocking`);
+  // Recently-reviewed caveat — advisory ONLY, never an auto-light: the operator
+  // decides (scope similarity is not scope identity). Evidence source is the
+  // claude-mem harvest artifact, which the review flow guarantees exists by
+  // the time review-weight runs (field: prior-review evidence lived in the
+  // harvest + user-memory, never in rotated state or the PR).
+  try {
+    const pathA = require("path");
+    const fsA = require("fs");
+    const rootA = opts.projectRoot || require("./config.cjs").findProjectRoot();
+    const harvestPath = pathA.join(rootA, ".devt", "state", "claude-mem-harvest.md");
+    if (fsA.existsSync(harvestPath)) {
+      const h = fsA.readFileSync(harvestPath, "utf8");
+      if (/review/i.test(h) && /(APPROVED|verdict|lane)/i.test(h)) {
+        advisories.push("scope overlaps prior review evidence in the claude-mem harvest — expect low marginal yield on a re-review; consider --lite (advisory only; the scope may have genuinely changed)");
+      }
+    }
+  } catch { /* harvest unreadable — no caveat */ }
 
   const eligible = blocked.length === 0;
   return {
@@ -218,7 +254,7 @@ function _parseFlag(args, name) {
 
 function run(subcommand, args) {
   args = args || [];
-  const USAGE = "Usage: review-weight assess [--base=<ref>] [--files=<csv>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n";
+  const USAGE = "Usage: review-weight assess [--base=<ref>] [--range=<a>..<b>] [--files=<csv>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n";
   if (subcommand !== "assess") {
     process.stderr.write(USAGE);
     return 2;
@@ -227,7 +263,7 @@ function run(subcommand, args) {
   // A silently-ignored flag on an advisory that builds an auto-light track
   // record poisons the record (field receipt: a misspelled flag read as a
   // legitimately-absent signal).
-  const ALLOWED_FLAGS = new Set(["base", "files", "effect-size", "god-node", "tier"]);
+  const ALLOWED_FLAGS = new Set(["base", "range", "files", "effect-size", "god-node", "tier"]);
   for (const a of args) {
     if (a.startsWith("--")) {
       const name = a.slice(2).split("=")[0];
@@ -241,6 +277,7 @@ function run(subcommand, args) {
   const filesRaw = _parseFlag(args, "files");
   const verdict = assessReviewWeight({
     baseRef: _parseFlag(args, "base"),
+    range: _parseFlag(args, "range"),
     files: filesRaw === undefined ? undefined : filesRaw.split(",").map(s => s.trim()).filter(Boolean),
     effectSize: _parseFlag(args, "effect-size"),
     godNodeMatch: godRaw === undefined ? undefined : (godRaw === "true" ? true : godRaw === "false" ? false : undefined),

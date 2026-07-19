@@ -8,6 +8,14 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+Staged toward the range release (cal #56b, receipt #22's headline gap) — landed:
+
+- **`--range=<a>..<b>` commit-range scope** in the file-collection choke point (`collectChangedFiles` range mode: exactly the named range, no working-tree/untracked contamination) and threaded through `state changed-files --range`, `review-weight assess --range`, and `code-review.md` scope_check (file count + diff-LOC banding vs the range) + identify_scope guidance — merged-PR and historical-range reviews stop starving four subsystems at once.
+- **review-weight empty-diff is a scope failure, not a safety verdict**: "scope unresolvable" naming `--range` as the likely fix (was: "HEAVY recommended — nothing to prove safe" on zero evidence), with a distinct workflow echo; plus the **recently-reviewed caveat** (advisory-only, never auto-light) sourced from the claude-mem harvest artifact.
+- **Verbatim-OR-attested ARGS contract**: overriding known-bad generated args is now sanctioned WHEN fully attested inside `graphify-impact-plan.json` (`args_overridden` + original/override args + reason/evidence/by/timestamp); `assert-graphify-decision` fails a declared override with incomplete attestation.
+
+Remaining before the release: `--range` deep-threading through `contextInitBundle` (the memory_signal affects-union choke point consumed by all three dispatch generations) + preflight topic anchoring, topic-symbol identifier-shape validation + tokenizer hash-token hygiene, suggested_reading relevance floor, K293.
+
 ## [0.174.0] - 2026-07-19
 
 ### The trust batch — receipt #22's confirmed small bugs and contract fixes (cal #56, first of two)
