@@ -30,7 +30,7 @@ BEFORE starting curation, load the following:
 4. Read `CLAUDE.md` — project context for evaluating relevance
 5. Read `.devt/rules/` files relevant to the candidates — to validate accuracy
 6. Read `${CLAUDE_PLUGIN_ROOT}/guardrails/contamination-guidelines.md` — the 5-filter quality standard (Specificity, Durability, Non-obviousness, Evidence, Actionability)
-7. Read `${CLAUDE_PLUGIN_ROOT}/schemas/learning-entry.yaml` — the lessons.yaml hand-off shape from retro
+7. Read `${CLAUDE_PLUGIN_ROOT}/templates/memory/LES-template.md` — the LES-NNNN frontmatter shape you write (enum confidence, affects_paths, links). The incoming lessons.yaml hand-off shape is defined by the retro agent's `structure` step (title/summary/domain/enum confidence/affects_paths/affects_symbols + context/evidence/action).
 
 Do NOT skip the existing `.devt/memory/` files. Curation without context produces duplicates and contradictions.
 

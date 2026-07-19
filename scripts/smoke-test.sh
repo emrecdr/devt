@@ -17731,6 +17731,27 @@ else
   fail "K294: missing-affects surface regressed:$K294_MISS"
 fi
 
+# K295: learning-entry.yaml ghost removed and stays removed (OPT-1). The schema
+# was a stale spec loaded by two agents (retro step 8, curator step 7) that
+# contradicted the LES contract — float confidence vs the 5-value enum
+# validateFrontmatter treats as a hard error — and referenced deleted
+# semantic.cjs twice + a non-existent .devt/learning-playbook.md. Regression
+# pin: the file stays deleted and no agent re-references it (the third
+# semantic.cjs-ghost instance; the broad class gate is OPT-2, still deferred).
+K295_OK=1
+K295_MISS=""
+[ ! -f "$ROOT/schemas/learning-entry.yaml" ] || { K295_OK=0; K295_MISS="$K295_MISS schema-still-present"; }
+if /usr/bin/grep -rq "learning-entry" "$ROOT/agents/"; then K295_OK=0; K295_MISS="$K295_MISS agent-still-references"; fi
+# The agents now point at the real, existing contract (the LES template).
+{ /usr/bin/grep -qF 'templates/memory/LES-template.md' "$ROOT/agents/retro.md" \
+  && /usr/bin/grep -qF 'templates/memory/LES-template.md' "$ROOT/agents/curator.md" \
+  && [ -f "$ROOT/templates/memory/LES-template.md" ]; } || { K295_OK=0; K295_MISS="$K295_MISS repoint-missing"; }
+if [ "$K295_OK" -eq 1 ]; then
+  pass "K295: learning-entry.yaml ghost removed + retro/curator repointed at the LES template (OPT-1; no residual reference)"
+else
+  fail "K295: learning-entry ghost surface regressed:$K295_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

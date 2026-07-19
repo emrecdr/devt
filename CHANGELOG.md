@@ -8,6 +8,22 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.177.0] - 2026-07-19
+
+### Retired a contradictory ghost schema in the lesson pipeline (OPT-1)
+
+A memory-layer review (validated filesystem-first) found `schemas/learning-entry.yaml` was a stale spec that both `agents/retro.md` (context step 8) and `agents/curator.md` (context step 7) were instructed to load as authoritative — while it contradicted the contract both agents actually implement. Most seriously it typed `confidence` as `float 0.0-1.0` against the memory layer's five-value enum, which `validateFrontmatter` treats as a hard **error**; it also referenced the deleted `semantic.cjs` twice and targeted a `.devt/learning-playbook.md` that does not exist. Verified zero other consumers on the current tree — no gate, no doc. This was the third instance of the `semantic.cjs` ghost class (K280/K281 gate CLI routing + printUsage but not module/artifact paths inside `schemas/`/`agents/`).
+
+### Removed
+
+- **`schemas/learning-entry.yaml` deleted.** `retro.md` step 8 and `curator.md` step 7 now point at the real, existing contract — `templates/memory/LES-template.md` (enum confidence, `affects_paths`, `links`) — and retro's own `structure` step remains the lessons.yaml hand-off definition. The agents already emitted the correct enum shape; the loaded schema was inert and contradictory, so retiring it removes a documentation-rot landmine without changing any working behavior.
+- DEF-005's decay leg re-anchored off the deleted schema (its `decay_days` field is now noted as design-fresh, since the schema was its only prior spec).
+
+### Notes
+
+- Gate **K295** pins the removal (schema stays deleted, no agent re-references it, both repoint at the LES template). Drift-guard stack 202 → 203 deep (K94–K295).
+- The **broad** ghost-class gate (module/artifact paths referenced inside `schemas/**`/`agents/**` must resolve) is OPT-2 — deliberately deferred to a fresh session for the false-positive-scoping care a new class scan needs. The report's own sequencing (delete before the broad gate) is honored: this ships the deletion first.
+
 ## [0.176.0] - 2026-07-19
 
 ### Affects-coverage: the first instrument for the primary memory signal (DEF-007 part 1)

@@ -31,7 +31,7 @@ BEFORE starting extraction, load ALL workflow artifacts:
 5. Read `.devt/state/docs-summary.md` if available — documentation gaps found
 6. Read `CLAUDE.md` — project rules (to identify lessons about rule compliance)
 7. Read `.devt/rules/` files that were relevant to the workflow
-8. Read `${CLAUDE_PLUGIN_ROOT}/schemas/learning-entry.yaml` — the entry format spec (lessons.yaml hand-off shape)
+8. Read `${CLAUDE_PLUGIN_ROOT}/templates/memory/LES-template.md` — the LES-NNNN frontmatter your lessons.yaml output must align to (enum confidence, affects_paths, links). Your own `structure` step below defines the lessons.yaml shape.
 
 Every artifact contributes context. Missing one means missing lessons.
 </context_loading>

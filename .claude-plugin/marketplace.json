@@ -9,7 +9,7 @@
     {
       "name": "devt",
       "description": "Zero-dependency multi-agent development workflow plugin. Language-agnostic — adapts to any project via .devt/rules/ convention. Commands -> Workflows -> Agents architecture with learning loops.",
-      "version": "0.176.0",
+      "version": "0.177.0",
       "source": "./",
       "author": {
         "name": "Emre Camdere",
