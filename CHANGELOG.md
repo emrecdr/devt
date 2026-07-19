@@ -8,6 +8,16 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.179.0] - 2026-07-19
+
+### Memory trust-model documentation (DEF-009 M5)
+
+A memory-layer security review (validated filesystem-first) observed that devt's curator-gate control — untrusted candidates in `_suggestions.md`, mediated promotion into `.devt/memory/` via 5-filter review + `AskUserQuestion` — is bypassed on exactly one path: multi-root **shared roots** are read-only from devt, edited directly by their maintainers, and re-govern consuming projects silently on the next `memory-auto-index`, so their docs never pass the gate. A shared-root ADR governs (and, under block-mode pre-flight, coerces) with the same authority as a locally-curated one; provenance (`source_root`) is tracked but not rendered at the governance surface. This is an architectural gap with cheap mitigations, not a live vulnerability — multi-root is opt-in and shared roots are normally org-controlled repos behind PR review.
+
+### Changed (docs only)
+
+- **`docs/MEMORY.md` gains a "Trust model — memory is a persistent write channel" section**: memory acts on future dispatches (governs, coerces via block-mode, suppresses via REJ keywords), the curator gate is the control, multi-root shared roots are the documented bypass, and adding a shared root grants it commit-blocking authority — trust it accordingly. Names the current limitation (provenance not yet at the governance surface) and points at `DEF-009` for the code mitigations (surface `source_root` in the Brief; optional trust tier so shared roots advise without coercing). Shipped as the depth-safe half of DEF-009; M1/M2 (the memory-signal-path code) stay fresh-session.
+
 ## [0.178.0] - 2026-07-19
 
 ### Ghost-surface class gate for module references (OPT-2, .cjs scope)

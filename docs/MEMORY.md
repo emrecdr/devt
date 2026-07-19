@@ -570,6 +570,16 @@ The curator agent (memory-curation skill) writes promoted ADRs/Concepts/Flows/RE
 
 Precedence: rightmost (project-local) wins, leftmost loses. Mid-tier overrides global; project overrides mid-tier.
 
+### Trust model — memory is a persistent write channel
+
+Permanent memory is not just read at retrieval time; it **acts on future dispatches**. A governing ADR/CON enters the Brief's `governing[]` union, rides into `scope_hint` dispatches, and under block-mode pre-flight an agent is *required to cite it before editing*. A REJ tombstone's `search_keywords` *suppress* future proposals. So a write here has effects that outlive the session that made it — the reason the promotion path is gated.
+
+**The curator gate is the control.** Untrusted candidates land in `_suggestions.md`; nothing reaches `.devt/memory/` except through the curator's 5-filter review and an explicit `AskUserQuestion` approval. Free-form writes to the trusted store are not a supported path — by design.
+
+**Multi-root shared roots are the exception, so trust them accordingly.** Curator writes always go local; shared roots are read-only from devt and edited directly by their maintainers, so **shared-root docs never pass the curator gate** — and a change in a shared root silently re-governs every consuming project on the next `memory index` / `memory-auto-index`, with no per-project review. A shared-root ADR governs (and coerces, under block-mode) with the same authority as a locally-curated one; a shared-root REJ tombstone suppresses proposals across all consumers. Add a shared root only when you trust its contents as much as your own curated memory — treat it like a dependency you grant commit-blocking authority. Normal use (an org ADR repo behind PR review) is low-risk; the caution is for roots outside your review control.
+
+**Current limitation:** provenance (`source_root`) is tracked and shown in `memory list`/`get`, but is **not yet rendered at the governance surface** — the Brief and `governing[]` do not distinguish a shared-root doc from a local one, and block-mode denial does not tier on provenance. Making provenance legible there (and an optional trust tier that lets shared roots advise without coercing) is tracked as `DEF-009` in the deferred queue.
+
 ## Related Documentation
 
 - [`CLAUDE.md`](../CLAUDE.md) — entry point: orchestrator architecture + critical contracts
