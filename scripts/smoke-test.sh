@@ -17787,6 +17787,51 @@ else
   fail "K296: unresolved .cjs module reference (ghost surface): ${K296_RESULT#FAIL }"
 fi
 
+# K297: shared-root provenance at the governance surface (DEF-009 M1). A doc
+# from a shared memory root enters the governing union WITHOUT passing the
+# local curator gate — the Brief line must carry the ·shared:<label> marker
+# and the sidecar governing[] entry must carry shared_root, while
+# project-local docs render byte-identical to single-root behavior (zero
+# provenance noise on the common case).
+K297_SHARED=$(mktemp -d)
+K297_PROJ=$(mktemp -d)
+mkdir -p "$K297_SHARED/decisions"
+printf -- '---\nid: ADR-901\ntitle: "Shared flurb rule"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: verified\nsummary: "Governs flurbwidget caching from the shared root."\n---\nbody\n' > "$K297_SHARED/decisions/ADR-901-shared.md"
+(cd "$K297_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+printf -- '---\nid: ADR-902\ntitle: "Local flurb policy"\ndoc_type: decision\ndomain: caching\nstatus: active\nconfidence: explicit\nsummary: "Project-local flurbwidget caching policy."\n---\nbody\n' > "$K297_PROJ/.devt/memory/decisions/ADR-902-local.md"
+node -e "
+  const fs = require('fs');
+  const p = '$K297_PROJ/.devt/config.json';
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.memory = cfg.memory || {};
+  cfg.memory.paths = ['$K297_SHARED', '.devt/memory'];
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+"
+(cd "$K297_PROJ" && node "$CLI" memory index >/dev/null 2>&1 && node "$CLI" preflight generate "flurbwidget caching" >/dev/null 2>&1)
+K297_LABEL=$(basename "$K297_SHARED")
+K297_BRIEF="$K297_PROJ/.devt/state/preflight-brief.md"
+K297_JSON="$K297_PROJ/.devt/state/preflight-brief.json"
+K297_OK=1
+/usr/bin/grep -q "\[ADR-901\].*·shared:$K297_LABEL, lane" "$K297_BRIEF" 2>/dev/null || K297_OK=0
+/usr/bin/grep -q "\[ADR-902\].*_(active·explicit, lane" "$K297_BRIEF" 2>/dev/null || K297_OK=0
+if /usr/bin/grep "\[ADR-902\]" "$K297_BRIEF" 2>/dev/null | /usr/bin/grep -q "shared:"; then K297_OK=0; fi
+K297_SIDE=$(node -e "
+  try {
+    const j = require('$K297_JSON');
+    const by = Object.fromEntries((j.governing||[]).map(g=>[g.id,g]));
+    const s = by['ADR-901'], l = by['ADR-902'];
+    if (s && l && s.shared_root === '$K297_LABEL' && l.shared_root === null) process.stdout.write('OK');
+    else process.stdout.write('MISMATCH ' + JSON.stringify({s: s && s.shared_root, l: l && l.shared_root}));
+  } catch (e) { process.stdout.write('ERR ' + e.message); }
+" 2>/dev/null)
+[ "$K297_SIDE" = "OK" ] || K297_OK=0
+if [ "$K297_OK" = "1" ]; then
+  pass "K297: shared-root provenance at governance surface — Brief ·shared:<label> marker + sidecar shared_root, local docs render unchanged (DEF-009 M1)"
+else
+  fail "K297: shared-root provenance broken (sidecar: $K297_SIDE; brief: $(/usr/bin/grep 'ADR-90' "$K297_BRIEF" 2>/dev/null | tr '\n' ';'))"
+fi
+rm -rf "$K297_SHARED" "$K297_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

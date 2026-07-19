@@ -8,6 +8,24 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.180.0] - 2026-07-19
+
+### Shared-root provenance at the governance surface (DEF-009 M1)
+
+The keystone code half of DEF-009. `source_root` was tracked at index time (last-wins precedence needs it) and shown in `memory list`/`get`, but `getDocsMeta` — the governing-union enrichment chokepoint — selected only `id, doc_type, status, confidence`, so a shared-root doc entered the Brief, the sidecar `governing[]`, and block-mode scope hints looking exactly as authoritative as a locally-curated one. Before: `_(active·verified, lane B)_` for shared and local alike. After: shared-root docs carry a provenance marker; local docs render byte-identical, so single-root projects (the common case) see zero new noise.
+
+### Added
+
+- **Brief governing lines mark shared-root docs** — `_(active·verified·shared:<label>, lane B)_`. The label is the shared root's basename, parent-qualified only when two configured shared roots collide on basename (no config alias surface — that would front-run the planned `{path, trust}` entry form).
+- **Sidecar `governing[]` entries gain `shared_root`** — `"<label>"` for shared-root docs, `null` for local. Additive: consumers projecting `[.governing[].id]` are unaffected (verified — no workflow reads any other `governing[]` field).
+- **`memory.cjs::sourceRootInfo(sourceRoot)`** — classifies a doc's root as local vs shared and derives the display label. Null/absent `source_root` (rows indexed before the column existed, single-root deployments) is treated as local; a recorded root no longer in config still renders as shared with its basename.
+- Gate **K297** — two-root behavioral fixture: shared Brief line carries the `·shared:<label>` marker, local line renders unchanged with no marker, sidecar `shared_root` is the label on the shared doc and null on the local doc. Drift-guard stack 204 → 205 deep (K94–K297).
+
+### Changed
+
+- `getDocsMeta` (`bin/modules/memory.cjs`) SELECT includes `source_root`; the preflight enrichment join threads it into the governing union.
+- `docs/MEMORY.md` — sidecar shape documents the new field; the trust-model section's limitation paragraph now reads provenance-legible, with the remaining gap narrowed to block-mode tiering (trust tier) and the shared-root index delta, both still tracked as `DEF-009`.
+
 ## [0.179.0] - 2026-07-19
 
 ### Memory trust-model documentation (DEF-009 M5)

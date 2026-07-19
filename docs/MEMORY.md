@@ -155,7 +155,7 @@ After the lookup, run `node bin/devt-tools.cjs preflight mark-stale "scope expan
       "reason": "..."          // human-readable; +0.2 overlap bonus when CamelCase-split symbol tokens match keywords
     }
   },
-  "governing": [...],          // deduped union of lanes A-D ∪ G, lifecycle-filtered (status active|candidate only, REJ excluded); [{id, status, confidence}] — project bare ids via [.governing[].id]
+  "governing": [...],          // deduped union of lanes A-D ∪ G, lifecycle-filtered (status active|candidate only, REJ excluded); [{id, status, confidence, shared_root}] — shared_root is null for project-local docs, a short root label (basename; parent-qualified on collision) for docs from a shared memory root; project bare ids via [.governing[].id]
   "suggested_reading": [...],  // capped at 8 — see below
   "scope_hint": {
     "confidence": {            // placeholder pending v0.69 R3 calibration
@@ -578,7 +578,7 @@ Permanent memory is not just read at retrieval time; it **acts on future dispatc
 
 **Multi-root shared roots are the exception, so trust them accordingly.** Curator writes always go local; shared roots are read-only from devt and edited directly by their maintainers, so **shared-root docs never pass the curator gate** — and a change in a shared root silently re-governs every consuming project on the next `memory index` / `memory-auto-index`, with no per-project review. A shared-root ADR governs (and coerces, under block-mode) with the same authority as a locally-curated one; a shared-root REJ tombstone suppresses proposals across all consumers. Add a shared root only when you trust its contents as much as your own curated memory — treat it like a dependency you grant commit-blocking authority. Normal use (an org ADR repo behind PR review) is low-risk; the caution is for roots outside your review control.
 
-**Current limitation:** provenance (`source_root`) is tracked and shown in `memory list`/`get`, but is **not yet rendered at the governance surface** — the Brief and `governing[]` do not distinguish a shared-root doc from a local one, and block-mode denial does not tier on provenance. Making provenance legible there (and an optional trust tier that lets shared roots advise without coercing) is tracked as `DEF-009` in the deferred queue.
+**Provenance is legible at the governance surface.** Shared-root docs are marked in the Brief's governing lines (`_(active·verified·shared:<label>, lane B)_` — the label is the root's basename, parent-qualified only on basename collision) and in the sidecar's `governing[]` (`shared_root: "<label>" | null`). Local docs render unchanged, so single-root projects see zero provenance noise. **Remaining limitation:** block-mode denial does not yet tier on provenance — a shared-root doc still coerces with full authority. The optional trust tier (shared roots advise without coercing) and a shared-root change delta on `memory index` are tracked as `DEF-009` in the deferred queue.
 
 ## Related Documentation
 

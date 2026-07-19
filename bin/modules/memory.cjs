@@ -973,9 +973,32 @@ function getDocsMeta(ids) {
   return withDb(db => {
     const placeholders = ids.map(() => "?").join(",");
     return db.prepare(
-      `SELECT id, doc_type, status, confidence FROM documents WHERE id IN (${placeholders})`
+      `SELECT id, doc_type, status, confidence, source_root FROM documents WHERE id IN (${placeholders})`
     ).all(...ids);
   });
+}
+
+// Classify a doc's source_root as local vs shared and derive a short display
+// label for shared roots. Null/absent source_root is treated as LOCAL: rows
+// indexed before the column existed and single-root deployments must render
+// with zero provenance noise. Label is the root's basename; only when two
+// configured shared roots collide on basename does the parent segment join it
+// (no config alias surface — that would front-run the planned {path, trust}
+// entry form).
+function sourceRootInfo(sourceRoot) {
+  if (!sourceRoot || typeof sourceRoot !== "string") return { local: true, label: null };
+  const localRoot = getMemoryRoot();
+  const norm = path.normalize(sourceRoot);
+  if (norm === localRoot) return { local: true, label: null };
+  const base = path.basename(norm);
+  let label = base;
+  try {
+    const siblings = getMemoryRoots().filter(r => r !== localRoot && r !== norm);
+    if (siblings.some(r => path.basename(r) === base)) {
+      label = `${path.basename(path.dirname(norm))}/${base}`;
+    }
+  } catch { /* roots unreadable — basename alone still identifies the doc as shared */ }
+  return { local: false, label };
 }
 
 function matchesGlob(filePath, pattern) {
@@ -2052,6 +2075,7 @@ module.exports = {
   validateRefs,
   getDoc,
   getDocsMeta,
+  sourceRootInfo,
   getAffectsPathsByIds,
   getByPath,
   getBySymbol,

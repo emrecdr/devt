@@ -1135,7 +1135,11 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
       // `active·verified` one, and the reader can only do that if the Brief
       // says which is which.
       const lifecycle = [d.status, d.confidence].filter(Boolean).join("·");
-      lines.push(`- [${d.id}] ${d.title || "(untitled)"} — ${d.summary || ""} _(${lifecycle ? `${lifecycle}, ` : ""}lane ${lane})_`);
+      // Shared-root docs carry a provenance marker (·shared:<label>) so a
+      // reader can weigh a doc that bypassed the local curator gate
+      // differently from a locally-curated one. Local docs render unchanged.
+      const marker = [lifecycle, d.shared_root ? `shared:${d.shared_root}` : null].filter(Boolean).join("·");
+      lines.push(`- [${d.id}] ${d.title || "(untitled)"} — ${d.summary || ""} _(${marker ? `${marker}, ` : ""}lane ${lane})_`);
     }
   }
   lines.push("");
@@ -1550,7 +1554,17 @@ function generate(taskText, opts) {
     const metaById = new Map(meta.map(m => [m.id, m]));
     governingUnion = governingUnionRaw.map(d => {
       const m = metaById.get(d.id);
-      return m ? { ...d, status: m.status, confidence: m.confidence, doc_type: m.doc_type } : d;
+      if (!m) return d;
+      // Provenance rides the same enrichment join: shared-root docs must be
+      // distinguishable at the governance surface (they entered without the
+      // local curator gate). shared_root stays null for local docs so the
+      // single-root case renders byte-identical.
+      let sharedRoot = null;
+      try {
+        const info = memory.sourceRootInfo(m.source_root);
+        if (!info.local) sharedRoot = info.label;
+      } catch { /* provenance unresolvable — render as local, no marker */ }
+      return { ...d, status: m.status, confidence: m.confidence, doc_type: m.doc_type, shared_root: sharedRoot };
     });
   } catch { /* index unavailable — rows keep their lane-carried fields */ }
   governingUnion = governingUnion.filter(d => {
@@ -1799,6 +1813,7 @@ function generate(taskText, opts) {
       id: d.id,
       status: d.status || null,
       confidence: d.confidence || null,
+      shared_root: d.shared_root || null,
     })),
     suggested_reading: suggestedReading,
     scope_hint: { confidence: scopeHintConfidence },
