@@ -18341,8 +18341,8 @@ K307_R=$(node -e "
     const r = require('$K307_PROJ/rep.json');
     const ic = r.injection_cost;
     const okData = ic && ic.available===true && ic.fires===2 && ic.bytes===1500 && ic.max===1000;
-    const sectionOk = /## Memory Injection Cost/.test(r.report) && /1500 bytes over 2 injector fires/.test(r.report);
-    process.stdout.write((okData && sectionOk) ? 'OK' : 'MISMATCH ' + JSON.stringify({ic, hasSection:/## Memory Injection Cost/.test(r.report||'')}));
+    const sectionOk = /## devt Memory Injection Cost/.test(r.report) && /1500 bytes over 2 injector fires/.test(r.report);
+    process.stdout.write((okData && sectionOk) ? 'OK' : 'MISMATCH ' + JSON.stringify({ic, hasSection:/## devt Memory Injection Cost/.test(r.report||'')}));
   } catch(e){ process.stdout.write('ERR '+e.message); }
 " 2>/dev/null)
 if [ "$K307_R" = "OK" ]; then
@@ -18351,6 +18351,28 @@ else
   fail "K307: injection-cost projection broken ($K307_R)"
 fi
 rm -rf "$K307_PROJ"
+
+# K308: lane size-band discounts generated/lockfile/append-only files (v2 field
+# receipt). A lane whose diff is mostly generated churn (a changelog archive, a
+# lockfile bump) must NOT trip a spurious "split" — size_class is driven by the
+# REVIEWABLE diff (est_loc), the full count is preserved as diff_lines_raw, and
+# the file stays in the lane's coverage. Hermetic: a lane with a 2-line real
+# change + a 9000-line -ARCHIVE.md sizes "ok", est_loc<3000, diff_lines_raw>=8000.
+K308_PROJ=$(mktemp -d)
+(cd "$K308_PROJ" && { git init -q -b main 2>/dev/null || { git init -q && git checkout -q -b main 2>/dev/null; } ; } && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K308_PROJ/app" "$K308_PROJ/docs"
+echo "def f(): pass" > "$K308_PROJ/app/svc.py"
+(cd "$K308_PROJ" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git checkout -q -b feat)
+printf 'def f():\n    return 1\n' > "$K308_PROJ/app/svc.py"
+node -e "require('fs').writeFileSync('$K308_PROJ/docs/API-CHANGELOG-ARCHIVE.md', Array.from({length:9000},(_,i)=>'- line '+i).join('\n'))"
+(cd "$K308_PROJ" && git add -A >/dev/null 2>&1 && node "$CLI" state update active=true workflow_type=code_review phase=context_init status=DONE >/dev/null 2>&1 && node "$CLI" state register-lane --id=L1 --scope=mix --files=app/svc.py,docs/API-CHANGELOG-ARCHIVE.md --base=main >/dev/null 2>&1)
+K308_R=$( (cd "$K308_PROJ" && node "$CLI" state read 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const L=(j.lanes||[])[0]||{};const ok=L.size_class==='ok'&&L.est_loc<3000&&(L.diff_lines_raw||0)>=8000;process.stdout.write(ok?'OK':'MISMATCH '+JSON.stringify({sc:L.size_class,est:L.est_loc,raw:L.diff_lines_raw}));}catch(e){process.stdout.write('ERR '+e.message);}});" )
+if [ "$K308_R" = "OK" ]; then
+  pass "K308: lane size-band discounts generated/lockfile/append-only files — a 9000-line -ARCHIVE.md doesn't trip split; est_loc counts reviewable diff, diff_lines_raw preserves the full count (v2 field receipt)"
+else
+  fail "K308: size-band discount broken ($K308_R)"
+fi
+rm -rf "$K308_PROJ"
 
 echo
 echo "== test-gates.cjs subsuite =="

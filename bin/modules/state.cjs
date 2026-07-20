@@ -6985,6 +6985,52 @@ function listLaneOutputs() {
 const LANE_DIFF_CHUNKED_THRESHOLD = 3000;
 const LANE_DIFF_SPLIT_THRESHOLD = 8000;
 
+// Generated / append-only / lockfile paths inflate a lane's diff-LOC without
+// adding reviewable logic — a 15k-line changelog archive or a lockfile bump is
+// a doc-skim, not a line-by-line review. They stay IN the lane's coverage (the
+// diff artifact keeps every file), but are discounted from the SIZING count
+// that drives size_class, so a lane whose diff is mostly generated churn does
+// not trip a spurious "split". Generic (not project-tailored) + extendable via
+// config review.size_exclude_globs (extra regex source strings).
+const SIZING_EXCLUDE_DEFAULT = [
+  /(^|\/)[^/]*\.lock$/i,
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|go\.sum)$/i,
+  /(^|\/)CHANGELOG[^/]*\.md$/i,
+  /(^|\/)[^/]*-ARCHIVE\.md$/i,
+  /(^|\/)[^/]*\.min\.(js|css)$/i,
+  /\.(map|snap)$/i,
+];
+function _sizingExcludePatterns() {
+  const pats = SIZING_EXCLUDE_DEFAULT.slice();
+  try {
+    const cfg = require("./config.cjs").getMergedConfig();
+    const extra = cfg && cfg.review && Array.isArray(cfg.review.size_exclude_globs) ? cfg.review.size_exclude_globs : [];
+    for (const src of extra) { try { pats.push(new RegExp(src)); } catch { /* skip a bad user regex rather than throw */ } }
+  } catch { /* config unavailable — defaults only */ }
+  return pats;
+}
+// Count +/- change lines in a unified-diff body, EXCLUDING files whose path
+// matches a sizing-exclude pattern. Keys each file section on its `+++ b/<path>`
+// header (content lines follow it), so coverage is untouched — only the sizing
+// tally drops the generated files.
+function _laneSizingLines(body) {
+  if (!body) return 0;
+  const excl = _sizingExcludePatterns();
+  const isExcl = (p) => excl.some(re => re.test(p));
+  let total = 0, curExcluded = false;
+  for (const line of body.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const p = line.replace(/^\+\+\+ (b\/)?/, "").trim();
+      curExcluded = p !== "/dev/null" && isExcl(p);
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("diff ") || line.startsWith("@@")) continue;
+    if (curExcluded) continue;
+    if (/^\+(?!\+\+)/.test(line) || /^-(?!--)/.test(line)) total++;
+  }
+  return total;
+}
+
 // Generates .devt/state/lane-diff-<id>.txt: merge-base diff of the lane's
 // files (committed + staged + unstaged in one pass) plus /dev/null diffs for
 // untracked lane files. Returns {ok, artifact, diff_lines} or {ok: false}.
@@ -7019,7 +7065,8 @@ function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
     // ~25% over the true changed-line count, which breaks any comparison
     // against a real `git diff --stat`.
     const diffLines = body === "" ? 0 : (body.match(/^(\+(?!\+\+)|-(?!--))/gm) || []).length;
-    return { ok: true, artifact, diff_lines: diffLines };
+    const sizingLines = _laneSizingLines(body);
+    return { ok: true, artifact, diff_lines: diffLines, sizing_lines: sizingLines };
   } catch {
     return { ok: false };
   }
@@ -7066,7 +7113,10 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
     let sizeBasis;
     let sizeClass;
     if (diff.ok) {
-      estLoc = diff.diff_lines;
+      // Size by REVIEWABLE diff (generated/lockfile/append-only files
+      // discounted), not raw diff — so a changelog-archive or lockfile bump
+      // doesn't trip a spurious split. diff_lines_raw preserves the full count.
+      estLoc = diff.sizing_lines != null ? diff.sizing_lines : diff.diff_lines;
       sizeBasis = "diff";
       sizeClass = estLoc >= LANE_DIFF_SPLIT_THRESHOLD ? "split"
         : estLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
@@ -7100,6 +7150,7 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       base_ref: laneBaseRef,
     };
     if (diff.ok) laneEntry.diff_artifact = diff.artifact;
+    if (diff.ok && diff.diff_lines !== estLoc) laneEntry.diff_lines_raw = diff.diff_lines;
     if (existing !== -1) {
       lanes[existing] = laneEntry;
     } else {

@@ -13,13 +13,13 @@ Perform a standalone code review of the current changes or specified files. Read
 </objective>
 
 <process>
-**Mandatory first action**: Parse $ARGUMENTS for the --focus flag, then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
+**Mandatory first action**: Scan `$ARGUMENTS` for a standalone `--focus=<value>` **token** — a single whitespace-delimited word of the exact form `--focus=code|arch|quality|security`, NOT a substring search over the argument text (a prose task description that merely mentions `--focus` somewhere is not a flag). Then Read the resolved workflow file from the table below (default: `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.md`) via the Read tool. The workflow body is NOT preloaded — the explicit Read is the only load path.
 
-**Step 1 — Parse $ARGUMENTS for --focus flag.** Strip the matched flag from $ARGUMENTS before passing the remaining scope/options to the workflow.
+**Step 1 — Extract the `--focus=<value>` token.** Match only a standalone `--focus=<value>` token; if none is present (the common case — a free-text task description carries no flag), focus defaults to `code`. Remove the matched token (only) from `$ARGUMENTS`; the remainder is the scope/target text, passed to the workflow verbatim and **never** interpolated into the routing table below (the table keys on the token, not on the argument blob).
 
 Routing table (apply first match):
 
-| Detected in $ARGUMENTS | Workflow file to Read |
+| `--focus=` token present | Workflow file to Read |
 |---|---|
 | `--focus=arch` | `${CLAUDE_PLUGIN_ROOT}/workflows/arch-health-scan.md` |
 | `--focus=quality` | `${CLAUDE_PLUGIN_ROOT}/workflows/quality-gates.md` |

@@ -8,6 +8,26 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.191.0] - 2026-07-20
+
+### First-field-run calibration fixes (greenfield T1 receipt)
+
+devt's first real field run — a greenfield cross-service review — produced a first-hand calibration. Every reported issue was validated against the code before acting, which mattered: the report's headline *"memory_signal came back empty"* was a **misread of its own run**. The cached `memory_signal_json` shows `files_checked:42, count:2` — the affects-union fired correctly on FLOW-001 + ADR-002. No memory bug existed; the fixes below are the validated remainder. Drift-guard stack 215 → 216 deep (K94–K308).
+
+### Fixed
+
+- **Lane size-band discounts generated / lockfile / append-only files (K308).** A lane whose diff is mostly generated churn — a changelog archive, a `*.lock` bump — no longer trips a spurious "split the lane": `size_class` is driven by the *reviewable* diff (`est_loc`), the full count is preserved as `diff_lines_raw`, and the file stays in the lane's coverage. Generic denylist (`*.lock`, `CHANGELOG*.md`, `*-ARCHIVE.md`, `*.min.js/css`, `*.map`/`*.snap`), extendable via `review.size_exclude_globs`. Field: a lane sized at ~29,900 diff-LOC that was 96% append-only changelog archive nearly triggered a needless split.
+- **`/devt:review` flag-parse tokenizes `--focus=`** instead of interpolating the whole argument blob into the routing table. A prose task description that merely mentions `--focus` no longer risks misrouting — the command matches a standalone `--focus=<value>` token and passes the remaining scope text verbatim.
+
+### Changed
+
+- **Graphify drill-down runs inline before its gate.** The top-3 `get_neighbors` follow-up is now explicitly executed in the same pass as `blast_radius`, before the graphify-decision gate — removing the chicken-and-egg block where an orchestrator hit the gate first, then had to hand-produce the drill-down sections.
+- **Weekly-report instrument honesty (two caveats).** (1) The affects-coverage section warns, when the window has **0 commits**, that it counts *committed* history only — so staged/uncommitted work reads 0% and must not be read as "the memory layer governs nothing" (this exact artifact caused a field LLM to misdiagnose a working affects-union as empty). (2) The injection-cost line is retitled **"devt Memory Injection Cost"** and caveats that it measures devt's `workflow-context-injector` only — not co-installed plugins' Read-hook injections (e.g. claude-mem's per-read observation blocks, field-measured far larger).
+
+### Deferred (validated, same receipt)
+
+- context_init ceremony trim → a future step-manifest cal (the field substep-value breakdown is the input); claude-mem's per-read injection volume → upstream (not devt-tunable); lane-cap-of-5 → kept (field: no measurable degradation).
+
 ## [0.190.0] - 2026-07-20
 
 ### Memory injection-cost projection + queue hygiene (options-v2 review, north-star-filtered)

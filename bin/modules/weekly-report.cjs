@@ -342,7 +342,7 @@ function aggregateAffectsCoverage(projectRoot, changedFiles) {
     // the memory index is absent; only {docs, summary} is a real result, so
     // guard the shape rather than spread an {error} into {available:true, …}.
     if (!cov || !Array.isArray(cov.docs)) return { available: false };
-    return { available: true, ...cov };
+    return { available: true, changed_count: Array.isArray(changedFiles) ? changedFiles.length : 0, ...cov };
   } catch {
     return { available: false };
   }
@@ -355,6 +355,16 @@ function renderAffectsCoverageSection(coverage) {
   const lines = ["## Affects Coverage (trend)", ""];
   lines.push("_Direction, not a target — density is (files changed this window that a doc's globs claim) ÷ (files those globs claim). A broad glob claiming files it never governs reads as diluted; do not 'fix' it by narrowing globs to nothing._");
   lines.push("");
+  if (coverage.changed_count === 0) {
+    // The window had no commits (staged/uncommitted work). This report counts
+    // COMMITTED history only, so every doc reads 0% — which a reader (human or
+    // LLM) can misread as "the memory layer governs nothing". It does not:
+    // review-time memory_signal matches the WORKING TREE and fires on docs this
+    // report shows at 0%. (Field: a calibration LLM misdiagnosed a working
+    // affects-union as empty off exactly this 0%/"no commits" artifact.)
+    lines.push("_⚠ No commits in this window — coverage counts **committed** history only, so staged/uncommitted work reads 0% here. This does NOT mean the memory layer governs nothing: review-time `memory_signal` matches the working tree and can fire on docs shown at 0%._");
+    lines.push("");
+  }
   const plural = (n) => (n === 1 ? "" : "s");
   for (const d of claiming) {
     lines.push(`- ${d.id}: claims ${d.claimed} file${plural(d.claimed)}, ${d.matched} changed → ${Math.round(d.density * 100)}% density`);
@@ -407,9 +417,9 @@ function renderInjectionSection(inj) {
   // coverage/guard sections when empty). Kill-receipt: if this line changes no
   // decision across ~3 report windows, delete it.
   if (!inj || !inj.available || inj.fires === 0 || inj.bytes === 0) return "";
-  const lines = ["## Memory Injection Cost", ""];
+  const lines = ["## devt Memory Injection Cost", ""];
   lines.push(`- Context injected: ~${inj.bytes} bytes over ${inj.fires} injector fire${inj.fires === 1 ? "" : "s"} — ~${inj.avg} bytes/fire (~${inj.est_tokens_per_fire} tokens/fire est., peak ${inj.max} bytes).`);
-  lines.push("- _Prices what memory_signal + governing lines + advisories cost per injection (#3). Direction, not a target; pair with % cited (deferred DEF-006) to judge waste — bytes alone price the surface._");
+  lines.push("- _devt's `workflow-context-injector` ONLY (memory_signal + governing lines + advisories). Excludes co-installed plugins' Read-hook injections — e.g. claude-mem's per-file-read observation blocks, field-measured far larger — which come from a different plugin's hook and are invisible here. Direction, not a target; pair with % cited (deferred DEF-006) to judge waste._");
   lines.push("");
   return lines.join("\n");
 }
