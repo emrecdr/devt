@@ -144,7 +144,7 @@ Before any step, initialize the workflow:
 
 <step name="context_init" gate="compound init succeeds and .devt/rules/ is readable">
 
-> Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with code-review.md::context_init.
+> Context_init runs 8 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. Shares the compound-wrapper substep SEMANTICS with code-review.md::context_init (same wrapper, same cached signals) — keep those in sync; prose layout may differ.
 
 ### Substep 1: Compound workflow-context-init (single bundle)
 

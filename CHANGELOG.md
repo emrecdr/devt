@@ -8,6 +8,25 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.192.0] - 2026-07-21
+
+### context_init ceremony-trim — orchestrator prose weight cut ~19% (T2)
+
+The compound `review-context-init` wrapper banked context_init's CLI round-trips (8→1) but left behind two kinds of now-redundant prose that reloaded into the orchestrator's context every review: documentation of decision logic the wrapper already computes, and uncommon-branch handling that noops in the common path. This finishes that refactor — losslessly. `code-review.md`'s `context_init` drops **280 → 232 lines (~19% fewer bytes)** on the common path, with the uncommon-branch detail moved one Read away. Not prose compression (that stays rejected) — content is relocated (the drill-down recovery blocks byte-for-byte; the arch-scan advisory intro lightly reworded for its new conditional gating, no instruction lost) or deleted because an authoritative copy already lives in wrapper code. Drift-guard stack 216 → 217 deep (K94–K309).
+
+### Changed
+
+- **Wrapper-logic documentation deleted from context_init.** The 14-row Graphify tier-decision table and the god-node signal-independence rationale documented logic the `computeGraphifyImpactPlan` / `augment-impact-map` wrappers already run — the orchestrator only reads the computed `$CTX.impact_plan.tier` / signal outputs, never the tables. A second copy of truth that lived in code, removed with a pointer to the source function. Verbose staleness-tree branches, WHY-narration, and self-justifying meta-sentences trimmed to their load-bearing core; every gate string, always-run bash block, and `AskUserQuestion` wording preserved.
+- **Uncommon-branch detail lazy-loaded by reference (K309).** The arch-scan freshness advisory and the anomalous-drill-down recovery handling (empty / god-node-oversize / below-substance-threshold) moved into a new `workflows/code-review.context-detail.md`, read only when the substep's precondition fires — the common review path (fresh graph, no arch scanner, normal drill-downs) never loads them. Modeled on the shared-steps partition (K275); the new K309 gate enforces the pointer↔anchor bijection + the common-path guard contract so the partition can't silently drift.
+- **Arch-scan advisory is now conditional (one intentional behavior delta).** The freshness probe runs only when an `arch-scan-report.md` exists — checking BOTH candidate paths `assert-arch-scan-fresh` itself probes (`.devt/state/arch-scan-report.md` and, in multi-instance mode, `.devt/state/$DEVT_WORKFLOW_ID/arch-scan-report.md`). Projects with no arch scanner wired (the common case) no longer emit the `[ARCH-SCAN-MISSING]` advisory line — and skip its CLI round-trip — on every review. Advisory-only and non-gating, so no functional review behavior changes; the K63 CLI contract is untouched.
+- **KEEP-IN-SYNC note reworded to a semantics contract.** The reciprocal `code-review.md ↔ dev-workflow.md` context_init sync note now governs the substep *semantics* (same wrapper, same cached signals), not prose layout — the two paths may diverge in presentation while the compound-wrapper contract stays shared.
+
+### Fixed (pre-release adversarial review)
+
+- **`pr_scoped_diff` tier now has an executable branch in substep 6.** The non-GitHub PR path (`state.cjs` emits `tier="pr_scoped_diff"`, executed identically to `symbol_anchored` — `blast_radius` over diff symbols) previously had no `if tier == …` branch in the review workflow; the deleted tier-decision table was its only mention. Substep 6's `symbol_anchored` branch and the drill-down follow-up now both cover `pr_scoped_diff` — closing a latent gap the table had masked, and making the workflow more correct than the pre-refactor documentation.
+- **Substance-threshold recovery is discoverable at the point of failure.** Substep 7's `assert-graphify-decision` gate-failure prose now cross-references `code-review.context-detail.md → ## drill-down-recovery` for the `drill-down section below substance threshold` reason, so the orchestrator re-anchors thin sections on `args.symbols` and re-runs the gate instead of stopping. (The other two recovery cases — empty, oversize — are observable at substep 6.)
+- **K309 disjointness strengthened.** The partition gate now checks one body-only sentinel per relocated passage (a partial re-inline that duplicates content while leaving the pointer is now caught, not just a 2-token spot-check), and requires each pointer to name the detail file, not just a valid anchor.
+
 ## [0.191.0] - 2026-07-20
 
 ### First-field-run calibration fixes (greenfield T1 receipt)

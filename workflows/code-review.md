@@ -55,15 +55,13 @@ Read `resolved_skills.code-reviewer` from the compound `init` output (`$CTX.init
 
 <step name="context_init" gate="compound init succeeds">
 
-> Context_init runs 9 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. KEEP IN SYNC with dev-workflow.md::context_init.
+> Context_init runs 9 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. Shares the compound-wrapper substep SEMANTICS with dev-workflow.md::context_init (same wrapper, same cached signals) — keep those in sync; prose layout may differ (this path lazy-loads uncommon-branch detail via code-review.context-detail.md).
 
 ### Substep 0: Stale-workflow pre-flight (auto-reset for unambiguous cases; prompt otherwise)
 
-Before any state update, detect whether `workflow.yaml` is stale relative to this new review. KILL gates fired on accumulated raw_dispatch/claim-check counters from the prior workflow will block this review's first `state update` call. Failure mode: a stale raw-dispatch counter left over from a days-old prior workflow blocks a brand-new review at substep 1.
+Detect whether `workflow.yaml` is stale before the first `state update` — a leftover raw_dispatch/claim-check counter from a days-old prior workflow trips a KILL gate and blocks this brand-new review at substep 1.
 
-**Auto-reset path**: fires on EITHER signal — (task changed AND workflow_type changed AND prior > 1h old: unambiguous new working session) OR (prior workflow COMPLETED — phase=complete, not paused — AND > 1h old: nothing to resume, so back-to-back same-type reviews reset silently too). Call `state auto-reset-if-stale` instead of prompting; resetSoft is non-destructive of valuable state (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts) so prompting adds friction without value. Note the `--workflow-type="code_review"` below is correct even for reviews that later go parallel — scope_check's delegation rotates `workflow_type` to `code_review_parallel` mid-run, which also rotates `workflow_id`; every same-run consumer is chain-aware (`workflow_id_history` + `first_created_at` bound), and cross-rotation telemetry queries use `mcp-stats --include-chain`.
-
-**Operator-override path**: if the operator types `/devt:review --fresh` (or includes `--fresh` in the task), skip the staleness check and unconditionally call `state reset-soft` before substep 1. This is the operator-explicit form of "I know it's stale, just reset and go."
+`state auto-reset-if-stale` fires on EITHER (task+workflow_type changed AND >1h old) OR (prior workflow COMPLETED AND >1h old); resetSoft is non-destructive (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts). The `--workflow-type="code_review"` below is correct even for reviews that later go parallel — scope_check rotates it to `code_review_parallel` mid-run (rotating `workflow_id` too); same-run consumers are chain-aware (`workflow_id_history` + `first_created_at`), cross-rotation telemetry uses `mcp-stats --include-chain`. `--fresh` in the task skips the check and forces `state reset-soft`.
 
 ```bash
 # Operator-override path: --fresh flag in args triggers unconditional reset.
@@ -110,7 +108,7 @@ fi
 
 The wrapper writes the same side-effect artifacts the inline substeps did — `preflight-brief.{md,json}`, `graphify-impact-plan.json`, and `scope_trust_json` + `memory_signal_json` + `god_node_warnings_json` cached in `workflow.yaml` — so the dispatch envelopes that read those caches keep working unchanged.
 
-**Capture discipline:** if you persist `$CTX` for later substeps, write it via shell redirection (`printf '%s' "$CTX" > <file>`) — never re-emit the JSON through a Write-tool body or heredoc you typed out. Model-rendered rewrites turn `\n` escapes inside string values (guardrails, rules content) into literal newlines, producing a file that fails `jq`/`JSON.parse` even though the CLI stdout was valid. Field-observed: a 133KB re-written bundle broke at the first embedded-file field while the live stdout parsed clean.
+**Capture discipline:** if you persist `$CTX` for later substeps, write it via shell redirection (`printf '%s' "$CTX" > <file>`) — never re-emit the JSON through a Write-tool body or heredoc, which mangles `\n` escapes inside string values into literal newlines and breaks `jq`/`JSON.parse` (field-observed on a 133KB bundle).
 
 **Dispatch-envelope payload.** `$CTX.init` carries the `init review` compound payload — `governing_rules` (`content` + `rules_hash`), `models`, `inline_rubrics`, `rubrics`, `config`. Fill the `{governing_rules…}` / `{models.code-reviewer}` / `{models.verifier}` placeholders in the code-reviewer and verifier dispatch envelopes from `$CTX.init`. Fill `{inline_rubrics.code_review}` in the code-reviewer envelope only — that inline rubric is the reviewer's deliberate self-check; the verifier envelope carries the rubric by-reference (`<rubric_path>`) and Reads it from disk. The governing-rule values (`.devt/rules/*.md`) are in `$CTX.init.governing_rules.content` — fill the dispatch placeholders VERBATIM from it, no separate Reads. Under the default `delivery_mode: by-reference` each value is a short `(by-reference: …)` stub (the reviewer/verifier Read the named files from disk when relevant; the envelope's Context-Loaded contract keeps that honest); full bodies ride only with config `dispatch.rules_mode: inline`. For any placeholder whose key is absent from content, fill `(no <path> available — file not present in this project)`. `CLAUDE.md` is always a stub — the harness auto-injects it into every subagent, so it is never inlined.
 
@@ -122,22 +120,13 @@ The wrapper computed `memory_signal` and cached it in `workflow.yaml::memory_sig
 
 ### Substep 3: scope_hint + scope_trust + god_node_warnings (cached by the wrapper)
 
-The wrapper ran `preflight scope-cache` (reads `preflight-brief.json`, computes `scope_hint` + `scope_trust`, applies the mechanical staleness override — forces `trust='sparse'` + writes `staleness-suppressed.txt` when state=ready AND lag exceeds `graphify.stale_threshold` or is null) and persisted `scope_trust_json` to `workflow.yaml`. The `scope_hint` `suggested_reading` field is the deduped union of governing docs' `affects_paths` plus blast-radius `direct_dependents`, capped at 8.
-
-It also extracted the structured god-node data from `preflight-brief.json` — `god_nodes[]` carries `{symbol, edge_count, source_file}` per entry plus the boolean `blast.god_node_match` — and persisted `god_node_warnings_json` to `workflow.yaml` for the `<god_node_warnings>` dispatch injection. Both blobs are in the bundle (`$CTX.scope_trust`, `$CTX.god_node_warnings`).
-
-When `god_node_match=true`, the agent sees a structured warning ("you're about to edit `<symbol>` — it has `<edge_count>` callers") instead of having to parse the markdown brief. Empty `god_nodes: []` with `god_node_match: false` is the no-warning baseline.
+The wrapper's `preflight scope-cache` persisted `scope_trust_json` + `god_node_warnings_json` to `workflow.yaml` (also in the bundle as `$CTX.scope_trust` / `$CTX.god_node_warnings`), consumed by the `<scope_trust>` and `<god_node_warnings>` dispatch blocks; it also applies the mechanical staleness override (forces `trust='sparse'` + writes `staleness-suppressed.txt` when the graph is ready-but-stale). When `god_node_match=true` the agent sees a structured "editing `<symbol>` — `<edge_count>` callers" warning; empty `god_nodes: []` + `god_node_match: false` is the no-warning baseline.
 
 ### Substep 4: Staleness gate + arch-scan advisory
 
-**Staleness gate (tiered).** The wrapper tiered the Graphify freshness into `$CTX.staleness_tier` (comparing `preflight-brief.json::staleness.lag_commits` against `graphify.stale_threshold`, default 10). Decision tree:
+**Staleness gate (tiered).** The wrapper tiered Graphify freshness into `$CTX.staleness_tier` (`preflight-brief.json::staleness.lag_commits` vs `graphify.stale_threshold`, default 10). Common tiers noop → proceed silently: `fresh` (matches HEAD) / `manifest_fresh` (`staleness_tier == "manifest_fresh"`; mtime-verified fresh for the scope) / `unknown` (graphify disabled) / absent (short-circuit re-call). `warn` (`0 < lag < threshold`) is the **silent-warn band**: emit the one-line stderr banner (below), no prompt — the wrapper already set `scope_trust.fresh=false`. The operator escape hatch `--no-refresh` / `--stale-ok` skips the gate entirely + forces `scope_trust.trust="sparse"` (emergency review on a known-broken graph).
 
-- **Operator escape hatch (`--no-refresh` / `--stale-ok`)**: when the task text in `REVIEW_SCOPE` contains either flag, skip the staleness gate entirely + force `scope_trust.trust="sparse"` so reviewers downweight blast-radius signal. For emergency-review-on-known-broken-graph (graph build failing, CI runs accepting staleness).
-- **`staleness_tier == "fresh"`** (`lag_commits == 0`): noop. Graph matches HEAD; proceed silently.
-- **`staleness_tier == "manifest_fresh"`**: noop. No usable commit anchor, but every changed code file matches graphify's build manifest (mtime-verified) — the graph IS fresh for this scope. Proceed silently; do NOT downgrade trust or prompt.
-- **`staleness_tier == "warn"`** (`0 < lag_commits < stale_threshold`, small-but-nonzero drift): **silent-warn band**. Emit one-line stderr `[staleness] graph behind HEAD; caller-sets may be slightly stale (lag<threshold)`; the wrapper already set `scope_trust.fresh=false` so reviewers see the freshness signal. No prompt — small drift doesn't justify interrupting.
 - **`staleness_tier == "stale"`** (`lag_commits >= stale_threshold`) OR **`"unknown_lag"`** (`graph_stats.state` is `ready` AND `lag_commits` is `null`): AskUserQuestion BEFORE the impact-map fetch and any agent dispatch. Question: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD (threshold {threshold}); review may miss recent caller-set changes. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue dispatch with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed.
-- **`staleness_tier == "unknown"`** (graphify disabled / not ready) or **absent** (short-circuit re-call on a fresh graph): proceed silently.
 
 ```bash
 # Operator escape hatch detection
@@ -158,19 +147,7 @@ When `STALENESS_TIER` is `stale` or `unknown_lag`: issue the AskUserQuestion abo
 
 **Stale Graphify artifacts were already evicted by the wrapper** (`state evict-graphify`, run after the freshness read so a clean short-circuit can reuse its `graph-impact.md`). The eviction is targeted — it never touches `impl-summary.md`, `test-summary.md`, etc. that the review may legitimately consume from a prior workflow phase. The same eviction set is shared with `dev-workflow`, `quick-implement`, `debug`, `research-task`.
 
-**Arch-scan freshness advisory.** Check whether an arch-scan-report.md is available and how recent it is. Advisory-only by default — surfaces a `[STALE-ARCH-SCAN]` sentinel if the report is older than 24h so the reviewer can decide whether to refresh before reviewing structural changes. Surfaces state subcommands that would otherwise be available but unwired into workflows:
-
-```bash
-ARCH_FRESH=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-arch-scan-fresh --max-age-hours=24 2>/dev/null || echo '{}')
-if [ "$(printf '%s\n' "$ARCH_FRESH" | jq -r '.warn // false')" = "true" ]; then
-  echo "[STALE-ARCH-SCAN] $(printf '%s\n' "$ARCH_FRESH" | jq -r '.reason')"
-fi
-if [ "$(printf '%s\n' "$ARCH_FRESH" | jq -r '.ok // false')" != "true" ]; then
-  echo "[ARCH-SCAN-MISSING] $(printf '%s\n' "$ARCH_FRESH" | jq -r '.reason')"
-fi
-```
-
-If the diff under review touches files that arch-scan has flagged (cross-reference arch-scan-report.md::findings vs the review's `scope_files`), surface the overlap explicitly to the reviewer — known architectural drift in the review's scope is a strong signal worth elevating.
+**Arch-scan freshness advisory (conditional).** When an `arch-scan-report.md` exists at EITHER `.devt/state/arch-scan-report.md` OR (multi-instance) `.devt/state/${DEVT_WORKFLOW_ID}/arch-scan-report.md` — the two candidate paths `assert-arch-scan-fresh` itself probes — Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## arch-scan-advisory` section (24h freshness sentinel + diff-overlap elevation). Absent from both → skip; no arch scanner is wired for this scope.
 
 ### Substep 5: Graphify impact-plan (computed by the wrapper)
 
@@ -195,18 +172,7 @@ DROPPED_COUNT=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.topic_symbols_dropped
 [ -n "$DROPPED_COUNT" ] && echo "topic.symbols pre-truncated: $DROPPED_COUNT symbols dropped → .devt/state/topic-symbols-dropped.json"
 ```
 
-**Tier decision tree (computed by the `computeGraphifyImpactPlan` wrapper — identical semantics to the prior inline bash):**
-
-| Precondition | Tier | Tool | Args |
-|---|---|---|---|
-| graphify state ≠ ready | `skip` | — | `{skip_reason: "graphify state=…"}` |
-| PR# + github | `pr_scoped` | `mcp__graphify__get_pr_impact` | `{pr_number: N}` |
-| PR# + non-github + diff-symbols | `pr_scoped_diff` | `blast_radius` | `{symbols: [diff symbols]}` (+ `pr_diff_caveat` when new files) |
-| PR# + non-github + topic.symbols | `symbol_anchored` | `blast_radius` | `{symbols: topic[:32]}` |
-| topic.symbols | `symbol_anchored` | `blast_radius` | `{symbols: topic[:32]}` |
-| scope ≥ threshold + dense + diff-symbols | `symbol_anchored` | `blast_radius` | `{symbols: [diff symbols]}` |
-| scope ≥ threshold + dense + no diff-symbols | `bulk_scoped` | `query_graph` | `{text: REVIEW_SCOPE, limit: 20}` |
-| else | `skip` | — | `{skip_reason: "no PR…"}` |
+The tier + tool + args are fully computed by the `computeGraphifyImpactPlan` wrapper (single source of truth — do not re-derive); substep 6 acts on `$CTX.impact_plan.tier`/`.tool`/`.args` directly.
 
 Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; `.devt/state/topic-symbols-dropped.json` when `topic.symbols > 32` (consumed by substep 7's god-node check); removes any stale dropped-list sidecar otherwise.
 
@@ -219,19 +185,15 @@ Side-effects (written by the wrapper): `.devt/state/graphify-impact-plan.json`; 
 - If `tier == "skip"`: write `.devt/state/graphify-skip-reason.txt` containing the `skip_reason` field verbatim. Do NOT call any MCP tool. The reviewer falls back to `<scope_hint>` plus raw file list and graph-impact analysis is correctly absent.
 - If `tier == "pr_scoped"`: call `mcp__graphify__get_pr_impact(args)` using the `args` object from the plan VERBATIM. **For Bitbucket projects this tier never fires** — the bash step routed past it. If the call errors (e.g. PR not found because the user-installed graphify MCP cannot reach the repo), fall back: write `graphify-skip-reason.txt` with the error and continue. Otherwise write the response verbatim to `.devt/state/graph-impact.md`.
 - If `tier == "bulk_scoped"`: call `mcp__plugin_devt_devt-graphify__query_graph(args)` using the `args` object from the plan VERBATIM. From the response's top-5 nodes (highest degree), call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: <label>, direction: "in", depth: 2})` for each. Concatenate into `graph-impact.md` with one `## <symbol>` heading per block.
-- If `tier == "symbol_anchored"`: call `mcp__plugin_devt_devt-graphify__blast_radius(args)` using the `args` object from the plan VERBATIM — the `symbols` array is computed from the diff in the bash step above; do not re-pick. Write the response verbatim to `graph-impact.md`.
+- If `tier == "symbol_anchored"` OR `tier == "pr_scoped_diff"` (the non-GitHub PR path — identical execution, `blast_radius` over diff symbols): call `mcp__plugin_devt_devt-graphify__blast_radius(args)` using the `args` object from the plan VERBATIM — the `symbols` array is computed from the diff in the bash step above; do not re-pick. Write the response verbatim to `graph-impact.md`.
 
 **Caveat + calibration passthrough.** When the plan carries `symbol_anchored_caveat`, prepend it as a one-line note at the top of `graph-impact.md` (blast_radius ran against the last-committed layout — reviewers must know moved/new paths are unrepresented). When it carries `corpus_blind_caveat`, prepend that too — the graph has NO nodes for those changed files, and its silence about them is blindness, not safety. When `manifest_freshness.all_matched` is true, prepend one line noting the graph is manifest-verified FRESH for this scope (reviewers must not discount it on commit-lag grounds). When it carries `severity_calibration_note`, append the note as a `## Severity Calibration` section to `graph-impact.md` — lane reviewers weight findings by actual semantic delta instead of inflating severity off a popularity-driven `effect_size`, while still using the caller sets to verify wiring.
 
 **Lite mode.** When the command injected `<mode>lite</mode>` (the operator judged the change small via `--lite`), execute the headline tier call above but SKIP the multi-tier drill-down follow-up in this substep AND the hyperedge/ambiguous augmentation in substep 7 — the headline (`effect_size` / `god_node_match` / `modules_touched`) plus the deterministic god-node check (substep 7's `check-large-files`) is the lite signal. The drill-down is a heavy-path tool for when the caller set is too large to grep; on a small change the reviewer reads the code directly. Emit `[review-weight] lite mode — headline only, multi-tier drill-down skipped per --lite`. `<mode>full</mode>` forces the full drill-down regardless.
 
-**Multi-tier follow-up (post-impact-plan drill-down) — run INLINE in this same substep, immediately after `blast_radius`, BEFORE advancing to the graphify-decision gate.** The gate in the next substep checks these drill-down sections exist and are substantive; producing them here in the same pass is what keeps it from blocking on a notice-and-hand-produce round-trip (field: an orchestrator hit the gate first, then had to go back and run the top-3 by hand). When the tier executed was `symbol_anchored` or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response — rank via the `direct_dependents_degrees` array (`{label, in_count, edge_count, source_file, relevance_tier, is_god_node, pure_god_node}`, already sorted by RELEVANCE to the diff — dependents whose `source_file` is among the changed symbols' files (`relevance_tier: 2`), or that share a Leiden community with a changed symbol (`relevance_tier: 1`), rank first; incidental high-fan-in god-nodes are demoted to the bottom but remain present; `direct_dependents` carries the same order, so position IS the rank); fall back to array position on older response shapes. When the response has fewer than 3 dependents, drill on however many exist (skip the drill-down step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Why: one blast_radius call alone leaves lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
+**Multi-tier follow-up (post-impact-plan drill-down) — run INLINE in this same substep, immediately after `blast_radius`, BEFORE advancing to the graphify-decision gate.** The gate in the next substep checks these drill-down sections exist and are substantive; producing them here in the same pass is what keeps it from blocking on a notice-and-hand-produce round-trip (field: an orchestrator hit the gate first, then had to go back and run the top-3 by hand). When the tier executed was `symbol_anchored`, `pr_scoped_diff`, or `bulk_scoped` AND the response carries a `direct_dependents` or top-degree-nodes array, **also** call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for the top-3 dependents from the response — rank via the `direct_dependents_degrees` array (`{label, in_count, edge_count, source_file, relevance_tier, is_god_node, pure_god_node}`, already sorted by RELEVANCE to the diff — dependents whose `source_file` is among the changed symbols' files (`relevance_tier: 2`), or that share a Leiden community with a changed symbol (`relevance_tier: 1`), rank first; incidental high-fan-in god-nodes are demoted to the bottom but remain present; `direct_dependents` carries the same order, so position IS the rank); fall back to array position on older response shapes. When the response has fewer than 3 dependents, drill on however many exist (skip the drill-down step entirely if 0). Append each as a `## Drill-down: <DEP> [call: <correlation_id>]` section to `graph-impact.md` — the correlation_id is the `_meta.correlation_id` field returned by the MCP call's response envelope (8-char hex), and downstream lane reviewers can cite it via `mcp-stats --correlation-id=<id>` to trace findings back to the specific call. When the response envelope lacks `_meta.correlation_id` (older MCP servers), omit the `[call: ...]` suffix rather than blocking. Why: one blast_radius call alone leaves lane subagents grep-hunting for caller sets that 3 cheap MCP calls would have surfaced. Args-VERBATIM contract still applies to the original tier call; the drill-down args are derived from the tier response, not from the impact-plan.json.
 
-**Empty drill-down handling**: `get_neighbors` self-recovers on empty results — identifier-shaped dropped callers return in `results` marked `recovered_from_noise: true` (confidence RECOVERED), with `dropped_by_file` still aggregating what stayed filtered. A drill-down is genuinely empty only when BOTH are absent — then record `## Drill-down: <SYM> (empty — dynamic dispatch suspected) [call: <correlation_id>]` and substitute the next-ranked dependent (bounded: try up to 5).
-
-**God-node oversize handling**: when a top-3 dependent carries `is_god_node: true` in its `direct_dependents_degrees` entry — a high-fan-in node now demoted by relevance ranking, so it only reaches the top-3 when relevant dependents are scarce, typically a class with hundreds of incoming edges — the upstream MCP `get_neighbors(symbol, direction="in", depth=2)` response can overflow the MCP transport's response-size cap, returning zero usable data (observed: 84KB overflow → empty response on high-degree symbols). When this happens, fall back to the devt CLI wrapper which supports `--max-bytes` truncation: `node bin/devt-tools.cjs graphify neighbors <symbol> --direction=in --depth=2 --max-bytes=60000`. The CLI sorts results depth-ascending + label-alphabetical and truncates deterministically, returning `truncated: true` + `total_neighbors` so the heading can record the partial nature: `## Drill-down: <SYM> (truncated — depth-2 incoming exceeded 60KB; first <N> of <total>) [via CLI fallback]`.
-
-**Substance threshold on drill-down sections.** `assert-graphify-decision` doesn't check "was the MCP tool called?" — it checks "is each drill-down section dense enough to be useful?" The gate uses a substance-byte-threshold heuristic per `## Drill-down:` block (currently 200 bytes minimum after stripping headings). A thin drill-down (e.g., 57 bytes) can fail the gate even when the MCP call succeeded — the section is thin because the topic extraction returned a generic concept that didn't map to a single useful subgraph. **If the gate fails with reason `drill-down section below substance threshold`**: re-derive the drill-down symbol from the impact-plan's `args.symbols` (NOT from topic keywords) so each section anchors on a real graph node with real dependents to enumerate. The gate is by design about output usefulness, not call presence.
+**Anomalous drill-down recovery (conditional).** If a drill-down response comes back empty, god-node-oversized (MCP transport overflow), or below the `assert-graphify-decision` substance threshold, Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## drill-down-recovery` section (self-recovery / `--max-bytes` CLI fallback / symbol re-derivation). Normal drill-downs need none of it.
 
 ### Substep 7: Deterministic god-node check
 
@@ -243,17 +205,7 @@ AUGMENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify augment-impac
 echo "graphify augment-impact-map: $(printf '%s\n' "$AUGMENT" | jq -r 'if (.sections_appended // []) | length == 0 then "no sections (clean)" else "appended " + (.sections_appended | join(", ")) end')"
 ```
 
-Why: a large module file (e.g. ~2,400 LOC) may be a god node, but the symbol-anchored anchor list can miss it because the diff's PascalCase symbols don't include module-level identifiers from that file. The CLI is deterministic (no MCP calls), idempotent, and gracefully no-ops when the graph is missing or the diff is empty.
-
-Symbol-level rationale: `check-large-files` aggregates per-file (one max-degree symbol per basename) and can miss a true god-node symbol when a lower-degree sibling in the same file happens to be reported as the file's top symbol. `check-symbol-godnodes` returns every above-threshold symbol whose `source_file` is in the diff with no per-file collapse, so a high-degree symbol cannot be eclipsed by a same-file sibling.
-
-**Note on signal independence**: four signals now feed the reviewer, all independent:
-- `blast_radius::god_node_match` — symbol-aggregated; at least one input symbol matches a god-node in the graph.
-- `check-large-files` — file-aggregated; reports the max-degree symbol per diff file.
-- `check-symbol-godnodes` — symbol-level; reports every above-threshold symbol whose source_file is in the diff, no per-file aggregation.
-- `preflight.god_nodes` fallback — graph-global top god-nodes; only emitted when both diff-anchored CLIs return 0. Provides structural signal for the common pattern where the diff touches callers, not definition sites.
-
-Any of the four can fire while the others stay silent — surface all four verbatim in the reviewer dispatch context. The fallback is mutually exclusive with the diff-anchored CLIs (only emits when they both go silent).
+The CLI is deterministic (no MCP calls), idempotent, and no-ops when the graph is missing or the diff is empty. It emits up to four independent god-node signals — `blast_radius::god_node_match` (symbol-aggregated), `check-large-files` (file-aggregated), `check-symbol-godnodes` (symbol-level, no per-file collapse), and the graph-global `preflight.god_nodes` fallback (emitted only when both diff-anchored checks return 0). Any can fire while the others stay silent; surface all appended sections verbatim in the reviewer dispatch context. (Why four — each catches a god node the others structurally miss: see `augment-impact-map` in `graphify.cjs`.)
 
 After this step, **EXACTLY ONE** of `graph-impact.md` or `graphify-skip-reason.txt` MUST exist. Enforced by a hard process gate — not prose:
 
@@ -272,11 +224,11 @@ fi
 
 The assert auto-passes when graphify is disabled or the graph is missing (`graphify_state != "ready"`) — the gate is about orchestrator obedience to the workflow contract, not about graphify being installed.
 
-**Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false`, STOP with BLOCKED — the orchestrator skipped the EXECUTE THE PLAN step above.
+**Gate**: If compound init fails, STOP with BLOCKED. If `state assert-graphify-decision` returns `ok:false` with reason `drill-down section below substance threshold`, first apply the re-derivation in `code-review.context-detail.md` → `## drill-down-recovery` (re-anchor each thin section on `args.symbols`) and re-run the gate; if it still returns `ok:false` for any reason, STOP with BLOCKED — the orchestrator skipped the EXECUTE THE PLAN step above.
 
 ### Substep 8: Decision-artifact gates + claude-mem MCP pre-step
 
-**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — orchestrators that skip silently get caught. Why: this pre-step is easy to drop as an unconscious skip — not rationalized, not noticed, simply absent — without an enforcement gate.
+**Orchestrator pre-step (claude-mem MCP) — DECISION-ARTIFACT REQUIRED.** Exactly ONE of `.devt/state/claude-mem-harvest.md` or `.devt/state/claude-mem-skipped.txt` MUST exist after this step. The `state assert-claude-mem-harvest` gate below enforces this — an easy pre-step to drop as an unconscious silent skip, so it is gated.
 
 If `mcp__plugin_claude-mem_mcp-search__search` is registered in this session:
 1. Call `mcp__plugin_claude-mem_mcp-search__search` with `query=${REVIEW_SCOPE}`, `project=<current devt project name>`, and `limit=50`. The response is a markdown index with table-row observations (`| #NNNN | time | <emoji> | Title | ~tokens |`) grouped by source file.
@@ -307,7 +259,7 @@ fi
 
 The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason satisfies the gate. The point is to make the consideration explicit — silent skips are the failure mode.
 
-**Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline already cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6). It runs on every review so its recommendation accumulates a track record against reality: light must be EARNED (proven absence of god-node + risk-surface path), never granted by a single metric.
+**Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6).
 
 ```bash
 RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')

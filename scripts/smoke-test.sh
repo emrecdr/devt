@@ -7321,8 +7321,9 @@ fi
 
 # G7: F16 ranking + empty-drill-down fallback
 if /usr/bin/grep -qE "in_count|edge_count" "$ROOT/workflows/code-review.md" \
-  && /usr/bin/grep -qE "dynamic dispatch suspected|Empty drill-down" "$ROOT/workflows/code-review.md"; then
-  pass "G7a: code-review.md F16 specifies ranking criterion + empty-drill-down fallback"
+  && /usr/bin/grep -q "drill-down-recovery" "$ROOT/workflows/code-review.md" \
+  && /usr/bin/grep -qE "dynamic dispatch suspected|Empty drill-down" "$ROOT/workflows/code-review.context-detail.md"; then
+  pass "G7a: F16 ranking criterion inline + empty-drill-down fallback relocated to code-review.context-detail.md (pointer present)"
 else
   fail "G7a: F16 ranking or empty-fallback prose missing"
 fi
@@ -8876,7 +8877,7 @@ fi
 # stays in the workflow prose.
 M11_BASH=$(/usr/bin/grep -c 'preflight_godnodes_fallback' "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M11_HEADER=$(/usr/bin/grep -c "from preflight, not diff-anchored" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
-M11_SIGNAL=$(/usr/bin/grep -c "four signals now feed the reviewer" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+M11_SIGNAL=$(/usr/bin/grep -c "four independent god-node signals" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 if [ "${M11_BASH:-0}" -ge 1 ] && [ "${M11_HEADER:-0}" -ge 1 ] && [ "${M11_SIGNAL:-0}" -ge 1 ]; then
   pass "M11: F17 cross-checks preflight.god_nodes when CLIs return 0 (bash=${M11_BASH}, header=${M11_HEADER}, signal-doc=${M11_SIGNAL})"
 else
@@ -18373,6 +18374,44 @@ else
   fail "K308: size-band discount broken ($K308_R)"
 fi
 rm -rf "$K308_PROJ"
+
+# K309: context_init by-reference partition integrity. The uncommon-branch
+# detail (arch-scan advisory, drill-down recovery) lives ONCE in
+# code-review.context-detail.md; code-review.md carries a conditional Read
+# pointer per anchor and NO resident copy. Enforces pointer<->anchor bijection
+# + the common-path guard contract (models K275). Static grep gate.
+K309_OK=1; K309_WHY=""
+CRD="$ROOT/workflows/code-review.context-detail.md"
+CRM="$ROOT/workflows/code-review.md"
+if [ ! -f "$CRD" ]; then
+  K309_OK=0; K309_WHY="detail-file-missing"
+else
+  # (1) every anchor defined in the detail file is referenced by a pointer that
+  #     ALSO names the detail file (a valid anchor behind a wrong Read path fails)
+  ANCHORS=$(/usr/bin/grep -oE '^## [a-z-]+' "$CRD" | sed 's/^## //')
+  for ANCHOR in $ANCHORS; do
+    /usr/bin/grep -qE "code-review.context-detail.md.*## ${ANCHOR}" "$CRM" || { K309_OK=0; K309_WHY="orphan-or-unpathed-anchor:${ANCHOR}"; }
+  done
+  # (2) every anchor referenced by a code-review.md pointer exists in the detail
+  REFS=$(/usr/bin/grep -oE 'execute its .## [a-z-]+' "$CRM" | /usr/bin/grep -oE '[a-z-]+$')
+  for REF in $REFS; do
+    /usr/bin/grep -q "^## ${REF}" "$CRD" || { K309_OK=0; K309_WHY="dangling-pointer:${REF}"; }
+  done
+  # (3) common-path guards still read the wrapper-computed values
+  /usr/bin/grep -q 'staleness_tier' "$CRM" || { K309_OK=0; K309_WHY="lost-staleness-guard"; }
+  /usr/bin/grep -q 'impact_plan.tier' "$CRM" || { K309_OK=0; K309_WHY="lost-impact-plan-guard"; }
+  # (4) disjointness: NO relocated-body sentinel may reappear resident in CRM —
+  #     one body-only sentinel per relocated passage so a partial re-inline (which
+  #     duplicates content while leaving the pointer) is caught, not just a 2-token spot-check.
+  for SENTINEL in 'STALE-ARCH-SCAN' 'ARCH-SCAN-MISSING' 'arch-scan-report.md::findings' 'recovered_from_noise' 'max-bytes=60000' 'substance-byte-threshold'; do
+    /usr/bin/grep -qF -- "$SENTINEL" "$CRM" && { K309_OK=0; K309_WHY="resident-body:${SENTINEL}"; }
+  done
+fi
+if [ "$K309_OK" = "1" ]; then
+  pass "K309: context_init by-reference partition — arch-scan advisory + drill-down recovery single-sourced in code-review.context-detail.md, code-review.md carries conditional pointers + common-path guards, no resident copies"
+else
+  fail "K309: context_init partition regressed at $K309_WHY"
+fi
 
 echo
 echo "== test-gates.cjs subsuite =="
