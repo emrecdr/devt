@@ -65,6 +65,8 @@ superseded_by: ADR-050         # successor id; the successor carries the matchin
 ---
 ```
 
+Every top-level key above is recognized by the layer; `memory validate` **warns** (never errors) on any *unrecognized* frontmatter key — an authored-but-inert field (the retired `decay_days`, a stray `keywords`) otherwise fails silently.
+
 Retirement is **two-sided**: the retired doc flips to `status: superseded` (+ `superseded_at`/`superseded_by`) AND the successor gains a `supersedes` link. Never hand-edit one side — `memory supersede <old> <new>` does both atomically, and `memory validate` errors on the one-sided state (`supersession-contradiction`: a supersedes link whose target is still active/candidate) and warns on the other (`orphaned-retirement`: a superseded ADR/CON/FLOW nothing links to; lessons and REJ docs are exempt — curator archival retires them without successors).
 
 For REJ tombstones, additional fields:
@@ -295,7 +297,7 @@ The weekly report (`report generate`) renders this as **## Affects Coverage (tre
 
 ### Enforce assertions (declarative conformance)
 
-A governing decision/concept/flow doc can carry `enforce:` rules — declarative assertions the verifier runs on the touched files, turning a ratified decision into a checked one. Each violation is a blocking finding routed through the normal grader/revision loop.
+A governing decision/concept/flow doc can carry `enforce:` rules — declarative assertions the verifier runs on the touched files, turning a ratified decision into a checked one. Each violation carries a `severity`: **blocking** (a local doc, or a shared-root doc when `memory.shared_roots_coerce` is granted) fails the verdict through the normal grader/revision loop; **advisory** (a shared-root doc governing without a coercion grant) is surfaced for the author but does not fail the verdict. The top-level `pass` is false iff a blocking violation exists.
 
 ```yaml
 enforce:                        # a LIST — a nested map parses as empty and errors at validate
@@ -304,11 +306,13 @@ enforce:                        # a LIST — a nested map parses as empty and er
     message: "api layer must not import infrastructure directly"
 ```
 
-The assertion is a **regex body, never a shell command** — a deliberate safety boundary: shared-root docs govern without the local curator gate (see the multi-root threat model above), so a shell `enforce:` would be arbitrary code execution from any such doc. Regex bodies are written as-is (single-backslash escapes; `parseScalar` preserves quoted values verbatim). `forbid` reports one violation per matching line; `require` one per in-scope file lacking the pattern. Regexes are applied per line and skip pathologically long (minified/generated) lines, so a catastrophic-backtracking pattern can't stall the verify loop. Only active decision/concept/flow docs run enforce — a REJ/lesson carrying `enforce:` warns at `memory validate` and is otherwise ignored.
+The assertion is a **regex body, never a shell command** — a deliberate safety boundary: shared-root docs govern without the local curator gate (see the multi-root threat model above), so a shell `enforce:` would be arbitrary code execution from any such doc. Regex bodies are written as-is (single-backslash escapes; `parseScalar` preserves quoted values verbatim). `forbid` reports one violation per matching line (skipping pathologically long minified/generated lines); `require` tests the whole file content — preserving multi-line and `^`/`$` anchor semantics, skipping files above a size cap — so a catastrophic-backtracking pattern can't stall the verify loop. Only active decision/concept/flow docs run enforce — a REJ/lesson, or a candidate/superseded governing doc, carrying `enforce:` warns at `memory validate` and is otherwise ignored. The blocking/advisory split mirrors the pre-flight guard's `shared_roots_coerce` tier: a shared-root doc that never passed the local curator gate advises rather than coerces unless the project explicitly grants coercion — a wrong block from an unreviewed shared root would be destructive.
 
 ```bash
 node bin/devt-tools.cjs memory enforce --files=a.py,b.py   # --files = touched set; omit for repo-wide (git ls-files)
 ```
+
+**Enforce vs K-gate — which mechanism?** Both assert invariants; they are not interchangeable. A **K-gate** (`scripts/smoke-test.sh`) belongs to devt's own contract — it runs in CI, guards the plugin's structure, and blocks the whole suite. An **`enforce:` rule** belongs to a *project's ratified decision* — it rides in a governing doc, runs batch-side on the touched files during `/devt:review`, and speaks that project's vocabulary. Rule of thumb: if the invariant protects devt's machinery, it's a K-gate; if it encodes a decision the project made about its own code, it's `enforce:`. Regex expresses "the API layer must not import infrastructure" but not "prefer composition over inheritance," so the enforceable fraction of any decision corpus is bounded — treat enforce coverage as a direction, never a target.
 
 Results are data (`{pass, violations:[{doc_id, shared_root, file, line, rule, message}]}`, exit 0; `shared_root` is null for local docs, the root label for shared-root ones — provenance parity with the rest of the multi-root layer). `agents/verifier.md` runs it in `run_verification`; a `pass:false` means the diff violates a governing decision.
 

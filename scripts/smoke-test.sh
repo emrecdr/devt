@@ -18169,6 +18169,153 @@ else
 fi
 rm -rf "$K303_PROJ"
 
+# K304: enforce trust-tier parity (F-A). A shared-root doc governs without
+# passing the local curator gate, so — mirroring the pre-flight guard's
+# memory.shared_roots_coerce tier — its enforce violations are ADVISORY
+# (non-blocking) unless the project grants coercion; local-doc violations always
+# block. Without this the enforce path (v0.185.0) re-opened a coercive surface
+# the trust tier (v0.182.0) was built to withhold.
+K304_PROJ=$(mktemp -d)
+(cd "$K304_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K304_PROJ/src/api"
+printf 'from app import infrastructure\n' > "$K304_PROJ/src/api/bad.py"
+K304_SHARED=$(mktemp -d)
+mkdir -p "$K304_SHARED/decisions"
+printf -- '---\nid: ADR-951\ntitle: "Shared layer rule"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Org-wide: api must not import infra."\nenforce:\n  - files: "src/api/**"\n    forbid: "import .*infrastructure"\n    message: "org rule: api must not import infrastructure"\n---\nbody\n' > "$K304_SHARED/decisions/ADR-951-shared.md"
+node -e "const fs=require('fs');const p='$K304_PROJ/.devt/config.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.memory=c.memory||{};c.memory.paths=['$K304_SHARED','.devt/memory'];c.memory.shared_roots_coerce=false;fs.writeFileSync(p,JSON.stringify(c,null,2));"
+(cd "$K304_PROJ" && git add -A >/dev/null 2>&1 && node "$CLI" memory index >/dev/null 2>&1)
+# coerce OFF: the shared-only violation is advisory and does NOT block (pass true)
+(cd "$K304_PROJ" && node "$CLI" memory enforce --files=src/api/bad.py 2>/dev/null) > "$K304_PROJ/off.json"
+# coerce ON: the identical violation becomes blocking (pass false)
+node -e "const fs=require('fs');const p='$K304_PROJ/.devt/config.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.memory.shared_roots_coerce=true;fs.writeFileSync(p,JSON.stringify(c,null,2));"
+(cd "$K304_PROJ" && node "$CLI" memory enforce --files=src/api/bad.py 2>/dev/null) > "$K304_PROJ/on.json"
+# back to coerce OFF, add a LOCAL doc flagging the same file: local blocks, shared advises, one run
+node -e "const fs=require('fs');const p='$K304_PROJ/.devt/config.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.memory.shared_roots_coerce=false;fs.writeFileSync(p,JSON.stringify(c,null,2));"
+printf -- '---\nid: ADR-801\ntitle: "Local layer rule"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Local: api must not import infra."\nenforce:\n  - files: "src/api/**"\n    forbid: "import .*infrastructure"\n    message: "local rule: api must not import infrastructure"\n---\nbody\n' > "$K304_PROJ/.devt/memory/decisions/ADR-801-local.md"
+(cd "$K304_PROJ" && node "$CLI" memory index >/dev/null 2>&1)
+(cd "$K304_PROJ" && node "$CLI" memory enforce --files=src/api/bad.py 2>/dev/null) > "$K304_PROJ/mix.json"
+K304_R=$(node -e "
+  try {
+    const off = require('$K304_PROJ/off.json');
+    const on = require('$K304_PROJ/on.json');
+    const mix = require('$K304_PROJ/mix.json');
+    const shOff = off.violations.find(v=>v.doc_id==='ADR-951');
+    const advOk = off.pass===true && off.blocking===0 && off.advisory===1 && !!shOff && shOff.severity==='advisory' && shOff.shared_root!==null;
+    const shOn = on.violations.find(v=>v.doc_id==='ADR-951');
+    const blkOk = on.pass===false && on.blocking===1 && !!shOn && shOn.severity==='blocking';
+    const mLoc = mix.violations.find(v=>v.doc_id==='ADR-801');
+    const mSh = mix.violations.find(v=>v.doc_id==='ADR-951');
+    const mixOk = mix.pass===false && mix.blocking===1 && mix.advisory===1 && !!mLoc && mLoc.severity==='blocking' && mLoc.shared_root===null && !!mSh && mSh.severity==='advisory';
+    process.stdout.write((advOk && blkOk && mixOk) ? 'OK' : 'MISMATCH ' + JSON.stringify({off:{p:off.pass,b:off.blocking,a:off.advisory,sev:shOff&&shOff.severity}, on:{p:on.pass,b:on.blocking,sev:shOn&&shOn.severity}, mix:{p:mix.pass,b:mix.blocking,a:mix.advisory,loc:mLoc&&mLoc.severity,sh:mSh&&mSh.severity}}));
+  } catch (e) { process.stdout.write('ERR ' + e.message); }
+" 2>/dev/null)
+if [ "$K304_R" = "OK" ]; then
+  pass "K304: enforce trust-tier parity — shared-root violation advisory + non-blocking when shared_roots_coerce off, blocking when granted, local always blocking (F-A, DEF-009 M2 parity)"
+else
+  fail "K304: enforce trust-tier broken ($K304_R)"
+fi
+rm -rf "$K304_PROJ" "$K304_SHARED"
+
+# K305: unknown-frontmatter-key hygiene (F-B). An authored top-level key the
+# memory layer doesn't consume (the retired `decay_days`, the inert `keywords`)
+# used to fail silently — `memory validate` now WARNS (never errors) so the
+# ghost-field class is legible (LES-001: the second recurrence of a failure
+# class gets gated). Known-only frontmatter stays warning-free.
+K305_PROJ=$(mktemp -d)
+(cd "$K305_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+cat > "$K305_PROJ/.devt/memory/decisions/ADR-905-ghost.md" <<'ADR5'
+---
+id: ADR-905
+title: "Ghost field doc"
+doc_type: decision
+domain: arch
+status: active
+confidence: verified
+summary: "carries an inert decay_days key nothing consumes."
+decay_days: 30
+affects_paths:
+  - "src/**"
+---
+body
+ADR5
+cat > "$K305_PROJ/.devt/memory/decisions/ADR-906-clean.md" <<'ADR6'
+---
+id: ADR-906
+title: "Clean doc"
+doc_type: decision
+domain: arch
+status: active
+confidence: verified
+summary: "only known keys, no unknown-key warning."
+affects_paths:
+  - "src/**"
+---
+body
+ADR6
+K305_R=$( (cd "$K305_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{
+    try {
+      const j=JSON.parse(s);const iss=j.issues||[];
+      const unk=iss.filter(i=>i.category==='unknown-key');
+      const onGhost=unk.filter(i=>/ADR-905/.test(i.filePath)&&/decay_days/.test(i.error||''));
+      const onClean=unk.filter(i=>/ADR-906/.test(i.filePath));
+      const allWarn=unk.every(i=>i.severity==='warning');
+      const ok = onGhost.length===1 && onClean.length===0 && allWarn;
+      process.stdout.write(ok?'OK':'MISMATCH '+JSON.stringify({ghost:onGhost.length,clean:onClean.length,warn:allWarn}));
+    } catch(e){process.stdout.write('ERR '+e.message);}
+  });" )
+if [ "$K305_R" = "OK" ]; then
+  pass "K305: unknown-frontmatter-key hygiene — validate warns (not errors) on an inert key (decay_days), stays quiet on known-only frontmatter (F-B, ghost-field class gate)"
+else
+  fail "K305: unknown-key warning broken ($K305_R)"
+fi
+rm -rf "$K305_PROJ"
+
+# K306: memory retract (F-G/OPT-I). The "never valid" sibling to supersede —
+# withdraws a doc (status→rejected, stamps retracted_at + optional
+# retracted_reason) with no successor required; archive-never-delete keeps the
+# file on disk. Idempotent, drops the doc from the active governing union, and
+# the retract stamps are known frontmatter keys so validate stays clean. A
+# missing / already-retracted doc fails cleanly (nonzero exit — guarded so
+# pipefail does not abort the gate).
+K306_PROJ=$(mktemp -d)
+(cd "$K306_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+cat > "$K306_PROJ/.devt/memory/decisions/ADR-910-wrong.md" <<'ADR9'
+---
+id: ADR-910
+title: "Wrong decision"
+doc_type: decision
+domain: arch
+status: active
+confidence: verified
+summary: "will be retracted."
+affects_paths:
+  - "src/**"
+---
+body
+ADR9
+(cd "$K306_PROJ" && node "$CLI" memory index >/dev/null 2>&1)
+{ (cd "$K306_PROJ" && node "$CLI" memory retract ADR-910 --reason="premise invalidated" 2>/dev/null) > "$K306_PROJ/r1.json"; } || true
+{ (cd "$K306_PROJ" && node "$CLI" memory retract ADR-910 2>/dev/null) > "$K306_PROJ/r2.json"; } || true
+{ (cd "$K306_PROJ" && node "$CLI" memory retract ADR-999 2>/dev/null) > "$K306_PROJ/r3.json"; } || true
+K306_VAL=$( (cd "$K306_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const i=j.issues||[];process.stdout.write(String(i.filter(x=>x.severity==='error').length)+'/'+String(i.filter(x=>x.category==='unknown-key').length));}catch{process.stdout.write('parse-error');}});" )
+K306_ACT=$( (cd "$K306_PROJ" && node "$CLI" memory active 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);const rows=Array.isArray(j)?j:(j.rows||j.active||[]);process.stdout.write(JSON.stringify(rows).includes('ADR-910')?'yes':'no');});" )
+K306_R=$(node -e "
+  try {
+    const r1=require('$K306_PROJ/r1.json'), r2=require('$K306_PROJ/r2.json'), r3=require('$K306_PROJ/r3.json');
+    const flipOk = r1.ok===true && r1.retracted && r1.retracted.status==='rejected' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}\$/.test(r1.retracted.retracted_at||'');
+    const idemOk = r2.ok===false && /already retracted/.test((r2.errors||[])[0]&&r2.errors[0].error||'');
+    const missOk = r3.ok===false && /not found/.test((r3.errors||[])[0]&&r3.errors[0].error||'');
+    process.stdout.write((flipOk&&idemOk&&missOk)?'OK':'MISMATCH '+JSON.stringify({r1:r1.ok,r2:r2.ok,r3:r3.ok}));
+  } catch(e){ process.stdout.write('ERR '+e.message); }
+" 2>/dev/null)
+if [ "$K306_R" = "OK" ] && [ "$K306_VAL" = "0/0" ] && [ "$K306_ACT" = "no" ]; then
+  pass "K306: memory retract — status→rejected + retracted_at/reason stamped, dropped from active union, idempotent + missing-doc errors clean, retract stamps pass validate (F-G/OPT-I)"
+else
+  fail "K306: retract broken (run=$K306_R validate=$K306_VAL active_has_910=$K306_ACT)"
+fi
+rm -rf "$K306_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

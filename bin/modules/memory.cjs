@@ -356,6 +356,22 @@ function parseScalar(raw) {
 const REQUIRED_FIELDS_COMMON = ["id", "title", "doc_type", "status", "confidence", "summary"];
 const REQUIRED_FIELDS_REJECTED = [...REQUIRED_FIELDS_COMMON, "reason"];
 
+// Every top-level frontmatter key the memory layer recognizes — the union of
+// what the code consumes (fm.*), what the retirement/versioning machinery
+// stamps, and the REJ-only fields. `memory validate` warns (never errors) on
+// any key outside this set: an authored-but-unconsumed field (the retired
+// `decay_days`, the inert `keywords`) otherwise fails silently, and LES-001's
+// own rule is that the second recurrence of a failure class gets gated.
+const KNOWN_FRONTMATTER_KEYS = new Set([
+  "id", "title", "doc_type", "domain", "status", "confidence", "summary",
+  "affects_paths", "affects_symbols", "links",
+  "created_at", "created_by", "schema_version",
+  "superseded_at", "superseded_by", "superseded_reason",
+  "retracted_at", "retracted_reason",
+  "reason", "search_keywords",
+  "enforce",
+]);
+
 function validateFrontmatter(fm, filePath) {
   const errors = [];
   if (!fm || typeof fm !== "object") {
@@ -1013,6 +1029,49 @@ function supersede(oldId, newId, opts = {}) {
   };
 }
 
+/**
+ * memory retract <id> [--reason=...] — withdraw a doc that turned out WRONG or
+ * never valid, the "never valid" sibling to supersede's "changed, here is the
+ * successor". Flips status to `rejected` (dropping the doc from the active
+ * governing union) and stamps `retracted_at` + optional `retracted_reason`.
+ * Archive-never-delete: the file stays on disk, retrievable by id with its
+ * lineage intact — only its governing authority is withdrawn. No successor is
+ * required (that is what distinguishes it from supersede). Curator/operator
+ * invokes it; there is no auto-retraction path. Writes the doc's EXISTING file
+ * path (never a recomputed slug) and reindexes once.
+ */
+function retract(id, opts = {}) {
+  if (!id) {
+    return { ok: false, errors: [{ error: "usage: memory retract <id> [--reason=...]" }] };
+  }
+  const doc = scanDocs().find(d => d.frontmatter && d.frontmatter.id === id);
+  if (!doc) return { ok: false, errors: [{ error: `doc not found: ${id}` }] };
+  if (doc.frontmatter.status === "rejected") {
+    return { ok: false, errors: [{ error: `${id} is already retracted (status: rejected)` }] };
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const fm = {
+    ...doc.frontmatter,
+    status: "rejected",
+    retracted_at: stamp,
+    ...(opts.reason ? { retracted_reason: String(opts.reason) } : {}),
+  };
+
+  const errors = validateFrontmatter(fm, doc.relativePath);
+  if (errors.length) return { ok: false, errors };
+
+  const markdown = `---\n${serializeFrontmatter(fm)}\n---\n\n${String(doc.body || "").replace(/^\s+/, "").replace(/\s+$/, "")}\n`;
+  try {
+    atomicWriteFileSync(doc.filePath, markdown);
+  } catch (e) {
+    return { ok: false, errors: [{ error: `write failed: ${e.message}` }] };
+  }
+
+  const indexed = rebuildIndex();
+  return { ok: true, retracted: { id, file: doc.relativePath, status: "rejected", retracted_at: stamp }, indexed };
+}
+
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
@@ -1310,6 +1369,13 @@ function runEnforce(files) {
     d.frontmatter && d.frontmatter.status === "active"
     && ENFORCE_TYPES.has(d.frontmatter.doc_type)
     && Array.isArray(d.frontmatter.enforce) && d.frontmatter.enforce.length);
+  // Trust tier (DEF-009 M2 parity): a shared-root doc governs without passing
+  // the local curator gate, so — mirroring the pre-flight guard — its enforce
+  // violations are ADVISORY (noted, non-blocking) unless the project explicitly
+  // grants coercion via memory.shared_roots_coerce. Local-doc violations always
+  // block. A wrong block from an unreviewed shared root would be destructive, so
+  // coercion is an opt-in grant, not a side effect of adding a shared root.
+  const coerce = require("./config.cjs").getMergedConfig().memory?.shared_roots_coerce === true;
   const violations = [];
   const filesScanned = new Set();
   const lineCache = new Map();  // per-run read+split cache — a file matched by several rules is read once
@@ -1319,6 +1385,7 @@ function runEnforce(files) {
     // a SHARED-root doc — which governs without the local curator gate — is the
     // source of a conformance finding (DEF-009 M4 provenance parity).
     const sharedRoot = sourceRootInfo(d.source_root).label;
+    const severity = sharedRoot && !coerce ? "advisory" : "blocking";
     for (const rule of d.frontmatter.enforce) {
       if (!rule || typeof rule.files !== "string") continue;
       const isForbid = typeof rule.forbid === "string";
@@ -1343,7 +1410,7 @@ function runEnforce(files) {
           for (let ln = 0; ln < entry.lines.length; ln++) {
             if (entry.lines[ln].length > MAX_LINE) continue;
             if (re.test(entry.lines[ln])) {
-              violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
+              violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, severity, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
             }
           }
         } else if (entry.content.length <= MAX_CONTENT && !re.test(entry.content)) {
@@ -1351,12 +1418,13 @@ function runEnforce(files) {
           // ^/$ anchor semantics (per-line testing would false-flag a cross-line
           // require and flip anchors). A file above MAX_CONTENT is skipped
           // (assumed satisfied) rather than risk a catastrophic-regex hang.
-          violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
+          violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, severity, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
         }
       }
     }
   }
-  return { docs_checked: docs.length, rules_checked: rulesChecked, files_scanned: filesScanned.size, violations, pass: violations.length === 0 };
+  const blocking = violations.filter(v => v.severity === "blocking").length;
+  return { docs_checked: docs.length, rules_checked: rulesChecked, files_scanned: filesScanned.size, violations, blocking, advisory: violations.length - blocking, pass: blocking === 0 };
 }
 
 function listActive(domain) {
@@ -1795,6 +1863,21 @@ function validate() {
         });
       }
     }
+
+    // Unknown-key hygiene: an authored top-level frontmatter key the layer
+    // doesn't recognize is almost always a silent ghost — a field the author
+    // believes does something that nothing consumes (the retired `decay_days`,
+    // the inert `keywords`). Warn so the class is legible; validate-clean keys
+    // on errors, so this never hard-blocks.
+    const _unknownKeys = Object.keys(doc.frontmatter).filter(k => !KNOWN_FRONTMATTER_KEYS.has(k));
+    if (_unknownKeys.length) {
+      issues.push({
+        filePath: doc.relativePath,
+        severity: "warning",
+        category: "unknown-key",
+        error: `unrecognized frontmatter key(s): ${_unknownKeys.join(", ")} — not consumed by the memory layer (authored-but-inert field; remove it or wire a consumer)`,
+      });
+    }
   }
 
   const dbPath = getDbPath();
@@ -2089,6 +2172,15 @@ function run(subcommand, args) {
       const positional = args.filter(a => !a.startsWith("--"));
       const reasonArg = args.find(a => a.startsWith("--reason="));
       const result = supersede(positional[0], positional[1], {
+        reason: reasonArg ? reasonArg.slice("--reason=".length) : null,
+      });
+      json(result);
+      return result.ok ? 0 : 1;
+    }
+    case "retract": {
+      const positional = args.filter(a => !a.startsWith("--"));
+      const reasonArg = args.find(a => a.startsWith("--reason="));
+      const result = retract(positional[0], {
         reason: reasonArg ? reasonArg.slice("--reason=".length) : null,
       });
       json(result);
@@ -2395,7 +2487,7 @@ function run(subcommand, args) {
       process.stderr.write(
         `Unknown memory subcommand: ${subcommand}\n` +
         `Valid: init | index | query | get | affects | coverage | enforce | list | links | active | rejected-keywords |\n` +
-        `       validate | supersede | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
+        `       validate | supersede | retract | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
         `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
         `       paths | diff | export | import |\n` +
         `       promote (via /devt:memory) | reject (via /devt:memory)\n`

@@ -6,15 +6,6 @@ status: active
 confidence: verified
 domain: smoke-tests
 summary: Under set -euo pipefail, smoke gates using $(... | grep -c ...) silently die when grep finds 0 matches — caught 4× this cycle. Defuse with set +eo pipefail in subshell.
-keywords:
-  - pipefail
-  - set-e
-  - grep-c
-  - smoke-test
-  - silent-failure
-  - subshell
-  - command-substitution
-  - bash-trap
 affects_paths:
   - scripts/smoke-test.sh
   - hooks/dispatch-hygiene-guard.sh

@@ -306,6 +306,15 @@ function renderGuardSection(guard) {
   if (g.recovered_ungoverned > g.recovered_governed && g.recovered_ungoverned > 3) {
     lines.push(`- Signal: recoveries are mostly ':: ungoverned' — the guard is firing on paths the memory layer does not govern; extend affects_paths coverage or tune memory.preflight_mode.`);
   }
+  if (g.recovered_ungoverned > 0) {
+    // The ungoverned bucket is only trustworthy once the guard matched absolute
+    // paths — earlier it compared repo-relative globs against absolute
+    // file_paths and auto-logged every abs-pathed edit as ':: ungoverned',
+    // inflating this count with path mismatches rather than real coverage gaps.
+    // Framed by the mechanism (not a version) so a long-window read doesn't
+    // mistake the two levers (tune the guard vs grow affects coverage).
+    lines.push(`- Caveat: ':: ungoverned' counts are reliable only for denies logged after the guard began matching absolute file paths; a window reaching earlier over-counts this bucket with path mismatches, not true coverage gaps.`);
+  }
   lines.push("");
   return lines.join("\n");
 }

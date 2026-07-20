@@ -6,15 +6,6 @@ status: active
 confidence: verified
 domain: telemetry
 summary: dispatch-warnings.jsonl carries 2 signal classes (raw_dispatch + task_output_bytes). Dominant signal is project-shaped — devt 99.7%/0.08% vs greenfield 13%/84.7%. Recipes must surface both classes.
-keywords:
-  - dispatch-warnings
-  - raw_dispatch
-  - task_output_bytes
-  - cliff-detection
-  - telemetry
-  - greenfield-calibration
-  - signal-flip
-  - project-shaped
 affects_paths:
   - hooks/dispatch-hygiene-guard.sh
   - hooks/task-truncation-detector.sh

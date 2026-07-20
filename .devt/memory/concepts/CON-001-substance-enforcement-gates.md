@@ -6,14 +6,6 @@ status: active
 confidence: verified
 domain: gates
 summary: Gates must enforce substance (work happened), not form (artifact exists). Five field-validated instances; pattern is now structural to devt's workflow contract.
-keywords:
-  - substance
-  - enforcement
-  - gate
-  - verifier
-  - workflow-contract
-  - stub-detection
-  - mcp-trace
 affects_paths:
   - bin/modules/state.cjs
   - workflows/code-review.md

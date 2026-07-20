@@ -8,6 +8,26 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.189.0] - 2026-07-20
+
+### Memory-layer hardening — enforce trust-tier, frontmatter hygiene, retract (validated external findings)
+
+An independent memory-layer review surfaced two confirmed code defects plus several enhancement options. Each was validated filesystem-first and filtered through the project's north stars (TRIM > ADD, delegate over reimplement, value over mechanism): the aligned subset shipped; four mechanism-heavy options (FTS keyword indexing, a changelog→candidate extractor, an A/B eval harness, a `PreCompact` hook) were deliberately declined as ADD-before-value. Drift-guard stack 211 → 214 deep (K94–K306).
+
+### Fixed
+
+- **`enforce:` bypassed the shared-root trust tier.** A shared-root governing doc — whose content never passes the local curator gate — could block the verify loop through an `enforce:` rule even with `memory.shared_roots_coerce: false`, the exact coercive authority the tier (DEF-009 M2) was built to withhold. `runEnforce` now tags each violation `severity: blocking|advisory`: a shared-root violation is **advisory** (surfaced, non-blocking) unless the project grants coercion; local-doc violations always block. Top-level `pass` is false iff a blocking violation exists, and the verifier routes on it — mirroring the pre-flight guard's tier exactly. A wrong block from an unreviewed shared root would be destructive, so coercion stays an explicit grant. Pinned by **K304**.
+
+### Added
+
+- **`memory validate` warns on unrecognized frontmatter keys.** An authored-but-inert field (the retired `decay_days`, a stray `keywords`) previously failed silently. A known-key allowlist now emits an `unknown-key` **warning** — never an error, so an experimental field never hard-blocks validate-clean — applying LES-001's "gate the class on the second recurrence". Its first run caught three inert `keywords:` fields (CON-001/002/003), now trimmed.  Pinned by **K305**.
+- **`memory retract <id> [--reason=…]`** — the "never valid" sibling to `supersede`'s "changed, here's the successor". Flips a doc to `status: rejected` (dropping it from the active governing union), stamps `retracted_at` + optional `retracted_reason`, requires no successor, and keeps the file on disk (archive-never-delete). Idempotent; validates the mutated frontmatter before writing. Pinned by **K306**.
+
+### Changed
+
+- **Guard Telemetry caveat.** The weekly report now notes — only when `:: ungoverned` recoveries are actually present — that the ungoverned bucket is trustworthy only for denies logged after the guard began matching absolute paths, so a long-window read doesn't mistake path-mismatches for real coverage gaps.
+- **docs/MEMORY.md** — documents the enforce blocking/advisory tier, corrects the stale "`require` matches per line" description (whole-content since the K303 hardening), adds an **enforce-vs-K-gate** boundary note (which mechanism a rule belongs in; enforce coverage is a direction, not a target), and the unknown-key validate warning.
+
 ## [0.188.0] - 2026-07-20
 
 ### Enforce / affects-coverage hardening (xhigh code-review findings)
