@@ -17972,6 +17972,45 @@ else
 fi
 rm -rf "$K300_PROJ"
 
+# K301: affects-coverage density (DEF-007 pt2). Instruments the affects-union
+# memory_signal: per governing doc, N = tracked files its globs CLAIM, M = the
+# subset changed in the window, density = M/N. A broad `**` glob claims far
+# more than any change set touches → low density, so dilution is visible; an
+# exact-path doc reads 100%. Rows sort most-diluted-first (density asc, then
+# broadest claim), and a doc whose globs match nothing tracked is dead (null
+# density). --universe/--changed inject a hermetic file set (no git needed).
+K301_PROJ=$(mktemp -d)
+(cd "$K301_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+printf -- '---\nid: ADR-901\ntitle: "Narrow exact-path rule"\ndoc_type: decision\ndomain: widgets\nstatus: active\nconfidence: verified\nsummary: "Tight glob."\naffects_paths:\n  - "src/narrow/exact.py"\n---\nbody\n' > "$K301_PROJ/.devt/memory/decisions/ADR-901-narrow.md"
+printf -- '---\nid: ADR-902\ntitle: "Broad wildcard rule"\ndoc_type: decision\ndomain: widgets\nstatus: active\nconfidence: explicit\nsummary: "Broad glob."\naffects_paths:\n  - "src/broad/**"\n---\nbody\n' > "$K301_PROJ/.devt/memory/decisions/ADR-902-broad.md"
+printf -- '---\nid: ADR-903\ntitle: "Dead glob rule"\ndoc_type: decision\ndomain: widgets\nstatus: active\nconfidence: explicit\nsummary: "Glob matches nothing tracked."\naffects_paths:\n  - "src/gone/**"\n---\nbody\n' > "$K301_PROJ/.devt/memory/decisions/ADR-903-dead.md"
+(cd "$K301_PROJ" && node "$CLI" memory index >/dev/null 2>&1)
+K301_JSON="$K301_PROJ/cov.json"
+(cd "$K301_PROJ" && node "$CLI" memory coverage \
+  --universe=src/narrow/exact.py,src/broad/a.py,src/broad/b.py,src/broad/c.py \
+  --changed=src/narrow/exact.py,src/broad/a.py 2>/dev/null) > "$K301_JSON"
+K301_R=$(node -e "
+  try {
+    const j = require('$K301_JSON');
+    const by = Object.fromEntries(j.docs.map(d => [d.id, d]));
+    const n = by['ADR-901'], b = by['ADR-902'], dead = by['ADR-903'];
+    const ok = n && b && dead
+      && n.claimed === 1 && n.matched === 1 && n.density === 1
+      && b.claimed === 3 && b.matched === 1 && Math.abs(b.density - 1/3) < 1e-9
+      && dead.claimed === 0 && dead.density === null
+      && j.docs.findIndex(d => d.id==='ADR-902') < j.docs.findIndex(d => d.id==='ADR-901')
+      && Math.abs(j.summary.mean_density - (1 + 1/3)/2) < 1e-9
+      && j.summary.docs_with_claim === 2;
+    process.stdout.write(ok ? 'OK' : 'MISMATCH ' + JSON.stringify({n,b,dead,order:j.docs.map(d=>d.id),sum:j.summary}));
+  } catch (e) { process.stdout.write('ERR ' + e.message); }
+" 2>/dev/null)
+if [ "$K301_R" = "OK" ]; then
+  pass "K301: affects-coverage density — exact-path doc 100%, broad `**` doc diluted (1/3), dead glob null, most-diluted-first ordering + mean over claiming docs (DEF-007 pt2)"
+else
+  fail "K301: affects-coverage broken ($K301_R)"
+fi
+rm -rf "$K301_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

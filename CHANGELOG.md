@@ -8,6 +8,21 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.184.0] - 2026-07-20
+
+### Affects-coverage density (DEF-007 part 2)
+
+Part 1 (v0.176.0) warned when an active governing doc had no `affects_paths` at all — invisible to the affects-union memory_signal. Part 2 instruments the opposite failure: a doc whose glob is so broad it claims files it never really governs, so it fires on the affects-union for nearly any change while adding no precision (mechanism-firing ≠ value). Before: nothing distinguished a tight exact-path doc from a `**` doc that matches half the tree — both just "govern" whatever changed. After: the weekly report's new **## Affects Coverage (trend)** section gives each governing doc a density — of the N tracked files its own globs CLAIM, how many M were changed in the window — sorted most-diluted-first. A `guardrails/**`+`skills/**` tombstone claiming 26 files reads visibly diluted next to an exact-path doc at 100%.
+
+Deliberately a **direction, not a target**: the denominator is scoped to each doc's own claim (a raw changed-files fraction would reward broad globs that govern nothing), a single window can't distinguish "diluted" from "quiet," and the mean-over-claiming-docs line is there to compare across reports — never a score to maximize, since narrowing a glob to nothing would "improve" it while governing less.
+
+### Added
+
+- **`memory.computeAffectsCoverage(changedFiles, fileUniverse)`** + the pure, DB-free **`memory.globReach(patterns, files)`** core (reuses the same `matchesGlob` engine `getByPath` uses, so a coverage count is exactly the file set the affects-union would match). Per governing doc in `getByPath`'s universe (active/candidate, ≥1 affects pattern, all types): `claimed` = universe ∩ globs, `matched` = changed ∩ globs, `density` = M/N (null when the globs match nothing tracked — a distinct "dead governance" pathology). Rows sort density-ascending, broadest-claim-first within a tier.
+- **`memory coverage`** CLI — `--changed`/`--universe` accept comma lists (with `--universe` omitted the denominator is `git ls-files`); exposes the metric for ad-hoc inspection and hermetic testing.
+- **Weekly report `## Affects Coverage (trend)` section** — `report generate` now aggregates the window's changed-file set (a new `git log --name-only` collector) against tracked files and renders per-doc density with the trend-not-target caveat and a mean-coverage line. New `affects_coverage` key in the `generate` JSON result.
+- Gate **K301** — behavioral on a hermetic fixture (exact-path doc → 100%, broad `**` doc → diluted 1/3, dead glob → null, most-diluted-first ordering, mean over claiming docs). Drift-guard stack 208 → 209 deep (K94–K301).
+
 ## [0.183.0] - 2026-07-20
 
 ### Session-end curation surface (DEF-008)

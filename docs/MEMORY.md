@@ -283,6 +283,16 @@ Every verifier dispatch in `dev-workflow.md` and `code-review.md` includes a `<m
 
 Rendering rules: an empty **supplement** disappears; an empty **primary** states the checkable claim above; a literal `{}` is reserved for memory-layer-unavailable ("could not check" — consumers fall back to fresh queries). Field failure this fixes: the prose query returned `counts: {}` — reading as "no governance applies" — while per-file affects carried ADR/FLOW governance for the same diff.
 
+### Affects-coverage density (dilution instrument)
+
+The affects-union above is only as precise as each doc's globs. A doc with a broad glob (`skills/**`) enters the union for almost any change, appearing relevant while governing nothing specific — the mechanism fires, but converts no value. `memory coverage` instruments this: for each doc in `getByPath`'s universe it reports `claimed` (tracked files the globs match), `matched` (the subset in a supplied changed-file set), and `density = matched/claimed` (null when the globs match nothing tracked — a dead glob). A broad glob claims far more than any change touches → low density = visibly diluted; an exact-path doc reads 100%.
+
+```bash
+node bin/devt-tools.cjs memory coverage --changed=a.py,b.py   # --universe defaults to `git ls-files`
+```
+
+The weekly report (`report generate`) renders this as **## Affects Coverage (trend)**, most-diluted-first, over the window's changed files, with a mean-coverage line. It is a **direction, not a target**: the denominator is each doc's own claim (a raw changed-files fraction would reward broad globs that govern nothing), one window can't distinguish "diluted" from "quiet", and narrowing a glob to nothing would "improve" the score while governing less — so the mean is there to compare across reports, never to maximize.
+
 **Dev/research workflows (prose-anchored).** Pre-implementation work has no diff to anchor on, so the signal stays:
 
 ```bash
@@ -308,6 +318,7 @@ node bin/devt-tools.cjs memory query <terms> --signal=N        # combined: domai
 node bin/devt-tools.cjs memory query <terms> --json-compact    # full rows, compact JSON (no formatting)
 node bin/devt-tools.cjs memory get <id>          # fetch single doc
 node bin/devt-tools.cjs memory affects <path>    # path-based pre-flight
+node bin/devt-tools.cjs memory coverage --changed=a,b [--universe=x,y]  # per-doc glob density (dilution instrument)
 node bin/devt-tools.cjs memory list [doc_type]   # enumerate
 node bin/devt-tools.cjs memory links <id>        # transitive link traversal
 node bin/devt-tools.cjs memory active [domain]   # status: active filter

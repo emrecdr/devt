@@ -305,6 +305,69 @@ function renderGuardSection(guard) {
 }
 
 // ---------------------------------------------------------------------------
+// Affects coverage — per-governing-doc glob density over the reporting window.
+// Denominator is the files a doc's OWN globs claim (tracked files), numerator
+// the subset changed in the window. A broad glob claims far more than any
+// window touches → low density, so dilution is visible rather than reading as
+// full coverage. Rendered as a direction to track across windows, never a
+// score to maximize — narrowing a glob to nothing would "improve" it while
+// governing less.
+// ---------------------------------------------------------------------------
+
+function collectTrackedFiles(projectRoot) {
+  try {
+    return execFileSync("git", ["ls-files"], { cwd: projectRoot, encoding: "utf8", timeout: 30000 })
+      .split("\n").filter(Boolean);
+  } catch { return []; }
+}
+
+function collectWindowChangedFiles(projectRoot, fromDate, toDate) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["log", "--all", "--after=" + fromDate, "--before=" + toDate, "--name-only", "--pretty=format:"],
+      { cwd: projectRoot, encoding: "utf8", timeout: 30000 }
+    );
+    return [...new Set(out.split("\n").filter(Boolean))];
+  } catch { return []; }
+}
+
+function aggregateAffectsCoverage(projectRoot, fromDate, toDate) {
+  const universe = collectTrackedFiles(projectRoot);
+  if (universe.length === 0) return { available: false };
+  const changed = collectWindowChangedFiles(projectRoot, fromDate, toDate);
+  try {
+    const cov = require("./memory.cjs").computeAffectsCoverage(changed, universe);
+    return { available: true, ...cov };
+  } catch {
+    return { available: false };
+  }
+}
+
+function renderAffectsCoverageSection(coverage) {
+  if (!coverage || !coverage.available || !Array.isArray(coverage.docs)) return "";
+  const claiming = coverage.docs.filter(d => d.claimed > 0);
+  const dead = coverage.docs.filter(d => d.claimed === 0);
+  if (claiming.length === 0 && dead.length === 0) return "";
+  const lines = ["## Affects Coverage (trend)", ""];
+  lines.push("_Direction, not a target — density is (files changed this window that a doc's globs claim) ÷ (files those globs claim). A broad glob claiming files it never governs reads as diluted; do not 'fix' it by narrowing globs to nothing._");
+  lines.push("");
+  const plural = (n) => (n === 1 ? "" : "s");
+  for (const d of claiming) {
+    lines.push(`- ${d.id}: claims ${d.claimed} file${plural(d.claimed)}, ${d.matched} changed → ${Math.round(d.density * 100)}% density`);
+  }
+  for (const d of dead) {
+    lines.push(`- ${d.id}: claims 0 tracked files — globs match nothing (dead governance)`);
+  }
+  if (coverage.summary && coverage.summary.mean_density != null) {
+    lines.push("");
+    lines.push(`- Governing-doc mean coverage this window: ${Math.round(coverage.summary.mean_density * 100)}% (compare across reports for the trend)`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -331,15 +394,17 @@ function run(subcommand, args) {
       const fromMs = new Date(window.from).getTime();
       const toMs = new Date(window.to).getTime() + 24 * 3600 * 1000;
       const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);
+      const coverage = aggregateAffectsCoverage(projectRoot, window.from, window.to);
       const guard = aggregateGuardTelemetry(projectRoot, fromMs, toMs);
-      const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents) + renderGuardSection(guard);
+      const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents)
+        + renderAffectsCoverageSection(coverage) + renderGuardSection(guard);
 
       if (outputPath) {
         atomicWriteFileSync(outputPath, report);
-        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents, guard_telemetry: guard };
+        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard };
       }
 
-      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents, guard_telemetry: guard };
+      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard };
     }
 
     default:
@@ -347,4 +412,4 @@ function run(subcommand, args) {
   }
 }
 
-module.exports = { run, computeWindow, parseGitLog, renderMarkdown, aggregateMemoryEvents, renderMemorySection, aggregateGuardTelemetry, renderGuardSection };
+module.exports = { run, computeWindow, parseGitLog, renderMarkdown, aggregateMemoryEvents, renderMemorySection, aggregateAffectsCoverage, renderAffectsCoverageSection, aggregateGuardTelemetry, renderGuardSection };

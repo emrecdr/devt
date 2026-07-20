@@ -1147,6 +1147,74 @@ function getBySymbol(symbol) {
   `).all(symbol));
 }
 
+// Subset of `files` matched by any pattern in `patterns`. Pure — no DB, git,
+// or filesystem; both arguments are arrays of repo-relative path strings.
+// Reuses matchesGlob (the same engine getByPath uses) so a coverage count is
+// exactly the file set the affects-union memory_signal would match.
+function globReach(patterns, files) {
+  if (!Array.isArray(patterns) || !Array.isArray(files)) return [];
+  return files.filter(f => patterns.some(p => matchesGlob(f, p)));
+}
+
+// Per-governing-doc affects coverage. For each doc in getByPath's universe
+// (active/candidate with ≥1 affects pattern), N = tracked files its globs
+// CLAIM (fileUniverse ∩ globs), M = those that were CHANGED (changedFiles ∩
+// globs); density = M/N. A broad `**` glob claims a large N but a window's
+// changes touch a sliver → low density, so dilution is visible rather than
+// reading as full coverage. density is null when a doc claims nothing tracked
+// (a dead glob — a distinct pathology from dilution). Rows sort most-diluted
+// first; the mean over claiming docs is the single number to track across
+// reporting windows (a trend, never a target — see the report caveat).
+function computeAffectsCoverage(changedFiles, fileUniverse) {
+  const universe = Array.isArray(fileUniverse) ? fileUniverse : [];
+  const changed = Array.isArray(changedFiles) ? changedFiles : [];
+  return withDb(db => {
+    const rows = db.prepare(`
+      SELECT d.id, d.doc_type, a.pattern
+      FROM documents d JOIN affects a ON d.id = a.doc_id
+      WHERE a.pattern IS NOT NULL AND d.status IN ('active', 'candidate')
+    `).all();
+    const byDoc = new Map();
+    for (const r of rows) {
+      if (!byDoc.has(r.id)) byDoc.set(r.id, { id: r.id, doc_type: r.doc_type, patterns: [] });
+      byDoc.get(r.id).patterns.push(r.pattern);
+    }
+    const docs = [];
+    for (const d of byDoc.values()) {
+      const claimed = globReach(d.patterns, universe).length;
+      const matched = globReach(d.patterns, changed).length;
+      docs.push({
+        id: d.id,
+        doc_type: d.doc_type,
+        patterns: d.patterns,
+        claimed,
+        matched,
+        density: claimed > 0 ? matched / claimed : null,
+      });
+    }
+    // Ascending density → most-diluted first; within a density tier the
+    // broadest claim leads (dilution is high-claim × low-density, so a 26-file
+    // glob at 0% outranks a 1-file glob at 0%). Dead globs (null density) last.
+    docs.sort((a, b) => {
+      const da = a.density == null ? Infinity : a.density;
+      const dbb = b.density == null ? Infinity : b.density;
+      return da !== dbb ? da - dbb : b.claimed - a.claimed;
+    });
+    const claiming = docs.filter(d => d.claimed > 0);
+    const meanDensity = claiming.length
+      ? claiming.reduce((s, d) => s + d.density, 0) / claiming.length
+      : null;
+    return {
+      docs,
+      summary: {
+        governing_docs: docs.length,
+        docs_with_claim: claiming.length,
+        mean_density: meanDensity,
+      },
+    };
+  });
+}
+
 function listActive(domain) {
   return withDb(db => {
     if (domain) {
@@ -1790,6 +1858,28 @@ function run(subcommand, args) {
       json({ path: args[0], matches: getByPath(args[0]) });
       return 0;
     }
+    case "coverage": {
+      // Per-doc affects-coverage density. --changed / --universe accept comma
+      // lists (test + ad-hoc use); with --universe omitted the denominator is
+      // `git ls-files` (tracked files), and with --changed omitted every
+      // matched count is 0 (claim-breadth only). The weekly report calls
+      // computeAffectsCoverage directly with its window's changed-file set.
+      const parseList = (flag) => {
+        const a = args.find(x => x.startsWith(flag + "="));
+        return a ? a.split("=").slice(1).join("=").split(",").map(s => s.trim()).filter(Boolean) : null;
+      };
+      let universe = parseList("--universe");
+      const changed = parseList("--changed") || [];
+      if (universe == null) {
+        try {
+          universe = require("child_process")
+            .execFileSync("git", ["ls-files"], { encoding: "utf8", timeout: 30000 })
+            .split("\n").filter(Boolean);
+        } catch { universe = []; }
+      }
+      json(computeAffectsCoverage(changed, universe));
+      return 0;
+    }
     case "list": {
       const docType = args[0] && DOC_TYPES.includes(args[0]) ? args[0] : null;
       json({ doc_type: docType, docs: listDocs(docType) });
@@ -2136,7 +2226,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown memory subcommand: ${subcommand}\n` +
-        `Valid: init | index | query | get | affects | list | links | active | rejected-keywords |\n` +
+        `Valid: init | index | query | get | affects | coverage | list | links | active | rejected-keywords |\n` +
         `       validate | supersede | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
         `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
         `       paths | diff | export | import |\n` +
@@ -2160,6 +2250,8 @@ module.exports = {
   getAffectsPathsByIds,
   getByPath,
   getBySymbol,
+  globReach,
+  computeAffectsCoverage,
   supersede,
   listActive,
   listRejectedKeywords,
