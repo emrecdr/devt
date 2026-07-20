@@ -304,13 +304,13 @@ enforce:                        # a LIST — a nested map parses as empty and er
     message: "api layer must not import infrastructure directly"
 ```
 
-The assertion is a **regex body, never a shell command** — a deliberate safety boundary: shared-root docs govern without the local curator gate (see the multi-root threat model above), so a shell `enforce:` would be arbitrary code execution from any such doc. Regex bodies are written as-is (single-backslash escapes; `parseScalar` preserves quoted values verbatim). `forbid` reports one violation per matching line; `require` one per in-scope file lacking the pattern.
+The assertion is a **regex body, never a shell command** — a deliberate safety boundary: shared-root docs govern without the local curator gate (see the multi-root threat model above), so a shell `enforce:` would be arbitrary code execution from any such doc. Regex bodies are written as-is (single-backslash escapes; `parseScalar` preserves quoted values verbatim). `forbid` reports one violation per matching line; `require` one per in-scope file lacking the pattern. Regexes are applied per line and skip pathologically long (minified/generated) lines, so a catastrophic-backtracking pattern can't stall the verify loop. Only active decision/concept/flow docs run enforce — a REJ/lesson carrying `enforce:` warns at `memory validate` and is otherwise ignored.
 
 ```bash
 node bin/devt-tools.cjs memory enforce --files=a.py,b.py   # --files = touched set; omit for repo-wide (git ls-files)
 ```
 
-Results are data (`{pass, violations:[{doc_id, file, line, rule, message}]}`, exit 0). `agents/verifier.md` runs it in `run_verification`; a `pass:false` means the diff violates a governing decision.
+Results are data (`{pass, violations:[{doc_id, shared_root, file, line, rule, message}]}`, exit 0; `shared_root` is null for local docs, the root label for shared-root ones — provenance parity with the rest of the multi-root layer). `agents/verifier.md` runs it in `run_verification`; a `pass:false` means the diff violates a governing decision.
 
 **Dev/research workflows (prose-anchored).** Pre-implementation work has no diff to anchor on, so the signal stays:
 

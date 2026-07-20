@@ -8,6 +8,27 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.186.0] - 2026-07-20
+
+### Hardening + cleanup for the coverage + enforce features (v0.184.0/v0.185.0)
+
+A validation pass over the two new memory-layer features found five edge cases, and a follow-up simplify pass removed the duplication they were built on. All behavior-preserving where it counts; the drift-guard suite stays 1049/0 at K94–K302.
+
+### Fixed
+
+- **Affects-coverage density could exceed 100%** — `matched` was not scoped to the tracked universe, so a file changed in the window but since deleted (or changed on another branch via `git log --all`) inflated the numerator past `claimed`. `matched` now counts only changed files that are still tracked, restoring `matched ≤ claimed` (F1, pinned by K301's deleted-file case).
+- **`memory enforce` silently no-op'd on absolute `--files`** — a raw absolute path matched no repo-relative glob (the same trap that once disarmed the pre-flight guard). Paths are now canonicalized (`realpath` both sides, resilient to a symlinked root) before matching (F2, K302).
+- **Enforce violations were unattributed by root** — each violation now carries `shared_root` (null for local, the root label for shared-root docs), so a reviewer can see when a doc governing without the local curator gate is the source of a finding (F3, DEF-009 M4 parity, K302).
+- **Enforce on a non-governing doc-type was silently ignored** — a REJ/lesson carrying `enforce:` now warns at `memory validate` (`enforce-ignored`) instead of quietly never running (F4, K302).
+- **Enforce regexes were unbounded** — a catastrophic-backtracking pattern could stall the verify loop. Regexes now apply per line and skip pathologically long (minified/generated) lines, removing the ReDoS surface without affecting real source (F5, K302).
+
+### Changed (internal cleanup)
+
+- **One `trackedFiles()` helper** replaces three copies of the `git ls-files` idiom (`runEnforce`, `computeAffectsCoverage` fallback, coverage CLI, weekly report).
+- **One `toRepoRelative()` helper** for the absolute→repo-relative canonicalization; **one `activeAffectsRows()`** query shared by `getByPath` + `computeAffectsCoverage` so the governing-doc definition can't drift; **one module-level `parseCsvFlag()`** for the `--files`/`--changed`/`--universe` CLI args.
+- **The weekly report no longer runs a second `git log`** — `parseGitLog` collects the window's changed-file set in its existing walk (via an out-param) instead of re-walking it for affects-coverage.
+- `runEnforce` reads + splits each in-scope file once per run (cache) instead of once per matching rule.
+
 ## [0.185.0] - 2026-07-20
 
 ### Enforce assertions — declarative ADR conformance (DEF-004 pilot)

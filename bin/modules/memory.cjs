@@ -1156,19 +1156,44 @@ function globMatch(pattern, str) {
   return match(0, 0);
 }
 
+// The affects-union universe: every active/candidate doc joined to its path
+// patterns. Single source of truth for "which docs govern which globs" — both
+// getByPath (single-file lookup) and computeAffectsCoverage (per-doc density)
+// read from here so the governing-doc definition can't drift between them.
+function activeAffectsRows(db) {
+  return db.prepare(`
+    SELECT d.*, a.pattern
+    FROM documents d JOIN affects a ON d.id = a.doc_id
+    WHERE a.pattern IS NOT NULL AND d.status IN ('active', 'candidate')
+  `).all();
+}
+
+// Repo-relative paths of all git-tracked files — the coverage denominator and
+// the enforce repo-wide universe. `cwd` scopes the git call (the weekly report
+// runs from the project root); returns [] when git is unavailable.
+function trackedFiles(cwd) {
+  try {
+    const opts = { encoding: "utf8", timeout: 30000 };
+    if (cwd) opts.cwd = cwd;
+    return require("child_process").execFileSync("git", ["ls-files"], opts).split("\n").filter(Boolean);
+  } catch { return []; }
+}
+
+// Canonicalize an absolute path to repo-relative, resilient to a symlinked root
+// (macOS /tmp → /private/var) and new/deleted files (realpath the PARENT, rejoin
+// basename). Relative inputs pass through; `canonRoot` must already be realpath'd.
+// One home for the absolute-vs-relative trap that silently disarmed the guard.
+function toRepoRelative(fp, canonRoot) {
+  const path = require("path");
+  if (!path.isAbsolute(fp)) return fp;
+  const fs = require("fs");
+  let canonFp = fp;
+  try { canonFp = path.join(fs.realpathSync(path.dirname(fp)), path.basename(fp)); } catch { /* parent missing — use raw */ }
+  return path.relative(canonRoot, canonFp);
+}
+
 function getByPath(filePath) {
-  return withDb(db => {
-    const all = db.prepare(`
-      SELECT d.*, a.pattern
-      FROM documents d JOIN affects a ON d.id = a.doc_id
-      WHERE a.pattern IS NOT NULL AND d.status IN ('active', 'candidate')
-    `).all();
-    const matches = [];
-    for (const row of all) {
-      if (matchesGlob(filePath, row.pattern)) matches.push(row);
-    }
-    return matches;
-  });
+  return withDb(db => activeAffectsRows(db).filter(row => matchesGlob(filePath, row.pattern)));
 }
 
 function getBySymbol(symbol) {
@@ -1198,14 +1223,17 @@ function globReach(patterns, files) {
 // first; the mean over claiming docs is the single number to track across
 // reporting windows (a trend, never a target — see the report caveat).
 function computeAffectsCoverage(changedFiles, fileUniverse) {
-  const universe = Array.isArray(fileUniverse) ? fileUniverse : [];
-  const changed = Array.isArray(changedFiles) ? changedFiles : [];
+  // fileUniverse null/undefined → fall back to the tracked tree; an explicit []
+  // stays empty (a caller asking for a bounded universe).
+  const universe = Array.isArray(fileUniverse) ? fileUniverse : trackedFiles();
+  // matched counts only CHANGED files that are also tracked — a file changed in
+  // the window but since deleted (or changed on another branch, via git log
+  // --all) is not part of the current governed surface, and counting it would
+  // let matched exceed claimed (density > 100%, a nonsensical reading).
+  const universeSet = new Set(universe);
+  const changed = (Array.isArray(changedFiles) ? changedFiles : []).filter(f => universeSet.has(f));
   return withDb(db => {
-    const rows = db.prepare(`
-      SELECT d.id, d.doc_type, a.pattern
-      FROM documents d JOIN affects a ON d.id = a.doc_id
-      WHERE a.pattern IS NOT NULL AND d.status IN ('active', 'candidate')
-    `).all();
+    const rows = activeAffectsRows(db);
     const byDoc = new Map();
     for (const r of rows) {
       if (!byDoc.has(r.id)) byDoc.set(r.id, { id: r.id, doc_type: r.doc_type, patterns: [] });
@@ -1257,25 +1285,34 @@ function computeAffectsCoverage(changedFiles, fileUniverse) {
 // authoring); results are DATA (exit stays 0) so a pipefail consumer never dies.
 function runEnforce(files) {
   const ENFORCE_TYPES = new Set(["decision", "concept", "flow"]);
-  let universe = Array.isArray(files) && files.length ? files.slice() : null;
-  if (!universe) {
-    try {
-      universe = require("child_process")
-        .execFileSync("git", ["ls-files"], { encoding: "utf8", timeout: 30000 })
-        .split("\n").filter(Boolean);
-    } catch { universe = []; }
-  }
+  // ReDoS guard: a catastrophic-backtracking regex (e.g. `(a+)+$`) needs a long
+  // input line to hang. Skip lines above this — they are minified/generated,
+  // never real source — so an enforce regex can't stall the verify loop (F5).
+  const MAX_LINE = 10000;
   const fs = require("fs");
   const path = require("path");
   const root = findProjectRoot();
+  let canonRoot = root;
+  try { canonRoot = fs.realpathSync(root); } catch { /* keep as-is */ }
+  // --files may arrive absolute; canonicalize to repo-relative via the shared
+  // helper (handles the symlinked-root + new/deleted-file trap). Empty → the
+  // whole tracked tree.
+  const universe = Array.isArray(files) && files.length
+    ? files.map(f => toRepoRelative(f, canonRoot))
+    : trackedFiles();
   const docs = scanDocs().filter(d =>
     d.frontmatter && d.frontmatter.status === "active"
     && ENFORCE_TYPES.has(d.frontmatter.doc_type)
     && Array.isArray(d.frontmatter.enforce) && d.frontmatter.enforce.length);
   const violations = [];
   const filesScanned = new Set();
+  const lineCache = new Map();  // per-run read+split cache — a file matched by several rules is read once
   let rulesChecked = 0;
   for (const d of docs) {
+    // Attribute the governing root (null for local) so a reviewer can see when
+    // a SHARED-root doc — which governs without the local curator gate — is the
+    // source of a conformance finding (DEF-009 M4 provenance parity).
+    const sharedRoot = sourceRootInfo(d.source_root).label;
     for (const rule of d.frontmatter.enforce) {
       if (!rule || typeof rule.files !== "string") continue;
       const isForbid = typeof rule.forbid === "string";
@@ -1284,19 +1321,26 @@ function runEnforce(files) {
       let re;
       try { re = new RegExp(pat); } catch { continue; }
       rulesChecked++;
-      for (const f of universe.filter(x => matchesGlob(x, rule.files))) {
-        let content;
-        try { content = fs.readFileSync(path.join(root, f), "utf8"); } catch { continue; }
+      for (const f of globReach([rule.files], universe)) {
+        let ls = lineCache.get(f);
+        if (ls === undefined) {
+          try { ls = fs.readFileSync(path.join(root, f), "utf8").split("\n"); } catch { ls = null; }
+          lineCache.set(f, ls);
+        }
+        if (ls === null) continue;
         filesScanned.add(f);
         if (isForbid) {
-          const ls = content.split("\n");
           for (let ln = 0; ln < ls.length; ln++) {
+            if (ls[ln].length > MAX_LINE) continue;
             if (re.test(ls[ln])) {
-              violations.push({ doc_id: d.frontmatter.id, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
+              violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
             }
           }
-        } else if (!re.test(content)) {
-          violations.push({ doc_id: d.frontmatter.id, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
+        } else if (!ls.some(l => l.length <= MAX_LINE && re.test(l))) {
+          // require: pattern must appear on some length-bounded line — tested
+          // per line for the same ReDoS bound as forbid (matches all realistic
+          // single-line markers; a require pattern spanning newlines is unusual).
+          violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
         }
       }
     }
@@ -1717,6 +1761,19 @@ function validate() {
         error: `active ${_apDocType} has no affects_paths — invisible to the affects-union memory_signal (the primary review-time governance signal); add affects_paths so it can govern the files it applies to`,
       });
     }
+
+    // enforce on a non-governing doc-type is silently ignored — `memory
+    // enforce` scopes to decision/concept/flow, so a REJ/lesson enforce rule
+    // never fires. Warn so an author isn't left believing it does (F4).
+    if (Array.isArray(doc.frontmatter.enforce) && doc.frontmatter.enforce.length
+        && !["decision", "concept", "flow"].includes(_apDocType)) {
+      issues.push({
+        filePath: doc.relativePath,
+        severity: "warning",
+        category: "enforce-ignored",
+        error: `enforce on a ${_apDocType} doc is ignored — only decision/concept/flow docs run enforce rules`,
+      });
+    }
   }
 
   const dbPath = getDbPath();
@@ -1838,6 +1895,14 @@ function init() {
 // CLI dispatcher
 // ---------------------------------------------------------------------------
 
+// Parse a `--flag=a,b,c` comma-list CLI arg → array of trimmed non-empty
+// values, or null when the flag is absent (so callers can distinguish "omitted"
+// from an explicit empty list).
+function parseCsvFlag(args, flag) {
+  const a = Array.isArray(args) ? args.find(x => x.startsWith(flag + "=")) : null;
+  return a ? a.split("=").slice(1).join("=").split(",").map(s => s.trim()).filter(Boolean) : null;
+}
+
 function run(subcommand, args) {
   const json = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 
@@ -1949,33 +2014,17 @@ function run(subcommand, args) {
     }
     case "coverage": {
       // Per-doc affects-coverage density. --changed / --universe accept comma
-      // lists (test + ad-hoc use); with --universe omitted the denominator is
-      // `git ls-files` (tracked files), and with --changed omitted every
-      // matched count is 0 (claim-breadth only). The weekly report calls
-      // computeAffectsCoverage directly with its window's changed-file set.
-      const parseList = (flag) => {
-        const a = args.find(x => x.startsWith(flag + "="));
-        return a ? a.split("=").slice(1).join("=").split(",").map(s => s.trim()).filter(Boolean) : null;
-      };
-      let universe = parseList("--universe");
-      const changed = parseList("--changed") || [];
-      if (universe == null) {
-        try {
-          universe = require("child_process")
-            .execFileSync("git", ["ls-files"], { encoding: "utf8", timeout: 30000 })
-            .split("\n").filter(Boolean);
-        } catch { universe = []; }
-      }
-      json(computeAffectsCoverage(changed, universe));
+      // lists; --universe omitted → computeAffectsCoverage falls back to the
+      // tracked tree, --changed omitted → every matched count is 0 (claim
+      // breadth only). The weekly report calls computeAffectsCoverage directly.
+      json(computeAffectsCoverage(parseCsvFlag(args, "--changed") || [], parseCsvFlag(args, "--universe")));
       return 0;
     }
     case "enforce": {
       // Run governing-doc enforce rules against --files (comma list of touched
-      // files; defaults to the whole tree). Violations are DATA in the JSON
+      // files; omitted → the whole tree). Violations are DATA in the JSON
       // (pass:false) — exit stays 0 so a pipefail-guarded caller never dies.
-      const fArg = args.find(a => a.startsWith("--files="));
-      const files = fArg ? fArg.split("=").slice(1).join("=").split(",").map(s => s.trim()).filter(Boolean) : null;
-      json(runEnforce(files));
+      json(runEnforce(parseCsvFlag(args, "--files")));
       return 0;
     }
     case "list": {
@@ -2351,6 +2400,8 @@ module.exports = {
   globReach,
   computeAffectsCoverage,
   runEnforce,
+  trackedFiles,
+  toRepoRelative,
   supersede,
   listActive,
   listRejectedKeywords,

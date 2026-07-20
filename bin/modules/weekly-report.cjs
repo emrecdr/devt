@@ -63,7 +63,7 @@ function matchContributor(author, contributors) {
   return author;
 }
 
-function parseGitLog(fromDate, toDate, contributors) {
+function parseGitLog(fromDate, toDate, contributors, changedFiles) {
   const args = [
     "log", "--all",
     "--after=" + fromDate, "--before=" + toDate,
@@ -98,6 +98,7 @@ function parseGitLog(fromDate, toDate, contributors) {
         stats[currentAuthor].insertions += ins;
         stats[currentAuthor].deletions += dels;
         stats[currentAuthor].files.add(parts[2]);
+        if (changedFiles) changedFiles.add(parts[2]);  // repo-wide union for affects-coverage (avoids a 2nd git log)
       }
     }
   }
@@ -314,41 +315,24 @@ function renderGuardSection(guard) {
 // governing less.
 // ---------------------------------------------------------------------------
 
-function collectTrackedFiles(projectRoot) {
-  try {
-    return execFileSync("git", ["ls-files"], { cwd: projectRoot, encoding: "utf8", timeout: 30000 })
-      .split("\n").filter(Boolean);
-  } catch { return []; }
-}
-
-function collectWindowChangedFiles(projectRoot, fromDate, toDate) {
-  try {
-    const out = execFileSync(
-      "git",
-      ["log", "--all", "--after=" + fromDate, "--before=" + toDate, "--name-only", "--pretty=format:"],
-      { cwd: projectRoot, encoding: "utf8", timeout: 30000 }
-    );
-    return [...new Set(out.split("\n").filter(Boolean))];
-  } catch { return []; }
-}
-
-function aggregateAffectsCoverage(projectRoot, fromDate, toDate) {
-  const universe = collectTrackedFiles(projectRoot);
+// `changedFiles` is collected by the parseGitLog walk over this same window
+// (no second `git log`). The tracked universe is memory.cjs's shared helper —
+// the same "tracked files" concept coverage + enforce use.
+function aggregateAffectsCoverage(projectRoot, changedFiles) {
+  const memory = require("./memory.cjs");
+  const universe = memory.trackedFiles(projectRoot);
   if (universe.length === 0) return { available: false };
-  const changed = collectWindowChangedFiles(projectRoot, fromDate, toDate);
   try {
-    const cov = require("./memory.cjs").computeAffectsCoverage(changed, universe);
-    return { available: true, ...cov };
+    return { available: true, ...memory.computeAffectsCoverage(changedFiles, universe) };
   } catch {
     return { available: false };
   }
 }
 
 function renderAffectsCoverageSection(coverage) {
-  if (!coverage || !coverage.available || !Array.isArray(coverage.docs)) return "";
+  if (!coverage || !coverage.available || !Array.isArray(coverage.docs) || coverage.docs.length === 0) return "";
   const claiming = coverage.docs.filter(d => d.claimed > 0);
   const dead = coverage.docs.filter(d => d.claimed === 0);
-  if (claiming.length === 0 && dead.length === 0) return "";
   const lines = ["## Affects Coverage (trend)", ""];
   lines.push("_Direction, not a target — density is (files changed this window that a doc's globs claim) ÷ (files those globs claim). A broad glob claiming files it never governs reads as diluted; do not 'fix' it by narrowing globs to nothing._");
   lines.push("");
@@ -387,14 +371,15 @@ function run(subcommand, args) {
 
       const window = computeWindow(weeks);
       const contributors = loadContributors();
-      const stats = parseGitLog(window.from, window.to, contributors);
+      const changedFiles = new Set();
+      const stats = parseGitLog(window.from, window.to, contributors, changedFiles);
       const title = `Contribution Report: ${window.from} to ${window.to}`;
 
       const projectRoot = require("./config.cjs").findProjectRoot();
       const fromMs = new Date(window.from).getTime();
       const toMs = new Date(window.to).getTime() + 24 * 3600 * 1000;
       const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);
-      const coverage = aggregateAffectsCoverage(projectRoot, window.from, window.to);
+      const coverage = aggregateAffectsCoverage(projectRoot, [...changedFiles]);
       const guard = aggregateGuardTelemetry(projectRoot, fromMs, toMs);
       const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents)
         + renderAffectsCoverageSection(coverage) + renderGuardSection(guard);

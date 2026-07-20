@@ -17986,9 +17986,12 @@ printf -- '---\nid: ADR-902\ntitle: "Broad wildcard rule"\ndoc_type: decision\nd
 printf -- '---\nid: ADR-903\ntitle: "Dead glob rule"\ndoc_type: decision\ndomain: widgets\nstatus: active\nconfidence: explicit\nsummary: "Glob matches nothing tracked."\naffects_paths:\n  - "src/gone/**"\n---\nbody\n' > "$K301_PROJ/.devt/memory/decisions/ADR-903-dead.md"
 (cd "$K301_PROJ" && node "$CLI" memory index >/dev/null 2>&1)
 K301_JSON="$K301_PROJ/cov.json"
+# `src/broad/deleted.py` matches src/broad/** and is CHANGED but NOT in the
+# universe (a file changed then deleted, or on another branch) — matched must
+# clamp it out (density ≤ 100%), so ADR-902 stays matched=1 not 2 (F1 fix).
 (cd "$K301_PROJ" && node "$CLI" memory coverage \
   --universe=src/narrow/exact.py,src/broad/a.py,src/broad/b.py,src/broad/c.py \
-  --changed=src/narrow/exact.py,src/broad/a.py 2>/dev/null) > "$K301_JSON"
+  --changed=src/narrow/exact.py,src/broad/a.py,src/broad/deleted.py 2>/dev/null) > "$K301_JSON"
 K301_R=$(node -e "
   try {
     const j = require('$K301_JSON');
@@ -18005,7 +18008,7 @@ K301_R=$(node -e "
   } catch (e) { process.stdout.write('ERR ' + e.message); }
 " 2>/dev/null)
 if [ "$K301_R" = "OK" ]; then
-  pass "K301: affects-coverage density — exact-path doc 100%, broad `**` doc diluted (1/3), dead glob null, most-diluted-first ordering + mean over claiming docs (DEF-007 pt2)"
+  pass "K301: affects-coverage density — exact-path doc 100%, broad `**` doc diluted (1/3), dead glob null, most-diluted-first ordering, mean over claiming docs, matched clamps to tracked universe (density ≤ 100%) (DEF-007 pt2 + F1)"
 else
   fail "K301: affects-coverage broken ($K301_R)"
 fi
@@ -18026,29 +18029,57 @@ printf 'from app import infrastructure\n' > "$K302_PROJ/src/api/bad.py"
 printf 'from app import service\n' > "$K302_PROJ/src/api/good.py"
 printf 'no marker here\n' > "$K302_PROJ/src/req/missing.py"
 printf 'REQUIRED_MARKER = 1\n' > "$K302_PROJ/src/req/present.py"
+# F5: a >MAX_LINE line that WOULD match ADR-901's forbid must be skipped (the
+# ReDoS length cap) so it never becomes a violation — enf.json stays 2, not 3.
+node -e "require('fs').writeFileSync('$K302_PROJ/src/api/huge.py', 'import ' + 'a'.repeat(10050) + ' infrastructure\n')"
 (cd "$K302_PROJ" && git add -A >/dev/null 2>&1 && node "$CLI" memory index >/dev/null 2>&1)
 (cd "$K302_PROJ" && node "$CLI" memory enforce 2>/dev/null) > "$K302_PROJ/enf.json"
 (cd "$K302_PROJ" && node "$CLI" memory enforce --files=src/api/good.py,src/req/present.py 2>/dev/null) > "$K302_PROJ/enf-clean.json"
 printf -- '---\nid: ADR-903\ntitle: "Bad enforce"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Nested-map enforce is malformed."\nenforce:\n  files: "src/**"\n  forbid: "x"\n---\nbody\n' > "$K302_PROJ/.devt/memory/decisions/ADR-903-bad.md"
-K302_VAL=$( (cd "$K302_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>/enforce/.test(i.error||'')).length))}catch{process.stdout.write('parse-error')}});" )
+# F4: enforce on a non-governing doc-type (REJ) warns at validate and is ignored
+# by the runner (its forbid would flag present.py if it ran — it must not).
+printf -- '---\nid: REJ-904\ntitle: "Rej enforce"\ndoc_type: rejected\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "REJ enforce is ignored, not run."\nreason: "performance"\nsearch_keywords:\n  - foo\nenforce:\n  - files: "src/req/**"\n    forbid: "REQUIRED_MARKER"\n    message: "would flag present.py if REJ enforce ran"\n---\nbody\n' > "$K302_PROJ/.devt/memory/rejected/REJ-904-rej.md"
+K302_VAL=$( (cd "$K302_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.severity==='error'&&/enforce/.test(i.error||'')).length))}catch{process.stdout.write('parse-error')}});" )
+K302_WARN=$( (cd "$K302_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.category==='enforce-ignored').length))}catch{process.stdout.write('parse-error')}});" )
+# F2: an ABSOLUTE --files path must be canonicalized + relativized before glob
+# matching (was a silent no-op — same class as the DEF-009 guard bug).
+(cd "$K302_PROJ" && node "$CLI" memory enforce --files="$K302_PROJ/src/api/bad.py" 2>/dev/null) > "$K302_PROJ/enf-abs.json"
+# F3: a SHARED-root doc's enforce violation carries its source-root label; a
+# local doc's stays null (DEF-009 M4 provenance parity). Add a shared root with
+# its own enforce ADR that also flags src/api/bad.py, then re-index multi-root.
+K302_SHARED=$(mktemp -d)
+mkdir -p "$K302_SHARED/decisions"
+printf -- '---\nid: ADR-951\ntitle: "Shared layer rule"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Org-wide: api must not import infra."\nenforce:\n  - files: "src/api/**"\n    forbid: "import .*infrastructure"\n    message: "org rule: api must not import infrastructure"\n---\nbody\n' > "$K302_SHARED/decisions/ADR-951-shared.md"
+node -e "const fs=require('fs');const p='$K302_PROJ/.devt/config.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.memory=c.memory||{};c.memory.paths=['$K302_SHARED','.devt/memory'];fs.writeFileSync(p,JSON.stringify(c,null,2));"
+(cd "$K302_PROJ" && node "$CLI" memory index >/dev/null 2>&1 && node "$CLI" memory enforce 2>/dev/null) > "$K302_PROJ/enf-shared.json"
+K302_LABEL=$(basename "$K302_SHARED")
 K302_R=$(node -e "
   try {
     const j = require('$K302_PROJ/enf.json');
     const c = require('$K302_PROJ/enf-clean.json');
+    const a = require('$K302_PROJ/enf-abs.json');
+    const sh = require('$K302_PROJ/enf-shared.json');
     const fb = j.violations.filter(v => v.rule==='forbid' && v.doc_id==='ADR-901' && v.file==='src/api/bad.py' && v.line===1);
     const rq = j.violations.filter(v => v.rule==='require' && v.doc_id==='ADR-902' && v.file==='src/req/missing.py' && v.line===null);
     const clean = j.violations.filter(v => /good\.py|present\.py/.test(v.file));
+    const absOk = a.pass===false && a.violations.some(v => v.rule==='forbid' && v.file==='src/api/bad.py');
+    const shV = sh.violations.find(v => v.doc_id==='ADR-951');
+    const locV = sh.violations.find(v => v.doc_id==='ADR-901');
+    const attrOk = !!shV && shV.shared_root==='$K302_LABEL' && !!locV && locV.shared_root===null;
+    const noHuge = j.violations.every(v => v.file !== 'src/api/huge.py');     // F5: >MAX_LINE line skipped
+    const rejIgnored = sh.violations.every(v => v.doc_id !== 'REJ-904');       // F4: REJ enforce never runs
     const ok = j.pass===false && j.violations.length===2 && fb.length===1 && rq.length===1 && clean.length===0
-      && c.pass===true && c.violations.length===0 && c.files_scanned===2;
-    process.stdout.write(ok ? 'OK' : 'MISMATCH ' + JSON.stringify({pass:j.pass, n:j.violations.length, clean:c.pass, cn:c.violations.length}));
+      && c.pass===true && c.violations.length===0 && c.files_scanned===2
+      && absOk && attrOk && noHuge && rejIgnored;
+    process.stdout.write(ok ? 'OK' : 'MISMATCH ' + JSON.stringify({n:j.violations.length, abs:a.pass, absN:a.violations.length, sh:shV&&shV.shared_root, loc:locV&&locV.shared_root, huge:noHuge, rej:rejIgnored}));
   } catch (e) { process.stdout.write('ERR ' + e.message); }
 " 2>/dev/null)
-if [ "$K302_R" = "OK" ] && [ "$K302_VAL" -ge 1 ] 2>/dev/null; then
-  pass "K302: enforce assertions — forbid flags matching line, require flags missing-pattern file, clean files pass, touched-file scoping works, malformed nested-map enforce errors at validate (DEF-004)"
+if [ "$K302_R" = "OK" ] && [ "$K302_VAL" -ge 1 ] && [ "$K302_WARN" -ge 1 ] 2>/dev/null; then
+  pass "K302: enforce assertions — forbid/require flag correctly, clean files pass, touched-file scoping, malformed nested-map errors at validate, absolute --files relativized (F2), shared-root attributed + local null (F3), non-governing-type warns + ignored (F4), >MAX_LINE line skipped (F5) (DEF-004)"
 else
-  fail "K302: enforce broken (run=$K302_R val_errs=$K302_VAL)"
+  fail "K302: enforce broken (run=$K302_R val_errs=$K302_VAL enforce_ignored_warn=$K302_WARN)"
 fi
-rm -rf "$K302_PROJ"
+rm -rf "$K302_PROJ" "$K302_SHARED"
 
 echo
 echo "== test-gates.cjs subsuite =="
