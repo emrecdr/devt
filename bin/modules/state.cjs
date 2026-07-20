@@ -5638,6 +5638,10 @@ function assertWired(symbol, args) {
   // to fs.readdirSync recursion. Use Node-native grep via fs.readFileSync —
   // avoids shelling out and the BRE alternation grep trap.
   let files = [];
+  // Deliberately NOT io.cjs::listTrackedFiles — assert-wired must distinguish
+  // "git unavailable" (return {ok:false, reason} so the caller reports why the
+  // check couldn't run) from "no matching files", which the []-on-error helper
+  // collapses together.
   try {
     const { execSync } = require("child_process");
     const out = execSync("git ls-files", { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });

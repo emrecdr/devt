@@ -63,16 +63,21 @@ function matchContributor(author, contributors) {
   return author;
 }
 
-function parseGitLog(fromDate, toDate, contributors, changedFiles) {
+function parseGitLog(fromDate, toDate, contributors, changedFiles, cwd) {
+  // Run at the project root so paths are project-relative (matching trackedFiles
+  // and the affects globs). --no-renames emits plain paths, not `{a => b}`
+  // arrows that match no tracked file. --relative scopes to (and reports paths
+  // relative to) the project subtree. 256MB buffer clears the 1MB default.
+  const base = cwd || require("./config.cjs").findProjectRoot();
   const args = [
-    "log", "--all",
+    "log", "--all", "--no-renames", "--relative",
     "--after=" + fromDate, "--before=" + toDate,
     "--format=%H|%an|%ai|%s", "--numstat",
   ];
 
   let output;
   try {
-    output = execFileSync("git", args, { encoding: "utf8", timeout: 30000 });
+    output = execFileSync("git", args, { encoding: "utf8", timeout: 30000, maxBuffer: 256 * 1024 * 1024, cwd: base });
   } catch (err) {
     return { error: "git command failed: " + (err.message || String(err)) };
   }
@@ -323,7 +328,12 @@ function aggregateAffectsCoverage(projectRoot, changedFiles) {
   const universe = memory.trackedFiles(projectRoot);
   if (universe.length === 0) return { available: false };
   try {
-    return { available: true, ...memory.computeAffectsCoverage(changedFiles, universe) };
+    const cov = memory.computeAffectsCoverage(changedFiles, universe);
+    // computeAffectsCoverage → withDb returns {error} (it does NOT throw) when
+    // the memory index is absent; only {docs, summary} is a real result, so
+    // guard the shape rather than spread an {error} into {available:true, …}.
+    if (!cov || !Array.isArray(cov.docs)) return { available: false };
+    return { available: true, ...cov };
   } catch {
     return { available: false };
   }
@@ -371,11 +381,11 @@ function run(subcommand, args) {
 
       const window = computeWindow(weeks);
       const contributors = loadContributors();
+      const projectRoot = require("./config.cjs").findProjectRoot();
       const changedFiles = new Set();
-      const stats = parseGitLog(window.from, window.to, contributors, changedFiles);
+      const stats = parseGitLog(window.from, window.to, contributors, changedFiles, projectRoot);
       const title = `Contribution Report: ${window.from} to ${window.to}`;
 
-      const projectRoot = require("./config.cjs").findProjectRoot();
       const fromMs = new Date(window.from).getTime();
       const toMs = new Date(window.to).getTime() + 24 * 3600 * 1000;
       const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);

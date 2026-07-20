@@ -18081,6 +18081,94 @@ else
 fi
 rm -rf "$K302_PROJ" "$K302_SHARED"
 
+# K303: enforce/coverage hardening from the xhigh code review. [3] require is
+# whole-content (a multi-line/anchored pattern is no longer false-flagged per
+# line); [4] an empty forbid is skipped (not compiled to a match-everything
+# regex); [7] the enforce-ignored warning covers non-active status, not just
+# doc-type; [1] a subdirectory invocation still resolves the project-relative
+# tracked universe (trackedFiles defaults cwd to the project root); [6]
+# aggregateAffectsCoverage returns available:false (not available:true + error)
+# when the memory index is absent. Heredocs keep the require regex bytes exact.
+K303_PROJ=$(mktemp -d)
+(cd "$K303_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K303_PROJ/src/api" "$K303_PROJ/sub"
+cat > "$K303_PROJ/.devt/memory/decisions/ADR-901-req.md" <<'ADR1'
+---
+id: ADR-901
+title: "Header rule"
+doc_type: decision
+domain: arch
+status: active
+confidence: verified
+summary: "multi-line require."
+enforce:
+  - files: "src/api/**"
+    require: "Copyright[\s\S]*Licensed"
+    message: "license header required"
+---
+body
+ADR1
+cat > "$K303_PROJ/.devt/memory/decisions/ADR-902-empty.md" <<'ADR2'
+---
+id: ADR-902
+title: "Empty forbid"
+doc_type: decision
+domain: arch
+status: active
+confidence: verified
+summary: "empty forbid must be skipped by the runner."
+enforce:
+  - files: "src/api/**"
+    forbid: ""
+    message: "empty"
+---
+body
+ADR2
+cat > "$K303_PROJ/.devt/memory/decisions/ADR-903-cand.md" <<'ADR3'
+---
+id: ADR-903
+title: "Candidate enforce"
+doc_type: decision
+domain: arch
+status: candidate
+confidence: verified
+summary: "candidate governing doc enforce is ignored."
+enforce:
+  - files: "src/api/**"
+    forbid: "TODO"
+    message: "cand"
+---
+body
+ADR3
+printf '# Copyright 2026 Acme\n# Licensed under MIT\ncode()\n' > "$K303_PROJ/src/api/good.py"
+printf 'code()\n' > "$K303_PROJ/src/api/bad.py"
+(cd "$K303_PROJ" && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 && node "$CLI" memory index >/dev/null 2>&1)
+(cd "$K303_PROJ" && node "$CLI" memory enforce 2>/dev/null) > "$K303_PROJ/enf.json"
+(cd "$K303_PROJ/sub" && node "$CLI" memory enforce 2>/dev/null) > "$K303_PROJ/enf-sub.json"
+K303_WARN=$( (cd "$K303_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>i.category==='enforce-ignored'&&/non-active/.test(i.error||'')).length))}catch{process.stdout.write('parse-error')}});" )
+(cd "$K303_PROJ" && rm -f .devt/memory/index.db && node "$CLI" report generate --weeks 1 2>/dev/null) > "$K303_PROJ/rep.json"
+K303_R=$(node -e "
+  try {
+    const enf = require('$K303_PROJ/enf.json');
+    const sub = require('$K303_PROJ/enf-sub.json');
+    const rep = require('$K303_PROJ/rep.json');
+    const req = enf.violations.filter(v => v.rule==='require');
+    const reqOk = req.length===1 && req[0].file==='src/api/bad.py';                 // [3] good.py multi-line header satisfies whole-content require
+    const emptyOk = enf.violations.every(v => v.doc_id!=='ADR-902');                // [4] empty forbid skipped
+    const candOk = enf.violations.every(v => v.doc_id!=='ADR-903');                 // candidate never runs
+    const subOk = sub.files_scanned>0 && sub.violations.some(v => v.rule==='require' && v.file==='src/api/bad.py'); // [1] subdir cwd
+    const noIdxOk = rep.affects_coverage && rep.affects_coverage.available===false; // [6]
+    const ok = reqOk && emptyOk && candOk && subOk && noIdxOk;
+    process.stdout.write(ok ? 'OK' : 'MISMATCH ' + JSON.stringify({req:req.map(v=>v.file), empty:!emptyOk, cand:!candOk, subN:sub.files_scanned, avail:rep.affects_coverage&&rep.affects_coverage.available}));
+  } catch (e) { process.stdout.write('ERR ' + e.message); }
+" 2>/dev/null)
+if [ "$K303_R" = "OK" ] && [ "$K303_WARN" -ge 1 ] 2>/dev/null; then
+  pass "K303: enforce/coverage hardening — whole-content require (multi-line/anchor-safe, [3]), empty forbid skipped ([4]), enforce-ignored warns on non-active status ([7]), subdir invocation resolves the universe ([1]), coverage available:false without an index ([6])"
+else
+  fail "K303: hardening broken (run=$K303_R warn=$K303_WARN)"
+fi
+rm -rf "$K303_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

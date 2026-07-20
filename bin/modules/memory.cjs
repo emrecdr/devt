@@ -1172,24 +1172,28 @@ function activeAffectsRows(db) {
 // the enforce repo-wide universe. `cwd` scopes the git call (the weekly report
 // runs from the project root); returns [] when git is unavailable.
 function trackedFiles(cwd) {
-  try {
-    const opts = { encoding: "utf8", timeout: 30000 };
-    if (cwd) opts.cwd = cwd;
-    return require("child_process").execFileSync("git", ["ls-files"], opts).split("\n").filter(Boolean);
-  } catch { return []; }
+  // Default the working dir to the project root so an invocation from a
+  // subdirectory still lists the whole tree with project-root-relative paths (a
+  // subdir cwd would otherwise yield subdir-relative paths that match no affects
+  // glob). nul:true (-z) keeps non-ASCII names unescaped so they match the
+  // plain-string affects globs. Boilerplate lives in io.cjs::listTrackedFiles.
+  return require("./io.cjs").listTrackedFiles(cwd || findProjectRoot(), { nul: true });
 }
 
-// Canonicalize an absolute path to repo-relative, resilient to a symlinked root
-// (macOS /tmp → /private/var) and new/deleted files (realpath the PARENT, rejoin
-// basename). Relative inputs pass through; `canonRoot` must already be realpath'd.
-// One home for the absolute-vs-relative trap that silently disarmed the guard.
+// Canonicalize a path to project-root-relative (forward-slash), resilient to a
+// symlinked root (macOS /tmp → /private/var) and new/deleted files (realpath the
+// PARENT, rejoin basename). A RELATIVE input is resolved against the current
+// working dir first — a `--files=x.js` from a subdirectory means `<cwd>/x.js`,
+// not `<root>/x.js`. `canonRoot` must already be realpath'd. One home for the
+// absolute-vs-relative trap that silently disarmed the guard.
 function toRepoRelative(fp, canonRoot) {
   const path = require("path");
-  if (!path.isAbsolute(fp)) return fp;
   const fs = require("fs");
-  let canonFp = fp;
-  try { canonFp = path.join(fs.realpathSync(path.dirname(fp)), path.basename(fp)); } catch { /* parent missing — use raw */ }
-  return path.relative(canonRoot, canonFp);
+  const absFp = path.isAbsolute(fp) ? fp : path.resolve(process.cwd(), fp);
+  let canonFp = absFp;
+  try { canonFp = path.join(fs.realpathSync(path.dirname(absFp)), path.basename(absFp)); } catch { /* parent missing — use raw */ }
+  // Normalize separators so the result matches git's forward-slash paths on Windows.
+  return path.relative(canonRoot, canonFp).split(path.sep).join("/");
 }
 
 function getByPath(filePath) {
@@ -1286,9 +1290,11 @@ function computeAffectsCoverage(changedFiles, fileUniverse) {
 function runEnforce(files) {
   const ENFORCE_TYPES = new Set(["decision", "concept", "flow"]);
   // ReDoS guard: a catastrophic-backtracking regex (e.g. `(a+)+$`) needs a long
-  // input line to hang. Skip lines above this — they are minified/generated,
-  // never real source — so an enforce regex can't stall the verify loop (F5).
+  // input to hang. forbid tests each line, so skip lines above MAX_LINE
+  // (minified/generated, never real source); require tests the whole file
+  // (preserving multi-line/anchor semantics), so skip files above MAX_CONTENT.
   const MAX_LINE = 10000;
+  const MAX_CONTENT = 5 * 1024 * 1024;
   const fs = require("fs");
   const path = require("path");
   const root = findProjectRoot();
@@ -1317,29 +1323,34 @@ function runEnforce(files) {
       if (!rule || typeof rule.files !== "string") continue;
       const isForbid = typeof rule.forbid === "string";
       const pat = isForbid ? rule.forbid : rule.require;
-      if (typeof pat !== "string") continue;
+      // Skip empty/whitespace patterns — new RegExp("") matches everything, so
+      // an empty forbid would flag every line of every in-scope file. validate
+      // rejects these, but runEnforce is the last line if one slips past.
+      if (typeof pat !== "string" || pat.trim() === "") continue;
       let re;
       try { re = new RegExp(pat); } catch { continue; }
       rulesChecked++;
       for (const f of globReach([rule.files], universe)) {
-        let ls = lineCache.get(f);
-        if (ls === undefined) {
-          try { ls = fs.readFileSync(path.join(root, f), "utf8").split("\n"); } catch { ls = null; }
-          lineCache.set(f, ls);
+        let entry = lineCache.get(f);
+        if (entry === undefined) {
+          try { const content = fs.readFileSync(path.join(root, f), "utf8"); entry = { content, lines: content.split("\n") }; }
+          catch { entry = null; }
+          lineCache.set(f, entry);
         }
-        if (ls === null) continue;
+        if (entry === null) continue;
         filesScanned.add(f);
         if (isForbid) {
-          for (let ln = 0; ln < ls.length; ln++) {
-            if (ls[ln].length > MAX_LINE) continue;
-            if (re.test(ls[ln])) {
+          for (let ln = 0; ln < entry.lines.length; ln++) {
+            if (entry.lines[ln].length > MAX_LINE) continue;
+            if (re.test(entry.lines[ln])) {
               violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
             }
           }
-        } else if (!ls.some(l => l.length <= MAX_LINE && re.test(l))) {
-          // require: pattern must appear on some length-bounded line — tested
-          // per line for the same ReDoS bound as forbid (matches all realistic
-          // single-line markers; a require pattern spanning newlines is unusual).
+        } else if (entry.content.length <= MAX_CONTENT && !re.test(entry.content)) {
+          // require: whole-content match — preserves multi-line patterns and
+          // ^/$ anchor semantics (per-line testing would false-flag a cross-line
+          // require and flip anchors). A file above MAX_CONTENT is skipped
+          // (assumed satisfied) rather than risk a catastrophic-regex hang.
           violations.push({ doc_id: d.frontmatter.id, shared_root: sharedRoot, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
         }
       }
@@ -1762,17 +1773,27 @@ function validate() {
       });
     }
 
-    // enforce on a non-governing doc-type is silently ignored — `memory
-    // enforce` scopes to decision/concept/flow, so a REJ/lesson enforce rule
-    // never fires. Warn so an author isn't left believing it does (F4).
-    if (Array.isArray(doc.frontmatter.enforce) && doc.frontmatter.enforce.length
-        && !["decision", "concept", "flow"].includes(_apDocType)) {
-      issues.push({
-        filePath: doc.relativePath,
-        severity: "warning",
-        category: "enforce-ignored",
-        error: `enforce on a ${_apDocType} doc is ignored — only decision/concept/flow docs run enforce rules`,
-      });
+    // enforce is silently ignored unless the doc is BOTH a governing type AND
+    // active — `runEnforce` filters on both axes, so a REJ/lesson enforce rule
+    // OR a candidate/superseded governing doc's rule never fires. Warn on either
+    // so an author isn't left believing it does (F4 + the status axis).
+    if (Array.isArray(doc.frontmatter.enforce) && doc.frontmatter.enforce.length) {
+      const _apStatus = doc.frontmatter.status;
+      if (!["decision", "concept", "flow"].includes(_apDocType)) {
+        issues.push({
+          filePath: doc.relativePath,
+          severity: "warning",
+          category: "enforce-ignored",
+          error: `enforce on a ${_apDocType} doc is ignored — only decision/concept/flow docs run enforce rules`,
+        });
+      } else if (_apStatus !== "active") {
+        issues.push({
+          filePath: doc.relativePath,
+          severity: "warning",
+          category: "enforce-ignored",
+          error: `enforce on a non-active (${_apStatus || "?"}) ${_apDocType} is ignored — only active docs run enforce rules`,
+        });
+      }
     }
   }
 

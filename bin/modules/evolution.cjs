@@ -108,11 +108,10 @@ function readLog(after) {
 }
 
 function listTrackedFiles() {
-  try {
-    return git(["ls-files"]).split("\n").filter(Boolean);
-  } catch (_) {
-    return [];
-  }
+  // Shared boilerplate via io.cjs::listTrackedFiles. nul:false keeps
+  // core.quotePath escaping consistent with this module's sibling `git log`
+  // output, which these paths are matched against.
+  return require("./io.cjs").listTrackedFiles(undefined, { nul: false });
 }
 
 // ---------------------------------------------------------------------------
