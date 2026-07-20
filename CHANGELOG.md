@@ -8,6 +8,16 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.187.0] - 2026-07-20
+
+### Template currency refresh — go + typescript-node (T4)
+
+Refreshed the `go` and `typescript-node` project-rules templates to current-stable practices, validated against live releases (July 2026). A filesystem-first check found `rust` (edition 2024, next is 2027) and `vue-bootstrap` (Vue 3.5, **Vite 8**, Pinia 3) already current — so those were left as-is apart from a one-line Pinia note, rather than churned. Content-only; K70 (9-file baseline) unaffected.
+
+- **go** — floor raised to Go 1.24+ (was 1.22+; current stable 1.26). Added: the `tool` directive in `go.mod` (retires the `tools.go` blank-import workaround), `go fix` modernizers, `os.Root` (traversal-safe FS), generic type aliases, `encoding/json/v2`, container-aware `GOMAXPROCS`, `sync.WaitGroup.Go`, and a `testing/synctest` section for deterministic concurrency tests (the top source of CI flakes).
+- **typescript-node** — TypeScript 7 (the native Go-based `tsc`, ~10× faster, same type system) and Node.js 24 LTS. The big shift: **native type-stripping** — `node app.ts` runs with no build step — documented with its two load-bearing caveats (it does *not* type-check, so `tsc --noEmit` stays the CI gate; only erasable syntax runs, so avoid `enum`/parameter-properties/`namespace`). `node --test` now runs `.ts` directly.
+- **vue-bootstrap** — one-line note that Pinia 4 (ESM-only) is current; Vue 3.5 / Vite 8 were already accurate.
+
 ## [0.186.0] - 2026-07-20
 
 ### Hardening + cleanup for the coverage + enforce features (v0.184.0/v0.185.0)

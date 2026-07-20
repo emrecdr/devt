@@ -14,7 +14,7 @@ Enforces consistent style and catches common errors.
 npx tsc --noEmit
 ```
 
-Validates all types without producing output. Type errors are blocking.
+Validates all types without producing output. Type errors are blocking. On Node 24+ this is the ONLY type check — running `.ts` via native type-stripping erases annotations without checking them, so this gate is what keeps broken types out of production.
 
 ## Gate 3: Unit Tests
 

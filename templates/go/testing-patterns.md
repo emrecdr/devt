@@ -119,3 +119,23 @@ func BenchmarkParseToken(b *testing.B) {
 Run: `go test -bench=BenchmarkParseToken -benchmem`
 
 Use benchmarks when optimizing hot paths. Compare before/after with `benchstat`.
+
+### Concurrency Tests (synctest)
+
+`testing/synctest` (GA in Go 1.25) tests time- and goroutine-dependent code deterministically — no real sleeps, no flaky timeouts. Inside `synctest.Test`, `time` uses a fake clock and `synctest.Wait` blocks until every goroutine in the bubble is idle.
+
+```go
+func TestCacheExpiry(t *testing.T) {
+    synctest.Test(t, func(t *testing.T) {
+        c := NewCache(100 * time.Millisecond)
+        c.Set("k", "v")
+        time.Sleep(101 * time.Millisecond) // fake clock — returns instantly
+        synctest.Wait()                    // let the eviction goroutine run
+        if _, ok := c.Get("k"); ok {
+            t.Fatal("expected key to expire")
+        }
+    })
+}
+```
+
+**When to use:** timeouts, retries/backoff, tickers, context cancellation, anything with a `time.After`/`time.Sleep` you'd otherwise fake by hand. Prefer it over real-time sleeps in tests — those are the top source of CI flakes.

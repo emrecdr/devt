@@ -4,7 +4,7 @@
 
 - **Framework**: Vue 3.5+ with Composition API exclusively
 - **Build**: Vite 8+
-- **State**: Pinia 3+
+- **State**: Pinia 3+ (Pinia 4 is current — ESM-only; adopt it on new projects)
 - **Router**: Vue Router 5+
 - **HTTP**: Axios with centralized client (`src/shared/services/api.js`)
 - **UI**: Bootstrap 5 + SCSS (no Tailwind)

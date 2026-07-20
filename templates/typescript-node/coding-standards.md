@@ -2,12 +2,20 @@
 
 ## Language & Runtime
 
-- TypeScript 5.2+ (5.4+ recommended) with strict mode enabled
+- TypeScript 7+ — the native Go-based `tsc` (~10× faster full builds; the type system and inference are a structural port of 5.x/6.x, so your types don't change). Libraries pin an explicit floor in `package.json`.
 - `strict: true` in `tsconfig.json` — non-negotiable
-- Node.js current LTS (22+ recommended)
+- Node.js 24 LTS (the active LTS; 22 is in maintenance until April 2027)
 - ESM modules required (`"type": "module"` in `package.json`) — CommonJS only for legacy interop
 
-## Built-in Node APIs (Node 22+)
+### Running TypeScript without a build step (Node 24+)
+
+Node 24 strips type annotations natively (on by default), so `node app.ts` Just Works — no `tsc` build, no loader, no `tsconfig.json` needed to run. Use it for dev, scripts, and production entry points alike.
+
+Two things this does NOT relax:
+- **Type-stripping does not type-check** — it only erases annotations. Keep `tsc --noEmit` as a CI gate, or broken types reach production.
+- **Only erasable syntax runs** — no `enum`, no parameter properties (`constructor(private x: T)`), no `namespace`; those need code generation, not erasure. Prefer `const`-object / union types over `enum` and explicit field assignment over parameter properties. (`node --experimental-transform-types` handles them, but avoiding them keeps `node file.ts` portable.)
+
+## Built-in Node APIs (Node 24+)
 
 Modern Node projects use first-party features instead of reaching for dependencies:
 

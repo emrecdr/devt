@@ -47,11 +47,11 @@ Run:
 node --test                          # discover *.test.ts in cwd
 node --test --watch                  # rerun on file changes
 node --test --test-only              # only tests marked `{ only: true }`
-node --test --experimental-test-coverage   # built-in coverage (Node 22+)
+node --test --experimental-test-coverage   # built-in coverage
 node --test --test-name-pattern="user"     # filter by name
 ```
 
-TypeScript: register a loader (`tsx`, `ts-node/esm`, or `tsimp`) via `NODE_OPTIONS="--import tsx"` or run pre-compiled JS from `dist/`.
+TypeScript: on Node 24+, `node --test` runs `*.test.ts` directly via native type-stripping — no loader, no pre-compile. (Only on older runtimes do you need a loader like `tsx` via `NODE_OPTIONS="--import tsx"`, or JS from `dist/`.) Type-stripping doesn't type-check, so keep `tsc --noEmit` in the pipeline.
 
 ## File Naming & Organization
 

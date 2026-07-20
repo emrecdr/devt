@@ -2,9 +2,11 @@
 
 ## Language & Runtime
 
-- Go 1.22+
+- Go 1.24+ (current stable is 1.26; new projects target the latest, libraries declare an explicit floor)
 - Use standard library first, external dependencies second
 - Modules with `go.mod` — never vendor without reason
+- Track build/codegen tools with the `tool` directive in `go.mod` (`go get -tool ...`, `go tool`) — replaces the old `tools.go` blank-import workaround
+- After a toolchain bump, run `go fix ./...` (rewritten in Go 1.26 around the analysis framework) — its "modernizer" analyzers flag code that could use newer stdlib/language features
 
 ## Error Handling
 
@@ -43,7 +45,7 @@
 - Prefer `errgroup.Group` for parallel tasks that need error collection
 - Use channels for communication between goroutines, mutexes for shared state protection
 - Always handle goroutine lifecycle — no fire-and-forget goroutines without cleanup
-- Use `sync.WaitGroup` when you need to wait for multiple goroutines without error propagation
+- Use `sync.WaitGroup` when you need to wait for multiple goroutines without error propagation; `wg.Go(fn)` (Go 1.25) launches and tracks in one call, so there's no `Add`/`Done` to forget
 - Avoid goroutine leaks — every goroutine must have a termination path
 
 ## Initialization
@@ -85,12 +87,16 @@ fmt.Println("error:", err)
 - Pass logger via context or struct field, not package-level global
 - Use `slog.With("request_id", reqID)` for request-scoped fields
 
-### Modern Standard Library (Go 1.22+)
+### Modern Standard Library
 
 - `net/http` method routing: `mux.HandleFunc("GET /api/users/{id}", handler)` — no need for chi/gorilla for basic routing
 - `slices` package: `slices.Contains`, `slices.SortFunc`, `slices.Compact` — don't hand-roll
 - `maps` package: `maps.Keys`, `maps.Clone` — don't iterate manually
 - Range-over-func (Go 1.23): use `iter.Seq` / `iter.Seq2` for custom iterators instead of channels or callbacks
+- `os.Root` (Go 1.24): scope filesystem operations under a directory — use it for any path built from untrusted input instead of hand-checking for `..` traversal
+- Generic type aliases (Go 1.24): `type Set[T comparable] = map[T]struct{}` — parameterized aliases are fully supported
+- `encoding/json/v2` (Go 1.25, `GOEXPERIMENT=jsonv2`): faster, stricter JSON with a cleaner API — opt into it on new services; otherwise stay on `encoding/json`
+- Container-aware `GOMAXPROCS` (Go 1.25): the runtime honors cgroup CPU limits automatically — drop manual `GOMAXPROCS` tuning in containers
 
 ### Receiver Types
 
