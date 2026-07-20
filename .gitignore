@@ -36,6 +36,7 @@ node_modules/
 
 # devt memory FTS5 index (regenerable from markdown)
 .devt/memory/index.db
+.devt/memory/.auto-index-stamp
 
 # devt MCP tool-call trace (v0.21.0+, append-only telemetry; safe to delete)
 .devt/memory/_mcp-trace.jsonl
