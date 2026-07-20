@@ -8,6 +8,31 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.185.0] - 2026-07-20
+
+### Enforce assertions — declarative ADR conformance (DEF-004 pilot)
+
+A ratified decision ("the API layer must not import infrastructure directly") only holds if something checks it. DEF-004's filed trigger — "a field receipt of an ADR the review missed" — is self-defeating: it only fires once a miss is already noticed. This pilot escapes that by shipping the mechanism so it generates its own evidence. A governing ADR/CON/FLOW doc can now carry an `enforce:` block, and the verifier runs it on the touched files during the normal loop; a violation is a blocking finding routed through the existing grader/revision cycle.
+
+**The assertion is a regex, never a shell command — a deliberate safety call.** DEF-009 (v0.180.0–v0.182.0) established that shared-root docs govern *without* passing the local curator gate; an `enforce:` shell field would be arbitrary code execution from any such doc. So the contract is purely declarative — a `forbid`/`require` regex over a file glob — with zero code-execution surface.
+
+```yaml
+# on an ADR/CON/FLOW (a LIST — the frontmatter parser makes a valueless key a list,
+# so a nested map silently empties; validate errors on that):
+enforce:
+  - files: "src/api/**"
+    forbid: "import .*infrastructure"   # or: require: "<regex>"
+    message: "api layer must not import infrastructure directly"
+```
+
+### Added
+
+- **`memory.runEnforce(files)`** + **`memory enforce [--files=a,b]`** CLI — runs every active decision/concept/flow doc's `enforce:` rules against a file set (`--files` = the verifier's touched set; default = `git ls-files`). `forbid` → one violation per matching line; `require` → one per in-scope file missing the pattern. Results are DATA (`pass:false` + `violations[]`); exit stays 0 so a pipefail-guarded caller never dies. Broken regexes are skipped (caught earlier at validate).
+- **`validateFrontmatter` validates `enforce:`** — must be a non-empty list of `{files, forbid|require (valid regex), message}` objects; a nested map (which parses as empty) errors with a fix hint.
+- **`agents/verifier.md`** gains a `run_verification` step: run `memory enforce --files=<changed>`, treat each violation as a blocking, deterministic finding.
+- **CON-003** gains a live `enforce` binding (`scripts/smoke-test.sh` must retain a `set +e` pipefail guard) — the pilot's first real-code assertion, green on the current tree.
+- Gate **K302** — behavioral: forbid flags the matching line, require flags the missing-pattern file, clean files pass, touched-file scoping works, malformed nested-map enforce errors at validate. Drift-guard stack 209 → 210 deep (K94–K302). `docs/MEMORY.md` documents the contract.
+
 ## [0.184.0] - 2026-07-20
 
 ### Affects-coverage density (DEF-007 part 2)

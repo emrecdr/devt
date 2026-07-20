@@ -184,7 +184,8 @@ Execute concrete verification checks:
 4. For new services: verify DI wiring (grep for the class in dependency injection)
 5. For new events: verify event registration and handler wiring
 6. For new models: verify migration exists and model is imported
-7. **Declare your functional surface**: in verification.md's Quality Gates section, list which project-declared runnable surfaces (quality-gate commands, test suites, E2E suites named in `.devt/rules/`) you executed and which you did not, with a one-line reason per skip (`NOT RUN — unaffected by this diff`). This is a legibility contract, not an execution mandate — an honest "not run" beats an implied "covered".
+7. **Enforce assertions (governing-doc conformance)**: run `node bin/devt-tools.cjs memory enforce --files=<changed files from impl-summary/scope_hint, comma-separated>` (omit `--files` only if that set is unavailable — repo-wide is slower and off-diff). Governing ADR/CON/FLOW docs may declare declarative `enforce:` rules (a `forbid`/`require` regex over a file glob); each `violations[]` entry is a **blocking finding** — cite `doc_id` + `file:line` + `message` and route it through your verdict (`pass:false` ⇒ the diff violates a ratified decision). These are deterministic, not judgment calls: a violation is a real gap, not a style note.
+8. **Declare your functional surface**: in verification.md's Quality Gates section, list which project-declared runnable surfaces (quality-gate commands, test suites, E2E suites named in `.devt/rules/`) you executed and which you did not, with a one-line reason per skip (`NOT RUN — unaffected by this diff`). This is a legibility contract, not an execution mandate — an honest "not run" beats an implied "covered".
 
 Record pass/fail for each check with the exact command and output.
 </step>

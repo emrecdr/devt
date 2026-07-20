@@ -400,6 +400,38 @@ function validateFrontmatter(fm, filePath) {
     }
   }
 
+  // enforce: declarative conformance rules the verifier runs on touched files.
+  // A LIST of {files, forbid|require, message} — the frontmatter parser makes a
+  // valueless key a list, so a nested map would silently become [] (hence the
+  // explicit non-empty-list check). forbid/require are regex bodies (no code
+  // execution — never a shell command, so a shared-root doc can't inject RCE).
+  if (fm.enforce !== undefined) {
+    if (!Array.isArray(fm.enforce) || fm.enforce.length === 0) {
+      errors.push({ filePath, error: `enforce must be a non-empty list of {files, forbid|require, message} objects (a nested map parses as empty — use "- files:" list items)` });
+    } else {
+      fm.enforce.forEach((rule, idx) => {
+        if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
+          errors.push({ filePath, error: `enforce[${idx}] must be an object` });
+          return;
+        }
+        if (typeof rule.files !== "string" || rule.files.trim() === "") {
+          errors.push({ filePath, error: `enforce[${idx}] missing "files" glob` });
+        }
+        const hasForbid = typeof rule.forbid === "string" && rule.forbid.trim() !== "";
+        const hasRequire = typeof rule.require === "string" && rule.require.trim() !== "";
+        if (hasForbid === hasRequire) {
+          errors.push({ filePath, error: `enforce[${idx}] needs exactly one of "forbid" or "require" (regex body)` });
+        } else {
+          try { new RegExp(hasForbid ? rule.forbid : rule.require); }
+          catch (e) { errors.push({ filePath, error: `enforce[${idx}] ${hasForbid ? "forbid" : "require"} is not a valid regex: ${e.message}` }); }
+        }
+        if (typeof rule.message !== "string" || rule.message.trim() === "") {
+          errors.push({ filePath, error: `enforce[${idx}] missing "message"` });
+        }
+      });
+    }
+  }
+
   return errors;
 }
 
@@ -1215,6 +1247,63 @@ function computeAffectsCoverage(changedFiles, fileUniverse) {
   });
 }
 
+// Run every active governing doc's enforce rules against a file set. Governing
+// scope = decision/concept/flow (same lineage as the affects-union signal;
+// REJ/lesson carry no conformance rules). When `files` is empty the universe is
+// `git ls-files` (repo-wide); the verifier passes the touched set for a
+// diff-anchored check. forbid → a violation per matching line; require → one
+// violation per in-scope file missing the pattern. Regex bodies only — no code
+// execution. Broken regexes are skipped (validateFrontmatter errors on them at
+// authoring); results are DATA (exit stays 0) so a pipefail consumer never dies.
+function runEnforce(files) {
+  const ENFORCE_TYPES = new Set(["decision", "concept", "flow"]);
+  let universe = Array.isArray(files) && files.length ? files.slice() : null;
+  if (!universe) {
+    try {
+      universe = require("child_process")
+        .execFileSync("git", ["ls-files"], { encoding: "utf8", timeout: 30000 })
+        .split("\n").filter(Boolean);
+    } catch { universe = []; }
+  }
+  const fs = require("fs");
+  const path = require("path");
+  const root = findProjectRoot();
+  const docs = scanDocs().filter(d =>
+    d.frontmatter && d.frontmatter.status === "active"
+    && ENFORCE_TYPES.has(d.frontmatter.doc_type)
+    && Array.isArray(d.frontmatter.enforce) && d.frontmatter.enforce.length);
+  const violations = [];
+  const filesScanned = new Set();
+  let rulesChecked = 0;
+  for (const d of docs) {
+    for (const rule of d.frontmatter.enforce) {
+      if (!rule || typeof rule.files !== "string") continue;
+      const isForbid = typeof rule.forbid === "string";
+      const pat = isForbid ? rule.forbid : rule.require;
+      if (typeof pat !== "string") continue;
+      let re;
+      try { re = new RegExp(pat); } catch { continue; }
+      rulesChecked++;
+      for (const f of universe.filter(x => matchesGlob(x, rule.files))) {
+        let content;
+        try { content = fs.readFileSync(path.join(root, f), "utf8"); } catch { continue; }
+        filesScanned.add(f);
+        if (isForbid) {
+          const ls = content.split("\n");
+          for (let ln = 0; ln < ls.length; ln++) {
+            if (re.test(ls[ln])) {
+              violations.push({ doc_id: d.frontmatter.id, file: f, line: ln + 1, rule: "forbid", pattern: pat, message: rule.message });
+            }
+          }
+        } else if (!re.test(content)) {
+          violations.push({ doc_id: d.frontmatter.id, file: f, line: null, rule: "require", pattern: pat, message: rule.message });
+        }
+      }
+    }
+  }
+  return { docs_checked: docs.length, rules_checked: rulesChecked, files_scanned: filesScanned.size, violations, pass: violations.length === 0 };
+}
+
 function listActive(domain) {
   return withDb(db => {
     if (domain) {
@@ -1880,6 +1969,15 @@ function run(subcommand, args) {
       json(computeAffectsCoverage(changed, universe));
       return 0;
     }
+    case "enforce": {
+      // Run governing-doc enforce rules against --files (comma list of touched
+      // files; defaults to the whole tree). Violations are DATA in the JSON
+      // (pass:false) — exit stays 0 so a pipefail-guarded caller never dies.
+      const fArg = args.find(a => a.startsWith("--files="));
+      const files = fArg ? fArg.split("=").slice(1).join("=").split(",").map(s => s.trim()).filter(Boolean) : null;
+      json(runEnforce(files));
+      return 0;
+    }
     case "list": {
       const docType = args[0] && DOC_TYPES.includes(args[0]) ? args[0] : null;
       json({ doc_type: docType, docs: listDocs(docType) });
@@ -2226,7 +2324,7 @@ function run(subcommand, args) {
     default:
       process.stderr.write(
         `Unknown memory subcommand: ${subcommand}\n` +
-        `Valid: init | index | query | get | affects | coverage | list | links | active | rejected-keywords |\n` +
+        `Valid: init | index | query | get | affects | coverage | enforce | list | links | active | rejected-keywords |\n` +
         `       validate | supersede | backlinks | orphans | stale-links | affects-symbol | suggest |\n` +
         `       candidates-status | candidates-touch-surface | candidates-footer |\n` +
         `       paths | diff | export | import |\n` +
@@ -2252,6 +2350,7 @@ module.exports = {
   getBySymbol,
   globReach,
   computeAffectsCoverage,
+  runEnforce,
   supersede,
   listActive,
   listRejectedKeywords,

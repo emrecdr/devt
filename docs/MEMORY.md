@@ -293,6 +293,25 @@ node bin/devt-tools.cjs memory coverage --changed=a.py,b.py   # --universe defau
 
 The weekly report (`report generate`) renders this as **## Affects Coverage (trend)**, most-diluted-first, over the window's changed files, with a mean-coverage line. It is a **direction, not a target**: the denominator is each doc's own claim (a raw changed-files fraction would reward broad globs that govern nothing), one window can't distinguish "diluted" from "quiet", and narrowing a glob to nothing would "improve" the score while governing less — so the mean is there to compare across reports, never to maximize.
 
+### Enforce assertions (declarative conformance)
+
+A governing decision/concept/flow doc can carry `enforce:` rules — declarative assertions the verifier runs on the touched files, turning a ratified decision into a checked one. Each violation is a blocking finding routed through the normal grader/revision loop.
+
+```yaml
+enforce:                        # a LIST — a nested map parses as empty and errors at validate
+  - files: "src/api/**"         # glob scope (matchesGlob)
+    forbid: "import .*infrastructure"   # regex that must NOT appear (or: require: "<regex>")
+    message: "api layer must not import infrastructure directly"
+```
+
+The assertion is a **regex body, never a shell command** — a deliberate safety boundary: shared-root docs govern without the local curator gate (see the multi-root threat model above), so a shell `enforce:` would be arbitrary code execution from any such doc. Regex bodies are written as-is (single-backslash escapes; `parseScalar` preserves quoted values verbatim). `forbid` reports one violation per matching line; `require` one per in-scope file lacking the pattern.
+
+```bash
+node bin/devt-tools.cjs memory enforce --files=a.py,b.py   # --files = touched set; omit for repo-wide (git ls-files)
+```
+
+Results are data (`{pass, violations:[{doc_id, file, line, rule, message}]}`, exit 0). `agents/verifier.md` runs it in `run_verification`; a `pass:false` means the diff violates a governing decision.
+
 **Dev/research workflows (prose-anchored).** Pre-implementation work has no diff to anchor on, so the signal stays:
 
 ```bash
@@ -319,6 +338,7 @@ node bin/devt-tools.cjs memory query <terms> --json-compact    # full rows, comp
 node bin/devt-tools.cjs memory get <id>          # fetch single doc
 node bin/devt-tools.cjs memory affects <path>    # path-based pre-flight
 node bin/devt-tools.cjs memory coverage --changed=a,b [--universe=x,y]  # per-doc glob density (dilution instrument)
+node bin/devt-tools.cjs memory enforce [--files=a,b]  # run governing-doc enforce: rules (declarative conformance)
 node bin/devt-tools.cjs memory list [doc_type]   # enumerate
 node bin/devt-tools.cjs memory links <id>        # transitive link traversal
 node bin/devt-tools.cjs memory active [domain]   # status: active filter

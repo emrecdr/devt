@@ -18011,6 +18011,45 @@ else
 fi
 rm -rf "$K301_PROJ"
 
+# K302: enforce assertions (DEF-004). Governing ADR/CON/FLOW docs may carry
+# declarative `enforce:` rules — a forbid/require REGEX (never a shell command,
+# so a shared-root doc cannot inject code) over a file glob, run batch-side by
+# the verifier on touched files. forbid → violation per matching line; require
+# → violation per in-scope file missing the pattern. Malformed enforce
+# (e.g. a nested map, which the list-parser silently empties) errors at validate.
+K302_PROJ=$(mktemp -d)
+(cd "$K302_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K302_PROJ/src/api" "$K302_PROJ/src/req"
+printf -- '---\nid: ADR-901\ntitle: "Layer rule"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "API must not import infra."\nenforce:\n  - files: "src/api/**"\n    forbid: "import .*infrastructure"\n    message: "api must not import infrastructure directly"\n---\nbody\n' > "$K302_PROJ/.devt/memory/decisions/ADR-901-layer.md"
+printf -- '---\nid: ADR-902\ntitle: "Marker rule"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Req files need marker."\nenforce:\n  - files: "src/req/**"\n    require: "REQUIRED_MARKER"\n    message: "req files must declare REQUIRED_MARKER"\n---\nbody\n' > "$K302_PROJ/.devt/memory/decisions/ADR-902-marker.md"
+printf 'from app import infrastructure\n' > "$K302_PROJ/src/api/bad.py"
+printf 'from app import service\n' > "$K302_PROJ/src/api/good.py"
+printf 'no marker here\n' > "$K302_PROJ/src/req/missing.py"
+printf 'REQUIRED_MARKER = 1\n' > "$K302_PROJ/src/req/present.py"
+(cd "$K302_PROJ" && git add -A >/dev/null 2>&1 && node "$CLI" memory index >/dev/null 2>&1)
+(cd "$K302_PROJ" && node "$CLI" memory enforce 2>/dev/null) > "$K302_PROJ/enf.json"
+(cd "$K302_PROJ" && node "$CLI" memory enforce --files=src/api/good.py,src/req/present.py 2>/dev/null) > "$K302_PROJ/enf-clean.json"
+printf -- '---\nid: ADR-903\ntitle: "Bad enforce"\ndoc_type: decision\ndomain: arch\nstatus: active\nconfidence: verified\nsummary: "Nested-map enforce is malformed."\nenforce:\n  files: "src/**"\n  forbid: "x"\n---\nbody\n' > "$K302_PROJ/.devt/memory/decisions/ADR-903-bad.md"
+K302_VAL=$( (cd "$K302_PROJ" && node "$CLI" memory validate 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.issues||[]).filter(i=>/enforce/.test(i.error||'')).length))}catch{process.stdout.write('parse-error')}});" )
+K302_R=$(node -e "
+  try {
+    const j = require('$K302_PROJ/enf.json');
+    const c = require('$K302_PROJ/enf-clean.json');
+    const fb = j.violations.filter(v => v.rule==='forbid' && v.doc_id==='ADR-901' && v.file==='src/api/bad.py' && v.line===1);
+    const rq = j.violations.filter(v => v.rule==='require' && v.doc_id==='ADR-902' && v.file==='src/req/missing.py' && v.line===null);
+    const clean = j.violations.filter(v => /good\.py|present\.py/.test(v.file));
+    const ok = j.pass===false && j.violations.length===2 && fb.length===1 && rq.length===1 && clean.length===0
+      && c.pass===true && c.violations.length===0 && c.files_scanned===2;
+    process.stdout.write(ok ? 'OK' : 'MISMATCH ' + JSON.stringify({pass:j.pass, n:j.violations.length, clean:c.pass, cn:c.violations.length}));
+  } catch (e) { process.stdout.write('ERR ' + e.message); }
+" 2>/dev/null)
+if [ "$K302_R" = "OK" ] && [ "$K302_VAL" -ge 1 ] 2>/dev/null; then
+  pass "K302: enforce assertions — forbid flags matching line, require flags missing-pattern file, clean files pass, touched-file scoping works, malformed nested-map enforce errors at validate (DEF-004)"
+else
+  fail "K302: enforce broken (run=$K302_R val_errs=$K302_VAL)"
+fi
+rm -rf "$K302_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

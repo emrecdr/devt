@@ -19,6 +19,10 @@ affects_paths:
   - scripts/smoke-test.sh
   - hooks/dispatch-hygiene-guard.sh
   - hooks/task-truncation-detector.sh
+enforce:
+  - files: "scripts/smoke-test.sh"
+    require: "set \+e"
+    message: "smoke-test gates must retain a set +e pipefail guard for grep -c under set -euo pipefail (CON-003)"
 created_at: 2026-06-14
 created_by: emre
 schema_version: 1
