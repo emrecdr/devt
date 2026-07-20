@@ -8,6 +8,25 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.190.0] - 2026-07-20
+
+### Memory injection-cost projection + queue hygiene (options-v2 review, north-star-filtered)
+
+A second-pass memory-layer review (options v2) was validated filesystem-first. It proposed mostly TRIM + measurement; the aligned subset shipped, and its two flagship "cheap projections" were **disproven on the filesystem** and deferred to their true home (DEF-006). Drift-guard stack 214 → 215 deep (K94–K307).
+
+### Added
+
+- **Memory injection-cost line in the weekly report (OPT-α).** Prices the memory/context-injection surface — what `memory_signal` + governing lines + advisories cost per workflow — by projecting `workflow-context-injector` `stdout_bytes` from the universal `run-hook.jsonl` trace (the same source `hook-cost` reads; no new collector). It reads **~0 in raw-dispatch/maintainer sessions** (the injector emits nothing without an active workflow) and reflects real cost only in workflow-running projects; the section renders only when injection actually happened in-window. In-code kill-receipt: delete the line if it changes no decision across ~3 report windows. Pinned by **K307**.
+
+### Changed (queue hygiene — no code)
+
+- **DEF-005/006 triggers de-proxied (TRIM-2).** Replaced the `corpus > 30 docs` numeric trigger with a value-shaped one (a field receipt, or the curator flagging dead-weight governance). For a solo-maintainer plugin, doc-count is a proxy that games as easily as it gates.
+- **OPT-α(% cited) / OPT-β(lane-attribution) recorded as DEF-006, not a cheap projection.** Their "projection over existing data" premise was disproven: PREFLIGHT scratchpad lines are ephemeral (truncated per workflow) and are pre-flight-guard file-coverage records, not doc-citations; and the sidecar `governing[]` carries no lane-of-origin tag. Capturing + aggregating citations *is* the deferred DEF-006 build — noted so it isn't double-built. Only OPT-α's *bytes-injected* half was a genuine projection (shipped above).
+
+### Notes
+
+- The review's FLOW trim (TRIM-3) was **already satisfied** — `docs/MEMORY.md` already documents FLOW as a consumer-facing doc type with an expected-empty `flows/`. No change.
+
 ## [0.189.0] - 2026-07-20
 
 ### Memory-layer hardening — enforce trust-tier, frontmatter hygiene, retract (validated external findings)

@@ -371,6 +371,50 @@ function renderAffectsCoverageSection(coverage) {
 }
 
 // ---------------------------------------------------------------------------
+// Memory injection cost — bytes the context-injector hook emits per workflow,
+// projected from the universal run-hook trace (the same source hook-cost reads;
+// no new collector). This is the memory/context layer's #3 footprint: what
+// memory_signal + governing lines + advisories cost per injection. It reads ~0
+// in raw-dispatch/maintainer sessions — the injector emits nothing when no
+// /devt:* workflow is active — and reflects real cost only in workflow-running
+// projects. The `% cited` companion (would this injection have been worth its
+// bytes?) is deliberately NOT here: citations are ephemeral (truncated per
+// workflow) and governing[] has no lane tag, so aggregating them is the
+// deferred DEF-006 build, not a projection.
+// ---------------------------------------------------------------------------
+function aggregateInjectionCost(projectRoot, fromMs, toMs) {
+  const tracePath = path.join(projectRoot, ".devt", "state", "hook-trace", "run-hook.jsonl");
+  if (!fs.existsSync(tracePath)) return { available: false };
+  let fires = 0, bytes = 0, max = 0;
+  try {
+    for (const line of fs.readFileSync(tracePath, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let r; try { r = JSON.parse(line); } catch { continue; }
+      if (r.script !== "workflow-context-injector.sh") continue;
+      const ms = new Date(r.ts).getTime();
+      if (!Number.isFinite(ms) || ms < fromMs || ms >= toMs) continue;
+      fires++;
+      const b = r.stdout_bytes || 0;
+      bytes += b;
+      if (b > max) max = b;
+    }
+  } catch { return { available: false }; }
+  return { available: true, fires, bytes, avg: fires ? Math.round(bytes / fires) : 0, max, est_tokens_per_fire: fires ? Math.round(bytes / fires / 4) : 0 };
+}
+
+function renderInjectionSection(inj) {
+  // Renders only when the injector actually injected in-window (like the
+  // coverage/guard sections when empty). Kill-receipt: if this line changes no
+  // decision across ~3 report windows, delete it.
+  if (!inj || !inj.available || inj.fires === 0 || inj.bytes === 0) return "";
+  const lines = ["## Memory Injection Cost", ""];
+  lines.push(`- Context injected: ~${inj.bytes} bytes over ${inj.fires} injector fire${inj.fires === 1 ? "" : "s"} — ~${inj.avg} bytes/fire (~${inj.est_tokens_per_fire} tokens/fire est., peak ${inj.max} bytes).`);
+  lines.push("- _Prices what memory_signal + governing lines + advisories cost per injection (#3). Direction, not a target; pair with % cited (deferred DEF-006) to judge waste — bytes alone price the surface._");
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -400,15 +444,16 @@ function run(subcommand, args) {
       const memoryEvents = aggregateMemoryEvents(projectRoot, fromMs, toMs);
       const coverage = aggregateAffectsCoverage(projectRoot, [...changedFiles]);
       const guard = aggregateGuardTelemetry(projectRoot, fromMs, toMs);
+      const injection = aggregateInjectionCost(projectRoot, fromMs, toMs);
       const report = renderMarkdown(stats, title) + renderMemorySection(memoryEvents)
-        + renderAffectsCoverageSection(coverage) + renderGuardSection(guard);
+        + renderAffectsCoverageSection(coverage) + renderGuardSection(guard) + renderInjectionSection(injection);
 
       if (outputPath) {
         atomicWriteFileSync(outputPath, report);
-        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard };
+        return { output: outputPath, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard, injection_cost: injection };
       }
 
-      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard };
+      return { report, window, authors: Object.keys(stats).length, memory_events: memoryEvents, affects_coverage: coverage, guard_telemetry: guard, injection_cost: injection };
     }
 
     default:

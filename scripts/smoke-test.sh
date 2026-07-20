@@ -18316,6 +18316,42 @@ else
 fi
 rm -rf "$K306_PROJ"
 
+# K307: memory injection-cost projection (OPT-α, v2 review). The weekly report
+# prices the memory/context-injection surface from run-hook.jsonl stdout_bytes
+# of the workflow-context-injector hook — a projection over the same trace
+# hook-cost reads, no new collector. Renders only when the injector actually
+# injected in-window (~0 in raw-dispatch/maintainer sessions, where no workflow
+# is active). Hermetic: seed a trace with two in-window injector fires + one
+# out-of-window + one other hook → the section sums ONLY the two in-window
+# injector fires. (The `% cited` companion is deferred DEF-006, not built here.)
+K307_PROJ=$(mktemp -d)
+(cd "$K307_PROJ" && git init -q && git config user.email t@t.t && git config user.name t && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
+mkdir -p "$K307_PROJ/.devt/state/hook-trace"
+K307_NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+K307_OLD=$(date -u -v-60d +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u -d '60 days ago' +"%Y-%m-%dT%H:%M:%S.000Z")
+{
+  printf '{"ts":"%s","script":"workflow-context-injector.sh","stdout_bytes":1000,"exit":0}\n' "$K307_NOW"
+  printf '{"ts":"%s","script":"workflow-context-injector.sh","stdout_bytes":500,"exit":0}\n' "$K307_NOW"
+  printf '{"ts":"%s","script":"workflow-context-injector.sh","stdout_bytes":9999,"exit":0}\n' "$K307_OLD"
+  printf '{"ts":"%s","script":"bash-guard.sh","stdout_bytes":7777,"exit":0}\n' "$K307_NOW"
+} > "$K307_PROJ/.devt/state/hook-trace/run-hook.jsonl"
+(cd "$K307_PROJ" && node "$CLI" report generate --weeks 1 2>/dev/null) > "$K307_PROJ/rep.json"
+K307_R=$(node -e "
+  try {
+    const r = require('$K307_PROJ/rep.json');
+    const ic = r.injection_cost;
+    const okData = ic && ic.available===true && ic.fires===2 && ic.bytes===1500 && ic.max===1000;
+    const sectionOk = /## Memory Injection Cost/.test(r.report) && /1500 bytes over 2 injector fires/.test(r.report);
+    process.stdout.write((okData && sectionOk) ? 'OK' : 'MISMATCH ' + JSON.stringify({ic, hasSection:/## Memory Injection Cost/.test(r.report||'')}));
+  } catch(e){ process.stdout.write('ERR '+e.message); }
+" 2>/dev/null)
+if [ "$K307_R" = "OK" ]; then
+  pass "K307: memory injection-cost projection — weekly report sums in-window workflow-context-injector stdout_bytes (excludes out-of-window + other hooks), section renders only with real injection (OPT-α, v2 review)"
+else
+  fail "K307: injection-cost projection broken ($K307_R)"
+fi
+rm -rf "$K307_PROJ"
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
