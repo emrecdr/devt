@@ -614,36 +614,19 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
 **Claim-check (Q11)**: Before reading the sidecar, mechanically verify the programmer wrote its declared output. Catches the case where the programmer returned a verbal summary (mid-task wall) without actually writing impl-summary.md.
 
 ```bash
-ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present programmer)
-if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
-fi
-# Rate-limit-mid-section recovery diagnostic. The PARTIAL contract triggers
-# at section boundaries; a rate-limit mid-section leaves impl-summary.md at
-# its stub-first sentinel with no structured sidecar. recover-partial-impl
-# reads dispatch-warnings.jsonl::task_output_bytes + on-disk impl-summary
-# substance and returns a recovery decision the orchestrator routes on.
-PARTIAL_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state recover-partial-impl programmer 2>/dev/null || echo '{}')
-if [ "$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.recovery_needed // false')" = "true" ]; then
-  SUGGESTED=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.suggested_action // ""')
-  if [ "$SUGGESTED" = "targeted-fix" ]; then
-    MODE=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.mode // ""')
-    MISSING=$(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.drift.missing_sections // [] | join(", ")')
-    echo "[STRUCTURAL_DRIFT_DETECTED] mode=${MODE}"
-    echo "[STRUCTURAL_DRIFT_DETECTED] missing_sections=${MISSING}"
-    echo "[STRUCTURAL_DRIFT_DETECTED] $(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.reason // ""')"
-  else
-    echo "[PARTIAL_IMPL_RECOVERY] suggested_action=${SUGGESTED}"
-    echo "[PARTIAL_IMPL_RECOVERY] $(printf '%s\n' "$PARTIAL_CHECK" | jq -r '.reason // ""')"
-  fi
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check programmer)
+ACTION=$(printf '%s\n' "$PDC" | jq -r '.action')
+if [ "$ACTION" != "proceed" ]; then
+  echo "[POST_DISPATCH] action=${ACTION} — $(printf '%s\n' "$PDC" | jq -r '.reason')"
 fi
 ```
 
-If the claim-check BLOCKED: programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume the same programmer with `<continue_from_section>` if a budget wall is suspected (often paired with `near_cliff` or `low_output` or `mid_task_language` records in `.devt/state/dispatch-warnings.jsonl`).
+`post-dispatch-check` folds the Layer-1 artifact assertion and the partial-recovery diagnostic (`assert-artifact-present` + `recover-partial-impl`) into one `{action}` verdict — cut the mechanics, keep the routing. Route on `action`:
 
-If `[PARTIAL_IMPL_RECOVERY]` surfaced with `suggested_action=SendMessage-resume`: the programmer was rate-limited mid-section (stub-only output + `low_output:true` signal). SendMessage the agent ID from the most recent programmer dispatch rather than re-dispatching from scratch — the stub-first sentinel + the orchestrator's section progress are recoverable context. If `suggested_action=investigate`: stub-only output without a rate-limit signal — investigate the dispatch transcript before re-dispatching.
-
-If `[STRUCTURAL_DRIFT_DETECTED]` surfaced: programmer wrote a substantive impl-summary.md but dropped one or more sections that `agents/io-contracts.yaml::programmer.outputs.expected_sections` declares as required. Read `templates/dispatch/envelopes/programmer-fix.tmpl.md`, substitute `{drift_errors}` with the `missing_sections` list (one per line), and SendMessage-resume the existing programmer agent ID with the rendered fix prompt — NOT a fresh `Task()` dispatch. SendMessage-resume preserves the programmer's prior context (recent file edits, decisions made, gates run) so the fix can populate the dropped sections from real source material rather than inventing content. On `mode=warn`, the fix is advisory — proceed past the drift if the next gate requires it. On `mode=block`, the fix is mandatory before advancing to the test phase.
+- **`proceed`** — impl-summary.md present and substantive; continue to the sidecar read below.
+- **`redispatch`** — programmer did not write impl-summary.md. Re-dispatch with explicit instruction, OR SendMessage-resume the same programmer with `<continue_from_section>` if a budget wall is suspected (often paired with `near_cliff` / `low_output` / `mid_task_language` records in `.devt/state/dispatch-warnings.jsonl`).
+- **`sendmessage_resume`** — resume the existing programmer agent ID, not a fresh `Task()`. `resume_hint.kind=rate_limit`: rate-limited mid-section (stub output + `low_output:true`); SendMessage the most recent programmer agent ID — the stub-first sentinel + section progress are recoverable context. `resume_hint.kind=structural_drift`: a substantive impl-summary.md that dropped `expected_sections` (listed in `resume_hint.missing_sections`); read `templates/dispatch/envelopes/programmer-fix.tmpl.md`, substitute `{drift_errors}` with the missing sections (one per line), and SendMessage-resume so the fix populates the dropped sections from real source material rather than inventing content. `resume_hint.mode=warn` → advisory (proceed past the drift if the next gate requires it); `mode=block` → mandatory before advancing to the test phase.
+- **`investigate`** — stub output with no rate-limit signal; investigate the dispatch transcript before re-dispatching.
 
 **Gate check**: Read the structured sidecar `.devt/state/impl-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract (the markdown carries no `## Status` header by design):
 
@@ -959,38 +942,13 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review_deferr
 
 <step name="finalize" gate="final status is reported to user">
 
-**Knowledge-candidates-tagged gate.** Before completing, assert that the orchestrator either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during work OR declared none via `knowledge-candidates-none.txt` with a structured reason. Why: candidates described in prose but never tagged never reach the curator harvester. Runs BEFORE the scratchpad truncate below.
-
-**Layer-2 claim-check resolution gate.** Block finalize if any Layer-1 `assert-artifact-present` failures in this workflow window are still unresolved (agent dispatch returned without writing its declared output, not re-dispatched). Mirrors S1's post-hoc pattern. Set `claim_check_mode: "warn"` in config to opt out.
+**Finalize gates (one call).** `state finalize-gates` runs `aggregate-knowledge-candidates` FIRST — harvesting `#KNOWLEDGE-CANDIDATE` tags the programmer placed inside `impl-summary*.md` (scanned alongside `review-lane-*.md`/`review.md`) into `scratchpad.md` so the knowledge-candidates gate can count them — then the phase-gate registry trio for the `complete` terminal phase in declared order: Layer-2 claim-check resolution (`claim_check_mode: "warn"` opts out), post-hoc raw-dispatch hygiene (`dispatch_hygiene_mode: "warn"` opts out), and knowledge-candidates-tagged. Nonzero exit on any block. The `scratchpad.md` truncate stays a separate step after `advance-phase` below — advance-phase re-runs the KC gate, so truncating earlier would empty scratchpad before that final re-check (KC-before-truncate preserved by position).
 
 ```bash
-CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
-if printf '%s\n' "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+FG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state finalize-gates --phase=complete)
+if [ "$(printf '%s\n' "$FG" | jq -r '.all_ok')" != "true" ]; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$CC_GATE" | jq -r '.reason')"
-  exit 0
-fi
-```
-
-**Dispatch-hygiene post-hoc gate.** Block finalize if any raw devt:* dispatches happened this session (Claude Code doesn't enforce PreToolUse Task-deny). Set `dispatch_hygiene_mode: "warn"` in config to opt out.
-
-```bash
-RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
-if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
-  exit 0
-fi
-```
-
-Aggregate any tags the programmer placed inside `impl-summary*.md` (the aggregator scans those alongside `review-lane-*.md`/`review.md`) so they reach scratchpad before the gate inspects it.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
-KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=finalize status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$FG" | jq -r '[.gates[] | select(.ok==false) | .gate + ": " + .reason] | join(" | ")')"
   exit 0
 fi
 ```

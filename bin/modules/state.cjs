@@ -6237,6 +6237,117 @@ function cmdAssertAll(args) {
   };
 }
 
+// One-call post-dispatch claim-check. Folds the assert-artifact-present +
+// recover-partial-impl ladder — copy-pasted at 5+ dispatch sites — into a
+// single routing verdict so each workflow keeps only the routing SEMANTICS
+// (what each action means for its agent) and drops the mechanical branching.
+// Composes the two existing functions; side-effect-free beyond the
+// claim-check-failures.jsonl append assertArtifactPresent already performs
+// (do NOT re-persist). recoverPartialImpl handles agents with no
+// sidecar/expected_sections gracefully, so it is safe to call for every agent.
+// The parallel-lane state machine (code-review-parallel.md) is deliberately
+// NOT folded here — its per-lane retry budget + terminal statuses don't map
+// onto the 4-action model; that routing stays in workflow prose.
+function postDispatchCheck(agent, args) {
+  if (!agent || typeof agent !== "string" || agent.startsWith("--")) {
+    return { ok: false, action: "investigate", reason: "Usage: state post-dispatch-check <agent> [--iteration=N] [--max-iterations=M]" };
+  }
+  const iteration = parseInt(_getFlag(args || [], "--iteration"), 10);
+  const maxIterations = parseInt(_getFlag(args || [], "--max-iterations"), 10);
+  const hasBudget = Number.isFinite(iteration) && Number.isFinite(maxIterations);
+  const budgetExhausted = hasBudget && iteration >= maxIterations;
+
+  const claim = assertArtifactPresent(agent); // persists claim-check-failures.jsonl
+  let recover;
+  try { recover = recoverPartialImpl(agent); }
+  catch (e) { recover = { recovery_needed: false, reason: `recover-partial-impl unavailable: ${(e && e.message) || e}` }; }
+  const sugg = recover && recover.suggested_action;
+
+  let action, reason, resumeHint = null;
+  if (claim.ok === true && (!recover || recover.recovery_needed === false)) {
+    action = "proceed";
+    reason = claim.reason || "artifact present and substantive — proceed.";
+  } else if (sugg === "SendMessage-resume" || sugg === "targeted-fix") {
+    action = "sendmessage_resume";
+    reason = recover.reason || "partial output — resume the same agent instead of re-dispatching.";
+    resumeHint = sugg === "targeted-fix"
+      ? { kind: "structural_drift", missing_sections: (recover.drift && recover.drift.missing_sections) || [], mode: recover.mode || null, fix_template: "templates/dispatch/envelopes/programmer-fix.tmpl.md" }
+      : { kind: "rate_limit", low_output: recover.low_output === true, output_bytes: recover.output_bytes ?? null };
+  } else if (sugg === "investigate") {
+    action = "investigate";
+    reason = recover.reason || "stub output with no rate-limit signal — investigate the transcript before re-dispatching.";
+  } else if (budgetExhausted) {
+    action = "investigate";
+    reason = `artifact missing after ${iteration}/${maxIterations} iterations — retry budget exhausted, escalate to the user. (${claim.reason || (recover && recover.reason) || ""})`;
+  } else {
+    action = "redispatch";
+    reason = claim.reason || (recover && recover.reason) || "artifact missing — re-dispatch the agent.";
+  }
+
+  return {
+    ok: action === "proceed",
+    agent,
+    action,
+    reason,
+    ...(hasBudget ? { iteration, max_iterations: maxIterations, budget_exhausted: budgetExhausted } : {}),
+    ...(resumeHint ? { resume_hint: resumeHint } : {}),
+    claim_check: claim,
+    ...(recover && recover.recovery_needed ? { partial_recovery: recover } : {}),
+  };
+}
+
+// One-call finalize gate. Runs aggregate-knowledge-candidates FIRST (so the
+// knowledge-candidates gate counts freshly-harvested tags), then the SAME
+// phase-gate registry runner as assert-all/advance-phase — single-sourcing the
+// gate set so the CC/RD/KC trio can't drift out of sync across the five
+// finalize sites that used to copy-paste it. Nonzero exit code on any block
+// (survives shell-output mangling, exactly like cmdAssertAll).
+//
+// Deliberately does NOT truncate scratchpad: the caller's terminal
+// `advance-phase` re-runs the KC gate through the same registry, so truncating
+// here would empty scratchpad before that re-check and fail it whenever the run
+// tagged candidates (rather than none-declaring). The scratchpad truncate stays
+// the caller's LAST step, after advance-phase — the KC-before-truncate ordering
+// preserved by position.
+function finalizeGates(args) {
+  const phaseFlag = _getFlag(args || [], "--phase");
+  let st = {};
+  try { st = readState(); } catch { /* empty state — gates run with null type below */ }
+  const workflowType = st.workflow_type || null;
+  // Default to each workflow_type's TERMINAL phase key (the one carrying the
+  // full gate set) — `debug`/`arch_health_scan` name their terminal phase after
+  // themselves; everything else finalizes at `complete`. An explicit --phase
+  // always wins (and must name a phase the registry declares gates for).
+  const phase = phaseFlag || (
+    workflowType === "debug" ? "debug"
+      : workflowType === "arch_health_scan" ? "arch_health_scan"
+        : "complete"
+  );
+
+  let aggregated;
+  try { aggregated = aggregateKnowledgeCandidates(); }
+  catch (e) { aggregated = { ok: false, reason: `aggregate failed: ${(e && e.message) || e}` }; }
+
+  const run = runPhaseGates(workflowType, phase, { tracePrefix: "finalize-gates" });
+  const gates = run.fired ? run.gateResults : [];
+  const allOk = run.fired ? run.blockedBy.length === 0 : true;
+
+  if (!allOk) process.exitCode = 1;
+  return {
+    ok: allOk,
+    all_ok: allOk,
+    phase,
+    workflow_type: workflowType,
+    workflow_id: st.workflow_id || null,
+    aggregated: (aggregated && aggregated.ok !== false)
+      ? { aggregated: aggregated.aggregated ?? 0, sources_scanned: aggregated.sources_scanned ?? 0 }
+      : aggregated,
+    gates_run: gates.length,
+    gates,
+    ...(run.fired ? {} : { note: run.note }),
+  };
+}
+
 function advanceState(targetPhase, kvUpdates) {
   if (typeof targetPhase !== "string" || !targetPhase) {
     throw new Error("advance-phase: missing target phase argument (Usage: state advance-phase <phase> [key=value ...])");
@@ -7829,6 +7940,10 @@ function run(subcommand, args) {
       return traceGate("assert-claim-checks-resolved", () => assertClaimChecksResolved());
     case "recover-partial-impl":
       return recoverPartialImpl(args[0]);
+    case "post-dispatch-check":
+      return postDispatchCheck(args[0], args.slice(1));
+    case "finalize-gates":
+      return finalizeGates(args);
     case "check-inherited-edits":
       return detectInheritedSourceEdits();
     case "assert-file-quiescent":
@@ -7916,7 +8031,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
       );
   }
 }

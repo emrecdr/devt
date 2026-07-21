@@ -300,10 +300,13 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
 <!-- END dispatch:verifier:dev -->
 ```
 
-**Layer-1 claim-check** — confirm the verifier wrote its output before routing on it (mirrors the programmer/architect claim-checks in the spine):
+**Layer-1 claim-check** — confirm the verifier wrote its output before routing on it (mirrors the programmer/architect claim-checks in the spine, folded to `post-dispatch-check`):
 
 ```bash
-ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present verifier)
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check verifier)
+if [ "$(printf '%s\n' "$PDC" | jq -r '.action')" != "proceed" ]; then
+  echo "[POST_DISPATCH] action=$(printf '%s\n' "$PDC" | jq -r '.action') — $(printf '%s\n' "$PDC" | jq -r '.reason')"
+fi
 ```
 
 **Gate check**: Read the structured sidecar `.devt/state/verification.json` for routing — the JSON is authoritative for control flow per the  outcome-grader contract (`references/rubrics/dev.v1.md`):

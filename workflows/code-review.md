@@ -581,13 +581,13 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
 **Claim-check (Q11)**: Before advancing phase, mechanically verify the code-reviewer wrote its declared output. Catches the case where the reviewer returned a verbal summary without actually writing review.md.
 
 ```bash
-ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present code-reviewer)
-if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check code-reviewer)
+if [ "$(printf '%s\n' "$PDC" | jq -r '.action')" != "proceed" ]; then
+  echo "[POST_DISPATCH] action=$(printf '%s\n' "$PDC" | jq -r '.action') — $(printf '%s\n' "$PDC" | jq -r '.reason')"
 fi
 ```
 
-If BLOCKED: code-reviewer did not write review.md. Re-dispatch with explicit instruction, OR SendMessage-resume if a budget wall is suspected. Read the sidecar's `status` (`DONE|PARTIAL|BLOCKED`) — PARTIAL means SendMessage-resume with `<continue_from_section>` set to `sidecar.next_section`; DONE means proceed.
+If the action is not `proceed`: `redispatch` → code-reviewer did not write review.md, re-dispatch with explicit instruction; `sendmessage_resume` → resume the existing agent ID if a budget wall is suspected (read the sidecar's `status` — PARTIAL means SendMessage-resume with `<continue_from_section>` set to `sidecar.next_section`); `investigate` → inspect the transcript first.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status=DONE

@@ -144,13 +144,13 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 **Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Why: without a Layer-1 check at the dispatch site, Layer-2's `assert-claim-checks-resolved` at finalize passes vacuously when no Layer-1 calls ever fired (`claim-check-failures.jsonl` stays absent regardless of dispatch outcome).
 
 ```bash
-ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present debugger)
-if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check debugger)
+if [ "$(printf '%s\n' "$PDC" | jq -r '.action')" != "proceed" ]; then
+  echo "[BLOCKED] devt: $(printf '%s\n' "$PDC" | jq -r '.action + " — " + .reason')"
 fi
 ```
 
-If BLOCKED: debugger did not write debug-summary.md. Re-dispatch with explicit instruction.
+`post-dispatch-check` folds the Layer-1 artifact assertion (plus a partial-recovery diagnosis — a no-op for the debugger, which has no sidecar) into one `{action}` verdict. If the action is not `proceed`: `redispatch` → the debugger returned without writing debug-summary.md, so re-dispatch with an explicit instruction to write it; `investigate` → an abnormal stop (no rate-limit signal), inspect the transcript before re-dispatching.
 
 </step>
 
@@ -224,38 +224,13 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 <step name="report" gate="results presented to user">
 ## Step 4: Report Results
 
-**Knowledge-candidates-tagged gate.** Before reporting, assert that the debugger either surfaced `#KNOWLEDGE-CANDIDATE` lines in `scratchpad.md` during investigation OR declared none via `knowledge-candidates-none.txt` with a structured reason. Why: candidates described in prose but never tagged never reach the curator. Runs BEFORE the scratchpad truncate below — that order matters.
-
-**Layer-2 claim-check resolution gate.** Block report on any unresolved Layer-1 `assert-artifact-present` failures. Mirrors S1's post-hoc pattern. Set `claim_check_mode: "warn"` in config to opt out.
+**Finalize gates (one call).** `state finalize-gates` runs `aggregate-knowledge-candidates` FIRST — harvesting `#KNOWLEDGE-CANDIDATE` tags from `debug-summary.md` / `impl-summary*.md` into `scratchpad.md` so the knowledge-candidates gate can count them — then the phase-gate registry trio for the `debug` terminal phase in declared order: Layer-2 claim-check resolution (`claim_check_mode: "warn"` opts out), post-hoc raw-dispatch hygiene (`dispatch_hygiene_mode: "warn"` opts out), and knowledge-candidates-tagged. Nonzero exit on any block. The `scratchpad.md` truncate stays a separate step after `advance-phase` below — advance-phase re-runs the KC gate, so truncating earlier would empty scratchpad before that final re-check (KC-before-truncate preserved by position).
 
 ```bash
-CC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-claim-checks-resolved)
-if printf '%s\n' "$CC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
+FG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state finalize-gates --phase=debug)
+if [ "$(printf '%s\n' "$FG" | jq -r '.all_ok')" != "true" ]; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$CC_GATE" | jq -r '.reason')"
-  exit 0
-fi
-```
-
-**Dispatch-hygiene post-hoc gate.** Block report on any in-session raw devt:* dispatches. Claude Code doesn't enforce PreToolUse Task-deny; this is the post-hoc enforcement.
-
-```bash
-RD_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-no-raw-dispatches-this-session)
-if printf '%s\n' "$RD_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$RD_GATE" | jq -r '.reason')"
-  exit 0
-fi
-```
-
-Aggregate tags from `debug-summary.md` / `impl-summary*.md` first so the gate sees them.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state aggregate-knowledge-candidates >/dev/null 2>&1 || true
-KC_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-knowledge-candidates-tagged)
-if printf '%s\n' "$KC_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=report status=BLOCKED verdict=FAILED
-  echo "BLOCKED: $(printf '%s\n' "$KC_GATE" | jq -r '.reason')"
+  echo "BLOCKED: $(printf '%s\n' "$FG" | jq -r '[.gates[] | select(.ok==false) | .gate + ": " + .reason] | join(" | ")')"
   exit 0
 fi
 ```
@@ -274,7 +249,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state advance-phase debug active
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state truncate-artifact scratchpad.md
 ```
 
-The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` so the next workflow in the same session starts clean. Debugger writes PREFLIGHT entries during investigation; without this, stale entries would falsely satisfy the pre-flight-guard hook for files touched in the next workflow.
+The second line clears ephemeral PREFLIGHT lines from `scratchpad.md` so the next workflow in the same session starts clean — debugger writes PREFLIGHT entries during investigation, and stale entries would otherwise falsely satisfy the pre-flight-guard hook for files touched in the next workflow.
 </step>
 
 </process>

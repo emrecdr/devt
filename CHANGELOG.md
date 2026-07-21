@@ -8,6 +8,21 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.197.0] - 2026-07-21
+
+### Composite claim-check / finalize CLI verbs + K117 gate-count floor
+
+Two mechanical sequences copy-pasted across the workflows become single-sourced CLI verbs (the `preflight scan-prep` precedent applied twice more), and the K-gate count the docs advertise becomes a floor instead of an exact number that taxed a manual re-sync on every gate addition.
+
+### Added
+
+- **`state post-dispatch-check <agent>` — one call for the post-dispatch claim-check ladder (K316).** Composes `assert-artifact-present` + `recover-partial-impl` into a `{action}` verdict (`proceed` | `sendmessage_resume` | `redispatch` | `investigate`) with a `resume_hint` distinguishing the rate-limit and structural-drift cases; the workflow keeps only the routing semantics and drops the ~35-line branching. Wired at 7 dispatch sites (dev + quick programmer, quick reviewer, dev-complex architect, dev-standard verifier, code-review reviewer, debug debugger). The parallel-lane substance-check state machine keeps its prose — its per-lane retry budget + terminal statuses don't map onto the 4-action model.
+- **`state finalize-gates` — one call for the finalize gate trio (K316).** Runs `aggregate-knowledge-candidates` first (so the knowledge-candidates gate counts freshly-harvested tags), then the SAME `_phase-gates.yaml` registry runner `assert-all`/`advance-phase` already use — single-sourcing the claim-check / raw-dispatch / knowledge-candidate set so it can't drift out of sync across the five finalize sites that copy-pasted it. Nonzero exit on any block. Wired at dev/quick/debug finalize; code-review's superset finalize (adds curator/verifier/axis-H gates + K275 partition integrity) stays inline. Deliberately does NOT truncate scratchpad — the caller's terminal `advance-phase` re-runs the knowledge-candidates gate, so the truncate stays the last step after it (KC-before-truncate preserved by position, not by erasing the tags the re-check needs).
+
+### Changed
+
+- **K117 is a gate-count FLOOR, not an exact count.** The README / CLAUDE.md "N-deep drift-guard stack K94–KNNN" claim taxed a manual four-string re-sync on every gate addition — for a number no reader cares about. The docs now advertise a floor (`K94+`, 200+ gates) and K117 enforces only that the real gate count hasn't shrunk below it; the floor is bumped when crossing a round hundred, upward, never per-gate. (K7 + K50 claim-check presence gates now accept either `assert-artifact-present` or the folded `post-dispatch-check`.)
+
 ## [0.196.0] - 2026-07-21
 
 ### Deep-read validation pass — two P0 defects, the guardrails by-reference lever, hook-latency measurement, drift-class gates, debug unification

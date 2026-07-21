@@ -218,13 +218,13 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
 **Claim-check (Q11)**: Before reading the artifact, mechanically verify the architect wrote its declared output. Catches the case where the architect returned a verbal summary without actually writing arch-review.md.
 
 ```bash
-ARTIFACT_CHECK=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present architect)
-if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
-  echo "[BLOCKED] devt: $(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.reason')"
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check architect)
+if [ "$(printf '%s\n' "$PDC" | jq -r '.action')" != "proceed" ]; then
+  echo "[POST_DISPATCH] action=$(printf '%s\n' "$PDC" | jq -r '.action') — $(printf '%s\n' "$PDC" | jq -r '.reason')"
 fi
 ```
 
-If the claim-check BLOCKED: architect did not write its declared output. Re-dispatch with explicit instruction to write the artifact before returning, OR SendMessage-resume if a budget wall is suspected. Do NOT advance phase=architect.
+If the action is not `proceed`: `redispatch` → architect did not write its declared output, re-dispatch with explicit instruction to write the artifact before returning; `sendmessage_resume` → resume the existing agent ID if a budget wall is suspected; `investigate` → inspect the transcript first. Do NOT advance phase=architect until it resolves.
 
 **Gate check**: Read `.devt/state/arch-review.md` and check status:
 

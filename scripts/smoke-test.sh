@@ -10293,12 +10293,12 @@ for site in "${K7_DISPATCH_SITES[@]}"; do
   # Look for "state assert-artifact-present <agent>" within the workflow file.
   # We don't require positional adjacency to END markers (workflows vary in
   # wiring); presence of the agent-specific assertion is the contract.
-  if ! grep -qE "state assert-artifact-present ${agent}\b" "$ROOT/$wf_file" 2>/dev/null; then
+  if ! grep -qE "state (assert-artifact-present|post-dispatch-check) ${agent}\b" "$ROOT/$wf_file" 2>/dev/null; then
     K7_FAIL="$K7_FAIL $(basename $wf_file):${agent}"
   fi
 done
 if [ -z "$K7_FAIL" ]; then
-  pass "K7: every wired dispatch site has state assert-artifact-present claim-check (5 sites checked)"
+  pass "K7: every wired dispatch site has a claim-check (assert-artifact-present or the folded post-dispatch-check; 5 sites checked)"
 else
   fail "K7: missing claim-check at —$K7_FAIL"
 fi
@@ -10704,12 +10704,12 @@ for wf in "$ROOT"/workflows/*.md; do
   done
   if [ -z "$dispatched" ]; then continue; fi
   # Workflow dispatches at least one output-writer — require Layer-1.
-  if ! grep -q "assert-artifact-present" "$wf" 2>/dev/null; then
+  if ! grep -qE "assert-artifact-present|post-dispatch-check" "$wf" 2>/dev/null; then
     K50_FAIL="$K50_FAIL $(basename "$wf")"
   fi
 done
 if [ -z "$K50_FAIL" ]; then
-  pass "K50: every workflow dispatching output-writing agents has Layer-1 assert-artifact-present (11 workflows checked)"
+  pass "K50: every workflow dispatching output-writing agents has a Layer-1 claim-check (assert-artifact-present or the folded post-dispatch-check; 11 workflows checked)"
 else
   fail "K50: workflows missing Layer-1 claim-check despite dispatching output-writers:$K50_FAIL"
 fi
@@ -13005,39 +13005,35 @@ else
   fail "K116: undefused grep-c substitutions found: $K116_VIOLATIONS"
 fi
 
-# K117 (M1): K-gate count auto-validator. Catches the off-by-one drift class
-# observed 3× during v0.93→v0.94 (15→16, 17→21, 21→22). Counts actual K-gate
-# definitions and verifies README + CLAUDE.md "N-deep" claim + "Kn-Km" range
-# upper bound match. Node-based so the gate doesn't trip CON-003.
+# K117: K-gate FLOOR validator. The docs advertise the suite as a floor
+# ("N+ gates"), not an exact count — the exact number had no reader value and
+# taxed a manual README+CLAUDE re-sync on EVERY gate addition. This gate now
+# only enforces that the real gate count has not shrunk below the advertised
+# floor (and that the floor claim is present in both surfaces). The floor is
+# bumped only when crossing a round hundred, upward — never per-gate. Node-based
+# so it doesn't trip CON-003.
 K117_CHECK=$(node -e "
   const fs = require('fs');
   const smoke = fs.readFileSync('$0', 'utf8');
   const readme = fs.readFileSync('$ROOT/README.md', 'utf8');
   const claude = fs.readFileSync('$ROOT/CLAUDE.md', 'utf8');
   // Count K94+ gate definitions in smoke (K94-K99 + any 3-digit K100+).
-  // Accepts `# K94:` and `# K94 (anything):` so gate authors can add hints
-  // without breaking the count.
+  // Accepts `# K94:` and `# K94 (anything):` so gate authors can add hints.
   const gateMatches = smoke.match(/^# K(9[4-9]|[1-9][0-9][0-9])[a-z]?(\s+\(.*?\))?:/gm) || [];
   const actual = gateMatches.length;
-  // Highest K number
-  const nums = gateMatches.map(m => parseInt(m.match(/K(\d+)/)[1], 10));
-  const top = Math.max.apply(null, nums);
-  // Parse README + CLAUDE.md claims
-  const readmeDeep = (readme.match(/(\d+)-deep/) || [0,'0'])[1];
-  const readmeRange = (readme.match(/K94[-–]K(\d+)/) || [0,'0'])[1];
-  const claudeDeep = (claude.match(/(\d+)-deep/) || [0,'0'])[1];
-  const claudeRange = (claude.match(/K94[-–]K(\d+)/) || [0,'0'])[1];
+  const readmeFloor = (readme.match(/(\d+)\+ gates/) || [null, null])[1];
+  const claudeFloor = (claude.match(/(\d+)\+ gates/) || [null, null])[1];
   const failures = [];
-  if (parseInt(readmeDeep,10) !== actual) failures.push('README \"' + readmeDeep + '-deep\" != actual ' + actual);
-  if (parseInt(readmeRange,10) !== top) failures.push('README \"K94-K' + readmeRange + '\" != actual top K' + top);
-  if (parseInt(claudeDeep,10) !== actual) failures.push('CLAUDE \"' + claudeDeep + '-deep\" != actual ' + actual);
-  if (parseInt(claudeRange,10) !== top) failures.push('CLAUDE \"K94-K' + claudeRange + '\" != actual top K' + top);
-  console.log(failures.length === 0 ? 'OK:actual=' + actual + ':top=K' + top : 'FAIL:' + failures.join('; '));
+  if (!readmeFloor) failures.push('README missing \"N+ gates\" floor claim');
+  else if (actual < parseInt(readmeFloor, 10)) failures.push('README floor ' + readmeFloor + ' > actual ' + actual + ' (suite shrank below advertised floor)');
+  if (!claudeFloor) failures.push('CLAUDE missing \"N+ gates\" floor claim');
+  else if (actual < parseInt(claudeFloor, 10)) failures.push('CLAUDE floor ' + claudeFloor + ' > actual ' + actual);
+  console.log(failures.length === 0 ? 'OK:actual=' + actual + ':floor=' + (readmeFloor || '?') : 'FAIL:' + failures.join('; '));
 " 2>/dev/null)
 if echo "$K117_CHECK" | /usr/bin/grep -q "^OK:"; then
-  pass "K117: K-gate count auto-validator (smoke gate count matches README + CLAUDE.md \"N-deep\" + \"K94-K[top]\" claims; CON-001 applied to docs)"
+  pass "K117: K-gate floor validator (real gate count ≥ the README + CLAUDE.md \"N+ gates\" advertised floor — no per-gate exact-count sync; CON-001 applied to docs as a floor)"
 else
-  fail "K117: doc count drift — $K117_CHECK"
+  fail "K117: gate-floor claim drift — $K117_CHECK"
 fi
 
 # K118 (M2): CHANGELOG [Unreleased] coverage for code surface commits.
@@ -18557,6 +18553,45 @@ case "$K315_RES" in
   OK:*) pass "K315: drift-class gates (docs hooks/guardrails path existence, no devt-internal v0.x markers, help.md counts derive from command frontmatter; $K315_RES)" ;;
   *) fail "K315: drift regressed — $K315_RES" ;;
 esac
+
+# K316: composite claim-check / finalize verbs (item 6) — fold copy-pasted
+# post-dispatch and finalize bash into single-sourced CLI verbs.
+# `post-dispatch-check <agent>` composes assert-artifact-present +
+# recover-partial-impl into a {proceed|sendmessage_resume|redispatch|investigate}
+# routing verdict; `finalize-gates` runs aggregate-knowledge-candidates → the
+# SAME phase-gate registry runner assert-all/advance-phase use (single-sourced
+# gate set, no copy-pasted trio to drift), carrying a nonzero exit code on any
+# block. (It does NOT truncate — the caller's post-advance-phase truncate owns
+# that, since advance-phase re-checks the KC gate.)
+K316_OK=1; K316_MISS=""
+{ /usr/bin/grep -qF 'case "post-dispatch-check":' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'case "finalize-gates":' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'post-dispatch-check, finalize-gates' "$ROOT/bin/modules/state.cjs"; } || { K316_OK=0; K316_MISS="$K316_MISS wiring"; }
+K316_TMP=$(mktemp -d)
+mkdir -p "$K316_TMP/.devt/state"
+printf 'active: true\nworkflow_id: "k316"\nworkflow_type: "quick_implement"\nphase: "implement"\ncreated_at: "2026-07-18T08:00:00Z"\nfirst_created_at: "2026-07-18T08:00:00Z"\n' > "$K316_TMP/.devt/state/workflow.yaml"
+K316_A=$( (cd "$K316_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state post-dispatch-check programmer 2>/dev/null) || true)
+printf '%s' "$K316_A" | /usr/bin/grep -q '"action":"redispatch"' || { K316_OK=0; K316_MISS="$K316_MISS pdc-missing"; }
+K316_B=$( (cd "$K316_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state post-dispatch-check programmer --iteration=2 --max-iterations=2 2>/dev/null) || true)
+{ printf '%s' "$K316_B" | /usr/bin/grep -q '"action":"investigate"' && printf '%s' "$K316_B" | /usr/bin/grep -q '"budget_exhausted":true'; } || { K316_OK=0; K316_MISS="$K316_MISS pdc-budget"; }
+node -e 'require("fs").writeFileSync(process.argv[1]+"/.devt/state/impl-summary.md","# Implementation Summary\n\n"+"Substantive content across sections. ".repeat(70))' "$K316_TMP"
+printf '{"status":"DONE","self_flagged_uncertainties":[]}' > "$K316_TMP/.devt/state/impl-summary.json"
+K316_C=$( (cd "$K316_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state post-dispatch-check programmer 2>/dev/null) || true)
+printf '%s' "$K316_C" | /usr/bin/grep -q '"action":"proceed"' || { K316_OK=0; K316_MISS="$K316_MISS pdc-proceed"; }
+printf 'reason=no_novel_patterns\ndeclared_at=2026-07-18T09:00:00Z\n' > "$K316_TMP/.devt/state/knowledge-candidates-none.txt"
+printf 'PREFLIGHT scratch\n' > "$K316_TMP/.devt/state/scratchpad.md"
+if K316_D=$( (cd "$K316_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state finalize-gates --phase=complete 2>/dev/null) ); then K316_DRC=0; else K316_DRC=$?; fi
+{ printf '%s' "$K316_D" | /usr/bin/grep -q '"all_ok":true' && [ "$K316_DRC" = "0" ]; } || { K316_OK=0; K316_MISS="$K316_MISS fg-pass(rc=$K316_DRC)"; }
+printf '{"ts":"2026-07-18T08:30:00Z","source":"raw_dispatch","agent":"devt:programmer","prompt_bytes":500}\n' > "$K316_TMP/.devt/state/dispatch-warnings.jsonl"
+printf 'PREFLIGHT scratch again\n' > "$K316_TMP/.devt/state/scratchpad.md"
+if K316_E=$( (cd "$K316_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state finalize-gates --phase=complete 2>/dev/null) ); then K316_ERC=0; else K316_ERC=$?; fi
+{ printf '%s' "$K316_E" | /usr/bin/grep -q '"all_ok":false' && [ "$K316_ERC" = "1" ]; } || { K316_OK=0; K316_MISS="$K316_MISS fg-block(rc=$K316_ERC)"; }
+rm -rf "$K316_TMP"
+if [ "$K316_OK" -eq 1 ]; then
+  pass "K316: composite verbs (post-dispatch-check 4-action routing; finalize-gates aggregate→single-sourced phase-gate registry with nonzero exit on block)"
+else
+  fail "K316: composite verb surface regressed:$K316_MISS"
+fi
 
 echo
 echo "== test-gates.cjs subsuite =="
