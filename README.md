@@ -122,7 +122,7 @@ graphify install                 # refresh the assistant skill files after upgra
 Check your installed version with:
 
 ```bash
-uv tool list | grep graphifyy    # e.g. "graphifyy v0.8.24"
+uv tool list | grep graphifyy    # e.g. "graphifyy v0.9.5"
 ```
 
 > **Full devt feature set requires graphifyy ≥ 0.8.x.** Newer subcommands like `graphify prs --conflicts` (powering `/devt:ship`'s pre-PR merge-risk scan), `graphify affected`, and the v8 MCP tools (`list_prs`, `get_pr_impact`, `triage_prs`) only ship in the 0.8 line. devt capability-probes graphify at runtime and silently skips features on older versions — they activate automatically once you upgrade.
