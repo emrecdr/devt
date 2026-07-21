@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.198.1] - 2026-07-21
+
+### Fixed
+
+- **`review-weight`'s "scope unresolvable — empty diff" message now names the base.** Field calibration surfaced that the message hid *which* base resolved to empty — so a base mismatch (the workflow computing scope against `main` while the operator meant `development`) read as a bare "empty diff" the operator couldn't diagnose. It now reads `empty diff for base '<base>' (<base>...HEAD + working tree + untracked all empty); if that base is wrong, set git.primary_branch in .devt/config.json (or export PRIMARY_BRANCH), else … pass --range=<a>..<b>`. Complements the v0.198.0 `PRIMARY_BRANCH`→config fix by making any residual base mismatch immediately legible.
+
 ## [0.198.0] - 2026-07-21
 
 ### Field-report fixes (greenfield calibration) + measured guardrails default flip

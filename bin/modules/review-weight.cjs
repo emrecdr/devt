@@ -149,16 +149,16 @@ function assessReviewWeight(opts = {}) {
   // Resolve the changed-file list.
   let files = Array.isArray(opts.files) ? opts.files.slice() : null;
   let filesReadable = files !== null;
+  let resolvedBase = opts.baseRef || null;
   if (files === null) {
     try {
       const { findProjectRoot, getMergedConfig } = require("./config.cjs");
       const proot = opts.projectRoot || findProjectRoot();
-      let base = opts.baseRef;
-      if (!base) {
+      if (!resolvedBase) {
         const gc = getMergedConfig();
-        base = (gc && gc.git && gc.git.primary_branch) || "main";
+        resolvedBase = (gc && gc.git && gc.git.primary_branch) || "main";
       }
-      files = collectChangedFiles(proot, base, opts.range ? { range: opts.range } : undefined);
+      files = collectChangedFiles(proot, resolvedBase, opts.range ? { range: opts.range } : undefined);
       filesReadable = true;
     } catch {
       files = [];
@@ -192,7 +192,7 @@ function assessReviewWeight(opts = {}) {
   // zero evidence reads as analysis when it is absence (field: a merged-PR
   // review got "HEAVY — nothing to prove safe" from an empty union and the
   // operator rightly discarded the output). Name the likely fix instead.
-  if (filesReadable && files.length === 0) blocked.push("scope unresolvable — empty diff (committed range + working tree + untracked all empty); if reviewing a merged PR or historical range, pass --range=<a>..<b>");
+  if (filesReadable && files.length === 0) blocked.push(`scope unresolvable — empty diff for base '${resolvedBase || "?"}' (${resolvedBase || "?"}...HEAD + working tree + untracked all empty); if that base is wrong, set git.primary_branch in .devt/config.json (or export PRIMARY_BRANCH), else for a merged PR / historical range pass --range=<a>..<b>`);
   if (graphBlind) blocked.push("graph-blind (blast headline unavailable or tier not graph-anchored) — safety not provable");
   if (godNodeMatch === true) blocked.push("god_node_match: a diff symbol is a high-blast-radius hub");
   if (riskHits.length > 0) blocked.push(`risk-surface path(s): ${riskHits.slice(0, 5).map(h => h.file).join(", ")}${riskHits.length > 5 ? ` (+${riskHits.length - 5})` : ""}`);
