@@ -543,7 +543,7 @@ function cmdRenderFilled(target, options) {
     workflowId = resolveAutoWorkflowId();
   }
   const template = renderEnvelope(agent, workflowId, readContracts());
-  const { CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB } = require("./init.cjs");
+  const { CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB, GUARDRAILS_BY_REFERENCE_STUB } = require("./init.cjs");
 
   // Delivery-mode resolution: an explicit option (true OR false) always wins —
   // render-lanes passes explicit values so its worktree opt-out (--inline-rules)
@@ -565,6 +565,11 @@ function cmdRenderFilled(target, options) {
   const rubricByRef = options && options.rubricByReference !== undefined
     ? !!options.rubricByReference
     : (modeCfg.rubric_mode || "by-reference") !== "inline";
+  // guardrails_mode defaults to inline (not by-reference) — the fixed guardrail
+  // set was inlined everywhere historically; opt-in until field-measured.
+  const guardrailsByRef = options && options.guardrailsByReference !== undefined
+    ? !!options.guardrailsByReference
+    : (modeCfg.guardrails_mode || "inline") === "by-reference";
   const subs = buildSubstitutionTable(agent, { inlineByteCap: !rulesByRef });
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
@@ -607,6 +612,18 @@ function cmdRenderFilled(target, options) {
     // {inline_rubrics.<type>} placeholder to the stub instead of leaking it.
     const rubricKeys = new Set([...Object.keys(subs.inline_rubrics), ...Object.keys(subs.rubrics || {})]);
     subs.inline_rubrics = Object.fromEntries([...rubricKeys].map((k) => [k, stub]));
+  }
+
+  // guardrailsByReference: swap each inline guardrail body for a read-from-disk
+  // stub. Guardrails are a fixed plugin-shipped set identical across every
+  // dispatch, so inlining ~25KB per dispatch is a large static cost for zero
+  // per-dispatch signal. The Context-Loaded contract (static in the templates)
+  // already treats a stub as read-and-record. Default inline; --inline-rules
+  // keeps guardrails inline for worktree-isolated dispatches.
+  if (guardrailsByRef && subs.inline_guardrails) {
+    subs.inline_guardrails = Object.fromEntries(
+      Object.keys(subs.inline_guardrails).map((name) => [name, GUARDRAILS_BY_REFERENCE_STUB(name)])
+    );
   }
 
   const excludeHeadings = (options && options.rulesExclude) || [];
@@ -1184,16 +1201,18 @@ function run(subcommand, args) {
       const notesArg = args.find(a => a.startsWith("--notes-file="));
       const notesFile = notesArg ? notesArg.slice("--notes-file=".length) : undefined;
       // Delivery-mode flags. Left undefined when no flag is given so
-      // cmdRenderFilled falls through to `dispatch.rules_mode`/`rubric_mode`
-      // config (default by-reference). --inline-rules restores full inlining
-      // of both — the worktree-isolation escape hatch, same flag name as
-      // render-lanes.
-      let rulesByReference, rubricByReference;
-      if (args.includes("--inline-rules")) { rulesByReference = false; rubricByReference = false; }
+      // cmdRenderFilled falls through to `dispatch.rules_mode`/`rubric_mode`/
+      // `guardrails_mode` config (rules+rubric default by-reference; guardrails
+      // default inline). --inline-rules restores full inlining of all three —
+      // the worktree-isolation escape hatch, same flag name as render-lanes;
+      // --guardrails-by-reference opts a single dispatch into guardrail stubs.
+      let rulesByReference, rubricByReference, guardrailsByReference;
+      if (args.includes("--inline-rules")) { rulesByReference = false; rubricByReference = false; guardrailsByReference = false; }
       if (args.includes("--rules-by-reference")) rulesByReference = true;
       if (args.includes("--rubric-by-reference")) rubricByReference = true;
+      if (args.includes("--guardrails-by-reference")) guardrailsByReference = true;
       let out;
-      try { out = cmdRenderFilled(target, { rulesExclude, notesFile, rulesByReference, rubricByReference }); }
+      try { out = cmdRenderFilled(target, { rulesExclude, notesFile, rulesByReference, rubricByReference, guardrailsByReference }); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
@@ -1558,6 +1577,9 @@ function cmdRenderLanes(target, options) {
     ...(baseRulesExclude.length ? { rulesExclude: baseRulesExclude } : {}),
     rulesByReference: rulesByReference,
     rubricByReference: rulesByReference,
+    // Guardrails default inline (measure-first); honor a project's config opt-in,
+    // but force inline when --inline-rules protects a worktree-isolated lane.
+    ...(options.inlineRules ? { guardrailsByReference: false } : {}),
   });
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");

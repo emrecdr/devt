@@ -15,12 +15,12 @@ fi
 
 # Check stop_hook_active from JSON input to prevent infinite loops
 if [[ -n "$INPUT" ]]; then
-  IS_ACTIVE=$(node -e "
+  IS_ACTIVE=$(printf '%s' "$INPUT" | node -e "
     try {
-      const d = JSON.parse(process.argv[1]);
+      const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
       process.stdout.write(String(d.stop_hook_active || false));
     } catch { process.stdout.write('false'); }
-  " "$INPUT" 2>/dev/null) || IS_ACTIVE="false"
+  " 2>/dev/null) || IS_ACTIVE="false"
   if [[ "$IS_ACTIVE" == "true" ]]; then
     exit 0
   fi

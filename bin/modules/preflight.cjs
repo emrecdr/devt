@@ -1801,10 +1801,10 @@ function generate(taskText, opts) {
   const extractionConfidence = computeExtractionConfidence(topic);
   // scope_hint confidence is a placeholder — without observed dispatch
   // hit-rate against suggested_reading paths we'd be guessing thresholds.
-  // V0.69 R3 will fold real signal here once G4's confidence data accrues.
+  // A future pass will fold real signal here once G4's confidence data accrues.
   const scopeHintConfidence = suggestedReadingTotal === 0
     ? { score: 0.0, band: "none", reason: "no suggested_reading entries (files OR symbols)" }
-    : { score: 1.0, band: "high", reason: "placeholder pending v0.69 R3 calibration" };
+    : { score: 1.0, band: "high", reason: "placeholder pending confidence calibration" };
   const topicWithConfidence = {
     ...topic,
     extraction_confidence: extractionConfidence,

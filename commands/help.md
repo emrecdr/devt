@@ -5,7 +5,7 @@ argument-hint: "[--all]"
 ---
 
 <objective>
-Display devt commands in tiered groups. Default view shows only the 15 family-head commands. `--all` flag surfaces the full inventory including the parameter surface and the 4 specialized direct-callable tools.
+Display devt commands in tiered groups. Default view shows only the 16 family-head commands. `--all` flag surfaces the full inventory including the parameter surface and the 3 specialized direct-callable tools.
 </objective>
 
 <process>
@@ -14,7 +14,7 @@ Parse `$ARGUMENTS` for `--all` flag. If present, print the FULL guide (Tier 1+2+
 If `--all` is NOT in arguments, print:
 
 ```
-# devt — Command Reference (15 visible · 4 specialized)
+# devt — Command Reference (16 visible · 3 specialized)
 
 ## Tier 1 — Daily Commands
 
@@ -38,6 +38,7 @@ If `--all` is NOT in arguments, print:
 
 /devt:memory <subcommand>       Permanent ADR/Concept/Flow/REJ layer (init, query, promote, …)
 /devt:note "idea"               Quick idea capture without derailing current work
+/devt:thread "name"             Session handoffs + persistent context threads (create, list, resume, update)
 /devt:setup --<op>              Admin: --init | --update | --uninstall | --health
 
 ## Family-Head Parameter Surface
@@ -88,16 +89,16 @@ If `--all` is NOT in arguments, print:
   See token telemetry:
     /devt:status --stats=tokens
 
-For the 4 specialized direct-callable tools, run /devt:help --all
+For the 3 specialized direct-callable tools, run /devt:help --all
 ```
 
 Else (`--all` IS in arguments), print the SAME Tier 1+2+3 + Parameter Surface sections AS ABOVE, followed by:
 
 ```
 
-## Specialized Direct-Callable Tools (4 — hidden from /-autocomplete, typed-callable)
+## Specialized Direct-Callable Tools (3 — hidden from /-autocomplete, typed-callable)
 
-These 4 commands have narrow use cases that don't fold cleanly into a
+These 3 commands have narrow use cases that don't fold cleanly into a
 family-head parameter form. They're hidden from `/`-autocomplete (use
 `user-invocable: false`) but invocable by typing the full name.
 
@@ -109,11 +110,6 @@ family-head parameter form. They're hidden from `/`-autocomplete (use
                                 Proposes additions to .devt/state/autoskill-proposals.md;
                                 curator decides what merges into skill-index.yaml.
 
-/devt:thread "<name>"           Session handoffs + persistent context threads.
-                                create distills the current session (goal, context,
-                                what's left) and prints a copy-paste resume prompt.
-                                Subcommands: create, list, resume <N|slug>, update.
-
 /devt:council "<decision>"      Pressure-test a high-stakes engineering decision through
                                 5 advisors (Contrarian / First Principles / Generalizer /
                                 Newcomer / Pragmatist) with adversarial peer review and
@@ -123,8 +119,7 @@ family-head parameter form. They're hidden from `/`-autocomplete (use
 
 ## What Happened to /devt:init, /devt:health, /devt:retro, etc?
 
-Phase 3 of the v0.93 UX simplification deleted 18 direct-form commands and
-folded their functionality under family-head + parameter forms:
+devt folds 18 former direct-form commands under family-head + parameter forms:
 
   /devt:init             → /devt:setup --init
   /devt:update           → /devt:setup --update
@@ -145,7 +140,7 @@ folded their functionality under family-head + parameter forms:
   /devt:tokens           → /devt:status --stats=tokens
   /devt:mcp-stats        → /devt:status --stats=mcp
 
-Casual user surface: 15 family-head commands instead of 36 equal-tier commands.
+Casual user surface: 16 family-head commands instead of 36 equal-tier commands.
 ```
 
 End printed output. Do not add commentary or summarization after the code block.

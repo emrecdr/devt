@@ -128,7 +128,7 @@ node bin/devt-tools.cjs evolution scan [--window-months=N] [--top=N] [--no-write
 
 No build steps or linters. CommonJS Node.js (`.cjs`) for tooling, Markdown for prompts/workflows/agents.
 
-CI runs `bash scripts/smoke-test.sh` (CLI smoke + 221-deep drift-guard stack K94-K313) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
+CI runs `bash scripts/smoke-test.sh` (CLI smoke + 223-deep drift-guard stack K94-K315) + `node scripts/test-locking.cjs` (20-worker concurrent state-write test) on every push. Also enforces version coherence (`VERSION` ↔ `plugin.json`), CHANGELOG coverage, and `workflow_type` registry coverage. Run both locally before committing to `bin/`, `hooks/`, or `.claude-plugin/`.
 
 ### Releasing
 
@@ -222,7 +222,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 - Shadow-mode state validation persists `validation_status` to `workflow.yaml`. → docs/INTERNALS.md (Shadow-mode State Validation).
 - `autonomous_chain` enables cross-workflow chaining (implement → test → review). → docs/INTERNALS.md (Autonomous Chaining).
 - Parallel researcher + arch_health dispatch in COMPLEX dev flows (one message, two `Task` calls). → docs/INTERNALS.md (Parallel Researcher + arch_health Dispatch).
-- Inline guardrails wiring — `loadInlineGuardrails` injects `<guardrails_inline>` into programmer + code-reviewer dispatches (64 KB cap). → docs/INTERNALS.md (Inline Guardrails Wiring).
+- Inline guardrails wiring — `loadInlineGuardrails` injects `<guardrails_inline>` into programmer, code-reviewer, tester, and architect dispatches (64 KB cap); `dispatch.guardrails_mode` (default `inline`) swaps the bodies for single-sourced read-from-disk stubs when set to `by-reference`, mirroring `rules_mode`. → docs/INTERNALS.md (Inline Guardrails Wiring).
 - Governing rules wiring — `loadGoverningRules` injects `<governing_rules>` into code-reviewer + verifier + researcher dispatches (96 KB cap, drift detection via `rules_hash`). → docs/INTERNALS.md (Governing Rules Wiring).
 - `state validate` subcommand checks artifact consistency + content-schema. → docs/INTERNALS.md (State Validate Subcommand).
 - Deferred-task tracker (`/devt:defer`, `.devt/state/deferred.md`, `DEF-NNN`, RESET_EXEMPT). → docs/INTERNALS.md (Deferred-Task Tracker).

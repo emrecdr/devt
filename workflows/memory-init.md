@@ -8,10 +8,11 @@ The memory layer (`.devt/memory/`) is the permanent knowledge graph for architec
 decisions, concepts, flows, and rejected proposals. This workflow is a thin shell over
 the CLI — no agent dispatch, no state mutation beyond the index rebuild itself.
 
-Phase 1 covers the data layer only (init, index, query, get, affects, list,
-links, active, rejected-keywords, validate). Phase 2 will add curator-gated
-promotion subcommands (promote, reject, suggest) that DO mutate markdown files via
-AskUserQuestion approval flow.
+Data-layer subcommands (init, index, query, get, affects, list, links, active,
+rejected-keywords, validate, suggest) run as thin CLI calls. The curator-gated
+promotion subcommands (promote, reject) do NOT run through the CLI — they route to
+`workflows/memory-promote.md` / `memory-reject.md`, which dispatch the curator agent
+to mutate `.devt/memory/` markdown only through AskUserQuestion approval.
 </purpose>
 
 <prerequisites>
@@ -40,6 +41,15 @@ the subcommand; remaining tokens are arguments to pass through.
 
 If the user provided NO subcommand (empty argument), display the subcommand reference
 table from `commands/memory.md` and stop.
+
+**Curator-gated routing** — if the subcommand is `promote` or `reject`, this dispatcher
+does NOT call the CLI (those subcommands return exit 2 from the CLI by design: permanent
+memory is mutated only through curator approval). Instead:
+- `promote` → Read `${CLAUDE_PLUGIN_ROOT}/workflows/memory-promote.md` and execute its steps.
+- `reject`  → Read `${CLAUDE_PLUGIN_ROOT}/workflows/memory-reject.md` and execute its steps.
+
+Then STOP — do not fall through to Step 2. All other subcommands (including `suggest`, which
+stages candidates in `_suggestions.md` without touching permanent memory) fall through.
 </step>
 
 <step name="execute" gate="CLI invoked and result captured">

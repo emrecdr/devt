@@ -43,9 +43,9 @@ if [[ -z "$INPUT" ]]; then
   exit 0
 fi
 
-node -e "
+printf '%s' "$INPUT" | node -e "
   let input;
-  try { input = JSON.parse(process.argv[1]); } catch { process.exit(0); }
+  try { input = JSON.parse(require('fs').readFileSync(0, 'utf8')); } catch { process.exit(0); }
   // Claude Code passes tool_name='Agent' for sub-agent dispatches (the Task tool's
   // canonical payload key). Older versions used 'Task'. Accept both — the matcher
   // in hooks.json filters at the platform layer; this is defensive backstop.
@@ -361,4 +361,4 @@ node -e "
   });
   process.stdout.write(output);
   process.exit(0);
-" -- "$INPUT"
+"

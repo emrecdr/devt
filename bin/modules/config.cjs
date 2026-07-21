@@ -423,6 +423,13 @@ const DEFAULTS = {
     // (both inline), --rules-by-reference / --rubric-by-reference (force-enable).
     rules_mode: "by-reference",
     rubric_mode: "by-reference",
+    // guardrails_mode gates the ~25KB <guardrails_inline> block (golden-rules +
+    // engineering-principles + generative-debt-checklist) the same way: "by-
+    // reference" swaps the bodies for read-from-disk stubs, "inline" keeps them.
+    // Defaults to inline (unlike rules/rubric) — the fixed guardrail set was
+    // inlined everywhere historically; the flip to by-reference is staged behind
+    // field measurement. --inline-rules forces inline for worktree dispatches.
+    guardrails_mode: "inline",
   },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug

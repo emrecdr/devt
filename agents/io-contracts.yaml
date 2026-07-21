@@ -87,7 +87,7 @@ agents:
       sidecar: test-summary.json
       expected_sections: [Coverage, Test Files, Quality Gate Results, Provenance]
     inputs:
-      context_blocks: [governing_rules, agent_skills, task]
+      context_blocks: [governing_rules, guardrails_inline, agent_skills, task]
       graphify_inputs: [scope_hint, scope_trust, graphify_status]
 
   code-reviewer:
@@ -122,7 +122,7 @@ agents:
       primary: arch-review.md
       sidecar: null
     inputs:
-      context_blocks: [governing_rules, agent_skills, task]
+      context_blocks: [governing_rules, guardrails_inline, agent_skills, task]
       graphify_inputs: [scope_hint, scope_trust]
 
   retro:

@@ -26,12 +26,12 @@ if [[ -z "$INPUT" ]]; then
 fi
 
 # Decide whether to run, then dispatch. All decisions in node — single subprocess.
-node -e "
+printf '%s' "$INPUT" | node -e "
   const fs = require('fs');
   const path = require('path');
   const { spawnSync } = require('child_process');
   try {
-    const d = JSON.parse(process.argv[1]);
+    const d = JSON.parse(fs.readFileSync(0, 'utf8'));
     const fp = (d.tool_input || {}).file_path || '';
     if (!fp) process.exit(0);
 
@@ -120,4 +120,4 @@ node -e "
     }
     process.exit(0);
   } catch { process.exit(0); }
-" "$INPUT" 2>/dev/null
+" 2>/dev/null

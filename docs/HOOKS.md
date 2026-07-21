@@ -13,7 +13,7 @@ Hooks use a Node.js runner (`hooks/run-hook.js`) with profile support:
 | Env var | Default | Purpose |
 |---|---|---|
 | `DEVT_HOOK_PROFILE` | `standard` | Selects the hook set — `minimal`, `standard`, or `full` |
-| `DEVT_DISABLED_HOOKS` | (unset) | Comma-separated list of hook scripts to disable regardless of profile (e.g. `bash-guard.sh,dispatch-scope-guard.sh`) |
+| `DEVT_DISABLED_HOOKS` | (unset) | Comma-separated list of hook scripts to disable regardless of profile (e.g. `bash-guard.sh,dispatch-hygiene-guard.sh`) |
 | `DEVT_HOOK_TRACE` | `1` | Set to `0` to disable the universal invocation trace |
 | `DEVT_VALIDATE_SHADOW` | `1` | Set to `0` to disable the shadow-mode state validation that runs on every `state update` and persists `validation_status` to `workflow.yaml` |
 | `DEVT_VALIDATE_ENFORCE` | `0` | Set to `1` to make `state update` HARD-fail on validation mismatches (default: shadow-only — log + persist warning but don't block) |
@@ -124,7 +124,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 ## Dispatch-Scope Advisory Hook
 
-**Hook.** `hooks/dispatch-scope-guard.sh` — PreToolUse matcher on `Task`.
+**Hook.** `hooks/dispatch-hygiene-guard.sh` — PreToolUse matcher on `Task`.
 
 **Behavior.** Emits an advisory `additionalContext` when a subagent dispatch's prompt byte count exceeds `dispatch.max_prompt_bytes` (default `24576`) or its parsed `<scope_hint>` array exceeds `dispatch.max_files_hint` (default `8`). **NEVER blocks.**
 
@@ -132,7 +132,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 **Tunables.** Per project in `.devt/config.json::dispatch.{max_prompt_bytes, max_files_hint}`.
 
-**Profile.** Active in `standard` and `full`. Kill switch: `DEVT_DISABLED_HOOKS=dispatch-scope-guard.sh`.
+**Profile.** Active in `standard` and `full`. Kill switch: `DEVT_DISABLED_HOOKS=dispatch-hygiene-guard.sh`.
 
 ---
 

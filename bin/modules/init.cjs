@@ -297,6 +297,14 @@ const CLAUDE_MD_BY_REFERENCE_STUB =
 const RULES_BY_REFERENCE_STUB = (key) =>
   `(by-reference: Read ${key} from disk when relevant to your scope — content covered by rules_hash)`;
 
+// Per-guardrail by-reference stub. Guardrails are a fixed plugin-shipped set,
+// identical across every dispatch, so by-reference mode swaps the ~25KB of
+// bodies for these directives; the templates' Context-Loaded contract already
+// treats a stub as read-and-record. Both delivery pipelines (init compound
+// payload + cmdRenderFilled) must emit byte-identical stub text.
+const GUARDRAILS_BY_REFERENCE_STUB = (name) =>
+  `(by-reference: Read guardrails/${name} from disk before you start — a fixed plugin-shipped rule set, identical across every dispatch)`;
+
 function loadGoverningRules(projectRoot, opts) {
   const result = { content: {}, paths_included: [], paths_excluded: [], rules_hash: null, total_bytes: 0, warnings: [] };
   if (!projectRoot) return result;
@@ -773,7 +781,17 @@ function initWorkflow(task, pluginRoot, initVerb) {
     inline_guardrails: (() => {
       const r = loadInlineGuardrails(pluginRoot);
       warnings.push(...r.warnings);
-      return r.content;
+      // Mirror governing_rules: dispatch.guardrails_mode (default inline)
+      // decides whether the compound payload carries full guardrail bodies or
+      // per-file read-from-disk stubs. By-reference keeps ~25KB of a fixed,
+      // dispatch-invariant rule set out of the orchestrator's fill context; the
+      // consumer Reads them once. Default stays inline until field measurement
+      // supports flipping it (mirrors how rules_mode shipped).
+      const byRef = ((config.dispatch || {}).guardrails_mode || "inline") === "by-reference";
+      if (!byRef || !r.content) return r.content;
+      return Object.fromEntries(
+        Object.keys(r.content).map((name) => [name, GUARDRAILS_BY_REFERENCE_STUB(name)])
+      );
     })(),
     governing_rules: (() => {
       // Delivery-mode resolution mirrors cmdRenderFilled: config
@@ -950,4 +968,4 @@ function runReviewBundle(taskText) {
   };
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB, GUARDRAILS_BY_REFERENCE_STUB };

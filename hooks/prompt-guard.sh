@@ -16,13 +16,13 @@ if [[ -z "$INPUT" ]]; then
 fi
 
 # Extract file path from hook input
-FILE_PATH=$(node -e "
+FILE_PATH=$(printf '%s' "$INPUT" | node -e "
   try {
-    const d = JSON.parse(process.argv[1]);
+    const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
     const input = d.tool_input || {};
     console.log(input.file_path || input.path || '');
   } catch { console.log(''); }
-" "$INPUT" 2>/dev/null)
+" 2>/dev/null)
 
 # Only guard .devt/state/ files
 if [[ "$FILE_PATH" != *".devt/state/"* && "$FILE_PATH" != *".devt/rules/"* ]]; then
@@ -30,13 +30,13 @@ if [[ "$FILE_PATH" != *".devt/state/"* && "$FILE_PATH" != *".devt/rules/"* ]]; t
 fi
 
 # Extract content being written
-CONTENT=$(node -e "
+CONTENT=$(printf '%s' "$INPUT" | node -e "
   try {
-    const d = JSON.parse(process.argv[1]);
+    const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
     const input = d.tool_input || {};
     console.log(input.content || input.new_string || '');
   } catch { console.log(''); }
-" "$INPUT" 2>/dev/null)
+" 2>/dev/null)
 
 if [[ -z "$CONTENT" ]]; then
   exit 0
@@ -46,8 +46,8 @@ fi
 # (was 6 grep shellouts + 1 Node = 7 subprocesses per Edit/Write to .devt/state/).
 # Each grep was 5-10ms warm; consolidation drops the per-write hook latency to
 # one process spawn. Patterns mirror the prior bash regex set verbatim.
-WARNINGS=$(node -e "
-  const content = process.argv[1] || '';
+WARNINGS=$(printf '%s' "$CONTENT" | node -e "
+  const content = require('fs').readFileSync(0, 'utf8');
   const checks = [
     [/ignore (all |any )?(previous |prior |above )?instructions/i, 'Instruction override pattern detected'],
     [/you are now|new role|act as|pretend to be/i,                'Role manipulation pattern detected'],
@@ -62,7 +62,7 @@ WARNINGS=$(node -e "
     if (re.test(content)) hits.push('- ' + label);
   }
   if (hits.length) process.stdout.write(hits.join('\\n'));
-" "$CONTENT" 2>/dev/null || true)
+" 2>/dev/null || true)
 
 if [[ -n "$WARNINGS" ]]; then
   # Advisory warning — do NOT block

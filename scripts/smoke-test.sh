@@ -18484,6 +18484,80 @@ else
   fail "K313: scope-artifact pre-write regressed at $K313_WHY"
 fi
 
+# K314: guardrails_mode delivery gate — dispatch.guardrails_mode (default inline)
+# gates the ~25KB <guardrails_inline> block the same way rules_mode gates rule
+# bodies. Behavioral (render-filled programmer:dev on a fixture): default inlines
+# the guardrail body; --guardrails-by-reference AND config by-reference swap it
+# for a single-sourced read-from-disk stub; --inline-rules forces guardrails
+# inline for worktree lanes. Plus: the stub is single-sourced
+# (GUARDRAILS_BY_REFERENCE_STUB, consumed by dispatch.cjs) and tester+architect
+# DECLARE the guardrails_inline block they already render (present-but-undeclared
+# fix — the K206 gap).
+K314_OK=1; K314_MISS=""
+{ /usr/bin/grep -qF 'guardrails_mode: "inline"' "$ROOT/bin/modules/config.cjs" \
+  && /usr/bin/grep -qF 'GUARDRAILS_BY_REFERENCE_STUB' "$ROOT/bin/modules/init.cjs" \
+  && /usr/bin/grep -qF 'GUARDRAILS_BY_REFERENCE_STUB(name)' "$ROOT/bin/modules/dispatch.cjs" \
+  && /usr/bin/grep -qF 'options.guardrailsByReference !== undefined' "$ROOT/bin/modules/dispatch.cjs"; } || { K314_OK=0; K314_MISS="$K314_MISS wiring"; }
+K314_TMP=$(mktemp -d)
+mkdir -p "$K314_TMP/.devt/state"
+printf 'active: true\nworkflow_id: "fx-g"\nworkflow_type: "dev"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K314_TMP/.devt/state/workflow.yaml"
+K314_BODY='Universal development rules that apply to every project'
+K314_STUB='by-reference: Read guardrails/golden-rules.md'
+K314_DEF=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev 2>/dev/null) || true)
+K314_BYREF=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev --guardrails-by-reference 2>/dev/null) || true)
+K314_INL=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev --inline-rules 2>/dev/null) || true)
+printf '{"dispatch":{"guardrails_mode":"by-reference"}}' > "$K314_TMP/.devt/config.json"
+K314_CFG=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev 2>/dev/null) || true)
+rm -rf "$K314_TMP"
+{ printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_BODY" \
+  && ! printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_STUB"; } || { K314_OK=0; K314_MISS="$K314_MISS default-inline"; }
+{ printf '%s' "$K314_BYREF" | /usr/bin/grep -qF "$K314_STUB" \
+  && ! printf '%s' "$K314_BYREF" | /usr/bin/grep -qF "$K314_BODY"; } || { K314_OK=0; K314_MISS="$K314_MISS flag-byref"; }
+{ printf '%s' "$K314_INL" | /usr/bin/grep -qF "$K314_BODY" \
+  && ! printf '%s' "$K314_INL" | /usr/bin/grep -qF "$K314_STUB"; } || { K314_OK=0; K314_MISS="$K314_MISS inline-rules-force"; }
+printf '%s' "$K314_CFG" | /usr/bin/grep -qF "$K314_STUB" || { K314_OK=0; K314_MISS="$K314_MISS config-byref"; }
+K314_DECL=$(/usr/bin/grep -cF 'context_blocks: [governing_rules, guardrails_inline, agent_skills, task]' "$ROOT/agents/io-contracts.yaml" || true)
+[ "$K314_DECL" -ge 2 ] || { K314_OK=0; K314_MISS="$K314_MISS io-declare($K314_DECL)"; }
+if [ "$K314_OK" -eq 1 ]; then
+  pass "K314: guardrails_mode delivery gate (default-inline behavioral, --guardrails-by-reference + config stub, --inline-rules forces inline, single-sourced stub, tester+architect declare guardrails_inline)"
+else
+  fail "K314: guardrails_mode surface regressed:$K314_MISS"
+fi
+
+# K315: drift-class gates (LES-001) — three audit sweeps promoted to permanent
+# gates after the pass that found their instances. (A) Every hooks//guardrails/
+# path referenced in a LIVE docs/ file (reports + archive excluded — those are
+# point-in-time snapshots) resolves on disk — the dispatch-scope-guard.sh /
+# contamination-prevention.md / caveman-compress ghost-ref class. (B) No
+# devt-internal v0.x version markers survive in the runtime/prose surfaces
+# (allowlist: the third-party graphify `v0.8.x+` ref in ship.md + the
+# changelog-header regex EXAMPLE in update.cjs). (C) help.md's printed
+# visible/specialized counts derive from the command frontmatter
+# (user-invocable) — the 15·4-vs-16·3 drift. Each sweep took minutes by hand.
+K315_RES=$(cd "$ROOT" && node -e '
+const fs=require("fs"),path=require("path");
+const miss=[];
+const docFiles=[];
+(function w(d){ for(const e of fs.readdirSync(d,{withFileTypes:true})){ const p=path.join(d,e.name); if(e.isDirectory()){ if(/^(archive|reports)$/.test(e.name))continue; w(p);} else if(e.name.endsWith(".md") && !/-report\.md$/.test(e.name)) docFiles.push(p);} })("docs");
+const refRe=/\b(hooks|guardrails)\/[A-Za-z0-9_.-]+\.(sh|md|py|cjs|js|json|ya?ml)\b/g;
+for(const f of docFiles){ const t=fs.readFileSync(f,"utf8"); let m; while((m=refRe.exec(t))){ if(!fs.existsSync(m[0])) miss.push("A:"+f+"->"+m[0]); } }
+const vdirs=["agents","workflows","skills","commands","bin","hooks","references","guardrails"];
+const vAllow=new Set(["workflows/ship.md","bin/modules/update.cjs"]);
+const vre=/v0\.[0-9]/;
+for(const d of vdirs){ if(!fs.existsSync(d))continue; (function ww(dd){ for(const e of fs.readdirSync(dd,{withFileTypes:true})){ const p=path.join(dd,e.name); if(e.isDirectory()){ if(e.name==="node_modules")continue; ww(p);} else if(/\.(md|cjs|js|sh|ya?ml)$/.test(e.name)){ const t=fs.readFileSync(p,"utf8"); if(vre.test(t) && !vAllow.has(p)){ const ln=t.split("\n").find(l=>vre.test(l)); miss.push("B:"+p+":"+(ln||"").trim().slice(0,50)); } } } })(d); }
+const cmds=fs.readdirSync("commands").filter(f=>f.endsWith(".md"));
+let vis=0,hid=0;
+for(const c of cmds){ const fm=(fs.readFileSync(path.join("commands",c),"utf8").split("---")[1]||""); if(/user-invocable:\s*false/.test(fm)) hid++; else vis++; }
+const help=fs.readFileSync("commands/help.md","utf8");
+if(!help.includes("("+vis+" visible · "+hid+" specialized)")) miss.push("C:help-header(want "+vis+"/"+hid+")");
+if(!help.includes("Specialized Direct-Callable Tools ("+hid+" —")) miss.push("C:help-specialized(want "+hid+")");
+process.stdout.write(miss.length? "MISS:"+miss.join(" | ") : "OK:vis="+vis+":hid="+hid);
+' 2>&1)
+case "$K315_RES" in
+  OK:*) pass "K315: drift-class gates (docs hooks/guardrails path existence, no devt-internal v0.x markers, help.md counts derive from command frontmatter; $K315_RES)" ;;
+  *) fail "K315: drift regressed — $K315_RES" ;;
+esac
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

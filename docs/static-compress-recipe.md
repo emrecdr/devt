@@ -80,7 +80,7 @@ Best fit for compression — these are devt-authored prose files load-bearing in
 - `guardrails/golden-rules.md`
 - `guardrails/engineering-principles.md`
 - `guardrails/generative-debt-checklist.md`
-- `guardrails/contamination-prevention.md`
+- `guardrails/contamination-guidelines.md`
 
 For project-local rules (`.devt/rules/*.md`): use sparingly. These are project-authored and any compression should be reviewed before merging — the compressed file becomes the source of truth for future sessions.
 

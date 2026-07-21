@@ -30,11 +30,11 @@ fi
 
 # Single Node call: parse hook input, read merged config + scratchpad, decide.
 # Defense-in-depth — even on parse failure, exit 0 so we don't block.
-node -e "
+printf '%s' "$INPUT" | node -e "
   const fs = require('fs');
   const path = require('path');
   try {
-    const d = JSON.parse(process.argv[1]);
+    const d = JSON.parse(fs.readFileSync(0, 'utf8'));
     const fp = (d.tool_input || {}).file_path || '';
     if (!fp) process.exit(0);
 
@@ -257,4 +257,4 @@ node -e "
     }));
     process.exit(0);
   } catch { process.exit(0); }
-" "$INPUT" 2>/dev/null
+" 2>/dev/null

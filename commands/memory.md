@@ -38,6 +38,9 @@ Parse the user's argument. The first token is the subcommand; remaining tokens a
 | `active [domain]` | All `status: active` docs, optionally filtered by domain. | `/devt:memory active security` |
 | `rejected-keywords` | All REJ tombstones with their AI-suppression search_keywords. Used by autoskill before proposing changes. | `/devt:memory rejected-keywords` |
 | `validate` | Schema check + path resolution + broken-link detection. Reports errors and warnings. | `/devt:memory validate` |
+| `suggest` | Scan session state for promotion candidates and stage them in `.devt/memory/_suggestions.md`. No permanent files written. | `/devt:memory suggest` |
+| `promote [DEC-id]` | Curator-gated: promote a candidate (DEC-xxx, a `_suggestions.md` entry, or a caller payload) into a permanent ADR/CON/FLOW via the curator's AskUserQuestion approval flow. Routes through `workflows/memory-promote.md`. | `/devt:memory promote DEC-003` |
+| `reject <statement>` | Curator-gated: capture a rejection as a permanent REJ tombstone (suppresses future re-proposals). Routes through `workflows/memory-reject.md`. | `/devt:memory reject "no Redis sessions — compliance"` |
 
 ## Execution
 
@@ -63,7 +66,7 @@ If the user passes no subcommand or an unknown one, surface the table above.
 ## Boundaries
 
 - This command is **read/write on the markdown files**, **read-only on the index** during query subcommands, and **write on the index** during init/index.
-- Permanent ADR/CON/FLOW/REJ markdown files are NEVER created automatically by these subcommands. Phase 2 will add `promote` and `reject` subcommands that DO create files, but those routes through curator's AskUserQuestion approval flow.
+- Permanent ADR/CON/FLOW/REJ markdown files are NEVER created automatically. The `promote` and `reject` subcommands DO create them, but only through the curator's AskUserQuestion approval flow (routed via `workflows/memory-promote.md` / `memory-reject.md`) — never without explicit user approval.
 - For ephemeral session decisions (DEC-xxx in `.devt/state/decisions.md`), use `/devt:workflow --mode=clarify` instead — those are workflow-scoped and reset between workflows.
 - For operational lessons ("when X fails, check Y first"), use `/devt:workflow --retro` — those are extracted as candidates and promoted by the curator into `.devt/memory/lessons/` (LES-NNNN).
 

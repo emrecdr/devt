@@ -237,7 +237,7 @@ Commands:
   memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
   memory suggest            Run discovery: #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-node harvest
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
-  deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md (v0.29.0+)
+  deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md
                             [--context="..."] [--tags=a,b,c] [--by=<agent>]
                             Survives /devt:workflow --cancel (reset-exempted)
   deferred list             List deferred items [--status=open|closed] [--tag=X] [--limit=N]

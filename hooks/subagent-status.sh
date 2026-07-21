@@ -19,15 +19,15 @@ fi
 # Extract and sanitize agent name using node (guaranteed available, proper JSON parsing)
 AGENT_NAME="unknown"
 if [[ -n "$INPUT" ]]; then
-  AGENT_NAME=$(node -e "
-    const d = JSON.parse(process.argv[1]);
+  AGENT_NAME=$(printf '%s' "$INPUT" | node -e "
+    const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
     let name = String(d.agentName || d.name || 'unknown');
     // Sanitize: alphanumeric, hyphens, underscores only; max 64 chars
     name = name.replace(/[^a-zA-Z0-9\-_]/g, '_').slice(0, 64);
     // Guard against prototype pollution keys
     if (['__proto__', 'constructor', 'prototype'].includes(name)) name = '_' + name;
     process.stdout.write(name);
-  " "$INPUT" 2>/dev/null) || AGENT_NAME="unknown"
+  " 2>/dev/null) || AGENT_NAME="unknown"
 fi
 
 STATUS="running"

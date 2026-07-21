@@ -160,6 +160,7 @@ function appendTrace(scriptName, fields) {
 }
 
 function main() {
+  const t0 = Date.now();
   const args = process.argv.slice(2);
   const scriptName = args[0];
 
@@ -186,6 +187,7 @@ function main() {
       enabled: false,
       stdin_bytes: Buffer.byteLength(stdinPassthrough, "utf8"),
       exit: 0,
+      duration_ms: Date.now() - t0,
       reason: "disabled_by_profile_or_env",
     });
     process.exit(0);
@@ -195,7 +197,7 @@ function main() {
   const hookPath = path.join(pluginRoot, "hooks", scriptName);
 
   if (!fs.existsSync(hookPath)) {
-    appendTrace(scriptName, { profile, enabled: true, exit: 1, reason: "script_not_found" });
+    appendTrace(scriptName, { profile, enabled: true, exit: 1, duration_ms: Date.now() - t0, reason: "script_not_found" });
     process.stderr.write(JSON.stringify({ error: `Hook script not found: ${scriptName}` }) + "\n");
     process.exit(1);
   }
@@ -226,6 +228,7 @@ function main() {
       enabled: true,
       stdin_bytes: Buffer.byteLength(stdin, "utf8"),
       exit: 1,
+      duration_ms: Date.now() - t0,
       reason: `spawn_failed: ${reason}`,
     });
     process.stderr.write(JSON.stringify({ error: `Hook ${scriptName} failed: ${reason}` }) + "\n");
@@ -242,6 +245,7 @@ function main() {
     stdout_bytes: Buffer.byteLength(result.stdout || "", "utf8"),
     stderr_bytes: Buffer.byteLength(result.stderr || "", "utf8"),
     exit: result.status ?? 0,
+    duration_ms: Date.now() - t0,
   });
 
   process.exit(result.status ?? 0);

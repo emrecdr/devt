@@ -162,7 +162,7 @@ Wired into `init.cjs` to sanitize task descriptions entering the system.
 
 ### `structural-validator.cjs`
 
-Markdown-structure extractors ported from caveman (MIT, `skills/caveman-compress/scripts/validate.py`). Public surface:
+Markdown-structure extractors ported from the caveman project (MIT). Public surface:
 
 - `extractHeadings(text)` → `[{level, title}]`
 - `extractCodeBlocks(text)` → `[string]` (line-based, nested-fence-aware per CommonMark)
@@ -314,7 +314,7 @@ Architecture progression: warn-at-dispatch → warn-at-finalize (Layer-1) → bl
 | `source` | Writer | Per-record fields (after `ts` + `source`) |
 |---|---|---|
 | `raw_dispatch` | `hooks/dispatch-hygiene-guard.sh` | `agent`, `prompt_bytes`, `prompt_preview` |
-| `dispatch_scope` | `hooks/dispatch-scope-guard.sh` | `agent`, `prompt_bytes`, `scope_hint_count`, `cap_bytes`, `cap_files`, `warnings` |
+| `dispatch_scope` | `hooks/dispatch-hygiene-guard.sh` | `agent`, `prompt_bytes`, `scope_hint_count`, `cap_bytes`, `cap_files`, `warnings` |
 | `task_output_bytes` | `hooks/task-truncation-detector.sh` | `agent`, `output_bytes`, `threshold_bytes`, `near_cliff`, `low_output`, `low_output_threshold`, `stop_reason`, `mid_task_language` |
 
 Consumers MUST filter by `source:` before interpreting payload fields — different sources have disjoint schemas. Common pitfall: reading the file expecting unified `{dispatch_type, subagent_type, reason}` fields → mostly-null payloads because the actual schema is per-source. `state.cjs::recoverPartialImpl` is the canonical example of a correct consumer — it filters `rec.source === "task_output_bytes"` before reading `rec.low_output`. `state.cjs::assertNoRawDispatchesThisSession` does the same for `rec.source === "raw_dispatch"`.
@@ -341,7 +341,7 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 **User overrides.** `.devt/config.json::agent_skills.<agent>` remains a flat array (= always loaded, no tier filter) so existing project configs don't break.
 
-**Fixtures.** Trigger-evaluation fixtures live in `skills-workspace/` (gitignored, used by autoskill).
+**Fixtures.** Trigger-evaluation fixtures live in `skills-workspace/` (gitignored, local dev fixtures).
 
 ---
 
@@ -400,7 +400,9 @@ Consumers MUST filter by `source:` before interpreting payload fields — differ
 
 **Function.** `init.cjs::loadInlineGuardrails` returns the contents of `golden-rules.md` + `engineering-principles.md` + `generative-debt-checklist.md` (~27 KB total, capped at 64 KB) inline in the `init` payload as `inline_guardrails: {filename: content}`.
 
-**Consumer workflow.** `workflows/dev-workflow.md` captures this at context_init and injects it as a `<guardrails_inline>` block (with `<golden_rules>`, `<engineering_principles>`, `<generative_debt_checklist>` sub-tags) into the **programmer and code-reviewer** dispatch templates only — the 2 agents that read all 3 files on every dispatch.
+**Consumer templates.** The `<guardrails_inline>` block (with `<golden_rules>`, `<engineering_principles>`, `<generative_debt_checklist>` sub-tags) is rendered into the **programmer, code-reviewer, tester, and architect** dispatch templates (8 envelopes across the 4 families). programmer + code-reviewer carry all three guardrails; tester carries `<golden_rules>` only.
+
+**Delivery mode.** `dispatch.guardrails_mode` gates delivery, mirroring `rules_mode`: default `inline` (full bodies); `by-reference` swaps each body for a single-sourced `GUARDRAILS_BY_REFERENCE_STUB` read-from-disk directive, which the templates' Context-Loaded contract treats as read-and-record. `--inline-rules` (and `--guardrails-by-reference` for the inverse) override per dispatch; `--inline-rules` forces inline for worktree-isolated dispatches. Default stays `inline` until field measurement supports flipping it.
 
 **Why only those two.** Other dev agents continue reading from disk. Extending inlining to them would inflate prefix bytes without offsetting Read savings (their reads are 0–1 files per dispatch).
 

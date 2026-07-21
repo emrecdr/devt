@@ -495,7 +495,7 @@ function readWorkflowContext() {
     const workflow_type = typeMatch ? typeMatch[1].trim() : null;
     const phase = phaseMatch ? phaseMatch[1].trim() : null;
     // If none of the three known fields are present, treat as "no context" —
-    // happens for pre-v0.38.0 workflow.yaml files written before auto-stamp.
+    // happens for legacy workflow.yaml files written before auto-stamp.
     const context = (workflow_id || workflow_type || phase)
       ? { workflow_id, workflow_type, phase }
       : null;
