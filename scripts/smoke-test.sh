@@ -18413,6 +18413,38 @@ else
   fail "K309: context_init partition regressed at $K309_WHY"
 fi
 
+# K310: parallel scope-artifact self-recovery (P0 field-confirmed seam #1). A
+# fresh parallel delegation reaches code-review-parallel.md::partition_lanes with
+# code-review-input.md ABSENT (scope_check delegates before identify_scope writes
+# it) — partition_lanes must self-recover the scope from the changed-files union
+# and proceed PARALLEL, LOUDLY, rather than silently degrading to single-dispatch
+# (field: a 5-lane review silently ran as 1). Locks the fix against regression.
+K310_OK=1; K310_WHY=""
+PWF="$ROOT/workflows/code-review-parallel.md"
+/usr/bin/grep -qF 'Self-recovering scope from the changed-files union' "$PWF" || { K310_OK=0; K310_WHY="no-self-recovery"; }
+/usr/bin/grep -qF 'state changed-files' "$PWF" || { K310_OK=0; K310_WHY="no-changed-files-call"; }
+/usr/bin/grep -qF 'proceeding with PARALLEL' "$PWF" || { K310_OK=0; K310_WHY="no-parallel-continue"; }
+/usr/bin/grep -qF 'code-review-input.md ABSENT' "$PWF" || { K310_OK=0; K310_WHY="not-loud"; }
+if [ "$K310_OK" = "1" ]; then
+  pass "K310: parallel partition_lanes self-recovers scope from changed-files (loud) instead of silently degrading to single-dispatch (P0 field-confirmed)"
+else
+  fail "K310: parallel scope self-recovery regressed at $K310_WHY"
+fi
+
+# K311: cid-on-every-rendered-envelope (seam #2). render-lanes stamps per-lane
+# cids; render-filled must ALSO mint one so consolidator/verifier dispatches
+# don't read as raw_dispatch (field: a compliant consolidator accrued a warning
+# because its envelope carried no cid). Locks the render-filled cid-mint.
+K311_OK=1; K311_WHY=""
+DWF="$ROOT/bin/modules/dispatch.cjs"
+/usr/bin/grep -qF 'Mint a correlation_id into every render-filled envelope' "$DWF" || { K311_OK=0; K311_WHY="no-mint"; }
+/usr/bin/grep -qF '<correlation_id>cid_/.test(out)' "$DWF" || { K311_OK=0; K311_WHY="no-cid-guard"; }
+if [ "$K311_OK" = "1" ]; then
+  pass "K311: render-filled mints a correlation_id into every envelope (seam contract — consolidator/verifier dispatches carry a cid, matching render-lanes)"
+else
+  fail "K311: render-filled cid-mint regressed at $K311_WHY"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

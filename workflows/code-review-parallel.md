@@ -93,9 +93,24 @@ Partition scope files into lanes. Community-first when graphify is enabled AND t
 ```bash
 SCOPE_FILES_PATH=".devt/state/code-review-input.md"
 if [ ! -f "$SCOPE_FILES_PATH" ]; then
-  echo "FALLBACK: code-review-input.md absent — routing to single-dispatch"
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
-  exit 0
+  # SEAM (P0): this workflow is only entered via delegation from
+  # code-review.md::scope_check, which runs BEFORE identify_scope writes
+  # code-review-input.md — so on a canonical FRESH parallel delegation the file
+  # is absent here. Silently routing to single-dispatch defeated the user's
+  # explicit parallel choice (field-confirmed: a 5-lane review silently ran as 1).
+  # Self-recover the scope from the SAME changed-files union scope_check used to
+  # decide parallel, LOUDLY — a silent fallback reads as "worked" when it didn't.
+  echo "⚠️  [partition_lanes] code-review-input.md ABSENT — scope artifact not written before parallel delegation (scope_check delegates before identify_scope). Self-recovering scope from the changed-files union instead of silently degrading to single-dispatch."
+  RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+  RECOVERED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
+  if [ -n "$RECOVERED" ]; then
+    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$RECOVERED" | sed 's/^/- /'; } > "$SCOPE_FILES_PATH"
+    echo "[partition_lanes] recovered $(printf '%s\n' "$RECOVERED" | /usr/bin/grep -cE '.') scope file(s) → proceeding with PARALLEL (not degrading to single-dispatch)."
+  else
+    echo "FALLBACK: code-review-input.md absent AND changed-files recovery empty — genuinely empty scope, routing to single-dispatch."
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
+    exit 0
+  fi
 fi
 
 # Read scope files (one path per line, skip blanks + comments)

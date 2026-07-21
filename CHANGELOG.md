@@ -8,6 +8,27 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.193.0] - 2026-07-21
+
+### Lightness pass (batch 1) — correctness + token trims from a second greenfield field run
+
+A second parallel-review field run surfaced a real structural bug and several cost-without-conversion mechanisms. This batch ships the confirmed, validated fixes; the design-fresh items (review-weight→offer, an interactive gate profile) are staged separately. Guiding frame: **a heavy pipeline that gets skipped or silently degraded is worse than a lighter one that runs** — weight is an adoption risk, not just a token cost. Drift-guard stack 217 → 219 deep (K94–K311).
+
+### Fixed
+
+- **Parallel `/devt:review` no longer silently degrades to single-dispatch (P0, K310).** On a *fresh* parallel delegation, `scope_check` delegated to `code-review-parallel.md` before `identify_scope` wrote `code-review-input.md` — so `partition_lanes` found the scope artifact absent and silently fell back to single-dispatch. The user asked for a 5-lane review and got 1, with no signal. `partition_lanes` now **self-recovers** the scope from the same `changed-files` union `scope_check` used to trigger parallel, writes the artifact, and proceeds **parallel** — **loudly** (a silent fallback reads as "worked" when it didn't). Only a genuinely empty scope falls back to single-dispatch.
+- **`augment-impact-map` truncation banner no longer emits a fabricated denominator or misattributed cap.** `TOPIC_SYMBOLS_RAW_COUNT` was never set by any substep (the `--raw-count` arg was always `unknown`), so the banner invented a denominator; it also credited the truncation to a "blast_radius 32-symbol cap" when 32 is *devt's own* pre-truncation topic cap (applied before `blast_radius` to keep args verbatim), not blast_radius's limit. The CLI now derives the true count from the authoritative source (`preflight-brief.json::topic.symbols`, falling back to kept+dropped) and names the cap correctly. A wrong number in a review artifact is worse than no number.
+
+### Changed
+
+- **claude-mem per-read suppression extended to `Bash` (`CLAUDE_MEM_SKIP_TOOLS`).** Field-confirmed that `Bash` tool calls also triggered claude-mem's per-read observation injection; the recommended skip list now includes it (parent-side). The dominant remaining cost — subagent-read inheritance flooding the parent context in a multi-lane review — is claude-mem-internal (upstream #3274/#3324), not devt-tunable.
+- **New seam contract-tests (K310, K311).** K310 locks the parallel scope self-recovery against regression; K311 locks the render-filled correlation_id mint (every rendered dispatch envelope carries a cid). CI-time drift-guards only — no runtime weight.
+
+### Retracted (validated as no-ops before building — no code shipped)
+
+- **Graphify activity telemetry "bug"** — the `mcp-stats --include-chain` `calls:"?"` was a consumer-side jq path error (`.aggregate.total_calls` is nested), not a devt defect. Capture + `--include-chain` union both work.
+- **render-filled correlation_id "gap"** — render-filled has minted a cid into every envelope since v0.169.0; the field `raw_dispatch` came from a hand-built consolidator dispatch that didn't paste the rendered output. Usage, not defect (K311 locks the existing behavior).
+
 ## [0.192.0] - 2026-07-21
 
 ### context_init ceremony-trim — orchestrator prose weight cut ~19% (T2)

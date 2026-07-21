@@ -1979,12 +1979,26 @@ function augmentImpactMap(opts = {}) {
   const dropped = readJson(droppedPath, null);
   if (Array.isArray(dropped) && dropped.length > 0) {
     const n = dropped.length;
+    // True pre-truncation denominator. The workflow's `--raw-count` arg was
+    // never plumbed (TOPIC_SYMBOLS_RAW_COUNT is unset → always "unknown"),
+    // which fabricated the denominator. Prefer an explicit numeric rawCount
+    // (test/hand-set); otherwise derive from the authoritative source — the
+    // same preflight-brief.json::topic.symbols list state.cjs truncated — or
+    // fall back to kept(32)+dropped. The 32 is devt's OWN pre-truncation topic
+    // cap (state.cjs, applied before blast_radius to keep args verbatim), NOT
+    // blast_radius's own symbol limit (256).
+    const TOPIC_CAP = 32;
+    const optsRawNum = (rawCount !== "?" && !isNaN(Number(rawCount))) ? Number(rawCount) : null;
+    const briefRaw = (brief && brief.topic && Array.isArray(brief.topic.symbols)) ? brief.topic.symbols.length : null;
+    const trueRaw = optsRawNum != null ? optsRawNum
+      : (briefRaw != null && briefRaw >= n + TOPIC_CAP) ? briefRaw
+      : (n + TOPIC_CAP);
     if (n > 5) {
-      const banner = `> **Subject symbols truncated**: ${n} of ${rawCount} extracted topic symbols were dropped by the MCP blast_radius 32-symbol cap. Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
+      const banner = `> **Subject symbols truncated**: ${n} of ${trueRaw} extracted topic symbols were dropped by devt's 32-symbol topic cap (applied before blast_radius to keep args verbatim). Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
       try { fs.writeFileSync(giPath, banner + (fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "")); appended.push("dropped_banner"); } catch { /* skip */ }
     }
     const rows = dropped.map(s => `- ${s}`);
-    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n} of the ${rawCount} extracted topic symbols were truncated by the MCP blast_radius 32-symbol cap. Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
+    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n} of the ${trueRaw} extracted topic symbols were truncated by devt's 32-symbol topic cap (applied before blast_radius to keep args verbatim). Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
   }
 
   // 4. Hyperedge completeness (partial-coverage groupings).
