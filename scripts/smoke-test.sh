@@ -2781,6 +2781,10 @@ echo "== init.cjs inline_guardrails plumbing (v0.32.0+) =="
 TMP_IG=$(mktemp -d)
 cd "$TMP_IG"
 mkdir -p .devt
+# guardrails_mode now defaults to by-reference (stubs); force inline here so this
+# gate verifies the full-content load path (the by-reference stub delivery is
+# covered by K314).
+printf '{"dispatch":{"guardrails_mode":"inline"}}' > .devt/config.json
 IG_OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "smoke-ig" 2>/dev/null || true)
 cd "$ROOT"
 rm -rf "$TMP_IG"
@@ -18480,17 +18484,17 @@ else
   fail "K313: scope-artifact pre-write regressed at $K313_WHY"
 fi
 
-# K314: guardrails_mode delivery gate — dispatch.guardrails_mode (default inline)
-# gates the ~25KB <guardrails_inline> block the same way rules_mode gates rule
-# bodies. Behavioral (render-filled programmer:dev on a fixture): default inlines
-# the guardrail body; --guardrails-by-reference AND config by-reference swap it
-# for a single-sourced read-from-disk stub; --inline-rules forces guardrails
+# K314: guardrails_mode delivery gate — dispatch.guardrails_mode (default
+# by-reference) gates the ~25KB <guardrails_inline> block the same way rules_mode
+# gates rule bodies. Behavioral (render-filled programmer:dev on a fixture):
+# default (+ --guardrails-by-reference + config by-reference) swaps the guardrail
+# body for a single-sourced read-from-disk stub; --inline-rules forces guardrails
 # inline for worktree lanes. Plus: the stub is single-sourced
 # (GUARDRAILS_BY_REFERENCE_STUB, consumed by dispatch.cjs) and tester+architect
 # DECLARE the guardrails_inline block they already render (present-but-undeclared
 # fix — the K206 gap).
 K314_OK=1; K314_MISS=""
-{ /usr/bin/grep -qF 'guardrails_mode: "inline"' "$ROOT/bin/modules/config.cjs" \
+{ /usr/bin/grep -qF 'guardrails_mode: "by-reference"' "$ROOT/bin/modules/config.cjs" \
   && /usr/bin/grep -qF 'GUARDRAILS_BY_REFERENCE_STUB' "$ROOT/bin/modules/init.cjs" \
   && /usr/bin/grep -qF 'GUARDRAILS_BY_REFERENCE_STUB(name)' "$ROOT/bin/modules/dispatch.cjs" \
   && /usr/bin/grep -qF 'options.guardrailsByReference !== undefined' "$ROOT/bin/modules/dispatch.cjs"; } || { K314_OK=0; K314_MISS="$K314_MISS wiring"; }
@@ -18505,8 +18509,8 @@ K314_INL=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-t
 printf '{"dispatch":{"guardrails_mode":"by-reference"}}' > "$K314_TMP/.devt/config.json"
 K314_CFG=$( (cd "$K314_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled programmer:dev 2>/dev/null) || true)
 rm -rf "$K314_TMP"
-{ printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_BODY" \
-  && ! printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_STUB"; } || { K314_OK=0; K314_MISS="$K314_MISS default-inline"; }
+{ printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_STUB" \
+  && ! printf '%s' "$K314_DEF" | /usr/bin/grep -qF "$K314_BODY"; } || { K314_OK=0; K314_MISS="$K314_MISS default-byref"; }
 { printf '%s' "$K314_BYREF" | /usr/bin/grep -qF "$K314_STUB" \
   && ! printf '%s' "$K314_BYREF" | /usr/bin/grep -qF "$K314_BODY"; } || { K314_OK=0; K314_MISS="$K314_MISS flag-byref"; }
 { printf '%s' "$K314_INL" | /usr/bin/grep -qF "$K314_BODY" \
@@ -18515,7 +18519,7 @@ printf '%s' "$K314_CFG" | /usr/bin/grep -qF "$K314_STUB" || { K314_OK=0; K314_MI
 K314_DECL=$(/usr/bin/grep -cF 'context_blocks: [governing_rules, guardrails_inline, agent_skills, task]' "$ROOT/agents/io-contracts.yaml" || true)
 [ "$K314_DECL" -ge 2 ] || { K314_OK=0; K314_MISS="$K314_MISS io-declare($K314_DECL)"; }
 if [ "$K314_OK" -eq 1 ]; then
-  pass "K314: guardrails_mode delivery gate (default-inline behavioral, --guardrails-by-reference + config stub, --inline-rules forces inline, single-sourced stub, tester+architect declare guardrails_inline)"
+  pass "K314: guardrails_mode delivery gate (default-by-reference behavioral, --guardrails-by-reference + config stub, --inline-rules forces inline, single-sourced stub, tester+architect declare guardrails_inline)"
 else
   fail "K314: guardrails_mode surface regressed:$K314_MISS"
 fi
@@ -18591,6 +18595,37 @@ if [ "$K316_OK" -eq 1 ]; then
   pass "K316: composite verbs (post-dispatch-check 4-action routing; finalize-gates aggregate→single-sourced phase-gate registry with nonzero exit on block)"
 else
   fail "K316: composite verb surface regressed:$K316_MISS"
+fi
+
+# K317: greenfield field-report fixes — three code-verified fixes.
+# (#1) No workflow hardcodes ${PRIMARY_BRANCH:-main} — the pattern that mis-based
+# review/dev scope to literal "main" on non-main-default repos. The CLIs already
+# default --base to config.git.primary_branch, so workflows pass the flag only
+# when PRIMARY_BRANCH is explicitly set (${PRIMARY_BRANCH:+--base=...}).
+# (#2) graphify symbolsInFiles drops whitespace-bearing labels (docstring
+# pseudo-nodes) before they reach impact-plan args.symbols, with a
+# docstring_filtered counter — whitespace, NOT a length cap (real long test
+# names exceed 64 chars). (#3) register-lane stamps a deterministic
+# correlation_id (cid_<wfPrefix>_<lane>) surfaced by list-lane-outputs so the
+# stale-lane cid_match filter works immediately after registration.
+K317_OK=1; K317_MISS=""
+K317_HC=$(node -e 'const fs=require("fs"),p=require("path");let n=0;for(const f of fs.readdirSync("workflows").filter(x=>x.endsWith(".md")))n+=(fs.readFileSync(p.join("workflows",f),"utf8").match(/PRIMARY_BRANCH:-main/g)||[]).length;process.stdout.write(String(n));')
+[ "$K317_HC" = "0" ] || { K317_OK=0; K317_MISS="$K317_MISS pb-hardcoded($K317_HC)"; }
+/usr/bin/grep -qF 'PRIMARY_BRANCH:+--base' "$ROOT/workflows/code-review.md" || { K317_OK=0; K317_MISS="$K317_MISS pb-fix-missing"; }
+{ /usr/bin/grep -qF 'docstringFilteredCount' "$ROOT/bin/modules/graphify.cjs" \
+  && /usr/bin/grep -qF 'docstring_filtered:' "$ROOT/bin/modules/graphify.cjs"; } || { K317_OK=0; K317_MISS="$K317_MISS docstring-filter"; }
+K317_TMP=$(mktemp -d)
+( cd "$K317_TMP" && git init -q && git config user.email t@t.co && git config user.name t \
+  && mkdir -p .devt/state app && echo x > app/a.py && git add -A && git commit -qm init >/dev/null 2>&1 \
+  && printf 'active: true\nworkflow_id: "abcd1234-56"\nworkflow_type: "code_review"\ncreated_at: "2026-07-18T08:00:00Z"\nfirst_created_at: "2026-07-18T08:00:00Z"\n' > .devt/state/workflow.yaml \
+  && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=identity --files=app/a.py >/dev/null 2>&1 )
+K317_CID=$( (cd "$K317_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null) | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);const l=(o.lanes||[])[0]||{};process.stdout.write((l.correlation_id||"")+"|"+(l.cid_match||""));}catch{process.stdout.write("ERR");}})')
+rm -rf "$K317_TMP"
+[ "$K317_CID" = "cid_abcd1234_L1|current" ] || { K317_OK=0; K317_MISS="$K317_MISS cid-stamp($K317_CID)"; }
+if [ "$K317_OK" -eq 1 ]; then
+  pass "K317: field-report fixes (no hardcoded-main scope base → config default; docstring whitespace filter + telemetry; register-lane cid stamped + surfaced for the stale-lane filter)"
+else
+  fail "K317: field-report fix surface regressed:$K317_MISS"
 fi
 
 echo

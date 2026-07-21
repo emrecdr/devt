@@ -151,7 +151,7 @@ Before any step, initialize the workflow:
 Run the compound context-init wrapper ONCE. It performs `init workflow`, activates the workflow (`active=true workflow_type=dev phase=context_init`), runs `preflight generate` (Topic Pre-Flight Brief), computes + caches `memory_signal` / `scope_hint` / `scope_trust`, and evicts stale Graphify artifacts — collapsing what were ~6 sequential data-gathering CLI round-trips into one. Capture the JSON bundle into `CTX`:
 
 ```bash
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=dev --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=dev --scope="${TASK_DESCRIPTION}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
 PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
   echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"

@@ -2637,6 +2637,7 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
   const HUNK_SLACK = 5;   // decorators/multi-line def signatures above the def line
   const seen = new Set(); // dedup by symbol label (blast_radius args are names)
   let hunkFilteredCount = 0;
+  let docstringFilteredCount = 0;
   const results = [];
   for (const [id, node] of nodeMap) {
     const sf = node && node.source_file;
@@ -2663,6 +2664,13 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
       }
     }
     const label = node.label || id;
+    // Identifier-shape gate — a docstring pseudo-node carries a real source_file
+    // (so _isConceptNode / _isFileNode miss it) but a prose label with spaces
+    // ("Align linked clients' organization to their license's… Bul"). A real
+    // identifier never contains whitespace, so drop on that — NOT a length cap
+    // (legitimate long test names exceed 64/80 chars). Field-evidenced leak into
+    // impact-plan args.symbols.
+    if (/\s/.test(label)) { docstringFilteredCount++; continue; }
     if (seen.has(label)) continue;   // dedup (fixes EventBusDep-twice)
     seen.add(label);
     results.push({
@@ -2747,7 +2755,7 @@ function symbolsInFiles(diffFiles, limit = 10, opts = {}) {
   } else {
     reason = totalMatches > cap ? `truncated to limit=${cap} of ${totalMatches} total matches` : "ok";
   }
-  const envelope = { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches };
+  const envelope = { symbols, reason, graph_lag_commits: lagCommits, total_matches: totalMatches, docstring_filtered: docstringFilteredCount };
   // matched_files: normalized graph source_file paths that suffix-matched a
   // diff file. Consumed by computeGraphifyImpactPlan to reconcile the
   // "N files not indexed" caveat against reality (a diff file is genuinely

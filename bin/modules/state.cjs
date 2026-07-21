@@ -6995,6 +6995,7 @@ function listLaneOutputs() {
     const sizeClass = (block.match(/^\s+size_class:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
     const sizeBasis = (block.match(/^\s+size_basis:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
     const diffArtifact = (block.match(/^\s+diff_artifact:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
+    const correlationId = (block.match(/^\s+correlation_id:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
     if (!id) continue;
     let sizeBytes = 0;
     let exists = false;
@@ -7044,6 +7045,19 @@ function listLaneOutputs() {
       } catch { /* read error — leave as "absent" */ }
     }
 
+    // Registration-cid fallback: before a reviewer echoes the cid into the
+    // review file, fall back to the deterministic cid stamped at register-lanes
+    // so trace-back + the stale-lane filter (cid_match != "foreign") work
+    // immediately after registration, not only after a reviewer runs.
+    if (cidMatch === "absent" && correlationId) {
+      const rm = correlationId.match(/cid_([0-9a-f]{8})/);
+      if (rm) {
+        cidPrefix = cidPrefix || rm[1];
+        const mtimeOk = (exists && anchorMs > 0) ? mtimeMs >= anchorMs : true;
+        cidMatch = (chain.prefixes.has(rm[1]) && mtimeOk) ? "current" : "foreign";
+      }
+    }
+
     lanes.push({
       id: id ? id.trim() : null,
       community: community ? community.trim() : null,
@@ -7060,6 +7074,7 @@ function listLaneOutputs() {
       stale,
       cid_match: cidMatch,
       cid_prefix: cidPrefix,
+      correlation_id: correlationId,
     });
   }
   return { lanes };
@@ -7259,6 +7274,12 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       size_class: sizeClass,
       repo_root: laneRepoRoot,
       base_ref: laneBaseRef,
+      // Correlation id stamped at REGISTRATION — fully determined here
+      // (workflow_id + lane id), matching render-lanes' cid_<wfPrefix>_<id>.
+      // Without it the consolidate step's cid_match!="foreign" stale-lane filter
+      // can't function (the cid was null until a reviewer echoed it into the
+      // review file), and callers had to hand-roll their own cid.
+      correlation_id: `cid_${String(state.workflow_id || "noworkflow").split("-")[0]}_${id}`,
     };
     if (diff.ok) laneEntry.diff_artifact = diff.artifact;
     if (diff.ok && diff.diff_lines !== estLoc) laneEntry.diff_lines_raw = diff.diff_lines;

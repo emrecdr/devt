@@ -426,10 +426,11 @@ const DEFAULTS = {
     // guardrails_mode gates the ~25KB <guardrails_inline> block (golden-rules +
     // engineering-principles + generative-debt-checklist) the same way: "by-
     // reference" swaps the bodies for read-from-disk stubs, "inline" keeps them.
-    // Defaults to inline (unlike rules/rubric) — the fixed guardrail set was
-    // inlined everywhere historically; the flip to by-reference is staged behind
-    // field measurement. --inline-rules forces inline for worktree dispatches.
-    guardrails_mode: "inline",
+    // Defaults to by-reference (matching rules/rubric) — measured ~6.1K tok saved
+    // per programmer dispatch, ~3.9K reviewer, ~3.3K tester, on the same proven
+    // stub mechanism (the guardrails stub directs an unconditional disk read).
+    // --inline-rules forces inline for worktree-isolated dispatches.
+    guardrails_mode: "by-reference",
   },
   // State ring buffer — `state reset` archives prior artifacts to
   // `.devt/state/.archive/<timestamp>/` instead of unlinking them. Prior debug

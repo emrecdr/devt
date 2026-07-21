@@ -29,7 +29,7 @@ Before dispatching the researcher agent, read `resolved_skills.researcher` from 
 ## Step 1: Initialize
 
 ```bash
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=research --scope="${TASK_DESCRIPTION}" --primary-branch="${PRIMARY_BRANCH:-main}")
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state workflow-context-init --workflow-type=research --scope="${TASK_DESCRIPTION}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
 PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
   echo "BLOCKED: compound init failed — workflow-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
@@ -47,7 +47,7 @@ The wrapper performs `init workflow`, activates the workflow (`workflow_type=res
 
 `state evict-graphify` clears stale `graph-impact.md` + related MCP-response artifacts so this research session doesn't inherit a different topic's blast radius. **Note**: `graphify-impact-plan.json` is **NOT** evicted — it carries the args+tier audit trail and survives `state reset` via RESET_EXEMPT.
 
-**Staleness gate** — When `$CTX.staleness_tier ∈ {stale, unknown_lag}` (`staleness.lag_commits > graphify.stale_threshold`, OR `graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate.
+**Staleness gate** — When `$CTX.staleness_tier ∈ {stale, unknown_lag}` (`staleness.lag_commits > graphify.stale_threshold`, OR `graph_stats.state` is `ready` AND `staleness.lag_commits` is `null`), prompt the user via AskUserQuestion BEFORE the researcher dispatch: "Graphify graph is {lag_commits ?? 'unknown'} commits behind HEAD; codebase patterns may be stale. Refresh now?" Options: **Refresh (recommended)** — pause for `graphify update .`, re-run preflight, continue; **Proceed with stale graph** — continue with `scope_trust.fresh=false`; **Cancel** — STOP with BLOCKED. In autonomous mode, force `scope_trust.trust="sparse"` and proceed. Skip only when graphify is disabled — a null `lag_commits` while `state=ready` (e.g., unreachable SHA, shallow clone) now triggers the prompt instead of silently disabling the gate. **Silent-warn band** — when `$CTX.staleness_tier == warn` (`0 < staleness.lag_commits < graphify.stale_threshold`, behind HEAD but within tolerance), do NOT prompt: emit a one-line `[staleness] graph is {lag_commits} commits behind HEAD; codebase patterns may be slightly stale (lag<threshold)` note and continue, matching `/devt:review`'s tiered `warn` tier.
 
 **Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar. Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
 

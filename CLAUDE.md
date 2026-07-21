@@ -222,7 +222,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 - Shadow-mode state validation persists `validation_status` to `workflow.yaml`. → docs/INTERNALS.md (Shadow-mode State Validation).
 - `autonomous_chain` enables cross-workflow chaining (implement → test → review). → docs/INTERNALS.md (Autonomous Chaining).
 - Parallel researcher + arch_health dispatch in COMPLEX dev flows (one message, two `Task` calls). → docs/INTERNALS.md (Parallel Researcher + arch_health Dispatch).
-- Inline guardrails wiring — `loadInlineGuardrails` injects `<guardrails_inline>` into programmer, code-reviewer, tester, and architect dispatches (64 KB cap); `dispatch.guardrails_mode` (default `inline`) swaps the bodies for single-sourced read-from-disk stubs when set to `by-reference`, mirroring `rules_mode`. → docs/INTERNALS.md (Inline Guardrails Wiring).
+- Inline guardrails wiring — `loadInlineGuardrails` injects `<guardrails_inline>` into programmer, code-reviewer, tester, and architect dispatches (64 KB cap); `dispatch.guardrails_mode` (default `by-reference`, matching rules/rubric) swaps the bodies for single-sourced read-from-disk stubs; `--inline-rules` restores inline for worktree-isolated dispatches. → docs/INTERNALS.md (Inline Guardrails Wiring).
 - Governing rules wiring — `loadGoverningRules` injects `<governing_rules>` into code-reviewer + verifier + researcher dispatches (96 KB cap, drift detection via `rules_hash`). → docs/INTERNALS.md (Governing Rules Wiring).
 - `state validate` subcommand checks artifact consistency + content-schema. → docs/INTERNALS.md (State Validate Subcommand).
 - Deferred-task tracker (`/devt:defer`, `.devt/state/deferred.md`, `DEF-NNN`, RESET_EXEMPT). → docs/INTERNALS.md (Deferred-Task Tracker).

@@ -102,7 +102,7 @@ if [ ! -f "$SCOPE_FILES_PATH" ]; then
   # decide parallel, LOUDLY — a silent fallback reads as "worked" when it didn't.
   echo "⚠️  [partition_lanes] code-review-input.md ABSENT — scope artifact not written before parallel delegation (scope_check delegates before identify_scope). Self-recovering scope from the changed-files union instead of silently degrading to single-dispatch."
   RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-  RECOVERED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
+  RECOVERED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
   if [ -n "$RECOVERED" ]; then
     { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$RECOVERED" | sed 's/^/- /'; } > "$SCOPE_FILES_PATH"
     echo "[partition_lanes] recovered $(printf '%s\n' "$RECOVERED" | /usr/bin/grep -cE '.') scope file(s) → proceeding with PARALLEL (not degrading to single-dispatch)."

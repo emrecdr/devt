@@ -98,7 +98,7 @@ If `IS_STALE=0`: continue to substep 1 silently (no prompt, no overhead).
 Run the compound context-init wrapper ONCE. It performs `init review`, activates the workflow (`active=true workflow_type=code_review phase=context_init`), runs `preflight generate` (Topic Pre-Flight Brief), computes + caches `memory_signal` / `scope_hint` / `scope_trust` / `god_node_warnings`, evicts stale Graphify artifacts, and computes the Graphify impact-plan — collapsing what were ~8 sequential CLI round-trips into one. It is read-only of prior-phase artifacts (does NOT reset `.devt/state/`; substep 0 handled the on-demand soft-reset for stale workflows), so a legitimate resumed review keeps its artifacts.
 
 ```bash
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" --primary-branch="${PRIMARY_BRANCH:-main}")
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
 PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
   echo "BLOCKED: compound init failed — review-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
@@ -265,14 +265,21 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
 RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
 RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
-RW_ARGS="--base=${PRIMARY_BRANCH:-main}"
+RW_ARGS="${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH}"
 RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
 [ -n "$RANGE" ] && RW_ARGS="$RW_ARGS --range=$RANGE"
 [ -n "$RW_TIER" ]   && RW_ARGS="$RW_ARGS --tier=$RW_TIER"
 [ -n "$RW_GOD" ]    && RW_ARGS="$RW_ARGS --god-node=$RW_GOD"
 [ -n "$RW_EFFECT" ] && RW_ARGS="$RW_ARGS --effect-size=$RW_EFFECT"
 RW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight assess $RW_ARGS 2>/dev/null || echo '{}')
-if [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
+# Thoroughness-intent suppression: if the task text asks for a detailed / deep /
+# audit / cascade review, do NOT suggest --lite even when the diff is
+# light-eligible — honoring stated intent (same signal class the parallel
+# short-circuit reads). The operator can still pass --lite explicitly.
+THOROUGH_INTENT=$(echo " ${REVIEW_SCOPE:-} ${ARGUMENTS:-} " | /usr/bin/grep -oiE 'detailed|thorough|in-depth|deep.?dive|comprehensive|audit|all (possible )?(cascade|effect)' | head -1)
+if [ -n "$THOROUGH_INTENT" ] && [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
+  echo "[review-weight] LIGHT suggestion suppressed — task text signals thoroughness ('${THOROUGH_INTENT}'); keeping the heavy path. Pass --lite explicitly to override."
+elif [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
   echo "[review-weight] LIGHT-eligible — $(printf '%s\n' "$RW" | jq -r '.logic_file_count') logic file(s), $(printf '%s\n' "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
 else
   if printf '%s\n' "$RW" | jq -r '(.blocked_by // []) | join("; ")' | /usr/bin/grep -q "scope unresolvable"; then
@@ -308,7 +315,7 @@ RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=
 if [ -s .devt/state/code-review-input.md ]; then
   SCOPE_FILE_COUNT=$(awk '/^- /{n++} END{print n+0}' .devt/state/code-review-input.md 2>/dev/null || echo 0)
 else
-  SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} | jq -r '.count // 0')
+  SCOPE_FILE_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} | jq -r '.count // 0')
 fi
 GRAPHIFY_STATE=$(jq -r '.graph_stats.state // "not_ready"' .devt/state/preflight-brief.json 2>/dev/null || echo "not_ready")
 
@@ -322,7 +329,7 @@ if [ -n "$RANGE" ]; then
   # untracked contribution (they are not part of the range under review).
   DIFF_LOC=$({ git diff --numstat $RANGE 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
 else
-  MB=$(git merge-base HEAD "${PRIMARY_BRANCH:-main}" 2>/dev/null || echo HEAD)
+  MB=$(git merge-base HEAD "${PRIMARY_BRANCH:-$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" config get git.primary_branch 2>/dev/null | jq -r '.value // "main"')}" 2>/dev/null || echo HEAD)
   DIFF_LOC=$({ git diff --numstat "$MB" 2>/dev/null || true; } | awk '{s+=$1+$2} END{print s+0}')
   UNTRACKED_LOC=$({ git ls-files --others --exclude-standard 2>/dev/null || true; } | while IFS= read -r f; do [ -f "$f" ] && wc -l < "$f"; done | awk '{s+=$1} END{print s+0}')
   DIFF_LOC=$((DIFF_LOC + UNTRACKED_LOC))
@@ -369,7 +376,7 @@ If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECI
 
 ```bash
 # Domain spread — the value-side variable. Top-2 path segments of the scope files.
-DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" | jq -r '.files[]' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | wc -l | tr -d ' ')
+DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} | jq -r '.files[]' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | wc -l | tr -d ' ')
 EXPECTED_LANES=$(( DOMAIN_COUNT < 5 ? DOMAIN_COUNT : 5 ))
 echo "[scope_check] cost/value preview: single-dispatch ≈ 1 reviewer + 1-2 verify rounds; parallel ≈ ${EXPECTED_LANES} lanes + consolidator + 1-3 verify rounds (field-measured: a 5-lane run with 3 verify rounds cost roughly 6-8x a single dispatch). Value side: scope spans ${DOMAIN_COUNT} domain(s) at ${DIFF_LOC} changed lines — single-dispatch coverage-confidence drops as attention spreads past ~15 files / 3+ domains, and finding rates scale with diff mass; cross-cutting findings need reconciliation only parallel lanes surface independently."
 ```
@@ -400,7 +407,7 @@ If user picks YES (parallel): **first pre-write the scope artifact, THEN delegat
 ```bash
 if [ ! -s .devt/state/code-review-input.md ]; then
   RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-  PARALLEL_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
+  PARALLEL_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
   if [ -n "$PARALLEL_SCOPE" ]; then
     { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; } > .devt/state/code-review-input.md
     echo "[scope_check] pre-wrote code-review-input.md ($(printf '%s\n' "$PARALLEL_SCOPE" | /usr/bin/grep -cE '.') files) before parallel delegation"
@@ -434,7 +441,7 @@ Determine which files to review. Use ONE of these strategies (in priority order)
 1. **User-specified files**: If the user provided specific file paths or patterns, use those.
 2. **Git diff**: If no files were specified, detect changed files via the union CLI — committed range (merge-base-aware triple-dot) PLUS working tree PLUS untracked. Raw `git diff base...HEAD` returns an EMPTY set exactly when the review target is uncommitted work, silently under-scoping the review:
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} | jq -r '.files[]'
+   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} | jq -r '.files[]'
    ```
    When the task text carries `--range=<a>..<b>` (merged-PR / historical-range review), re-derive it in this block with the same one-liner scope_check uses — range mode diffs exactly that range and excludes working-tree/untracked files. Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review; without the flag the CLI defaults to `.devt/config.json::git.primary_branch`, then `main`.
 3. **Impl-summary**: If `.devt/state/impl-summary.md` exists from a prior workflow, extract the file list from it.
