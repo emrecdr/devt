@@ -781,13 +781,12 @@ function initWorkflow(task, pluginRoot, initVerb) {
     inline_guardrails: (() => {
       const r = loadInlineGuardrails(pluginRoot);
       warnings.push(...r.warnings);
-      // Mirror governing_rules: dispatch.guardrails_mode (default inline)
+      // Mirror governing_rules: dispatch.guardrails_mode (default by-reference)
       // decides whether the compound payload carries full guardrail bodies or
       // per-file read-from-disk stubs. By-reference keeps ~25KB of a fixed,
       // dispatch-invariant rule set out of the orchestrator's fill context; the
-      // consumer Reads them once. Default stays inline until field measurement
-      // supports flipping it (mirrors how rules_mode shipped).
-      const byRef = ((config.dispatch || {}).guardrails_mode || "inline") === "by-reference";
+      // consumer Reads them once. Inline stays available as a config escape.
+      const byRef = ((config.dispatch || {}).guardrails_mode || "by-reference") !== "inline";
       if (!byRef || !r.content) return r.content;
       return Object.fromEntries(
         Object.keys(r.content).map((name) => [name, GUARDRAILS_BY_REFERENCE_STUB(name)])

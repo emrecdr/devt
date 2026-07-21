@@ -15,14 +15,14 @@ if [[ -z "$INPUT" ]]; then
 fi
 
 # Single node call: parse input, check file exists, emit advisory if needed
-node -e "
+printf '%s' "$INPUT" | node -e "
   const fs = require('fs');
   try {
-    const d = JSON.parse(process.argv[1]);
+    const d = JSON.parse(fs.readFileSync(0, 'utf8'));
     const fp = (d.tool_input || {}).file_path || '';
     if (!fp || !fs.existsSync(fp)) process.exit(0);
     const name = require('path').basename(fp);
     const ctx = 'Reminder: if \"' + name + '\" has not been Read in this session, Read it first — the runtime requires it before Edit.';
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: ctx } }));
   } catch { process.exit(0); }
-" "$INPUT" 2>/dev/null
+" 2>/dev/null

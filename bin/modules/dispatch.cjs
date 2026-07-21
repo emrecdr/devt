@@ -565,11 +565,12 @@ function cmdRenderFilled(target, options) {
   const rubricByRef = options && options.rubricByReference !== undefined
     ? !!options.rubricByReference
     : (modeCfg.rubric_mode || "by-reference") !== "inline";
-  // guardrails_mode defaults to inline (not by-reference) — the fixed guardrail
-  // set was inlined everywhere historically; opt-in until field-measured.
+  // guardrails_mode mirrors rules/rubric: by-reference by default (the fixed,
+  // dispatch-invariant guardrail set Reads from disk once instead of riding
+  // ~25KB inline in every fill). Inline stays available as a config escape.
   const guardrailsByRef = options && options.guardrailsByReference !== undefined
     ? !!options.guardrailsByReference
-    : (modeCfg.guardrails_mode || "inline") === "by-reference";
+    : (modeCfg.guardrails_mode || "by-reference") !== "inline";
   const subs = buildSubstitutionTable(agent, { inlineByteCap: !rulesByRef });
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content

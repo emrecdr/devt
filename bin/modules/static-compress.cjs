@@ -291,7 +291,12 @@ function _compressPluginFile(absPath) {
 // `git checkout`.
 function compressPluginBuild(opts) {
   opts = opts || {};
-  const pluginRoot = path.resolve(__dirname, "..", "..");
+  // opts.root override points the compressor at a caller-supplied tree (the
+  // smoke suite passes a mktemp COPY of guardrails/ + skills/ so a test run can
+  // never mutate the live plugin corpus — the git-checkout cleanup the gate
+  // used to rely on silently no-ops in a git-less checkout). Defaults to the
+  // real plugin root for the maintainer's release-build use.
+  const pluginRoot = opts.root ? path.resolve(opts.root) : path.resolve(__dirname, "..", "..");
   const surfaces = [
     path.join(pluginRoot, "guardrails"),
     path.join(pluginRoot, "skills"),
@@ -497,8 +502,9 @@ function run(_subcommand, args) {
   const bulk = args.includes("--all");
   const pluginBuild = args.includes("--plugin-build");
   const allowDirty = args.includes("--allow-dirty");
+  const rootArg = args.find(a => a.startsWith("--root="));
   if (pluginBuild) {
-    const result = compressPluginBuild({ allowDirty });
+    const result = compressPluginBuild({ allowDirty, root: rootArg ? rootArg.slice("--root=".length) : undefined });
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     return result.ok ? 0 : 1;
   }

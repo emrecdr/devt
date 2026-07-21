@@ -8,6 +8,25 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.199.0] - 2026-07-22
+
+### Smoke-suite corpus safety (K84 hermetic + corpus-integrity gate)
+
+An external post-0198 verification pass reproduced a silent-corruption class: the K84 smoke gate compressed the *live* `guardrails/` + `skills/` corpus in place and relied on `git checkout` to undo it. That cleanup is a no-op in a git-less checkout (archive install, shallow / no-`.git` tree), so a smoke run there left the REJ-001 prose-shrink transformation **permanent** — 21 files / ~6,982 bytes altered (article-stripped skill descriptions and guardrail bodies) — while the suite stayed green. Real CI checks out with `.git`, so cleanup fired there; the hazard was specifically git-less installs.
+
+### Fixed
+
+- **K84 is now hermetic — the live corpus is never a test subject.** The gate copies `guardrails/` + `skills/` into a `mktemp` fixture and points the compressor at it via a new `--plugin-build --root=<dir>` override (`compressPluginBuild` gained an `opts.root`, ~5 lines), following the K77/K81 fixture pattern. All `git diff` / `git checkout` / patch-restore logic is gone — the compressor *cannot* reach the working tree because it never receives its path. A new hermeticity assertion confirms the compressor reported the fixture (not the repo root) as `plugin_root`.
+- **`read-before-edit-guard.sh` reads hook input from stdin, not `process.argv`.** The 8th and last hook still passing the JSON payload on argv — a large payload could hit `E2BIG` and silently skip the guard. Now `printf '%s' "$INPUT" | node -e "… fs.readFileSync(0,'utf8') …"`, matching the other seven hooks hardened earlier.
+
+### Added
+
+- **KCORPUS corpus-integrity gate.** A whole-corpus sha256 of `guardrails/` + `skills/` is captured before any gate runs and asserted byte-identical at suite end. This is the tripwire for the *entire* in-place-mutation class — independent of which pinned phrase a content-grep gate happens to watch (only 1 of the pinned-phrase gates could have caught the article-stripping) and independent of which gate causes the mutation, present or future. Belt to K84's suspenders; degrades safe (absent `shasum` → empty digests → no-op).
+
+### Changed
+
+- **`guardrails_mode` config-absent fallback aligned `inline` → `by-reference`.** The authoritative default has lived in `config.cjs` DEFAULTS as `by-reference` since the measured flip, but the secondary fallbacks in `dispatch.cjs` and `init.cjs` (fired only on a total config-read failure) still read `|| "inline"` — so a degraded path silently reverted guardrails to the *expensive* inline mode, the opposite of the intended default. Both now read `|| "by-reference"` and use the same `!== "inline"` idiom as `rules_mode` / `rubric_mode`, and the stale "defaults to inline / opt-in until field-measured" comments are corrected to match reality.
+
 ## [0.198.1] - 2026-07-21
 
 ### Fixed
@@ -661,19 +680,3 @@ Four-agent research sweep (official FastAPI docs + release timeline, community p
 - **HURL 8 notes** in hurl-reference: RFC 9535 JSONPath engine, removed multiline-string attributes, secrets redaction (`--secrets-file`), parallel-by-default `--test` mode vs ordered chains.
 - **De-contamination sweep**: field-project domain vocabulary in generic examples (ownership table, HURL domain map + foundation chain, changelog example rows, scope table, service-name lists, circular-dep examples) replaced with generic Users/Orders/Catalog/Billing/Notifications shapes.
 - Gate **K271** (template currency: pydantic-patterns present + PyJWT/pwdlib + FAST/ASYNC wiring + trap kit + pytest-asyncio idiom). Drift-guard stack 177 → 178 deep (K94–K271).
-
-## [0.163.0] - 2026-07-15
-
-### Fourth field receipt, lane ergonomics: diff-first lanes + un-droppable consolidator contract
-
-The same six-lane field run's ergonomic layer, design-locked by the reporter's measured answers: lane sizing measured the wrong quantity (whole-file LOC fired "oversized" on all six lanes — 14K–69K against an 800 threshold, zero signal — while diff sizes of 872–7,937 lines were what actually predicted budget), the mitigation that made lanes land (hand-generated per-lane diff artifacts, diff-read-FIRST method) wasn't a workflow capability, cross-repo lanes had to fake it with absolute paths, and the consolidator's synthesis contract silently didn't activate under a customized prompt.
-
-- **Diff-LOC lane sizing + first-class lane-diff artifacts.** `register-lane` now generates `.devt/state/lane-diff-<id>.txt` (merge-base diff of the lane's files: committed + working tree + untracked) and sizes the lane on its line count: `size_class` ok < 3,000 / chunked ≥ 3,000 / split ≥ 8,000 — thresholds calibrated from the field run's measured lanes (≤~3,000 needed nothing; 7,937 landed with chunking). Whole-file fallback (no usable git context) claims `size_class: unknown` instead of a fake verdict. The 15-file trigger is gone (16–19-file lanes were all fine).
-- **Diff-first review method, auto-injected.** `render-lanes` adds `<lane_diff>` + `<lane_method>` ("the diff IS the change under review; full files only for context around changed hunks") to every lane envelope with an artifact; `chunked`/`split` lanes additionally get the hunk-enumeration read strategy. Only `split` lanes interrupt the operator — `chunked` is handled by the envelope.
-- **Per-lane (repo_root, base_ref).** Lane registration accepts a repository root + diff base per lane — sizing and the diff artifact are computed in that repo. Covers the sibling-repo lane (frontend repo with `base=main` reviewed alongside an API repo on `base=development`) that previously required hand-rolling everything.
-- **Auto-partitioner routes through register-lanes.** The community-partition step no longer hand-builds a lanes YAML splice with its own (whole-file) sizing — one sizing implementation, lane-files sidecars + diff artifacts now exist for BOTH partition paths, and the fixed `/tmp` block file (a concurrent-session collision hazard) is gone.
-- **Structural synthesis trigger.** The consolidator contract (including the `consolidator-ran.txt` marker, step 0) previously activated on a literal opening phrase — a near-verbatim custom prompt ("the 6" for "the N") skipped it silently. It now triggers on the `<lane_files>`-of-review-lane-artifacts structure, regardless of task phrasing.
-- **Paste-ready consolidator envelope.** `dispatch render-filled code-reviewer:code_review_parallel` now pre-fills `{lane_files_newline_separated}` from the lane registry (terminal lanes, foreign cids excluded — the consolidate step's exact filter) and `--notes-file` injects `<orchestrator_notes>` (cross-lane reconciliation directives, validation evidence) — the three field-reported reasons for hand-rolling (unknown trigger, no advertised render path, no customization slot) each get a mechanical answer. The consolidate + dispatch discoverability tips now name both render CLIs explicitly.
-- `lane-diff-*.txt` added to the state-file contract (pattern-allowed) and to `reset-soft` eviction (a stale diff read as "the change under review" is silent-wrong-input).
-- Gates **K267–K270** (diff sizing behavioral incl. untracked + fallback, diff-first injection, consolidator render behavioral, structural trigger + single-source partition) + **K27 recalibrated** (size_class/size_basis/diff_artifact surface; legacy lanes report null, never a fake class). Drift-guard stack 173 → 177 deep (K94–K270).
-
