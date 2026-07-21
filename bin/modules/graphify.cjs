@@ -1896,21 +1896,22 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   const loaded = loadGraph();
   if (!loaded.ok) return [];
   const { nodeMap, inc, out } = loaded.cache.adj;
-  // file basename → top match (deterministic dedup so absolute/relative paths
-  // collapse to the same file row). We match on basename to handle the common
-  // case where diff entries are relative paths but graph source_file is
-  // absolute (or vice versa).
-  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
-  const perFile = new Map(); // basename -> { max_edges, top_symbol, file }
+  // Match god-node source_files against diff files by path SUFFIX (segment
+  // boundary via _pathSuffixMatch), NOT basename. Basename matching pulled the
+  // top symbol from EVERY same-named file across the repo — in a service-oriented
+  // layout (dozens of service.py / routes.py / models.py / dto.py) a diff of a
+  // few files produced an 85-line god-node list, ~all outside the diff (field-
+  // confirmed). _pathSuffixMatch handles the relative/absolute rooting variance
+  // basename was meant to paper over, without the same-name over-match.
+  const perFile = new Map(); // normalized source_file → { max_edges, top_symbol, file }
   for (const [id, node] of nodeMap) {
     const sf = node && node.source_file;
-    if (!sf) continue;
-    const bn = path.basename(sf);
-    if (!wantBasenames.has(bn)) continue;
+    if (!sf || !diffFiles.some(df => _pathSuffixMatch(sf, df))) continue;
+    const key = _normPath(sf);
     const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
-    const cur = perFile.get(bn);
+    const cur = perFile.get(key);
     if (!cur || degree > cur.max_edges) {
-      perFile.set(bn, { file: sf, max_edges: degree, top_symbol: node.label || id });
+      perFile.set(key, { file: sf, max_edges: degree, top_symbol: node.label || id });
     }
   }
   const out_ = [];
@@ -2901,11 +2902,12 @@ function checkSymbolLevelGodNodes(diffFiles, edgeThreshold = 50) {
   const loaded = loadGraph();
   if (!loaded.ok) return [];
   const { nodeMap, inc, out } = loaded.cache.adj;
-  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  // Path-SUFFIX match, not basename (see checkLargeFilesGodNodes) — basename
+  // matched god-node symbols in every same-named file across the repo.
   const results = [];
   for (const [id, node] of nodeMap) {
     const sf = node && node.source_file;
-    if (!sf || !wantBasenames.has(path.basename(sf))) continue;
+    if (!sf || !diffFiles.some(df => _pathSuffixMatch(sf, df))) continue;
     const degree = (inc.get(id) || []).length + (out.get(id) || []).length;
     if (degree < edgeThreshold) continue;
     if (_isFileNode(node, degree)) continue;

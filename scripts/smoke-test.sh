@@ -18445,6 +18445,29 @@ else
   fail "K311: render-filled cid-mint regressed at $K311_WHY"
 fi
 
+# K312: god-node checks match diff files by path SUFFIX, not basename (field:
+# an 85-line god-node list bloated with same-basename files from OTHER services
+# — every service.py/routes.py/models.py in the repo). Hermetic: two service.py
+# in different dirs, both god-nodes; a diff touching ONE must report only that
+# one. Locks checkLargeFilesGodNodes/checkSymbolLevelGodNodes on _pathSuffixMatch.
+K312_T=$(mktemp -d); mkdir -p "$K312_T/.devt/state" "$K312_T/graphify-out"
+printf '{"graphify":{"enabled":true}}' > "$K312_T/.devt/config.json"
+node -e '
+  const fs=require("fs");
+  const nodes=[{id:"gA",label:"SvcAGod",source_file:"app/services/a/service.py"},{id:"gB",label:"SvcBGod",source_file:"app/services/b/service.py"}];
+  const links=[];
+  for(let i=0;i<60;i++){nodes.push({id:"ca"+i,label:"ca"+i,source_file:"x"+i+".py"});links.push({source:"ca"+i,target:"gA",relation:"calls",confidence:"EXTRACTED"});}
+  for(let i=0;i<60;i++){nodes.push({id:"cb"+i,label:"cb"+i,source_file:"y"+i+".py"});links.push({source:"cb"+i,target:"gB",relation:"calls",confidence:"EXTRACTED"});}
+  fs.writeFileSync(process.argv[1],JSON.stringify({nodes,links,built_at_commit:"x"}));
+' "$K312_T/graphify-out/graph.json"
+K312_R=$(cd "$K312_T" && node -e 'const g=require("'"$ROOT"'/bin/modules/graphify.cjs");const r=g.checkLargeFilesGodNodes(["app/services/a/service.py"],50);const f=r.map(x=>x.file);process.stdout.write((f.length===1&&f[0]==="app/services/a/service.py")?"OK":"BAD:"+JSON.stringify(f));' 2>&1 || echo "ERR")
+rm -rf "$K312_T"
+if [ "$K312_R" = "OK" ]; then
+  pass "K312: god-node checks match diff files by path-suffix not basename — same-basename files in other dirs are NOT over-matched (field: 85-line god-node bloat)"
+else
+  fail "K312: god-node basename-collision regressed ($K312_R)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
