@@ -395,7 +395,20 @@ echo "${USER_CHOICE}" > .devt/state/scope-check-answer.txt
 
 If the user chose `cancel`, STOP with BLOCKED. If `parallel`, proceed to the parallel delegation path. If `single`, continue to identify_scope (single-dispatch).
 
-If user picks YES: delegate to `workflows/code-review-parallel.md` by Read-ing that file and following its steps starting from `context_init`. The cached workflow.yaml state (workflow_id, memory_signal, scope_hint, scope_trust) carries over — the parallel workflow re-reads it.
+If user picks YES (parallel): **first pre-write the scope artifact, THEN delegate.** scope_check runs BEFORE identify_scope would write `.devt/state/code-review-input.md`, and the parallel workflow's `partition_lanes` reads it — writing it here (from the same changed-files union scope_check measured) means the parallel path has its scope on entry. `partition_lanes` also self-recovers if it's somehow still absent, but pre-writing keeps that a genuine-anomaly path (loud warning fires only when the handoff really broke, not on every fresh run):
+
+```bash
+if [ ! -s .devt/state/code-review-input.md ]; then
+  RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+  PARALLEL_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files --base="${PRIMARY_BRANCH:-main}" ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
+  if [ -n "$PARALLEL_SCOPE" ]; then
+    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; } > .devt/state/code-review-input.md
+    echo "[scope_check] pre-wrote code-review-input.md ($(printf '%s\n' "$PARALLEL_SCOPE" | /usr/bin/grep -cE '.') files) before parallel delegation"
+  fi
+fi
+```
+
+Then delegate to `workflows/code-review-parallel.md` by Read-ing that file and following its steps starting from `context_init`. The cached workflow.yaml state (workflow_id, memory_signal, scope_hint, scope_trust) carries over — the parallel workflow re-reads it.
 
 If user picks NO: continue to identify_scope (existing single-dispatch path; the code-reviewer agent's community-filter logic handles scope > 10 files automatically).
 

@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.195.0] - 2026-07-21
+
+### Lightness pass (batch 3) — close the small gaps: parallel pre-write + empty scope_hint
+
+Two remaining items from the field-run sequence. Drift-guard stack 220 → 221 deep (K94–K313).
+
+### Fixed
+
+- **Parallel scope artifact is now pre-written before delegation (K313, completes the P0 handoff).** `scope_check` runs before `identify_scope` would write `code-review-input.md`, so its parallel branch now pre-writes the scope (from the same `changed-files` union it measured) *before* Read-ing `code-review-parallel.md`. Without this, `partition_lanes` self-recovers (K310) on **every** fresh parallel run and the loud `ABSENT` warning degrades into constant noise; the pre-write makes the common path clean and keeps the self-recovery/warning a genuine-anomaly signal. Parent-side + parallel-side self-recovery = defense in depth for the seam greenfield ranked #1.
+
+### Changed
+
+- **Empty `scope_hint` blocks are suppressed in rendered dispatch envelopes.** An `<scope_hint>[]</scope_hint>` line — the common case in `symbol_anchored` / `pr_scoped_diff` tiers, where `blast_radius`'s caller sets already cover the reading-scope role — is now stripped once, centrally, in `applySubstitutions` (the shared render point for all lane / consolidator / verifier envelopes). Only the empty form is stripped; a populated `scope_hint` is untouched, and the envelope's other tags keep dispatch-hygiene-guard's raw-dispatch recognition intact. (The single-path inline code-reviewer envelope is orchestrator-filled and out of scope; `scope_hint` is a pervasive block across 12+ templates with real consumers — e.g. the debugger — so suppression is deliberately empty-only, not a removal.)
+
 ## [0.194.0] - 2026-07-21
 
 ### Lightness pass (batch 2) — god-node basename-collision fix (the 85-line bloat)

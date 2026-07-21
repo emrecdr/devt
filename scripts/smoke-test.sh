@@ -18468,6 +18468,22 @@ else
   fail "K312: god-node basename-collision regressed ($K312_R)"
 fi
 
+# K313: scope-artifact PRE-WRITTEN before parallel delegation (seam #1, parent
+# side — completes the P0 handoff fix). scope_check runs BEFORE identify_scope
+# would write code-review-input.md, so its parallel branch must pre-write it
+# before Read-ing code-review-parallel.md. Without this, partition_lanes
+# self-recovers (K310) on EVERY fresh run and the loud ABSENT warning degrades
+# to constant noise; the pre-write makes self-recovery a genuine-anomaly path.
+K313_OK=1; K313_WHY=""
+CRM313="$ROOT/workflows/code-review.md"
+/usr/bin/grep -qF 'pre-wrote code-review-input.md' "$CRM313" || { K313_OK=0; K313_WHY="no-prewrite-echo"; }
+/usr/bin/grep -qF 'before parallel delegation' "$CRM313" || { K313_OK=0; K313_WHY="no-before-delegation-marker"; }
+if [ "$K313_OK" = "1" ]; then
+  pass "K313: scope_check pre-writes code-review-input.md before delegating to code-review-parallel.md (parent side of the P0 handoff; K310 self-recovery is the anomaly-only net)"
+else
+  fail "K313: scope-artifact pre-write regressed at $K313_WHY"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

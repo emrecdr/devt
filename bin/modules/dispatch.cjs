@@ -387,6 +387,13 @@ function applySubstitutions(template, subs) {
     out = out.replace(re, getter());
   }
 
+  // Suppress EMPTY scope_hint blocks. An `<scope_hint>[]</scope_hint>` line is
+  // pure noise (field: null all run in symbol_anchored/pr_scoped_diff, where
+  // blast_radius's caller sets already cover the reading-scope role). Strip only
+  // the empty form; a populated scope_hint is untouched, and the envelope's other
+  // tags keep dispatch-hygiene-guard's raw-dispatch recognition intact.
+  out = out.replace(/^[ \t]*<scope_hint>\[\]<\/scope_hint>[ \t]*\r?\n/gm, "");
+
   return out;
 }
 
