@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.203.0] - 2026-07-22
+
+### Added
+
+- **Gate K320 — implement/test KEEP-IN-SYNC contract.** `dev-workflow.md` and `quick-implement.md` carry deliberately-divergent implement/test step bodies (dev is the full pipeline — verifier, arch, scope-requirements blocks; quick is the fast path). A deep scan measured them ~50% diverged, and most of the divergence is *intentional* — so rather than force them into a ~50%-mode-forked shared file (which would be less legible than two honest bodies, and is resident-neutral anyway), K320 asserts the LOAD-BEARING mechanical contract — `post-dispatch-check`, sidecar routing (`read-sidecar` + status enum), `phase=` update — is present in BOTH step bodies. It catches a silent gate-drop of the shared contract (the exact drift the review paths hit before K275) while letting prose + mode-specific blocks differ freely. The four `KEEP IN SYNC` markers now name the gate so the enforcement is legible to a maintainer editing either body. (Considered the full K275-style extraction; the scan showed the bodies are too divergent and too intentionally different for a shared file to be a net win — detection over deduplication.)
+
 ## [0.202.0] - 2026-07-22
 
 ### Changed
@@ -661,11 +667,3 @@ A six-lane parallel run (receipt-validated against its on-disk artifacts) confir
 - **Session-distance eviction for `code-review-input.md`.** The file is double-duty — documented pre-written-scope escape hatch AND prior-session leftover (field: a stale 123-file scope nearly reviewed against a 42-file live diff). Blanket eviction would kill the escape hatch; the reporter's own correction showed a prior-`created_at` comparison under-evicts mid-session leftovers. Shipped their prep-window rule: reset-soft evicts only when the file is >1h old — a deliberate pre-write minutes before launch survives, anything demonstrably pre-dating this session's prep dies.
 - **Mechanical**: the `--raw-count=${VAR:-?}` unquoted glob sentinel (zsh aborts on `?`) is quoted with a non-glob default; the phase banner renders `workflow_type` instead of a literal `?` when tier is absent (review workflows have no tier); `verify_iteration`'s 0-based retries-not-dispatches semantics documented at the read site.
 - Gates **K274** (all five fixes pinned) + **K274b** (eviction behavioral: stale dies, pre-write survives). Drift-guard stack 180 → 182 deep (K94–K274b).
-
-## [0.165.1] - 2026-07-16
-
-### Fix: template copy shipped ephemeral dirs into scaffolded projects
-
-- `setup --template python-fastapi` delivered `__pycache__` (compiled bytecode caches from the template's own arch-scan tests running in CI) into every scaffolded project's `.devt/rules/`, and would likewise have shipped a stray `.devt/state/` hook-trace residue scaffolded into the template by an agent running with its cwd there. These directories regenerate — deleting them doesn't stick — so the copy layer is the enforcement point: `copyDirRecursive` + `copyMissingFiles` now skip `__pycache__`, `.ruff_cache`, `.pytest_cache`, `.mypy_cache`, `.devt`, `.git`, `node_modules`.
-- Behaviorally verified both directions: pollution gone from a fresh scaffold AND intentional template content (`tests/architecture/`, `detectors/`, `pydantic-patterns.md`) still ships.
-- Gate **K273** (plants pollution in the template, scaffolds, asserts zero ships + content intact, cleans up). Drift-guard stack 179 → 180 deep (K94–K273).

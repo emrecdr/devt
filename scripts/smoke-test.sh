@@ -18626,6 +18626,41 @@ else
   fail "K319: README ### CI section is ${K319_CI}B (> 2500B) — don't inline the gate enumeration; keep a concise floor-based summary and point to CHANGELOG for per-gate detail"
 fi
 
+# K320: implement/test KEEP-IN-SYNC contract gate. dev-workflow.md and
+# quick-implement.md carry deliberately-divergent implement/test step bodies —
+# dev is the full pipeline (verifier, arch, scope-requirements blocks), quick is
+# the fast path — so they are NOT extracted into a shared file (a ~50%-mode-
+# forked shared file would be less legible than two honest bodies). But the
+# LOAD-BEARING mechanical contract (dispatch claim-check, sidecar routing, phase
+# update) must stay identical across both copies — a silent drop of one gate in
+# one body is the exact drift the review paths hit before K275. This gate asserts
+# the shared contract tokens are present in BOTH step bodies; prose + mode-
+# specific blocks may differ freely. Step bodies extracted by <step name=…> span.
+K320_OK=1; K320_WHY=""
+K320_DEV_IMPL=$(awk '/<step name="implement"/{f=1} f{print} /<\/step>/{if(f)exit}' "$ROOT/workflows/dev-workflow.md")
+K320_QK_IMPL=$(awk '/<step name="implement"/{f=1} f{print} /<\/step>/{if(f)exit}' "$ROOT/workflows/quick-implement.md")
+K320_DEV_TEST=$(awk '/<step name="test"/{f=1} f{print} /<\/step>/{if(f)exit}' "$ROOT/workflows/dev-workflow.md")
+K320_QK_TEST=$(awk '/<step name="test"/{f=1} f{print} /<\/step>/{if(f)exit}' "$ROOT/workflows/quick-implement.md")
+for tok in 'post-dispatch-check programmer' 'read-sidecar impl-summary.json' 'state update phase=implement' 'DONE|DONE_WITH_CONCERNS|PARTIAL|BLOCKED|NEEDS_CONTEXT'; do
+  printf '%s' "$K320_DEV_IMPL" | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY dev-impl:[$tok]"; }
+  printf '%s' "$K320_QK_IMPL"  | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY quick-impl:[$tok]"; }
+done
+for tok in 'read-sidecar test-summary.json' 'state update phase=test'; do
+  printf '%s' "$K320_DEV_TEST" | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY dev-test:[$tok]"; }
+  printf '%s' "$K320_QK_TEST"  | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY quick-test:[$tok]"; }
+done
+# The KEEP-IN-SYNC markers must name the gate so the enforcement is legible to a
+# maintainer editing either body (2 markers per file: implement + test).
+for wf in dev-workflow.md quick-implement.md; do
+  K320_MK=$(/usr/bin/grep -c 'KEEP IN SYNC.*K320' "$ROOT/workflows/$wf" || true)
+  [ "$K320_MK" -ge 2 ] || { K320_OK=0; K320_WHY="$K320_WHY $wf:sync-marker($K320_MK)"; }
+done
+if [ "$K320_OK" -eq 1 ]; then
+  pass "K320: implement/test KEEP-IN-SYNC contract (post-dispatch-check + sidecar routing + phase update present in both dev + quick bodies; markers name the gate)"
+else
+  fail "K320: implement/test contract drift —$K320_WHY"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

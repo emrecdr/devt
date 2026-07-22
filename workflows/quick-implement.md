@@ -170,7 +170,7 @@ SCOPE_TRUST=$(printf '%s\n' "$STATE" | jq -r '.scope_trust_json // "{}"')
 **Reuse pre-search** — derive graphify-powered candidates before the programmer writes new code. Best-effort: swallowed on graphify unavailability (0 candidates, gate passes transparently).
 
 ```bash
-# KEEP IN SYNC: mirrored in dev-workflow.md implement step
+# KEEP IN SYNC (shared contract gated by smoke gate K320): mirrored in dev-workflow.md implement step — the load-bearing mechanics (post-dispatch-check, sidecar routing, phase update) must match; prose + mode-specific blocks (dev has verifier/arch/scope; quick omits them) may differ freely
 TASK_TEXT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')
 if [ -n "$TASK_TEXT" ]; then
   # Write the attempted-marker BEFORE invoking the CLI. assert-reuse-analyzed
@@ -285,7 +285,7 @@ Skip entirely when graphify is disabled or `files_modified` is empty.
 **Reuse-analysis gate** — programmer must have addressed all reuse candidates before tests run.
 
 ```bash
-# KEEP IN SYNC: mirrored in dev-workflow.md test step
+# KEEP IN SYNC (shared contract gated by smoke gate K320): mirrored in dev-workflow.md test step — the load-bearing mechanics (read-sidecar, phase update) must match; prose + mode-specific blocks may differ freely
 REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
 if printf '%s\n' "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
