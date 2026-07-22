@@ -141,7 +141,7 @@ node bin/devt-tools.cjs agent resume [auto|--sidecar=<path>]
 
 | Env var | Default | Effect |
 |---|---|---|
-| `PRIMARY_BRANCH` | `main` | Base branch for `git diff --name-only ${PRIMARY_BRANCH:-main}...HEAD` in `workflows/code-review.md` `scope_check` + `identify_scope`. Set per-project (`export PRIMARY_BRANCH=development` for trunk-based or non-main projects) so multi-commit feature branches diff against merge-base instead of `HEAD~1` |
+| `PRIMARY_BRANCH` | config `git.primary_branch` (→ `main`) | Overrides the scope base for `git diff`-based scope in `workflows/code-review.md` `scope_check` + `identify_scope` (review-weight, changed-files, merge-base). When unset, the scope CLIs default `--base` to `config.git.primary_branch` (itself defaulting to `main`) — so set `git.primary_branch` in `.devt/config.json` for a permanent per-project base, or `export PRIMARY_BRANCH=development` for a one-off override. Multi-commit feature branches diff against merge-base instead of `HEAD~1` |
 | `DEVT_HOOK_PROFILE` | `standard` | Hook tier — `minimal` / `standard` / `full`. See CLAUDE.md hook profiles table |
 | `DEVT_DISABLED_HOOKS` | (empty) | CSV of hook script names to disable regardless of profile |
 | `DEVT_WORKFLOW_ID` | (unset) | Multi-instance isolation — when set, `getStateDir()` returns `.devt/state/<id>/` for per-terminal workflow concurrency |
