@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.201.0] - 2026-07-22
+
+### Removed
+
+- **`static-compress --plugin-build` retired, gate K84 with it.** The maintainer-mode CLI that prose-shrank the plugin's OWN `guardrails/` + `skills/` implemented exactly the transformation REJ-001 rejected. Three independent reasons converged on removal: it was wired into **no** release path (verified: zero references in `scripts/release.sh` + `.github/`, and known-unwired for months); its measured payoff was the cache-invisible **0.06–0.19%/dispatch** REJ-001 already cites (editing cached content is briefly net-negative); and running it against a real tree silently corrupted the corpus (the article-stripping the K84-hermetic fix in `0.199.0` had to fence off). Its only exercise was K84 — a gate verifying the CLI surface existed. Removed: the `--plugin-build` / `--allow-dirty` / `--root` flags, `compressPluginBuild` + `_compressPluginFile`, and gate K84 (a gate retires with its subject — RETIREMENT-WATCH policy). `static-compress` keeps `--all` / `--restore` / single-file compression on a project's own `.devt/rules/` — the surface REJ-001 does not cover. Recorded loudly: REJ-001 gains a "Machinery status" section, the RETIREMENT-WATCH strip-ledger gains the entry, and KCORPUS remains the whole-corpus tripwire against any future in-place mutation.
+
 ## [0.200.0] - 2026-07-22
 
 ### Hook-runtime consolidation
@@ -667,13 +673,3 @@ The two research-validated items deferred from the FastAPI/Pydantic calibration,
 - **RFC 9457 problem-details section** in architecture.md — the community-recommended error response shape (`application/problem+json` with `type`/`title`/`status`/`detail`/`instance`), framed explicitly as *recommended shape, not FastAPI default* (core still emits `{"detail": ...}`). Wires into the template's existing `AppError` hierarchy via the exception handler + per-class type/title registry; points at the actively-maintained `fastapi-problem` library; requires a deliberate decision on the 422 validation-error format rather than mixed shapes.
 - **Streaming & SSE section** — JSON-lines streaming and Server-Sent Events are now first-class framework surface; the section carries the four rules that keep streams from taking down the service: never block inside a streaming generator (stalls the loop for every request), release resources on client disconnect (`try/finally` — abandoned generators are a slow leak), bounded `asyncio.Queue` backpressure, and flat item models (typed SSE items validate per item).
 - **K271 extended** to guard both sections. Deliberately still held back: `lazy=` relationship detector (receipt-gated — the only field consumer runs 94-to-1 sync sessions, nothing to fire on), httpx2 migration (upstream hasn't moved), other-template calibrations (own research loops).
-
-## [0.164.1] - 2026-07-16
-
-### Fix: graphify MCP scaffold path + dead registration hint
-
-Both surfaced by a live platform-doc check on the `.mcp.json` location question:
-
-- The scaffolded graphify server's graph-path arg was bare-relative (`graphify-out/graph.json`), resolving against the spawned server's working directory — which Claude Code does not guarantee to be the project root. Now `${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json`, the platform-documented form for project-scoped `.mcp.json` (the `:-.` default degrades to today's behavior where the variable isn't substituted, and self-heals wherever it is). Existing projects reconcile on `setup --mode reinit`; `create`/`update` leave user entries untouched as before.
-- `health`'s `GRAPHIFY_MCP_UNREGISTERED` fix message instructed users to register `graphify mcp --project .` — a subcommand upstream removed (setup.cjs has scaffolded `python -m graphify.serve` for months; the hint was never updated). Anyone following it registered a server that cannot start. The message now leads with re-running setup and shows the current uv launch form.
-- Gate **K272** (prefixed graph path + no dead registration hint anywhere). Drift-guard stack 178 → 179 deep (K94–K272).

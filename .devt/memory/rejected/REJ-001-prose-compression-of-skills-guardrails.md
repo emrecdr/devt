@@ -52,3 +52,16 @@ Token reduction on dispatch surfaces goes through structural levers with
 measured per-dispatch effect: rules/rubric by-reference, section excludes,
 by-reference stubs — never through lossy prose rewriting of behavioral
 instruction files.
+
+## Machinery status
+
+The `static-compress --plugin-build` CLI (`compressPluginBuild`) was the last
+implementation of this rejected transformation — a maintainer command that
+prose-shrank the plugin's own `guardrails/` + `skills/` at release-build time.
+It was never wired into any release path, and its measured payoff was exactly
+the cache-invisible 0.06–0.19%/dispatch cited above. It has been retired: the
+flag, its function + helper, and its smoke gate (K84) are removed.
+`static-compress` keeps only the project-side surfaces this rejection does not
+cover (`--all` / `--restore` on a user project's `.devt/rules/`). The KCORPUS
+smoke gate stands as the whole-corpus tripwire against any future in-place
+mutation of these surfaces.

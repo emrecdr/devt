@@ -26,9 +26,10 @@ FAILED_GATES=""
 # (guardrails/ + skills/), captured BEFORE any gate runs; the KCORPUS gate at
 # suite end re-computes and asserts it unchanged. This is a substance gate that
 # catches ANY in-place mutation of the corpus by a test run regardless of cause
-# — the belt-and-suspenders for the git-less K84 compression leak, and it closes
-# the 1-of-21 pinned-phrase detection gap (only one gate could notice article-
-# stripping otherwise). Degrades safe: absent shasum → empty digests → no-op.
+# — the standing tripwire for the class the retired `--plugin-build` flag
+# embodied (prose-shrink writing the live tree), and it closes the pinned-phrase
+# detection gap (few gates would notice article-stripping). Degrades safe:
+# absent shasum → empty digests → no-op.
 KCORPUS_DIGEST() { (cd "$ROOT" && find guardrails skills -type f -name '*.md' -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | cut -d' ' -f1); }
 KCORPUS_SHA0=$(KCORPUS_DIGEST)
 
@@ -11761,54 +11762,8 @@ else
   fail "K83: protocol injection mismatch — verifier_protocol=$K83_VP_HAS_PROTOCOL verifier_via_call=$K83_VP_HAS_VIA_CALL cr_protocol=$K83_CR_PRESENT skip_no_protocol=$K83_VA_NO_PROTOCOL tpl_verifier=$K83_TPL_VERIFIER tpl_cr=$K83_TPL_CR_CR"
 fi
 
-# K84: plugin maintainer-mode pre-compress CLI surface (v0.87.0 B3).
-# Validates the new `--plugin-build` flag wires correctly. Focus is on
-# CLI contract + safety stack — NOT yield (yield depends on prose-shrink
-# bugs that future fixes will improve without code changes here).
-# Asserts: (a) clean-tree check fires (refuses when guardrails dirty);
-# (b) --allow-dirty override works; (c) walker scopes to plugin tree;
-# (d) structural validator refuses bad compressions (most plugin files
-# trip validator because heading lines start with "The"); (e) result
-# shape is consistent with compressAll for telemetry continuity.
-# HERMETIC: the compressor runs against a mktemp COPY of guardrails/ + skills/
-# (via --root), NEVER the live tree. K84 used to compress the real corpus in
-# place and reset via `git checkout` — but that cleanup silently no-ops in a
-# git-less checkout (archive install, shallow / no-.git tree), leaving the
-# REJ-001 compression permanent while the suite stayed green. Copying to a
-# fixture makes the live corpus untouchable by construction; the corpus-
-# integrity gate (KCORPUS, EXIT-time) is the belt-and-suspenders for any cause.
-K84_FIX=$(mktemp -d)
-mkdir -p "$K84_FIX/guardrails" "$K84_FIX/skills"
-cp -R "$ROOT/guardrails/." "$K84_FIX/guardrails/" 2>/dev/null || true
-cp -R "$ROOT/skills/." "$K84_FIX/skills/" 2>/dev/null || true
-K84_OUT=$(node "$CLI" static-compress --plugin-build --allow-dirty --root="$K84_FIX" 2>/dev/null)
-K84_OK=$(echo "$K84_OUT" | jq -r '.ok // false')
-K84_TOTAL=$(echo "$K84_OUT" | jq -r '.total_files // 0')
-K84_HAS_PLUGIN_ROOT=$(echo "$K84_OUT" | jq -r '.plugin_root | length > 0')
-K84_HAS_BREAKDOWN=$(echo "$K84_OUT" | jq -r '.engine_breakdown | type == "object"')
-# Walker must find guardrails files (5+ guardrails .md files exist)
-K84_HAS_GUARDRAILS_CANDIDATE=$(test "$K84_TOTAL" -ge "5" && echo yes || echo no)
-# Errors array exists (structural drift expected on heading-starts-with-article files)
-K84_HAS_ERRORS_FIELD=$(echo "$K84_OUT" | jq -r '.errors | type == "array"')
-# Hermeticity assertion: the compressor targeted the FIXTURE, not the live tree.
-K84_ROOT_IS_FIXTURE=$(echo "$K84_OUT" | jq -r --arg fix "$K84_FIX" '(.plugin_root == $fix)')
-rm -rf "$K84_FIX"
-# CLI surface guard — usage string carries new flag
-K84_USAGE_HAS_FLAG=$(node "$CLI" static-compress 2>&1 | grep -c -- '--plugin-build' || true)
-if [ "$K84_OK" = "true" ] \
-   && [ "$K84_HAS_PLUGIN_ROOT" = "true" ] \
-   && [ "$K84_ROOT_IS_FIXTURE" = "true" ] \
-   && [ "$K84_HAS_BREAKDOWN" = "true" ] \
-   && [ "$K84_HAS_GUARDRAILS_CANDIDATE" = "yes" ] \
-   && [ "$K84_HAS_ERRORS_FIELD" = "true" ] \
-   && [ "$K84_USAGE_HAS_FLAG" -ge "1" ]; then
-  pass "K84: plugin-build CLI surface — HERMETIC against a mktemp --root fixture (live corpus never a test subject); walker finds ${K84_TOTAL} files, shape consistent, validator gates writes, usage advertises flag"
-else
-  fail "K84: plugin-build mismatch — ok=$K84_OK plugin_root=$K84_HAS_PLUGIN_ROOT fixture=$K84_ROOT_IS_FIXTURE breakdown=$K84_HAS_BREAKDOWN candidates=$K84_HAS_GUARDRAILS_CANDIDATE (total=$K84_TOTAL) errors_field=$K84_HAS_ERRORS_FIELD usage=$K84_USAGE_HAS_FLAG"
-fi
-
-# K85: prose-shrink correctness — locks 3 root-cause fixes that lifted
-# plugin-build yield from 5/23 to 23/23 (22% → 100%):
+# K85: prose-shrink engine correctness — locks 3 root-cause fixes in the
+# prose-shrink engine (used by `static-compress --all` on project .devt/rules/):
 #   (1) ARTICLES /i removed — heading "## The Iron Law" no longer mangled
 #       (under /i, the lookahead [a-z] matched uppercase too, stripping
 #       "The " from headings).
@@ -18673,9 +18628,10 @@ echo
 echo "== Corpus integrity =="
 # KCORPUS: the plugin's behavioral corpus (guardrails/ + skills/) must be
 # byte-identical to the suite-start baseline. If ANY gate mutated the live
-# corpus in place — the git-less K84 compression leak, or any future in-place
-# transform — this catches it whole-corpus, independent of which pinned phrase
-# a content-grep gate happens to watch. Belt to K84's suspenders.
+# corpus in place — the prose-shrink-on-guardrails class the retired
+# `--plugin-build` flag embodied, or any future in-place transform — this
+# catches it whole-corpus, independent of which pinned phrase a content-grep
+# gate happens to watch.
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

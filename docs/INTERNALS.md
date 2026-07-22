@@ -195,7 +195,7 @@ Used as the regex-fallback compression engine in `static-compress.cjs`.
 
 CLI compressor for project markdown files (`.devt/rules/*.md`, project-local `guardrails/*.md`). Single engine — `prose-shrink.cjs` (zero-dep caveman-shrink regex port). Output runs through `structural-validator.cjs` post-compression — drift detected → backup file deleted, input file left untouched. Five safety layers before any input is touched: sensitive-path denylist refusal, size cap (default 500 KB), empty-file refusal, identical-output refusal, backup-readback verification (with byte-mismatch detail when readback fails).
 
-Reversible via `<path>.original.md` backup sibling: `node bin/devt-tools.cjs static-compress --restore <path>` swaps it back atomically. Bulk run via `--all` walks project-owned surfaces; plugin maintainer pre-compress via `--plugin-build` ships pre-compressed guardrails with the next plugin release.
+Reversible via `<path>.original.md` backup sibling: `node bin/devt-tools.cjs static-compress --restore <path>` swaps it back atomically. Bulk run via `--all` walks project-owned surfaces (`.devt/rules/` + project `guardrails/`). Prose compression never runs against the plugin's OWN `guardrails/` + `skills/` — that surface is governed by REJ-001 (`docs/MEMORY.md`).
 
 Gated by `config.static_compress.mode` (`'on'` default; CLI returns `{ok: true, skipped: true}` when off, exit 0). Compress + restore actions log to `.devt/state/static-compress.jsonl` (RESET_EXEMPT). Full user-facing recipe in `docs/static-compress-recipe.md`.
 

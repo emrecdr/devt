@@ -37,6 +37,7 @@ Each entry names the model capability gap the scaffold compensates for (`compens
 | turn-limit awareness blocks (10 agents) | mid-turn budget death without a durable artifact | KEEP; re-test per release |
 | stub-first protocol (8 agents) | **not a strip candidate** — load-bearing for legible-compliance gates (recoverable sentinel that lets deterministic layers distinguish "never started" from "couldn't finalize"), independent of the truncation era | KEEP |
 | context-reset / compaction scaffolds | n/a — deliberately never built; platform compaction suffices (validated against the harness-design engineering post) | — |
+| `static-compress --plugin-build` (`compressPluginBuild`) | none — implemented the REJ-001-rejected prose-shrink of the plugin's own guardrails/skills; unwired into any release path, measured payoff 0.06–0.19%/dispatch (cache-invalidating) | **RETIRED** — flag + function + gate K84 removed, REJ-001 updated; `static-compress` keeps the project-side `--all`/`--restore` surface, KCORPUS guards the corpus |
 
 ## Receipt-gated adoption items
 
