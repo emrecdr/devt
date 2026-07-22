@@ -22,6 +22,23 @@ Hooks use a Node.js runner (`hooks/run-hook.js`) with profile support:
 
 The `run-hook.cmd` polyglot delegates to `run-hook.js` for cross-platform support.
 
+### Shared hook runtime (`hooks/_common.sh`)
+
+The runner spawns each hook as `bash <hook>` with the event JSON on stdin and `PLUGIN_ROOT` exported. Every stdin-consuming hook `source`s `hooks/_common.sh` and reads its input through it — do NOT re-implement the read inline:
+
+```bash
+[[ $- == *i* ]] && return
+set -euo pipefail
+source "$(dirname "$0")/_common.sh"
+INPUT="$(devt_read_stdin)"          # tty-guarded, time-boxed; pass a timeout arg to override the 3s default
+[[ -z "$INPUT" ]] && exit 0         # allow-hooks echo '{}' first — that action stays per-hook
+```
+
+- `devt_read_stdin [timeout_secs]` — returns the piped JSON (empty on a tty or timeout). Reading fd 0 here, never `process.argv`, is what keeps large payloads off the E2BIG cliff. Gate K318 fails the build if any stdin hook re-inlines a `timeout N cat` read.
+- `devt_plugin_root` — the plugin root, preferring the runner-exported `PLUGIN_ROOT` and falling back to `$0`-relative resolution for direct invocation.
+
+A hook that reads no stdin (e.g. `session-start.sh`) does not source `_common.sh`.
+
 ---
 
 ## Universal Hook Invocation Trace
