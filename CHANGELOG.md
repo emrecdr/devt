@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.202.0] - 2026-07-22
+
+### Changed
+
+- **README `### CI` section slimmed ~36KB → <1KB (gate K319).** The section inlined a single run-on paragraph enumerating every drift-guard gate (107 of them, K94–K259) — a third of the entire README, and a count-sync burden that went stale the instant a gate was added (it stopped at K259 while the stack runs past K300). Nobody kept it synced because nobody could. The per-gate rationale already lives in the `## [X.Y.Z]` CHANGELOG entry that introduced each gate; the README now keeps a concise floor-based summary (`K94+`, 200+ gates) and points to CHANGELOG for the detail. New gate **K319** budgets the section at ≤2500B so the enumeration can't creep back — the count-sync relief K117's floor conversion started, finished on the README side.
+
 ## [0.201.0] - 2026-07-22
 
 ### Removed
@@ -663,13 +669,3 @@ A six-lane parallel run (receipt-validated against its on-disk artifacts) confir
 - `setup --template python-fastapi` delivered `__pycache__` (compiled bytecode caches from the template's own arch-scan tests running in CI) into every scaffolded project's `.devt/rules/`, and would likewise have shipped a stray `.devt/state/` hook-trace residue scaffolded into the template by an agent running with its cwd there. These directories regenerate — deleting them doesn't stick — so the copy layer is the enforcement point: `copyDirRecursive` + `copyMissingFiles` now skip `__pycache__`, `.ruff_cache`, `.pytest_cache`, `.mypy_cache`, `.devt`, `.git`, `node_modules`.
 - Behaviorally verified both directions: pollution gone from a fresh scaffold AND intentional template content (`tests/architecture/`, `detectors/`, `pydantic-patterns.md`) still ships.
 - Gate **K273** (plants pollution in the template, scaffolds, asserts zero ships + content intact, cleans up). Drift-guard stack 179 → 180 deep (K94–K273).
-
-## [0.165.0] - 2026-07-16
-
-### python-fastapi template: error-shape + streaming sections (cal #49 follow-up)
-
-The two research-validated items deferred from the FastAPI/Pydantic calibration, re-verified against live sources 24h apart with zero drift before shipping:
-
-- **RFC 9457 problem-details section** in architecture.md — the community-recommended error response shape (`application/problem+json` with `type`/`title`/`status`/`detail`/`instance`), framed explicitly as *recommended shape, not FastAPI default* (core still emits `{"detail": ...}`). Wires into the template's existing `AppError` hierarchy via the exception handler + per-class type/title registry; points at the actively-maintained `fastapi-problem` library; requires a deliberate decision on the 422 validation-error format rather than mixed shapes.
-- **Streaming & SSE section** — JSON-lines streaming and Server-Sent Events are now first-class framework surface; the section carries the four rules that keep streams from taking down the service: never block inside a streaming generator (stalls the loop for every request), release resources on client disconnect (`try/finally` — abandoned generators are a slow leak), bounded `asyncio.Queue` backpressure, and flat item models (typed SSE items validate per item).
-- **K271 extended** to guard both sections. Deliberately still held back: `lazy=` relationship detector (receipt-gated — the only field consumer runs 94-to-1 sync sessions, nothing to fire on), httpx2 migration (upstream hasn't moved), other-template calibrations (own research loops).

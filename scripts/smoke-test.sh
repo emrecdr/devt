@@ -18612,6 +18612,20 @@ else
   fail "K318: hook-runtime consolidation regressed:$K318_MISS"
 fi
 
+# K319: README ### CI section size budget. The section once inlined a ~36KB
+# run-on enumeration of every K-gate (107 of them, K94..K259) — a count-sync
+# burden that went stale the moment a gate was added (it stopped at K259 while
+# the stack runs past K300) and cost a third of the README's bytes. The per-gate
+# rationale lives in the CHANGELOG entry that introduced each gate; the README
+# keeps a concise floor-based summary. This budget stops the enumeration from
+# creeping back (now that K117 is a floor, the README never needs an exact count).
+K319_CI=$(awk '/^### CI$/{f=1;next} /^##/{if(f)exit} f{print}' "$ROOT/README.md" | wc -c | tr -d ' ')
+if [ "$K319_CI" -le 2500 ]; then
+  pass "K319: README ### CI section within budget (${K319_CI}B ≤ 2500B — per-gate detail lives in CHANGELOG, not a stale README enumeration)"
+else
+  fail "K319: README ### CI section is ${K319_CI}B (> 2500B) — don't inline the gate enumeration; keep a concise floor-based summary and point to CHANGELOG for per-gate detail"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
