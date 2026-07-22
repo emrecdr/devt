@@ -4,8 +4,9 @@
 # Reads workflow state via devt-tools.cjs and outputs additionalContext JSON.
 # Exit 0 always — non-zero would block the user's prompt.
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
-PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PLUGIN_ROOT="$(devt_plugin_root)"
 
 # State-read cache keyed by workflow.yaml mtime. Hook fires on every
 # user prompt; the prior unconditional `node devt-tools.cjs state read` paid
@@ -23,7 +24,7 @@ STATE_JSON=""
 # once-per-session config-alert dedup below. Empty when the runner didn't
 # forward stdin — dedup then degrades to every-prompt (fail-loud is the
 # right failure mode for a safety banner).
-HOOK_INPUT=$(cat 2>/dev/null || true)
+HOOK_INPUT="$(devt_read_stdin)"
 SESSION_ID=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 ALERT_MARKER="$CACHE_DIR/config-alert-$PROJ_HASH"
 mkdir -p "$CACHE_DIR" 2>/dev/null || true

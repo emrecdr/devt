@@ -18630,6 +18630,33 @@ else
   fail "K317: field-report fix surface regressed:$K317_MISS"
 fi
 
+# K318: hook-runtime consolidation — the stdin read + plugin-root resolution are
+# single-sourced in hooks/_common.sh, so the argv->stdin (E2BIG) class the whole
+# hook ecosystem was hand-converted through cannot be reintroduced one hook at a
+# time. Every stdin-consuming hook sources _common.sh and calls devt_read_stdin;
+# none re-implements the inline `timeout N cat` read. Plus a behavioral proof the
+# sourced helper still delivers (bash-guard deny path, end-to-end through source).
+K318_OK=1; K318_MISS=""
+K318_COMMON="$ROOT/hooks/_common.sh"
+{ [ -f "$K318_COMMON" ] \
+  && /usr/bin/grep -qF 'devt_read_stdin()' "$K318_COMMON" \
+  && /usr/bin/grep -qF 'devt_plugin_root()' "$K318_COMMON"; } || { K318_OK=0; K318_MISS="$K318_MISS common-helper"; }
+K318_HOOKS="bash-guard.sh dispatch-hygiene-guard.sh memory-auto-index.sh pre-flight-guard.sh prompt-guard.sh read-before-edit-guard.sh stop.sh subagent-status.sh task-truncation-detector.sh workflow-context-injector.sh"
+for h in $K318_HOOKS; do
+  hp="$ROOT/hooks/$h"
+  /usr/bin/grep -qF 'source "$(dirname "$0")/_common.sh"' "$hp" || { K318_OK=0; K318_MISS="$K318_MISS $h:no-source"; }
+  /usr/bin/grep -qF 'devt_read_stdin' "$hp" || { K318_OK=0; K318_MISS="$K318_MISS $h:no-read"; }
+  if /usr/bin/grep -Eq 'timeout [0-9]+ cat' "$hp"; then K318_OK=0; K318_MISS="$K318_MISS $h:inline-read"; fi
+done
+# Behavioral: the sourced helper delivers end-to-end (deny survives the source).
+K318_BG=$(printf '%s' '{"tool_input":{"command":"rm -rf /"}}' | bash "$ROOT/hooks/bash-guard.sh" 2>/dev/null || true)
+printf '%s' "$K318_BG" | /usr/bin/grep -q '"decision":"deny"' || { K318_OK=0; K318_MISS="$K318_MISS behavioral-deny"; }
+if [ "$K318_OK" -eq 1 ]; then
+  pass "K318: hook-runtime consolidation (_common.sh single-sources devt_read_stdin + devt_plugin_root; 10 stdin hooks source it, none re-implements inline timeout-cat; bash-guard deny survives end-to-end)"
+else
+  fail "K318: hook-runtime consolidation regressed:$K318_MISS"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

@@ -8,6 +8,21 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.200.0] - 2026-07-22
+
+### Hook-runtime consolidation
+
+The stdin read and plugin-root resolution that every hook re-implemented are now single-sourced in `hooks/_common.sh`. This makes the argv→stdin (E2BIG) fix — which had to be applied to the hook ecosystem one script at a time — structurally un-reintroducible: a new hook sources the helper and inherits the correct, tty-guarded, time-boxed read for free.
+
+### Changed
+
+- **`hooks/_common.sh` single-sources `devt_read_stdin` + `devt_plugin_root`.** All 10 stdin-consuming hooks (`bash-guard`, `dispatch-hygiene-guard`, `memory-auto-index`, `pre-flight-guard`, `prompt-guard`, `read-before-edit-guard`, `stop`, `subagent-status`, `task-truncation-detector`, `workflow-context-injector`) now `source` it instead of carrying an inline `INPUT="" / if ! [ -t 0 ]; then timeout N cat …` block. Hook-specific empty-input actions (an allow-hook echoes `{}` before exit; others exit silently) stay in each hook. `devt_plugin_root` prefers the `PLUGIN_ROOT` the runner already exports, falling back to `$0`-relative resolution for direct invocation.
+- **`workflow-context-injector` stdin read is now tty-guarded + time-boxed.** It previously used a bare `cat` with no `[ -t 0 ]` guard — robust only because the runner always pipes stdin; a direct or on-a-tty invocation could block. It now uses `devt_read_stdin` like the others.
+
+### Added
+
+- **Gate K318** enforces the consolidation: `_common.sh` defines both helpers, every stdin hook sources it and calls `devt_read_stdin`, none re-implements the inline `timeout N cat` read, and the sourced helper delivers end-to-end (bash-guard deny path survives the source).
+
 ## [0.199.0] - 2026-07-22
 
 ### Smoke-suite corpus safety (K84 hermetic + corpus-integrity gate)
@@ -662,21 +677,3 @@ Both surfaced by a live platform-doc check on the `.mcp.json` location question:
 - The scaffolded graphify server's graph-path arg was bare-relative (`graphify-out/graph.json`), resolving against the spawned server's working directory — which Claude Code does not guarantee to be the project root. Now `${CLAUDE_PROJECT_DIR:-.}/graphify-out/graph.json`, the platform-documented form for project-scoped `.mcp.json` (the `:-.` default degrades to today's behavior where the variable isn't substituted, and self-heals wherever it is). Existing projects reconcile on `setup --mode reinit`; `create`/`update` leave user entries untouched as before.
 - `health`'s `GRAPHIFY_MCP_UNREGISTERED` fix message instructed users to register `graphify mcp --project .` — a subcommand upstream removed (setup.cjs has scaffolded `python -m graphify.serve` for months; the hint was never updated). Anyone following it registered a server that cannot start. The message now leads with re-running setup and shows the current uv launch form.
 - Gate **K272** (prefixed graph path + no dead registration hint anywhere). Drift-guard stack 178 → 179 deep (K94–K272).
-
-## [0.164.0] - 2026-07-15
-
-### python-fastapi template: FastAPI + Pydantic best-practice calibration
-
-Four-agent research sweep (official FastAPI docs + release timeline, community production consensus, ecosystem stack, dedicated Pydantic pass — every prescription live-verified against primary sources, cross-corroborated, UNVERIFIED claims excluded). The template's bones held up (Annotated DI, lifespan, UUIDv7, uv, structlog+OTel, testcontainers, ASGITransport all still current); what follows fixes the parts the ecosystem moved out from under.
-
-- **Security stack corrected**: `python-jose` (unmaintained, dropped from official guidance) → **PyJWT**; `passlib`/`bcrypt` → **pwdlib[argon2]** with `PasswordHash.recommended()` (the official tutorial stack; passlib survives only as a read-legacy-hashes note).
-- **Async story rewritten** (was self-contradictory: prescribed sync-DB-by-default while showing async testing): explicit decision tree (non-blocking → `async def`; blocking lib → `def`/threadpool of ~40; mixed → `run_in_threadpool`; CPU-bound → task queue), async-first DB as the default posture, and the async-SQLAlchemy trap kit — engine-once-in-lifespan, session-per-request yield dependency (+ the new `scope` parameter), `expire_on_commit=False`, `selectinload`/`joinedload`, **`lazy="raise"` relationship default**, `MissingGreenlet` explained.
-- **New `pydantic-patterns.md` add-on** (~300 lines): ConfigDict essentials (`extra="forbid"` at API boundaries, the 2.11 aliasing trio replacing `populate_by_name`), validator rules (ValueError-only — anything else 500s; messages leak verbatim into 422 bodies; no `assert`), `field_serializer` over deprecated `json_encoders`, `computed_field`, TypeAdapter reuse, `exclude_unset`-vs-`exclude_none` semantics + the official PATCH pattern, discriminated unions, `AwareDatetime`, `Optional ≠ default`, `polymorphic_serialization`, settings (secrets_dir, the BaseSettings `extra="forbid"` default gotcha, eager fail-fast + `lru_cache` dependency), and the validate-at-boundaries performance doctrine.
-- **Enforcement over prose**: ruff `FAST` + `ASYNC` rule groups added to the pyproject example — FAST002 mechanically enforces the template's own Annotated-DI rule; ASYNC detects blocking-in-async. Compatibility-floor table added to coding-standards (FastAPI ≥0.128 = Pydantic-v2-only; 0.132 strict JSON Content-Type; pytest-asyncio 1.x; httpx 0.28).
-- **Response-model idiom**: return-type annotation as primary (now also the fast Rust-serialization path), `response_model=` only when types diverge; second-validation-pass cost noted; self-contradicting `= Depends()` example fixed.
-- **pytest idiom coherence**: pytest-asyncio 1.x config (`asyncio_mode=auto` + explicit `asyncio_default_fixture_loop_scope`), no per-test markers, `event_loop`-fixture and `AsyncClient(app=)` flagged as removed-upstream.
-- **Six new common-smells entries**: lazy-loading-in-async (MissingGreenlet/hidden N+1), ValueError-internals-leak, legacy test-client/event-loop idioms, `exclude_none`-in-PATCH, superseded config flags; sync-in-async entry gains the `run_in_threadpool` escape and threadpool-exhaustion context.
-- **architecture.md additions**: BackgroundTasks-vs-queue boundary (ARQ async-native default, Celery for heavy pipelines), workers guidance (K8s single-process; gunicorn is legacy; uvicorn is HTTP/1.1-only), correlation-id middleware + double-access-log note, alembic `pyproject_async` init template, structure-tradeoff note (deliberate Clean-Architecture sublayers vs community flat-per-domain).
-- **HURL 8 notes** in hurl-reference: RFC 9535 JSONPath engine, removed multiline-string attributes, secrets redaction (`--secrets-file`), parallel-by-default `--test` mode vs ordered chains.
-- **De-contamination sweep**: field-project domain vocabulary in generic examples (ownership table, HURL domain map + foundation chain, changelog example rows, scope table, service-name lists, circular-dep examples) replaced with generic Users/Orders/Catalog/Billing/Notifications shapes.
-- Gate **K271** (template currency: pydantic-patterns present + PyJWT/pwdlib + FAST/ASYNC wiring + trap kit + pytest-asyncio idiom). Drift-guard stack 177 → 178 deep (K94–K271).

@@ -33,11 +33,9 @@
 #
 [[ $- == *i* ]] && return
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
-INPUT=""
-if ! [ -t 0 ]; then
-  INPUT="$(timeout 3 cat 2>/dev/null || true)"
-fi
+INPUT="$(devt_read_stdin)"
 
 if [[ -z "$INPUT" ]]; then
   exit 0

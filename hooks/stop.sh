@@ -4,14 +4,12 @@
 # If a workflow is active and incomplete, warns Claude to finish or pause.
 # If workflow is complete or inactive, saves state and allows exit.
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
-PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PLUGIN_ROOT="$(devt_plugin_root)"
 
-# Read hook input JSON from stdin (non-blocking)
-INPUT=""
-if ! [ -t 0 ]; then
-  INPUT="$(timeout 3 cat 2>/dev/null || true)"
-fi
+# Read hook input JSON from stdin (tty-guarded, time-boxed)
+INPUT="$(devt_read_stdin)"
 
 # Check stop_hook_active from JSON input to prevent infinite loops
 if [[ -n "$INPUT" ]]; then

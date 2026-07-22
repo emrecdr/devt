@@ -13,14 +13,9 @@
 # (exit 0 with "{}") on any parse error so a hook bug never blocks legitimate work.
 [[ $- == *i* ]] && return
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
-if [ -t 0 ]; then
-  # No stdin piped — nothing to check.
-  echo '{}'
-  exit 0
-fi
-
-INPUT="$(timeout 3 cat 2>/dev/null || true)"
+INPUT="$(devt_read_stdin)"
 if [[ -z "$INPUT" ]]; then
   echo '{}'
   exit 0
@@ -28,4 +23,4 @@ fi
 
 # Delegate to the Node module via the CLI dispatcher. The module reads stdin
 # directly, so we re-pipe INPUT through.
-printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/bin/devt-tools.cjs" bash-guard check 2>/dev/null || echo '{}'
+printf '%s' "$INPUT" | node "$(devt_plugin_root)/bin/devt-tools.cjs" bash-guard check 2>/dev/null || echo '{}'

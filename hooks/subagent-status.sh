@@ -4,6 +4,7 @@
 # Usage: subagent-status.sh start|stop
 # Designed for async hooks: fast, no blocking operations.
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
 ACTION="${1:-}"
 if [[ -z "$ACTION" ]]; then
@@ -11,10 +12,7 @@ if [[ -z "$ACTION" ]]; then
 fi
 
 # Read agent info from stdin (hook input JSON)
-INPUT=""
-if ! [ -t 0 ]; then
-  INPUT="$(timeout 3 cat 2>/dev/null || true)"
-fi
+INPUT="$(devt_read_stdin)"
 
 # Extract and sanitize agent name using node (guaranteed available, proper JSON parsing)
 AGENT_NAME="unknown"

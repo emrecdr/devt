@@ -3,12 +3,10 @@
 # Advisory only: warns but does not block operations
 [[ $- == *i* ]] && return
 set -euo pipefail
+source "$(dirname "$0")/_common.sh"
 
-# Read hook input from stdin (with timeout)
-INPUT=""
-if ! [ -t 0 ]; then
-  INPUT="$(timeout 3 cat 2>/dev/null || true)"
-fi
+# Read hook input from stdin (tty-guarded, time-boxed)
+INPUT="$(devt_read_stdin)"
 
 # Only check Write/Edit to .devt/state/ paths
 if [[ -z "$INPUT" ]]; then
