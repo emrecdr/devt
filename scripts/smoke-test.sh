@@ -67,12 +67,21 @@ TMP=$(mktemp -d)
 WF_STATE="$ROOT/.devt/state/workflow.yaml"
 WF_BAK="$TMP/workflow.yaml.pre-suite"
 if [ -f "$WF_STATE" ]; then cp "$WF_STATE" "$WF_BAK"; fi
+# Repo-state tripwire (status.json): the lane-state-guard blocks state
+# mutations (init-workflow strip, reset) when status.json shows a FRESH
+# "running" subagent. A pre-existing running agent in the dogfood repo — a
+# crashed prior session, or a hook test that wrote status.json — would abort
+# the whole suite at the first `init workflow`. Snapshot + clear now so the
+# suite runs against clean state; restore on EXIT so dogfood state survives.
+STATUS_STATE="$ROOT/.devt/state/status.json"
+STATUS_BAK="$TMP/status.json.pre-suite"
+if [ -f "$STATUS_STATE" ]; then cp "$STATUS_STATE" "$STATUS_BAK"; rm -f "$STATUS_STATE"; fi
 # Abort tripwire: a gate crashing under set -e can end the run BEFORE the
 # Result line while still reading as green in a chained invocation. The
 # sentinel flips only after every gate has run; an exit without it is a
 # failure regardless of the exit path.
 SUITE_COMPLETED=0
-trap 'if [ -f "$WF_BAK" ]; then cp "$WF_BAK" "$WF_STATE"; elif [ -d "$ROOT/.devt/state" ]; then rm -f "$WF_STATE"; fi; rm -rf "$TMP"; if [ "${SUITE_COMPLETED:-0}" != "1" ]; then echo "SMOKE SUITE ABORTED before the Result line — a gate crashed mid-run; treat as FAILURE"; exit 70; fi' EXIT
+trap 'if [ -f "$WF_BAK" ]; then cp "$WF_BAK" "$WF_STATE"; elif [ -d "$ROOT/.devt/state" ]; then rm -f "$WF_STATE"; fi; if [ -f "$STATUS_BAK" ]; then cp "$STATUS_BAK" "$STATUS_STATE"; fi; rm -rf "$TMP"; if [ "${SUITE_COMPLETED:-0}" != "1" ]; then echo "SMOKE SUITE ABORTED before the Result line — a gate crashed mid-run; treat as FAILURE"; exit 70; fi' EXIT
 cd "$TMP"
 
 run_json "init workflow"   node "$CLI" init workflow "smoke test task"
@@ -3716,6 +3725,21 @@ if [ "$COORD_ROWS" -eq "$DO_ROWS" ] && [ "$COORD_ROWS" -ge "$MIN_ROUTING_ROWS" ]
   pass "coordinator routing-table row count matches workflows/do.md (${COORD_ROWS} rows)"
 else
   fail "coordinator routing-table drift — coordinator=${COORD_ROWS} do.md=${DO_ROWS} min=${MIN_ROUTING_ROWS}"
+fi
+
+# Content parity — row-count parity is necessary but not sufficient: two
+# equal-row tables can still route a command to a different target, rename a
+# command, or diverge on a --flag form without the count changing (the gap the
+# file's own drift note called out). Extract the /devt: command tokens (full
+# form incl. flags) from the TABLE ROWS of both files and assert identical
+# sorted sets. Same drift class K320 closes for the implement/test bodies.
+COORD_CMDS=$(grep -E '^\|' "$ROOT/agents/devt-coordinator.md" | grep -oE '/devt:[^`]+' | sed 's/ *$//' | sort)
+DO_CMDS=$(grep -E '^\|' "$ROOT/workflows/do.md" | grep -oE '/devt:[^`]+' | sed 's/ *$//' | sort)
+if [ "$COORD_CMDS" = "$DO_CMDS" ]; then
+  pass "coordinator routing-table command tokens match workflows/do.md (content parity, not just row count)"
+else
+  COORD_CMD_DIFF=$(diff <(printf '%s\n' "$DO_CMDS") <(printf '%s\n' "$COORD_CMDS") | tr '\n' ' ' || true)
+  fail "coordinator routing-table CONTENT drift (row count may match, commands differ) — do.md '<' vs coordinator '>': $COORD_CMD_DIFF"
 fi
 
 echo "== Parallel researcher + arch_health dispatch (v0.36.0+, Option 9a) =="
@@ -10223,7 +10247,7 @@ fi
 # includes the rendered envelope. State may have been reset by earlier tests
 # (L622, L631), so seed a fresh active workflow first — `:auto` resolution
 # needs workflow.yaml::active=true to render successfully.
-node "$CLI" init workflow "K4 hook envelope test" >/dev/null 2>&1
+node "$CLI" init workflow "K4 hook envelope test" >/dev/null 2>&1 || true
 K4_CFG_BAK=$(mktemp)
 [ -f .devt/config.json ] && cp .devt/config.json "$K4_CFG_BAK"
 echo '{"dispatch_hygiene_mode":"warn"}' > .devt/config.json
@@ -10325,7 +10349,7 @@ fi
 K33_TMP=$(mktemp -d)
 mkdir -p "$K33_TMP/.devt/state"
 cd "$K33_TMP"
-node "$CLI" init workflow "K33 test" >/dev/null 2>&1
+node "$CLI" init workflow "K33 test" >/dev/null 2>&1 || true
 K33_EMPTY=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
 node "$CLI" state assert-artifact-present architect >/dev/null 2>&1
 K33_BLOCK=$(node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok')
@@ -10384,7 +10408,7 @@ echo '{"graphify":{"enabled":true}}' > .devt/config.json
 echo '{"nodes":[{"id":"S1","label":"TestSymbol","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
 echo "class TestSymbol: pass" > a.py
 git add -A && git -c user.email=ci@devt.local -c user.name=ci commit -q -m "init"
-CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K36 TestSymbol test" >/dev/null 2>&1
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K36 TestSymbol test" >/dev/null 2>&1 || true
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor TestSymbol" >/dev/null 2>&1
 K36_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));console.log(j.blast && 'caller_count_grep' in j.blast && 'magnification_advisory' in j.blast ? 'yes' : 'no')" 2>/dev/null)
 cd "$ROOT"
@@ -10400,7 +10424,7 @@ fi
 # firing with verdict + workflow_id + phase enrichment.
 K37_TMP=$(mktemp -d)
 cd "$K37_TMP"
-node "$CLI" init workflow "K37 test" >/dev/null 2>&1
+node "$CLI" init workflow "K37 test" >/dev/null 2>&1 || true
 node "$CLI" state assert-claim-checks-resolved >/dev/null 2>&1
 K37_HAS=$(node -e "if(!require('fs').existsSync('.devt/state/gate-trace.jsonl')){console.log('absent');process.exit(0)}const l=require('fs').readFileSync('.devt/state/gate-trace.jsonl','utf8').trim().split('\n')[0];try{const j=JSON.parse(l);console.log(j.source==='gate_trace'&&j.gate&&j.verdict&&'workflow_id'in j?'yes':'no')}catch{console.log('parse_err')}" 2>/dev/null)
 cd "$ROOT"
@@ -10423,7 +10447,7 @@ echo '{"graphify":{"enabled":true}}' > .devt/config.json
 echo '{"nodes":[{"id":"S1","label":"RealK38","source_file":"a.py"}],"links":[]}' > graphify-out/graph.json
 echo "class RealK38: pass" > a.py
 git add -A && git -c user.email=ci@devt.local -c user.name=ci commit -q -m "init"
-CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K38 test" >/dev/null 2>&1
+CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" init workflow "K38 test" >/dev/null 2>&1 || true
 CLAUDE_PLUGIN_ROOT="$ROOT" node "$CLI" preflight generate "refactor RealK38 FakeK38" >/dev/null 2>&1
 K38_HAS=$(node -e "const j=JSON.parse(require('fs').readFileSync('.devt/state/preflight-brief.json','utf8'));process.exit('symbols_dropped_no_graph_node' in j.topic ? 0 : 1)" 2>/dev/null && echo "yes" || echo "no")
 cd "$ROOT"
@@ -10451,7 +10475,7 @@ fi
 # set -euo pipefail when advance-phase legitimately exits 1.
 K40_TMP=$(mktemp -d)
 cd "$K40_TMP"
-node "$CLI" init workflow "K40 test" >/dev/null 2>&1
+node "$CLI" init workflow "K40 test" >/dev/null 2>&1 || true
 node "$CLI" state update workflow_type=quick_implement >/dev/null 2>&1
 K40_EC=0
 node "$CLI" state advance-phase complete >/dev/null 2>&1 || K40_EC=$?
@@ -10468,7 +10492,7 @@ fi
 # phases NOT in the registry. Backwards compatibility check.
 K41_TMP=$(mktemp -d)
 cd "$K41_TMP"
-node "$CLI" init workflow "K41 test" >/dev/null 2>&1
+node "$CLI" init workflow "K41 test" >/dev/null 2>&1 || true
 node "$CLI" state update workflow_type=quick_implement >/dev/null 2>&1
 K41_OK=$(node "$CLI" state advance-phase unknown_phase 2>/dev/null | jq -r '.ok')
 cd "$ROOT"
@@ -11341,7 +11365,7 @@ rm -rf "$K72_TMP"
 # branches.
 K73_TMP=$(mktemp -d)
 cd "$K73_TMP"
-node "$CLI" init workflow "K73 inlining test" >/dev/null 2>&1
+node "$CLI" init workflow "K73 inlining test" >/dev/null 2>&1 || true
 # absent: rendered envelope shows the (no graph-impact.md available — ...) notice
 K73_ABSENT=$(node "$CLI" dispatch render-filled programmer:dev 2>/dev/null | grep -c "no graph-impact.md available" || true)
 # present: write graph-impact.md and confirm content inlines verbatim
