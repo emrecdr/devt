@@ -8,6 +8,38 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.205.0] - 2026-07-26
+
+### v3-report residuals — every item code-verified before implementation
+
+A third external deep-read (post-0203) was validated finding-by-finding: 13 findings confirmed (2 with corrected severity/mechanics, 2 expanded beyond the report), 1 fix-direction rejected. This release ships the validated small-fix tier; the measured token/latency tier follows separately.
+
+### Fixed
+
+- **The tester dispatch gets the claim-check every other agent already had (R3, K320).** Six agents were claim-checked after dispatch (programmer ×2, code-reviewer ×2, debugger, architect, verifier) — the tester was the only output-writing dispatch without one, i.e. the one agent whose partial output stayed invisible until the verifier stage. Both test bodies now run `state post-dispatch-check tester` (proven working behaviorally: missing artifact → `redispatch` with the io-contracts reason; present → `proceed`) and K320's test-step token list pins it.
+- **KCORPUS digests ALL corpus files and is honestly fail-loud (R1+R2).** The gate hashed only `*.md` — `skills/complexity-assessment/assets/keywords.yaml` is a behavioral input (the assess step reads it) that in-place mutation could corrupt silently. Now all files under `guardrails/` + `skills/` are hashed (`.DS_Store` pruned). The "degrades safe: absent shasum → no-op" comment was false — under `set -euo pipefail` a missing shasum aborted the suite with a bare exit 127. Deliberately kept **fail-loud** (an integrity gate that can quietly stop tripping is worse than one that refuses to run — the report's `|| true` suggestion was rejected) and made legible: an explicit `command -v shasum` check fails with a named error. The abort-path non-assertion is now documented (the `SUITE_COMPLETED` sentinel already forces failure there).
+- **`_common.sh` honors `CLAUDE_PLUGIN_ROOT` again (R5).** Three hooks' inner node blocks still read `CLAUDE_PLUGIN_ROOT` directly, but the consolidated `devt_plugin_root` had dropped it from the fallback chain — now `PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` → `$0`-relative, one consistent contract.
+- **Config schema truth restored, both directions (N3, expanded).** `graphify.rebuild_debounce_seconds` (read by `maybe-refresh`, documented in GRAPHIFY.md) and `preflight.domain_hints` (read by lane-A extraction, documented in MEMORY.md, dogfooded in this repo's own config) were absent from DEFAULTS — the CON-005 inverse, where the unknown-key warning can't protect their nesting. Both added with rationale comments. The README hook-profile table had drifted **three** ways (a ghost `dispatch-scope-guard.sh` row surviving that hook's long-ago merge into `dispatch-hygiene-guard.sh`, a missing `task-truncation-detector.sh` row, and `read-before-edit-guard.sh` shown at `standard` after its demotion to full-only — the third error found during validation, not in the report). Fixed, plus three more merge-leftover ghost references the report missed: `config.cjs`'s consumer comment, `docs/AGENT-CONTRACTS.md`'s cross-ref list, and `docs/STATE-RULES.md`'s writer attribution.
+- Comment truth one-liners: `workflow-context-injector`'s stdin read documents its tty-guard/timeout semantics (R4); KCORPUS documents why the EXIT trap doesn't re-assert (R7).
+
+### Removed
+
+- **`scripts/prompt-injection-scan.sh` retired (N5).** A duplicate pattern list of `security.cjs::scanForInjection` — the two were literally cross-NOTEd as "parallel implementation" of each other — and invoked by no CI job, smoke section, or hook. Two drift-prone pattern lists in a security control, one of them dead. Deleted; `security.cjs` is the single implementation. Deliberately NO new CLI verb: nothing consumes one, and maintained-but-unwired machinery is the exact class the `--plugin-build` retirement closed. RETIREMENT-WATCH ledger records it.
+
+### Changed
+
+- **`session-start.sh` no longer touches `~/.claude/commands/` on plugin-managed installs (N6).** The per-session symlink re-link (`rm -rf` + `ln -sf` into user-global state) is a pre-plugin-era registration mechanism; marketplace installs get native command registration. Now gated: a `PLUGIN_ROOT` under `~/.claude/plugins/` skips it; manual-clone installs keep the current behavior.
+
+### Added
+
+- **Gate K321** — hook-profile TABLE parity (README + CLAUDE.md ↔ `run-hook.js::HOOK_PROFILES`, hook set AND per-profile membership, both directions — the class none of K315/K155 covered) plus pins for every fix in this batch (env contract, KCORPUS scope + fail-loud, DEFAULTS keys, ghost-name absence, scanner retirement, symlink gating).
+
+### Corrected (v3-report claims adjusted under verification)
+
+- R6 ("allow-hooks fail closed if `_common.sh` breaks") — severity refuted: exit 1 is a *non-blocking* hook error to the harness (only exit 2 blocks), so the failure mode is fail-open-with-noise; the proposed `source … || echo '{}'` would hide guard death and was not adopted.
+- The injector "runs the full CLI on every prompt with no idle short-circuit" — partly wrong: the `state read` is mtime-cached; the unconditional per-prompt cost is the context-builder spawn.
+- PreToolUse matcher-merge and injector idle short-circuit — refuted by measurement (profile-skips cost ~1ms; the cache works); recorded as validated non-issues rather than shipped.
+
 ## [0.204.0] - 2026-07-25
 
 Both items surfaced by a post-release deep-validation pass (adversarial mutation-testing of the session's new gates + an audit for further improvements).
@@ -654,15 +686,3 @@ An external deep-audit of the memory layer (validated finding-by-finding against
 - Gates: **K276** (behavioral: superseded + REJ FTS-matches stay out of `governing_ids`, lifecycle rendered, explicit query unaffected), **K277** (supersede round-trip atomic, validate clean after), **K278** (one-sided link errors, orphaned retirement warns), **K279** (mechanism drift pins), **K280** (documented-CLI routing coverage — every `devt-tools.cjs <cmd>` in CLAUDE.md must have a live routing case; the gate that would have caught the `semantic` ghost the day it appeared). Drift-guard stack 183 → 188 deep (K94–K280).
 
 Deferred with triggers (mechanism-firing ≠ value-conversion; live corpora are currently 4–7 docs): confidence-weighted lane ranking (matters only when the FTS limit truncates), confidence lifecycle transitions (proposals-only if ever built — auto-promotion would breach the curator gate), usage-ledger aggregation of PREFLIGHT citations, `enforce:` frontmatter compilation, drift-risk reporting, LES decay, `memory history` lineage walk, alias frontmatter.
-
-## [0.167.0] - 2026-07-16
-
-### Review verify + present_findings single-sourced (the KEEP-IN-SYNC banners were lying)
-
-The receipt ranked the ~1,670-line two-file review workflow's copy-paste duplication as its #5 fix. Validation before implementation found something worse than duplication: **the sync had already failed silently**. The parallel path was missing four gates the single path gained over time — the verifier short-circuit, the walk-all-axes coverage override, the Layer-2 claim-check resolution gate, and the raw-dispatch finalize gate (two of which are the load-bearing blocks of the three-layer dispatch defense). A parallel review could finalize without the enforcement the single path guarantees, while both files displayed banners claiming they were identical.
-
-- **New `workflows/code-review.steps.md`** — single source for the `verify` and `present_findings` step bodies, loaded by both parents at `SHARED-STEP` pointers via the dev-workflow tier-partition mechanism (mandatory Read + pipeline-position markers + mode branches: unmarked blocks run in both modes, `SINGLE-DISPATCH ONLY` / `PARALLEL ONLY` blocks in one). The verifier dispatch envelope — which had stayed byte-identical in both copies — now exists once.
-- **Parallel path gains the four lost gates**: axes-coverage override, claim-check resolution, raw-dispatch finalize enforcement (all unconditional now), and the finalize migrates to `advance-phase`. The short-circuit gate stays deliberately single-only — a consolidator's self-flags summarize other agents' work, and short-circuiting synthesis on second-hand self-certification is unvalidated (receipt-gated, reason documented in the block).
-- **Deliberate divergences are now explicit** instead of hidden in drift: consolidator-dispatched gate (parallel), short-circuit (single), RETRY re-dispatch target, report format (single keeps its 0–100; parallel headlines verdict + counts + lane distribution per the score-model fix).
-- Net: 1,690 → 1,527 lines across the three files, ~440 formerly-drifting lines single-sourced, stale KEEP-IN-SYNC banners replaced with the real contract.
-- Nine smoke gates repointed at the new single source (verifier-dispatch pair, allow-list, graphify-surface, F28a, I7a, M15, K43, K222, K274) + **K275** (partition integrity: bodies present once with all four recovered gates, parents carry pointers + mandatory-Read, resident copies banned) + **O5 fixture de-flaked** (anchor stamped before the fresh touch — the anchor-after-touch order raced the second boundary under suite load, same class as the N8 flake). Drift-guard stack 182 → 183 deep (K94–K275).

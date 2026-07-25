@@ -207,7 +207,6 @@ function scanForInjection(text, opts) {
     }
 
     // URL-encoded injection — decode %XX sequences and re-scan
-    // NOTE: parallel implementation in scripts/prompt-injection-scan.sh (category 7)
     if (/%[0-9a-fA-F]{2}/.test(text)) {
       scanDecoded(decodeUrlEncoding(text), "URL-encoded injection");
     }

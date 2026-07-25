@@ -145,7 +145,7 @@ Tag-driven via `.github/workflows/release.yml`. Bump VERSION + plugin.json + CHA
 ### Plugin Mechanics
 
 - Plugin manifest at `.claude-plugin/plugin.json`. Agents are listed explicitly; commands and skills are auto-discovered.
-- Commands symlinked to `~/.claude/commands/devt/` on SessionStart for `devt:` namespaced autocomplete.
+- Commands symlinked to `~/.claude/commands/devt/` on SessionStart for `devt:` namespaced autocomplete (manual-clone installs only — plugin-managed installs use native registration).
 - Version tracked in both `plugin.json` (primary) and `VERSION` file; CI enforces coherence.
 - Plugin registration + skill-namespacing footguns: → docs/AGENT-CONTRACTS.md (Plugin Mechanics).
 - `agents/devt-coordinator.md` opt-in main-thread router: → docs/INTERNALS.md (devt-coordinator).

@@ -7,13 +7,22 @@ set -euo pipefail
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ─── Command Registration ───
-# Symlink commands into ~/.claude/commands/devt/ for proper namespacing (devt:command)
-COMMANDS_DIR="$HOME/.claude/commands/devt"
-if [[ ! -d "$COMMANDS_DIR" ]] || [[ "$(readlink -f "$COMMANDS_DIR" 2>/dev/null)" != "$(readlink -f "$PLUGIN_ROOT/commands" 2>/dev/null)" ]]; then
-  mkdir -p "$HOME/.claude/commands" 2>/dev/null || true
-  rm -rf "$COMMANDS_DIR" 2>/dev/null || true
-  ln -sf "$PLUGIN_ROOT/commands" "$COMMANDS_DIR" 2>/dev/null || true
-fi
+# Symlink commands into ~/.claude/commands/devt/ for proper namespacing
+# (devt:command) — MANUAL-CLONE installs only. A plugin-managed install
+# (PLUGIN_ROOT under ~/.claude/plugins/) gets native command registration from
+# the plugin system; re-linking there would touch user-global state every
+# session for a mechanism the platform already owns.
+case "$PLUGIN_ROOT" in
+  "$HOME/.claude/plugins/"*) ;;
+  *)
+    COMMANDS_DIR="$HOME/.claude/commands/devt"
+    if [[ ! -d "$COMMANDS_DIR" ]] || [[ "$(readlink -f "$COMMANDS_DIR" 2>/dev/null)" != "$(readlink -f "$PLUGIN_ROOT/commands" 2>/dev/null)" ]]; then
+      mkdir -p "$HOME/.claude/commands" 2>/dev/null || true
+      rm -rf "$COMMANDS_DIR" 2>/dev/null || true
+      ln -sf "$PLUGIN_ROOT/commands" "$COMMANDS_DIR" 2>/dev/null || true
+    fi
+    ;;
+esac
 
 # ─── Project Detection ───
 

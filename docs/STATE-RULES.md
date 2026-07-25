@@ -94,7 +94,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 | `threads/` | `/devt:thread create` (session handoffs + cross-session threads) | directory of uniquely slug-named `<slug>.md` threads (frontmatter: `title`, `status`, `session:` id); canonical subdir — `state cleanup` never bulk-archives it; one-shot handoff threads auto-RESOLVE on resume | ✓ (`RESET_EXEMPT` — cross-session survival is the contract) |
 | `deferred.md` | `/devt:note --defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
 | `preflight-denies.jsonl` | preflight hook + bash-guard + graph_loader | JSONL (one record per deny) | ✓ |
-| `dispatch-warnings.jsonl` | dispatch-scope-guard hook | JSONL (advisory only) | ✓ |
+| `dispatch-warnings.jsonl` | dispatch-hygiene-guard hook | JSONL (advisory only) | ✓ |
 | `probe-failures.jsonl` | `graphify.probeBinary` + `setup.probePythonGraphifyMcp` | JSONL with `{ts, category, command, args, error, ...}` — categories: `spawn-error` / `timeout` / `nonzero-exit` / `not-installed` / `no-result`. `health` surfaces `PROBE_FAILURES_RECENT` info-check when activity is logged within the last 24h. | ✓ |
 | `.graphify-rebuild.lock` | `graphify rebuild` CLI (DEF-038) | atomic O_CREAT|O_EXCL lock holding `{pid, started_at}` JSON; auto-unlinked in finally; survives reset only when the holder crashed (next `rebuild` breaks past the debounce window) | ✓ |
 | `static-compress.jsonl` | `static-compress.cjs` CLI | JSONL with `{action, ts, path, engine, before_bytes, after_bytes, ratio, backup_path, warnings}` records — one per compress / restore action. Audits the opt-in static-file compressor; survives reset so calibration data isn't lost when a workflow resets between compression runs. | ✓ |

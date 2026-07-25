@@ -471,12 +471,12 @@ The setting is **declarative** — no enforcement code reads it. Agents self-reg
 | `stop.sh` | ✓ | ✓ | ✓ |
 | `workflow-context-injector.sh` | – | ✓ | ✓ |
 | `subagent-status.sh` | – | ✓ | ✓ |
-| `read-before-edit-guard.sh` | – | ✓ | ✓ |
+| `read-before-edit-guard.sh` | – | – | ✓ |
 | `pre-flight-guard.sh` | – | ✓ | ✓ |
 | `memory-auto-index.sh` | – | ✓ | ✓ |
 | `bash-guard.sh` | – | ✓ | ✓ |
-| `dispatch-scope-guard.sh` | – | ✓ | ✓ |
 | `dispatch-hygiene-guard.sh` | – | ✓ | ✓ |
+| `task-truncation-detector.sh` | – | ✓ | ✓ |
 | `prompt-guard.sh` | – | – | ✓ |
 
 Disable specific hooks: `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh`. Disable the universal hook trace (advanced): `DEVT_HOOK_TRACE=0`.

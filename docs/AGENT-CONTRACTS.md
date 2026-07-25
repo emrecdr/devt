@@ -335,7 +335,7 @@ skills: [codebase-scan]         # ✗ silently fails
 
 - `docs/MEMORY.md` — pre-flight, scope_hint sidecar shape, memory layer mechanics
 - `docs/INTERNALS.md` — governing_rules wiring, inline guardrails, sidecar registry, MCP trace
-- `docs/HOOKS.md` — dispatch-hygiene-guard, dispatch-scope-guard, pre-flight-guard, bash-guard
+- `docs/HOOKS.md` — dispatch-hygiene-guard, pre-flight-guard, bash-guard
 - `docs/GRADER.md` — verifier outcome-grader, code-review grader, pinned rubrics
 - `docs/GRAPHIFY.md` — graphify-first protocol, scan_prep gate, eviction CLI
 - `docs/STATE-RULES.md` — `.devt/state/` filename contract

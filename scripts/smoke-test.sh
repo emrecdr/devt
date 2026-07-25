@@ -28,9 +28,16 @@ FAILED_GATES=""
 # catches ANY in-place mutation of the corpus by a test run regardless of cause
 # — the standing tripwire for the class the retired `--plugin-build` flag
 # embodied (prose-shrink writing the live tree), and it closes the pinned-phrase
-# detection gap (few gates would notice article-stripping). Degrades safe:
-# absent shasum → empty digests → no-op.
-KCORPUS_DIGEST() { (cd "$ROOT" && find guardrails skills -type f -name '*.md' -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | cut -d' ' -f1); }
+# detection gap (few gates would notice article-stripping). Digests ALL files
+# under the two roots (skill assets like keywords.yaml are behavioral inputs,
+# not just the .md bodies), pruning .DS_Store noise. FAIL-LOUD by design: a
+# missing shasum aborts here with a named error rather than letting an
+# integrity gate silently no-op — a tripwire that can quietly stop tripping is
+# worse than one that refuses to run. Not re-asserted in the EXIT trap: an
+# abort path already forces failure via the SUITE_COMPLETED sentinel, so an
+# aborted run can never read as corpus-clean.
+command -v shasum >/dev/null 2>&1 || { echo "FATAL: shasum not found — the KCORPUS corpus-integrity gate cannot run"; exit 70; }
+KCORPUS_DIGEST() { (cd "$ROOT" && find guardrails skills -type f ! -name '.DS_Store' -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | cut -d' ' -f1); }
 KCORPUS_SHA0=$(KCORPUS_DIGEST)
 
 run() {
@@ -18669,7 +18676,7 @@ for tok in 'post-dispatch-check programmer' 'read-sidecar impl-summary.json' 'st
   printf '%s' "$K320_DEV_IMPL" | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY dev-impl:[$tok]"; }
   printf '%s' "$K320_QK_IMPL"  | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY quick-impl:[$tok]"; }
 done
-for tok in 'read-sidecar test-summary.json' 'state update phase=test'; do
+for tok in 'post-dispatch-check tester' 'read-sidecar test-summary.json' 'state update phase=test'; do
   printf '%s' "$K320_DEV_TEST" | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY dev-test:[$tok]"; }
   printf '%s' "$K320_QK_TEST"  | /usr/bin/grep -qF -- "$tok" || { K320_OK=0; K320_WHY="$K320_WHY quick-test:[$tok]"; }
 done
@@ -18683,6 +18690,60 @@ if [ "$K320_OK" -eq 1 ]; then
   pass "K320: implement/test KEEP-IN-SYNC contract (post-dispatch-check + sidecar routing + phase update present in both dev + quick bodies; markers name the gate)"
 else
   fail "K320: implement/test contract drift —$K320_WHY"
+fi
+
+# K321: v3-report residual surface. (1) Hook-profile TABLE parity — README +
+# CLAUDE.md tables must both match run-hook.js::HOOK_PROFILES exactly (hook set
+# AND per-profile membership, both directions). The README table had drifted
+# three ways (a ghost dispatch-scope-guard row surviving that hook's merge into
+# dispatch-hygiene-guard, a missing task-truncation-detector row, and
+# read-before-edit shown at standard after its demotion to full) with no gate
+# noticing — K315's path sweep covers docs/, K155 covers hooks.json ↔ CLAUDE.md
+# wiring, nothing checked profile COLUMNS. (2) Pins for the rest of the batch:
+# _common.sh honors CLAUDE_PLUGIN_ROOT; KCORPUS digests ALL corpus files
+# (keywords.yaml is behavioral) with the shasum fail-loud check; the two
+# formerly-ghost config keys live in DEFAULTS; the ghost hook name is gone from
+# live surfaces; the duplicate injection scanner stays retired; session-start
+# gates the symlink to manual-clone installs.
+K321_OK=1; K321_MISS=""
+K321_TBL=$(node -e '
+const fs=require("fs");
+const root=process.argv[1];
+const src=fs.readFileSync(root+"/hooks/run-hook.js","utf8");
+const rx=/"([a-z][a-z-]*\.sh)":\s*\[([^\]]*)\]/g; const prof={}; let m;
+while((m=rx.exec(src))) prof[m[1]]=m[2].split(",").map(s=>s.replace(/["\s]/g,"")).filter(Boolean).join("+");
+const errs=[];
+for(const f of ["README.md","CLAUDE.md"]){
+  const body=fs.readFileSync(root+"/"+f,"utf8");
+  const rows={};
+  for(const line of body.split("\n")){
+    const mm=line.match(/^\|\s*`([a-z][a-z-]*\.sh)`\s*\|(.+)\|\s*$/);
+    if(!mm) continue;
+    const cells=mm[2].split("|").map(s=>s.trim());
+    if(cells.length<3) continue;
+    const p=[]; ["minimal","standard","full"].forEach((name,i)=>{if((cells[i]||"").indexOf("✓")>=0) p.push(name);});
+    rows[mm[1]]=p.join("+");
+  }
+  for(const h of Object.keys(prof)){ if(!(h in rows)) errs.push(f+":missing:"+h); else if(rows[h]!==prof[h]) errs.push(f+":"+h+"="+(rows[h]||"none")+"(runner:"+prof[h]+")"); }
+  for(const h of Object.keys(rows)) if(!(h in prof)) errs.push(f+":ghost:"+h);
+}
+process.stdout.write(errs.length?("FAIL "+errs.join(" ")):"OK");
+' "$ROOT" 2>/dev/null || echo "FAIL parser-crashed")
+[ "$K321_TBL" = "OK" ] || { K321_OK=0; K321_MISS="$K321_MISS table[$K321_TBL]"; }
+/usr/bin/grep -qF 'CLAUDE_PLUGIN_ROOT' "$ROOT/hooks/_common.sh" || { K321_OK=0; K321_MISS="$K321_MISS common-env"; }
+/usr/bin/grep -E '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q 'DS_Store' || { K321_OK=0; K321_MISS="$K321_MISS kcorpus-scope"; }
+if /usr/bin/grep -E '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q "name '\*\.md'"; then K321_OK=0; K321_MISS="$K321_MISS kcorpus-md-only"; fi
+/usr/bin/grep -qF 'command -v shasum' "$ROOT/scripts/smoke-test.sh" || { K321_OK=0; K321_MISS="$K321_MISS shasum-check"; }
+/usr/bin/grep -qF 'rebuild_debounce_seconds: 30' "$ROOT/bin/modules/config.cjs" || { K321_OK=0; K321_MISS="$K321_MISS cfg-debounce"; }
+/usr/bin/grep -qF 'domain_hints: []' "$ROOT/bin/modules/config.cjs" || { K321_OK=0; K321_MISS="$K321_MISS cfg-hints"; }
+if /usr/bin/grep -q 'dispatch-scope-guard' "$ROOT/README.md" "$ROOT/CLAUDE.md" "$ROOT/bin/modules/config.cjs" "$ROOT/docs/AGENT-CONTRACTS.md" "$ROOT/docs/STATE-RULES.md" 2>/dev/null; then K321_OK=0; K321_MISS="$K321_MISS ghost-hook-ref"; fi
+[ ! -f "$ROOT/scripts/prompt-injection-scan.sh" ] || { K321_OK=0; K321_MISS="$K321_MISS scanner-alive"; }
+if /usr/bin/grep -q 'prompt-injection-scan' "$ROOT/bin/modules/security.cjs"; then K321_OK=0; K321_MISS="$K321_MISS scanner-note"; fi
+/usr/bin/grep -qF '.claude/plugins' "$ROOT/hooks/session-start.sh" || { K321_OK=0; K321_MISS="$K321_MISS symlink-gate"; }
+if [ "$K321_OK" -eq 1 ]; then
+  pass "K321: v3 residual surface (hook-profile tables match HOOK_PROFILES in README+CLAUDE.md both directions; _common env contract; KCORPUS all-files + fail-loud shasum; DEFAULTS carry rebuild_debounce_seconds + domain_hints; ghost hook name gone; scanner retired; symlink plugin-gated)"
+else
+  fail "K321: v3 residual surface regressed:$K321_MISS"
 fi
 
 echo

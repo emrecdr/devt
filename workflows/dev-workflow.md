@@ -667,7 +667,7 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 **Reuse-analysis gate** — programmer must have addressed all reuse candidates before tests run.
 
 ```bash
-# KEEP IN SYNC (shared contract gated by smoke gate K320): mirrored in quick-implement.md test step — the load-bearing mechanics (read-sidecar, phase update) must match; prose + mode-specific blocks may differ freely
+# KEEP IN SYNC (shared contract gated by smoke gate K320): mirrored in quick-implement.md test step — the load-bearing mechanics (post-dispatch-check, read-sidecar, phase update) must match; prose + mode-specific blocks may differ freely
 REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
 if printf '%s\n' "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
@@ -722,6 +722,14 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
 ")
 <!-- END dispatch:tester:dev -->
 ```
+
+**Claim-check**: before reading the sidecar, mechanically verify the tester wrote its declared output:
+
+```bash
+PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check tester)
+```
+
+Route on `action`: `proceed` → continue to the sidecar read below; `sendmessage_resume` → resume the SAME tester agent id (`resume_hint.kind` names rate-limit vs structural drift) instead of a fresh `Task()`; `redispatch` → the tester returned without writing test-summary.md, re-dispatch with explicit instruction; `investigate` → stub output with no rate-limit signal, inspect the dispatch transcript first.
 
 **Gate check**: Read the structured sidecar `.devt/state/test-summary.json` for routing — the JSON is authoritative for control flow per the sidecar-only contract:
 

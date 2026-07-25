@@ -21,9 +21,11 @@ CACHE_FILE="$CACHE_DIR/wf-state-$PROJ_HASH.json"
 STATE_JSON=""
 
 # Hook stdin carries the UserPromptSubmit event JSON; session_id keys the
-# once-per-session config-alert dedup below. Empty when the runner didn't
-# forward stdin — dedup then degrades to every-prompt (fail-loud is the
-# right failure mode for a safety banner).
+# once-per-session config-alert dedup below. Read via devt_read_stdin — a 3s
+# tty-guarded read (was an unbounded bare `cat`): safe because run-hook.js
+# pipes stdin eagerly at spawn, and a hook run directly on a terminal must not
+# block. Empty when the runner didn't forward stdin — dedup then degrades to
+# every-prompt (fail-loud is the right failure mode for a safety banner).
 HOOK_INPUT="$(devt_read_stdin)"
 SESSION_ID=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 ALERT_MARKER="$CACHE_DIR/config-alert-$PROJ_HASH"

@@ -22,8 +22,10 @@ devt_read_stdin() {
 }
 
 # devt_plugin_root — the devt plugin root. Prefers the value run-hook.js already
-# resolved and exported (PLUGIN_ROOT); falls back to this file's parent so the
-# helper still works when a hook is invoked directly (tests, manual runs).
+# resolved and exported (PLUGIN_ROOT), then the harness-set CLAUDE_PLUGIN_ROOT
+# (the same env contract several hooks' inner node blocks read directly); falls
+# back to this file's parent so the helper still works when a hook is invoked
+# directly (tests, manual runs).
 devt_plugin_root() {
-  printf '%s' "${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  printf '%s' "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
 }

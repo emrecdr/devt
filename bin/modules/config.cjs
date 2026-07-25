@@ -292,6 +292,11 @@ const DEFAULTS = {
     // suppression even if it's in the top-K). Generic by design — any project
     // names its own ubiquitous types.
     ubiquitous_types: [],
+    // Debounce window for `graphify maybe-refresh` rebuilds — a second refresh
+    // within this many seconds skips silently (reason="debounced"), de-duping
+    // concurrent-workflow and agent-loop refresh storms. Per-call override:
+    // --debounce=N.
+    rebuild_debounce_seconds: 30,
     // After an implementation phase writes new code (impl-summary.json with
     // non-empty files_modified), the workflow decides how to handle the now-
     // stale graph. Three accepted values:
@@ -367,6 +372,11 @@ const DEFAULTS = {
   // tier-based resolution; null means use the tier budget.
   preflight: {
     max_triples: null,
+    // Project vocabulary APPENDED to the built-in English framework-generic
+    // domain hints for lane-A domain extraction (never replaces — the
+    // built-ins stay the generic floor). For projects whose domain terms fall
+    // outside the generic set, or aren't English.
+    domain_hints: [],
     lane_budget: {
       trivial: 10,
       simple: 25,
@@ -404,7 +414,7 @@ const DEFAULTS = {
     // "distinct areas touched"). 2 = e.g. `app/services`.
     domain_depth: 2,
   },
-  // Dispatch scope advisory thresholds — consumed by hooks/dispatch-scope-guard.sh
+  // Dispatch scope advisory thresholds — consumed by hooks/dispatch-hygiene-guard.sh
   // (PreToolUse on Task). Advisory only: warnings append to
   // .devt/state/dispatch-warnings.jsonl, the dispatch never blocks. Tune higher
   // when a project consistently runs over-cap dispatches for legitimate reasons;
