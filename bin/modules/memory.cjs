@@ -2426,29 +2426,6 @@ function run(subcommand, args) {
       // Does NOT serve /devt:next's variant, which needs ready_to_surface as
       // a shell variable to gate a downstream AskUserQuestion. That call site
       // keeps the underlying candidates-status primitive.
-      const cfg = require("./config.cjs").getMergedConfig().memory || {};
-      const threshold = Number.isInteger(cfg.candidates_surface_threshold) ? cfg.candidates_surface_threshold : 5;
-      const cooldownHours = Number.isFinite(cfg.candidates_surface_cooldown_hours) ? cfg.candidates_surface_cooldown_hours : 24;
-      const root = findProjectRoot();
-      const suggestionsPath = path.join(root, ".devt", "memory", "_suggestions.md");
-      const cooldownPath = path.join(root, ".devt", "memory", ".last-candidate-surface");
-      let count = 0;
-      if (fs.existsSync(suggestionsPath)) {
-        try {
-          const content = fs.readFileSync(suggestionsPath, "utf8");
-          count = (content.match(/^### [⚖️🔵🔄]/gmu) || []).length;
-        } catch { /* count stays 0 */ }
-      }
-      let hoursSinceLast = null;
-      if (fs.existsSync(cooldownPath)) {
-        try {
-          const ts = fs.readFileSync(cooldownPath, "utf8").trim();
-          const parsed = new Date(ts).getTime();
-          if (!isNaN(parsed)) hoursSinceLast = (Date.now() - parsed) / 3_600_000;
-        } catch { /* stays null */ }
-      }
-      const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
-      const ready = count >= threshold && cooldownOk;
       // --hint-only: the Stop-hook mode. The hook fires on EVERY Stop event,
       // so the always-on status line (designed for once-per-workflow finalize
       // steps) would be per-turn noise there. Silence below readiness is fine
@@ -2456,16 +2433,12 @@ function run(subcommand, args) {
       // threshold+cooldown pair bounds the hint to at most once per cooldown
       // window.
       const hintOnly = Array.isArray(args) && args.includes("--hint-only");
+      const st = candidatesFooterStatus();
       if (!hintOnly) {
-        process.stdout.write(`[memory] candidates-footer: ${count} pending / threshold ${threshold} / cooldown ${cooldownOk ? "ok" : "blocked"}\n`);
+        process.stdout.write(`[memory] candidates-footer: ${st.count} pending / threshold ${st.threshold} / cooldown ${st.cooldownOk ? "ok" : "blocked"}\n`);
       }
-      if (ready) {
-        process.stdout.write(`${hintOnly ? "" : "\n"}💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.\n`);
-        try {
-          const memDir = path.join(root, ".devt", "memory");
-          if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
-          fs.writeFileSync(cooldownPath, new Date().toISOString() + "\n", "utf8");
-        } catch { /* best-effort */ }
+      if (st.ready) {
+        process.stdout.write(`${hintOnly ? "" : "\n"}${st.hint}\n`);
       }
       return 0;
     }
@@ -2496,8 +2469,49 @@ function run(subcommand, args) {
   }
 }
 
+// Shared decision core for the candidates footer — consumed by BOTH the
+// `candidates-footer` CLI case (workflow finalize steps) and
+// `state stop-hook` (the per-turn Stop event). Returns
+// {count, threshold, cooldownOk, ready, hint} and — when ready — touches the
+// cooldown stamp, so whichever caller surfaces the hint also starts the
+// suppression window.
+function candidatesFooterStatus() {
+  const cfg = require("./config.cjs").getMergedConfig().memory || {};
+  const threshold = Number.isInteger(cfg.candidates_surface_threshold) ? cfg.candidates_surface_threshold : 5;
+  const cooldownHours = Number.isFinite(cfg.candidates_surface_cooldown_hours) ? cfg.candidates_surface_cooldown_hours : 24;
+  const root = findProjectRoot();
+  const suggestionsPath = path.join(root, ".devt", "memory", "_suggestions.md");
+  const cooldownPath = path.join(root, ".devt", "memory", ".last-candidate-surface");
+  let count = 0;
+  if (fs.existsSync(suggestionsPath)) {
+    try {
+      count = (fs.readFileSync(suggestionsPath, "utf8").match(/^### [⚖️🔵🔄]/gmu) || []).length;
+    } catch { /* count stays 0 */ }
+  }
+  let hoursSinceLast = null;
+  if (fs.existsSync(cooldownPath)) {
+    try {
+      const parsed = new Date(fs.readFileSync(cooldownPath, "utf8").trim()).getTime();
+      if (!isNaN(parsed)) hoursSinceLast = (Date.now() - parsed) / 3_600_000;
+    } catch { /* stays null */ }
+  }
+  const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
+  const ready = count >= threshold && cooldownOk;
+  let hint = "";
+  if (ready) {
+    hint = `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`;
+    try {
+      const memDir = path.join(root, ".devt", "memory");
+      if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
+      fs.writeFileSync(cooldownPath, new Date().toISOString() + "\n", "utf8");
+    } catch { /* best-effort */ }
+  }
+  return { count, threshold, cooldownOk, ready, hint };
+}
+
 module.exports = {
   run,
+  candidatesFooterStatus,
   init,
   getByPath,
   rebuildIndex,

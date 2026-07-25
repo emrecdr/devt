@@ -6248,6 +6248,62 @@ function cmdAssertAll(args) {
 // The parallel-lane state machine (code-review-parallel.md) is deliberately
 // NOT folded here — its per-lane retry budget + terminal statuses don't map
 // onto the 4-action model; that routing stays in workflow prose.
+// Compound Stop-hook verb — one CLI spawn replaces the 8-spawn bash/node
+// chain hooks/stop.sh used to run at EVERY turn end in all profiles
+// (field-measured p50 928ms/fire). Mirrors the retired chain step-for-step
+// with a byte-identical output contract:
+//   stop_hook_active   → NO output (any stopReason would re-enter the loop)
+//   active+incomplete  → WARNING stopReason + stop stamp (stopped_at,
+//                        stopped_phase, active=false — the same updateState
+//                        args the chain used, so deactivation-gate semantics
+//                        are inherited unchanged)
+//   otherwise          → base "Workflow stopped" stopReason
+// Every leg is best-effort — a failure inside any leg degrades toward the
+// base stopReason rather than blocking shutdown. Returns null for the
+// no-output leg; the router case prints and exits itself (the shared
+// console.log(JSON.stringify(...)) printer can't express silence).
+function stopHook() {
+  let input = "";
+  try { input = fs.readFileSync(0, "utf8"); } catch { /* no stdin piped */ }
+  try {
+    const d = JSON.parse(input);
+    if (d && d.stop_hook_active) return null;
+  } catch { /* malformed input → treat as inactive and continue */ }
+
+  let state = {};
+  try { state = readState() || {}; } catch { state = {}; }
+
+  // Unconditional knowledge-candidate harvest at every workflow exit — covers
+  // raw-dispatch paths that never hit a finalize step. Fire-and-forget.
+  try { aggregateKnowledgeCandidates(); } catch { /* never blocks shutdown */ }
+
+  // Session-end curation hint — at most one per cooldown window (the shared
+  // decision core touches the stamp when it surfaces).
+  let hint = "";
+  try { hint = (require("./memory.cjs").candidatesFooterStatus().hint || "").trim(); } catch { hint = ""; }
+
+  const active = state.active === true || state.active === "true";
+  const phase = state.phase || "unknown";
+  const status = state.status || "";
+  const task = String(state.task || "").replace(/\n/g, " ");
+  const isComplete = ["complete", "finalize"].includes(phase) || ["DONE", "BLOCKED"].includes(status);
+
+  if (active && !isComplete) {
+    try {
+      const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      updateState([`stopped_at=${ts}`, `stopped_phase=${phase}`, "active=false"], {});
+    } catch { /* stop stamp is best-effort */ }
+    let ctx = `WARNING: Workflow stopped before completion. Phase '${phase}' was in progress.`;
+    if (task) ctx += ` Task: ${task}.`;
+    ctx += " State preserved in .devt/state/. Run /devt:next to resume or /devt:workflow --cancel to reset.";
+    if (hint) ctx += ` ${hint}`;
+    return { stopReason: ctx };
+  }
+
+  const base = "Workflow stopped. State preserved in .devt/state/";
+  return { stopReason: hint ? `${base} | ${hint}` : base };
+}
+
 function postDispatchCheck(agent, args) {
   if (!agent || typeof agent !== "string" || agent.startsWith("--")) {
     return { ok: false, action: "investigate", reason: "Usage: state post-dispatch-check <agent> [--iteration=N] [--max-iterations=M]" };
@@ -8008,6 +8064,13 @@ function run(subcommand, args) {
       return advanceState(args[0], args.slice(1));
     case "aggregate-knowledge-candidates":
       return aggregateKnowledgeCandidates();
+    case "stop-hook": {
+      const r = stopHook();
+      // Self-printing: the stop_hook_active leg must emit NOTHING, which the
+      // shared console.log(JSON.stringify(run(...))) printer can't express.
+      if (r) process.stdout.write(JSON.stringify(r));
+      process.exit(0);
+    }
     case "derive-reuse-candidates":
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "refresh-scope-context":
@@ -8052,7 +8115,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, stop-hook, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
       );
   }
 }

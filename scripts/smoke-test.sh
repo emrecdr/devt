@@ -4191,14 +4191,15 @@ done
 PERF_END=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 PERF_MS=$(( (PERF_END - PERF_START) / 1000000 ))
 # 30 invocations × 50ms logic budget = 1500ms ceiling. Node spawn-cost
-# dominates, and macOS/CI variance under load can push wall-time higher,
-# so use 6000ms (~200ms/call wall-time) as the regression-guard ceiling.
-# This still catches catastrophic slowdowns (e.g., a hook that started
-# spawning subagents) while tolerating normal system-load variance.
-if [ "$PERF_MS" -lt 6000 ]; then
-  pass "bash-guard perf: 30 invocations in ${PERF_MS}ms (under spawn-inclusive 6000ms budget)"
+# dominates, and macOS/CI variance under load can push wall-time higher.
+# Budget 8000ms (~265ms/call wall-time): the prior 6000ms ceiling boundary-
+# flaked twice under full-suite load (6019ms, 6827ms) while idle p50 sits
+# ~3000ms — 8000ms still catches catastrophic slowdowns (a hook spawning
+# subagents lands >10s) without tripping on scheduler contention.
+if [ "$PERF_MS" -lt 8000 ]; then
+  pass "bash-guard perf: 30 invocations in ${PERF_MS}ms (under spawn-inclusive 8000ms budget)"
 else
-  fail "bash-guard perf budget exceeded: 30 invocations in ${PERF_MS}ms (limit 6000ms)"
+  fail "bash-guard perf budget exceeded: 30 invocations in ${PERF_MS}ms (limit 8000ms)"
 fi
 
 echo "== Wave C-slim — memory_signal + lane budget =="
@@ -4742,11 +4743,26 @@ else
   fail "bin/devt-graphify-mcp.cjs missing or self-test failed"
 fi
 # JSON-RPC protocol smoke: initialize + tools/list must return both protocol envelope and 9 tool definitions
+# Conditional tool surface: tools/list consults graphify.status() — a
+# disabled/graph-missing project (the DEFAULT install) advertises ONLY
+# `status` (~300B) instead of the full ~4.6KB 9-tool schema payload every
+# session; a ready project advertises the full surface. Probe BOTH directions
+# in fixtures so the repo's own graphify state never decides the verdict.
 GRAPHIFY_MCP_RPC=$(printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null)
-if echo "$GRAPHIFY_MCP_RPC" | grep -q '"serverInfo"' && echo "$GRAPHIFY_MCP_RPC" | grep -q '"name":"get_neighbors"' && echo "$GRAPHIFY_MCP_RPC" | grep -q '"name":"blast_radius"'; then
-  pass "devt-graphify MCP responds to initialize + tools/list with expected tool surface"
+GMCP_DIS=$(mktemp -d); mkdir -p "$GMCP_DIS/.devt"
+GMCP_DIS_N=$( (cd "$GMCP_DIS" && printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null) | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(s.trim().split("\n").pop());const t=(j.result||{}).tools||[];console.log(t.length===1&&t[0].name==="status"?"status-only":"unexpected:"+t.map(x=>x.name).join(","))}catch(e){console.log("parse-fail")}})' )
+GMCP_RDY=$(mktemp -d); mkdir -p "$GMCP_RDY/.devt" "$GMCP_RDY/graphify-out"
+printf '{"graphify":{"enabled":true}}' > "$GMCP_RDY/.devt/config.json"
+printf '{"nodes":[],"edges":[]}' > "$GMCP_RDY/graphify-out/graph.json"
+GMCP_RDY_LIST=$( (cd "$GMCP_RDY" && printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null) )
+rm -rf "$GMCP_DIS" "$GMCP_RDY"
+if echo "$GRAPHIFY_MCP_RPC" | grep -q '"serverInfo"' \
+   && [ "$GMCP_DIS_N" = "status-only" ] \
+   && echo "$GMCP_RDY_LIST" | grep -q '"name":"get_neighbors"' \
+   && echo "$GMCP_RDY_LIST" | grep -q '"name":"blast_radius"'; then
+  pass "devt-graphify MCP conditional surface (initialize ok; disabled dir advertises status-only; ready fixture advertises the full tool surface)"
 else
-  fail "devt-graphify MCP stdio protocol broken (initialize or tools/list missing required fields)"
+  fail "devt-graphify MCP conditional surface broken — serverInfo=$(echo "$GRAPHIFY_MCP_RPC" | grep -c serverInfo || true) disabled=$GMCP_DIS_N ready-has-neighbors=$(echo "$GMCP_RDY_LIST" | grep -c get_neighbors || true)"
 fi
 
 echo
@@ -4784,7 +4800,7 @@ fi
 # inversion gate that locks the removal — flags accidental re-add without
 # documentation. Re-advertising means re-authoring the handler block in
 # bin/devt-graphify-mcp.cjs AND updating the expectedTools self-test array.
-if echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node "$ROOT/bin/devt-graphify-mcp.cjs" 2>/dev/null | grep -q '"name":"get_community"'; then
+if echo "$GMCP_RDY_LIST" | grep -q '"name":"get_community"'; then
   fail "devt-graphify MCP relay unexpectedly advertises get_community — round 6 removed it; re-add only with documented agent-facing use case"
 else
   pass "devt-graphify MCP relay correctly omits get_community from advertised surface"
@@ -18744,6 +18760,34 @@ if [ "$K321_OK" -eq 1 ]; then
   pass "K321: v3 residual surface (hook-profile tables match HOOK_PROFILES in README+CLAUDE.md both directions; _common env contract; KCORPUS all-files + fail-loud shasum; DEFAULTS carry rebuild_debounce_seconds + domain_hints; ghost hook name gone; scanner retired; symlink plugin-gated)"
 else
   fail "K321: v3 residual surface regressed:$K321_MISS"
+fi
+
+# K323: stop-hook compound verb — behavioral parity with the retired 8-spawn
+# stop.sh chain (field-measured p50 928ms/turn-end → one CLI spawn). Legs:
+# stop_hook_active → NO output (any stopReason would re-enter the stop loop);
+# active+incomplete → WARNING stopReason naming the phase + the stop stamp
+# persisted (stopped_at, active=false — same updateState args as the chain,
+# deactivation-gate semantics inherited); inactive → base stopReason. The
+# curation-hint leg stays covered by K300, which drives the real stop.sh.
+K323_T=$(mktemp -d); mkdir -p "$K323_T/.devt/state"
+K323_A=$( (cd "$K323_T" && printf '%s' '{"stop_hook_active":true}' | node "$CLI" state stop-hook 2>/dev/null) || true )
+printf 'active: true\nworkflow_id: "k323"\nworkflow_type: "dev"\nphase: "implement"\ntask: "k323 probe"\ncreated_at: "2026-07-26T08:00:00Z"\n' > "$K323_T/.devt/state/workflow.yaml"
+K323_B=$( (cd "$K323_T" && printf '%s' '{"stop_hook_active":false}' | node "$CLI" state stop-hook 2>/dev/null) || true )
+K323_ST=$( (cd "$K323_T" && node "$CLI" state read 2>/dev/null) || true )
+K323_C=$( (cd "$K323_T" && printf '%s' '{}' | node "$CLI" state stop-hook 2>/dev/null) || true )
+rm -rf "$K323_T"
+K323_OK=1; K323_WHY=""
+[ -z "$K323_A" ] || { K323_OK=0; K323_WHY="$K323_WHY loop-guard-output"; }
+printf '%s' "$K323_B" | /usr/bin/grep -q 'WARNING: Workflow stopped before completion' || { K323_OK=0; K323_WHY="$K323_WHY warn-msg"; }
+printf '%s' "$K323_B" | /usr/bin/grep -q "Phase 'implement'" || { K323_OK=0; K323_WHY="$K323_WHY warn-phase"; }
+printf '%s' "$K323_ST" | /usr/bin/grep -q '"active":false' || { K323_OK=0; K323_WHY="$K323_WHY deactivation-stamp"; }
+printf '%s' "$K323_ST" | /usr/bin/grep -q 'stopped_at' || { K323_OK=0; K323_WHY="$K323_WHY stopped-at"; }
+printf '%s' "$K323_C" | /usr/bin/grep -qF 'Workflow stopped. State preserved in .devt/state/' || { K323_OK=0; K323_WHY="$K323_WHY base-msg"; }
+/usr/bin/grep -qF 'state stop-hook' "$ROOT/hooks/stop.sh" || { K323_OK=0; K323_WHY="$K323_WHY hook-not-wired"; }
+if [ "$K323_OK" -eq 1 ]; then
+  pass "K323: stop-hook compound verb (loop-guard silent, WARNING + stop stamp on active+incomplete, base stopReason otherwise; hooks/stop.sh wired to the single-spawn path)"
+else
+  fail "K323: stop-hook parity regressed:$K323_WHY"
 fi
 
 echo

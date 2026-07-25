@@ -228,11 +228,24 @@ function replyError(id, code, message, data) {
 }
 
 function listTools() {
+  // Conditional surface: a default install (graphify.enabled=false is the
+  // DEFAULT) or a project with no graph built would otherwise pay the full
+  // ~4.6KB 9-tool schema payload in EVERY session's tools/list for a feature
+  // that is off. List only `status` (~300B) in that case — a probing agent
+  // learns the state and the enable path from status(); after enabling, a
+  // client restart re-lists the full set (enabling is a setup event, and
+  // tools/list_changed adoption is inconsistent across clients). tools/call
+  // still resolves every tool regardless of listing, so an unlisted call
+  // degrades gracefully via the wrappers' {degraded, fallback_trigger}
+  // payloads rather than erroring.
+  let ready = false;
+  try { const s = graphify.status(); ready = !!s && s.state === "ready"; } catch { ready = false; }
+  const names = ready ? Object.keys(TOOLS) : ["status"];
   return {
-    tools: Object.entries(TOOLS).map(([name, def]) => ({
+    tools: names.map((name) => ({
       name,
-      description: def.description,
-      inputSchema: def.inputSchema,
+      description: TOOLS[name].description,
+      inputSchema: TOOLS[name].inputSchema,
     })),
   };
 }
@@ -451,7 +464,10 @@ if (require.main === module && process.argv.includes("--self-test")) {
     "status", "freshness", "graph_stats", "get_node", "get_neighbors",
     "shortest_path", "query_graph", "blast_radius", "god_nodes",
   ];
-  const listed = listTools().tools.map(t => t.name).sort();
+  // Registry-drift check inspects the TOOLS registry itself — listTools() is
+  // a conditional ADVERTISEMENT (status-only when graphify isn't ready in the
+  // cwd), so the full-surface comparison must not depend on local state.
+  const listed = Object.keys(TOOLS).sort();
   const missing = expectedTools.filter(t => !listed.includes(t));
   const extra = listed.filter(t => !expectedTools.includes(t));
   if (missing.length || extra.length) {
