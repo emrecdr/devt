@@ -8,6 +8,24 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.211.0] - 2026-07-27
+
+The v5 follow-up batch (contract-gate extensions + the two platform verifications) — and the item that was scheduled as a "2-minute field check" turned out to be the most important fix of the arc.
+
+### Fixed
+
+- **Every devt deny hook was silently advisory — the deny schema was dead.** Live-verified with five probes on the current build: the legacy top-level `{decision: "deny"}` that all three guards emitted is IGNORED (a governed Edit executed while pre-flight-guard logged a block-mode deny; a `rm -rf *`-classified Bash call executed while bash-guard logged its deny), and a dual legacy+modern form is ALSO ignored — the legacy key's presence poisons the deny. Only the modern `hookSpecificOutput.permissionDecision: "deny"` shape enforces (verified: the fixed guard then actually blocked a live governed Edit and a live `--no-verify` commit). All three emitters (pre-flight-guard, bash-guard, dispatch-hygiene-guard) now emit modern-only, with `source`/`rule_id` metadata retained; nine suite assertions repointed from the legacy shape to `permissionDecision`. Bonus finding recorded en route: pre-flight-guard is workflow-scoped by design (`active: false` → silent), which is why maintainer sessions never saw it fire. Task-tool deny enforcement remains unverified either way — the post-hoc `assert-no-raw-dispatches-this-session` gate stays the load-bearing net there, and its comment now tells the schema story accurately.
+
+### Added
+
+- **Contract-system completeness (the v5 A8–A11 batch), all mutation-proven RED:** the contracts-drift gate now also asserts (d) every `index_buckets` entry declared in io-contracts.yaml is non-empty in skill-index.yaml — the promise io-contracts' own comment made about a gate that didn't exist; (e) every `agents/*.md` has a contract row — devt-coordinator previously escaped the contract system entirely and now has a row (frontmatter skills gated, no IO — it routes, writes nothing); (f) every `outputs.expected_sections` entry appears as a heading in the agent's .md — `recoverPartialImpl` greps artifacts for these, so an agent never told to write a section reads as structural drift.
+- **The code-reviewer rubric blocks are contract-declared.** `rubric_path` + `rubric_content` added to code-reviewer's `context_blocks` with per-workflow exemptions matching reality (parallel is by-reference — path only; dev/quick_implement reviewers carry no rubric). A template edit deleting the rubric from a standalone-review dispatch now fails `dispatch check-contracts` — previously it would have passed every gate. Mutation-proven: deleting `<rubric_path>` from the compiled review region reds K206.
+- **PreCompact thread-snapshot hook receipt-gated, not built.** The platform event exists and devt has no hook on it — but file-based state is designed to survive compaction, so the hook only earns its place if a field receipt shows `/devt:next` mis-routing after a mid-workflow compaction. Entry in RETIREMENT-WATCH; the field instrument asks the question directly.
+
+### Changed
+
+- Deny-contract documentation matches the verified reality across HOOKS.md and all three hook headers (block-mode rows now name `hookSpecificOutput.permissionDecision` and note the legacy key is ignored by current builds).
+
 ## [0.210.0] - 2026-07-27
 
 Alignment batch from the v5 external report (validated finding-by-finding before implementation; ~25 claims checked — the three headline defects confirmed, one of them undercounted by the report itself, two of the report's supporting details refuted). Theme: the code was ahead of its own paperwork — two real data-loss/behavior defects lived in maintenance verbs, everything else was a surface lying about another surface.
@@ -617,18 +635,4 @@ A memory-layer review (validated filesystem-first) found `schemas/learning-entry
 
 - Gate **K295** pins the removal (schema stays deleted, no agent re-references it, both repoint at the LES template). Drift-guard stack 202 → 203 deep (K94–K295).
 - The **broad** ghost-class gate (module/artifact paths referenced inside `schemas/**`/`agents/**` must resolve) is OPT-2 — deliberately deferred to a fresh session for the false-positive-scoping care a new class scan needs. The report's own sequencing (delete before the broad gate) is honored: this ships the deletion first.
-
-## [0.176.0] - 2026-07-19
-
-### Affects-coverage: the first instrument for the primary memory signal (DEF-007 part 1)
-
-A second external memory-layer review (validated filesystem-first) surfaced that since prose-FTS was demoted to a supplement and the affects-union became the primary review-time `memory_signal`, a governing doc with no `affects_paths` is structurally invisible to that signal — and nothing measured or flagged it. `affects_paths` is optional and `memory validate` only walked it when present, so a doc with none was silently absent from governance. This ships the small, unambiguous half of the fix.
-
-### Added
-
-- **`memory validate` warns on active `decision`/`concept`/`flow` docs with no `affects_paths`.** Scoped to lineage-bearing types exactly like the orphaned-retirement check — REJ tombstones, lessons, and superseded docs are exempt. It is a **warning** (never touches the `errors` count the validate-clean gates key on), with a message that names why: the doc can't reach the affects-union signal until it declares the paths it governs. Gate K294 (behavioral: warn on active-no-paths, exempt REJ, clear when a path is added). Drift-guard stack 201 → 202 deep (K94–K294).
-
-### Deferred (DEF-007 part 2)
-
-- The coverage **trend** number (what fraction of a governing doc's claimed domain actually gets affects hits) remains open — it needs a denominator scoped to governed domains and a trend-not-target framing (a raw fraction rewards broad globs that govern nothing). Captured in the backlog for a fresh session.
 

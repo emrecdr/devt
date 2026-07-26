@@ -7,7 +7,9 @@
 #
 # Hook exits with:
 #   0 + "{}" stdout      → tool call proceeds (allow)
-#   0 + {decision:"deny"} → blocks the call (deny — Claude Code hook contract)
+#   0 + {hookSpecificOutput:{permissionDecision:"deny"}} → blocks the call
+#   (the legacy top-level {decision:"deny"} is ignored by current builds —
+#   field-verified 2026-07-27)
 #
 # Reads JSON hook input from stdin. Robust to malformed input — fails open
 # (exit 0 with "{}") on any parse error so a hook bug never blocks legitimate work.

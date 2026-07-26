@@ -982,12 +982,12 @@ function assertPreflightSemanticQuality(args) {
 
 // Post-hoc enforcement gate for raw devt:* agent dispatches. The PreToolUse
 // `dispatch-hygiene-guard.sh` hook detects raw dispatches correctly and
-// returns `{decision:"deny"}` — but Claude Code does NOT enforce PreToolUse
-// deny verdicts on the Task tool in current versions (hook fires and writes
-// raw_dispatch entries to dispatch-warnings.jsonl, but sub-agents run
-// anyway). The hook's `mode:"block"` is functionally a no-op for Task
-// dispatches; the advisory surfaces in additionalContext but the orchestrator
-// can rationalize past it.
+// emits a deny (now in the modern hookSpecificOutput.permissionDecision
+// schema — the legacy top-level {decision:"deny"} it once used is ignored
+// by current builds, field-verified for Edit + Bash 2026-07-27). Task-tool
+// enforcement of PreToolUse denies has not been live-verified either way,
+// so this post-hoc net stays load-bearing regardless: at finalize time it
+// scans for raw_dispatch records the hook logged and blocks the workflow.
 //
 // This gate is the post-hoc mitigation: at workflow finalize/present_findings
 // time, scan dispatch-warnings.jsonl for `source:"raw_dispatch"` entries

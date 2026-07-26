@@ -7,7 +7,9 @@
  *   destroy   — filesystem-wipe patterns (rm -rf /, dd of=/dev/sd*, mkfs, …)
  *   no_verify — git operations that skip hooks or GPG signing
  *
- * Returns {decision: "deny", source, reason, …} on match; null on allow.
+ * checkCommand returns {decision, source, rule_id, reason} internally; the
+ * hook stdout emits the modern deny schema (hookSpecificOutput.permissionDecision
+ * + source/rule_id metadata) — the only shape current builds enforce.
  * Deny records append to .devt/state/preflight-denies.jsonl with a `source` field
  * so the stuck-detector can count them alongside preflight denies.
  */
@@ -189,13 +191,21 @@ function run(subcommand) {
     verdict.reason +
     " Deny is a redirect, not a stop: continue the task via a safer path to the same goal — do not retry the exact command and do not work around the guard. If no safer path exists, ask the user.";
 
+  // Modern deny schema ONLY — hookSpecificOutput.permissionDecision is the
+  // shape current Claude Code enforces (field-verified 2026-07-27: the legacy
+  // top-level {decision:"deny"} was logged as a block yet the Bash call
+  // executed, and a dual legacy+modern form is ALSO ignored — the legacy key
+  // poisons the deny). source/rule_id stay as metadata for gates + telemetry;
+  // the jsonl record above remains the classification authority.
   process.stdout.write(
     JSON.stringify({
-      decision: "deny",
       source: verdict.source,
       rule_id: verdict.rule_id,
-      reason: reasonOut,
-      hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: reasonOut },
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reasonOut,
+      },
     }),
   );
   return 0;

@@ -12,7 +12,8 @@
 #
 # Hook exits with:
 # 0 + JSON output → tool call proceeds (default warn mode)
-# {decision: "deny"} JSON in stdout → blocks the call (block mode only)
+# {hookSpecificOutput:{permissionDecision:"deny"}} in stdout → blocks the call
+# (block mode only; legacy top-level decision is ignored by current builds)
 #
 # Reads JSON hook input from stdin. Robust to malformed input — fails-open
 # (returns 0) on any parse error, never blocks legitimate work due to a hook bug.
@@ -241,10 +242,14 @@ printf '%s' "$INPUT" | node -e "
 
     if (mode === 'block') {
       // PreToolUse deny — JSON to stdout per Claude Code hook spec
+      // Modern deny schema ONLY. Field-verified 2026-07-27, three live probes:
+      // legacy-only {decision:'deny'} is ignored (a governed Edit executed
+      // while this hook logged a block-mode deny); a DUAL form carrying both
+      // the legacy top-level keys AND hookSpecificOutput.permissionDecision is
+      // ALSO ignored — the legacy key's presence poisons the deny; the
+      // hookSpecificOutput-only form below is the shape that actually blocked.
       process.stdout.write(JSON.stringify({
-        decision: 'deny',
-        reason,
-        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: reason }
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason }
       }));
       process.exit(0);
     }

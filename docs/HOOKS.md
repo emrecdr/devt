@@ -75,7 +75,7 @@ PREFLIGHT <ts> edit <path> :: <governing IDs>
 |---|---|
 | `off` | Hook is a no-op |
 | `warn` | Stderr advisory; edit proceeds |
-| `block` (default) | Returns `{decision: "deny"}` with a checklist; agent must produce the PREFLIGHT line first |
+| `block` (default) | Returns `hookSpecificOutput.permissionDecision: "deny"` with a checklist; agent must produce the PREFLIGHT line first (the legacy top-level `decision` key is ignored by current builds — field-verified) |
 
 See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 = the Brief; Tier 2 = this guard).
 
@@ -157,7 +157,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 **Hook.** `hooks/dispatch-hygiene-guard.sh` — PreToolUse matcher on `Task`.
 
-**Behavior.** Emits advisory `additionalContext` and appends `source: "raw_dispatch"` (with a stamped `warning_id: "w_<8hex>"` — the address for scoped remediation via `dispatch warnings resolve <id> --reason=…`, which annotates the record rather than deleting it) to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`). When `dispatch_hygiene_mode: "block"` (the default), the hook returns `{decision: "deny"}` for INVESTIGATIVE agents (code-reviewer, programmer, verifier, researcher, debugger, architect, tester); the deny reason includes a `/devt:review` redirect but does NOT include the rendered envelope (block mode stays strict — no paste-ready escape from the canonical workflow path).
+**Behavior.** Emits advisory `additionalContext` and appends `source: "raw_dispatch"` (with a stamped `warning_id: "w_<8hex>"` — the address for scoped remediation via `dispatch warnings resolve <id> --reason=…`, which annotates the record rather than deleting it) to `dispatch-warnings.jsonl` on any `Task` call to a `devt:*` subagent whose prompt lacks all three context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`). When `dispatch_hygiene_mode: "block"` (the default), the hook returns `hookSpecificOutput.permissionDecision: "deny"` for INVESTIGATIVE agents (code-reviewer, programmer, verifier, researcher, debugger, architect, tester); the deny reason includes a `/devt:review` redirect but does NOT include the rendered envelope (block mode stays strict — no paste-ready escape from the canonical workflow path).
 
 **Warn-mode envelope auto-injection.** When `dispatch_hygiene_mode: "warn"`, the advisory in `additionalContext` is followed by a structured `<canonical_envelope>…</canonical_envelope>` block carrying the fully-rendered envelope for the target agent (via `dispatch.cjs::cmdRenderFilled(<agent>:auto)`). The orchestrator sees the exact paste-ready envelope it should have used, derived from current state + governing rules + guardrails + model-profile config. Best-effort with fail-open semantics: any rendering failure (no active workflow, missing template, plugin root absent) falls back to advisory-only. The envelope render reads from the active workflow's `workflow.yaml::workflow_id`; workflows auto-call `state refresh-scope-context` before each dispatch block so the cached `scope_trust` reflects current graph state rather than the value computed at workflow start.
 

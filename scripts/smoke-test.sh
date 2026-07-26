@@ -791,8 +791,8 @@ else
   fail "pre-flight-guard: preflight-denies.jsonl not created"
 fi
 # Verify the deny JSON itself is unchanged (forensic logging must not break the hook contract)
-if echo "$HOOK_OUT" | grep -q '"decision":"deny"'; then
-  pass "pre-flight-guard: deny JSON contract still emitted alongside log"
+if echo "$HOOK_OUT" | grep -q '"permissionDecision":"deny"'; then
+  pass "pre-flight-guard: deny JSON contract (hookSpecificOutput.permissionDecision) still emitted alongside log"
 else
   fail "pre-flight-guard: deny JSON missing — hook contract broken: $HOOK_OUT"
 fi
@@ -1259,8 +1259,8 @@ mkdir -p .devt/state
 echo "active: true" > .devt/state/workflow.yaml
 echo '{"memory":{"preflight_mode":"block"}}' > .devt/config.json
 BLK=$(echo '{"tool_input":{"file_path":"src/auth/service.ts"}}' | bash "$ROOT/hooks/pre-flight-guard.sh" 2>/dev/null)
-if echo "$BLK" | grep -q '"decision":"deny"'; then
-  pass "pre-flight-guard returns deny in block mode"
+if echo "$BLK" | grep -q '"permissionDecision":"deny"'; then
+  pass "pre-flight-guard returns permissionDecision deny in block mode"
 else
   fail "pre-flight-guard did not deny in block mode (got: $BLK)"
 fi
@@ -3375,9 +3375,14 @@ fi
 echo "== Agent IO Contracts registry drift =="
 # agents/io-contracts.yaml is the single source of truth that asserts agreement
 # between (a) agents/<name>.md frontmatter `skills:`, (b) skill-index.yaml
-# buckets, and (c) state.cjs JSON_SIDECAR_SCHEMAS. Catches the class of drift
-# where memory-pre-flight was preloaded by 9 agents via frontmatter but missing
-# from skill-index.yaml.
+# buckets, and (c) state-contract.cjs JSON_SIDECAR_SCHEMAS. Catches the class of
+# drift where memory-pre-flight was preloaded by 9 agents via frontmatter but
+# missing from skill-index.yaml. Also enforces: (d) every declared index_bucket
+# is non-empty in skill-index.yaml (the contract file's own promise), (e) every
+# agents/*.md has a contract row (disk-to-contract completeness — the
+# devt-coordinator escape), (f) every outputs.expected_sections entry appears as
+# a heading in the agent's .md (recoverPartialImpl greps artifacts for these —
+# an agent never told to write a section reads as structural drift).
 CONTRACTS_DRIFT=$(ROOT="$ROOT" node -e "
   const fs = require('fs');
   const path = require('path');
@@ -3467,7 +3472,25 @@ CONTRACTS_DRIFT=$(ROOT="$ROOT" node -e "
     return out;
   }
 
+  function parseSkillIndex(p) {
+    const lines = fs.readFileSync(p, 'utf8').split('\n');
+    const out = {}; let inAgents = false, agent = null, bucket = null;
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const ind = line.length - line.replace(/^\s+/, '').length;
+      if (ind === 0) { inAgents = (t === 'agents:'); agent = null; bucket = null; continue; }
+      if (!inAgents) continue;
+      if (ind === 2 && t.endsWith(':')) { agent = t.slice(0, -1); out[agent] = {}; bucket = null; continue; }
+      if (ind === 4 && agent && t.endsWith(':')) { bucket = t.slice(0, -1); out[agent][bucket] = []; continue; }
+      if (ind === 6 && agent && bucket && t.startsWith('- ')) { out[agent][bucket].push(t.slice(2).trim()); continue; }
+    }
+    return out;
+  }
+
   const contracts = parseYamlContracts(fs.readFileSync(path.join(root, 'agents/io-contracts.yaml'), 'utf8'));
+  const skillIndex = parseSkillIndex(path.join(root, 'skill-index.yaml'));
   const initMod = require(path.join(root, 'bin/modules/init.cjs'));
   const stateMod = require(path.join(root, 'bin/modules/state.cjs'));
   const issues = [];
@@ -3490,6 +3513,31 @@ CONTRACTS_DRIFT=$(ROOT="$ROOT" node -e "
     if (sidecar && !stateMod.JSON_SIDECAR_SCHEMAS[sidecar]) {
       issues.push(agent + ': sidecar ' + sidecar + ' not registered in JSON_SIDECAR_SCHEMAS');
     }
+
+    // 4) Every declared index_bucket is non-empty in skill-index.yaml
+    for (const bkt of c.index_buckets || []) {
+      const list = (skillIndex[agent] || {})[bkt];
+      if (!Array.isArray(list) || list.length === 0) {
+        issues.push(agent + ': index_bucket ' + bkt + ' missing or empty in skill-index.yaml');
+      }
+    }
+
+    // 5) expected_sections appear as headings in the agent's .md
+    const secs = (c.outputs && c.outputs.expected_sections) || [];
+    if (secs.length) {
+      const bodyLines = fs.readFileSync(mdPath, 'utf8').split('\n');
+      for (const s of secs) {
+        const has = bodyLines.some((l) => l.trim().startsWith('#') && l.includes(s));
+        if (!has) issues.push(agent + ': expected_section ' + JSON.stringify(s) + ' is not a heading in agents/' + agent + '.md');
+      }
+    }
+  }
+
+  // 6) Disk-to-contract completeness: every agents/*.md has a contract row
+  for (const f of fs.readdirSync(path.join(root, 'agents'))) {
+    if (!f.endsWith('.md')) continue;
+    const name = f.slice(0, -3);
+    if (!contracts.agents[name]) issues.push(name + ': agents/' + f + ' has no io-contracts.yaml row');
   }
 
   if (issues.length) {
@@ -3499,7 +3547,7 @@ CONTRACTS_DRIFT=$(ROOT="$ROOT" node -e "
   process.exit(0);
 " 2>&1)
 if [ -z "$CONTRACTS_DRIFT" ]; then
-  pass "agents/io-contracts.yaml: no drift vs frontmatter + JSON_SIDECAR_SCHEMAS"
+  pass "agents/io-contracts.yaml: no drift vs frontmatter + JSON_SIDECAR_SCHEMAS + non-empty buckets + disk-completeness + expected_sections headings"
 else
   fail "io-contracts.yaml drift detected: $CONTRACTS_DRIFT"
 fi
@@ -4118,7 +4166,7 @@ fi
 # Synthetic destroy deny — parse via Node (bash-guard emits compact JSON, no space after colon,
 # but using Node makes the gate robust to formatter changes).
 BG_DESTROY=$(echo '{"tool_input":{"command":"rm -rf /"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
-if printf '%s' "$BG_DESTROY" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='bash_destroy' ? 0 : 1)}catch{process.exit(1)}})"; then
+if printf '%s' "$BG_DESTROY" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit((j.hookSpecificOutput||{}).permissionDecision==='deny' && j.source==='bash_destroy' ? 0 : 1)}catch{process.exit(1)}})"; then
   pass "bash-guard denies destructive rm with source=bash_destroy"
 else
   fail "bash-guard failed to deny destructive rm command (got: $BG_DESTROY)"
@@ -4126,7 +4174,7 @@ fi
 
 # Synthetic no-verify deny
 BG_NOV=$(echo '{"tool_input":{"command":"git commit --no-verify -m foo"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
-if printf '%s' "$BG_NOV" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='no_verify' ? 0 : 1)}catch{process.exit(1)}})"; then
+if printf '%s' "$BG_NOV" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit((j.hookSpecificOutput||{}).permissionDecision==='deny' && j.source==='no_verify' ? 0 : 1)}catch{process.exit(1)}})"; then
   pass "bash-guard denies git --no-verify with source=no_verify"
 else
   fail "bash-guard failed to deny git --no-verify command (got: $BG_NOV)"
@@ -4484,7 +4532,7 @@ echo "== v0.38.1 — git_destructive bash-guard patterns =="
 
 # Force-push to protected branch
 GD1=$(echo '{"tool_input":{"command":"git push --force origin main"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null)
-if printf '%s' "$GD1" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit(j.decision==='deny' && j.source==='git_destructive' && j.rule_id==='force-push-protected' ? 0 : 1)}catch{process.exit(1)}})"; then
+if printf '%s' "$GD1" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.exit((j.hookSpecificOutput||{}).permissionDecision==='deny' && j.source==='git_destructive' && j.rule_id==='force-push-protected' ? 0 : 1)}catch{process.exit(1)}})"; then
   pass "bash-guard denies force-push to protected branch (source=git_destructive)"
 else
   fail "bash-guard failed to deny force-push to main (got: $GD1)"
@@ -6181,7 +6229,7 @@ mkdir -p "$L1_TMP/.devt/state"
 RAW_PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review X"}}'
 # L1a — DEFAULT (no config.json) blocks investigative raw dispatch
 L1A=$(cd "$L1_TMP" && echo "$RAW_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
-if echo "$L1A" | /usr/bin/grep -q '"decision":"deny"' && echo "$L1A" | /usr/bin/grep -q "BLOCKED"; then
+if echo "$L1A" | /usr/bin/grep -q '"permissionDecision":"deny"' && echo "$L1A" | /usr/bin/grep -q "BLOCKED"; then
   pass "L1a: dispatch-hygiene blocks raw devt:code-reviewer dispatch by default (decision:deny)"
 else
   fail "L1a: default-block missing — got: $(echo "$L1A" | /usr/bin/head -c 200)"
@@ -6190,7 +6238,7 @@ fi
 mkdir -p "$L1_TMP/.devt"
 echo '{"dispatch_hygiene_mode":"warn"}' > "$L1_TMP/.devt/config.json"
 L1B=$(cd "$L1_TMP" && echo "$RAW_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
-if echo "$L1B" | /usr/bin/grep -q "additionalContext" && ! echo "$L1B" | /usr/bin/grep -q '"decision":"deny"'; then
+if echo "$L1B" | /usr/bin/grep -q "additionalContext" && ! echo "$L1B" | /usr/bin/grep -q '"permissionDecision":"deny"'; then
   pass "L1b: dispatch_hygiene_mode=warn emits advisory + allows (no deny)"
 else
   fail "L1b: warn mode wrong — got: $(echo "$L1B" | /usr/bin/head -c 200)"
@@ -6207,7 +6255,7 @@ fi
 rm -f "$L1_TMP/.devt/config.json"
 CURATOR_PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:curator","prompt":"Curate X"}}'
 L1D=$(cd "$L1_TMP" && echo "$CURATOR_PAYLOAD" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
-if ! echo "$L1D" | /usr/bin/grep -q '"decision":"deny"'; then
+if ! echo "$L1D" | /usr/bin/grep -q '"permissionDecision":"deny"'; then
   pass "L1d: curator dispatch NOT blocked even in default-block mode (agent-type filter works)"
 else
   fail "L1d: curator over-blocked in default mode — got: $(echo "$L1D" | /usr/bin/head -c 200)"
@@ -6215,7 +6263,7 @@ fi
 # L1e — wrapped dispatch (has scope_trust) NOT blocked
 WRAPPED='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<scope_trust>{}</scope_trust>\nReview X"}}'
 L1E=$(cd "$L1_TMP" && echo "$WRAPPED" | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1)
-if [ -z "$L1E" ] || ! echo "$L1E" | /usr/bin/grep -qE '"decision":"deny"|additionalContext'; then
+if [ -z "$L1E" ] || ! echo "$L1E" | /usr/bin/grep -qE '"permissionDecision":"deny"|additionalContext'; then
   pass "L1e: workflow-wrapped dispatch (has scope_trust) passes through unblocked"
 else
   fail "L1e: wrapped dispatch incorrectly blocked — got: $L1E"
@@ -12177,7 +12225,7 @@ K92_BARE_RESULT=$(echo "$K92_PROBE_BARE" | node "$ROOT/hooks/run-hook.js" dispat
 K92_HAND_PASS=$([ -z "$K92_HAND_RESULT" ] && echo yes || echo no)
 K92_DOCS_PASS=$([ -z "$K92_DOCS_RESULT" ] && echo yes || echo no)
 # Bare prose should produce a deny decision.
-K92_BARE_DENIES=$(echo "$K92_BARE_RESULT" | grep -c '"decision":"deny"' || true)
+K92_BARE_DENIES=$(echo "$K92_BARE_RESULT" | grep -c '"permissionDecision":"deny"' || true)
 if [ "$K92_HAND_PASS" = "yes" ] && [ "$K92_DOCS_PASS" = "yes" ] && [ "$K92_BARE_DENIES" -ge "1" ]; then
   pass "K92: dispatch-hygiene content-aware (hand-injected <context> envelope passes, ENVELOPE_NOT_REQUIRED docs-writer passes, bare prose still denies)"
 else
@@ -17413,7 +17461,7 @@ K288_MISS=""
 K288_TMP=$(mktemp -d)
 K288_BG=$( (cd "$K288_TMP" && printf '%s' '{"tool_input":{"command":"git commit --no-verify -m x"}}' | node "$ROOT/bin/devt-tools.cjs" bash-guard check 2>/dev/null) || true)
 rmdir "$K288_TMP" 2>/dev/null || true
-if ! { printf '%s' "$K288_BG" | /usr/bin/grep -q '"decision":"deny"' && printf '%s' "$K288_BG" | /usr/bin/grep -q "Deny is a redirect, not a stop"; }; then
+if ! { printf '%s' "$K288_BG" | /usr/bin/grep -q '"permissionDecision":"deny"' && printf '%s' "$K288_BG" | /usr/bin/grep -q "Deny is a redirect, not a stop"; }; then
   K288_OK=0; K288_MISS="$K288_MISS bash-guard-recovery-grammar"
 fi
 /usr/bin/grep -qF 'Bash(node "${cliPath}" *)' "$ROOT/bin/modules/setup.cjs" || { K288_OK=0; K288_MISS="$K288_MISS setup-narrow-allow"; }
@@ -17927,7 +17975,7 @@ K299_A=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":
 case "$K299_A" in *deny*) K299_OK=0; K299_WHY="$K299_WHY shared-only-denied";; esac
 /usr/bin/grep -q ":: shared-advisory ADR-921" "$K299_PROJ/.devt/state/scratchpad.md" 2>/dev/null || { K299_OK=0; K299_WHY="$K299_WHY no-advisory-line"; }
 K299_E=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$K299_PROJ"'/src/widget/core.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh")
-case "$K299_E" in *'"decision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY abs-local-not-denied";; esac
+case "$K299_E" in *'"permissionDecision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY abs-local-not-denied";; esac
 node -e "
   const fs = require('fs');
   const p = '$K299_PROJ/.devt/config.json';
@@ -17936,7 +17984,7 @@ node -e "
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
 "
 K299_C=$(cd "$K299_PROJ" && echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$K299_PROJ"'/src/widget/beta.py"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/pre-flight-guard.sh")
-case "$K299_C" in *'"decision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY coerce-not-denied";; esac
+case "$K299_C" in *'"permissionDecision":"deny"'*) : ;; *) K299_OK=0; K299_WHY="$K299_WHY coerce-not-denied";; esac
 if [ "$K299_OK" = "1" ]; then
   pass "K299: shared-root trust tier + REJ attribution — shared-only governance advises (shared-advisory line) not denies, local governance denies on absolute paths (relativization fix), coerce opt-in restores deny, Brief REJ lines root-attributed (DEF-009 M2+M4)"
 else
@@ -18654,7 +18702,7 @@ for h in $K318_HOOKS; do
 done
 # Behavioral: the sourced helper delivers end-to-end (deny survives the source).
 K318_BG=$(printf '%s' '{"tool_input":{"command":"rm -rf /"}}' | bash "$ROOT/hooks/bash-guard.sh" 2>/dev/null || true)
-printf '%s' "$K318_BG" | /usr/bin/grep -q '"decision":"deny"' || { K318_OK=0; K318_MISS="$K318_MISS behavioral-deny"; }
+printf '%s' "$K318_BG" | /usr/bin/grep -q '"permissionDecision":"deny"' || { K318_OK=0; K318_MISS="$K318_MISS behavioral-deny"; }
 if [ "$K318_OK" -eq 1 ]; then
   pass "K318: hook-runtime consolidation (_common.sh single-sources devt_read_stdin + devt_plugin_root; 10 stdin hooks source it, none re-implements inline timeout-cat; bash-guard deny survives end-to-end)"
 else

@@ -16,14 +16,14 @@
 #   (<scope_trust>, <scope_hint>, <memory_signal>, and 7 others). Fires only
 #   when subagent_type starts with 'devt:' AND envelope blocks are missing.
 #   Writes source='raw_dispatch' record + (per `dispatch_hygiene_mode` config)
-#   either a decision:deny block or a warn-mode additionalContext advisory.
+#   either a permissionDecision:deny block or a warn-mode additionalContext advisory.
 #
 # Both checks write to .devt/state/dispatch-warnings.jsonl with distinct
 # `source` discriminators so /devt:status, mcp-stats --by=source, and
 # /devt:debug --mode=forensics can route each class independently.
 #
 # Output composition:
-#   - If hygiene blocks: emit decision:deny (scope advisory is dropped — would
+#   - If hygiene blocks: emit permissionDecision:deny (scope advisory is dropped — would
 #     have been advisory-only anyway, and the block message takes priority).
 #   - If hygiene doesn't block: emit additionalContext combining any scope
 #     advisory + hygiene advisory (when present).
@@ -280,7 +280,14 @@ printf '%s' "$INPUT" | node -e "
       'If this is a NEW review starting against a stale workflow.yaml (accumulated raw_dispatch counts from a prior unrelated workflow), ' +
       'run \"node bin/devt-tools.cjs state reset-soft\" from the project root to clear per-workflow accumulators ' +
       '(preserves workflow_id_history + .devt/memory/ + phase artifacts; rotates dispatch-warnings.jsonl; assigns fresh workflow_id + first_created_at).';
-    process.stdout.write(JSON.stringify({ decision: 'deny', reason: denyReason }));
+    // Modern deny schema ONLY — hookSpecificOutput.permissionDecision is what
+    // current builds enforce; a dual legacy+modern form is ignored (the legacy
+    // top-level decision key poisons the deny — field-verified for Edit + Bash
+    // 2026-07-27). Task-tool enforcement remains platform-gated either way;
+    // the post-hoc assert-no-raw-dispatches gate stays the real net.
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: denyReason }
+    }));
     process.exit(0);
   }
 
