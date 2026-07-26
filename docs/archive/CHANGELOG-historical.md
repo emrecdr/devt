@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.170.0] - 2026-07-18
+
+### Platform-alignment batch from the 39-page external sweep (cal #52)
+
+Two independent sweeps of the same sources (27 claudefa.st guides, 9 claude.com posts, 3 anthropic.com engineering articles — one in-session, one external report validated filesystem-first against the repo) converged on a small, first-party-validated batch: align devt with the platform's autonomous-operation grammar, sharpen prompt surfaces field receipts already exercise, and institutionalize the strip-audit discipline. Everything heavier stays receipt-gated with named triggers.
+
+### Added
+
+- **Narrow auto-mode allow rules in the settings scaffold.** Auto mode drops broad allow rules at entry (bare `Bash`, wildcarded interpreters like `Bash(node:*)`), so every devt CLI call routes through the permission classifier. `setup` now scaffolds two machine-resolved literal rules — `Bash(node "<plugin-root>/bin/devt-tools.cjs" *)` in quoted and unquoted form — into fresh `.claude/settings.json`; narrow literal rules carry over into auto mode. Rule shape verified against the platform permission docs (literal text matching; `${CLAUDE_PLUGIN_ROOT}` is never substituted inside settings files, so the path resolves at scaffold time). Approve-once recipe for existing projects documented in CLI-REFERENCE (Auto-mode permissions).
+- **Recover-don't-halt deny grammar on bash-guard.** Every deny now appends the platform's on-deny contract at the single emit point: deny is a redirect, not a stop — continue the task via a safer path; do not retry the exact command; do not work around the guard. The jsonl deny record keeps the raw rule reason for telemetry classification. (pre-flight-guard's message already conformed — it names the exact recovery action — and stays inside its smoke-gated byte budget.)
+- **`docs/RETIREMENT-WATCH.md`** — standing register merging the native-convergence freeze-zone table (Agent Teams, observer agents, auto-mode pipeline, `/usage`, artifacts, worktree isolation, persistent-subagent resume, Managed Agents primitives — each row with an explicit trigger to act) with the strip-candidate ledger (a `compensates:` annotation per scaffold) and the per-model-generation strip-audit checklist. Receipt-gated adoption items (headless-Ask audit, enforced active verification, warm revision resume) carry their named unlock triggers.
+- **Plans lead with decisions.** create-plan Step 4 + the implementation-plan template gain `## Key Decisions (most-likely-to-change first)` ahead of the task list — data model changes, new interfaces/contracts, anything user-facing first — so early review attention lands where wrongness is most expensive. The plan-presentation summary surfaces the same list.
+- **Recipe 6 in DISPATCH-RECIPES**: side audit in a separate detached headless session (`claude --bg`), paired with the concurrent-session discriminator discipline.
+
+### Changed
+
+- **read-before-edit-guard demoted to the `full` profile** — first strip-audit retirement. The runtime natively errors on Edit-without-Read (the hook's own message said so), making the per-Edit reminder (~40 tokens/fire) redundant at `standard`. Kept at `full` for environments without the native check.
+- Questioning guide's decision-tree walk gains the architecture tiebreak: when two candidate questions compete for the next slot, ask the one whose answer would change the architecture first — a late answer there invalidates the most downstream work.
+- Programmer deviation Rules 1-3 now default to the most conservative valid fix (log under Deviations, keep going), folded into the shared-process line so the agent stays exactly at its 500-line cap.
+- Verifier self-check bans silent downgrades — an issue identified during verification may only be dismissed WITH the evidence that justified the downgrade (the known evaluator failure mode: identify, then talk yourself out of it) — and `run_verification` now declares the functional surface: which project-declared runnable surfaces were executed and which were not, one-line reason per skip; legibility only, no forced execution. The dev.v1 rubric carries both bars.
+- **CHANGELOG rotated**: the root file keeps `[Unreleased]` plus the ten most recent releases (709 KB → 32 KB); 152 older sections moved into `docs/archive/CHANGELOG-historical.md` (now spanning v0.1.0–v0.162.0). Every consumer verified rotation-safe: CI checks only the current version's section, the release extractor reads recent sections, and `update changelog`'s between-parse degrades gracefully when old sections are absent.
+- Gate **K288** pins the batch (guard demotion, deny-grammar behavioral check from a bare temp dir, narrow-allow scaffold, retirement-watch register, prompt-surface lines, rotation ceiling). Drift-guard stack 195 → 196 deep (K94–K288).
+
+### Validated, deliberately not shipped (for the record)
+
+- The external report's guardrails-compression proposal is a direct REJ-001 hit (twice-rejected static-compress / hedge-removal) — rejected again; no new evidence offered.
+- The 20-total-denies escalation leg died in verification: the stuck-detector already fires at ≥3 TOTAL denies per workflow session — stricter than the platform's 3-consecutive/20-total grammar on both axes — so the leg would be unreachable dead code.
+
 ## [0.169.0] - 2026-07-17
 
 ### Sixth field receipt: make the compliant path legible
