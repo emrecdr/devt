@@ -10,6 +10,25 @@ short primary list for always-on context budget.
 
 The full inventory of `node bin/devt-tools.cjs` subcommands. CLAUDE.md keeps a short primary list for the always-on context budget; the verbose entries live here so every-session token cost stays small.
 
+### State — compound context-init + Stop-event verbs
+
+```bash
+node bin/devt-tools.cjs state review-context-init [--scope=...] [--primary-branch=...] [--range=<a>..<b>]
+# Compound review-context blob in ONE spawn (scope detection + stale-graphify eviction + preflight surface) — workflows/code-review.md's context_init wrapper; replaces the ~8-call hand-rolled sequence
+
+node bin/devt-tools.cjs state workflow-context-init [--workflow-type=dev] [--scope=...] [--primary-branch=...]
+# The dev-workflow twin of review-context-init — one-spawn context blob for dev/implement flows
+
+node bin/devt-tools.cjs state stop-hook
+# Stop-event compound (reads the hook's JSON on stdin): stop_hook_active loop guard, knowledge-candidate harvest, curation hint, incomplete-workflow stop stamp, stopReason emission. hooks/stop.sh's single CLI call — self-printing (emits nothing on the loop-guard leg)
+
+node bin/devt-tools.cjs hook-cost-estimate [--window=7d]
+# Per-hook migration ROI from the .devt/state/hook-trace/run-hook.jsonl invocation trace
+
+node bin/devt-tools.cjs telemetry <subcommand>
+# Calibration-mode opt-in flags for hooks that emit forensic records (telemetry-calibrate.cjs)
+```
+
 ### State — workflow-internal assertions and gates
 
 ```bash
@@ -126,7 +145,7 @@ node bin/devt-tools.cjs dispatch render-lanes [target] [--target=<agent>:<workfl
 node bin/devt-tools.cjs dispatch compile --check|--write
 # Verifies (or rewrites) every <!-- BEGIN dispatch:agent:workflow_id --> region in workflows/*.md against its template at templates/dispatch/envelopes/. Returns regions_checked + drift array. --check exits 1 when drift exists; --write atomically rewrites drifted bodies
 
-node bin/devt-tools.cjs dispatch run <agent> --task="<text>" [--workflow=<id|auto>] [--rules-exclude=<headings>]
+node bin/devt-tools.cjs dispatch run <agent>[:<workflow_id|auto>] --task="<text>" [--rules-exclude=<headings>]
 # Single-dispatch ergonomic launcher. Builds the canonical envelope (scope_trust, scope_hint, memory_signal, governing_rules) and prints it Task-tool-ready, so an orchestrator doing ONE devt:* dispatch can stay on the canonical path without the 3-step lanes.yaml → register-lanes → render-lanes boilerplate. Compresses single-agent dispatch to one CLI call. For parallel fan-out, still use render-lanes (run is single-agent only by design). --task is required; empty task rejected at input validation
 ```
 

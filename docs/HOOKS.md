@@ -17,7 +17,7 @@ Hooks use a Node.js runner (`hooks/run-hook.js`) with profile support:
 | `DEVT_HOOK_TRACE` | `1` | Set to `0` to disable the universal invocation trace |
 | `DEVT_VALIDATE_SHADOW` | `1` | Set to `0` to disable the shadow-mode state validation that runs on every `state update` and persists `validation_status` to `workflow.yaml` |
 | `DEVT_VALIDATE_ENFORCE` | `0` | Set to `1` to make `state update` HARD-fail on validation mismatches (default: shadow-only — log + persist warning but don't block) |
-| `DEVT_AUTO_INDEX_DEBOUNCE_SEC` | `30` | Debounce window for the memory-auto-index PostToolUse hook. Edits to `.devt/memory/*.md` within the window are coalesced into one FTS5 rebuild |
+| `DEVT_AUTO_INDEX_DEBOUNCE_SEC` | `5` | Debounce window for the memory-auto-index PostToolUse hook. Edits to `.devt/memory/*.md` within the window are coalesced into one FTS5 rebuild |
 | `DEVT_MCP_ALLOW_WRITES` | (unset) | Set to `1` to enable write-tools on the memory MCP server (`memory_upsert_doc` etc.). Default disabled — read-only MCP surface unless explicitly opted-in per project |
 
 The `run-hook.cmd` polyglot delegates to `run-hook.js` for cross-platform support.
@@ -143,7 +143,7 @@ See `docs/MEMORY.md` for the full Two-Tier Pre-Flight Protocol context (Tier 1 =
 
 **Hook.** `hooks/dispatch-hygiene-guard.sh` — PreToolUse matcher on `Task`.
 
-**Behavior.** Emits an advisory `additionalContext` when a subagent dispatch's prompt byte count exceeds `dispatch.max_prompt_bytes` (default `24576`) or its parsed `<scope_hint>` array exceeds `dispatch.max_files_hint` (default `8`). **NEVER blocks.**
+**Behavior.** Emits an advisory `additionalContext` when a subagent dispatch's prompt byte count exceeds `dispatch.max_prompt_bytes` (default `24576`) or its parsed `<scope_hint>` array exceeds `dispatch.max_files_hint` (default `12`). **NEVER blocks.**
 
 **Telemetry.** Each warning appends one JSONL record to `.devt/state/dispatch-warnings.jsonl` (`source: "dispatch_scope"`) so `/devt:debug --mode=forensics` can surface "this workflow had N over-scoped dispatches" post-hoc.
 
@@ -206,9 +206,9 @@ The mechanism is announcement-only. It does NOT change CLI behavior, does NOT bl
 
 **`hooks/stop.sh`** (universal Stop hook, all profiles) appends a curation hint to its `stopReason` when memory candidates are ready for triage: `💭 N memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`
 
-**How it works.** After the unconditional knowledge-candidate harvest, the hook calls `memory candidates-footer --hint-only` — a mode that emits ONLY the hint, and only when `count >= memory.candidates_surface_threshold` (default 5) AND the `memory.candidates_surface_cooldown_hours` window (default 24h, stamp `.devt/memory/.last-candidate-surface`) allows. Emitting touches the cooldown, so despite Stop firing on every response turn, the hint appears at most once per cooldown window. Below readiness the hook's messages are byte-identical to before.
+**How it works.** The hook's single `state stop-hook` CLI call (which also owns the stop_hook_active loop guard, the knowledge-candidate harvest, and the incomplete-workflow stop stamp) runs the footer logic in-process via `memory.cjs::candidatesFooterStatus` — the hint is emitted only when `count >= memory.candidates_surface_threshold` (default 5) AND the `memory.candidates_surface_cooldown_hours` window (default 24h, stamp `.devt/memory/.last-candidate-surface`) allows. Emitting touches the cooldown, so despite Stop firing on every response turn, the hint appears at most once per cooldown window. Below readiness the hook's messages are byte-identical to before. (`memory candidates-footer --hint-only` is the CLI-facing form of the same logic.)
 
-**Why.** Curation triggers are otherwise workflow-finalize-bound (`skills/memory-curation/SKILL.md`), so raw-dispatch maintainer sessions — which never hit a finalize step — accumulate candidates nobody ever sees. Session end is also the moment a human is most likely to notice an anomalous candidate before it reaches the curator (the memory-trust angle: candidates are the untrusted inbox). The `--hint-only` mode deliberately drops the always-on status line the finalize-footer contract requires — that contract exists for once-per-workflow call sites where silence is indistinguishable from never-executing; a per-turn hook has the invocation trace for that, and the always-on line would be per-turn noise.
+**Why.** Curation triggers are otherwise workflow-finalize-bound (`skills/memory-curation/SKILL.md`), so raw-dispatch maintainer sessions — which never hit a finalize step — accumulate candidates nobody ever sees. Session end is also the moment a human is most likely to notice an anomalous candidate before it reaches the curator (the memory-trust angle: candidates are the untrusted inbox). The hint-only behavior deliberately drops the always-on status line the finalize-footer contract requires — that contract exists for once-per-workflow call sites where silence is indistinguishable from never-executing; a per-turn hook has the invocation trace for that, and the always-on line would be per-turn noise.
 
 ## Hook Messaging Is Right-Sized for Cost
 

@@ -496,7 +496,7 @@ The four profiles and what each agent gets:
 | Agent | `quality` | `balanced` (default) | `budget` | `inherit` |
 |---|---|---|---|---|
 | **architect** | opus | opus | sonnet | inherit session model |
-| **verifier** | opus | opus | sonnet | inherit session model |
+| **verifier** | opus | sonnet | sonnet | inherit session model |
 | **debugger** | opus | opus | sonnet | inherit session model |
 | **code-reviewer** | opus | opus | sonnet | inherit session model |
 | **programmer** | opus | opus | sonnet | inherit session model |
@@ -506,7 +506,7 @@ The four profiles and what each agent gets:
 | retro | opus | sonnet | haiku | inherit session model |
 | curator | opus | sonnet | haiku | inherit session model |
 
-**`balanced` (default)** — keeps the 5 strategic agents (architect, verifier, debugger, code-reviewer, programmer) on opus while downgrading the 5 synthesis/exploration agents to sonnet. ~50-60% of `quality`'s token cost; protects judgment-critical paths.
+**`balanced` (default)** — keeps the 4 judgment-critical agents (architect, debugger, code-reviewer, programmer) on opus while downgrading the other 6 — including the verifier, whose rubric-driven grading is structured enough to hold up on sonnet — to sonnet. ~50-60% of `quality`'s token cost; protects the paths where judgment quality compounds.
 
 **`quality`** — all 10 agents on opus. Highest cost, highest reasoning depth. Use for production codebases, high-stakes reviews, complex debugging.
 
@@ -830,7 +830,7 @@ node bin/devt-tools.cjs setup --template <name> [--mode create|update|reinit]
 node bin/devt-tools.cjs memory <subcommand>
 
 # Pre-Flight Brief
-node bin/devt-tools.cjs preflight "<topic>"
+node bin/devt-tools.cjs preflight generate "<topic>"
 
 # Deferred TODO tracker
 node bin/devt-tools.cjs deferred add "<title>" [--context=… --tags=a,b --by=<agent>]

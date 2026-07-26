@@ -105,13 +105,13 @@ const DEFAULTS = {
   validator: {
     structural_mode: "warn",
   },
-  // Opt-in static-file prose compressor. Refer to
-  // docs/static-compress-recipe.md for the full opt-in protocol.
+  // Static-file prose compressor. Refer to docs/static-compress-recipe.md
+  // for the full protocol.
   //
-  //   mode: "off" (default) — CLI errors with "feature disabled"; explicit
-  //     opt-in required per project. Safest default — no surprises.
-  //   mode: "on" — `node bin/devt-tools.cjs static-compress <path>` compresses
-  //     the file in place + writes <path>.original.md backup for reversal.
+  //   mode: "on" (default) — `node bin/devt-tools.cjs static-compress <path>`
+  //     compresses the file in place + writes <path>.original.md backup for
+  //     reversal.
+  //   mode: "off" — CLI errors with "feature disabled"; per-project opt-out.
   //
   //   size_cap_bytes: hard refuse files larger than this. Default 500 KB —
   //     covers .devt/rules/, guardrails/, skills/SKILL.md without raising
@@ -419,6 +419,13 @@ const DEFAULTS = {
   // .devt/state/dispatch-warnings.jsonl, the dispatch never blocks. Tune higher
   // when a project consistently runs over-cap dispatches for legitimate reasons;
   // lower when the warnings should fire earlier as a discipline signal.
+  // Dispatch-time rules filtering — section headings listed here are dropped
+  // from rendered <governing_rules> payloads; dispatch.cjs unions this with
+  // per-call --rules-exclude. Present in DEFAULTS so the key is documented
+  // and the unknown-top-level-key warning never fires for a key that works.
+  rules: {
+    exclude_sections: [],
+  },
   dispatch: {
     max_prompt_bytes: 24576,
     max_files_hint: 12,
@@ -461,10 +468,10 @@ const DEFAULTS = {
   // `<rubric_path>` so the agent never has to know about config layout.
   rubrics: {
     dev: "dev.v1.md",
-    code_review: "code_review.v1.md",
+    code_review: "code_review.v2.md",
     // Parallel-lane review consolidates N lane outputs into a single review.md;
     // verifier still grades the consolidated artifact, so the rubric is shared.
-    code_review_parallel: "code_review.v1.md",
+    code_review_parallel: "code_review.v2.md",
   },
 };
 

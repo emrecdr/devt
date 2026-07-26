@@ -2,9 +2,9 @@
 
 **The state directory is governed by a strict contract.** This document is the single source of truth for what files are allowed there, who writes them, and what happens to ad-hoc names.
 
-Source of truth (machine-readable): `bin/modules/state.cjs::STATE_FILE_CONTRACT` + `ARTIFACT_SCHEMA` + `JSON_SIDECAR_SCHEMAS` + `JSON_INPUT_SCHEMAS` + `SIDECAR_FOR_MARKDOWN` + `RESET_EXEMPT`.
+Source of truth (machine-readable): `bin/modules/state-contract.cjs::STATE_FILE_CONTRACT` + `ARTIFACT_SCHEMA` + `JSON_SIDECAR_SCHEMAS` + `JSON_INPUT_SCHEMAS` + `SIDECAR_FOR_MARKDOWN` + `RESET_EXEMPT` (all re-exported through the `state.cjs` facade; edit them in `state-contract.cjs`).
 
-Source of truth (regex compilation): `bin/modules/state-audit.cjs::ALLOWED_PATTERNS` + `EPHEMERAL_PATTERNS`. These two surfaces are smoke-test enforced to agree with the declared contract.
+`bin/modules/state-audit.cjs` compiles its `ALLOWED_PATTERNS` + `EPHEMERAL_PATTERNS` directly from the contract's regex strings — there is no second list to keep in sync. Smoke gate K329 proves the derivation (a contract-legal artifact classifies `pattern_allowed`, and every "Survives reset ✓" row below is in `RESET_EXEMPT`).
 
 ---
 
@@ -59,7 +59,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `baseline-gates.md` | orchestrator | Regression baseline | (not status-gated) |
 | `claude-mem-harvest.md` | orchestrator pre-step | claude-mem MCP harvest | (not status-gated) |
 | `claude-mem-skipped.txt` | orchestrator pre-step | claude-mem decision-artifact (skip) | (not status-gated) |
-| `review-scope.md` | orchestrator | Code-review file list | (not status-gated) |
+| `code-review-input.md` | orchestrator | Code-review file list | (not status-gated) |
 | `review.md` | code-reviewer | Code review body | Sidecar (review.json) |
 | `graph-impact.md` | orchestrator | Graphify-derived impact map | (not status-gated) |
 | `topic-symbols-dropped.json` | code-review.md substep 5 | Symbols dropped when `symbol_anchored` truncates >32 from preflight; consumed by the impact step to emit a truncation notice in `graph-impact.md` | (not status-gated) |
@@ -74,7 +74,7 @@ Files in `ad_hoc` are the failure mode. They appear when an agent or human write
 | `verification.md` | `verification.json` | sidecar | satisfied / needs_revision / failed |
 | `review.md` | `review.json` | sidecar | APPROVED / APPROVED_WITH_NOTES / NEEDS_WORK |
 
-Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEMAS`, add the pairing to `SIDECAR_FOR_MARKDOWN`, remove the markdown entry from `ARTIFACT_SCHEMA` if it was there.
+Adding a new sidecar pair: register the schema in `state-contract.cjs::JSON_SIDECAR_SCHEMAS`, add the pairing to `SIDECAR_FOR_MARKDOWN`, remove the markdown entry from `ARTIFACT_SCHEMA` if it was there.
 
 ### Input-only JSON artifacts
 
@@ -90,7 +90,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 |---|---|---|---|
 | `.lock` | `state update` PID mutex | JSON | ✓ |
 | `.archive/` | `state reset` + `state cleanup` | directory (ring buffer, default 5 snapshots) | ✓ |
-| `lane-files/` | `state register-lane` + `register-lanes` (round 8 Tier C) | directory holding `<lane-id>.json` per-lane files sidecars (each: `{id, community, files[], registered_at, repo_root, base_ref, size_class, size_basis, est_loc, diff_artifact}`); written because the lane-files array can't safely round-trip through `serializeSimpleYaml`'s primitive-only lane field encoder | ✓ |
+| `lane-files/` | `state register-lane` + `register-lanes` (round 8 Tier C) | directory holding `<lane-id>.json` per-lane files sidecars (each: `{id, community, files[], registered_at, repo_root, base_ref, size_class, size_basis, est_loc, diff_artifact}`); written because the lane-files array can't safely round-trip through `serializeSimpleYaml`'s primitive-only lane field encoder | ✗ (archived with reset — lane registrations are scope-bound to their workflow, same rationale as `lane-diff-L*.txt`; `state cleanup` never bulk-archives it mid-workflow via the audit's canonical-subdir list) |
 | `threads/` | `/devt:thread create` (session handoffs + cross-session threads) | directory of uniquely slug-named `<slug>.md` threads (frontmatter: `title`, `status`, `session:` id); canonical subdir — `state cleanup` never bulk-archives it; one-shot handoff threads auto-RESOLVE on resume | ✓ (`RESET_EXEMPT` — cross-session survival is the contract) |
 | `deferred.md` | `/devt:note --defer`, deferred.cjs | markdown with DEF-NNN entries | ✓ |
 | `preflight-denies.jsonl` | preflight hook + bash-guard + graph_loader | JSONL (one record per deny) | ✓ |
@@ -118,7 +118,7 @@ Adding a new sidecar pair: register the schema in `state.cjs::JSON_SIDECAR_SCHEM
 
 ## Allowed patterns (slug variants)
 
-When an artifact has multiple instances within one workflow (sliced PR reviews, multi-pass implementation variants), use these regex patterns. **No other slug patterns are accepted** — adding a new one means amending both `STATE_FILE_CONTRACT.allowed_patterns` in `state.cjs` AND `ALLOWED_PATTERNS` in `state-audit.cjs`, then re-running smoke tests.
+When an artifact has multiple instances within one workflow (sliced PR reviews, multi-pass implementation variants), use these regex patterns. **No other slug patterns are accepted** — adding a new one means amending `STATE_FILE_CONTRACT.allowed_patterns` in `bin/modules/state-contract.cjs` (the single source; `state-audit.cjs` compiles from it), then re-running smoke tests.
 
 | Pattern (regex) | Example | When to use |
 |---|---|---|
@@ -127,8 +127,8 @@ When an artifact has multiple instances within one workflow (sliced PR reviews, 
 | `^test-summary-[A-Za-z0-9_.-]+\.(md\|json)$` | `test-summary-integration.json` | Multiple test runs in one workflow |
 | `^verification-[A-Za-z0-9_.-]+\.(md\|json)$` | `verification-rerun.json` | Multiple verifier passes |
 | `^slice-[A-Za-z0-9_.-]+\.md$` | `slice-A.md`, `slice-frontend.md` | Generic slice files for non-review workflows |
-| `^[a-z]+-summary\.md$` | `module-md-update-summary.md` | Topical summaries when none of the above fit |
-| `^review-lane-[a-z][a-z0-9_]{0,31}\.md$` | `review-lane-api.md`, `review-lane-frontend.md` | Per-lane review output from `code-review-parallel.md`. Slug computed via `state.cjs::slugifyLaneName`. Multiple files allowed per workflow run. Not RESET_EXEMPT. |
+| `^[a-z][a-z0-9]*(-[a-z0-9]+)+-summary\.md$` | `module-md-update-summary.md` | Topical summaries when none of the above fit. Two or more words before `-summary` required — single-word forms (`test-summary.md`) are the canonical namespace and stay disjoint (F10e) |
+| `^review-lane-[a-z][a-z0-9_]{0,31}\.md$` | `review-lane-api.md`, `review-lane-frontend.md` | Per-lane review output from `code-review-parallel.md` (a sub-class of the `^review-` pattern above — the contract carries no separate entry). Slug computed via `state-lanes.cjs::slugifyLaneName`. Multiple files allowed per workflow run. Not RESET_EXEMPT. |
 | `^lane-diff-L\d+\.txt$` | `lane-diff-L1.txt` | Per-lane diff artifact generated by `state register-lane` (merge-base diff of the lane's files: committed + working tree + untracked, computed in the lane's `repo_root` against its `base_ref`). Lanes read it FIRST — the diff IS the change under review. Sized by `est_loc`/`size_class`. Evicted by `reset-soft` (scope-bound; a stale diff read as the change is silent-wrong-input). Not RESET_EXEMPT. |
 
 **Pattern-allowed files are archived after 21 days** (`STATE_FILE_CONTRACT.stale_days_default`). Override per-run with `state cleanup --stale-days=N`.
@@ -151,7 +151,7 @@ These files should never exist on disk during normal operation. If they do, an a
 
 If your new agent/workflow needs to write a new file to `.devt/state/`, do exactly one of:
 
-1. **Exact filename** → add to `STATE_FILE_CONTRACT.additional_canonical` in `state.cjs` + describe it in the canonical inventory above. Use this for once-per-workflow artifacts.
+1. **Exact filename** → add to `STATE_FILE_CONTRACT.additional_canonical` in `state-contract.cjs` + describe it in the canonical inventory above. Use this for once-per-workflow artifacts.
 2. **Slug variant** → check if your filename fits one of the existing patterns. If yes, you're done — just use the matching format. If no AND you need slug variants, propose a new `ALLOWED_PATTERNS` entry (requires smoke gate update).
 3. **JSON sidecar for an existing markdown** → register in `JSON_SIDECAR_SCHEMAS`, add to `SIDECAR_FOR_MARKDOWN`, remove markdown's `## Status:` header if status moves to the sidecar.
 
@@ -213,5 +213,5 @@ Current-session writes are preserved by the mtime gates in (2), (3), and (4). Cr
 - [`docs/AGENT-CONTRACTS.md`](AGENT-CONTRACTS.md) — JSON sidecar contract, sidecar-only status routing (consumes `JSON_SIDECAR_SCHEMAS` referenced here)
 - [`docs/INTERNALS.md`](INTERNALS.md) — `state.cjs` internals: locking, validation, session metadata
 - [`docs/MEMORY.md`](MEMORY.md) — permanent knowledge layer (`.devt/memory/`), distinct from this directory's per-workflow artifacts
-- `bin/modules/state.cjs` — machine-readable contract: `STATE_FILE_CONTRACT` + `ARTIFACT_SCHEMA` + `JSON_SIDECAR_SCHEMAS` + `SIDECAR_FOR_MARKDOWN` + `RESET_EXEMPT`
+- `bin/modules/state-contract.cjs` — machine-readable contract: `STATE_FILE_CONTRACT` + `ARTIFACT_SCHEMA` + `JSON_SIDECAR_SCHEMAS` + `SIDECAR_FOR_MARKDOWN` + `RESET_EXEMPT` (re-exported through the `state.cjs` facade)
 - `bin/modules/state-audit.cjs` — regex compilation: `ALLOWED_PATTERNS` + `EPHEMERAL_PATTERNS`

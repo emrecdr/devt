@@ -212,6 +212,12 @@ Commands:
   state audit               Classify .devt/state/ files: canonical | pattern_allowed | ephemeral | ad_hoc
   state cleanup [--apply] [--stale-days=N]
                             Archive ad_hoc + ephemeral + stale pattern_allowed files to .archive/cleanup-<ts>/
+  state review-context-init [--scope=...] [--primary-branch=...] [--range=<a>..<b>]
+                            Compound review-context blob (scope + eviction + preflight surface) — one spawn
+  state workflow-context-init [--workflow-type=dev] [--scope=...] [--primary-branch=...]
+                            Compound dev-workflow context blob — the workflow-side twin
+  state stop-hook           Stop-event compound (hook JSON on stdin): loop guard, candidate harvest,
+                            curation hint, stop stamp, stopReason emission — hooks/stop.sh's single call
   config get|set            Config resolution (defaults ← global ← project)
   models get <profile>      Agent→model mapping for a profile
   setup --template <name>   Scaffold .devt/rules/ for a project
@@ -237,6 +243,11 @@ Commands:
   memory affects-symbol <s> AST-anchored symbol lookup (Graphify-backed when enabled)
   memory suggest            Run discovery: #KNOWLEDGE-CANDIDATE + DEC-xxx + graphify god-node harvest
                             Writes proposals to .devt/memory/_suggestions.md (NEVER auto-promotes)
+  memory promote|reject     Curator-gated — prints the /devt:memory routing hint and exits 2 (the CLI
+                            never writes permanent memory files directly)
+  telemetry <subcommand>    Calibration-mode flags for forensic hook records (telemetry-calibrate.cjs)
+  hook-cost-estimate [--window=7d]
+                            Per-hook migration ROI from the run-hook.jsonl invocation trace
   deferred add "<title>"    Capture a deferred TODO to .devt/state/deferred.md
                             [--context="..."] [--tags=a,b,c] [--by=<agent>]
                             Survives /devt:workflow --cancel (reset-exempted)

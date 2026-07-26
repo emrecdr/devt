@@ -405,6 +405,7 @@ const RESET_EXEMPT = new Set([
   "graphify-impact-plan.json",          // args+tier audit trail for the impact step. Survives reset so the "args VERBATIM" contract is auditable post-hoc; otherwise the plan disappears with the workflow and the only evidence left is graph-impact.md (the MCP response) without the args used to derive it.
   "workflow-id-rotations.jsonl",        // audit log of every workflow_id mutation (prev_id, new_id, source, pid, argv). RESET_EXEMPT because rotations BY resetSoft are themselves the events being audited — wiping the log on reset would erase the forensic trail for the bug that motivated it.
   "lane-status-overrides.jsonl",        // operator lane-verdict override rationales (update-lane override_reason=). Survives reset so post-hoc audits can distinguish "gate wrong, operator overrode with reason" from "gate right, lane redispatched".
+  "static-compress.jsonl",              // static-compress calibration log (compress/restore actions with byte ratios). Survives reset so calibration data isn't lost when a workflow resets between compression runs; membership here also makes it audit-canonical, so `state cleanup` never archives it.
 ]);
 
 
@@ -479,6 +480,7 @@ const STATE_FILE_CONTRACT = {
     "^research-[A-Za-z0-9_.-]+\\.md$",
     "^spec-[A-Za-z0-9_.-]+\\.md$",
     "^debug-(context|investigation|summary)-[A-Za-z0-9_.-]+\\.md$",
+    "^[a-z][a-z0-9]*(-[a-z0-9]+)+-summary\\.md$",  // topical summaries (module-md-update-summary.md) when no slugged class fits. ≥2 segments before "-summary" required: single-word forms (test-summary.md) ARE the canonical namespace — F10e enforces the disjointness
     "^lane-diff-L\\d+\\.txt$",   // per-lane diff artifact from register-lane
   ],
   ephemeral_patterns: [

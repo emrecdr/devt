@@ -8,6 +8,38 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.210.0] - 2026-07-27
+
+Alignment batch from the v5 external report (validated finding-by-finding before implementation; ~25 claims checked — the three headline defects confirmed, one of them undercounted by the report itself, two of the report's supporting details refuted). Theme: the code was ahead of its own paperwork — two real data-loss/behavior defects lived in maintenance verbs, everything else was a surface lying about another surface.
+
+### Fixed
+
+- **`state cleanup`/`reset` no longer destroy the static-compress calibration log.** `static-compress.jsonl` was doc-promised reset-exempt but absent from `RESET_EXEMPT` — every hard reset archived it, and the audit classified it `ad_hoc` so stale-cleanup archived it too. One membership entry fixes both (RESET_EXEMPT feeds the audit's canonical set). Fixture-proven: hard reset now leaves it as the only survivor.
+- **The audit's pattern list can no longer diverge from the contract.** `state-audit.cjs` carried a hand-copied 6-pattern list against the contract's 10 — contract-legal `lane-diff-L*.txt` (and the plan/research/spec/debug slug classes) classified `ad_hoc` and were cleanup-archived; both the audit comment and STATE-RULES claimed a smoke gate enforced agreement that never existed. The audit now compiles its regexes directly from `STATE_FILE_CONTRACT` — there is no second list.
+- **Consolidation surfaced two latent defects in the topical-summary pattern**: the old form could not match its own documented example (`[a-z]+` cannot cross hyphens in `module-md-update-summary.md`), and once fixed, the widened form collided with the canonical single-word namespace (`test-summary.md` — caught by F10e on the first suite run). Final form requires ≥2 words before `-summary`, matching the documented intent while staying disjoint from canonical names.
+- **The code-review rubric grades against a file that exists again.** All six `review-scope.md` references in the shipped rubric (axis-A procedure, the `failed` trigger, examples, decision tree) pointed at an artifact renamed to `code-review-input.md` — every verifier received a grading contract naming a dead path and bridged it ad-hoc. Shipped per the pinning convention as `code_review.v2.md` + DEFAULTS bump (`code_review` and `code_review_parallel`); v1 stays on disk for projects pinning it. Same ghost purged from GRADER.md, AGENT-CONTRACTS.md, and STATE-RULES.md (a fourth site the report missed).
+- **`/devt:note --tags` no longer silently drops tags on the default path.** The command advertised `--tags=a,b,c` but only the `--defer` route consumed it; the note workflow now parses the token and writes a `tags:` frontmatter line.
+- **`rules.exclude_sections` no longer triggers a false "unknown config key" warning.** The key is honored by dispatch envelope rendering but was absent from DEFAULTS, so config validation warned it "will be ignored" — it now ships in DEFAULTS as a documented empty list.
+- **devt-coordinator's routing note cited a CLAUDE.md section that lives in AGENT-CONTRACTS.md** — the citation now points at the real home.
+
+### Removed
+
+- **The unwired `--focus=security` and `--quick` promises on `/devt:review`.** Both injected tags (`<focus>security</focus>`, `<mode>quick</mode>`) that no workflow consumes — a user asking for a security-focused or quick review got the standard path with no signal anything was ignored. Removed from the command surface (argument-hint, routing table, help) rather than silently half-honored; `--lite|--full` remain the real consumed modes. A future security focus can be added deliberately, wired end-to-end.
+- **The phantom `--workflow=` flag from `dispatch run`'s documentation** — the CLI never parsed it (the colon form `<agent>:<workflow_id|auto>` is the real path and stays documented).
+
+### Added
+
+- **Gate K329 — contract single-sourcing + reset-exemption truth.** The reverse leg of K197 plus live behavior: a contract-legal lane-diff artifact must classify `pattern_allowed`, `static-compress.jsonl` must survive a hard reset, and every "survives reset" row STATE-RULES promises must be in `RESET_EXEMPT`. All three legs mutation-proven RED with named reasons.
+- **Gate K330 — the shipped rubric grades against live artifacts.** Resolves the rubric path through DEFAULTS (a future v3 bump stays gated automatically), requires the live artifact name, and pins zero ghost references. The ghost name matches the `^review-*` allowed pattern, so the state-contract checker structurally cannot catch this class — the content pin is the rename-class guard. Mutation-proven both directions (map regression to v1, ghost reintroduced into v2).
+- **`check-state-contract.cjs` now also scans `references/` + `references/rubrics/`**, with its pattern-shadowing limit documented in the header (a stale name that happens to match an allowed pattern passes the checker — that class needs content pins like K330).
+- **CLI documentation for the verbs that existed only in the router**: `state review-context-init` / `state workflow-context-init` / `state stop-hook` (the three composite verbs), `hook-cost-estimate`, `telemetry`, and `memory promote|reject` — added to both `printUsage` and CLI-REFERENCE.
+
+### Changed
+
+- **Post-refactor text sweep — every description of the state family now names the owning submodule.** CLAUDE.md (module list + `VALID_WORKFLOW_TYPES` edit-pointer), INTERNALS (workflow-registry pointers; `traceGate`/`recoverPartialImpl`/`assertNoRawDispatchesThisSession`/`checkAgentOutput` attributions — the first three are facade-internal and not re-exported, which the docs now say), AGENT-CONTRACTS (`JSON_SIDECAR_SCHEMAS`), STATE-RULES (six `state.cjs::` pointers + the `lane-files/` row flipped to code-truth: it is scope-bound and archived with reset, same rationale as lane diffs), test-gates.cjs header (stale line numbers → owning files).
+- **Gate PASS-texts tell the truth**: K42's three-way drift fixed (comment said "all 5", PASS said "all 6", the expected set has 7 workflow_types including `docs`); K50's hardcoded "11 workflows checked" is now a computed count that cannot go stale.
+- **Config/doc value truth**: HOOKS.md `max_files_hint` default 8 → 12 and auto-index debounce 30s → 5s (code truth); the static-compress default is honestly "on" across all three surfaces that still claimed "off" (recipe status line, recipe sample comment, and config.cjs's own comment block — whose tail already documented the flip its head denied); README's balanced profile row for verifier corrected to sonnet with the prose recount (4 judgment-critical agents on opus, not 5 — code truth; the verifier's rubric-driven grading is the structured case sonnet holds).
+
 ## [0.209.3] - 2026-07-26
 
 Third adversarial pass — this round's subject was the newest validator itself, plus two never-swept angles. Field-receipt closure worth headlining: across real session fires in the live hook trace, `stop.sh` p50 went **815ms → 84ms (9.7×)** — the v0.206.0 single-spawn claim confirmed with usage data, better than the bench estimate.
@@ -600,49 +632,3 @@ A second external memory-layer review (validated filesystem-first) surfaced that
 
 - The coverage **trend** number (what fraction of a governing doc's claimed domain actually gets affects hits) remains open — it needs a denominator scoped to governed domains and a trend-not-target framing (a raw fraction rewards broad globs that govern nothing). Captured in the backlog for a fresh session.
 
-## [0.175.0] - 2026-07-19
-
-### The range release — receipt #22's headline gap closed (cal #56b)
-
-The first native-context field run reviewed a merged PR and watched four subsystems starve simultaneously on an empty `base...HEAD` union, while topic anchoring shipped docstring fragments to the graph. This release makes commit-range review first-class end-to-end and puts identifier-shape hygiene at the anchor chokepoints. Verified end-to-end on a git fixture in K293: `--range` persists through `review-context-init` into `workflow.yaml` and the memory_signal affects union counts exactly the range's files.
-
-### Added
-
-- **`--range=<a>..<b>` first-class commit-range scope.** Range mode in the file-collection choke point (`collectChangedFiles`: exactly the named range, no working-tree/untracked contamination) and threaded everywhere scope is consumed: `state changed-files --range`; `review-weight assess --range`; **`state review-context-init --range` persists the range into `workflow.yaml` before any child CLI runs**, so the memory_signal affects union (the single cached value all three dispatch generations consume), diff-symbol extraction, manifest freshness, and preflight's topic anchoring all read one consistent scope; `graphify augment-impact-map --range`; `code-review.md` scope_check (file count + diff-LOC banding vs the range) and substep-7; the auto-partitioner wires each lane's `base_ref` from the range start (generalizing the per-lane plumbing the field run proved by hand); `/devt:review --range=…` documented at the command surface.
-- **Verbatim-OR-attested ARGS contract**: overriding known-bad generated args is sanctioned WHEN fully attested inside `graphify-impact-plan.json` (`args_overridden` + original/override args + reason/evidence/by/timestamp — a post-hoc auditor reconstructs what the generator produced, what was sent, and why); `assert-graphify-decision` fails a declared override with incomplete attestation. Undeclared overrides remain violations.
-
-### Fixed
-
-- **Topic anchors are identifier-shape gated.** The graph label space includes docstring pseudo-nodes; harvesting legs leaked ~80-char prose fragments and filenames into `topic.symbols`, where the args contract then forced wasted MCP calls on them. `isIdentifierShaped` now gates the symbol filter AND final assembly (every leg, including FTS rescue): whitespace, >64 chars, and file-extension-shaped entries rejected; dotted identifiers and `call()` forms kept. All three field fragments die in the K293 truth table.
-- **Commit-SHA shrapnel never becomes topic vocabulary**: hex-shaped tokens (the tokenizer split a SHA and `b9344` became a keyword that FTS-matched an unrelated service into suggested_reading) are excluded from keywords — the relevance floor at the query source. (A per-entry FTS score floor on suggested_reading remains open — the tokenizer + shape gates cut the junk-query side that produced the field's off-domain entry.)
-- **review-weight empty-diff is a scope failure, not a safety verdict**: "scope unresolvable" naming `--range` as the likely fix (was: "HEAVY recommended — nothing to prove safe" on zero evidence), with a distinct workflow echo; plus the **recently-reviewed caveat** (advisory-only, never auto-light) sourced from the claude-mem harvest artifact.
-- Gate **K293** pins the release (range persist + affects-union + changed-files end-to-end on a two-commit git fixture; topic hygiene behavioral truth table; scope-unresolvable verdict; attestation + workflow wiring pins). Drift-guard stack 200 → 201 deep (K94–K293).
-
-## [0.174.0] - 2026-07-19
-
-### The trust batch — receipt #22's confirmed small bugs and contract fixes (cal #56, first of two)
-
-Receipt #22 (the first NATIVE-context run: a greenfield session reviewing a merged PR end-to-end, followed by a 14-question clarification round answered with on-disk verification) split its findings into a headline input-shape gap (`--range`, next release) and this batch: small, source-verified defects that silently degraded marquee features, plus contract fixes the run's own workarounds designed. Every fix is behaviorally gated in K292.
-
-### Fixed
-
-- **`<rubric_path>` now renders ABSOLUTE.** It was plugin-root-relative in every envelope; all five native-run lanes resolved it against the project cwd, concluded the rubric didn't exist, and self-graded ad hoc — the lane-score distribution (a parallel-report headline) came back all-null with nothing noticing. Templates carry `{plugin_root}/references/rubrics/…` (fills identically from render substitution and orchestrator LLM-fill via `$CTX.init.plugin_root`); no relative value form remains anywhere.
-- **envelope_health no longer green-lights an unresolvable rubric.** A by-reference rubric stub classified as "populated" while pointing at a path no lane could resolve — health now stats the `rubric_path` target when the content is a stub; unresolvable = degraded.
-- **Sidecar schema checks with teeth**: `verification.json` requires `criteria_total` (the walk-all-axes gate's documented basis) unless `source="short_circuit"`; `review.json` with null `lane_scores[].score` requires `lane_scores_null_reason`. Surfaced as `schema_warnings` from `read-sidecar` — routing consumers decide severity. The synthesis template now also mandates the `status` routing field the field run omitted.
-- **Sidecar consistency wording**: the shadow checker told a JSON sidecar it "has no `## Status` line" (markdown language on a field check, re-warning every state update) — sidecar mismatches now say what's actually missing.
-- **Lane telemetry honesty**: `register-lanes` results carry `file_count` (displayed 0-shaped for every lane before); `est_loc` counts true +/− change lines instead of raw diff-artifact lines (~25% field-measured inflation vs a real diffstat).
-- **`memory candidates-footer` is never silent**: an always-on `[memory] candidates-footer: N pending / threshold M / cooldown ok|blocked` line — below-threshold was indistinguishable from the command never executing.
-- **Arch-scan advisory carries its on-ramp**: the missing-baseline reason names the exact command that creates one (the configured `arch_scanner.command` when present) instead of recommending a scan nothing ever seeds.
-
-### Changed
-
-- **Consolidator provenance is CLI-stamped, not agent-remembered.** `render-filled` appends a dispatch-intent stamp (cid + ts → `dispatch-stamps.jsonl`, state-contract registered, reset-soft evicted); `assert-consolidator-dispatched` passes on stamp + the same cid embedded in review.md's now-mandatory `Correlation:` header + artifact-mtime > stamp — proving "review.md came from a dispatched synthesis agent" while still catching hand-written reviews and died-before-artifact. The side-file marker (which the field consolidator forgot until nudged, despite perfect artifacts) remains a legacy fallback.
-- **`state assert-all --phase=X`**: every gate registered for the phase in one JSON verdict — per-gate `{ok, reason, elapsed_ms, detail}` with evidence passthrough, `gates_run` vs registry count, and a NONZERO EXIT CODE on any failure. Kills the silent-empty pipeline class (field: a shell quirk rendered never-executed gates as blank output visually identical to passes). Sourced from the same registry `advance-phase` consults; inline blocks remain canonical for per-gate remediation.
-- **Pointer dispatch is a contract, not a convention**: stubs carry a full-envelope `sha256` (rules_hash covers rules only); `render-lanes --out` prints the stubs as a tail-safe stderr trailer (the field operator's `tail -3` ate the stub field and they hand-reinvented pointer dispatch); `dispatch_lanes` prose presents the stub as the sanctioned first-class dispatch form.
-- **Per-lane `base_ref` documented as the sanctioned non-default-base mechanism** (merged PRs, commit ranges) — it carried the entire field run and was load-bearing but underdocumented.
-- Gate **K292** pins the batch behaviorally (absolute rubric render + zero relative residue, stub sha256, render-stamp → provenance-gate round trip, both schema checks, assert-all exit code, footer line). Drift-guard stack 199 → 200 deep (K94–K292).
-
-### Deliberately deferred (named owners)
-
-- `--range=<a>..<b>` first-class scope threading + empty-diff verdict + topic-anchor validation + attested args override → next release (the range work; threading spec captured from the field run).
-- Step-manifest architecture (~15–20K orchestrator tokens of process prose per review), RESET_EXEMPT ledger-growth audit, graphify PreToolUse hook scoping + NL-query upstream relay, `run-lanes` discoverability → parked in the receipt ledger with owners.

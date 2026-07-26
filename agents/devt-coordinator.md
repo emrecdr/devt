@@ -84,8 +84,8 @@ on an ambiguous prompt is worse than letting the user re-ask with the `/devt:<co
 
 Apply the **first matching** rule. This mirrors `workflows/do.md`'s routing logic; keep the two
 in sync when adding new commands. If you need to update routing, update both files atomically
-(see CLAUDE.md "Plugin agents register only when devt is loaded via `claude --plugin-dir <path>`
-or installed through the plugin system" section).
+(registration caveats: → docs/AGENT-CONTRACTS.md "Plugin Mechanics" — plugin agents register
+only when devt is loaded via `claude --plugin-dir <path>` or installed through the plugin system).
 
 | If the prompt describes...                                  | Route to                        | Why                                                  |
 | ----------------------------------------------------------- | ------------------------------- | ---------------------------------------------------- |

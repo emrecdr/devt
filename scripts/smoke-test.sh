@@ -10527,7 +10527,7 @@ else
   fail "K41: advance-phase backwards-compat fallthrough broken (ok=$K41_OK)"
 fi
 
-# K42 (v0.73 Phase B-1): _phase-gates.yaml parses + declares all 5 expected
+# K42 (v0.73 Phase B-1): _phase-gates.yaml parses + declares all 7 expected
 # workflow_types. Structural check using parsePhaseGatesYaml indirectly via
 # advance-phase's load path.
 K42_YAML="$ROOT/workflows/_phase-gates.yaml"
@@ -10536,7 +10536,7 @@ K42_EXPECTED="arch_health_scan code_review code_review_parallel debug dev docs q
 K42_GOT=$(echo "$K42_TYPES" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 K42_EXPECTED_SORTED=$(echo "$K42_EXPECTED" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
 if [ "$K42_GOT" = "$K42_EXPECTED_SORTED" ]; then
-  pass "K42: _phase-gates.yaml declares all 6 expected workflow_types (arch_health_scan, code_review, code_review_parallel, debug, dev, quick_implement)"
+  pass "K42: _phase-gates.yaml declares all 7 expected workflow_types (arch_health_scan, code_review, code_review_parallel, debug, dev, docs, quick_implement)"
 else
   fail "K42: _phase-gates.yaml workflow_types mismatch (got '$K42_GOT' expected '$K42_EXPECTED_SORTED')"
 fi
@@ -10754,6 +10754,7 @@ K50_FAIL=""
 # (Curator IS included even though its primary is curation-summary.md,
 # matching its io-contract.)
 K50_OUTPUT_WRITERS="programmer tester code-reviewer docs-writer architect retro verifier researcher debugger curator"
+K50_CHECKED=0
 for wf in "$ROOT"/workflows/*.md; do
   # Skip if no Task dispatch at all (orchestration-only workflows like next.md, pause.md).
   if ! grep -q 'Task(subagent_type="devt:' "$wf" 2>/dev/null; then continue; fi
@@ -10765,13 +10766,14 @@ for wf in "$ROOT"/workflows/*.md; do
     fi
   done
   if [ -z "$dispatched" ]; then continue; fi
+  K50_CHECKED=$((K50_CHECKED + 1))
   # Workflow dispatches at least one output-writer — require Layer-1.
   if ! grep -qE "assert-artifact-present|post-dispatch-check" "$wf" 2>/dev/null; then
     K50_FAIL="$K50_FAIL $(basename "$wf")"
   fi
 done
 if [ -z "$K50_FAIL" ]; then
-  pass "K50: every workflow dispatching output-writing agents has a Layer-1 claim-check (assert-artifact-present or the folded post-dispatch-check; 11 workflows checked)"
+  pass "K50: every workflow dispatching output-writing agents has a Layer-1 claim-check (assert-artifact-present or the folded post-dispatch-check; ${K50_CHECKED} workflows checked)"
 else
   fail "K50: workflows missing Layer-1 claim-check despite dispatching output-writers:$K50_FAIL"
 fi
@@ -12891,18 +12893,18 @@ else
 fi
 
 # K113: G3 — verifier rubric mandates Dispatch warnings acknowledgment section.
-# Both dev.v1.md and code_review.v1.md must contain the requirement text
+# Both dev.v1.md and code_review.v2.md must contain the requirement text
 # pointing at `## Dispatch warnings (session-scoped)`. Drift class: rubric
 # trim removes the section without removing the corresponding verifier check.
 K113_DEV_HAS=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings acknowledgment' "$ROOT/references/rubrics/dev.v1.md" 2>/dev/null) || K113_DEV_HAS=0
-K113_CR_HAS=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings acknowledgment' "$ROOT/references/rubrics/code_review.v1.md" 2>/dev/null) || K113_CR_HAS=0
+K113_CR_HAS=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings acknowledgment' "$ROOT/references/rubrics/code_review.v2.md" 2>/dev/null) || K113_CR_HAS=0
 K113_DEV_REQ=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings (session-scoped)' "$ROOT/references/rubrics/dev.v1.md" 2>/dev/null) || K113_DEV_REQ=0
-K113_CR_REQ=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings (session-scoped)' "$ROOT/references/rubrics/code_review.v1.md" 2>/dev/null) || K113_CR_REQ=0
+K113_CR_REQ=$(set +eo pipefail; /usr/bin/grep -c 'Dispatch warnings (session-scoped)' "$ROOT/references/rubrics/code_review.v2.md" 2>/dev/null) || K113_CR_REQ=0
 if [ "$K113_DEV_HAS" -ge "1" ] \
    && [ "$K113_CR_HAS" -ge "1" ] \
    && [ "$K113_DEV_REQ" -ge "1" ] \
    && [ "$K113_CR_REQ" -ge "1" ]; then
-  pass "K113: verifier rubric mandates Dispatch warnings acknowledgment section (both dev.v1.md + code_review.v1.md contain requirement + section title)"
+  pass "K113: verifier rubric mandates Dispatch warnings acknowledgment section (both dev.v1.md + code_review.v2.md contain requirement + section title)"
 else
   fail "K113: G3 rubric drift — dev_has=$K113_DEV_HAS cr_has=$K113_CR_HAS dev_req=$K113_DEV_REQ cr_req=$K113_CR_REQ"
 fi
@@ -12952,7 +12954,7 @@ K115_TMP=$(mktemp -d)
 mkdir -p "$K115_TMP/.devt/state"
 K115_OLD_TS=$(node -e "console.log(new Date(Date.now() - 60000).toISOString())")
 printf 'active: true\nworkflow_id: k115-test\nworkflow_type: code_review\nphase: verify\ntier: STANDARD\niteration: 1\ntask: "k115 fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K115_OLD_TS" "$K115_OLD_TS" > "$K115_TMP/.devt/state/workflow.yaml"
-# code_review.v1.md has 7 axes total (A,B,C,D,E,G in table + H as heading;
+# code_review.v2.md has 7 axes total (A,B,C,D,E,G in table + H as heading;
 # F is genuinely absent). criteria_total=6 simulates the cal #22 case where
 # verifier stopped one axis short of the rubric's declared count.
 printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":6,"criteria_met":6}\n' > "$K115_TMP/.devt/state/verification.json"
@@ -16326,7 +16328,7 @@ fi
 # pre-fix behavior silently fell back to path-only for every dispatch).
 K250_CHECK=$(node -e '
 const { loadInlineRubrics } = require("'"$ROOT"'/bin/modules/init.cjs");
-const r = loadInlineRubrics("'"$ROOT"'", null, {dev:"dev.v1.md", code_review:"code_review.v1.md", code_review_parallel:"code_review.v1.md"});
+const r = loadInlineRubrics("'"$ROOT"'", null, {dev:"dev.v1.md", code_review:"code_review.v2.md", code_review_parallel:"code_review.v2.md"});
 console.log(r.content !== null && Object.keys(r.content).length === 3 && r.bytes <= 32768 ? "OK" : "FAIL:bytes=" + r.bytes);
 ' 2>/dev/null || echo "FAIL:node error")
 if [ "$K250_CHECK" = "OK" ]; then
@@ -18910,6 +18912,68 @@ if [ "$K328_HITS" = "scripts/smoke-test.sh" ]; then
   pass "K328: NUL hygiene — the suite's sanitization fixture is the only NUL-bearing tracked text file (accidental NULs flip GNU grep to binary mode on Linux)"
 else
   fail "K328: unexpected NUL-bearing files: [$K328_HITS] (expected exactly scripts/smoke-test.sh)"
+fi
+
+# K329: state-file contract single-sourcing + reset-exemption truth (the
+# reverse leg of K197 — K197 proves every RESET_EXEMPT name is documented,
+# this proves every doc-promised exemption is code-real, plus live behavior).
+# Field: the audit's hand-copied ALLOWED_PATTERNS silently diverged from the
+# contract (6 vs 10+ patterns) — contract-legal lane-diff-L*.txt classified
+# ad_hoc and was cleanup-archived; static-compress.jsonl was doc-promised
+# reset-exempt but archived on every hard reset.
+K329_PROJ=$(mktemp -d)
+mkdir -p "$K329_PROJ/.devt/state"
+printf 'x\n' > "$K329_PROJ/.devt/state/lane-diff-L1.txt"
+printf '{"action":"compress"}\n' > "$K329_PROJ/.devt/state/static-compress.jsonl"
+K329_OK=1; K329_WHY=""
+K329_BUCKETS=$(cd "$K329_PROJ" && node "$CLI" state audit 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+const j=JSON.parse(s);const b=j.buckets||{};
+const find=(n)=>{for(const[k,v]of Object.entries(b))if(Array.isArray(v)&&v.some(f=>String((f&&f.name)||f).includes(n)))return k;return"missing"};
+process.stdout.write(find("lane-diff-L1.txt")+" "+find("static-compress.jsonl"));});' 2>/dev/null)
+[ "$K329_BUCKETS" = "pattern_allowed canonical" ] || { K329_OK=0; K329_WHY="classification [$K329_BUCKETS] (expected 'pattern_allowed canonical')"; }
+printf 'active: true\nworkflow_type: dev\ntask: "k329"\n' > "$K329_PROJ/.devt/state/workflow.yaml"
+(cd "$K329_PROJ" && node "$CLI" state reset --hard >/dev/null 2>&1)
+[ -f "$K329_PROJ/.devt/state/static-compress.jsonl" ] || { K329_OK=0; K329_WHY="$K329_WHY static-compress-lost-on-reset"; }
+K329_DOC=$(node -e '
+const fs=require("fs");
+const lines=fs.readFileSync(process.argv[1]+"/docs/STATE-RULES.md","utf8").split("\n");
+const {RESET_EXEMPT}=require(process.argv[1]+"/bin/modules/state-contract.cjs");
+let inTable=false;const missing=[];
+for(const l of lines){
+  if(l.includes("| Filename | Source | Format | Survives reset? |")){inTable=true;continue;}
+  if(inTable&&/^#/.test(l))break;
+  if(!inTable||!l.startsWith("| `"))continue;
+  const cells=l.split("|");const last=cells[cells.length-2]||"";
+  if(!last.includes("✓"))continue;
+  const name=(l.match(/^\| `([^`]+)`/)||[])[1];
+  if(!name)continue;
+  const norm=name.replace(/\/$/,"");
+  if(!RESET_EXEMPT.has(norm))missing.push(norm);
+}
+process.stdout.write(missing.join(" "));' "$ROOT" 2>/dev/null || echo "doc-parse-crashed")
+[ -z "$K329_DOC" ] || { K329_OK=0; K329_WHY="$K329_WHY doc-exempt-not-in-code:[$K329_DOC]"; }
+rm -rf "$K329_PROJ"
+if [ "$K329_OK" = "1" ]; then
+  pass "K329: contract single-sourcing — audit classifies from contract patterns (lane-diff=pattern_allowed, static-compress=canonical), static-compress.jsonl survives hard reset, every STATE-RULES survives-check row is in RESET_EXEMPT"
+else
+  fail "K329: $K329_WHY"
+fi
+
+# K330: the SHIPPED code-review rubric grades against live artifacts. The
+# review-scope.md → code-review-input.md rename left the rubric grading a
+# ghost path (the verifier's inlined grading contract named a file no
+# workflow writes; reviews graded correctly only because the model bridged
+# the mismatch). The ghost name matches the `^review-*` allowed pattern, so
+# check-state-contract passes it — this content pin is the rename-class guard.
+# Path resolves THROUGH DEFAULTS so a future v3 bump stays gated automatically.
+K330_RUBRIC="$ROOT/references/rubrics/$(node -e 'process.stdout.write(require(process.argv[1]+"/bin/modules/config.cjs").DEFAULTS.rubrics.code_review)' "$ROOT" 2>/dev/null)"
+K330_LIVE=$(set +eo pipefail; /usr/bin/grep -c 'code-review-input\.md' "$K330_RUBRIC" 2>/dev/null) || K330_LIVE=0
+K330_GHOST=$(set +eo pipefail; /usr/bin/grep -c 'review-scope\.md' "$K330_RUBRIC" 2>/dev/null) || K330_GHOST=0
+if [ "$K330_LIVE" -ge 4 ] && [ "$K330_GHOST" = "0" ]; then
+  pass "K330: shipped code-review rubric grades against code-review-input.md ($K330_LIVE refs, zero review-scope.md ghosts)"
+else
+  fail "K330: shipped rubric artifact refs wrong (code-review-input=$K330_LIVE expected >=4, review-scope ghosts=$K330_GHOST expected 0) in $K330_RUBRIC"
 fi
 
 echo

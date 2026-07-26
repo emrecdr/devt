@@ -29,21 +29,12 @@ const STATE_DIR_REL = path.join(".devt", "state");
 // Hard-coded compiled regexes for the allowed pattern set. Mirrored from
 // state.cjs::STATE_FILE_CONTRACT.allowed_patterns + ephemeral_patterns so static
 // analyzers don't have to verify that the regex sources are safe at runtime.
-// When adding a new pattern: update BOTH this list AND state.cjs's data
-// declaration. The smoke test verifies they agree.
-const ALLOWED_PATTERNS = [
-  /^review-[A-Za-z0-9_.-]+\.md$/,
-  /^impl-summary-[A-Za-z0-9_.-]+\.(md|json)$/,
-  /^test-summary-[A-Za-z0-9_.-]+\.(md|json)$/,
-  /^verification-[A-Za-z0-9_.-]+\.(md|json)$/,
-  /^slice-[A-Za-z0-9_.-]+\.md$/,
-  /^[a-z]+-summary\.md$/,
-];
-const EPHEMERAL_PATTERNS = [
-  /^\..*\.tmp$/,
-  /^.*\.tmp$/,
-  /^.*~$/,
-];
+// Compiled from the contract's regex strings — never hand-list patterns here.
+// A hand-maintained copy silently diverged (lane-diff/review-lane/plan/research/
+// spec/debug slugs classified ad_hoc and were cleanup-archived while the
+// contract declared them legal).
+const ALLOWED_PATTERNS = ((state.STATE_FILE_CONTRACT || {}).allowed_patterns || []).map((s) => new RegExp(s));
+const EPHEMERAL_PATTERNS = ((state.STATE_FILE_CONTRACT || {}).ephemeral_patterns || []).map((s) => new RegExp(s));
 
 // Subdirectories that are legitimate citizens of .devt/state/ — never flagged
 // ad_hoc, never moved by cleanupStateFiles. Update this set when a new

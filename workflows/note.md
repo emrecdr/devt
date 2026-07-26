@@ -34,6 +34,8 @@ Parse the user's input:
 - `/devt:note list` → list mode (show all notes)
 - `/devt:note promote <N>` → promote mode (convert note N to a task)
 
+If a standalone `--tags=a,b,c` token is present, strip it from the text and carry the comma-separated values as TAGS for the append step.
+
 IMPORTANT: `/devt:note list of things to try` saves "list of things to try" — only bare `list` triggers list mode.
 </step>
 
@@ -48,10 +50,13 @@ IMPORTANT: `/devt:note list of things to try` saves "list of things to try" — 
 ---
 date: YYYY-MM-DDTHH:MM:SSZ
 promoted: false
+tags: [a, b]
 ---
 
 {note text verbatim}
 ```
+
+The `tags:` line appears only when TAGS were parsed — omit it entirely for untagged notes.
 
 4. Confirm: "Note saved: .devt/state/notes/{slug}.md"
 

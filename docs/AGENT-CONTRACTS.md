@@ -87,7 +87,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 |---|---|
 | programmer | Lean on `impl-summary` |
 | tester | Use `impl-summary` file list |
-| code-reviewer | Treat `review-scope.md` as authoritative |
+| code-reviewer | Treat `code-review-input.md` as authoritative |
 | verifier | Verify path existence on disk |
 | researcher | Broaden Glob/Grep |
 | architect | Weight `scan-results` + `architecture.md` |
@@ -127,7 +127,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### JSON sidecar contract
 
-**Rule.** Agents that emit a workflow-routing decision write BOTH a `.md` (human review) and a `.json` (machine routing). Schemas registered in `bin/modules/state.cjs::JSON_SIDECAR_SCHEMAS` with per-sidecar enums for `status` + `verdict` + `agent`.
+**Rule.** Agents that emit a workflow-routing decision write BOTH a `.md` (human review) and a `.json` (machine routing). Schemas registered in `bin/modules/state-contract.cjs::JSON_SIDECAR_SCHEMAS` with per-sidecar enums for `status` + `verdict` + `agent`.
 
 **Reading.** Consumers read via `state read-sidecar <name>` which returns `{ok, file, data, validation:{valid_status, valid_verdict, valid_agent}}`.
 

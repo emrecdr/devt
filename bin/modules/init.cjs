@@ -65,7 +65,7 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   const result = {};
   const warnings = [];
   // Aliased workflow_types sharing one rubric file (code_review_parallel →
-  // code_review.v1.md) must not double-count its bytes against the cap —
+  // code_review.v2.md) must not double-count its bytes against the cap —
   // without dedup the shipped default trio exceeds the cap and inlining
   // silently falls back to path-only for everyone.
   const seen = new Map();

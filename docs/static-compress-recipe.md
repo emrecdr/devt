@@ -1,6 +1,6 @@
 # `static-compress` recipe
 
-**Status**: opt-in (`static_compress.mode: 'off'` by default)
+**Status**: enabled by default (`static_compress.mode: 'on'` — flipped once regression guards earned the trust; set `'off'` per project to disable)
 **Borrowed**: caveman (MIT, juliusbrussee/caveman) — `compress.py` orchestrator pattern + `caveman-shrink/compress.js` prose compressor + `is_sensitive_path` denylist
 
 ## What it does
@@ -24,7 +24,7 @@ The feature shipped after a telemetry gate confirmed the static-load slice was >
 // .devt/config.json
 {
   "static_compress": {
-    "mode": "on",          // default "off"
+    "mode": "on",          // default "on"; set "off" to disable
     "size_cap_bytes": 500000  // default 500 KB
   }
 }

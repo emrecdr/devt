@@ -48,7 +48,7 @@ If `--all` is NOT in arguments, print:
                           [--autonomous] [--to <phase>] [--only <phase>] [--chain]
                           [--tdd] [--dry-run]
 
-  /devt:review            [--focus=code|arch|quality|security] [--quick]
+  /devt:review            [--focus=code|arch|quality] [--lite|--full]
 
   /devt:debug "<bug>"     [--mode=forensics]
 

@@ -109,10 +109,10 @@ A project running its own `.claude/agents/programmer.md` that doesn't emit `impl
 **Config.** `bin/modules/config.cjs::DEFAULTS.rubrics` is the version map per workflow_type. Shipped defaults:
 
 ```json
-{ "dev": "dev.v1.md", "code_review": "code_review.v1.md" }
+{ "dev": "dev.v1.md", "code_review": "code_review.v2.md", "code_review_parallel": "code_review.v2.md" }
 ```
 
-**Init payload.** `init.cjs::initWorkflow` surfaces this at the top level of the payload as `rubrics: {dev: "dev.v1.md", code_review: "code_review.v1.md"}` so dispatch templates use the flat `{rubrics.<workflow_type>}` namespace.
+**Init payload.** `init.cjs::initWorkflow` surfaces this at the top level of the payload as `rubrics: {dev: "dev.v1.md", code_review: "code_review.v2.md", ...}` so dispatch templates use the flat `{rubrics.<workflow_type>}` namespace.
 
 **Workflow injection.** `workflows/dev-workflow.md` verifier dispatch injects `<rubric_path>references/rubrics/{rubrics.dev}</rubric_path>` into the context; `agents/verifier.md` prefers that block over computing the path from `<workflow_type>`.
 
@@ -126,13 +126,13 @@ A project running its own `.claude/agents/programmer.md` that doesn't emit `impl
 
 **Workflow.** `workflows/code-review.md` dispatches the verifier agent after the code-reviewer writes `review.md`.
 
-**Rubric.** `references/rubrics/code_review.v1.md` (pinned via `DEFAULTS.rubrics.code_review`).
+**Rubric.** `references/rubrics/code_review.v2.md` (pinned via `DEFAULTS.rubrics.code_review`; v2 fixed the review-scope.md → code-review-input.md artifact rename — v1 remains on disk for projects pinning it).
 
 **Grading axes (5).** The verifier grades the **review's quality** along:
 
 | Axis | Check |
 |---|---|
-| A. Scope coverage | Every file in `review-scope.md` has at least one observation |
+| A. Scope coverage | Every file in `code-review-input.md` has at least one observation |
 | B. Finding specificity | `file:line` + severity + rule ref on every finding |
 | C. Severity calibration | No critical-rated nits, no minor-rated security issues |
 | D. Remediation concreteness | Critical/Important findings have actionable fixes |
@@ -156,4 +156,4 @@ Those workflows were considered but deferred. The rubric design for them is **me
 - `docs/INTERNALS.md` — `state.cjs::JSON_SIDECAR_SCHEMAS` (verdict enums)
 - `agents/verifier.md` — agent body that reads rubrics
 - `references/rubrics/dev.v1.md` — current dev rubric with `## Deterministic Gates`
-- `references/rubrics/code_review.v1.md` — current code-review rubric
+- `references/rubrics/code_review.v2.md` — current code-review rubric

@@ -46,7 +46,7 @@ Use `DEVT_DISABLED_HOOKS=hook1.sh,hook2.sh` to selectively disable individual ho
 
 Zero-dependency Node.js CLI that bridges markdown prompts and filesystem state. Modules in `bin/modules/`:
 
-`init`, `config`, `state`, `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `evolution`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`, `review-weight`.
+`init`, `config`, `state` (facade over the `state-contract`/`state-io`/`state-gates`/`state-lanes`/`state-graphify` family — edit functions in their owning submodule), `model-profiles`, `setup`, `io`, `memory` (+ `memory-graph`, `memory-bundle`), `preflight`, `discovery`, `evolution`, `weekly-report`, `update`, `health`, `security`, `grader`, `stuck-detector`, `state-audit`, `structural-validator`, `sensitive-path`, `prose-shrink`, `static-compress`, `review-weight`.
 
 Deep-dive per module: → docs/INTERNALS.md (CLI Modules).
 
@@ -78,7 +78,7 @@ The `workflow_type` field in `workflow.yaml` drives resume routing via `/devt:ne
 | `docs` | `docs-extraction.md` | `/devt:workflow --mode=docs` |
 | `code_review_parallel` | `code-review-parallel.md` | `/devt:review` (re-routes via scope_check) |
 
-When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state.cjs` and routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
+When adding a new workflow that sets `active=true`, add its `workflow_type` to `VALID_WORKFLOW_TYPES` in `bin/modules/state-contract.cjs` and routing entries in BOTH `workflows/next.md` and `workflows/status.md`. The smoke test enforces presence in both surfaces.
 
 ### Templates
 

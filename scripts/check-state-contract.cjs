@@ -2,9 +2,14 @@
 "use strict";
 
 /**
- * check-state-contract — strict static analyzer that scans every agents/*.md
- * and workflows/*.md for `.devt/state/<filename>` references and verifies each
- * one matches the contract declared in bin/modules/state.cjs.
+ * check-state-contract — strict static analyzer that scans every agents/*.md,
+ * workflows/*.md, references/*.md, and references/rubrics/*.md for
+ * `.devt/state/<filename>` references and verifies each one matches the
+ * contract declared in bin/modules/state-contract.cjs (via the state facade).
+ *
+ * Limit: a stale reference that HAPPENS to match an allowed pattern (the
+ * review-scope.md ghost matched `^review-*`) passes here — rename-class
+ * regressions on pattern-shadowed names need a content pin (K330).
  *
  * Exit 0 if all references are contract-compliant. Exit 1 otherwise, printing
  * one violation per line as `<file>: <filename>`.
@@ -76,6 +81,8 @@ function scanDir(dir) {
 const all = [
   ...scanDir(path.join(ROOT, "agents")),
   ...scanDir(path.join(ROOT, "workflows")),
+  ...scanDir(path.join(ROOT, "references")),
+  ...scanDir(path.join(ROOT, "references", "rubrics")),
 ];
 
 if (all.length === 0) process.exit(0);

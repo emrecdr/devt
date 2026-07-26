@@ -8,13 +8,12 @@
  * prose with zero JS coverage, and a future tweak from 200 → 150 would
  * silently change drill-down acceptance across every code review.
  *
- * Gates covered (line numbers shift as state.cjs grows — use grep on the
- * function name when navigating):
- *   1. assertGraphifyDecision     — state.cjs:1701
- *   2. assertArtifactPresent      — state.cjs:2778
- *   3. assertFileQuiescent        — state.cjs:3284
- *   4. assertClaimChecksResolved  — state.cjs:4525
- *   5. assertVerifierGradedAllAxes — state.cjs:2192
+ * Gates covered (grep the function name in its owning module):
+ *   1. assertGraphifyDecision      — state-graphify.cjs
+ *   2. assertArtifactPresent       — state-gates.cjs
+ *   3. assertFileQuiescent         — state-gates.cjs
+ *   4. assertClaimChecksResolved   — state-gates.cjs
+ *   5. assertVerifierGradedAllAxes — state-gates.cjs
  *
  * Run: node scripts/test-gates.cjs
  * Exits 0 on success, 1 on any failure.
@@ -266,7 +265,7 @@ process.stdout.write("== assertVerifierGradedAllAxes ==\n");
   // code_review + verification.json with criteria_total < axes → ok:false with missing count
   const { stateDir, runCli, cleanup } = setupDevtFixture();
   seedActiveWorkflow(runCli, "code_review");
-  // Real code_review.v1.md has 8 axes (A-H). Seed criteria_total=6 to trigger gap.
+  // The shipped code_review.v2.md has 7 axes. Seed criteria_total=6 to trigger gap.
   seedArtifact(stateDir, "verification.json", JSON.stringify({
     verdict: "satisfied",
     criteria_total: 6,
@@ -275,7 +274,7 @@ process.stdout.write("== assertVerifierGradedAllAxes ==\n");
   const r = runCli("state", "assert-verifier-graded-all-axes");
   const j = parseJson(r.stdout);
   // Gate emits `missing_axes_count` not `missing`; see state.cjs:2192 contract.
-  // code_review.v1.md ships 7 axes (A–G as table rows; H is currently absent
+  // code_review.v2.md ships 7 axes (A–G as table rows; H is currently absent
   // from the rubric per the smoke gate's "7 axes" expectation).
   if (j && j.ok === false && (j.missing_axes_count || 0) >= 1) {
     pass("criteria_total=6 vs rubric axes → ok:false with missing_axes_count>=1");
