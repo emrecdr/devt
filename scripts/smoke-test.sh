@@ -18888,6 +18888,30 @@ else
   fail "K327: unresolved cross-module calls — $K327_OUT"
 fi
 
+# K328: NUL-byte hygiene — exactly ONE tracked text file may contain a NUL:
+# this suite itself (the memory-paths sanitization fixture embeds a literal
+# \u0000). A NUL anywhere else is an accident (the class has recurred:
+# evolution.cjs once shipped with stray NULs, and GNU grep flips any
+# NUL-bearing file into binary mode, silently changing every non-quiet grep
+# of it on Linux — the exact mechanism behind the K321 CI-only failure).
+K328_HITS=$(node -e '
+const fs=require("fs"),path=require("path");
+const roots=["bin","hooks","workflows","agents","skills","templates","commands","guardrails","docs","scripts",".claude-plugin"];
+const exts=/\.(cjs|js|sh|md|yaml|yml|json|tmpl)$/;
+const hits=[];
+const walk=(d)=>{let es;try{es=fs.readdirSync(d,{withFileTypes:true})}catch{return}
+for(const e of es){const p=path.join(d,e.name);
+if(e.isDirectory()){if(e.name==="node_modules"||e.name===".git")continue;walk(p);}
+else if(exts.test(e.name)){const b=fs.readFileSync(p);for(let i=0;i<b.length;i++)if(b[i]===0){hits.push(p);break;}}}};
+for(const r of roots) walk(path.join(process.argv[1],r));
+process.stdout.write(hits.map(h=>path.relative(process.argv[1],h)).join(" "));
+' "$ROOT" 2>/dev/null || echo "scan-crashed")
+if [ "$K328_HITS" = "scripts/smoke-test.sh" ]; then
+  pass "K328: NUL hygiene — the suite's sanitization fixture is the only NUL-bearing tracked text file (accidental NULs flip GNU grep to binary mode on Linux)"
+else
+  fail "K328: unexpected NUL-bearing files: [$K328_HITS] (expected exactly scripts/smoke-test.sh)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

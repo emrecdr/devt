@@ -8,13 +8,29 @@
 // resolvable in the calling function's scope: module-level import, own-module
 // top-level, or a function-local lazy require. Called by scripts/smoke-test.sh
 // (gate K327); runnable standalone: node scripts/check-state-resolution.cjs
+//
+// Stated limit (mirrors K326's honesty): only CALL-form usage is checked.
+// A cross-module name passed as a VALUE (registry entries, callbacks) is not
+// matched — bare-name matching over real code is a false-positive minefield,
+// and both field instances of this bug class were call-form. The deliberate
+// value-form pattern (_phaseGateFns registry) carries its own lazy requires.
 const fs=require("fs");
 const ROOT=process.argv[2]||require("path").resolve(__dirname,"..");
 const SUBS=["state-contract.cjs","state-io.cjs","state-gates.cjs","state-lanes.cjs","state-graphify.cjs"];
 const owner={};
 const modImports={};
 const bodies={};
-const strip=(s)=>s.replace(/\/\/[^\n]*/g,"").replace(/\/\*[\s\S]*?\*\//g,"");
+// Strip comments AND string literals before matching: a call-form name inside
+// an error message ("run generateLaneDiff() first") is prose, not a call —
+// without string-stripping the resolver false-fires on it (mutation-verified).
+// Template literals strip non-greedily; interpolation edge cases degrade to
+// under-stripping, which only risks a loud false positive, never a silent miss.
+const strip=(s)=>s
+  .replace(/\/\/[^\n]*/g,"")
+  .replace(/\/\*[\s\S]*?\*\//g,"")
+  .replace(/'(?:[^'\\\n]|\\.)*'/g,"''")
+  .replace(/"(?:[^"\\\n]|\\.)*"/g,'""')
+  .replace(/`(?:[^`\\]|\\.)*`/g,"``");
 for(const f of SUBS.concat(["state.cjs"])){
   const src=fs.readFileSync(ROOT+"/bin/modules/"+f,"utf8");
   bodies[f]=src;
