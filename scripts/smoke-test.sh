@@ -18747,8 +18747,8 @@ process.stdout.write(errs.length?("FAIL "+errs.join(" ")):"OK");
 ' "$ROOT" 2>/dev/null || echo "FAIL parser-crashed")
 [ "$K321_TBL" = "OK" ] || { K321_OK=0; K321_MISS="$K321_MISS table[$K321_TBL]"; }
 /usr/bin/grep -qF 'CLAUDE_PLUGIN_ROOT' "$ROOT/hooks/_common.sh" || { K321_OK=0; K321_MISS="$K321_MISS common-env"; }
-/usr/bin/grep -E '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q 'DS_Store' || { K321_OK=0; K321_MISS="$K321_MISS kcorpus-scope"; }
-if /usr/bin/grep -E '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q "name '\*\.md'"; then K321_OK=0; K321_MISS="$K321_MISS kcorpus-md-only"; fi
+/usr/bin/grep -aE '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q 'DS_Store' || { K321_OK=0; K321_MISS="$K321_MISS kcorpus-scope"; }
+if /usr/bin/grep -aE '^KCORPUS_DIGEST\(\)' "$ROOT/scripts/smoke-test.sh" | /usr/bin/grep -q "name '\*\.md'"; then K321_OK=0; K321_MISS="$K321_MISS kcorpus-md-only"; fi
 /usr/bin/grep -qF 'command -v shasum' "$ROOT/scripts/smoke-test.sh" || { K321_OK=0; K321_MISS="$K321_MISS shasum-check"; }
 /usr/bin/grep -qF 'rebuild_debounce_seconds: 30' "$ROOT/bin/modules/config.cjs" || { K321_OK=0; K321_MISS="$K321_MISS cfg-debounce"; }
 /usr/bin/grep -qF 'domain_hints: []' "$ROOT/bin/modules/config.cjs" || { K321_OK=0; K321_MISS="$K321_MISS cfg-hints"; }
@@ -18811,6 +18811,34 @@ if [ "$K324_OK" -eq 1 ]; then
   pass "K324: state facade contract (5 submodules load standalone, no facade back-requires, ${K324_EXPORTS} exports ≥ 59 floor, facade ${K324_LINES} ≤ 2600 lines)"
 else
   fail "K324: state facade contract regressed:$K324_MISS"
+fi
+
+# K325: Context-Loaded contract single-sourcing — the read-and-record paragraph
+# the by-reference stubs lean on lives ONCE in dispatch.cjs::CONTEXT_LOADED_CONTRACT
+# and is render-time expanded into every envelope's {context_loaded_contract}
+# placeholder (renderEnvelope is the chokepoint: compile + render + render-filled
+# + render-lanes all route through it). Before this it was copy-pasted 28x across
+# 14 templates + 14 compiled regions. Locks: constant present; NO template
+# carries the literal body; all 14 templates carry the placeholder; compiled
+# workflow regions carry the EXPANDED body (compile keeps them full-text for the
+# LLM-fill path); a rendered envelope carries the body with no placeholder leak.
+K325_OK=1; K325_MISS=""
+/usr/bin/grep -qF 'const CONTEXT_LOADED_CONTRACT' "$ROOT/bin/modules/dispatch.cjs" || { K325_OK=0; K325_MISS="$K325_MISS constant"; }
+if /usr/bin/grep -rl 'governing_rules delivery:' "$ROOT/templates/dispatch/envelopes/" >/dev/null 2>&1; then K325_OK=0; K325_MISS="$K325_MISS template-literal-body"; fi
+K325_PH=$(/usr/bin/grep -rl '{context_loaded_contract}' "$ROOT/templates/dispatch/envelopes/" 2>/dev/null | wc -l | tr -d ' ')
+[ "$K325_PH" -ge 14 ] || { K325_OK=0; K325_MISS="$K325_MISS placeholders($K325_PH<14)"; }
+K325_WF=$(/usr/bin/grep -rl 'governing_rules delivery:' "$ROOT/workflows/" 2>/dev/null | wc -l | tr -d ' ')
+[ "$K325_WF" -ge 8 ] || { K325_OK=0; K325_MISS="$K325_MISS compiled-body($K325_WF<8)"; }
+K325_T=$(mktemp -d); mkdir -p "$K325_T/.devt/state"
+printf 'active: true\nworkflow_id: "k325"\nworkflow_type: "dev"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K325_T/.devt/state/workflow.yaml"
+K325_R=$( (cd "$K325_T" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled tester:dev 2>/dev/null) || true)
+rm -rf "$K325_T"
+printf '%s' "$K325_R" | /usr/bin/grep -qF 'governing_rules delivery: any sub-tag above carrying' || { K325_OK=0; K325_MISS="$K325_MISS rendered-body"; }
+if printf '%s' "$K325_R" | /usr/bin/grep -qF '{context_loaded_contract}'; then K325_OK=0; K325_MISS="$K325_MISS placeholder-leak"; fi
+if [ "$K325_OK" -eq 1 ]; then
+  pass "K325: Context-Loaded contract single-sourced (constant + 14 placeholder templates, zero literal template bodies, compiled regions expanded, rendered envelope carries body with no leak)"
+else
+  fail "K325: contract single-sourcing regressed:$K325_MISS"
 fi
 
 echo

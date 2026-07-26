@@ -182,6 +182,16 @@ function listMarkerRegions() {
   return regions;
 }
 
+// The Context-Loaded contract paragraph — the read-and-record instruction the
+// by-reference stubs lean on. Single-sourced here and expanded at render time
+// into every envelope's <context_loaded_contract> tag: templates carry only
+// the {context_loaded_contract} placeholder, so the paragraph cannot drift
+// across the 14 envelope templates (it was copy-pasted 28x before this).
+// renderEnvelope is the single chokepoint: cmdCompile (workflow compiled
+// regions), cmdRender, cmdRenderFilled, and render-lanes all route through it,
+// so compiled + rendered output is byte-identical to the pre-constant era.
+const CONTEXT_LOADED_CONTRACT = "governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.";
+
 function renderEnvelope(agent, workflowId, contracts) {
   if (!contracts.agents[agent]) {
     throw new Error(`agent '${agent}' not declared in agents/io-contracts.yaml`);
@@ -200,7 +210,9 @@ function renderEnvelope(agent, workflowId, contracts) {
   // lines with "\n" and has no trailing newline. File reads include the
   // trailing newline that editors add. Normalize so byte-comparison succeeds.
   const envelope = fs.readFileSync(envelopePath, "utf8").replace(/\n+$/, "");
-  return envelope.replace(/\{\{workflow_id\}\}/g, workflowId);
+  return envelope
+    .replace(/\{\{workflow_id\}\}/g, workflowId)
+    .split("{context_loaded_contract}").join(CONTEXT_LOADED_CONTRACT);
 }
 
 // Compute the EDIT-SOURCE marker for a given agent + workflow_id. Returns
@@ -618,7 +630,8 @@ function cmdRenderFilled(target, options) {
   // guardrailsByReference: swap each inline guardrail body for a read-from-disk
   // stub. Guardrails are a fixed plugin-shipped set identical across every
   // dispatch, so inlining ~25KB per dispatch is a large static cost for zero
-  // per-dispatch signal. The Context-Loaded contract (static in the templates)
+  // per-dispatch signal. The Context-Loaded contract (single-sourced in
+  // CONTEXT_LOADED_CONTRACT, render-time expanded into every envelope)
   // already treats a stub as read-and-record. Default inline; --inline-rules
   // keeps guardrails inline for worktree-isolated dispatches.
   if (guardrailsByRef && subs.inline_guardrails) {
@@ -687,12 +700,14 @@ function cmdRenderFilled(target, options) {
     }
   }
 
-  // Context-Loaded contract is single-sourced in the envelope templates
-  // (static <context_loaded_contract> after each </governing_rules>, worded
-  // structurally: stubs mean read-and-record, inline content means neither).
-  // It keeps selective reading honest — without it, a weaker model skipping
-  // every Read is invisible. No render-time injection: both delivery modes
-  // carry the same contract text and the sub-tags themselves signal the mode.
+  // Context-Loaded contract is single-sourced in CONTEXT_LOADED_CONTRACT and
+  // render-time expanded into each template's {context_loaded_contract}
+  // placeholder (the <context_loaded_contract> tag after each
+  // </governing_rules>, worded structurally: stubs mean read-and-record,
+  // inline content means neither). It keeps selective reading honest —
+  // without it, a weaker model skipping every Read is invisible. Both
+  // delivery modes carry the same contract text; the sub-tags themselves
+  // signal the mode.
 
   // Inject <envelope_health> block before </context>. Surfaces (not gates)
   // the substantive payload state of 5 monitored context blocks so the
