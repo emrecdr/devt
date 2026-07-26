@@ -496,6 +496,7 @@ Utility scripts in `scripts/` with their purpose and CI status. Run-on-push gate
 | `smoke-test.sh` | 500+ CLI smoke checks across all subcommands, agent line budget, content-schema gates, pointer integrity | **CI** + manual pre-commit |
 | `test-locking.cjs` | 20-worker concurrent state-write test — asserts no lost updates, no orphaned `.lock` | **CI** + manual after `state.cjs` changes |
 | `check-dispatch-ordering.cjs` | Enforces `<task>`/`<bug>` AFTER `</context>` in workflow Task dispatches (cache-friendly prefix). Called by `smoke-test.sh`. | **CI** (via smoke-test) |
+| `check-state-resolution.cjs` | Static per-function cross-module call resolution across the state module family — the swallowed-catch-proof complement to the K326 runtime sweep. Called by `smoke-test.sh` (K327). | **CI** (via smoke-test) |
 | `check-state-contract.cjs` | Static analyzer scanning every `agents/*.md` and `workflows/*.md` for `.devt/state/<filename>` references; flags any that match no `STATE_FILE_CONTRACT` pattern | **CI** (via smoke-test) |
 | `run-quality-gates.sh` | Extracts and executes bash commands from `.devt/rules/quality-gates.md` fenced blocks | Used by `/devt:review --focus=quality` workflow |
 | `init-dev-rules.sh` | Scaffolds `.devt/rules/` from a template (one-off setup helper) | Manual |

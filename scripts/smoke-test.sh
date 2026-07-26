@@ -18872,6 +18872,22 @@ else
   fail "K326: router verbs with unresolved identifiers:$K326_HITS (n=$K326_N)"
 fi
 
+# K327: static per-function cross-module resolution — the complement to K326's
+# runtime sweep. For every top-level function in the state family, any CALL of
+# a name owned by another submodule (or a facade-internal helper) must be
+# visible in that function's scope: module-level import, own-module top-level,
+# or a function-local lazy require. Closes K326's stated blind spot: a moved
+# function whose unresolved call sits inside a bare catch never surfaces at
+# runtime (the _activeRange break hid exactly this way) — static resolution
+# sees it regardless. Mutation-proven complementary: a swallowed cross-module
+# call is invisible to the K326 sweep and caught here with a named function.
+K327_OUT=$(node "$ROOT/scripts/check-state-resolution.cjs" "$ROOT" 2>/dev/null || echo "FAIL resolver-crashed")
+if [ "$K327_OUT" = "OK" ]; then
+  pass "K327: static cross-module resolution — every state-family function resolves its cross-module calls (import, own, or lazy require; swallowed-catch-proof)"
+else
+  fail "K327: unresolved cross-module calls — $K327_OUT"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
