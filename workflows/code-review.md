@@ -297,8 +297,6 @@ RW_ADV=$(printf '%s\n' "$RW" | jq -r '(.advisories // []) | join("; ")')
 
 Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
 
-> **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. Each rendered envelope carries a `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` tag that `dispatch-hygiene-guard.sh` recognizes — preserve this short tag in your dispatch prompt (even when customizing other envelope content) to silence `raw_dispatch` warnings on registered-lane dispatches. The matcher is content-based: any one of the recognized envelope tags (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<correlation_id>cid_*`, etc.) is sufficient. This avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
-
 ```bash
 # Scope size must come from the same source identify_scope will use.
 # This step runs BEFORE identify_scope writes code-review-input.md, so
@@ -349,75 +347,7 @@ fi
 
 If `SCOPE_FILE_COUNT ≤ 10` OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope creeps past 10 files without graphify.
 
-**Operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question. Pre-detect the intent and auto-write the answer:
-
-```bash
-PARALLEL_INTENT_RE='(parallel|split (across|between|into) (multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
-SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|no parallel|no fan[ -]out|one[ -]reviewer)'
-SCOPE_LOWER=$(echo "${REVIEW_SCOPE}" | tr '[:upper:]' '[:lower:]')
-if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
-  echo "parallel" > .devt/state/scope-check-answer.txt
-  echo "[scope_check] operator-explicit short-circuit: parallel intent detected in task text — skipping AskUserQuestion"
-  SCOPE_CHECK_DECISION="parallel"
-elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
-  echo "single" > .devt/state/scope-check-answer.txt
-  echo "[scope_check] operator-explicit short-circuit: single intent detected in task text — skipping AskUserQuestion"
-  SCOPE_CHECK_DECISION="single"
-else
-  SCOPE_CHECK_DECISION=""
-fi
-```
-
-If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
-
-If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user.
-
-**Cost preview with value caveat — NEVER present cost alone.** A naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (field case: the "expensive" parallel run was the one that caught two cross-lane Criticals a single pass would plausibly have missed). The preview pairs a rough banded estimate with the coverage signal:
-
-```bash
-# Domain spread — the value-side variable. Top-2 path segments of the scope files.
-DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} | jq -r '.files[]' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | wc -l | tr -d ' ')
-EXPECTED_LANES=$(( DOMAIN_COUNT < 5 ? DOMAIN_COUNT : 5 ))
-echo "[scope_check] cost/value preview: single-dispatch ≈ 1 reviewer + 1-2 verify rounds; parallel ≈ ${EXPECTED_LANES} lanes + consolidator + 1-3 verify rounds (field-measured: a 5-lane run with 3 verify rounds cost roughly 6-8x a single dispatch). Value side: scope spans ${DOMAIN_COUNT} domain(s) at ${DIFF_LOC} changed lines — single-dispatch coverage-confidence drops as attention spreads past ~15 files / 3+ domains, and finding rates scale with diff mass; cross-cutting findings need reconciliation only parallel lanes surface independently."
-```
-
-```yaml
-question: "Review scope is {SCOPE_FILE_COUNT} files across {DOMAIN_COUNT} domains. Split into parallel lanes (one reviewer per graphify community, capped at 5)? Rough cost: parallel ≈ {EXPECTED_LANES} lane dispatches + consolidation + verify (~6-8x single-dispatch tokens); single ≈ one reviewer whose coverage-confidence drops above ~15 files / 3+ domains."
-header: "Parallel Review"
-multiSelect: false
-options:
-  - label: "Yes — parallel lanes (recommended for >15 files or 3+ domains)"
-    description: "Higher token cost, buys independent per-domain attention + cross-lane reconciliation — the configuration that catches cascade findings single passes miss"
-  - label: "No — single dispatch with community-filter"
-    description: "Fraction of the cost; one reviewer, deep review restricted to affected_communities, rest deferred — right call for single-domain or shallow diffs"
-```
-
-Do NOT add mid-verify-loop cost readouts: a "you've spent N tokens re-litigating this finding, continue?" prompt cannot distinguish convergence spend from waste, and the field case where round 3 cost ~800K is the round that reversed a wrong refutation — the spend was buying correctness.
-
-**After the user answers, write the choice to `.devt/state/scope-check-answer.txt`** — this is the mechanical signal that satisfies `state assert-scope-check-handled` (the gate at the start of the next step). The answer must be one of: `parallel`, `single`, `cancel`. Example:
-
-```bash
-echo "${USER_CHOICE}" > .devt/state/scope-check-answer.txt
-```
-
-If the user chose `cancel`, STOP with BLOCKED. If `parallel`, proceed to the parallel delegation path. If `single`, continue to identify_scope (single-dispatch).
-
-If user picks YES (parallel): **first pre-write the scope artifact, THEN delegate.** scope_check runs BEFORE identify_scope would write `.devt/state/code-review-input.md`, and the parallel workflow's `partition_lanes` reads it — writing it here (from the same changed-files union scope_check measured) means the parallel path has its scope on entry. `partition_lanes` also self-recovers if it's somehow still absent, but pre-writing keeps that a genuine-anomaly path (loud warning fires only when the handoff really broke, not on every fresh run):
-
-```bash
-if [ ! -s .devt/state/code-review-input.md ]; then
-  RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-  PARALLEL_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
-  if [ -n "$PARALLEL_SCOPE" ]; then
-    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; } > .devt/state/code-review-input.md
-    echo "[scope_check] pre-wrote code-review-input.md ($(printf '%s\n' "$PARALLEL_SCOPE" | /usr/bin/grep -cE '.') files) before parallel delegation"
-  fi
-fi
-```
-
-Then delegate to `workflows/code-review-parallel.md` by Read-ing that file and following its steps starting from `context_init`. The cached workflow.yaml state (workflow_id, memory_signal, scope_hint, scope_trust) carries over — the parallel workflow re-reads it.
-
-If user picks NO: continue to identify_scope (existing single-dispatch path; the code-reviewer agent's community-filter logic handles scope > 10 files automatically).
+**Parallel-offer branch (conditional).** If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"`: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## parallel-offer` section — operator-intent short-circuit, cost/value preview, AskUserQuestion, then the answer artifact + routing (parallel → pre-write the scope artifact and delegate to `code-review-parallel.md`; single → continue to identify_scope; cancel → STOP with BLOCKED). The section ends with `.devt/state/scope-check-answer.txt` written — `state assert-scope-check-handled` gates the next step on it. The common path (≤10 files or graphify not ready) never loads this.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check status=DONE

@@ -14693,13 +14693,13 @@ else
   fail "K177: suggested_reading shape wrong — got: $K177_OUT"
 fi
 
-# K178: code-review.md scope_check has operator-explicit short-circuit
+# K178: the scope_check parallel-offer (relocated to code-review.context-detail.md) has the operator-explicit short-circuit
 # (parallel/single intent in REVIEW_SCOPE text → auto-writes answer, skips
 # redundant AskUserQuestion). Asserts: SCOPE_CHECK_DECISION="parallel"
 # literal exists in workflow.
-K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
+K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.context-detail.md" 2>/dev/null || echo 0)
 if [ "$K178_OUT" -ge "1" ]; then
-  pass "K178: code-review.md scope_check has operator-explicit short-circuit (parallel/single intent detected pre-AskUserQuestion)"
+  pass "K178: parallel-offer carries the operator-explicit short-circuit (parallel/single intent detected pre-AskUserQuestion; body in code-review.context-detail.md)"
 else
   fail "K178: scope_check short-circuit missing — got count: $K178_OUT"
 fi
@@ -17065,8 +17065,8 @@ K274_WHY=""
 /usr/bin/grep -q 'Lane score distribution' "$ROOT/workflows/code-review.steps.md" || { K274_OK=0; K274_WHY="a:present_findings"; }
 /usr/bin/grep -q 'Repro-spec contract' "$ROOT/agents/code-reviewer.md" || { K274_OK=0; K274_WHY="b:finder"; }
 /usr/bin/grep -q 'reproduce the finding.s exact spec' "$ROOT/agents/verifier.md" || { K274_OK=0; K274_WHY="b:verifier"; }
-/usr/bin/grep -q 'NEVER present cost alone' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="c:preview"; }
-/usr/bin/grep -q 'Do NOT add mid-verify-loop cost readouts' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="c:no-midloop"; }
+/usr/bin/grep -q 'NEVER present cost alone' "$ROOT/workflows/code-review.context-detail.md" || { K274_OK=0; K274_WHY="c:preview"; }
+/usr/bin/grep -q 'Do NOT add mid-verify-loop cost readouts' "$ROOT/workflows/code-review.context-detail.md" || { K274_OK=0; K274_WHY="c:no-midloop"; }
 /usr/bin/grep -q 'code-review-input.md: session-distance eviction' "$ROOT/bin/modules/state.cjs" || { K274_OK=0; K274_WHY="d:eviction"; }
 /usr/bin/grep -q '"--raw-count=\${TOPIC_SYMBOLS_RAW_COUNT:-unknown}"' "$ROOT/workflows/code-review.md" || { K274_OK=0; K274_WHY="e:glob"; }
 if /usr/bin/grep -q -- '--raw-count=\${TOPIC_SYMBOLS_RAW_COUNT:-?}' "$ROOT/workflows/code-review.md"; then K274_OK=0; K274_WHY="e:unquoted-sentinel-back"; fi
@@ -17994,26 +17994,24 @@ rm -rf "$K299_SHARED" "$K299_PROJ"
 
 # K300: session-end curation surface (DEF-008). Curation triggers are
 # workflow-finalize-bound; raw-dispatch sessions never hit one, so pending
-# candidates were invisible. stop.sh now appends the curation hint to its
-# stopReason via `memory candidates-footer --hint-only` — silent below
-# threshold, once per cooldown window when ready, default footer mode
-# unchanged (the finalize contract's always-on line stays).
+# candidates were invisible. stop.sh's `state stop-hook` appends the curation
+# hint to its stopReason in-process via candidatesFooterStatus() — once per
+# cooldown window when ready; the finalize contract's always-on footer line
+# stays on the CLI verb. (The old `--hint-only` CLI flag was test-only code
+# kept alive by this gate; retired — the export + the real stop.sh below are
+# the behavioral surfaces.)
 K300_PROJ=$(mktemp -d)
 (cd "$K300_PROJ" && node "$CLI" setup --template blank --mode create >/dev/null 2>&1)
 printf -- '### \342\232\226\357\270\217 c1\n### \360\237\224\265 c2\n' > "$K300_PROJ/.devt/memory/_suggestions.md"
 K300_OK=1
 K300_WHY=""
-K300_S1=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
-[ -z "$K300_S1" ] || { K300_OK=0; K300_WHY="below-threshold-not-silent"; }
+K300_S1=$(cd "$K300_PROJ" && node -e "const m=require(process.argv[1]+'/bin/modules/memory.cjs');const s=m.candidatesFooterStatus();process.stdout.write(String(s.ready));" "$ROOT" 2>/dev/null)
+[ "$K300_S1" = "false" ] || { K300_OK=0; K300_WHY="below-threshold-ready=$K300_S1"; }
 printf -- '### \342\232\226\357\270\217 c1\n### \360\237\224\265 c2\n### \360\237\224\204 c3\n### \342\232\226\357\270\217 c4\n### \360\237\224\265 c5\n' > "$K300_PROJ/.devt/memory/_suggestions.md"
 rm -f "$K300_PROJ/.devt/memory/.last-candidate-surface"
-K300_S2=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
-case "$K300_S2" in *"5 memory candidates pending"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY ready-no-hint";; esac
-[ -f "$K300_PROJ/.devt/memory/.last-candidate-surface" ] || { K300_OK=0; K300_WHY="$K300_WHY no-stamp"; }
-K300_S3=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer --hint-only 2>/dev/null)
-[ -z "$K300_S3" ] || { K300_OK=0; K300_WHY="$K300_WHY cooldown-not-silent"; }
 K300_S4=$(cd "$K300_PROJ" && node "$CLI" memory candidates-footer 2>/dev/null)
 case "$K300_S4" in "[memory] candidates-footer:"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY default-line-missing";; esac
+[ -f "$K300_PROJ/.devt/memory/.last-candidate-surface" ] || { K300_OK=0; K300_WHY="$K300_WHY no-stamp-after-ready-footer"; }
 rm -f "$K300_PROJ/.devt/memory/.last-candidate-surface"
 K300_S5=$(cd "$K300_PROJ" && echo '{"stop_hook_active":false}' | bash "$ROOT/hooks/stop.sh" 2>/dev/null)
 case "$K300_S5" in *"memory candidates pending"*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY stop-no-hint";; esac
@@ -18021,7 +18019,7 @@ K300_S6=$(cd "$K300_PROJ" && echo '{"stop_hook_active":false}' | bash "$ROOT/hoo
 case "$K300_S6" in *"memory candidates pending"*) K300_OK=0; K300_WHY="$K300_WHY stop-hint-repeated";; *) : ;; esac
 case "$K300_S6" in *stopReason*) : ;; *) K300_OK=0; K300_WHY="$K300_WHY stop-base-broken";; esac
 if [ "$K300_OK" = "1" ]; then
-  pass "K300: session-end curation surface — hint-only silent below threshold, hint+stamp when ready, cooldown suppresses, default footer line intact, stop.sh stopReason carries hint once per window (DEF-008)"
+  pass "K300: session-end curation surface — export reports not-ready below threshold, footer verb emits hint+stamp when ready, stop.sh stopReason carries the hint once per cooldown window (DEF-008)"
 else
   fail "K300: curation surface broken ($K300_WHY)"
 fi
@@ -18457,12 +18455,12 @@ else
   # (4) disjointness: NO relocated-body sentinel may reappear resident in CRM —
   #     one body-only sentinel per relocated passage so a partial re-inline (which
   #     duplicates content while leaving the pointer) is caught, not just a 2-token spot-check.
-  for SENTINEL in 'STALE-ARCH-SCAN' 'ARCH-SCAN-MISSING' 'arch-scan-report.md::findings' 'recovered_from_noise' 'max-bytes=60000' 'substance-byte-threshold'; do
+  for SENTINEL in 'STALE-ARCH-SCAN' 'ARCH-SCAN-MISSING' 'arch-scan-report.md::findings' 'recovered_from_noise' 'max-bytes=60000' 'substance-byte-threshold' 'PARALLEL_INTENT_RE' 'cost/value preview: single-dispatch' 'pre-wrote code-review-input.md'; do
     /usr/bin/grep -qF -- "$SENTINEL" "$CRM" && { K309_OK=0; K309_WHY="resident-body:${SENTINEL}"; }
   done
 fi
 if [ "$K309_OK" = "1" ]; then
-  pass "K309: context_init by-reference partition — arch-scan advisory + drill-down recovery single-sourced in code-review.context-detail.md, code-review.md carries conditional pointers + common-path guards, no resident copies"
+  pass "K309: by-reference partition — arch-scan advisory + drill-down recovery + parallel-offer single-sourced in code-review.context-detail.md, code-review.md carries conditional pointers + common-path guards, no resident copies"
 else
   fail "K309: context_init partition regressed at $K309_WHY"
 fi
@@ -18529,7 +18527,7 @@ fi
 # self-recovers (K310) on EVERY fresh run and the loud ABSENT warning degrades
 # to constant noise; the pre-write makes self-recovery a genuine-anomaly path.
 K313_OK=1; K313_WHY=""
-CRM313="$ROOT/workflows/code-review.md"
+CRM313="$ROOT/workflows/code-review.context-detail.md"
 /usr/bin/grep -qF 'pre-wrote code-review-input.md' "$CRM313" || { K313_OK=0; K313_WHY="no-prewrite-echo"; }
 /usr/bin/grep -qF 'before parallel delegation' "$CRM313" || { K313_OK=0; K313_WHY="no-before-delegation-marker"; }
 if [ "$K313_OK" = "1" ]; then

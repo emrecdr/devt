@@ -65,3 +65,6 @@ graphify-out/manifest.json
 
 # Serena MCP runtime cache (external tool, not part of devt source)
 .serena/
+
+# Python linter cache (arch-scan tooling in Python-stack projects)
+.ruff_cache/

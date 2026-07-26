@@ -2426,19 +2426,16 @@ function run(subcommand, args) {
       // Does NOT serve /devt:next's variant, which needs ready_to_surface as
       // a shell variable to gate a downstream AskUserQuestion. That call site
       // keeps the underlying candidates-status primitive.
-      // --hint-only: the Stop-hook mode. The hook fires on EVERY Stop event,
-      // so the always-on status line (designed for once-per-workflow finalize
-      // steps) would be per-turn noise there. Silence below readiness is fine
-      // for this caller: invocation is recorded by the hook trace, and the
-      // threshold+cooldown pair bounds the hint to at most once per cooldown
-      // window.
-      const hintOnly = Array.isArray(args) && args.includes("--hint-only");
+      // Always-on status line + conditional hint — the finalize-footer
+      // contract (silence indistinguishable from never-executing at
+      // once-per-workflow call sites). The Stop hook consumes the same logic
+      // in-process via candidatesFooterStatus() from state.cjs::stopHook —
+      // there is no hook-facing CLI mode anymore (the --hint-only flag was
+      // test-only code kept alive by its own gate; retired).
       const st = candidatesFooterStatus();
-      if (!hintOnly) {
-        process.stdout.write(`[memory] candidates-footer: ${st.count} pending / threshold ${st.threshold} / cooldown ${st.cooldownOk ? "ok" : "blocked"}\n`);
-      }
+      process.stdout.write(`[memory] candidates-footer: ${st.count} pending / threshold ${st.threshold} / cooldown ${st.cooldownOk ? "ok" : "blocked"}\n`);
       if (st.ready) {
-        process.stdout.write(`${hintOnly ? "" : "\n"}${st.hint}\n`);
+        process.stdout.write(`\n${st.hint}\n`);
       }
       return 0;
     }

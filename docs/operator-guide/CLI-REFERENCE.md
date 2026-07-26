@@ -27,6 +27,15 @@ node bin/devt-tools.cjs hook-cost-estimate [--window=7d]
 
 node bin/devt-tools.cjs telemetry <subcommand>
 # Calibration-mode opt-in flags for hooks that emit forensic records (telemetry-calibrate.cjs)
+
+node bin/devt-tools.cjs state post-dispatch-check <agent>
+# Composite Layer-1 claim-check after an output-writing agent returns: primary artifact present + substantive,
+# sidecar terminal-status short-circuit, redispatch-with-reason on missing/partial (folds assert-artifact-present)
+
+node bin/devt-tools.cjs state finalize-gates [--phase=<name>]
+# Composite finalize sweep — fires the `workflows/_phase-gates.yaml` gate set registered for the active
+# workflow_type at the given phase (defaults to the workflow's current phase) in ONE spawn, with per-gate
+# results + gate-trace records (tracePrefix "finalize-gates")
 ```
 
 ### State — workflow-internal assertions and gates

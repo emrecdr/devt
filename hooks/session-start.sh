@@ -13,7 +13,12 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # the plugin system; re-linking there would touch user-global state every
 # session for a mechanism the platform already owns.
 case "$PLUGIN_ROOT" in
-  "$HOME/.claude/plugins/"*) ;;
+  "$HOME/.claude/plugins/"*)
+    # Plugin-managed install: native registration owns commands. Remove a
+    # stale symlink left by a prior manual-clone install so devt: commands
+    # don't keep resolving through a dead path after migration.
+    [[ -L "$HOME/.claude/commands/devt" ]] && rm -f "$HOME/.claude/commands/devt" 2>/dev/null || true
+    ;;
   *)
     COMMANDS_DIR="$HOME/.claude/commands/devt"
     if [[ ! -d "$COMMANDS_DIR" ]] || [[ "$(readlink -f "$COMMANDS_DIR" 2>/dev/null)" != "$(readlink -f "$PLUGIN_ROOT/commands" 2>/dev/null)" ]]; then

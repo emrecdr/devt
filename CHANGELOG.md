@@ -8,6 +8,30 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.212.0] - 2026-07-27
+
+Standing-ledger burn-down, round one — the largest remaining resident-token lever plus the small verified retirements.
+
+### Changed
+
+- **The scope_check parallel-offer machinery rides by-reference.** The >10-file branch (operator-intent short-circuit, cost/value preview, AskUserQuestion, answer routing, scope pre-write + parallel delegation) — 7,371 bytes — moved from resident `code-review.md` into `code-review.context-detail.md::## parallel-offer` behind a conditional Read pointer. The common path (≤10 files, or graphify not ready) never loads it: every ordinary review is ~7KB lighter. K309's partition contract extends to the new anchor (three body sentinels, pointer↔anchor bijection — both directions mutation-RED); K178, K313, and K274's cost-doctrine pins repointed to the body's new home.
+
+### Removed
+
+- **The `memory candidates-footer --hint-only` flag** — test-only code kept alive by its own gate since the Stop hook went in-process (the hook consumes `candidatesFooterStatus()` directly). K300 redesigned: an export probe covers below-threshold semantics, the footer verb covers hint+stamp, and the real `stop.sh` legs carry the once-per-cooldown behavior. Stale wiring claims fixed in the case comment, MEMORY.md, and HOOKS.md.
+- **Four zero-consumer files**: `protocols/ui-presentation.md` (nothing references it; the other two protocol files are consumed by dev-workflow) and three `skills-workspace/` eval sidecars for skills retired long ago (memory-compaction, playbook-curation, semantic-search).
+
+### Fixed
+
+- **A manual-clone → plugin-managed migration no longer leaves a stale `~/.claude/commands/devt` symlink forever** — the plugin-managed branch of session-start.sh now removes it instead of skipping cleanup along with registration.
+- `.ruff_cache/` added to `.gitignore` (Python arch-scan tooling cache).
+
+### Added
+
+- CLI-REFERENCE rows for the two composite verbs the previous batch missed: `state post-dispatch-check <agent>` and `state finalize-gates [--phase=]` (the latter described from its actual body — it fires the `_phase-gates.yaml` registry set, not a hand-rolled sweep).
+
+Still open on the ledger, named for the next round: the graphify ACTIVE/RECOVERY triplication (~6.9KB across three workflows, needs a mode-marked shared file), guide→rubric dedupe (~2KB per reviewer dispatch), coordinator table generation, memory dual-layer merge, memory-curation progressive disclosure, and the smoke-suite phase split.
+
 ## [0.211.0] - 2026-07-27
 
 The v5 follow-up batch (contract-gate extensions + the two platform verifications) — and the item that was scheduled as a "2-minute field check" turned out to be the most important fix of the arc.
@@ -619,20 +643,4 @@ The `learning-entry.yaml` retirement (v0.177.0) was the third instance of the sa
 ### Added
 
 - Gate **K296** — every `*.cjs` module token referenced in `agents/**.{md,yaml}` and `schemas/**.{yaml}` must resolve on disk. Scoped deliberately to the `.cjs`-module class: measured empirically to produce **zero false positives** on the current tree (only `devt-tools`/`memory`/`state.cjs` are referenced, all resolve), and verified to catch an injected ghost. The artifact-path half of the original proposal (`.devt/**`, `docs/**`) is **intentionally excluded** — those are runtime-created and example-prone and would false-positive; the recurring ghost was always a module reference. Drift-guard stack 203 → 204 deep (K94–K296).
-
-## [0.177.0] - 2026-07-19
-
-### Retired a contradictory ghost schema in the lesson pipeline (OPT-1)
-
-A memory-layer review (validated filesystem-first) found `schemas/learning-entry.yaml` was a stale spec that both `agents/retro.md` (context step 8) and `agents/curator.md` (context step 7) were instructed to load as authoritative — while it contradicted the contract both agents actually implement. Most seriously it typed `confidence` as `float 0.0-1.0` against the memory layer's five-value enum, which `validateFrontmatter` treats as a hard **error**; it also referenced the deleted `semantic.cjs` twice and targeted a `.devt/learning-playbook.md` that does not exist. Verified zero other consumers on the current tree — no gate, no doc. This was the third instance of the `semantic.cjs` ghost class (K280/K281 gate CLI routing + printUsage but not module/artifact paths inside `schemas/`/`agents/`).
-
-### Removed
-
-- **`schemas/learning-entry.yaml` deleted.** `retro.md` step 8 and `curator.md` step 7 now point at the real, existing contract — `templates/memory/LES-template.md` (enum confidence, `affects_paths`, `links`) — and retro's own `structure` step remains the lessons.yaml hand-off definition. The agents already emitted the correct enum shape; the loaded schema was inert and contradictory, so retiring it removes a documentation-rot landmine without changing any working behavior.
-- DEF-005's decay leg re-anchored off the deleted schema (its `decay_days` field is now noted as design-fresh, since the schema was its only prior spec).
-
-### Notes
-
-- Gate **K295** pins the removal (schema stays deleted, no agent re-references it, both repoint at the LES template). Drift-guard stack 202 → 203 deep (K94–K295).
-- The **broad** ghost-class gate (module/artifact paths referenced inside `schemas/**`/`agents/**` must resolve) is OPT-2 — deliberately deferred to a fresh session for the false-positive-scoping care a new class scan needs. The report's own sequencing (delete before the broad gate) is honored: this ships the deletion first.
 
