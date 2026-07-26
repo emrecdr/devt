@@ -8,6 +8,19 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.209.1] - 2026-07-26
+
+Post-release adversarial validation of the 0.205.0–0.209.0 batch: every new gate mutation-tested (break the guarded property → gate must go RED), all 73 router verbs swept, and the one unproven changelog claim behaviorally verified (unlisted `tools/call` in a disabled dir returns the graceful `degraded` payload, no RPC error — confirming the 0.206.0 assertion). Two hardenings came out of it.
+
+### Fixed
+
+- **K323's wiring leg no longer matches comments.** `grep -qF 'state stop-hook'` was satisfiable by stop.sh's own comment with the command deleted — the leg now pins the executable invocation (`devt-tools.cjs" state stop-hook`). Mutation-proven: breaking the command line turns the leg RED; the comment alone cannot keep it green. (K300 always covered the hook behaviorally; this closes the structural leg's blind spot.)
+
+### Added
+
+- **Gate K326 — state-router ReferenceError sweep.** Invokes every router verb (73 at gate time) in a minimal fixture and asserts none dies on an unresolved identifier — the regression net for the facade-split risk class, where a function moved between state submodules references a name its new home doesn't import and fails at CALL time (both real breaks of this class — `_assertLanesRegistered→listLaneOutputs` and `computeGraphifyImpactPlan→_activeRange` — shipped past load checks and a flat import audit). Known limit stated in the gate: a verb that swallows the error in a bare catch hides it from the sweep too; per-verb behavioral gates remain the deep net. Current sweep: 0/73 hits.
+
+
 ## [0.209.0] - 2026-07-26
 
 ### Added
@@ -656,18 +669,3 @@ A third-pass external verification of the two fresh batches, plus a one-line use
 - Boilerplate single-sourcing (the turn-limit block duplicated across 10 agents): duplication is real and near-byte-identical, but each copy loads only in its own agent's spawn context — relocating the prose saves ~zero tokens. Drift is the only cost; if it ever bites, an identity gate is the cheaper answer than restructuring the agent/envelope boundary.
 - Smoke-suite split/tiering: 17.5K lines, but the full suite completes in ~1m39s of CI wall time — a maintainability question today, not a cost one.
 - Rubric few-shot graded examples stay sequenced behind the by-reference field receipt.
-
-## [0.171.0] - 2026-07-18
-
-### The token-cut behavioral batch (cal #53)
-
-Companion release to the platform-alignment batch: the four behavioral items from the same two-sweep validation, each reusing machinery that already existed rather than building new. The single biggest lever — by-reference dispatch — was promoted exactly as dispatch.cjs's own comment prescribed ("promote to config after field evidence accumulates"); the field evidence was the 5-lane −71% render receipt with zero verifier-flagged quality gaps.
-
-### Changed
-
-- **By-reference is now the default delivery mode for ALL rendered dispatches, not just lanes.** `dispatch render-filled` swaps every `governing_rules` body and the inline rubric for read-from-disk stubs (config `dispatch.rules_mode` / `dispatch.rubric_mode`; `--inline-rules` restores full inlining for worktree-isolated dispatches, `--rules-by-reference` / `--rubric-by-reference` force-enable). Resolution lives inside `cmdRenderFilled` so every render path — CLI, render-lanes base, hygiene-guard canonical envelope — agrees; render-lanes now passes explicit values both ways so project config can never override the lane worktree opt-out. The Context-Loaded contract auto-injects (agents record what they actually Read; the verifier checks reads cover cited rules), `rules_hash` keeps drift detection, and CLAUDE.md stays dropped (harness auto-injects it). Expected: ~35–45 KB (~9–11 K tokens) saved per full dispatch on the default path, multiplied across every dispatch and revision round.
-- **Six consumer agents gained stub-awareness.** The context_loading prose in programmer, code-reviewer, verifier, architect, researcher, and tester previously said "treat inline sub-tag contents as authoritative and SKIP the on-disk Read" — against a by-reference stub, a literal reading would treat the stub text as the rules. Each now recognizes `(by-reference: …)` as an instruction to Read the named file from disk, not as content.
-- **Single-path review now measures diff mass.** scope_check computes diff LOC over the same union basis identify_scope uses (merge-base + working tree + untracked) and bands it with the lane registry's field-calibrated thresholds into `.devt/state/review-depth.txt` (reset-soft evicted — a stale `chunked` marker would bolt the large-diff strategy onto a small follow-up review). The cost/value preview and the parallel-decision question now carry changed-line counts alongside file/domain counts, and `chunked` diffs (≥3000 lines) get the same hunk-enumeration read strategy lane envelopes auto-attach at that size. The below-threshold verifier-skip idea from the source report was deliberately NOT added — the existing self-certification short-circuit (status=DONE + empty self_flagged_uncertainties) already skips the verifier on a better signal than diff size.
-- **Deny→recovery funnel is now visible.** pre-flight-guard's covered-allow path appends a `deny-outcome` record when the edit resolves a same-file deny from this session, classed `recovered-governed` (PREFLIGHT line cites governing IDs) vs `recovered-ungoverned` (`:: ungoverned`) — each deny resolved at most once, best-effort, never blocking. `report generate` gains a **Guard Telemetry** section: denies by source/rule, both recovery classes, the unrecovered remainder, and an explicit signal line when recoveries are mostly ungoverned (tune the guard vs grow affects coverage — the two levers a single aggregate would conflate).
-- **Fix iterations are delta-shaped.** The programmer envelope's review_feedback contract (dev + quick_implement, template source + compiled workflow regions) now states it explicitly: work from the feedback entries and the files they cite; no redoing reuse analysis, no re-reading scan/plan/research artifacts a prior iteration consumed, no rewriting untouched impl-summary sections. Combined with by-reference rules, a revision round no longer re-pays the first dispatch's context bill.
-- Gate **K289** pins the batch, including two behavioral checks (fixture render with/without `--inline-rules`; guard-telemetry aggregation over a fixture funnel) and the compile-sync proof that the delta-fix contract reached both compiled workflow regions. Drift-guard stack 196 → 197 deep (K94–K289).

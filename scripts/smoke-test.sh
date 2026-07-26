@@ -18783,7 +18783,7 @@ printf '%s' "$K323_B" | /usr/bin/grep -q "Phase 'implement'" || { K323_OK=0; K32
 printf '%s' "$K323_ST" | /usr/bin/grep -q '"active":false' || { K323_OK=0; K323_WHY="$K323_WHY deactivation-stamp"; }
 printf '%s' "$K323_ST" | /usr/bin/grep -q 'stopped_at' || { K323_OK=0; K323_WHY="$K323_WHY stopped-at"; }
 printf '%s' "$K323_C" | /usr/bin/grep -qF 'Workflow stopped. State preserved in .devt/state/' || { K323_OK=0; K323_WHY="$K323_WHY base-msg"; }
-/usr/bin/grep -qF 'state stop-hook' "$ROOT/hooks/stop.sh" || { K323_OK=0; K323_WHY="$K323_WHY hook-not-wired"; }
+/usr/bin/grep -qF 'devt-tools.cjs" state stop-hook' "$ROOT/hooks/stop.sh" || { K323_OK=0; K323_WHY="$K323_WHY hook-not-wired"; }
 if [ "$K323_OK" -eq 1 ]; then
   pass "K323: stop-hook compound verb (loop-guard silent, WARNING + stop stamp on active+incomplete, base stopReason otherwise; hooks/stop.sh wired to the single-spawn path)"
 else
@@ -18839,6 +18839,37 @@ if [ "$K325_OK" -eq 1 ]; then
   pass "K325: Context-Loaded contract single-sourced (constant + 14 placeholder templates, zero literal template bodies, compiled regions expanded, rendered envelope carries body with no leak)"
 else
   fail "K325: contract single-sourcing regressed:$K325_MISS"
+fi
+
+# K326: state-router ReferenceError sweep — invoke EVERY router verb once in a
+# minimal fixture and assert none dies on an unresolved identifier. This is the
+# regression net for the facade-split risk class: a function moved between
+# state submodules that references a name its new home doesn't import fails at
+# CALL time, not load time (the _assertLanesRegistered→listLaneOutputs and
+# computeGraphifyImpactPlan→_activeRange breaks both shipped past load checks
+# and a flat import audit). Known limit, by design: a verb whose body swallows
+# the error in a bare catch hides it from this sweep too — behavioral gates
+# per verb remain the deep net; this catches the loud majority cheaply.
+K326_VERBS=$(node -e '
+const s=require("fs").readFileSync("'"$ROOT"'/bin/modules/state.cjs","utf8");
+const out=new Set();for(const m of s.matchAll(/case "([a-z-]+)":/g)) out.add(m[1]);
+process.stdout.write([...out].join(" "));')
+K326_T=$(mktemp -d); mkdir -p "$K326_T/.devt/state"
+printf 'active: true\nworkflow_id: "k326"\nworkflow_type: "dev"\nphase: "implement"\ncreated_at: "2026-07-18T08:00:00Z"\n' > "$K326_T/.devt/state/workflow.yaml"
+K326_HITS=""
+K326_N=0
+for v in $K326_VERBS; do
+  K326_N=$((K326_N+1))
+  K326_OUT=$( (cd "$K326_T" && printf '{}' | timeout 10 node "$CLI" state "$v" 2>&1) || true )
+  if printf '%s' "$K326_OUT" | /usr/bin/grep -qE 'is not defined|ReferenceError'; then
+    K326_HITS="$K326_HITS $v"
+  fi
+done
+rm -rf "$K326_T"
+if [ -z "$K326_HITS" ] && [ "$K326_N" -ge 70 ]; then
+  pass "K326: state-router ReferenceError sweep (all $K326_N verbs invoke without unresolved identifiers — facade-split cross-module wiring intact)"
+else
+  fail "K326: router verbs with unresolved identifiers:$K326_HITS (n=$K326_N)"
 fi
 
 echo
