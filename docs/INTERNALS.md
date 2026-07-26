@@ -32,6 +32,8 @@ Key exports:
 
 Manages `.devt/state/` directory. Simple YAML parser/serializer. File-level locking with PID-based stale lock detection.
 
+**Module family.** `state.cjs` is a FACADE over five submodules — `state-contract.cjs` (the shared constant tables), `state-io.cjs` (paths, YAML, locking, read-only accessors), `state-gates.cjs` (the assert-* gates + phase-gate registry + claim-check/gate-trace persistence), `state-lanes.cjs` (lane registration/sizing/diffs), `state-graphify.cjs` (impact-plan + graphify gates + ROI). The facade keeps the mutation core (`updateState`, resets, context-init compounds), the `run()` router, and re-exports the full public surface, so every consumer keeps requiring `bin/modules/state.cjs` unchanged. Requires flow one way (`contract ← io ← gates ← {lanes, graphify} ← facade`); the handful of spots where a gate needs a lane/graphify function use documented call-time requires to avoid load cycles. When editing a state verb, edit it in its submodule — smoke gate K324 enforces the facade contract (standalone submodule loads, full export surface, no submodule requiring the facade back, facade line ceiling).
+
 **Schemas.**
 - `ARTIFACT_SCHEMA` + `extractStatus()` for per-artifact `## Status:` line validation (still used for the 6 non-sidecar artifacts).
 - `JSON_SIDECAR_SCHEMAS` — schema registry for sidecar `.json` files, with per-sidecar enums for `status` + `verdict` + `agent`.

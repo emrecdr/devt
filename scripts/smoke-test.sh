@@ -1168,7 +1168,7 @@ else
 fi
 
 # State has preflight workflow_type registered
-if grep -q '"preflight"' "$ROOT/bin/modules/state.cjs"; then
+if grep -q '"preflight"' "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-contract.cjs"; then
   pass "state.cjs registers preflight workflow_type"
 else
   fail "state.cjs missing preflight workflow_type"
@@ -3128,7 +3128,7 @@ fi
 # extractStatus cap is now 100 (was 50). Still relevant for markdown-only
 # artifacts in ARTIFACT_SCHEMA (test-summary.md, review.md, etc.). impl-summary
 # and verification.md route through their JSON sidecars per Option 4.
-if grep -q "slice(0, 100)" "$ROOT/bin/modules/state.cjs"; then
+if grep -q "slice(0, 100)" "$ROOT/bin/modules/state-io.cjs" "$ROOT/bin/modules/state-graphify.cjs"; then
   pass "extractStatus reads first 100 lines for ## Status (was 50)"
 else
   fail "extractStatus line cap regression (D-14)"
@@ -3159,10 +3159,10 @@ if [ -n "$NOT_IN_SCHEMA" ]; then
   SIDECAR_DRIFT+=("ARTIFACT_SCHEMA still contains sidecar-covered artifacts: $NOT_IN_SCHEMA")
 fi
 # Sidecar wiring: SIDECAR_FOR_MARKDOWN must reference both replaced artifacts.
-if ! grep -q "\"impl-summary.md\": \"impl-summary.json\"" "$ROOT/bin/modules/state.cjs"; then
+if ! grep -q "\"impl-summary.md\": \"impl-summary.json\"" "$ROOT/bin/modules/state-contract.cjs"; then
   SIDECAR_DRIFT+=("state.cjs::SIDECAR_FOR_MARKDOWN missing impl-summary mapping")
 fi
-if ! grep -q "\"verification.md\": \"verification.json\"" "$ROOT/bin/modules/state.cjs"; then
+if ! grep -q "\"verification.md\": \"verification.json\"" "$ROOT/bin/modules/state-contract.cjs"; then
   SIDECAR_DRIFT+=("state.cjs::SIDECAR_FOR_MARKDOWN missing verification mapping")
 fi
 if [ ${#SIDECAR_DRIFT[@]} -eq 0 ]; then
@@ -4019,7 +4019,7 @@ for actual in $ACTUAL_VERIFIER_WORKFLOWS; do
   fi
 done
 # Sidecar registration check
-if grep -q '"verification.json"' "$ROOT/bin/modules/state.cjs"; then
+if grep -q '"verification.json"' "$ROOT/bin/modules/state-contract.cjs" "$ROOT/bin/modules/state-gates.cjs"; then
   pass "verification.json registered in JSON_SIDECAR_SCHEMAS"
 else
   fail "verification.json not registered in bin/modules/state.cjs::JSON_SIDECAR_SCHEMAS"
@@ -4043,7 +4043,7 @@ fi
 echo "== Pre-existing fix gates (v0.38.0 wave) =="
 
 # Fix 1: preflight-denies.jsonl is in RESET_EXEMPT
-if node -e "const s=require('$ROOT/bin/modules/state.cjs').RESET_EXEMPT||require('$ROOT/bin/modules/state.cjs'); const txt=require('fs').readFileSync('$ROOT/bin/modules/state.cjs','utf8'); process.exit(txt.includes('\"preflight-denies.jsonl\"') ? 0 : 1)"; then
+if node -e "const s=require('$ROOT/bin/modules/state.cjs').RESET_EXEMPT||require('$ROOT/bin/modules/state.cjs'); const txt=require('fs').readFileSync('$ROOT/bin/modules/state-contract.cjs','utf8'); process.exit(txt.includes('\"preflight-denies.jsonl\"') ? 0 : 1)"; then
   pass "RESET_EXEMPT includes preflight-denies.jsonl"
 else
   fail "RESET_EXEMPT missing preflight-denies.jsonl in bin/modules/state.cjs"
@@ -5008,7 +5008,7 @@ else
   fail "code-review.md impact step still prose-only — orchestrator can skip without consequence"
 fi
 # Bitbucket awareness: tier-decision CLI branches on git.provider
-if grep -qE 'gitProvider === "github"' "$ROOT/bin/modules/state.cjs" && grep -qE 'gitProvider !== "github"' "$ROOT/bin/modules/state.cjs"; then
+if grep -qE 'gitProvider === "github"' "$ROOT/bin/modules/state-graphify.cjs" && grep -qE 'gitProvider !== "github"' "$ROOT/bin/modules/state"*.cjs; then
   pass "code-review impact plan (computeGraphifyImpactPlan) branches on git.provider — Bitbucket projects skip GitHub-only PR-scoped tier"
 else
   fail "code-review impact plan missing Bitbucket-aware provider check (PR-scoped tier would silently fail for non-GitHub projects)"
@@ -5456,17 +5456,17 @@ fi
 
 echo
 echo "== review.json sidecar wiring =="
-if grep -q '"review.json": {' "$ROOT/bin/modules/state.cjs"; then
+if grep -q '"review.json": {' "$ROOT/bin/modules/state-contract.cjs"; then
   pass "JSON_SIDECAR_SCHEMAS registers review.json"
 else
   fail "state.cjs missing review.json schema entry"
 fi
-if grep -q '"review.md": "review.json"' "$ROOT/bin/modules/state.cjs"; then
+if grep -q '"review.md": "review.json"' "$ROOT/bin/modules/state-contract.cjs"; then
   pass "SIDECAR_FOR_MARKDOWN maps review.md → review.json"
 else
   fail "state.cjs SIDECAR_FOR_MARKDOWN missing review.md → review.json pairing"
 fi
-if grep -qE '^\s*"review\.md":\s*\[' "$ROOT/bin/modules/state.cjs"; then
+if grep -qE '^\s*"review\.md":\s*\[' "$ROOT/bin/modules/state-contract.cjs"; then
   fail "ARTIFACT_SCHEMA still contains review.md — should be sidecar-routed via SIDECAR_FOR_MARKDOWN"
 else
   pass "ARTIFACT_SCHEMA no longer contains review.md (sidecar-routed)"
@@ -5793,7 +5793,7 @@ ORDER_OK=$(awk '
   /else if \(topicSymbolsCount > 0\)/ && !sa { sa = NR }
   /else if \(scopeFileCount >= impactThreshold/ && !bs { bs = NR }
   END { if (sa && bs && sa < bs) print "OK"; else print "BAD" }
-' bin/modules/state.cjs)
+' bin/modules/state-graphify.cjs)
 if [ "$ORDER_OK" = "OK" ]; then
   pass "computeGraphifyImpactPlan fires symbol_anchored BEFORE bulk_scoped (topic.symbols branch precedes scope+threshold branch)"
 else
@@ -6316,10 +6316,10 @@ fi
 # F10: slug-variant patterns + review-scope rename + state history CLI + collision gate
 # 10a — 4 new slug patterns present in STATE_FILE_CONTRACT.allowed_patterns
 F10A_OK=0
-/usr/bin/grep -qF '"^plan-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
-/usr/bin/grep -qF '"^research-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
-/usr/bin/grep -qF '"^spec-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
-/usr/bin/grep -qF '"^debug-(context|investigation|summary)-' "$ROOT/bin/modules/state.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^plan-' "$ROOT/bin/modules/state-contract.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^research-' "$ROOT/bin/modules/state-contract.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^spec-' "$ROOT/bin/modules/state-contract.cjs" && F10A_OK=$((F10A_OK + 1))
+/usr/bin/grep -qF '"^debug-(context|investigation|summary)-' "$ROOT/bin/modules/state-contract.cjs" && F10A_OK=$((F10A_OK + 1))
 if [ "$F10A_OK" -eq 4 ]; then
   pass "F10a: slug-variant patterns added for plan / research / spec / debug-(context|investigation|summary)"
 else
@@ -6332,7 +6332,7 @@ else
   pass "F10b: review-scope.md rename complete (0 references in workflows/agents/bin)"
 fi
 # 10c — code-review-input.md is the new canonical name + workflows write to it
-if /usr/bin/grep -q '"code-review-input\.md"' "$ROOT/bin/modules/state.cjs" \
+if /usr/bin/grep -q '"code-review-input\.md"' "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-contract.cjs" "$ROOT/bin/modules/state-io.cjs" "$ROOT/bin/modules/state-graphify.cjs" \
    && /usr/bin/grep -q "code-review-input.md" "$ROOT/workflows/code-review.md"; then
   pass "F10c: code-review-input.md is canonical + referenced by code-review.md workflow"
 else
@@ -6397,7 +6397,7 @@ else
   fail "F6a: missing $((3 - F6A_OK)) of 3 auto-curator config keys"
 fi
 # 6b — last-curator-run.txt is RESET_EXEMPT (cooldown survives state reset)
-if /usr/bin/grep -q '"last-curator-run\.txt"' "$ROOT/bin/modules/state.cjs"; then
+if /usr/bin/grep -q '"last-curator-run\.txt"' "$ROOT/bin/modules/state-contract.cjs"; then
   pass "F6b: last-curator-run.txt is RESET_EXEMPT (cooldown survives state reset)"
 else
   fail "F6b: last-curator-run.txt missing from RESET_EXEMPT set"
@@ -6518,7 +6518,7 @@ rm -rf "$F18_TMP"
 F15_DEAD="regression-baseline.md memory-suggestions.md pr-impact.md"
 F15_FAILS=""
 for f in $F15_DEAD; do
-  if /usr/bin/grep -q "\"$f\"" "$ROOT/bin/modules/state.cjs"; then
+  if /usr/bin/grep -q "\"$f\"" "$ROOT/bin/modules/state-contract.cjs"; then
     F15_FAILS="$F15_FAILS $f(state.cjs)"
   fi
 done
@@ -7151,8 +7151,8 @@ rm -rf "$F40_TMP"
 # F41: ARGS CONTRACT pre-truncation. After cal #37 #3, the contract lives in
 # state.cjs::computeGraphifyImpactPlan — TOPIC_CAP = 32 + slice(0, TOPIC_CAP)
 # before args is built. Presence check on the cap constant + slice idiom.
-if /usr/bin/grep -qE "TOPIC_CAP = 32" "$ROOT/bin/modules/state.cjs" \
-  && /usr/bin/grep -qE "topicSymbolsRaw\.slice\(0, TOPIC_CAP\)" "$ROOT/bin/modules/state.cjs"; then
+if /usr/bin/grep -qE "TOPIC_CAP = 32" "$ROOT/bin/modules/state-graphify.cjs" \
+  && /usr/bin/grep -qE "topicSymbolsRaw\.slice\(0, TOPIC_CAP\)" "$ROOT/bin/modules/state-graphify.cjs"; then
   pass "F41a: computeGraphifyImpactPlan pre-truncates topic.symbols to TOPIC_CAP=32 BEFORE building blast_radius args (P2 fix)"
 else
   fail "F41a: code-review.md missing ARGS-CONTRACT pre-truncation — VERBATIM contract still unimplementable at symbols > 32"
@@ -8953,10 +8953,10 @@ fi
 # workflow's inline jq). Drift gates verify the touch points: capture+rm in
 # state.cjs (atomicWriteJsonSync + fs.unlinkSync), emission header in the CLI,
 # state registration.
-M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
-M12_RM=$(/usr/bin/grep -cE 'fs\.unlinkSync\(droppedPath\)' "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M12_CAPTURE=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state-graphify.cjs" 2>/dev/null || echo 0)
+M12_RM=$(/usr/bin/grep -cE 'fs\.unlinkSync\(droppedPath\)' "$ROOT/bin/modules/state-graphify.cjs" 2>/dev/null || echo 0)
 M12_HEADER=$(/usr/bin/grep -c "Subject symbols dropped" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
-M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}' || true)
+M12_REG=$(/usr/bin/grep -c "topic-symbols-dropped.json" "$ROOT/bin/modules/state-contract.cjs" "$ROOT/bin/modules/state-graphify.cjs" "$ROOT/bin/modules/state-audit.cjs" 2>/dev/null | awk -F: '{s+=$2} END{print s}' || true)
 if [ "${M12_CAPTURE:-0}" -ge 1 ] && [ "${M12_RM:-0}" -ge 1 ] && [ "${M12_HEADER:-0}" -ge 1 ] && [ "${M12_REG:-0}" -ge 2 ]; then
   pass "M12: dropped-symbol capture (computeGraphifyImpactPlan: write+unlink) + workflow header + state registration (capture=${M12_CAPTURE}, rm=${M12_RM}, header=${M12_HEADER}, state=${M12_REG})"
 else
@@ -9055,7 +9055,7 @@ fi
 # #4 (delegate to graphify/python via clear feedback when their tools fail).
 M16_LOG_GRAPHIFY=$(/usr/bin/grep -c "_logProbeFailure(\"timeout\"" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M16_LOG_SETUP=$(/usr/bin/grep -c "logProbeFailure(\"timeout\"" "$ROOT/bin/modules/setup.cjs" 2>/dev/null || echo 0)
-M16_RESET_EXEMPT=$(/usr/bin/grep -c "\"probe-failures.jsonl\"" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M16_RESET_EXEMPT=$(/usr/bin/grep -c "\"probe-failures.jsonl\"" "$ROOT/bin/modules/state-contract.cjs" 2>/dev/null || echo 0)
 M16_HEALTH=$(/usr/bin/grep -c "PROBE_FAILURES_RECENT" "$ROOT/bin/modules/health.cjs" 2>/dev/null || echo 0)
 # End-to-end probe — call probeBinary with a missing binary, expect the
 # log to receive a not-installed category entry.
@@ -9101,7 +9101,7 @@ KC_FRESH=$(cd "$KC_TMPDIR" && node "$ROOT/bin/devt-tools.cjs" state assert-knowl
 M17_STALE_REJECTED=$(echo "$KC_STALE" | /usr/bin/grep -c '"ok":false' || echo 0)
 M17_FRESH_ACCEPTED=$(echo "$KC_FRESH" | /usr/bin/grep -c '"ok":true' || echo 0)
 M17_REASON_TOUCHED=$(echo "$KC_STALE" | /usr/bin/grep -c 'prior workflow' || echo 0)
-M17_CODE=$(/usr/bin/grep -c "Q5 — session-scope check via first_created_at" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M17_CODE=$(/usr/bin/grep -c "Q5 — session-scope check via first_created_at" "$ROOT/bin/modules/state-gates.cjs" 2>/dev/null || echo 0)
 rm -rf "$KC_TMPDIR"
 if [ "${M17_STALE_REJECTED:-0}" -ge 1 ] && [ "${M17_FRESH_ACCEPTED:-0}" -ge 1 ] && [ "${M17_REASON_TOUCHED:-0}" -ge 1 ] && [ "${M17_CODE:-0}" -ge 1 ]; then
   pass "M17: knowledge-candidates gate session-scoped (stale_rejected=${M17_STALE_REJECTED} fresh_accepted=${M17_FRESH_ACCEPTED} reason=${M17_REASON_TOUCHED} code=${M17_CODE})"
@@ -9135,7 +9135,7 @@ DEB_LOCK_PERSISTS=0
 [ -f "${DEB_TMPDIR}/.devt/state/.graphify-rebuild.lock" ] && DEB_LOCK_PERSISTS=1
 M18_DEBOUNCED=$(echo "$DEB_FRESH" | /usr/bin/grep -cE '"reason":\s*"debounced"' || true)
 M18_STALE_NOT_DEBOUNCED=$(echo "$DEB_STALE" | /usr/bin/grep -cE '"reason":\s*"debounced"' || true)
-M18_RESET_EXEMPT=$(/usr/bin/grep -c "\".graphify-rebuild.lock\"" "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+M18_RESET_EXEMPT=$(/usr/bin/grep -c "\".graphify-rebuild.lock\"" "$ROOT/bin/modules/state-contract.cjs" 2>/dev/null || echo 0)
 M18_FN=$(/usr/bin/grep -c "function rebuildDebounced" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 M18_CASE=$(/usr/bin/grep -c "case \"rebuild\":" "$ROOT/bin/modules/graphify.cjs" 2>/dev/null || echo 0)
 rm -rf "$DEB_TMPDIR"
@@ -10327,7 +10327,7 @@ for agent_file in agents/architect.md agents/researcher.md agents/docs-writer.md
 done
 # 4 sidecar agents — schema in state.cjs JSON_SIDECAR_SCHEMAS
 for sidecar_pattern in "impl-summary.json" "test-summary.json" "review.json" "verification.json"; do
-  if ! awk -v p="$sidecar_pattern" 'BEGIN{seen=0;inblk=0} $0 ~ p && /:/{inblk=1} inblk && /PARTIAL/{seen=1; exit} inblk && /^  }/{inblk=0} END{exit !seen}' "$ROOT/bin/modules/state.cjs"; then
+  if ! awk -v p="$sidecar_pattern" 'BEGIN{seen=0;inblk=0} $0 ~ p && /:/{inblk=1} inblk && /PARTIAL/{seen=1; exit} inblk && /^  }/{inblk=0} END{exit !seen}' "$ROOT/bin/modules/state-contract.cjs"; then
     K6_FAIL="$K6_FAIL $sidecar_pattern(no_PARTIAL_in_schema)"
   fi
 done
@@ -12053,7 +12053,7 @@ K89_HAS_ENVELOPE=$(node -e "const m = require('$ROOT/bin/modules/graphify.cjs');
 # Consumer was migrated from inline workflow bash to state.cjs
 # computeGraphifyImpactPlan (cal #37 #3) — assert the consumer is updated
 # in the new location where graphify.symbolsInFiles is called.
-K89_CONSUMER_UPDATED=$(grep -cE 'graphifyMod\.symbolsInFiles' "$ROOT/bin/modules/state.cjs" 2>/dev/null || true)
+K89_CONSUMER_UPDATED=$(grep -cE 'graphifyMod\.symbolsInFiles' "$ROOT/bin/modules/state-graphify.cjs" 2>/dev/null || true)
 if [ "$K89_NO_INPUT_REASON" = "no input files" ] && [ "$K89_HAS_ENVELOPE" = "true" ] && [ "$K89_CONSUMER_UPDATED" -ge "1" ]; then
   pass "K89: symbols-in-files envelope shape (reason/graph_lag_commits/total_matches keys present; consumer in state.cjs::computeGraphifyImpactPlan uses .symbols[])"
 else
@@ -12523,7 +12523,7 @@ fi
 # Drift between them ships UX bugs: status.md routing drift went undetected
 # for weeks until a manual audit caught 4 missing rows
 # (dev/debug/retro/arch_health_scan). Drift class: silent registry/router divergence.
-K103_VALID=$(awk '/VALID_WORKFLOW_TYPES = new Set/,/\]\);/' "$ROOT/bin/modules/state.cjs" \
+K103_VALID=$(awk '/VALID_WORKFLOW_TYPES = new Set/,/\]\);/' "$ROOT/bin/modules/state-contract.cjs" \
   | grep -oE '"[a-z_]+"' | sed 's/"//g' | sort -u)
 K103_NEXT=$(awk '/^\| `workflow_type` \|/{flag=1; next} flag && /^\|/' "$ROOT/workflows/next.md" \
   | grep -oE '`[a-z_]+`' | sed 's/`//g' | sort -u)
@@ -14556,7 +14556,7 @@ fi
 # K174: code-review.md impact-plan tier registry includes `pr_scoped_diff` tier
 # branch for non-GitHub PRs (Bitbucket pr_scoped equivalent — wires diff-symbols
 # + blast_radius). Asserts: TIER="pr_scoped_diff" literal exists in workflow.
-K174_OUT=$(/usr/bin/grep -cE '"pr_scoped_diff"' "$ROOT/bin/modules/state.cjs" 2>/dev/null || echo 0)
+K174_OUT=$(/usr/bin/grep -cE '"pr_scoped_diff"' "$ROOT/bin/modules/state-graphify.cjs" 2>/dev/null || echo 0)
 if [ "$K174_OUT" -ge "1" ]; then
   pass "K174: state.cjs::computeGraphifyImpactPlan tier-decision includes pr_scoped_diff branch for non-GitHub PRs (Bitbucket gets pr_scoped-equivalent richness)"
 else
@@ -15141,7 +15141,7 @@ fi
 # in STATE-RULES.md. Same structural-guard class as K117/K156/K194.
 K197_MISSING=$(node -e "
   const fs=require('fs');
-  const src=fs.readFileSync('$ROOT/bin/modules/state.cjs','utf8');
+  const src=fs.readFileSync('$ROOT/bin/modules/state-contract.cjs','utf8');
   const doc=fs.readFileSync('$ROOT/docs/STATE-RULES.md','utf8');
   const m=src.match(/const RESET_EXEMPT = new Set\(\[([\s\S]*?)\]\)/);
   const entries=[];
@@ -16285,7 +16285,7 @@ if ! /usr/bin/grep -q "^user-invocable: false" "$ROOT/commands/thread.md" \
    && /usr/bin/grep -q "^session: {workflow_id" "$ROOT/workflows/thread.md" \
    && /usr/bin/grep -q '"workflow_id"' "$ROOT/workflows/pause-work.md" \
    && /usr/bin/grep -q "QUOTED VERBATIM" "$ROOT/workflows/thread.md" \
-   && /usr/bin/grep -A6 "const RESET_EXEMPT" "$ROOT/bin/modules/state.cjs" | /usr/bin/grep -q '"threads"'; then
+   && /usr/bin/grep -A6 "const RESET_EXEMPT" "$ROOT/bin/modules/state"*.cjs | /usr/bin/grep -q '"threads"'; then
   pass "K247: session-handoff contract — thread visible + distill-not-quiz + copy-paste resume prompts + redaction + no-overwrite guard + session ids + verbatim anchors + threads RESET_EXEMPT"
 else
   fail "K247: session-handoff contract incomplete"
@@ -17385,8 +17385,8 @@ fi
 # top level (jq '.status' routes correctly; validation carries allowed values
 # on mismatch) and scope-cache suppresses generic entries (wiki index, bare
 # dir wildcards) when concrete blast-derived paths exist.
-if /usr/bin/grep -q "Routing fields hoisted to the TOP level" "$ROOT/bin/modules/state.cjs" \
-   && /usr/bin/grep -q "allowed_status = schema.status" "$ROOT/bin/modules/state.cjs" \
+if /usr/bin/grep -q "Routing fields hoisted to the TOP level" "$ROOT/bin/modules/state-io.cjs" \
+   && /usr/bin/grep -q "allowed_status = schema.status" "$ROOT/bin/modules/state-io.cjs" \
    && /usr/bin/grep -q "Generic-entry suppression" "$ROOT/bin/modules/preflight.cjs" \
    && /usr/bin/grep -qF 'wiki\/index\.md$|^[^*]*\/\*\*$' "$ROOT/bin/modules/preflight.cjs"; then
   pass "K287: read-sidecar top-level routing fields + scope_hint generic-entry suppression"
@@ -17467,7 +17467,7 @@ K289_STUBAWARE=$(/usr/bin/grep -lF 'a `(by-reference: …)` stub' "$ROOT/agents/
 { /usr/bin/grep -qF 'review-depth.txt' "$ROOT/workflows/code-review.md" \
   && /usr/bin/grep -qF 'diff_loc=${DIFF_LOC}' "$ROOT/workflows/code-review.md" \
   && /usr/bin/grep -qF 'enumerate per-file hunks first' "$ROOT/workflows/code-review.md" \
-  && /usr/bin/grep -qF '/^review-depth\.txt$/' "$ROOT/bin/modules/state.cjs"; } || { K289_OK=0; K289_MISS="$K289_MISS diff-loc-review"; }
+  && /usr/bin/grep -qF '/^review-depth\.txt$/' "$ROOT/bin/modules/state-contract.cjs"; } || { K289_OK=0; K289_MISS="$K289_MISS diff-loc-review"; }
 printf '{"source":"preflight","ts":"2026-07-18T08:05:00Z","file_path":"/x/a.py"}\n{"source":"deny-outcome","ts":"2026-07-18T08:06:00Z","file_path":"/x/a.py","resolves_ts":"2026-07-18T08:05:00Z","outcome":"recovered-governed"}\n{"source":"preflight","ts":"2026-07-18T08:07:00Z","file_path":"/x/b.py"}\n' > "$K289_TMP/.devt/state/preflight-denies.jsonl"
 K289_GUARD=$(node -e "
 const wr=require('$ROOT/bin/modules/weekly-report.cjs');
@@ -17578,7 +17578,7 @@ printf '%s' "$K291_INL" | /usr/bin/grep -q '"reason": *"over_budget"' || { K291_
 rm -rf "$K291_TMP"
 K291_REG=$({ /usr/bin/grep -c 'assert-dispatch-warnings-acknowledged' "$ROOT/workflows/_phase-gates.yaml" || true; })
 [ "$K291_REG" = "2" ] || { K291_OK=0; K291_MISS="$K291_MISS phase-gate-registry($K291_REG/2)"; }
-/usr/bin/grep -qF '"assert-dispatch-warnings-acknowledged": assertDispatchWarningsAcknowledged' "$ROOT/bin/modules/state.cjs" || { K291_OK=0; K291_MISS="$K291_MISS gate-fns-map"; }
+/usr/bin/grep -qF '"assert-dispatch-warnings-acknowledged": assertDispatchWarningsAcknowledged' "$ROOT/bin/modules/state-gates.cjs" || { K291_OK=0; K291_MISS="$K291_MISS gate-fns-map"; }
 { /usr/bin/grep -qF 'Delta-shaped revisions prefer a warm resume' "$ROOT/workflows/code-review.steps.md" \
   && /usr/bin/grep -qF 'ADOPTED' "$ROOT/docs/RETIREMENT-WATCH.md"; } || { K291_OK=0; K291_MISS="$K291_MISS warm-resume-adoption"; }
 { /usr/bin/grep -qF 'first_created_at' "$ROOT/agents/code-reviewer.md" \
@@ -17635,10 +17635,10 @@ K292_AA_EXIT=0
 K292_FOOT=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" memory candidates-footer 2>/dev/null) || true)
 printf '%s' "$K292_FOOT" | /usr/bin/grep -q '\[memory\] candidates-footer: [0-9]* pending / threshold' || { K292_OK=0; K292_MISS="$K292_MISS footer-line"; }
 rm -rf "$K292_TMP"
-{ /usr/bin/grep -qF 'is missing its "status" field (JSON sidecar routing contract)' "$ROOT/bin/modules/state.cjs" \
-  && /usr/bin/grep -qF 'Diffstat basis: count only +/- change lines' "$ROOT/bin/modules/state.cjs" \
-  && /usr/bin/grep -qF 'file_count: r.ok && r.lane' "$ROOT/bin/modules/state.cjs" \
-  && /usr/bin/grep -qF 'On-ramp:' "$ROOT/bin/modules/state.cjs"; } || { K292_OK=0; K292_MISS="$K292_MISS cli-pins"; }
+{ /usr/bin/grep -qF 'is missing its "status" field (JSON sidecar routing contract)' "$ROOT/bin/modules/state-io.cjs" \
+  && /usr/bin/grep -qF 'Diffstat basis: count only +/- change lines' "$ROOT/bin/modules/state-lanes.cjs" \
+  && /usr/bin/grep -qF 'file_count: r.ok && r.lane' "$ROOT/bin/modules/state-lanes.cjs" \
+  && /usr/bin/grep -qF 'On-ramp:' "$ROOT/bin/modules/state-gates.cjs"; } || { K292_OK=0; K292_MISS="$K292_MISS cli-pins"; }
 { /usr/bin/grep -qF 'Dispatch via the POINTER STUB' "$ROOT/workflows/code-review-parallel.md" \
   && /usr/bin/grep -qF 'non-default base in THIS repo' "$ROOT/workflows/code-review-parallel.md" \
   && /usr/bin/grep -qF 'state assert-all --phase=complete' "$ROOT/workflows/code-review.steps.md" \
@@ -17688,7 +17688,7 @@ process.stdout.write((symsOk && kwOk) ? 'ok' : 'shape=' + symsOk + ' kw=' + kwOk
 K293_RW=$( (cd "$ROOT" && node "$ROOT/bin/devt-tools.cjs" review-weight assess --range=HEAD~1..HEAD~1 2>/dev/null) || true)
 printf '%s' "$K293_RW" | /usr/bin/grep -q "scope unresolvable" || { K293_OK=0; K293_MISS="$K293_MISS scope-unresolvable"; }
 { /usr/bin/grep -qF -- '--range=' "$ROOT/bin/modules/graphify.cjs" \
-  && /usr/bin/grep -qF 'missing_attestation_fields' "$ROOT/bin/modules/state.cjs" \
+  && /usr/bin/grep -qF 'missing_attestation_fields' "$ROOT/bin/modules/state-graphify.cjs" \
   && /usr/bin/grep -qF 'args_overridden' "$ROOT/workflows/code-review.md" \
   && /usr/bin/grep -qF 'low marginal yield' "$ROOT/bin/modules/review-weight.cjs"; } || { K293_OK=0; K293_MISS="$K293_MISS cli-pins"; }
 K293_WF=$({ /usr/bin/grep -c 'RANGE=$(echo " ${REVIEW_SCOPE}' "$ROOT/workflows/code-review.md" || true; })
@@ -18788,6 +18788,29 @@ if [ "$K323_OK" -eq 1 ]; then
   pass "K323: stop-hook compound verb (loop-guard silent, WARNING + stop stamp on active+incomplete, base stopReason otherwise; hooks/stop.sh wired to the single-spawn path)"
 else
   fail "K323: stop-hook parity regressed:$K323_WHY"
+fi
+
+# K324: state facade contract — the state layer is a 5-submodule family behind
+# the state.cjs facade (mechanical split of the former 8.2K-line single file:
+# contract / io / gates / lanes / graphify). Locks: (1) every submodule loads
+# standalone (no load-order cycles — the two documented lazy requires stay
+# call-time); (2) the facade re-exports the full public surface (59 names at
+# split time — a floor, so additive growth doesn't churn this gate); (3) no
+# submodule requires the facade back (cycle guard); (4) the facade stays a
+# facade — a line ceiling keeps the hotspot from silently regrowing in place.
+K324_OK=1; K324_MISS=""
+for m in state-contract state-io state-gates state-lanes state-graphify; do
+  node -e "require('$ROOT/bin/modules/$m.cjs')" >/dev/null 2>&1 || { K324_OK=0; K324_MISS="$K324_MISS $m:load"; }
+  if /usr/bin/grep -q 'require("\./state\.cjs")' "$ROOT/bin/modules/$m.cjs"; then K324_OK=0; K324_MISS="$K324_MISS $m:requires-facade"; fi
+done
+K324_EXPORTS=$(node -e "console.log(Object.keys(require('$ROOT/bin/modules/state.cjs')).length)" 2>/dev/null || echo 0)
+[ "$K324_EXPORTS" -ge 59 ] || { K324_OK=0; K324_MISS="$K324_MISS exports($K324_EXPORTS<59)"; }
+K324_LINES=$(wc -l < "$ROOT/bin/modules/state.cjs" | tr -d ' ')
+[ "$K324_LINES" -le 2600 ] || { K324_OK=0; K324_MISS="$K324_MISS facade-lines($K324_LINES>2600)"; }
+if [ "$K324_OK" -eq 1 ]; then
+  pass "K324: state facade contract (5 submodules load standalone, no facade back-requires, ${K324_EXPORTS} exports ≥ 59 floor, facade ${K324_LINES} ≤ 2600 lines)"
+else
+  fail "K324: state facade contract regressed:$K324_MISS"
 fi
 
 echo

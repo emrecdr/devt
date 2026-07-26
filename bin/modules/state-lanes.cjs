@@ -1,0 +1,622 @@
+"use strict";
+
+// state-lanes — lane registration, sizing, diff generation, and lane-output listing for parallel-review fan-out.
+// Mechanical split of the former single-file state.cjs — function bodies are
+// verbatim moves; state.cjs remains the facade that re-exports every public
+// name, so all consumers keep requiring bin/modules/state.cjs unchanged.
+
+const fs = require("fs");
+const path = require("path");
+const { findProjectRoot } = require("./config.cjs");
+const { atomicWriteFileSync, atomicWriteJsonSync } = require("./io.cjs");
+const { FILE_REL: DEFERRED_FILE_REL } = require("./deferred.cjs");
+const {
+  STATE_DIR,
+  WORKFLOW_FILE,
+  LOCK_TIMEOUT_MS,
+  LOCK_RETRY_MS,
+  _INSTANCE_ID_PATTERN,
+  ARTIFACT_FRESHNESS_GRACE_MS,
+  KNOWN_STATE_KEYS,
+  PHASE_ORDER,
+  VALID_PHASES,
+  PHASE_ARTIFACT_MAP,
+  VALID_TIERS,
+  TIER_RANK,
+  INPUT_ARTIFACTS,
+  MISMATCH_REASONS,
+  VERIFICATION_STATUSES,
+  VERIFICATION_VERDICTS,
+  JSON_SIDECAR_SCHEMAS,
+  JSON_INPUT_SCHEMAS,
+  ARTIFACT_SCHEMA,
+  SIDECAR_FOR_MARKDOWN,
+  PERSISTENT_ARTIFACTS,
+  VALID_WORKFLOW_TYPES,
+  VALID_LANE_STATUSES,
+  _ACTIVE_SUBAGENT_FRESH_MS,
+  ARCHIVE_DIR,
+  RESET_EXEMPT,
+  STATE_FILE_CONTRACT,
+  RESET_SOFT_CLEAR_KEYS,
+  RESET_SOFT_ROTATE_LOGS,
+  RESET_SOFT_EVICT_PATTERNS,
+  TRUNCATABLE_ARTIFACTS,
+  _DISK_WARN_MB,
+  STUB_MARKER_PATTERNS,
+  STUB_WORD_COUNT_THRESHOLD,
+  STUB_PHRASE_WORD_CEILING,
+  VERIFIER_REQUIRED_WORKFLOWS,
+  SELF_FLAG_SIDECAR_FOR_AGENT,
+  REUSE_REQUIRED_WORKFLOWS,
+  STUB_SIZE_THRESHOLD,
+  LANE_DIFF_CHUNKED_THRESHOLD,
+  LANE_DIFF_SPLIT_THRESHOLD,
+  SIZING_EXCLUDE_DEFAULT,
+} = require("./state-contract.cjs");
+const {
+  getStateDir,
+  getStateRoot,
+  getWorkflowPath,
+  ensureStateDir,
+  isArtifactFresh,
+  parseSimpleYaml,
+  serializeSimpleYaml,
+  warnState,
+  validateStateEntry,
+  getScopeFileCount,
+  computeTierFloor,
+  readState,
+  extractStatus,
+  validateConsistency,
+  validateInputJson,
+  describeMismatch,
+  sleepSync,
+  acquireLock,
+  releaseLock,
+  readSidecar,
+  readSection,
+  checkWorkflowLock,
+  workflowIdChainSet,
+  _getFlag,
+} = require("./state-io.cjs");
+
+
+// Slug normalization for lane file names. Graphify affected_communities[].name
+// can carry spaces, hyphens, slashes, or other separators that would produce
+// invalid filenames. Rule: lowercase, replace non-alphanum with underscore,
+// collapse repeats, trim, cap at 32 chars. Deterministic and stable across
+// re-partitions.
+function slugifyLaneName(name) {
+  if (!name || typeof name !== "string") return "ungrouped";
+  const slug = name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+  return slug || "ungrouped";
+}
+
+
+// Surfaces the canonical lane registry from workflow.yaml::lanes[] alongside
+// each lane's review file existence + size. Consumed by code-review-parallel.md's
+// substance_check_lanes + consolidate steps. Returns empty lanes:[] when no
+// parallel workflow is active (lanes key missing from workflow.yaml).
+function listLaneOutputs() {
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { lanes: [], reason: "no workflow.yaml" };
+  }
+  const yaml = fs.readFileSync(wfPath, "utf8");
+  // first_created_at lets each lane report stale=true when its review_file
+  // predates the current session anchor — calibration #8 surfaced lanes
+  // registered in a prior workflow whose physical files were long gone
+  // (file_exists:false) but whose metadata still satisfied consumers.
+  //
+  // Cid-match correctness defense. Dispatch envelope stamps
+  // `cid_<workflow_id_prefix>_<lane_id>` and the lane reviewer's file body
+  // surfaces it. Matching against the whole session id chain (not just the
+  // current id) keeps lanes stamped before a workflow_type rotation from
+  // classifying as foreign; the mtime >= anchor bound keeps genuinely stale
+  // files (prior session, eviction miss) out even when their id survives in
+  // the preserved history.
+  const chain = workflowIdChainSet(yaml);
+  const anchorMs = chain.anchor_ms;
+  // Light YAML parse: the lanes[] block uses a fixed shape; we extract via
+  // line-based parsing to avoid pulling in a YAML library (zero-deps rule).
+  const lanes = [];
+  const blocks = yaml.split(/^  - id:/m).slice(1);
+  for (const block of blocks) {
+    const id = (block.match(/^\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const community = (block.match(/^\s+community:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const reviewFile = (block.match(/^\s+review_file:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const status = (block.match(/^\s+status:\s*"?([^"\n]+)"?\s*$/m) || [])[1];
+    const redispatchCount = parseInt(
+      (block.match(/^\s+redispatch_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    // Lane sizing fields written by registerLane (both the auto-partitioner
+    // and hand-rolled partitions route through it). size_class is diff-LOC
+    // based (ok/chunked/split) or "unknown" when diff generation fell back to
+    // whole-file counting. Absent on lanes registered by older tool versions
+    // or stripped during a manual workflow.yaml edit.
+    const fileCount = parseInt(
+      (block.match(/^\s+file_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    const estLoc = parseInt(
+      (block.match(/^\s+est_loc:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
+    const sizeClass = (block.match(/^\s+size_class:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
+    const sizeBasis = (block.match(/^\s+size_basis:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
+    const diffArtifact = (block.match(/^\s+diff_artifact:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
+    const correlationId = (block.match(/^\s+correlation_id:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
+    if (!id) continue;
+    let sizeBytes = 0;
+    let exists = false;
+    let mtimeMs = 0;
+    if (reviewFile) {
+      try {
+        const stat = fs.statSync(reviewFile);
+        sizeBytes = stat.size;
+        mtimeMs = stat.mtimeMs;
+        exists = true;
+      } catch { /* file absent — leave defaults */ }
+    }
+    // stale when the on-disk file is older than this session's anchor;
+    // absent files cannot be classified (no mtime) so they stay stale=false
+    // even though file_exists:false — consumers should treat absence as its
+    // own signal.
+    const stale = exists && anchorMs > 0 && mtimeMs < anchorMs;
+
+    // Cid-match extraction. Reads first 2KB of the lane file looking for
+    // a `cid_<8hex>` pattern (the dispatch correlation-id format). Outcomes:
+    //   "current" — cid prefix ∈ session id chain AND file mtime >= anchor
+    //   "foreign" — prefix outside the chain, OR chain-matched but written
+    //               before this session's anchor (prior-session leftover
+    //               surviving eviction — history is preserved across resets,
+    //               so id membership alone cannot vouch for freshness)
+    //   "absent"  — no cid found (legacy lane file pre-cid OR file missing)
+    // Consumers (consolidator query, gate checks) select `cid_match != "foreign"`
+    // to defend against the eviction-misses-a-file case. Bounded 2KB read so
+    // huge review files don't slow listLaneOutputs. cid_prefix is surfaced so
+    // an exclusion is diagnosable (which rotation stamped the lane) instead of
+    // a bare count.
+    let cidMatch = "absent";
+    let cidPrefix = null;
+    if (exists && reviewFile && chain.prefixes.size > 0) {
+      try {
+        const fd = fs.openSync(reviewFile, "r");
+        const buf = Buffer.alloc(2048);
+        try { fs.readSync(fd, buf, 0, 2048, 0); } finally { fs.closeSync(fd); }
+        const head = buf.toString("utf-8");
+        const cidM = head.match(/cid_([0-9a-f]{8})/);
+        if (cidM) {
+          cidPrefix = cidM[1];
+          const inChain = chain.prefixes.has(cidM[1]);
+          const mtimeOk = anchorMs > 0 ? mtimeMs >= anchorMs : true;
+          cidMatch = inChain && mtimeOk ? "current" : "foreign";
+        }
+      } catch { /* read error — leave as "absent" */ }
+    }
+
+    // Registration-cid fallback: before a reviewer echoes the cid into the
+    // review file, fall back to the deterministic cid stamped at register-lanes
+    // so trace-back + the stale-lane filter (cid_match != "foreign") work
+    // immediately after registration, not only after a reviewer runs.
+    if (cidMatch === "absent" && correlationId) {
+      const rm = correlationId.match(/cid_([0-9a-f]{8})/);
+      if (rm) {
+        cidPrefix = cidPrefix || rm[1];
+        const mtimeOk = (exists && anchorMs > 0) ? mtimeMs >= anchorMs : true;
+        cidMatch = (chain.prefixes.has(rm[1]) && mtimeOk) ? "current" : "foreign";
+      }
+    }
+
+    lanes.push({
+      id: id ? id.trim() : null,
+      community: community ? community.trim() : null,
+      review_file: reviewFile ? reviewFile.trim() : null,
+      status: status ? status.trim() : null,
+      redispatch_count: redispatchCount,
+      file_count: fileCount,
+      est_loc: estLoc,
+      size_class: sizeClass,
+      size_basis: sizeBasis,
+      diff_artifact: diffArtifact,
+      file_exists: exists,
+      file_size_bytes: sizeBytes,
+      stale,
+      cid_match: cidMatch,
+      cid_prefix: cidPrefix,
+      correlation_id: correlationId,
+    });
+  }
+  return { lanes };
+}
+
+function _sizingExcludePatterns() {
+  const pats = SIZING_EXCLUDE_DEFAULT.slice();
+  try {
+    const cfg = require("./config.cjs").getMergedConfig();
+    const extra = cfg && cfg.review && Array.isArray(cfg.review.size_exclude_globs) ? cfg.review.size_exclude_globs : [];
+    for (const src of extra) { try { pats.push(new RegExp(src)); } catch { /* skip a bad user regex rather than throw */ } }
+  } catch { /* config unavailable — defaults only */ }
+  return pats;
+}
+
+// Count +/- change lines in a unified-diff body, EXCLUDING files whose path
+// matches a sizing-exclude pattern. Keys each file section on its `+++ b/<path>`
+// header (content lines follow it), so coverage is untouched — only the sizing
+// tally drops the generated files.
+function _laneSizingLines(body) {
+  if (!body) return 0;
+  const excl = _sizingExcludePatterns();
+  const isExcl = (p) => excl.some(re => re.test(p));
+  let total = 0, curExcluded = false;
+  for (const line of body.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const p = line.replace(/^\+\+\+ (b\/)?/, "").trim();
+      curExcluded = p !== "/dev/null" && isExcl(p);
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("diff ") || line.startsWith("@@")) continue;
+    if (curExcluded) continue;
+    if (/^\+(?!\+\+)/.test(line) || /^-(?!--)/.test(line)) total++;
+  }
+  return total;
+}
+
+
+// Generates .devt/state/lane-diff-<id>.txt: merge-base diff of the lane's
+// files (committed + staged + unstaged in one pass) plus /dev/null diffs for
+// untracked lane files. Returns {ok, artifact, diff_lines} or {ok: false}.
+function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
+  const { execFileSync } = require("child_process");
+  const git = (argv, okCodes) => {
+    try {
+      return execFileSync("git", argv, { cwd: repoRoot, encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+    } catch (e) {
+      // git diff --no-index exits 1 when the files differ — that's the
+      // expected success path there, so callers opt specific codes in.
+      if (okCodes && e.status !== undefined && okCodes.includes(e.status) && typeof e.stdout === "string") return e.stdout;
+      throw e;
+    }
+  };
+  try {
+    let mergeBase = baseRef;
+    try { mergeBase = git(["merge-base", baseRef, "HEAD"]).trim() || baseRef; }
+    catch { /* unreachable base — two-dot against the ref itself below */ }
+    let body = git(["diff", mergeBase, "--", ...files]);
+    const untracked = new Set(git(["ls-files", "--others", "--exclude-standard", "--", ...files]).split("\n").map(s => s.trim()).filter(Boolean));
+    for (const f of files) {
+      const rel = path.isAbsolute(f) ? path.relative(repoRoot, f) : f;
+      if (!untracked.has(rel) && !untracked.has(f)) continue;
+      body += git(["diff", "--no-index", "--", "/dev/null", f], [1]);
+    }
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const artifact = path.join(stateDir, `lane-diff-${id}.txt`);
+    atomicWriteFileSync(artifact, body);
+    // Diffstat basis: count only +/- change lines (not context, hunk headers,
+    // or the +++/--- file headers). Raw artifact line count field-measured
+    // ~25% over the true changed-line count, which breaks any comparison
+    // against a real `git diff --stat`.
+    const diffLines = body === "" ? 0 : (body.match(/^(\+(?!\+\+)|-(?!--))/gm) || []).length;
+    const sizingLines = _laneSizingLines(body);
+    return { ok: true, artifact, diff_lines: diffLines, sizing_lines: sizingLines };
+  } catch {
+    return { ok: false };
+  }
+}
+
+
+function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
+  if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
+    return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
+  }
+  if (!scope || typeof scope !== "string") {
+    return { ok: false, reason: "scope required (non-empty string)" };
+  }
+  if (!Array.isArray(files) || files.length === 0) {
+    return { ok: false, reason: "files required (non-empty array of paths)" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { ok: false, reason: "no workflow.yaml — initialize a workflow first" };
+  }
+  const laneRepoRoot = repoRoot ? path.resolve(repoRoot) : findProjectRoot();
+  let laneBaseRef = baseRef;
+  if (!laneBaseRef) {
+    try {
+      const cfg = require("./config.cjs").getMergedConfig();
+      laneBaseRef = (cfg.git && cfg.git.primary_branch) || "main";
+    } catch { laneBaseRef = "main"; }
+  }
+  // Lock so concurrent register-lane calls don't lose entries on the
+  // read-modify-write cycle. acquireLock() defaults to getStateDir() —
+  // matches updateState/resetState/syncState/pruneState's lock idiom.
+  const lockFile = acquireLock();
+  try {
+    const state = parseSimpleYaml(fs.readFileSync(wfPath, "utf8"));
+    const lanes = Array.isArray(state.lanes) ? state.lanes : [];
+    const existing = lanes.findIndex(l => l && l.id === id);
+    if (existing !== -1 && !allowOverwrite) {
+      return { ok: false, reason: `lane id "${id}" already registered; pass --overwrite to replace` };
+    }
+    const slug = slugifyLaneName(scope);
+    const diff = generateLaneDiff({ id, files, repoRoot: laneRepoRoot, baseRef: laneBaseRef, stateDir: dir });
+    let estLoc;
+    let sizeBasis;
+    let sizeClass;
+    if (diff.ok) {
+      // Size by REVIEWABLE diff (generated/lockfile/append-only files
+      // discounted), not raw diff — so a changelog-archive or lockfile bump
+      // doesn't trip a spurious split. diff_lines_raw preserves the full count.
+      estLoc = diff.sizing_lines != null ? diff.sizing_lines : diff.diff_lines;
+      sizeBasis = "diff";
+      sizeClass = estLoc >= LANE_DIFF_SPLIT_THRESHOLD ? "split"
+        : estLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
+    } else {
+      estLoc = 0;
+      for (const f of files) {
+        try {
+          const content = fs.readFileSync(f, "utf8");
+          estLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
+        } catch { /* file missing or unreadable — counts as 0 LOC */ }
+      }
+      sizeBasis = "whole_file";
+      sizeClass = "unknown";
+    }
+    const fileCount = files.length;
+    const reviewFile = path.join(dir, `review-lane-${slug}.md`);
+    const registeredAt = new Date().toISOString();
+    const laneEntry = {
+      id,
+      community: scope,
+      slug,
+      review_file: reviewFile,
+      status: "in_flight",
+      redispatch_count: 0,
+      registered_at: registeredAt,
+      file_count: fileCount,
+      est_loc: estLoc,
+      size_basis: sizeBasis,
+      size_class: sizeClass,
+      repo_root: laneRepoRoot,
+      base_ref: laneBaseRef,
+      // Correlation id stamped at REGISTRATION — fully determined here
+      // (workflow_id + lane id), matching render-lanes' cid_<wfPrefix>_<id>.
+      // Without it the consolidate step's cid_match!="foreign" stale-lane filter
+      // can't function (the cid was null until a reviewer echoed it into the
+      // review file), and callers had to hand-roll their own cid.
+      correlation_id: `cid_${String(state.workflow_id || "noworkflow").split("-")[0]}_${id}`,
+    };
+    if (diff.ok) laneEntry.diff_artifact = diff.artifact;
+    if (diff.ok && diff.diff_lines !== estLoc) laneEntry.diff_lines_raw = diff.diff_lines;
+    if (existing !== -1) {
+      lanes[existing] = laneEntry;
+    } else {
+      lanes.push(laneEntry);
+    }
+    state.lanes = lanes;
+    atomicWriteFileSync(wfPath, serializeSimpleYaml(state));
+    // Per-lane files sidecar. Atomic per-lane write. Read by render-lanes
+    // (dispatch.cjs) and any future consumer that needs the file list
+    // without re-parsing the orchestrator's partition input.
+    const sidecarDir = path.join(dir, "lane-files");
+    if (!fs.existsSync(sidecarDir)) fs.mkdirSync(sidecarDir, { recursive: true });
+    atomicWriteFileSync(
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+      path.join(sidecarDir, `${id}.json`),
+      JSON.stringify({
+        id, community: scope, files, registered_at: registeredAt,
+        repo_root: laneRepoRoot, base_ref: laneBaseRef,
+        size_class: sizeClass, size_basis: sizeBasis, est_loc: estLoc,
+        diff_artifact: diff.ok ? diff.artifact : null,
+      }, null, 2) + "\n",
+    );
+    return { ok: true, lane: { ...laneEntry, files } };
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+
+// Round 8 W2 — bulk-register from a YAML/JSON partition file. Format:
+//   lanes:
+//     - id: L1
+//       scope: identity
+//       files: [app/services/identity/auth.py, ...]
+//     - id: L2
+//       ...
+// JSON shape (same key names) also accepted. Loops registerLane per entry.
+function registerLanesFromYaml(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { ok: false, reason: `partition file not found: ${filePath}` };
+  }
+  const raw = fs.readFileSync(filePath, "utf8");
+  let parsed = null;
+  // JSON-first: cheaper than the YAML branch and tolerates either format.
+  try { parsed = JSON.parse(raw); } catch { /* fall through to YAML */ }
+  if (!parsed) {
+    // Minimal YAML parse for the lanes:[] shape. Each lane is a dash-prefixed
+    // block. Reuses the existing parseSimpleYaml lanes round-trip when files
+    // is absent, then falls through to a focused multi-line files parse.
+    const lines = raw.split("\n");
+    const lanes = [];
+    let current = null;
+    let inFiles = false;
+    for (const line of lines) {
+      if (/^\s*-\s+id:/.test(line)) {
+        if (current) lanes.push(current);
+        current = { files: [] };
+        inFiles = false;
+        const m = line.match(/id:\s*"?([^"\n]+)"?\s*$/);
+        if (m) current.id = m[1].trim();
+      } else if (current && /^\s+scope:/.test(line)) {
+        inFiles = false;
+        const m = line.match(/scope:\s*"?([^"\n]+)"?\s*$/);
+        if (m) current.scope = m[1].trim();
+      } else if (current && /^\s+(repo_root|base_ref):/.test(line)) {
+        inFiles = false;
+        const m = line.match(/(repo_root|base_ref):\s*"?([^"\n]+)"?\s*$/);
+        if (m) current[m[1]] = m[2].trim();
+      } else if (current && /^\s+files:\s*\[/.test(line)) {
+        // Inline array form: files: [a.py, b.py]
+        inFiles = false;
+        const m = line.match(/files:\s*\[(.+)\]\s*$/);
+        if (m) current.files = m[1].split(",").map(s => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
+      } else if (current && /^\s+files:\s*$/.test(line)) {
+        inFiles = true;
+      } else if (current && inFiles && /^\s+-\s+/.test(line)) {
+        current.files.push(line.replace(/^\s+-\s+/, "").trim().replace(/^"|"$/g, ""));
+      } else if (/^[a-z_]/.test(line)) {
+        inFiles = false;
+      }
+    }
+    if (current) lanes.push(current);
+    parsed = { lanes };
+  }
+  const lanes = (parsed && Array.isArray(parsed.lanes)) ? parsed.lanes : [];
+  if (lanes.length === 0) {
+    return { ok: false, reason: "no lanes found in partition file (expected `lanes: [...]` at top level)" };
+  }
+  const results = [];
+  const errors = [];
+  for (const entry of lanes) {
+    const r = registerLane({
+      id: entry.id,
+      scope: entry.scope,
+      files: entry.files,
+      // Per-lane repo/base passthrough for cross-repo lanes (sibling
+      // repository with its own diff base). Accepts both snake_case (JSON/
+      // YAML convention) and camelCase.
+      repoRoot: entry.repo_root || entry.repoRoot,
+      baseRef: entry.base_ref || entry.baseRef,
+      allowOverwrite: true, // bulk register is idempotent — re-runs replace
+    });
+    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
+    if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
+  }
+  // Cross-lane disjointness check — WARN-only, never blocks. The parallel
+  // review workflow assumes disjoint file slices; hand-rolled partitions can
+  // double-assign a file, which costs duplicated review tokens + conflicting
+  // findings at consolidation. Surfaced per [[telemetry-on-reduction]]: the
+  // overlap is named, the operator decides.
+  const fileOwners = new Map();
+  for (const entry of lanes) {
+    for (const f of (entry.files || [])) {
+      if (!fileOwners.has(f)) fileOwners.set(f, []);
+      fileOwners.get(f).push(entry.id);
+    }
+  }
+  const overlaps = Array.from(fileOwners.entries())
+    .filter(([, owners]) => owners.length > 1)
+    .map(([file, owners]) => ({ file, lanes: owners }));
+  const out = { ok: errors.length === 0, registered: results, errors };
+  if (overlaps.length > 0) {
+    out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;
+    out.overlaps = overlaps.slice(0, 10);
+  }
+  return out;
+}
+
+
+function updateLane(laneId, kvPairs) {
+  if (!laneId || typeof laneId !== "string") {
+    return { ok: false, reason: "no lane-id provided" };
+  }
+  const updates = {};
+  for (const kv of (kvPairs || [])) {
+    const [k, v] = kv.split("=", 2);
+    if (!k || v === undefined) continue;
+    if (k === "status") {
+      if (!VALID_LANE_STATUSES.has(v)) {
+        return { ok: false, reason: `invalid status "${v}" (allowed: ${[...VALID_LANE_STATUSES].join(", ")})` };
+      }
+      updates.status = v;
+    } else if (k === "redispatch_count") {
+      const n = parseInt(v, 10);
+      if (isNaN(n) || n < 0) {
+        return { ok: false, reason: `invalid redispatch_count "${v}" (must be non-negative integer)` };
+      }
+      updates.redispatch_count = n;
+    } else if (k === "override_reason") {
+      if (!v.trim()) {
+        return { ok: false, reason: "override_reason must be non-empty" };
+      }
+      updates.override_reason = v.trim();
+    } else {
+      return { ok: false, reason: `unknown lane field "${k}" (allowed: status, redispatch_count, override_reason)` };
+    }
+  }
+  if (updates.status === undefined && updates.redispatch_count === undefined) {
+    return { ok: false, reason: "no updates provided (need status=... or redispatch_count=...; override_reason= only annotates one of those)" };
+  }
+  const dir = getStateDir();
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const wfPath = path.join(dir, "workflow.yaml");
+  if (!fs.existsSync(wfPath)) {
+    return { ok: false, reason: "no workflow.yaml" };
+  }
+  const yaml = fs.readFileSync(wfPath, "utf8");
+  // Locate the lane block by id, then mutate the status/redispatch_count
+  // lines in-place. Conservative line-based edit preserves YAML formatting.
+  const lines = yaml.split("\n");
+  let inLane = false;
+  let mutated = false;
+  let priorStatus = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^  - id:\s*"?/.test(line)) {
+      inLane = line.includes(`"${laneId}"`) || line.replace(/^  - id:\s*"?/, "").replace(/"\s*$/, "").trim() === laneId;
+    } else if (/^[a-z_]/.test(line)) {
+      inLane = false;
+    }
+    if (!inLane) continue;
+    if (updates.status !== undefined && /^\s+status:\s*/.test(line)) {
+      if (priorStatus === null) priorStatus = (line.match(/status:\s*"?([^"\n]*?)"?\s*$/) || [null, null])[1];
+      lines[i] = line.replace(/status:\s*"?[^"\n]*"?/, `status: "${updates.status}"`);
+      mutated = true;
+    }
+    if (updates.redispatch_count !== undefined && /^\s+redispatch_count:\s*/.test(line)) {
+      lines[i] = line.replace(/redispatch_count:\s*\d+/, `redispatch_count: ${updates.redispatch_count}`);
+      mutated = true;
+    }
+  }
+  if (!mutated) {
+    return { ok: false, reason: `lane id "${laneId}" not found in workflow.yaml::lanes[]` };
+  }
+  atomicWriteFileSync(wfPath, lines.join("\n"));
+  if (updates.override_reason) {
+    // Operator overrides of lane verdicts (e.g. keeping a review the stub
+    // gate false-flagged) were untraceable — the rationale lived only in
+    // whatever scratchpad the operator kept. Same forensic class as
+    // workflow-id-rotations.jsonl: append-only, RESET_EXEMPT.
+    const { appendJsonl } = require("./logger.cjs");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const auditPath = path.join(dir, "lane-status-overrides.jsonl");
+    try {
+      appendJsonl(auditPath, {
+        ts: new Date().toISOString(),
+        lane_id: laneId,
+        prior_status: priorStatus,
+        status: updates.status !== undefined ? updates.status : null,
+        redispatch_count: updates.redispatch_count !== undefined ? updates.redispatch_count : null,
+        override_reason: updates.override_reason,
+        pid: process.pid,
+      });
+    } catch { /* audit-trail failure must not block the status write */ }
+    return { ok: true, lane_id: laneId, updates, audit: auditPath };
+  }
+  return { ok: true, lane_id: laneId, updates };
+}
+
+module.exports = {
+  slugifyLaneName,
+  listLaneOutputs,
+  _sizingExcludePatterns,
+  _laneSizingLines,
+  generateLaneDiff,
+  registerLane,
+  registerLanesFromYaml,
+  updateLane,
+};
