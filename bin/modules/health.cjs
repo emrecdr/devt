@@ -29,6 +29,7 @@ const CHECKS = {
   W015: { severity: "warning", message: ".gitignore has flat .devt/state/ but not recursive **/.devt/state/ — sub-tree devt invocations (e.g. tools/X/, tests/Y/) will leak state files into PR diffs", repairable: true, fix: "Run /devt:setup --upgrade-gitignore to append recursive pattern (preserves the existing flat entry)" },
   W006: { severity: "warning", message: "Stale workflow — active=true with old stopped_at", repairable: true, fix: "Run /devt:setup --health --repair to clear stale state, or /devt:workflow --cancel" },
   W007: { severity: "warning", message: "VERSION and plugin.json version mismatch", repairable: false, fix: "Update VERSION or plugin.json to match" },
+  W016: { severity: "warning", message: "Rules file(s) byte-identical to their shipped template (untailored)", repairable: false, fix: "Tailor the listed .devt/rules/ files to the project — the template baseline can contradict project conventions (project CLAUDE.md wins on conflict); field case: a template's repository_interfaces.py rule contradicted a project's locked interfaces.py convention" },
   W008: { severity: "warning", message: "Hook script not executable", repairable: true, fix: "Run /devt:setup --health --repair to fix permissions, or: chmod +x hooks/<script>" },
   W009: { severity: "warning", message: "Plugin agent file missing", repairable: false, fix: "Reinstall devt — agent files may be corrupted or incomplete" },
   W010: { severity: "warning", message: "Workflow missing <available_agent_types> section", repairable: false, fix: "Add <available_agent_types> to the workflow to prevent post-/clear silent fallback to general-purpose" },
@@ -200,6 +201,46 @@ function runChecks(pluginRoot) {
       if (!fs.existsSync(path.join(rulesDir, file))) {
         add(RULE_WARNING_CODES[file]);
       }
+    }
+    // W016: untailored-rules detection. config.template records which template
+    // scaffolded this project; a rules file byte-identical to its template
+    // source has never been tailored — the installed boilerplate can
+    // contradict project law, and only downstream defenses (memory_signal,
+    // agent role text) stand between it and an agent grading against it.
+    // Heuristic: identical-to-CURRENT-template only (an old-template copy
+    // reads as tailored — acceptable false negative; the check is forward-
+    // looking for fresh installs).
+    if (pluginRoot) {
+      try {
+        // Template-agnostic: installs don't reliably record which template
+        // scaffolded them, so a rules file byte-identical to the same-named
+        // file in ANY shipped template counts as untailored.
+        const templatesRoot = path.join(pluginRoot, "templates");
+        const templateDirs = fs.existsSync(templatesRoot)
+          ? fs.readdirSync(templatesRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+          : [];
+        const untailored = [];
+        const walkRules = (rel) => {
+          for (const e of fs.readdirSync(path.join(rulesDir, rel), { withFileTypes: true })) {
+            const r = rel ? rel + "/" + e.name : e.name;
+            if (e.isDirectory()) { walkRules(r); continue; }
+            if (!e.name.endsWith(".md")) continue;
+            let installedBody;
+            try { installedBody = fs.readFileSync(path.join(rulesDir, r), "utf8"); } catch { continue; }
+            for (const t of templateDirs) {
+              const tplFile = path.join(templatesRoot, t, r);
+              try {
+                if (fs.existsSync(tplFile) && fs.readFileSync(tplFile, "utf8") === installedBody) {
+                  untailored.push(`${r} (=${t})`);
+                  break;
+                }
+              } catch { /* unreadable — skip */ }
+            }
+          }
+        };
+        walkRules("");
+        if (untailored.length > 0) add("W016", untailored.join(", "));
+      } catch { /* rules dir readable per E004 above — best-effort */ }
     }
   }
 

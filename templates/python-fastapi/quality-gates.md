@@ -1,5 +1,7 @@
 # Quality Gates — Python / FastAPI
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 > **About `parallel`**: gates tagged ``` ```bash parallel ``` are run concurrently
 > by `scripts/run-quality-gates.sh`. Consecutive parallel-tagged blocks form one
 > batch and finish when the slowest member finishes. Sequential blocks (no tag)

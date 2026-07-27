@@ -8,6 +8,19 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.217.0] - 2026-07-27
+
+Substrate batch, first slice (task-service field arc, Release Two part 1): headless honesty and untailored-rules defense.
+
+### Added
+
+- **`arch_scanner.autowire: never|ask|auto`** (default `ask`). The scanner-wiring prompt had no headless fallback — an autonomous run would block on a question nobody answers (the field operator saw it coming and deviated preemptively). Per the receipt's key refinement, `ask` now **degrades to `never` explicitly** in headless runs — skip, plus a named report line — never implicitly. `auto` wires a detected candidate without asking. The scanner-resolution step also collapsed to a single fence (config read + convention probe + autowire mode in one emission), removing that step's own cross-fence variable bug en route.
+- **Triage headless guard: defer-ALL.** A headless `--triage` run defers every untriaged finding with a report line instead of prompting — auto-accepting would corrupt the baseline's semantics ("operator-accepted floor"), making delta mode lie forever after.
+- **Template rules carry a precedence line** (fix (d), shipped to all 63 template rule files): the project's own CLAUDE.md and documented conventions win on any conflict with the template baseline. The field near-miss: an untailored template rule prescribed `repository_interfaces.py` against a project whose CLAUDE.md explicitly locks `interfaces.py` — only the memory signal and the architect's role text stood in between.
+- **Health check W016 — untailored-rules detection** (fix (b)'s mechanical core): `/devt:setup --health` flags every `.devt/rules/` file byte-identical to its counterpart in ANY shipped template, naming file and template. Template-agnostic because installs don't reliably record which template scaffolded them. Fixture-proven both directions: fresh install flags all files; a tailored file drops off the list.
+
+Remaining for the final substrate slice: the typed compiled architect envelope (needs the memory_signal contract decision + template-variant mechanics), the cross-fence workflow lint + sweep, and the compound `arch-scan run` verb.
+
 ## [0.216.0] - 2026-07-27
 
 The state-truth batch — Release One of the task-service field arc. A real external run (arch-health scan on a FastAPI service) produced a 9/9-verified defect report plus a calibration-grade filled receipt; this release restores the property the operator watched decay: *the state layer tells the truth during recovery*. Every fix below carries a field receipt.
@@ -627,24 +640,4 @@ Curation triggers were exclusively workflow-finalize-bound (`skills/memory-curat
 - `skills/memory-curation` gains the session-end trigger line (the weak form, shipping alongside the wiring that makes it fire).
 - Gate **K300** — behavioral: hint-only silent below threshold, hint+stamp at threshold, cooldown suppresses the rerun, default footer line intact, and stop.sh end-to-end emits the hint exactly once per window. Drift-guard stack 207 → 208 deep (K94–K300).
 - `docs/HOOKS.md` gains a "Session-End Curation Surface" section; `docs/MEMORY.md` CLI reference documents the mode.
-
-## [0.182.0] - 2026-07-19
-
-### Shared-root trust tier + REJ attribution (DEF-009 M2+M4 — sequence complete)
-
-The last legs of the multi-root provenance work. Before: a shared-root doc coerced under block-mode pre-flight with the same authority as a locally-curated one, and a shared-root REJ tombstone vetoed proposals with no indication of which root said NO. After: shared roots always govern and advise, but coercive denial over edits is an explicit config grant — and every REJ suppression names its root. With provenance markers, the index delta, the trust model doc, and now the tier, the full mitigation sequence for the curator-gate bypass is in place.
-
-### Added
-
-- **Config `memory.shared_roots_coerce`** (default `false`) — when false, an edit governed *solely* by shared-root docs logs a `PREFLIGHT … :: shared-advisory <ids>` scratchpad line and proceeds; the docs still ride the Brief and scope hints, only the block-mode deny is withheld. Any local governing doc in the match set keeps the full deny path. Provenance-unresolvable rows count as local (fail-coercive — preserves prior behavior). Opt-in restores the old always-coerce semantics.
-- **REJ suppression is root-attributed** — Brief tombstone lines gain `_(shared:<label>)_` for shared-root REJs (local lines unchanged), the recommendations line renders `REJ-NNN (shared:<label>)`, and `listRejectedKeywords` carries `source_root`.
-- Gate **K299** — behavioral fixture across the matrix: shared-only governance → advisory allow with scratchpad line; local governance on an **absolute** path → deny; `shared_roots_coerce: true` → deny restored; Brief REJ attribution on shared, absent on local. Drift-guard stack 206 → 207 deep (K94–K299).
-
-### Fixed
-
-- **`pre-flight-guard.sh` never matched governance on absolute paths** — `getByPath` received the raw `tool_input.file_path` (usually absolute) while `affects_paths` globs are repo-relative, so every absolutely-pathed edit auto-logged `:: ungoverned` and bypassed the guard whenever the plugin root was resolvable. Discovered while wiring the trust tier into that exact block; the guard now relativizes against the canonical project root (both sides already realpath'd for the descendant check) before matching. The deny path for governed files works for both path forms — pinned by K299.
-
-### Changed
-
-- `docs/MEMORY.md` — config-table row for `shared_roots_coerce`; trust-model section rewritten to the completed state (tiered coercion, attributed suppression; the inherent residual — shared content never passes the local curator gate — is the documented trust decision).
 

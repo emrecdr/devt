@@ -1,5 +1,7 @@
 # Testing Patterns — Rust
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Devt-integration document. Read by `tester`, `programmer`, `code-reviewer`, and `verifier` agents. Defines how tests are written, organized, and run in Rust projects.
 
 ## Test Pyramid

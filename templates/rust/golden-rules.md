@@ -1,5 +1,7 @@
 # Golden Rules
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Devt-integration document for Rust projects. Read by every agent. These rules are non-negotiable — they encode invariants that produce buggy / unsound / unreviewable code when violated.
 
 ## 1. No `unwrap()` / `expect()` Outside Tests + `main`

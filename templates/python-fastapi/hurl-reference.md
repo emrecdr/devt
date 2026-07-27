@@ -1,5 +1,7 @@
 # HURL E2E Test Reference
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 > **Reference file for `testing-patterns` skill.** See [SKILL.md](SKILL.md) for quick start.
 
 This guide covers HURL E2E test organization, structure, and best practices.

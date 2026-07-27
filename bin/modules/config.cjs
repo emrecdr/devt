@@ -317,6 +317,13 @@ const DEFAULTS = {
   arch_scanner: {
     command: null,
     report_dir: "docs/reports",
+    // Scanner auto-wiring when the convention probe finds a candidate:
+    //   "ask" (default) — AskUserQuestion when an interactive operator exists;
+    //     headless/autonomous runs DEGRADE TO "never" explicitly (skip + one
+    //     report line) rather than blocking on a prompt nobody will answer.
+    //   "never" — probe still reports the candidate; no prompt, no config write.
+    //   "auto"  — wire the detected candidate without asking.
+    autowire: "ask",
   },
   // Evolution scan — git-history behavioral metrics feeding /devt:review
   // --focus=arch (hotspots, change coupling, fix density, ownership).

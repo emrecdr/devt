@@ -1,5 +1,7 @@
 # Quality Gates
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Define your quality gate commands below. Each gate is a bash code block that must exit 0 to pass.
 Replace the placeholder commands with your project's actual commands.
 

@@ -17,6 +17,8 @@ Before submitting this MODULE.md file, verify:
 
 # Module: [Module Name]
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 <!--
 DOCUMENTATION SEPARATION GUIDE:
 - MODULE.md (this file): Technical reference for developers and AI agents

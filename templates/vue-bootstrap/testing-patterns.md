@@ -1,5 +1,7 @@
 # Testing Patterns — Vue 3 + Playwright
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 ## Test Strategy
 
 **Playwright E2E tests are the primary validation method.** No unit test framework (vitest/jest) is configured. All testing goes through Playwright.

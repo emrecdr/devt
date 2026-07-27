@@ -1,5 +1,7 @@
 # Architecture
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Devt-integration document for Rust projects. Read by the `architect` agent and `architecture-health-scanner` skill. Defines layering rules, structural patterns, and the trade-off space agents should respect when making architectural changes.
 
 ## Pattern: Clean Architecture (Hexagonal / Ports-and-Adapters)

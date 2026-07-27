@@ -1,5 +1,7 @@
 # Coding Standards — Vue 3 + Bootstrap 5
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 ## Language & Stack
 
 - **Framework**: Vue 3.5+ with Composition API exclusively

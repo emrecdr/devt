@@ -1,5 +1,7 @@
 # Coding Standards — TypeScript / Node
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 ## Language & Runtime
 
 - TypeScript 7+ — the native Go-based `tsc` (~10× faster full builds; the type system and inference are a structural port of 5.x/6.x, so your types don't change). Libraries pin an explicit floor in `package.json`.

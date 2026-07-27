@@ -90,30 +90,33 @@ try {
 
 <step name="check_scanner" gate="scanner configuration is determined">
 
-Check if `.devt/config.json` has an `arch_scanner.command` configured:
+Resolve the configured scanner, the convention probe, and the autowire mode in ONE fence (each Bash call is a fresh shell — no variable survives a fence boundary; the echoed lines below ARE the carrier):
 
 ```bash
 node -e "
-  const cfg = JSON.parse(require('fs').readFileSync('.devt/config.json', 'utf8'));
-  const cmd = cfg.arch_scanner?.command;
+  let cfg = {};
+  try { cfg = JSON.parse(require('fs').readFileSync('.devt/config.json', 'utf8')); } catch {}
+  const cmd = (cfg.arch_scanner && cfg.arch_scanner.command) || null;
+  const autowire = (cfg.arch_scanner && cfg.arch_scanner.autowire) || 'ask';
   console.log(cmd ? 'SCANNER:' + cmd : 'NO_SCANNER');
+  console.log('AUTOWIRE:' + autowire);
+  if (!cmd) {
+    // Convention probe — mirrors the graphify.probeBinary capability-probe
+    // pattern. Order: project-scoped devt convention first.
+    const fs = require('fs');
+    for (const c of ['.devt/rules/arch-scan.py', '.devt/rules/arch-scan.sh', 'tests/architecture/arch-scan.py', 'scripts/arch-scan.py']) {
+      if (fs.existsSync(c)) { console.log('DETECTED:' + c); break; }
+    }
+  }
 "
 ```
 
-**Convention probe when NO_SCANNER.** Before falling through to manual analysis, probe conventional scanner locations and surface any discovery so the user can wire it. Mirrors the `graphify.probeBinary` capability-probe pattern. Probe order: `.devt/rules/arch-scan.py` (the project-scoped devt convention used by the python-fastapi template), `.devt/rules/arch-scan.sh`, `tests/architecture/arch-scan.py`, `scripts/arch-scan.py`.
+Act on the echoed lines (`DETECTED:` present means a candidate scanner exists but isn't wired):
 
-```bash
-if [ "$(echo "$SCANNER_RESULT" | head -1)" = "NO_SCANNER" ]; then
-  for candidate in .devt/rules/arch-scan.py .devt/rules/arch-scan.sh tests/architecture/arch-scan.py scripts/arch-scan.py; do
-    if [ -f "$candidate" ]; then
-      DETECTED_SCANNER="$candidate"
-      break
-    fi
-  done
-fi
-```
-
-If `$DETECTED_SCANNER` is non-empty, AskUserQuestion before continuing:
+- `AUTOWIRE:auto` → wire it without asking: run the `config set` command from the Wire-automatically option below, then continue with the scanner path.
+- `AUTOWIRE:never` → do NOT prompt. Continue with manual analysis and carry one line into the final report: `Scanner candidate detected at <path> but not wired (arch_scanner.autowire=never) — wire via config set arch_scanner.command=...`.
+- `AUTOWIRE:ask` AND this run is autonomous (workflow.yaml `autonomous: true`, or no interactive operator) → **degrade to `never` explicitly**: skip the prompt, same report line plus `(autowire=ask degraded — headless run)`. A prompt nobody will answer is a blocked pipeline, and silently auto-wiring corrupts operator intent.
+- `AUTOWIRE:ask` AND an interactive operator exists → AskUserQuestion before continuing:
 
 - **Question**: "Found a project scanner at `$DETECTED_SCANNER` but it's not wired into `.devt/config.json::arch_scanner.command`. Wire it now so future arch-health scans use it?"
 - **Options**:
@@ -237,6 +240,8 @@ Pass only NEW findings to the architect for classification.
 ### Interactive Triage (only if `--triage`)
 
 _Skip this step unless `--triage` was specified._
+
+**Headless guard**: when this run is autonomous (workflow.yaml `autonomous: true`, or no interactive operator), do NOT prompt — defer ALL untriaged findings and carry a report line: `N findings deferred untriaged (headless run) — re-run with --triage interactively to accept/dismiss`. Auto-accepting would corrupt the baseline's meaning ("operator-accepted floor"); deferred-and-visible is the truthful state.
 
 Read `.devt/state/arch-triage.json` if it exists (prior triage decisions).
 

@@ -1,5 +1,7 @@
 # Coding Standards — Python / FastAPI
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 ## Language & Runtime
 
 - Python 3.13+

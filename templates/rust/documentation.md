@@ -1,5 +1,7 @@
 # Documentation — Rust
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 ## Crate-Level Documentation
 
 Every library crate begins with crate-level docs via inner-attribute `//!` comments at the top of `lib.rs`:

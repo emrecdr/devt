@@ -1,5 +1,7 @@
 # Pydantic Patterns — v2 Conventions for API Services
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Pydantic v2 idioms for request/response models, settings, and validation. The
 v1 surface (`@validator`, `class Config`, `.dict()`) still *runs* under v2 —
 deprecated, not removed — which is exactly why it keeps leaking into new code.

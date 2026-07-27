@@ -1,5 +1,7 @@
 # Coding Standards
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Devt-integration document for Rust projects. Read by `code-review-guide`, `complexity-assessment`, and `architect` skills. Rules express the project's idiomatic Rust shape so agents catch deviations early.
 
 ## Edition + MSRV

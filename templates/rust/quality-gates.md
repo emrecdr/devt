@@ -1,5 +1,7 @@
 # Quality Gates
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 Devt-integration document for Rust projects. Read by the `tester`, `code-reviewer`, and `verifier` agents. Each gate has a deterministic command; agents run the exact command and verify exit code 0 + clean output.
 
 ## Gate Stack

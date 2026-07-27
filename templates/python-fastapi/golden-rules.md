@@ -1,5 +1,7 @@
 # Golden Rules — Python / FastAPI
 
+> Template baseline — the project's own `CLAUDE.md` and documented conventions WIN on any conflict with this file. Tailor it to the project (`/devt:setup`); untailored copies are flagged by `/devt:setup --health`.
+
 > Non-negotiable rules for all development work. Violations require immediate stop and correction.
 
 ## Quick Reference Card
