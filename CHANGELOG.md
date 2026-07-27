@@ -8,6 +8,24 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.213.0] - 2026-07-27
+
+Standing-ledger burn-down, round two — the graphify quadruplication healed and the install tax fenced.
+
+### Changed
+
+- **The `graphify_scan_prep` decision bodies are single-sourced.** What the ledger carried as a "triplication" was four sites: dev-workflow, quick-implement, and debug each held a near-copy of the ACTIVE/SKIP/RECOVERY protocol (~6.9KB total) that had drifted at the wording level — three phrasings of the drill-down instruction, divergent RECOVERY tails, and one real per-mode variant (debug's SKIP falls back to grep + stack trace). The richest body (dev's, with the audit-trail and gate-closure sentences) is now the canonical in `workflows/graphify-scan.steps.md` with the debug variant mode-marked; each parent keeps its scan-prep bash and a `GRAPHIFY-STEP:decision` pointer. F13 rewritten as the partition gate (pointers + no resident copies + shared-file completeness, mutation-RED both directions — including a weak-leg fix caught during mutation: the mode-variant check now pins the variant's content, not its label); the scan-prep MCP gate and F16 repointed. The fourth site, `research-task.md`, carries an older bash-echo structural variant — left intact, named for migration.
+
+### Added
+
+- **Gate K331 — registration-surface budget.** The summed description/argument-hint frontmatter of commands + agents + skills (17,067B live — the model-facing registration slice of the ~23KB install tax v4 measured) is now budgeted at 18,500B, K319's idiom applied to the class: a ballooning description fails CI with the actual bytes named; raising the ceiling is a deliberate act with a changelog note. (The v4 trim recommendations for this surface were withdrawn by v5's platform intel — `disable-model-invocation` saves nothing and breaks subagent access — so the fence, not the trim, is the shippable piece.)
+
+### Fixed
+
+- `code-review.steps.md` still told the verifier to read `code_review.v1.md` — now points at the pinned rubric resolved via `DEFAULTS.rubrics` (the prose pointer the rubric-v2 sweep missed).
+
+Still open on the ledger: guide→rubric dedupe, coordinator table generation, memory dual-layer merge, memory-curation disclosure split, research-task scan-prep migration, smoke phase-split.
+
 ## [0.212.0] - 2026-07-27
 
 Standing-ledger burn-down, round one — the largest remaining resident-token lever plus the small verified retirements.
@@ -633,14 +651,4 @@ A memory-layer security review (validated filesystem-first) observed that devt's
 ### Changed (docs only)
 
 - **`docs/MEMORY.md` gains a "Trust model — memory is a persistent write channel" section**: memory acts on future dispatches (governs, coerces via block-mode, suppresses via REJ keywords), the curator gate is the control, multi-root shared roots are the documented bypass, and adding a shared root grants it commit-blocking authority — trust it accordingly. Names the current limitation (provenance not yet at the governance surface) and points at `DEF-009` for the code mitigations (surface `source_root` in the Brief; optional trust tier so shared roots advise without coercing). Shipped as the depth-safe half of DEF-009; M1/M2 (the memory-signal-path code) stay fresh-session.
-
-## [0.178.0] - 2026-07-19
-
-### Ghost-surface class gate for module references (OPT-2, .cjs scope)
-
-The `learning-entry.yaml` retirement (v0.177.0) was the third instance of the same ghost class — a `*.cjs` module referenced inside a schema or agent that no longer exists on disk. K280/K281 gate documented CLI commands and `printUsage` but never module references buried in `schemas/`/`agents/` prose, which is exactly where `semantic.cjs` survived twice. Per LES-001's own rule (second post-sweep recurrence → gate the class), this was overdue.
-
-### Added
-
-- Gate **K296** — every `*.cjs` module token referenced in `agents/**.{md,yaml}` and `schemas/**.{yaml}` must resolve on disk. Scoped deliberately to the `.cjs`-module class: measured empirically to produce **zero false positives** on the current tree (only `devt-tools`/`memory`/`state.cjs` are referenced, all resolve), and verified to catch an injected ghost. The artifact-path half of the original proposal (`.devt/**`, `docs/**`) is **intentionally excluded** — those are runtime-created and example-prone and would false-positive; the recurring ghost was always a module reference. Drift-guard stack 203 → 204 deep (K94–K296).
 

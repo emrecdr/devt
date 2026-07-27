@@ -61,18 +61,7 @@ CENTRAL_SYMBOL=$(printf '%s\n' "$SCAN" | jq -r '.central_symbol // empty')
 echo "graphify_scan_prep: $DECISION — $(printf '%s\n' "$SCAN" | jq -r '.reason // ("central=" + (.central_symbol // "?") + " dependents=" + (.dependents|tostring) + " trust=" + .trust)')"
 ```
 
-The CLI emits exactly one of `graphify_scan_prep: ACTIVE` / `graphify_scan_prep: RECOVERY` / `graphify_scan_prep: SKIP` (also in `$DECISION`). Act on it:
-
-**`graphify_scan_prep: ACTIVE`** — `$CENTRAL_SYMBOL` resolved. Execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
-
-1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, returns the impact map with `direct_dependents` array.
-2. **Drill-down on top-3 direct dependents**. Parse `direct_dependents` from the blast_radius response, take top-3 by impact_size, and for each call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEPENDENT_NAME>", direction: "in", depth: 2})`. The debugger uses drill-down data to find callers across the bug's blast radius that may exhibit the same symptom.
-
-Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. The debugger Reads this file when present.
-
-**`graphify_scan_prep: SKIP`** — the CLI already wrote `graphify-skip-reason.txt` as the explicit decision artifact and no MCP call is made — the debugger falls back to grep + stack trace.
-
-**`graphify_scan_prep: RECOVERY`** — topic extraction returned 0 symbols on a dense graph (the snake_case fallback also missed). Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${BUG_DESCRIPTION}", limit: 5})` — the `query_graph(task_text)` fallback — to resolve synthetic symbols against the graph, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section listing the query and top results.
+**Act on `$DECISION`** (`GRAPHIFY-STEP:decision`, MODE=debug) — Read `${CLAUDE_PLUGIN_ROOT}/workflows/graphify-scan.steps.md` and execute its `## decision` block for the emitted value: ACTIVE runs the blast_radius + top-3 drill-down MCP calls into `.devt/state/graph-impact.md`; SKIP proceeds on the CLI-written skip artifact; RECOVERY resolves `CENTRAL_SYMBOL` via the `query_graph` fallback first. The graphify-decision gate below still requires the resulting artifact.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 

@@ -5305,9 +5305,15 @@ fi
 # that actually resolves through the plugin loader; field 2026-05-28 namespace
 # drift fix).
 SCAN_PREP_PROTOCOL_MISSING=""
+# The ACTIVE-branch MCP call instructions live in the single-sourced
+# graphify-scan.steps.md; each workflow carries the GRAPHIFY-STEP:decision
+# pointer that loads it.
+if ! command grep -q 'mcp__plugin_devt_devt-graphify__get_neighbors' "$ROOT/workflows/graphify-scan.steps.md" 2>/dev/null || \
+   ! command grep -q 'mcp__plugin_devt_devt-graphify__blast_radius' "$ROOT/workflows/graphify-scan.steps.md" 2>/dev/null; then
+  SCAN_PREP_PROTOCOL_MISSING="$SCAN_PREP_PROTOCOL_MISSING graphify-scan.steps"
+fi
 for wf in quick-implement dev-workflow; do
-  if ! command grep -q 'mcp__plugin_devt_devt-graphify__get_neighbors' "$ROOT/workflows/$wf.md" 2>/dev/null || \
-     ! command grep -q 'mcp__plugin_devt_devt-graphify__blast_radius' "$ROOT/workflows/$wf.md" 2>/dev/null; then
+  if ! command grep -q 'GRAPHIFY-STEP:decision' "$ROOT/workflows/$wf.md" 2>/dev/null; then
     SCAN_PREP_PROTOCOL_MISSING="$SCAN_PREP_PROTOCOL_MISSING $wf"
   fi
 done
@@ -6511,7 +6517,9 @@ fi
 
 # F16: multi-tier follow-up (post-blast_radius drill-down on top-3 dependents) in all 5 graphify workflows
 F16_OK=0
-F16_WORKFLOWS="workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md workflows/code-review.md"
+# dev/qi/debug drill-down bodies live in graphify-scan.steps.md (single source);
+# research-task + code-review keep resident copies.
+F16_WORKFLOWS="workflows/graphify-scan.steps.md workflows/research-task.md workflows/code-review.md"
 F16_COUNT=$(echo $F16_WORKFLOWS | /usr/bin/wc -w | /usr/bin/tr -d ' ')
 for wf in $F16_WORKFLOWS; do
   if /usr/bin/grep -q "Drill-down" "$ROOT/$wf" \
@@ -6709,19 +6717,36 @@ else
   fail "F4e: gate wiring missing in $((3 - F4E_OK)) of 3 workflows"
 fi
 
-# F13: graphify_scan_prep has RECOVERY branch in all 4 workflows (orchestrator fallback when symbols=0)
+# F13: graphify_scan_prep decision bodies — the three CLI-form workflows load
+# the single-sourced graphify-scan.steps.md at a GRAPHIFY-STEP:decision pointer
+# (the copy-paste era drifted at the wording level); the shared file carries the
+# RECOVERY branch + query_graph fallback; no relocated body may reappear
+# resident. research-task.md keeps its older bash-echo variant resident.
 F13_OK=0
-for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/research-task.md workflows/debug.md; do
-  if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$ROOT/$wf" \
-     && /usr/bin/grep -q "query_graph(task_text)" "$ROOT/$wf" \
-     && /usr/bin/grep -q "Fuzzy symbol resolution" "$ROOT/$wf"; then
+GSS="$ROOT/workflows/graphify-scan.steps.md"
+for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md; do
+  if /usr/bin/grep -q "graphify-scan.steps.md" "$ROOT/$wf" \
+     && /usr/bin/grep -q "GRAPHIFY-STEP:decision" "$ROOT/$wf" \
+     && ! /usr/bin/grep -q "Drill-down on top-3 direct dependents" "$ROOT/$wf" \
+     && ! /usr/bin/grep -q "Fuzzy symbol resolution" "$ROOT/$wf"; then
     F13_OK=$((F13_OK + 1))
   fi
 done
-if [ "$F13_OK" -eq 4 ]; then
-  pass "F13: RECOVERY branch + orchestrator query_graph fallback wired in all 4 scan_prep workflows"
+if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$GSS" \
+   && /usr/bin/grep -q "query_graph(task_text)" "$GSS" \
+   && /usr/bin/grep -q "Fuzzy symbol resolution" "$GSS" \
+   && /usr/bin/grep -q "grep + stack trace" "$GSS"; then
+  F13_OK=$((F13_OK + 1))
+fi
+if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$ROOT/workflows/research-task.md" \
+   && /usr/bin/grep -q "query_graph" "$ROOT/workflows/research-task.md" \
+   && /usr/bin/grep -q "Fuzzy symbol resolution" "$ROOT/workflows/research-task.md"; then
+  F13_OK=$((F13_OK + 1))
+fi
+if [ "$F13_OK" -eq 5 ]; then
+  pass "F13: scan_prep decision bodies single-sourced in graphify-scan.steps.md (3 pointers, no resident copies, RECOVERY+fallback+mode-variant in the shared file; research-task variant intact)"
 else
-  fail "F13: RECOVERY branch missing in $((4 - F13_OK)) of 4 workflows"
+  fail "F13: scan_prep partition regressed ($F13_OK/5 legs)"
 fi
 
 # F12: extractTopic falls back to graphifyQuery for snake_case keywords when symbols are empty
@@ -6771,8 +6796,8 @@ for wf in workflows/research-task.md workflows/debug.md; do
   # ("graph-impact.md if it exists") OR the new inlined placeholder
   # ("graph_impact_content") OR a bare ".devt/state/graph-impact.md" mention.
   # All three count as "workflow references graph-impact" for coverage.
-  if /usr/bin/grep -q "graphify_scan_prep: ACTIVE" "$ROOT/$wf" \
-     && /usr/bin/grep -q "graphify_scan_prep: SKIP" "$ROOT/$wf" \
+  if /usr/bin/grep -qE "graphify_scan_prep: ACTIVE|GRAPHIFY-STEP:decision" "$ROOT/$wf" \
+     && /usr/bin/grep -qE "graphify_scan_prep: SKIP|GRAPHIFY-STEP:decision" "$ROOT/$wf" \
      && /usr/bin/grep -q "state assert-graphify-decision" "$ROOT/$wf" \
      && /usr/bin/grep -qE "graph-impact.md if it exists|graph_impact_content|\.devt/state/graph-impact.md" "$ROOT/$wf"; then
     F7_OK=$((F7_OK + 1))
@@ -19020,6 +19045,38 @@ if [ "$K330_LIVE" -ge 4 ] && [ "$K330_GHOST" = "0" ]; then
   pass "K330: shipped code-review rubric grades against code-review-input.md ($K330_LIVE refs, zero review-scope.md ghosts)"
 else
   fail "K330: shipped rubric artifact refs wrong (code-review-input=$K330_LIVE expected >=4, review-scope ghosts=$K330_GHOST expected 0) in $K330_RUBRIC"
+fi
+
+# K331: registration-surface budget. Every host session pays the summed
+# description/argument-hint frontmatter of commands + agents + skills before
+# any devt command runs (~17.1KB at gate creation; the whole install tax is
+# ~23KB with MCP listings + SessionStart context). K319's idiom applied to the
+# class: the tax can only be re-raised deliberately, never by description
+# creep. Ceiling = measured + ~8% headroom.
+K331_BYTES=$(node -e '
+const fs=require("fs");
+function fmField(file, field){
+  const s=fs.readFileSync(file,"utf8");
+  if(!s.startsWith("---")) return "";
+  const lines=s.split("\n"); let out=[],cap=false;
+  for(let i=1;i<lines.length;i++){
+    const l=lines[i];
+    if(l.trim()==="---") break;
+    if(new RegExp("^"+field+":").test(l)){cap=true;out.push(l);continue;}
+    if(cap){ if(/^\s+\S/.test(l)) out.push(l); else cap=false; }
+  }
+  return out.join("\n");
+}
+let t=0;
+for(const f of fs.readdirSync(process.argv[1]+"/commands")) if(f.endsWith(".md")) t+=Buffer.byteLength(fmField(process.argv[1]+"/commands/"+f,"description")+fmField(process.argv[1]+"/commands/"+f,"argument-hint"));
+for(const f of fs.readdirSync(process.argv[1]+"/agents")) if(f.endsWith(".md")) t+=Buffer.byteLength(fmField(process.argv[1]+"/agents/"+f,"description"));
+for(const d of fs.readdirSync(process.argv[1]+"/skills")){const p=process.argv[1]+"/skills/"+d+"/SKILL.md"; try{t+=Buffer.byteLength(fmField(p,"description"));}catch{}}
+process.stdout.write(String(t));
+' "$ROOT" 2>/dev/null || echo 999999)
+if [ "${K331_BYTES:-999999}" -le 18500 ]; then
+  pass "K331: registration-surface budget — commands+agents+skills descriptions ${K331_BYTES}B ≤ 18500B (install-tax creep is deliberate-only)"
+else
+  fail "K331: registration surface ${K331_BYTES}B exceeds the 18500B budget — a description grew; trim it or raise the ceiling deliberately with a CHANGELOG note"
 fi
 
 echo

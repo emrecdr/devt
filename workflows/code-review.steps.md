@@ -26,7 +26,7 @@ The dispatching parents (code-review.md single path, code-review-parallel.md par
 
 _Skip this step if `verify` is listed in `skipped_phases` from workflow state._
 
-Grader-driven thoroughness check. The verifier reads `references/rubrics/code_review.v1.md` and spot-checks the review for scope coverage, finding specificity, severity calibration, remediation concreteness, and ADR Compliance section presence. The verifier does NOT re-do the code review — it grades the review's quality and re-dispatches the code-reviewer with structured `revisions[]` when gaps are found. In MODE=parallel the artifact under grade is the consolidated review (written by the synthesis-mode dispatch); the grading contract is identical.
+Grader-driven thoroughness check. The verifier reads the pinned code-review rubric (`references/rubrics/`, resolved via `DEFAULTS.rubrics.code_review` — injected as `<rubric_path>`) and spot-checks the review for scope coverage, finding specificity, severity calibration, remediation concreteness, and ADR Compliance section presence. The verifier does NOT re-do the code review — it grades the review's quality and re-dispatches the code-reviewer with structured `revisions[]` when gaps are found. In MODE=parallel the artifact under grade is the consolidated review (written by the synthesis-mode dispatch); the grading contract is identical.
 
 **Artifact pre-gate**: confirm both `.devt/state/review.md` and `.devt/state/review.json` exist (single: the code-reviewer writes these; parallel: the consolidator does). If either is missing, **STOP with BLOCKED** — verification cannot run without the upstream artifact. The sidecar is the routing source of truth; the markdown is the human-readable view.
 

@@ -1,10 +1,20 @@
-# devt — Historical Changelog (v0.1.0–v0.177.0)
+# devt — Historical Changelog (v0.1.0–v0.178.0)
 
 Older release sections rotated out of the root CHANGELOG.md, newest first. The root file keeps the [Unreleased] section plus the most recent releases; everything older lives here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+
+## [0.178.0] - 2026-07-19
+
+### Ghost-surface class gate for module references (OPT-2, .cjs scope)
+
+The `learning-entry.yaml` retirement (v0.177.0) was the third instance of the same ghost class — a `*.cjs` module referenced inside a schema or agent that no longer exists on disk. K280/K281 gate documented CLI commands and `printUsage` but never module references buried in `schemas/`/`agents/` prose, which is exactly where `semantic.cjs` survived twice. Per LES-001's own rule (second post-sweep recurrence → gate the class), this was overdue.
+
+### Added
+
+- Gate **K296** — every `*.cjs` module token referenced in `agents/**.{md,yaml}` and `schemas/**.{yaml}` must resolve on disk. Scoped deliberately to the `.cjs`-module class: measured empirically to produce **zero false positives** on the current tree (only `devt-tools`/`memory`/`state.cjs` are referenced, all resolve), and verified to catch an injected ghost. The artifact-path half of the original proposal (`.devt/**`, `docs/**`) is **intentionally excluded** — those are runtime-created and example-prone and would false-positive; the recurring ghost was always a module reference. Drift-guard stack 203 → 204 deep (K94–K296).
 
 ## [0.177.0] - 2026-07-19
 
