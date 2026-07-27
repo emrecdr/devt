@@ -3774,27 +3774,16 @@ if grep -q '"./agents/devt-coordinator.md"' "$ROOT/.claude-plugin/plugin.json"; 
 else
   fail "devt-coordinator NOT registered in plugin.json agents list"
 fi
+# Routing rows are GENERATED from workflows/do.md between markers (the
+# hand-maintained era drifted at the trigger-text level while row-count and
+# command-token parity stayed green). Freshness enforced by K98 via the
+# generator's --check mode; the coordinator table needs at least the same
+# minimum rows do.md itself carries.
 COORD_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/agents/devt-coordinator.md" 2>/dev/null || echo 0)
-DO_ROWS=$(grep -cE '^\|.*\|.*`/devt:' "$ROOT/workflows/do.md" 2>/dev/null || echo 0)
-if [ "$COORD_ROWS" -eq "$DO_ROWS" ] && [ "$COORD_ROWS" -ge "$MIN_ROUTING_ROWS" ]; then
-  pass "coordinator routing-table row count matches workflows/do.md (${COORD_ROWS} rows)"
+if [ "$COORD_ROWS" -ge "$MIN_ROUTING_ROWS" ]; then
+  pass "coordinator routing table carries ${COORD_ROWS} generated routes (>= ${MIN_ROUTING_ROWS})"
 else
-  fail "coordinator routing-table drift — coordinator=${COORD_ROWS} do.md=${DO_ROWS} min=${MIN_ROUTING_ROWS}"
-fi
-
-# Content parity — row-count parity is necessary but not sufficient: two
-# equal-row tables can still route a command to a different target, rename a
-# command, or diverge on a --flag form without the count changing (the gap the
-# file's own drift note called out). Extract the /devt: command tokens (full
-# form incl. flags) from the TABLE ROWS of both files and assert identical
-# sorted sets. Same drift class K320 closes for the implement/test bodies.
-COORD_CMDS=$(grep -E '^\|' "$ROOT/agents/devt-coordinator.md" | grep -oE '/devt:[^`]+' | sed 's/ *$//' | sort)
-DO_CMDS=$(grep -E '^\|' "$ROOT/workflows/do.md" | grep -oE '/devt:[^`]+' | sed 's/ *$//' | sort)
-if [ "$COORD_CMDS" = "$DO_CMDS" ]; then
-  pass "coordinator routing-table command tokens match workflows/do.md (content parity, not just row count)"
-else
-  COORD_CMD_DIFF=$(diff <(printf '%s\n' "$DO_CMDS") <(printf '%s\n' "$COORD_CMDS") | tr '\n' ' ' || true)
-  fail "coordinator routing-table CONTENT drift (row count may match, commands differ) — do.md '<' vs coordinator '>': $COORD_CMD_DIFF"
+  fail "coordinator routing table too small — ${COORD_ROWS} < ${MIN_ROUTING_ROWS}"
 fi
 
 echo "== Parallel researcher + arch_health dispatch (v0.36.0+, Option 9a) =="
@@ -12451,28 +12440,17 @@ else
   fail "K97: stale refs —$K97_STALE"
 fi
 
-# K98: do.md ↔ devt-coordinator.md routing table parity.
-# The two routing tables are documented as mirrors. K98 enforces both
-# row count parity AND row-by-row "Route to" column parity. Catches the
-# class where someone updates one router but forgets the other (the
-# drift note already warns about this). Uses temp files instead of
-# process substitution to play nice with `set -euo pipefail`.
-K98_DO_TMP=$(mktemp)
-K98_DC_TMP=$(mktemp)
-awk '/^\| If the prompt/{seen=1; next} seen && /^\|/ && $0 !~ /^\|[ ]*---/{
-  n=split($0, a, "|"); if(n>=3){ gsub(/^[ \t`]+|[ \t`]+$/, "", a[3]); if(length(a[3]) > 0) print a[3] }
-}' "$ROOT/workflows/do.md" | sort > "$K98_DO_TMP"
-awk '/^\| If the prompt/{seen=1; next} seen && /^\|/ && $0 !~ /^\|[ ]*---/{
-  n=split($0, a, "|"); if(n>=3){ gsub(/^[ \t`]+|[ \t`]+$/, "", a[3]); if(length(a[3]) > 0) print a[3] }
-}' "$ROOT/agents/devt-coordinator.md" | sort > "$K98_DC_TMP"
-K98_DO_COUNT=$(wc -l < "$K98_DO_TMP" | tr -d ' ')
-K98_DC_COUNT=$(wc -l < "$K98_DC_TMP" | tr -d ' ')
-K98_DIFF=$(diff "$K98_DO_TMP" "$K98_DC_TMP" 2>/dev/null | head -10 || true)
-rm -f "$K98_DO_TMP" "$K98_DC_TMP"
-if [ "$K98_DO_COUNT" = "$K98_DC_COUNT" ] && [ -z "$K98_DIFF" ]; then
-  pass "K98: router parity ($K98_DO_COUNT routes match between workflows/do.md and agents/devt-coordinator.md)"
+# K98: coordinator routing table freshness. The table is GENERATED from
+# workflows/do.md between markers (scripts/generate-coordinator-table.cjs);
+# the old hand-maintained mirror drifted at the trigger-text level while
+# row-count + command-token parity gates stayed green — byte-freshness via
+# the generator's check mode is the drift-proof form. Regenerate with
+# `node scripts/generate-coordinator-table.cjs --write` after editing do.md.
+K98_OUT=$(node "$ROOT/scripts/generate-coordinator-table.cjs" 2>&1) || K98_OUT="STALE-OR-ERROR: $K98_OUT"
+if [ "$K98_OUT" = "OK" ]; then
+  pass "K98: coordinator routing table is generation-fresh (byte-equal to workflows/do.md's table via generate-coordinator-table.cjs)"
 else
-  fail "K98: router drift — do.md=$K98_DO_COUNT routes, devt-coordinator.md=$K98_DC_COUNT routes; diff lines: $K98_DIFF"
+  fail "K98: coordinator table stale or generator error — $K98_OUT"
 fi
 
 # K99: workflow orphan detection.

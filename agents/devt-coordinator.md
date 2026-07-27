@@ -82,32 +82,35 @@ on an ambiguous prompt is worse than letting the user re-ask with the `/devt:<co
 
 <routing_table>
 
-Apply the **first matching** rule. This mirrors `workflows/do.md`'s routing logic; keep the two
-in sync when adding new commands. If you need to update routing, update both files atomically
-(registration caveats: → docs/AGENT-CONTRACTS.md "Plugin Mechanics" — plugin agents register
-only when devt is loaded via `claude --plugin-dir <path>` or installed through the plugin system).
+Apply the **first matching** rule. The table below is GENERATED from `workflows/do.md`
+(the single routing source) — edit routing there, then run
+`node scripts/generate-coordinator-table.cjs --write`; smoke gate K98 fails on a stale copy.
+(Registration caveats: → docs/AGENT-CONTRACTS.md "Plugin Mechanics" — plugin agents register
+only when devt is loaded via `claude --plugin-dir <path>` or installed through the plugin system.)
 
-| If the prompt describes...                                  | Route to                        | Why                                                  |
-| ----------------------------------------------------------- | ------------------------------- | ---------------------------------------------------- |
-| Setting up a project, "initialize", "configure"             | `/devt:setup --init`            | Project setup                                        |
-| A bug, error, crash, "something broken"                     | `/devt:debug`                   | Systematic debugging                                 |
-| Exploring, researching, "how does X work in this codebase"  | `/devt:research`                | Codebase investigation                               |
-| Defining a feature, "write a spec", "requirements"          | `/devt:specify`                 | PRD generation                                       |
-| Creating a plan, "plan how to", "approach"                  | `/devt:plan`                    | Implementation planning                              |
-| Discussing choices, "which approach", "gray area decision"  | `/devt:workflow --mode=clarify` | Decision capture                                     |
-| Complex task: multi-file, architecture, migration           | `/devt:workflow`                | Full pipeline                                        |
-| Simple task: 1-2 files, clear scope                         | `/devt:implement`               | Quick pipeline                                       |
-| Trivial task: typo, rename, config tweak                    | `/devt:workflow --mode=fast`    | Inline execution                                     |
-| Reviewing code, "check my code"                             | `/devt:review`                  | Read-only analysis                                   |
-| Running tests, lint, typecheck                              | `/devt:review --focus=quality`  | Quality gates                                        |
-| Creating a PR, "ready to merge"                             | `/devt:ship`                    | PR creation                                          |
-| Checking status, "where am I"                               | `/devt:status`                  | Workflow progress                                    |
-| Resuming work, "continue", "pick up"                        | `/devt:next`                    | Auto-detect next step                                |
-| Pausing work, "stopping for now"                            | `/devt:workflow --pause`        | Structured handoff                                   |
-| A note or idea for later                                    | `/devt:note`                    | Idea capture                                         |
-| Plugin health, diagnostics                                  | `/devt:setup --health`          | Plugin validation                                    |
-| Updating the plugin                                         | `/devt:setup --update`          | Version check                                        |
-| Available commands, "help"                                  | `/devt:help`        | Command reference                                    |
+<!-- BEGIN GENERATED: do.md routing table — edit workflows/do.md, then run `node scripts/generate-coordinator-table.cjs --write` (never edit rows here) -->
+| If the prompt describes... | Route to | Why |
+|----------------------------|----------|-----|
+| Setting up a project, "initialize", "configure" | `/devt:setup --init` | Project setup |
+| A bug, error, crash, "something broken" | `/devt:debug` | Systematic debugging |
+| Exploring, researching, "how does X work in this codebase" | `/devt:research` | Codebase investigation |
+| Defining a feature, "write a spec", "requirements" | `/devt:specify` | PRD generation |
+| Creating a plan, "plan how to", "approach" | `/devt:plan` | Implementation planning |
+| Discussing choices, "which approach", "gray area decision" | `/devt:workflow --mode=clarify` | Decision capture |
+| A complex task: multi-file, architecture, migration | `/devt:workflow` | Full pipeline |
+| A simple task: 1-2 files, clear scope | `/devt:implement` | Quick pipeline |
+| A trivial task: typo, rename, config tweak | `/devt:workflow --mode=fast` | Inline execution |
+| Reviewing code, "check my code" | `/devt:review` | Read-only analysis |
+| Running tests, lint, typecheck | `/devt:review --focus=quality` | Quality gates |
+| Creating a PR, "ready to merge" | `/devt:ship` | PR creation |
+| Checking status, "where am I" | `/devt:status` | Workflow progress |
+| Resuming work, "continue", "pick up" | `/devt:next` | Auto-detect next step |
+| Pausing work, "stopping for now" | `/devt:workflow --pause` | Structured handoff |
+| A note or idea for later | `/devt:note` | Idea capture |
+| Plugin health, diagnostics | `/devt:setup --health` | Plugin validation |
+| Updating the plugin | `/devt:setup --update` | Version check |
+| Available commands, "help" | `/devt:help` | Command reference |
+<!-- END GENERATED: do.md routing table -->
 
 **Ambiguity:** If the prompt matches 2+ routes equally, do NOT guess. Ask once:
 

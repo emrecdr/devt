@@ -8,6 +8,14 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.215.0] - 2026-07-27
+
+### Changed
+
+- **The coordinator's routing table is generated, not mirrored.** `agents/devt-coordinator.md`'s copy of the do.md routing table is now rendered between GENERATED markers by `scripts/generate-coordinator-table.cjs` (`--write` to regenerate; check mode exits 1 on staleness). The hand-maintained mirror had live trigger-text drift that both parity gates missed — row-count and command-token parity stayed green while "how does X work" diverged from "how does X work in this codebase". The two coordinator-side refinements were upstreamed into `workflows/do.md` (they're better trigger text for `/devt:do` as well), making do.md the single routing source. K98 rewritten as the generation-freshness gate (byte-equality via the generator's check mode — mutation-proven in both directions: a hand-edited coordinator row and an un-regenerated do.md edit each fail with the remediation command named); the redundant row-count/command-token parity pair collapsed to a minimum-rows check.
+
+Still open: smoke phase-split (L — its own session; acceptance gate: identical PASS-name inventory before/after).
+
 ## [0.214.0] - 2026-07-27
 
 The per-dispatch-weight content batch — two items shipped, two closed by measurement instead of checkbox, and the scan-prep family completed.
@@ -639,22 +647,4 @@ Shared-root re-governance was structurally silent: an external edit in a shared 
 ### Changed
 
 - `docs/MEMORY.md` — new "Shared-root change delta" subsection under Multi-Root Memory; trust-model section updated (re-governance is now surfaced-not-blocked; remaining DEF-009 gap narrowed to the trust tier and REJ-suppression attribution).
-
-## [0.180.0] - 2026-07-19
-
-### Shared-root provenance at the governance surface (DEF-009 M1)
-
-The keystone code half of DEF-009. `source_root` was tracked at index time (last-wins precedence needs it) and shown in `memory list`/`get`, but `getDocsMeta` — the governing-union enrichment chokepoint — selected only `id, doc_type, status, confidence`, so a shared-root doc entered the Brief, the sidecar `governing[]`, and block-mode scope hints looking exactly as authoritative as a locally-curated one. Before: `_(active·verified, lane B)_` for shared and local alike. After: shared-root docs carry a provenance marker; local docs render byte-identical, so single-root projects (the common case) see zero new noise.
-
-### Added
-
-- **Brief governing lines mark shared-root docs** — `_(active·verified·shared:<label>, lane B)_`. The label is the shared root's basename, parent-qualified only when two configured shared roots collide on basename (no config alias surface — that would front-run the planned `{path, trust}` entry form).
-- **Sidecar `governing[]` entries gain `shared_root`** — `"<label>"` for shared-root docs, `null` for local. Additive: consumers projecting `[.governing[].id]` are unaffected (verified — no workflow reads any other `governing[]` field).
-- **`memory.cjs::sourceRootInfo(sourceRoot)`** — classifies a doc's root as local vs shared and derives the display label. Null/absent `source_root` (rows indexed before the column existed, single-root deployments) is treated as local; a recorded root no longer in config still renders as shared with its basename.
-- Gate **K297** — two-root behavioral fixture: shared Brief line carries the `·shared:<label>` marker, local line renders unchanged with no marker, sidecar `shared_root` is the label on the shared doc and null on the local doc. Drift-guard stack 204 → 205 deep (K94–K297).
-
-### Changed
-
-- `getDocsMeta` (`bin/modules/memory.cjs`) SELECT includes `source_root`; the preflight enrichment join threads it into the governing union.
-- `docs/MEMORY.md` — sidecar shape documents the new field; the trust-model section's limitation paragraph now reads provenance-legible, with the remaining gap narrowed to block-mode tiering (trust tier) and the shared-root index delta, both still tracked as `DEF-009`.
 

@@ -63,10 +63,10 @@ Match the input against this routing table. Apply the **first matching** rule:
 |----------------------------|----------|-----|
 | Setting up a project, "initialize", "configure" | `/devt:setup --init` | Project setup |
 | A bug, error, crash, "something broken" | `/devt:debug` | Systematic debugging |
-| Exploring, researching, "how does X work" | `/devt:research` | Codebase investigation |
+| Exploring, researching, "how does X work in this codebase" | `/devt:research` | Codebase investigation |
 | Defining a feature, "write a spec", "requirements" | `/devt:specify` | PRD generation |
 | Creating a plan, "plan how to", "approach" | `/devt:plan` | Implementation planning |
-| Discussing choices, "which approach", "gray area" | `/devt:workflow --mode=clarify` | Decision capture |
+| Discussing choices, "which approach", "gray area decision" | `/devt:workflow --mode=clarify` | Decision capture |
 | A complex task: multi-file, architecture, migration | `/devt:workflow` | Full pipeline |
 | A simple task: 1-2 files, clear scope | `/devt:implement` | Quick pipeline |
 | A trivial task: typo, rename, config tweak | `/devt:workflow --mode=fast` | Inline execution |
