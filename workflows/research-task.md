@@ -52,31 +52,18 @@ The wrapper performs `init workflow`, activates the workflow (`workflow_type=res
 **Graphify scan-prep gate** — When the graph is dense AND blast radius is substantial AND topic symbols resolved, instruct the orchestrator to write a fresh `.devt/state/graph-impact.md` via two MCP calls. Threshold matches dev-workflow's field-validated bar. Below the threshold (or graphify disabled): skip; researcher falls back to grep + scope_hint.
 
 ```bash
-DEPENDENTS=$(jq -r '.blast.direct_dependents_count // 0' .devt/state/preflight-brief.json 2>/dev/null || echo 0)
-TRUST=$(jq -r '.graph_stats.trust // "empty"' .devt/state/preflight-brief.json 2>/dev/null || echo "empty")
-SYMBOLS_JSON=$(jq -c '.topic.symbols // []' .devt/state/preflight-brief.json 2>/dev/null || echo '[]')
-SYMBOLS_COUNT=$(printf '%s\n' "$SYMBOLS_JSON" | jq 'length')
-if [ "$TRUST" = "dense" ] && [ "$DEPENDENTS" -ge 10 ] && [ "$SYMBOLS_COUNT" -gt 0 ]; then
-  CENTRAL_SYMBOL=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight pick-central-symbol "$SYMBOLS_JSON" "${TASK_DESCRIPTION:-}" 2>/dev/null | head -1)
-  [ -z "$CENTRAL_SYMBOL" ] && CENTRAL_SYMBOL=$(printf '%s\n' "$SYMBOLS_JSON" | jq -r '.[0]')
-  echo "graphify_scan_prep: ACTIVE — central=$CENTRAL_SYMBOL dependents=$DEPENDENTS trust=$TRUST"
-elif [ "$TRUST" = "dense" ] && [ "$SYMBOLS_COUNT" = "0" ]; then
-  echo "graphify_scan_prep: RECOVERY — symbols=0 trust=dense; orchestrator must call query_graph(task_text) to resolve synthetic symbols, then proceed with get_neighbors + blast_radius on the top result"
-else
-  REASON="dependents=$DEPENDENTS trust=$TRUST symbols=$SYMBOLS_COUNT (need dense+≥10+symbols)"
-  echo "graphify_scan_prep: SKIP — $REASON"
-  printf '%s\n' "$REASON" > .devt/state/graphify-skip-reason.txt
-fi
+# `preflight scan-prep` consolidates the decision tree (same call as
+# dev-workflow / quick-implement / debug — reads preflight-brief.json, applies
+# the adaptive threshold, picks the central symbol, writes
+# graphify-skip-reason.txt on SKIP). Returns
+# {decision, central_symbol, dependents, trust, threshold, symbols_count, reason}.
+SCAN=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" preflight scan-prep --scope="${TASK_DESCRIPTION}")
+DECISION=$(printf '%s\n' "$SCAN" | jq -r '.decision')
+CENTRAL_SYMBOL=$(printf '%s\n' "$SCAN" | jq -r '.central_symbol // empty')
+echo "graphify_scan_prep: $DECISION — $(printf '%s\n' "$SCAN" | jq -r '.reason // ("central=" + (.central_symbol // "?") + " dependents=" + (.dependents|tostring) + " trust=" + .trust)')"
 ```
 
-When the bash echo prints `ACTIVE`, the orchestrator MUST execute these two MCP calls and concatenate the output into `.devt/state/graph-impact.md`:
-
-1. **`mcp__plugin_devt_devt-graphify__blast_radius({symbols: ["<CENTRAL_SYMBOL>"]})`** — first call, impact map with `direct_dependents`.
-2. **Drill-down on top-3 dependents** (F16). Parse `direct_dependents`, take top-3 by impact_size, call `mcp__plugin_devt_devt-graphify__get_neighbors({symbol: "<DEP>", direction: "in", depth: 2})` for each. The researcher uses drill-down data to find existing usage patterns across the most-affected modules without grep-discovery.
-
-Format `graph-impact.md` with sections `# Graph Impact — <task>` / `## Blast radius — <CENTRAL_SYMBOL>` / `## Drill-down: <dep1> [call: <correlation_id>]` / `## Drill-down: <dep2> [call: <correlation_id>]` / `## Drill-down: <dep3> [call: <correlation_id>]`. The `correlation_id` is the `_meta.correlation_id` field returned by each `get_neighbors` MCP response (8-char hex); omit the `[call: ...]` suffix when the field is absent. The researcher Reads this file when present. When the bash printed `SKIP`, `graphify-skip-reason.txt` was written above and no MCP call is made — researcher falls back to grep+scope_hint.
-
-**When the bash echo prints `RECOVERY`** — topic extraction returned 0 symbols on a dense graph. Orchestrator MUST first call `mcp__plugin_devt_devt-graphify__query_graph({text: "${TASK_DESCRIPTION}", limit: 5})` to resolve synthetic symbols, then proceed with `get_neighbors` + `blast_radius` using the top result's label as `CENTRAL_SYMBOL`. Write `graph-impact.md` with an additional `## Fuzzy symbol resolution` section.
+**Act on `$DECISION`** (`GRAPHIFY-STEP:decision`, MODE=research) — Read `${CLAUDE_PLUGIN_ROOT}/workflows/graphify-scan.steps.md` and execute its `## decision` block for the emitted value: ACTIVE runs the blast_radius + top-3 drill-down MCP calls into `.devt/state/graph-impact.md`; SKIP proceeds on the CLI-written skip artifact; RECOVERY resolves `CENTRAL_SYMBOL` via the `query_graph` fallback first. The researcher Reads the resulting `graph-impact.md` when present.
 
 **Decision artifact assertion** — hard-fail if the orchestrator skipped writing either artifact:
 

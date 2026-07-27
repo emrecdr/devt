@@ -6517,9 +6517,10 @@ fi
 
 # F16: multi-tier follow-up (post-blast_radius drill-down on top-3 dependents) in all 5 graphify workflows
 F16_OK=0
-# dev/qi/debug drill-down bodies live in graphify-scan.steps.md (single source);
-# research-task + code-review keep resident copies.
-F16_WORKFLOWS="workflows/graphify-scan.steps.md workflows/research-task.md workflows/code-review.md"
+# dev/qi/debug/research-task drill-down bodies live in graphify-scan.steps.md
+# (single source); code-review keeps a resident copy (its drill-down is part of
+# the review-weight impact-plan protocol, not the scan-prep decision).
+F16_WORKFLOWS="workflows/graphify-scan.steps.md workflows/code-review.md"
 F16_COUNT=$(echo $F16_WORKFLOWS | /usr/bin/wc -w | /usr/bin/tr -d ' ')
 for wf in $F16_WORKFLOWS; do
   if /usr/bin/grep -q "Drill-down" "$ROOT/$wf" \
@@ -6717,14 +6718,15 @@ else
   fail "F4e: gate wiring missing in $((3 - F4E_OK)) of 3 workflows"
 fi
 
-# F13: graphify_scan_prep decision bodies — the three CLI-form workflows load
+# F13: graphify_scan_prep decision bodies — all four scan-prep workflows load
 # the single-sourced graphify-scan.steps.md at a GRAPHIFY-STEP:decision pointer
-# (the copy-paste era drifted at the wording level); the shared file carries the
-# RECOVERY branch + query_graph fallback; no relocated body may reappear
-# resident. research-task.md keeps its older bash-echo variant resident.
+# (the copy-paste era drifted at the wording level; research-task's older
+# bash-echo variant migrated to the same CLI + pointer form); the shared file
+# carries the RECOVERY branch + query_graph fallback + the mode variants; no
+# relocated body may reappear resident.
 F13_OK=0
 GSS="$ROOT/workflows/graphify-scan.steps.md"
-for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md; do
+for wf in workflows/dev-workflow.md workflows/quick-implement.md workflows/debug.md workflows/research-task.md; do
   if /usr/bin/grep -q "graphify-scan.steps.md" "$ROOT/$wf" \
      && /usr/bin/grep -q "GRAPHIFY-STEP:decision" "$ROOT/$wf" \
      && ! /usr/bin/grep -q "Drill-down on top-3 direct dependents" "$ROOT/$wf" \
@@ -6738,13 +6740,8 @@ if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$GSS" \
    && /usr/bin/grep -q "grep + stack trace" "$GSS"; then
   F13_OK=$((F13_OK + 1))
 fi
-if /usr/bin/grep -q "graphify_scan_prep: RECOVERY" "$ROOT/workflows/research-task.md" \
-   && /usr/bin/grep -q "query_graph" "$ROOT/workflows/research-task.md" \
-   && /usr/bin/grep -q "Fuzzy symbol resolution" "$ROOT/workflows/research-task.md"; then
-  F13_OK=$((F13_OK + 1))
-fi
 if [ "$F13_OK" -eq 5 ]; then
-  pass "F13: scan_prep decision bodies single-sourced in graphify-scan.steps.md (3 pointers, no resident copies, RECOVERY+fallback+mode-variant in the shared file; research-task variant intact)"
+  pass "F13: scan_prep decision bodies single-sourced in graphify-scan.steps.md (4 pointers, no resident copies, RECOVERY+fallback+mode-variants in the shared file)"
 else
   fail "F13: scan_prep partition regressed ($F13_OK/5 legs)"
 fi
@@ -12485,7 +12482,7 @@ fi
 # invoked via /devt:memory promote, not a direct @-ref).
 # Allowlist: workflows that are intentionally subcommand-routed or
 # internal-only (no command points at them directly).
-K99_ALLOWLIST="code-review-parallel memory-init memory-promote memory-reject"
+K99_ALLOWLIST="code-review-parallel memory-promote memory-reject"
 K99_ORPHANS=$(node -e '
 const fs = require("fs");
 const path = require("path");

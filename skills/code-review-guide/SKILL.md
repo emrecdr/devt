@@ -244,9 +244,13 @@ Score: XX/100 — VERDICT
 
 ## Memory + Graphify integration
 
-Reviews must include an "ADR Compliance" section. For each diff hunk:
+The `## ADR Compliance` section requirement and the REJ-tombstone hard-fail are the
+verifier's grading contract — the canonical statements live in the pinned code-review
+rubric (`references/rubrics/`, axis E + the REJ tombstone-alignment axis); do not
+restate them from memory. Operationally, for each diff hunk:
 1. `node bin/devt-tools.cjs memory affects <changed-file>` — enumerate governing docs
-2. Verify diff respects active ADRs (treat violations as Critical findings)
-3. `node bin/devt-tools.cjs memory rejected-keywords` — flag any diff text matching a REJ tombstone
-4. When Graphify enabled, enumerate affected callers via `graphify neighbors <symbol> --direction=in`
+   (violations of active ADRs are Critical findings; hits ⇒ the review carries `## ADR Compliance`)
+2. `node bin/devt-tools.cjs memory rejected-keywords` — never let a remediation
+   recommend a tombstoned approach (the verifier fails the review outright on a match)
+3. When Graphify enabled, enumerate affected callers via `graphify neighbors <symbol> --direction=in`
    (uses `skills/graphify-helpers/SKILL.md` protocol — falls back to grep when disabled).

@@ -8,6 +8,22 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.214.0] - 2026-07-27
+
+The per-dispatch-weight content batch — two items shipped, two closed by measurement instead of checkbox, and the scan-prep family completed.
+
+### Changed
+
+- **`/devt:memory` is a single-owner command.** `commands/memory.md` and `workflows/memory-init.md` both loaded on every invocation (~11.3KB combined) and duplicated the CLI-execution instructions, rendering guidance, and promote/reject routing. The workflow's unique content (prerequisites, failure handling, the exit-2 curator-routing detail, the atomic-index notes) folded into the command; `workflows/memory-init.md` deleted; K99's orphan allowlist token dropped. ~5.5KB lighter per invocation, one load path.
+- **`research-task.md` joined the scan-prep family.** Its hand-rolled decision bash (an older generation that duplicated what `preflight scan-prep` consolidates — same brief fields, same dense+symbols threshold shape, same skip artifact) replaced with the same CLI call + `GRAPHIFY-STEP:decision` pointer the other three workflows use; its research-specific drill-down rationale rides as a MODE=research clause in the shared file. One semantic harmonization: research now gets the CLI's adaptive threshold instead of its hard-coded 10. F13 is now a 4-pointer partition gate; F16's list follows the bodies.
+- **Guide→rubric dedupe, the honest slice.** The one true verbatim-class duplication — the ADR-Compliance section contract and the REJ-tombstone hard-fail, stated in both the code-review-guide and the rubric — now lives canonically in the rubric; the guide keeps the operational commands and points at axes. The rest of the proposed dedupe was **refuted on close reading**: the guide's severity table (with point deductions), scoring examples, and report template are the reviewer's operating instrument — the rubric doesn't contain the deduction points at all, and cutting them would make the reviewer learn its own scoring from the verifier's grading doc.
+
+### Validated non-issues
+
+- **The memory-curation disclosure split saves nothing real.** Nearly every curator dispatch presents candidates, so the protocol + classifier + exemplar are needed at presentation time — splitting them to references/ converts unconditional preload into a mandatory same-dispatch Read (one added hop, zero net tokens). The only consultation-grade content (anti-patterns, summary template, ~1.8KB) doesn't justify the structure churn on a low-frequency agent. Recorded here so the ledger entry doesn't resurrect.
+
+Still open: coordinator table generation (new compile machinery), smoke phase-split (L, dedicated session).
+
 ## [0.213.0] - 2026-07-27
 
 Standing-ledger burn-down, round two — the graphify quadruplication healed and the install tax fenced.
@@ -641,14 +657,4 @@ The keystone code half of DEF-009. `source_root` was tracked at index time (last
 
 - `getDocsMeta` (`bin/modules/memory.cjs`) SELECT includes `source_root`; the preflight enrichment join threads it into the governing union.
 - `docs/MEMORY.md` — sidecar shape documents the new field; the trust-model section's limitation paragraph now reads provenance-legible, with the remaining gap narrowed to block-mode tiering (trust tier) and the shared-root index delta, both still tracked as `DEF-009`.
-
-## [0.179.0] - 2026-07-19
-
-### Memory trust-model documentation (DEF-009 M5)
-
-A memory-layer security review (validated filesystem-first) observed that devt's curator-gate control — untrusted candidates in `_suggestions.md`, mediated promotion into `.devt/memory/` via 5-filter review + `AskUserQuestion` — is bypassed on exactly one path: multi-root **shared roots** are read-only from devt, edited directly by their maintainers, and re-govern consuming projects silently on the next `memory-auto-index`, so their docs never pass the gate. A shared-root ADR governs (and, under block-mode pre-flight, coerces) with the same authority as a locally-curated one; provenance (`source_root`) is tracked but not rendered at the governance surface. This is an architectural gap with cheap mitigations, not a live vulnerability — multi-root is opt-in and shared roots are normally org-controlled repos behind PR review.
-
-### Changed (docs only)
-
-- **`docs/MEMORY.md` gains a "Trust model — memory is a persistent write channel" section**: memory acts on future dispatches (governs, coerces via block-mode, suppresses via REJ keywords), the curator gate is the control, multi-root shared roots are the documented bypass, and adding a shared root grants it commit-blocking authority — trust it accordingly. Names the current limitation (provenance not yet at the governance surface) and points at `DEF-009` for the code mitigations (surface `source_root` in the Brief; optional trust tier so shared roots advise without coercing). Shipped as the depth-safe half of DEF-009; M1/M2 (the memory-signal-path code) stay fresh-session.
 
