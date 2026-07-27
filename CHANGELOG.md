@@ -8,6 +8,28 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.216.0] - 2026-07-27
+
+The state-truth batch — Release One of the task-service field arc. A real external run (arch-health scan on a FastAPI service) produced a 9/9-verified defect report plus a calibration-grade filled receipt; this release restores the property the operator watched decay: *the state layer tells the truth during recovery*. Every fix below carries a field receipt.
+
+### Fixed
+
+- **The Layer-2 claim-check gate self-heals recovered artifacts.** A resume/re-dispatch that produced the artifact AFTER a failure record left the failure "unresolved" until someone re-ran Layer-1 by hand — the field operator recovered correctly and then had to *guess* `state assert-artifact-present <agent>` to clear it. The finalize gate now re-probes presence AND substance via the real Layer-1 (which appends the success record itself), reports `self_healed:[agents]`, and fails loud only when the artifact is genuinely still missing or still stub. The workflow's remediation text also names the manual command.
+- **A stop-stamped workflow re-activates on new agent activity.** The Stop hook stamped `active:false/stopped_at` at a turn boundary; a SendMessage-resumed agent then ran ~2.5 minutes while state said "stopped" and `/devt:status` mis-routed to "resume or start fresh" mid-scan. New verb `state reactivate` clears the stamp (no-op without one); `hooks/subagent-status.sh` fires it on every SubagentStart. The lane-state guard stays intact — reactivation never mints ids, so first-activation protection is untouched.
+- **Subagent events no longer merge.** `status.json` keys by resolved name, so same-name (or unresolved-"unknown") agents collapsed last-writer-wins — three distinct field events survived as one record. The hook now appends every start/stop to `subagent-events.jsonl` (contract-canonical, STATE-RULES documented); `status.json` remains the derived last-known view.
+- **Hook failures keep their stderr.** A hook hard-failed with 721 bytes of stderr and only the byte count survived (async fire + `2>/dev/null` culture). `run-hook.js` trace records now carry `stderr_excerpt` (first 500B) on nonzero exit.
+- **`state validate`'s arch fossils are gone.** The phase-artifact map expected `scan-results.md` and `arch-health-scan.md` on `arch_health_scan` runs — a workflow type with no scan phase, and a phase key (`arch_health`) that doesn't match the live phase name. Type-scoped deletions (the plan/debug pattern) plus the missing `arch_health_scan → arch-review.md` row; the field's exact two-mismatch output now validates clean. The `arch_health` row stays for dev-COMPLEX's parallel arch dispatch, which really writes `arch-health-scan.md`.
+- **`--focus=architecture` is accepted** as an alias for `arch` (the operator hit the rejection on their first call).
+
+### Added
+
+- **`DEVT_DUMP_HOOK_PAYLOAD=1`** — one-off hook-payload capture to `hook-trace/payload-<script>-<ts>.json`. The trace stores byte counts only, so "which name fields does this build's SubagentStop payload carry?" was unanswerable post-hoc — the receipt's precondition for designing the agent-identity fallback chain.
+- **Small-history coupling annotation.** `evolution scan` now emits `coupling_confidence` (`level:"low"` when `commits_analyzed<50` or `authors<2`, reason-tagged, mirroring ownership's degradation shape) in the CLI summary, the JSON report, and as a banner in the markdown report. Field calibration: 24 commits/1 author inflated degrees to 91%, but the pairs stayed useful as leads — so annotate, never suppress (the architect converted one flagged pair into a real structural finding and the rest into a dismissal ledger).
+- **Graphify staleness surfaces in the arch flow.** `arch-health-scan.md` had zero staleness wiring while code-review carries the full tiered gate; a one-line non-blocking banner now reports graph lag at context init.
+- **Gate K332** — the batch's behavioral contract: self-heal (positive and negative), reactivate cycle, event-append no-merge, SubagentStart re-activation, stderr excerpt, coupling annotation — all fixture-proven in one gate. K156 independently caught the new verb's missing enum registration during the run, which is that gate class earning its keep.
+
+Deferred to Release Two (substrate batch): the state-carrier + workflow lint for cross-fence variables, the typed compiled architect envelope, `arch_scanner.autowire` with explicit headless degradation, the rules precedence line + health contradiction diff, and the compound `arch-scan run` verb.
+
 ## [0.215.0] - 2026-07-27
 
 ### Changed
@@ -625,26 +647,4 @@ The last legs of the multi-root provenance work. Before: a shared-root doc coerc
 ### Changed
 
 - `docs/MEMORY.md` — config-table row for `shared_roots_coerce`; trust-model section rewritten to the completed state (tiered coercion, attributed suppression; the inherent residual — shared content never passes the local curator gate — is the documented trust decision).
-
-## [0.181.0] - 2026-07-19
-
-### Shared-root change delta on `memory index` (DEF-009 M3)
-
-Shared-root re-governance was structurally silent: an external edit in a shared memory root (git pull, maintainer commit) re-governs every consuming project at its next `memory index` — and the auto-index hook that usually triggers that index printed nothing on success. Before: the only trace of a shared-root change was diffing the root by hand. After: every multi-root index reports exactly which shared-root docs were added/changed/removed since the previous index, on three surfaces.
-
-### Added
-
-- **`shared_delta` in the `memory index` result** — `{baseline, added, changed, removed}` with entries `{id, root: <label>}` (labels via the provenance helper). The baseline manifest (`{id: {root, hash}}` over post-precedence *winners* — a shared doc shadowed by a local one doesn't govern and isn't tracked) persists in the index DB's `meta` table, which the rebuild transaction never clears (the same mechanism that preserves `last_built_at`); deleting the regenerable DB honestly resets the baseline. First-ever run reports `baseline: "unavailable"` with empty arrays instead of enumerating every shared doc as added. Local-doc churn is excluded by design. Single-root projects: key omitted entirely, zero new surface.
-- **`health` gains `MEM_SHARED_DELTA`** (info severity) — reads the persisted last delta and reports `+a ~c -r` with doc ids. Self-clearing: the next multi-root index with no shared changes writes an empty delta, and a multi→single config flip deletes the row.
-- **`memory-auto-index` hook emits a compact line when the delta is non-empty** — the one silent re-governance path now surfaces `[memory-auto-index] shared-root memory changed: +a ~c -r (ids) …` on the hook's stdout. Fires only when multi-root AND shared docs changed (near-never), honoring the hook-messaging byte budget; silent-on-success behavior is otherwise unchanged.
-- **`memory.cjs::getLastSharedDelta()`** export (health's reader) and a `content_hash` (sha256) computed per doc at scan time to drive change detection.
-- Gate **K298** — behavioral two-root fixture walking the full lifecycle: first-run unavailable+empty, no-change empty, shared modify → `changed`, shared remove → `removed` with local churn excluded, health fires, single-root flip omits the key and clears health. Drift-guard stack 205 → 206 deep (K94–K298).
-
-### Fixed
-
-- **`memory-auto-index.sh` backtick command-substitution noise** — a JS comment inside the double-quoted `node -e` block contained a backticked phrase, which bash command-substituted on every hook fire (`memory: command not found` on stderr, empty string spliced into the comment). Harmless to behavior but a latent landmine of the known no-backticks-in-double-quoted-`node -e` class; the backticks are now plain quotes.
-
-### Changed
-
-- `docs/MEMORY.md` — new "Shared-root change delta" subsection under Multi-Root Memory; trust-model section updated (re-governance is now surfaced-not-blocked; remaining DEF-009 gap narrowed to the trust tier and REJ-suppression attribution).
 

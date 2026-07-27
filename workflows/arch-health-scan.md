@@ -72,6 +72,22 @@ Track state so `/devt:status` and `/devt:next` can detect and resume interrupted
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update active=true workflow_type=arch_health_scan phase=arch_health_scan status=IN_PROGRESS stopped_at=null stopped_phase=null verdict=null repair=null verify_iteration=0 resume_context=null
 ```
 
+**Graphify staleness surface** — the freshness tool exists; surface it here instead of letting a stale graph silently shape the architect's structural read (field: the operator had to check staleness by hand). One line, never blocks:
+
+```bash
+node -e "
+try {
+  const g = require('${CLAUDE_PLUGIN_ROOT}/bin/modules/graphify.cjs');
+  const st = g.status();
+  if (st && st.state === 'ready') {
+    const lag = (st.staleness && st.staleness.lag_commits);
+    if (lag === null || lag === undefined) console.log('[staleness] graph ready but lag unknown — structural findings may not reflect HEAD');
+    else if (lag > 0) console.log('[staleness] graph is ' + lag + ' commit(s) behind HEAD — refresh with: graphify update . (or proceed; findings may lag recent moves)');
+  }
+} catch { /* graphify absent — nothing to surface */ }
+" 2>/dev/null || true
+```
+
 <step name="check_scanner" gate="scanner configuration is determined">
 
 Check if `.devt/config.json` has an `arch_scanner.command` configured:
@@ -323,7 +339,7 @@ if [ "$(printf '%s\n' "$ARTIFACT_CHECK" | jq -r '.ok')" != "true" ]; then
 fi
 ```
 
-If the claim-check BLOCKED: architect did not write arch-review.md. Re-dispatch with explicit instruction to write the artifact before returning, OR SendMessage-resume if a budget wall is suspected (check `.devt/state/dispatch-warnings.jsonl` for `near_cliff` / `low_output` / `mid_task_language` records). Layer-2 at finalize will catch unresolved failures.
+If the claim-check BLOCKED: architect did not write arch-review.md. Re-dispatch with explicit instruction to write the artifact before returning, OR SendMessage-resume if a budget wall is suspected (check `.devt/state/dispatch-warnings.jsonl` for `near_cliff` / `low_output` / `mid_task_language` records). After recovery produces the artifact, re-run `state assert-artifact-present architect` to append the success record (the finalize gate also self-heals by re-probing — a still-listed failure with a present, substantive artifact clears itself with a `self_healed` trace).
 </step>
 
 <step name="report" gate="findings are presented to the user with priorities">

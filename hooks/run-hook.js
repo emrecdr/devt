@@ -238,6 +238,24 @@ function main() {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
 
+  // One-off payload capture for hook-contract debugging: the trace stores
+  // byte counts only, so questions like "which name fields does this build's
+  // SubagentStop payload carry?" are unanswerable post-hoc. Opt-in, loud
+  // location, one file per fire.
+  if (process.env.DEVT_DUMP_HOOK_PAYLOAD === "1") {
+    try {
+      const stateDir = findProjectStateDir();
+      if (stateDir) {
+        const dumpDir = path.join(stateDir, "hook-trace");
+        if (!fs.existsSync(dumpDir)) fs.mkdirSync(dumpDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dumpDir, `payload-${scriptName.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}.json`),
+          stdin,
+        );
+      }
+    } catch { /* capture is best-effort */ }
+  }
+
   appendTrace(scriptName, {
     profile,
     enabled: true,
@@ -246,6 +264,13 @@ function main() {
     stderr_bytes: Buffer.byteLength(result.stderr || "", "utf8"),
     exit: result.status ?? 0,
     duration_ms: Date.now() - t0,
+    // Failure diagnostics travel WITH the record: hooks run async with
+    // 2>/dev/null culture downstream, so a nonzero exit's stderr otherwise
+    // vanishes (field: a hook hard-failed with 721B of stderr and only the
+    // byte count survived).
+    ...((result.status ?? 0) !== 0 && result.stderr
+      ? { stderr_excerpt: String(result.stderr).slice(0, 500) }
+      : {}),
   });
 
   process.exit(result.status ?? 0);

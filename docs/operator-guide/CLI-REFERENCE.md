@@ -19,6 +19,12 @@ node bin/devt-tools.cjs state review-context-init [--scope=...] [--primary-branc
 node bin/devt-tools.cjs state workflow-context-init [--workflow-type=dev] [--scope=...] [--primary-branch=...]
 # The dev-workflow twin of review-context-init — one-spawn context blob for dev/implement flows
 
+node bin/devt-tools.cjs state reactivate
+# Clears a stop stamp (active=true, stopped_at/stopped_phase=null) when one exists; no-op otherwise.
+# Fired by hooks/subagent-status.sh on SubagentStart — new agent activity on a stop-stamped workflow
+# means the stop was a turn boundary, not an end (field: a SendMessage-resumed agent ran ~2.5 min
+# while state said stopped and /devt:status mis-routed)
+
 node bin/devt-tools.cjs state stop-hook
 # Stop-event compound (reads the hook's JSON on stdin): stop_hook_active loop guard, knowledge-candidate harvest, curation hint, incomplete-workflow stop stamp, stopReason emission. hooks/stop.sh's single CLI call — self-printing (emits nothing on the loop-guard leg)
 

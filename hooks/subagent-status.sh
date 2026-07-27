@@ -35,8 +35,21 @@ fi
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Write status — merge into existing status.json to preserve concurrent agent tracking
+# Append-only event record FIRST — status.json keys by resolved name, so
+# same-name (or unresolved-"unknown") agents merge last-writer-wins there;
+# the JSONL keeps every event (field: three distinct agents collapsed into
+# one status.json record). status.json stays as the derived last-known view.
 mkdir -p .devt/state
+printf '%s\n' "{\"ts\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\"}" >> .devt/state/subagent-events.jsonl 2>/dev/null || true
+
+# New agent activity on a stop-stamped workflow means the stop was a turn
+# boundary, not an end — clear the stamp so state reads truthfully during
+# resumed work (cheap no-op when no stamp is present).
+if [[ "$ACTION" == "start" ]]; then
+  node "$(devt_plugin_root)/bin/devt-tools.cjs" state reactivate >/dev/null 2>&1 || true
+fi
+
+# Write status — merge into existing status.json to preserve concurrent agent tracking
 node -e "
   const fs = require('fs');
   const statusFile = '.devt/state/status.json';

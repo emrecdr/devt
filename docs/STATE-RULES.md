@@ -108,6 +108,7 @@ Adding a new sidecar pair: register the schema in `state-contract.cjs::JSON_SIDE
 | Filename | Source |
 |---|---|
 | `preflight-brief.md` | preflight.cjs::generate (human-readable Brief; sidecar `.json` is the machine surface) |
+| `subagent-events.jsonl` | `hooks/subagent-status.sh` — append-only start/stop event per subagent fire (`{ts, event, agent}`). `status.json` is the derived last-known view and merges same-name agents last-writer-wins; the JSONL keeps every event |
 | `arch-baseline.json` | arch-health-scan |
 | `arch-triage.json` | arch-health-scan |
 | `arch-scan-report.md` | arch-health-scan (Markdown report from project scanner, e.g. `.devt/rules/arch-scan.py --report`) |

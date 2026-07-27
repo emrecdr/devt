@@ -2730,8 +2730,33 @@ function assertClaimChecksResolved() {
       });
     }
   }
+  // Self-heal before failing: a recovered artifact (resume/re-dispatch that
+  // succeeded AFTER the failure record) otherwise stays "unresolved" until
+  // someone re-runs the Layer-1 check by hand — field: the operator recovered
+  // correctly and then had to GUESS `state assert-artifact-present <agent>`
+  // to clear the record. Re-probe presence AND substance via the real Layer-1
+  // (which appends the success record itself); fail loud only when the
+  // artifact is genuinely still missing or still stub.
+  const selfHealed = [];
+  for (let i = unresolved.length - 1; i >= 0; i--) {
+    try {
+      const probe = assertArtifactPresent(unresolved[i].agent);
+      if (probe && probe.ok === true && probe.substance_verdict !== "stub") {
+        selfHealed.push(unresolved[i].agent);
+        unresolved.splice(i, 1);
+      }
+    } catch { /* probe failure — leave unresolved */ }
+  }
   if (unresolved.length === 0) {
-    return { ok: true, unresolved_count: 0, mode, reason: "all claim-checks in window resolved (latest verdict=success + substance=substantive per agent)" };
+    return {
+      ok: true,
+      unresolved_count: 0,
+      mode,
+      ...(selfHealed.length ? { self_healed: selfHealed } : {}),
+      reason: selfHealed.length
+        ? `all claim-checks resolved (${selfHealed.length} self-healed by re-probe: ${selfHealed.join(", ")} — artifact present + substantive on re-check)`
+        : "all claim-checks in window resolved (latest verdict=success + substance=substantive per agent)",
+    };
   }
   if (mode === "warn") {
     return {

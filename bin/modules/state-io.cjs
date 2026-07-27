@@ -419,6 +419,15 @@ function validateConsistency(stateOverride = null) {
   // Only include plan/debug artifacts when the workflow_type matches (reduces false positives)
   if (state.workflow_type !== "plan") delete PHASE_ARTIFACTS.plan;
   if (state.workflow_type !== "debug") delete PHASE_ARTIFACTS.debug;
+  if (state.workflow_type === "arch_health_scan") {
+    // The arch flow has no scan phase, and arch_health is the dev-side
+    // opt-in artifact — field: both rows false-fired "missing" against a
+    // task-service arch run whose own phase artifact is the architect review.
+    delete PHASE_ARTIFACTS.scan;
+    delete PHASE_ARTIFACTS.arch_health;
+  } else {
+    delete PHASE_ARTIFACTS.arch_health_scan;
+  }
 
   const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
   const mismatches = [];

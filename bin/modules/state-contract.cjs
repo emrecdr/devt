@@ -139,6 +139,7 @@ const PHASE_ARTIFACT_MAP = {
   retro: "lessons.yaml",
   scan: "scan-results.md",
   arch_health: "arch-health-scan.md",
+  arch_health_scan: "arch-review.md",
   architect: "arch-review.md",
   docs: "docs-summary.md",
   curate: "curation-summary.md",
@@ -437,6 +438,7 @@ const STATE_FILE_CONTRACT = {
     "lessons.yaml",             // retro hand-off draft
     "debug-context.md", "debug-investigation.md", "debug-summary.md",
     "arch-review.md", "arch-health-scan.md", "arch-baseline.json",
+    "subagent-events.jsonl",
     "arch-triage.json", "arch-scan-report.md", "scanner-output.txt",
     "evolution-report.md", "evolution-report.json",
     "docs-summary.md", "curation-summary.md", "session-report.md",

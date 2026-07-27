@@ -288,7 +288,19 @@ function computeCoupling(commits, fileStats, opts) {
     result.push({ a, b, shared, degree_pct: degree, rev_a: ra, rev_b: rb });
   }
   result.sort((x, y) => y.degree_pct - x.degree_pct || y.shared - x.shared);
-  return { pairs: result, skipped_large: skippedLarge, raw_pair_count: pairs.size };
+  // Small-history confidence: degree percentages inflate under low commit
+  // counts, and a single author enables batch-edit co-change — different
+  // noise sources, so both gate independently (field: 24 commits / 1 author
+  // produced 91% degrees; the pairs stayed USEFUL as leads, so annotate,
+  // never suppress — mirrors ownership's reason-tagged degradation shape).
+  const authorCount = new Set(commits.map((c) => c.author).filter(Boolean)).size;
+  const lowReasons = [];
+  if (commits.length < 50) lowReasons.push(`commits_analyzed=${commits.length}<50`);
+  if (authorCount < 2) lowReasons.push(`authors=${authorCount}<2`);
+  const confidence = lowReasons.length
+    ? { level: "low", reason: lowReasons.join(" + ") + " — degrees inflate under small history; treat pairs as leads, verify imports before acting" }
+    : { level: "normal", reason: null };
+  return { pairs: result, skipped_large: skippedLarge, raw_pair_count: pairs.size, confidence };
 }
 
 // Bird et al. define minor contributors as <5% of a component's commits. The
@@ -384,6 +396,9 @@ function renderMarkdown(data, opts) {
     "## Change coupling (files that co-change)",
     "",
     "Pairs with a hidden dependency: `degree` = shared commits / average revisions. Pairs WITHOUT a structural edge (import/call) are the interesting ones — invisible coupling the dependency graph cannot see.",
+    ...(data.coupling_confidence && data.coupling_confidence.level === "low"
+      ? ["", `> **Low confidence**: ${data.coupling_confidence.reason}`]
+      : []),
     "",
     data.coupling.length
       ? mdTable(
@@ -482,6 +497,7 @@ function scan(args) {
     },
     hotspots,
     coupling: coupling.pairs,
+    coupling_confidence: coupling.confidence,
   };
 
   let report_md = null;
@@ -508,6 +524,7 @@ function scan(args) {
     truncation: data.truncation,
     top_hotspots: hotspots.slice(0, 5).map((h) => ({ file: h.file, revisions: h.revisions, score: h.score })),
     top_coupling: coupling.pairs.slice(0, 5).map((c) => ({ a: c.a, b: c.b, degree_pct: c.degree_pct })),
+    coupling_confidence: coupling.confidence,
     report_md,
     report_json,
   };
