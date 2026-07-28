@@ -362,6 +362,63 @@ function discoverMissingWikiLinks() {
 // Main: harvest from all sources, filter, dedup, write _suggestions.md
 // ---------------------------------------------------------------------------
 
+// Recurrence ledger — persists how many times a candidate (or a near-duplicate
+// of it) has been staged across harvests. Field driver: promote questions were
+// too frequent and too technical; the ledger lets the curator ask ONLY about
+// approaches the team has already reached for N+ times, with "you've preferred
+// this N times" framing, while below-threshold candidates build evidence
+// silently. Lives in the memory root (survives state resets with the layer).
+function ledgerPath() {
+  return path.join(getMemoryRoot(), "_suggestions-ledger.json");
+}
+
+function loadLedger() {
+  try { return JSON.parse(fs.readFileSync(ledgerPath(), "utf8")); } catch { return {}; }
+}
+
+function candidateKey(title) {
+  return (title || "").toLowerCase().split(/\W+/).filter((t) => t.length >= 4).sort().join("-");
+}
+
+// Same 0.6 token-overlap bar findDuplicate uses against permanent docs —
+// one similarity definition across the layer.
+function ledgerMatch(title, ledger) {
+  const candTokens = new Set((title || "").toLowerCase().split(/\W+/).filter((t) => t.length >= 4));
+  if (candTokens.size === 0) return null;
+  for (const [key, entry] of Object.entries(ledger)) {
+    const entryTokens = new Set(`${entry.title || ""}`.toLowerCase().split(/\W+/).filter((t) => t.length >= 4));
+    let overlap = 0;
+    for (const t of candTokens) if (entryTokens.has(t)) overlap++;
+    if (overlap / candTokens.size >= 0.6) return key;
+  }
+  return null;
+}
+
+// Increments seen-counts for this harvest's proposals and stamps each proposal
+// with { seen, first_seen, last_seen }. Same-harvest duplicates of one ledger
+// entry count ONCE per harvest (a burst of identical tags in one session is
+// one preference event, not three).
+function applyRecurrence(proposals) {
+  const ledger = loadLedger();
+  const bumped = new Set();
+  const now = new Date().toISOString();
+  for (const p of proposals) {
+    const key = ledgerMatch(p.title, ledger) || candidateKey(p.title);
+    if (!ledger[key]) {
+      ledger[key] = { title: p.title, seen: 0, first_seen: now, last_seen: now };
+    }
+    if (!bumped.has(key)) {
+      ledger[key].seen += 1;
+      ledger[key].last_seen = now;
+      bumped.add(key);
+    }
+    p.seen = ledger[key].seen;
+    p.first_seen = ledger[key].first_seen;
+  }
+  try { atomicWriteFileSync(ledgerPath(), JSON.stringify(ledger, null, 2) + "\n"); } catch { /* ledger is best-effort */ }
+  return proposals;
+}
+
 function harvest(_options) {
   // Master switch — when memory.enabled=false, harvest is a no-op so we don't
   // write to .devt/memory/_suggestions.md (a memory-layer artifact). Returns
@@ -405,6 +462,8 @@ function harvest(_options) {
     proposals.push(cand);
   }
 
+  applyRecurrence(proposals);
+
   const wikiLinkProposals = discoverMissingWikiLinks();
 
   return {
@@ -446,9 +505,33 @@ function writeSuggestionsReport(harvestResult) {
   lines.push("");
 
   if (harvestResult.proposals.length > 0) {
-    lines.push("## ⚖️/🔵 Proposed Promotions");
+    const { getMergedConfig } = require("./config.cjs");
+    let threshold = 3;
+    try { const c = getMergedConfig(); if (c.memory && Number.isInteger(c.memory.promote_recurrence_threshold)) threshold = c.memory.promote_recurrence_threshold; } catch { /* default */ }
+    const recurring = harvestResult.proposals.filter((p) => (p.seen || 1) >= threshold);
+    const building = harvestResult.proposals.filter((p) => (p.seen || 1) < threshold);
+    if (recurring.length > 0) {
+      lines.push(`## Ready to promote (preferred ${threshold}+ times)`);
+      lines.push("");
+      lines.push("The curator presents ONLY these via AskUserQuestion, recurrence-framed and in plain language.");
+      lines.push("");
+    }
+    for (const p of recurring) {
+      lines.push(`### ${p.tag} ${p.title} — seen ${p.seen}× (first ${String(p.first_seen || "").slice(0, 10)})`);
+      lines.push(`- Source: ${p.source}${p.id ? ` (${p.id})` : ""}`);
+      lines.push("");
+    }
+    if (building.length > 0) {
+      lines.push(`## Building evidence (below the ${threshold}× recurrence bar — do NOT ask about these)`);
+      lines.push("");
+      for (const p of building) {
+        lines.push(`- ${p.tag} ${p.title} — seen ${p.seen || 1}×`);
+      }
+      lines.push("");
+    }
+    lines.push("## Full proposal detail");
     lines.push("");
-    lines.push("Each proposal carries the FULL original reasoning verbatim. Curator presents these via AskUserQuestion.");
+    lines.push("Each proposal carries the FULL original reasoning verbatim.");
     lines.push("");
     for (const p of harvestResult.proposals) {
       lines.push(`### ${p.tag} ${p.title}`);

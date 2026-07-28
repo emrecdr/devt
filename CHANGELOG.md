@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.218.0] - 2026-07-28
+
+Direct user field friction: the curator's promote questions were too frequent and too technical ("I do not understand what memory_promote asked"). The flow is now recurrence-gated and plain-language.
+
+### Changed
+
+- **Promotion asks are recurrence-gated.** A persistent ledger (`.devt/memory/_suggestions-ledger.json`) counts how many harvests have staged each candidate, with paraphrases folding into one entry via the same 0.6 token-overlap similarity the dedup already uses (same-harvest duplicates count once — a burst of identical tags in one session is one preference event). The curator asks ONLY about candidates seen `memory.promote_recurrence_threshold`+ times (default 3), framed as *"You've preferred this approach N× across sessions"*; below the bar, candidates build evidence silently — `_suggestions.md` now splits into "Ready to promote (preferred 3+ times)" and "Building evidence (do NOT ask about these)". An explicit `/devt:memory promote <id>` bypasses the gate.
+- **The ask is plain language, three options.** The previous form led with internal vocabulary — ADR/CON/FLOW, `status: active`, memory paths — across five symmetric options. Now: one plain sentence of what will change about future work ("readable cold by a non-expert" is the written test), and three choices: *make it a rule* / *don't suggest it again* / *not yet — keep watching*. The curator decides ALL mechanics silently (doc type from the tag, active-vs-candidate via the existing tooling-evolving classifier, affects_paths/keywords from evidence) and reports them in one line after the choice; the original reasoning rides verbatim below as secondary context; free-text answers via Other are the edit path.
+- K25 repinned to the new contract's real signals (the classifier's candidate pre-recommendation now modulates the recommended label's description instead of swapping two technical labels).
+
+### Added
+
+- Gate K333 — recurrence behavior end-to-end: two harvests stay "Building evidence" at seen 2×, the third crosses into "Ready to promote", a paraphrase increments the SAME ledger entry (1 entry at 4×), and the skill carries the plain-language form with the old five-option text gone.
+
 ## [0.217.0] - 2026-07-27
 
 Substrate batch, first slice (task-service field arc, Release Two part 1): headless honesty and untailored-rules defense.
@@ -626,18 +640,4 @@ Deliberately a **direction, not a target**: the denominator is scoped to each do
 - **`memory coverage`** CLI — `--changed`/`--universe` accept comma lists (with `--universe` omitted the denominator is `git ls-files`); exposes the metric for ad-hoc inspection and hermetic testing.
 - **Weekly report `## Affects Coverage (trend)` section** — `report generate` now aggregates the window's changed-file set (a new `git log --name-only` collector) against tracked files and renders per-doc density with the trend-not-target caveat and a mean-coverage line. New `affects_coverage` key in the `generate` JSON result.
 - Gate **K301** — behavioral on a hermetic fixture (exact-path doc → 100%, broad `**` doc → diluted 1/3, dead glob → null, most-diluted-first ordering, mean over claiming docs). Drift-guard stack 208 → 209 deep (K94–K301).
-
-## [0.183.0] - 2026-07-20
-
-### Session-end curation surface (DEF-008)
-
-Curation triggers were exclusively workflow-finalize-bound (`skills/memory-curation` "When to Run It"), so sessions that never complete a workflow — raw-dispatch maintainer work, exactly where devt's densest decision-making happens — accumulated candidates in `_suggestions.md` that nobody ever saw. Before: the Stop hook harvested candidates silently and said nothing. After: when candidates cross the surface threshold and the cooldown allows, the Stop hook's `stopReason` carries `💭 N memory candidates pending … — run /devt:memory promote to triage`, at most once per cooldown window.
-
-### Added
-
-- **`memory candidates-footer --hint-only`** — Stop-hook mode: emits ONLY the 💭 hint when `count >= threshold && cooldown ok` (touching the cooldown stamp), silent otherwise. The finalize-footer contract's always-on status line is deliberately dropped in this mode — that contract exists for once-per-workflow call sites where silence is indistinguishable from never-executing; Stop fires per turn, invocation is already recorded by the hook trace, and an always-on line there would be noise. Default (flag-less) behavior byte-identical.
-- **`hooks/stop.sh` appends the curation hint to `stopReason`** in both exit paths (incomplete-workflow warning and clean exit), right after the existing unconditional candidate harvest — the write side and the surface side of session-end curation now live in the same hook.
-- `skills/memory-curation` gains the session-end trigger line (the weak form, shipping alongside the wiring that makes it fire).
-- Gate **K300** — behavioral: hint-only silent below threshold, hint+stamp at threshold, cooldown suppresses the rerun, default footer line intact, and stop.sh end-to-end emits the hint exactly once per window. Drift-guard stack 207 → 208 deep (K94–K300).
-- `docs/HOOKS.md` gains a "Session-End Curation Surface" section; `docs/MEMORY.md` CLI reference documents the mode.
 

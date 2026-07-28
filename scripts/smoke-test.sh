@@ -8418,7 +8418,12 @@ K25_SIG_BEHAVIOR=$(/usr/bin/grep -c "BEHAVIOR or PATTERN of an external tool" "$
 K25_SIG_OPINIONATED=$(/usr/bin/grep -c "Lacks opinionated framing" "$K25_SKILL" 2>/dev/null || echo 0)
 K25_SIG_TITLE=$(/usr/bin/grep -c "behavior\`, \`pattern\`, \`migration" "$K25_SKILL" 2>/dev/null || echo 0)
 K25_RECO=$(/usr/bin/grep -c "(Recommended)" "$K25_SKILL" 2>/dev/null || echo 0)
-if [ "${K25_SIG_VERSION:-0}" -ge 1 ] && [ "${K25_SIG_BEHAVIOR:-0}" -ge 1 ] && [ "${K25_SIG_OPINIONATED:-0}" -ge 1 ] && [ "${K25_SIG_TITLE:-0}" -ge 1 ] && [ "${K25_RECO:-0}" -ge 2 ]; then
+K25_CAND_CLAUSE=$(/usr/bin/grep -c "Recorded as informational" "$K25_SKILL" 2>/dev/null || echo 0)
+# The plain-language contract carries ONE recommended label; the classifier's
+# candidate-status pre-recommendation now modulates that label's description
+# ("Recorded as informational first ...") instead of swapping two technical
+# labels — pin the clause, not the old count.
+if [ "${K25_SIG_VERSION:-0}" -ge 1 ] && [ "${K25_SIG_BEHAVIOR:-0}" -ge 1 ] && [ "${K25_SIG_OPINIONATED:-0}" -ge 1 ] && [ "${K25_SIG_TITLE:-0}" -ge 1 ] && [ "${K25_RECO:-0}" -ge 1 ] && [ "${K25_CAND_CLAUSE:-0}" -ge 1 ]; then
   pass "K25: memory-curation skill carries tooling-evolving heuristic (version/behavior/opinionated/title signals + (Recommended) suffix in ≥2 places)"
 else
   fail "K25: pre-recommendation heuristic incomplete. version=${K25_SIG_VERSION} behavior=${K25_SIG_BEHAVIOR} opinionated=${K25_SIG_OPINIONATED} title=${K25_SIG_TITLE} reco=${K25_RECO}"
@@ -19104,6 +19109,38 @@ if [ "$K332_OK" = "1" ]; then
   pass "K332: state-truth batch — Layer-2 self-heals recovered artifacts (still-missing blocks), reactivate clears stop stamps on agent activity, subagent events append without merging, hook stderr survives failure, small-history coupling annotates low confidence"
 else
   fail "K332: state-truth regression ($K332_WHY)"
+fi
+
+# K333: recurrence-gated curation (user field friction: promote questions too
+# frequent + too technical). Legs: (a) two harvests of one candidate → seen 2×,
+# report says "Building evidence", NOT ready; (b) third harvest crosses the
+# default threshold → "Ready to promote"; (c) a PARAPHRASE of the candidate
+# increments the SAME ledger entry (0.6 token-overlap match), not a new one;
+# (d) the curation skill carries the plain-language contract, not the old
+# five-option technical form.
+K333_PROJ=$(mktemp -d)
+mkdir -p "$K333_PROJ/.devt/state"
+K333_OK=1; K333_WHY=""
+(cd "$K333_PROJ" && node "$CLI" memory init >/dev/null 2>&1)
+printf '#KNOWLEDGE-CANDIDATE: [type=decision] Always use cursor pagination for list endpoints\n' > "$K333_PROJ/.devt/state/scratchpad.md"
+(cd "$K333_PROJ" && node "$CLI" memory suggest >/dev/null 2>&1 && node "$CLI" memory suggest >/dev/null 2>&1)
+/usr/bin/grep -q "Building evidence" "$K333_PROJ/.devt/memory/_suggestions.md" || { K333_OK=0; K333_WHY="a:no-building-section"; }
+/usr/bin/grep -q "seen 2×" "$K333_PROJ/.devt/memory/_suggestions.md" || { K333_OK=0; K333_WHY="$K333_WHY a:count"; }
+/usr/bin/grep -q "Ready to promote" "$K333_PROJ/.devt/memory/_suggestions.md" && { K333_OK=0; K333_WHY="$K333_WHY a:ready-too-early"; }
+(cd "$K333_PROJ" && node "$CLI" memory suggest >/dev/null 2>&1)
+/usr/bin/grep -q "Ready to promote (preferred 3+ times)" "$K333_PROJ/.devt/memory/_suggestions.md" || { K333_OK=0; K333_WHY="$K333_WHY b:not-ready-at-3"; }
+printf '#KNOWLEDGE-CANDIDATE: [type=decision] Use cursor pagination on all list endpoints\n' > "$K333_PROJ/.devt/state/scratchpad.md"
+(cd "$K333_PROJ" && node "$CLI" memory suggest >/dev/null 2>&1)
+K333_ENTRIES=$(node -e 'const l=require(process.argv[1]+"/.devt/memory/_suggestions-ledger.json");const e=Object.values(l);process.stdout.write(e.length+":"+e[0].seen)' "$K333_PROJ" 2>/dev/null)
+[ "$K333_ENTRIES" = "1:4" ] || { K333_OK=0; K333_WHY="$K333_WHY c:paraphrase=$K333_ENTRIES (want 1 entry at 4x)"; }
+/usr/bin/grep -q "Make it a standing project rule?" "$ROOT/skills/memory-curation/SKILL.md" || { K333_OK=0; K333_WHY="$K333_WHY d:plain-question"; }
+/usr/bin/grep -q "promote_recurrence_threshold" "$ROOT/skills/memory-curation/SKILL.md" || { K333_OK=0; K333_WHY="$K333_WHY d:gate-text"; }
+/usr/bin/grep -q "Promote (active)" "$ROOT/skills/memory-curation/SKILL.md" && { K333_OK=0; K333_WHY="$K333_WHY d:old-form-resident"; }
+rm -rf "$K333_PROJ"
+if [ "$K333_OK" = "1" ]; then
+  pass "K333: recurrence-gated curation — candidates build evidence silently below 3×, surface as 'Ready to promote' at the bar, paraphrases count into one ledger entry, and the ask is the plain-language 3-option form"
+else
+  fail "K333: curation recurrence regression ($K333_WHY)"
 fi
 
 echo

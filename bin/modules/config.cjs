@@ -213,6 +213,12 @@ const DEFAULTS = {
     // ~3K token cost); cooldown defaults to 24h (per-day cadence so a
     // user who dismisses the hint isn't pestered same-session).
     candidates_surface_threshold: 5,
+    // Recurrence gate for curator promote-asks: a candidate is only presented
+    // for promotion once the same (or a near-duplicate) approach has been
+    // staged this many times across harvests (_suggestions-ledger.json).
+    // Below the threshold candidates build evidence silently — the field
+    // complaint was too-frequent, too-technical promote questions.
+    promote_recurrence_threshold: 3,
     candidates_surface_cooldown_hours: 24,
   },
   // Graphify integration — optional AST symbol anchoring + MCP query layer.

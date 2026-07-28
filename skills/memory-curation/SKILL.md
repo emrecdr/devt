@@ -81,7 +81,16 @@ why a candidate didn't make the cut.
    - Apply the 5-filter
    - Cross-check against existing memory docs via `node bin/devt-tools.cjs memory query <terms>` — if a duplicate exists, mark as "may need update" instead of "new"
    - Cross-check against REJ tombstones — if one of them suppressed the proposal already, the discovery engine should have filtered it; double-check via `node bin/devt-tools.cjs memory rejected-keywords`
-3. Build a short queue of qualified candidates.
+3. **Recurrence gate** (field-driven — promote questions were landing too often
+   and too technical): read each proposal's `seen N×` count from
+   `_suggestions.md` (maintained by the harvest ledger). Only candidates at or
+   above `memory.promote_recurrence_threshold` (default 3) enter the ask queue.
+   Below-threshold candidates are NEVER presented individually — they appear as
+   one summary line in the wrap-up ("N more building evidence — will surface
+   after recurring"). A workflow caller handing the curator ONE explicit
+   candidate (e.g. `/devt:memory promote DEC-003`) bypasses the gate — the user
+   already chose it.
+4. Build a short queue of qualified candidates.
 
 ### Step 2 — Present each qualified candidate via AskUserQuestion
 
@@ -115,52 +124,68 @@ status rather than asking — they're descriptive, not opinionated. This
 pre-recommendation moves that judgment up-front so the user
 accepts/overrides instead of hunting through five symmetric options.
 
-For each candidate, present (apply the pre-recommendation by putting the
-recommended option FIRST with the suffix `(Recommended)` on the label;
-descriptions and the other four options unchanged):
+**Plain-language contract** (field-driven: the previous form led with internal
+vocabulary — ADR/CON/FLOW, `status: active`, memory paths — across five
+symmetric options, and the user could not tell what they were being asked).
+The user approves the SUBSTANCE in everyday words; the curator decides ALL
+mechanics silently — doc type via the ⚖️/🔵 tag, status via the classifier
+above, affects_paths/affects_symbols/links/keywords from the evidence — and
+reports them AFTER the choice ("Recorded as ADR-007 — governs src/auth/**").
+
+Before asking, write ONE plain sentence for the candidate: what will change
+about future work, readable cold by a non-expert. No doc-type names, no status
+vocabulary, no file paths. Test: would someone who has never seen `.devt/`
+understand what saying yes means?
 
 ```yaml
-question: "Promote this {⚖️ decision | 🔵 discovery} to {ADR | CON | FLOW}?"
+question: "You've preferred this approach {seen}× across sessions: {plain one-sentence summary}. Make it a standing project rule?"
 header: "{short candidate title, ≤12 chars}"
 multiSelect: false
 options:
-  # Pre-recommendation: when tooling-evolving signal present, swap the first two
-  # so "Promote (candidate)" leads with the (Recommended) suffix. Otherwise the
-  # default order below puts "Promote (active)" first with (Recommended).
-  - label: "Promote (active) (Recommended)"  # or "Promote (candidate) (Recommended)" per classifier
-    description: "Write {ADR-xxx} to .devt/memory/decisions/ with status: active. Becomes immediately governing for future agent edits."
-  - label: "Promote (candidate)"  # or "Promote (active)" per classifier
-    description: "Write {ADR-xxx} with status: candidate. Documented but not yet enforcing — promote to active later via the same flow."
-  - label: "Reject — capture as REJ tombstone"
-    description: "This idea was considered and explicitly NOT chosen. Write to .devt/memory/rejected/ with search_keywords so AI re-proposals are suppressed."
-  - label: "Defer"
-    description: "Keep the candidate in _suggestions.md; revisit in a later session."
-  - label: "Edit before promoting"
-    description: "Adjust title, summary, affects_paths, affects_symbols, or links before writing the markdown. Curator will re-prompt with the edited version."
+  - label: "Yes — make it a rule (Recommended)"
+    description: "Future agents follow it automatically and stop re-asking. It shows up when relevant files are touched."
+  - label: "No — and don't suggest it again"
+    description: "Recorded as a decided-against; future sessions will not re-propose it."
+  - label: "Not yet — keep watching"
+    description: "Stays on the watch list; you'll be asked again after it keeps coming up."
 ```
 
-When showing the question, INCLUDE the original reasoning verbatim above the options
-block — the user must see exactly what was recorded, not a curator paraphrase. Also
-include a one-line pre-recommendation rationale ("Pre-recommend `candidate` — body
-describes Hurl 4.1+ predicate behavior, not a project rule") so the user can sanity-
-check the classifier before accepting.
+When the classifier pre-recommends `candidate` (tooling-evolving signal), the
+first label's description gains one honest clause: "Recorded as informational
+first — it will inform agents without hard-enforcing until you confirm it
+later." The label itself stays plain.
+
+Below the options, include a short **"Recorded reasoning:"** block quoting the
+original evidence verbatim (indented, secondary) — the user can verify the
+substance without it being the headline. One line for the classifier rationale
+when it fired ("recorded as informational: describes Hurl 4.1+ behavior, not a
+project decision").
+
+The user can always answer with free text (the Other field) to edit the title,
+scope, or wording — the curator adapts and re-presents once.
 
 ### Step 3 — Act on the choice
 
-- **Promote (active|candidate)**: Use a `templates/memory/{ADR,CON,FLOW}-template.md` as
-  the starting frontmatter. Fill in id (auto-incremented from existing docs), title,
-  domain, status, confidence, summary, affects_paths, affects_symbols, links,
-  created_at (ISO-8601 now), created_by="curator". Write to the appropriate subdir.
-  Then run `node bin/devt-tools.cjs memory index` to update the FTS5 unified index.
-- **Reject — REJ tombstone**: Use `templates/memory/REJ-template.md`. CRITICAL — fill
-  `search_keywords` with every reasonable phrasing of the rejected idea. The autoskill
-  skill consults this list before generating proposals; under-coverage means the AI
-  will eventually re-propose this. Run `memory index` after writing.
-- **Defer**: No file changes. Note in `.devt/state/curation-summary.md` that the
-  candidate was deferred so it doesn't get re-presented immediately.
-- **Edit before promoting**: Surface the proposed frontmatter to the user, accept their
-  edits, then loop back to AskUserQuestion with the edited version. ONE edit cycle —
-  if the user wants a third pass, defer and let them edit the markdown by hand.
+- **"Yes — make it a rule"**: Use a `templates/memory/{ADR,CON,FLOW}-template.md` as
+  the starting frontmatter (type from the ⚖️/🔵 tag; status from the classifier —
+  `active`, or `candidate` on tooling-evolving signal). Fill in id (auto-incremented
+  from existing docs), title, domain, status, confidence, summary, affects_paths,
+  affects_symbols, links, created_at (ISO-8601 now), created_by="curator". Write to
+  the appropriate subdir, run `node bin/devt-tools.cjs memory index`, then report the
+  mechanics in ONE line: "Recorded as {id} ({status}) — governs {affects_paths}".
+- **"No — and don't suggest it again"**: Use `templates/memory/REJ-template.md`.
+  CRITICAL — fill `search_keywords` with every reasonable phrasing of the rejected
+  idea. The autoskill skill consults this list before generating proposals;
+  under-coverage means the AI will eventually re-propose this. Also remove the
+  candidate's entry from `_suggestions-ledger.json` (its counting is over). Run
+  `memory index` after writing.
+- **"Not yet — keep watching"**: No file changes; the ledger keeps counting. Note in
+  `.devt/state/curation-summary.md` that the candidate was deferred so it doesn't get
+  re-presented immediately.
+- **Free-text answer (Other)**: Treat as an edit — adjust title/scope/wording per the
+  user's words and loop back to AskUserQuestion once with the revised plain sentence.
+  ONE edit cycle — if the user wants a third pass, defer and let them edit the
+  markdown by hand.
 
 ### Step 4 — Capture summary
 

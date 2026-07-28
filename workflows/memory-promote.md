@@ -37,7 +37,7 @@ AskUserQuestion approval flow.
 <deviation_rules>
 1. **STOP: no candidates** — If `_suggestions.md` is empty AND no DEC-id was provided AND no caller payload exists, surface "No promotion candidates" and stop.
 2. **STOP: 5-filter rejects everything** — If all candidates fail the 5-filter, write a curation summary listing the failures and stop. Do not present a degenerate AskUserQuestion.
-3. **STOP: user picks Defer for every candidate** — Capture the deferral in curation-summary.md and stop. Do not loop back.
+3. **STOP: user picks "Not yet — keep watching" for every candidate** — Capture the deferrals in curation-summary.md and stop. Do not loop back.
 4. **Auto-fix: missing index** — If the FTS5 index is missing, run `node bin/devt-tools.cjs memory index` before dispatching curator (curator needs working query helpers).
 </deviation_rules>
 
@@ -95,7 +95,7 @@ ${TARGET_DEC_ID ? `(focus on candidate matching ${TARGET_DEC_ID})` : ""}.
 Apply the 5-filter (Specificity, Durability, Non-obviousness, Evidence, Actionability).
 For each qualified candidate, present an AskUserQuestion with the FULL ORIGINAL
 REASONING verbatim and the 5 options (Promote active | Promote candidate | Reject as
-REJ | Defer | Edit before promoting).
+REJ tombstone | Not yet — keep watching | free-text edit via Other).
 
 CRITICAL HARD INVARIANTS — see skills/memory-curation/SKILL.md:
 1. NEVER write a permanent .devt/memory/ file without explicit user approval via AskUserQuestion
