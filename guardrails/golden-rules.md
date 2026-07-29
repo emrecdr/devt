@@ -107,6 +107,8 @@ Match existing style even if you would write it differently. The Boy Scout insti
 
 **Practice**: Pick the canonical approach. Document it. Enforce it. Reject alternatives with clear error messages. If someone needs a different format, the answer is "use the standard format" — not "we also support this other thing."
 
+**System level (one way to do one thing)**: this holds for whole mechanisms, not just code patterns — one canonical command per operation, one on-disk format per artifact, one service per responsibility, one config-precedence chain. When a second way appears (a parallel command, a second server, an alternate format, a duplicate helper), **unify onto one and delete the other in the same change** — new redundancy is a defect even when both paths work, because drift between two "equivalent" paths is a bug generator. Prefer generalizing the one mechanism over adding a special-case second.
+
 ---
 
 ## Rule 10: Evidence Before Claims `[CRITICAL]`

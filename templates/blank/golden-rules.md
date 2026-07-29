@@ -14,6 +14,8 @@
 | 4. Surgical Changes | Modify only what the task needs; surface unrelated findings instead of silently fixing |
 | 5. No TODOs/Markers | Complete code only — no placeholders |
 | 6. Verify Before Done | No completion claims without test evidence |
+| 7. Never Weaken Tests | Fix the code, not the test — never delete/skip to go green |
+| 8. One Way | One canonical mechanism/command/format per outcome — unify onto one and delete duplicates |
 
 ---
 
@@ -96,6 +98,14 @@ diffing is blind to it, and the gap ships as missing or buggy functionality.
 If a test is genuinely wrong, change it visibly and state why in the output
 artifact — the verifier diffs test counts against the baseline and flags
 silent drops.
+
+---
+
+## Rule 8: One Way To Do One Thing
+
+Every capability has exactly **one** canonical implementation, command, code path, and format — never two mechanisms that reach the same outcome: one command per operation, one on-disk format per artifact, one service per responsibility, one config-precedence chain. When a second way appears — a duplicate helper, a parallel command, a second service, an alternate on-disk format — **unify onto one and delete the other in the same change**; never leave both. New redundancy is a defect even when both paths work: it doubles the surface that can drift, and drift between two "equivalent" paths is a bug generator. Prefer generalizing the one mechanism over adding a special-case second.
+
+Rule 2 covers reusing existing code as you implement; this rule covers the system level — mechanisms, commands, formats, and paths — where a second way must be unified away, not merely avoided.
 
 ---
 

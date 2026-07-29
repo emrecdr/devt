@@ -8,6 +8,22 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.221.0] - 2026-07-30
+
+A new language-agnostic golden rule — and the cross-template alignment its absence exposed. The rule was found living in only 2 of 6 templates, which is itself the defect the rule names.
+
+### Added
+
+- **Golden rule "One Way To Do One Thing"** — every capability has exactly one canonical implementation, command, code path, and format; when a second way appears (duplicate helper, parallel command, second service, alternate on-disk format), unify onto one and delete the other in the same change. New redundancy is a defect even when both paths work, because drift between two "equivalent" paths is a bug generator. Added byte-identical to **all six** templates (`blank`, `go`, `python-fastapi`, `rust`, `typescript-node`, `vue-bootstrap`) and devt's own `guardrails/golden-rules.md` (folded into the existing Rule 9 "One Obvious Way" as its system-level generalization — expanded, not duplicated). In go/typescript-node it *replaces* the old code-level "One Obvious Way" rule, whose reuse content already lived in Rule 2 (No Duplicate Features) — one rule, not two.
+- **Gate K336** — the canonical rule must be present in every template's golden-rules.md and in guardrails. Drift guard for the class that just bit: "One Obvious Way" had silently drifted into only go + typescript-node. Mutation-proven (stripping it from any template reds the gate, naming the template).
+
+### Changed
+
+- **rust template gained the full language-agnostic rule core.** It carried *zero* agnostic process rules (all 16 were Rust idioms in a different format) — the largest cross-template misalignment. A new "Universal Rules (language-agnostic — aligned across all devt templates)" section now carries the same eight process rules every other template has (Deep Analysis, No Duplicate Features, No Backward Compat, Surgical Changes, One Way To Do One Thing, No TODOs, Verify Before Done, Never Weaken Tests); its 16 Rust-specific idiom rules move under an explicit "Rust-Specific Rules" tier, unchanged.
+- **Quick-Reference cards made contiguous** in every template that has one — `blank`, `python-fastapi`, `vue-bootstrap`, `go`, and `typescript-node` cards were each silently missing their "Never Weaken Tests" row (pre-existing drift); all now list every rule through the new One-Way entry.
+
+The alignment target is the rule *set* + principle wording, not byte-identical bodies: language-flavored examples inside shared rules (Go's `// Deprecated:`, TS's `@deprecated`) are correct per-language detail and stay. Absolute rule numbers still differ where language-specific rules interleave — unavoidable and not drift.
+
 ## [0.220.0] - 2026-07-29
 
 The proef parallel-review seam batch — a second independent field run (64-file whole-workspace review, 5-lane fan-out) reported six findings, all code-verified; the initial fixes were then **reconciled against the operator's filled receipt before commit**, which reversed one design outright and upgraded three others. The receipt also delivered the state-truth verdict the arc was waiting for: across 35 minutes, a workflow rotation, 5 lanes, and 42 gate fires, the v0.216.0 fixes held — zero state/reality disagreements, zero foreign-cid false positives.
@@ -622,25 +638,4 @@ Refreshed the `go` and `typescript-node` project-rules templates to current-stab
 - **go** — floor raised to Go 1.24+ (was 1.22+; current stable 1.26). Added: the `tool` directive in `go.mod` (retires the `tools.go` blank-import workaround), `go fix` modernizers, `os.Root` (traversal-safe FS), generic type aliases, `encoding/json/v2`, container-aware `GOMAXPROCS`, `sync.WaitGroup.Go`, and a `testing/synctest` section for deterministic concurrency tests (the top source of CI flakes).
 - **typescript-node** — TypeScript 7 (the native Go-based `tsc`, ~10× faster, same type system) and Node.js 24 LTS. The big shift: **native type-stripping** — `node app.ts` runs with no build step — documented with its two load-bearing caveats (it does *not* type-check, so `tsc --noEmit` stays the CI gate; only erasable syntax runs, so avoid `enum`/parameter-properties/`namespace`). `node --test` now runs `.ts` directly.
 - **vue-bootstrap** — one-line note that Pinia 4 (ESM-only) is current; Vue 3.5 / Vite 8 were already accurate.
-
-## [0.186.0] - 2026-07-20
-
-### Hardening + cleanup for the coverage + enforce features (v0.184.0/v0.185.0)
-
-A validation pass over the two new memory-layer features found five edge cases, and a follow-up simplify pass removed the duplication they were built on. All behavior-preserving where it counts; the drift-guard suite stays 1049/0 at K94–K302.
-
-### Fixed
-
-- **Affects-coverage density could exceed 100%** — `matched` was not scoped to the tracked universe, so a file changed in the window but since deleted (or changed on another branch via `git log --all`) inflated the numerator past `claimed`. `matched` now counts only changed files that are still tracked, restoring `matched ≤ claimed` (F1, pinned by K301's deleted-file case).
-- **`memory enforce` silently no-op'd on absolute `--files`** — a raw absolute path matched no repo-relative glob (the same trap that once disarmed the pre-flight guard). Paths are now canonicalized (`realpath` both sides, resilient to a symlinked root) before matching (F2, K302).
-- **Enforce violations were unattributed by root** — each violation now carries `shared_root` (null for local, the root label for shared-root docs), so a reviewer can see when a doc governing without the local curator gate is the source of a finding (F3, DEF-009 M4 parity, K302).
-- **Enforce on a non-governing doc-type was silently ignored** — a REJ/lesson carrying `enforce:` now warns at `memory validate` (`enforce-ignored`) instead of quietly never running (F4, K302).
-- **Enforce regexes were unbounded** — a catastrophic-backtracking pattern could stall the verify loop. Regexes now apply per line and skip pathologically long (minified/generated) lines, removing the ReDoS surface without affecting real source (F5, K302).
-
-### Changed (internal cleanup)
-
-- **One `trackedFiles()` helper** replaces three copies of the `git ls-files` idiom (`runEnforce`, `computeAffectsCoverage` fallback, coverage CLI, weekly report).
-- **One `toRepoRelative()` helper** for the absolute→repo-relative canonicalization; **one `activeAffectsRows()`** query shared by `getByPath` + `computeAffectsCoverage` so the governing-doc definition can't drift; **one module-level `parseCsvFlag()`** for the `--files`/`--changed`/`--universe` CLI args.
-- **The weekly report no longer runs a second `git log`** — `parseGitLog` collects the window's changed-file set in its existing walk (via an out-param) instead of re-walking it for affects-coverage.
-- `runEnforce` reads + splits each in-scope file once per run (cache) instead of once per matching rule.
 

@@ -19193,6 +19193,24 @@ else
   fail "K335: seam regression ($K335_WHY)"
 fi
 
+# K336: language-agnostic golden rules stay aligned across ALL templates.
+# Field trigger: "One Obvious Way" had drifted into only go + typescript-node
+# of six templates — a two-ways-to-do-one-thing defect in the rules about
+# exactly that. The canonical "One Way To Do One Thing" rule (and its
+# load-bearing sentence) must be present in every template's golden-rules.md
+# AND devt's own guardrails/golden-rules.md, or a template silently ships
+# without an agnostic rule its siblings carry.
+K336_ANCHOR="unify onto one and delete the other in the same change"
+K336_MISSING=""
+for grf in "$ROOT"/templates/*/golden-rules.md "$ROOT/guardrails/golden-rules.md"; do
+  /usr/bin/grep -qF "$K336_ANCHOR" "$grf" || K336_MISSING="$K336_MISSING $(echo "$grf" | sed "s|$ROOT/||")"
+done
+if [ -z "$K336_MISSING" ]; then
+  pass "K336: 'One Way To Do One Thing' canonical rule aligned across all 6 templates + guardrails (agnostic-rule drift guard)"
+else
+  fail "K336: canonical One-Way rule missing from:$K336_MISSING — language-agnostic rules must align across every template (add the rule, don't leave the set uneven)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

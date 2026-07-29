@@ -4,6 +4,104 @@
 
 Devt-integration document for Rust projects. Read by every agent. These rules are non-negotiable — they encode invariants that produce buggy / unsound / unreviewable code when violated.
 
+## Universal Rules (language-agnostic — aligned across all devt templates)
+
+These process rules are identical across every devt language template; the numbered `Rust-Specific Rules` below add the language layer.
+
+### Rule 1: Deep Analysis Before Implementation
+
+```
+NO IMPLEMENTATION WITHOUT CODEBASE SCAN. NO EXCEPTIONS.
+```
+
+#### Required Process
+
+Before ANY implementation work:
+
+1. **Scan target module**: Read existing files in the target area
+2. **Scan shared utilities**: Check for helpers that already solve your subproblem
+3. **Scan tests**: Existing tests reveal actual behavior, not just intent
+
+#### Violation Examples
+
+- Implementing a helper that already exists in the codebase
+- Creating a new wrapper when the project already has one
+- Adding a new error type when an existing one covers the case
+
+---
+
+### Rule 2: No Duplicate Features
+
+Search before creating. If a function, type, or pattern already exists — reuse it. If it doesn't fit exactly, extend it. Creating a parallel implementation is always wrong.
+
+---
+
+### Rule 3: No Backward Compatibility Code
+
+Prefer direct changes over compatibility layers. No:
+
+- Deprecated function aliases
+- Feature flags for old behavior
+- Compatibility shims between old and new APIs
+
+Change the code, update all callers, delete the old path. If the project has external consumers, coordinate breaking changes — but don't add shims within the codebase itself.
+
+---
+
+### Rule 4: Surgical Changes
+
+Touch only what the task requires. Clean up orphans **your own** changes create — not pre-existing ones.
+
+When you spot unrelated improvements or bugs (typos, dead code, stale comments, latent bugs, refactor opportunities), do NOT silently fix them. Use the **Find-Surface-Decide protocol**:
+
+1. **Find**: note the file path and a one-line description of the issue
+2. **Surface**: present it to the user as a side-finding
+3. **Decide**: ask whether to (a) fix now in this task, (b) split into a follow-up task, or (c) just record in the session summary
+4. Act on the user's choice — never assume
+
+Match existing style even if you would write it differently. Silent in-scope creep is the failure mode this rule guards against.
+
+#### Boy Scout Mode (opt-in)
+
+`scope_mode` in `.devt/config.json` defaults to `"surgical"` (the protocol above). Set it to `"boyscout"` to grant agents permission to auto-fix small mechanical issues — dead imports, lint warnings, typos in comments, formatting — within files they are already editing, without asking. Anything larger (refactors, behavior changes, cross-file cleanups) still goes through Find-Surface-Decide regardless of mode.
+
+---
+
+### Rule 5: No TODOs or Placeholders
+
+Ship complete code or don't ship. If you can't complete a function, surface it as BLOCKED in your summary.
+
+---
+
+### Rule 6: Verify Before Claiming Done
+
+Before reporting DONE, run the project's quality gates and copy the terminal output as evidence. "I believe the tests pass" is not verification — "Here is the output showing 0 failures" is.
+
+---
+
+### Rule 7: Never Weaken Tests to Pass
+
+Never remove, skip, or weaken a failing test, gate, or assertion to make a run
+pass — fix the code, not the test. A deleted test cannot fail; pass/fail
+diffing is blind to it, and the gap ships as missing or buggy functionality.
+If a test is genuinely wrong, change it visibly and state why in the output
+artifact — the verifier diffs test counts against the baseline and flags
+silent drops.
+
+---
+
+### Rule 8: One Way To Do One Thing
+
+Every capability has exactly **one** canonical implementation, command, code path, and format — never two mechanisms that reach the same outcome: one command per operation, one on-disk format per artifact, one service per responsibility, one config-precedence chain. When a second way appears — a duplicate helper, a parallel command, a second service, an alternate on-disk format — **unify onto one and delete the other in the same change**; never leave both. New redundancy is a defect even when both paths work: it doubles the surface that can drift, and drift between two "equivalent" paths is a bug generator. Prefer generalizing the one mechanism over adding a special-case second.
+
+Rule 2 covers reusing existing code as you implement; this rule covers the system level — mechanisms, commands, formats, and paths — where a second way must be unified away, not merely avoided.
+
+---
+
+---
+
+## Rust-Specific Rules
+
 ## 1. No `unwrap()` / `expect()` Outside Tests + `main`
 
 ```rust

@@ -16,10 +16,11 @@
 | 6. Error Types | Every thrown error extends AppError with a code |
 | 7. Dependency Injection | No global singletons — inject everything via constructor |
 | 8. Named Exports Only | No default exports — explicit over implicit |
-| 9. One Obvious Way | If it exists, reuse it; don't build a second path |
+| 9. One Way | One canonical mechanism/command/format per outcome — unify onto one and delete duplicates |
 | 10. Boundary Validation | Validate ALL external input with Zod at system boundaries |
 | 11. No TODOs/Markers | Complete code only — no placeholders or temporal markers |
 | 12. Verify Before Done | No completion claims without fresh test evidence |
+| 13. Never Weaken Tests | Fix the code, not the test — never delete/skip to go green |
 
 ---
 
@@ -182,16 +183,11 @@ export default class UserService { ... }
 
 ---
 
-## Rule 9: One Obvious Way
+## Rule 9: One Way To Do One Thing
 
-Before building a solution, search:
+Every capability has exactly **one** canonical implementation, command, code path, and format — never two mechanisms that reach the same outcome: one command per operation, one on-disk format per artifact, one service per responsibility, one config-precedence chain. When a second way appears — a duplicate helper, a parallel command, a second service, an alternate on-disk format — **unify onto one and delete the other in the same change**; never leave both. New redundancy is a defect even when both paths work: it doubles the surface that can drift, and drift between two "equivalent" paths is a bug generator. Prefer generalizing the one mechanism over adding a special-case second.
 
-- Is there already a middleware that does this?
-- Is there already a service method that fetches this data?
-- Is there already an error type for this case?
-- Is there already a test helper for this setup?
-
-If yes — use it. Two ways to do the same thing is always worse than one.
+Rule 2 covers reusing existing code as you implement; this rule covers the system level — mechanisms, commands, formats, and paths — where a second way must be unified away, not merely avoided.
 
 ---
 
