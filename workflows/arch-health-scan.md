@@ -146,7 +146,13 @@ test -f .devt/state/arch-triage.json && echo "TRIAGE_EXISTS" || echo "NO_TRIAGE"
 
 ```bash
 SCAN_ID="$(date +%Y%m%d-%H%M%S)"
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state arch-scan-trace scan-start --scan-id="$SCAN_ID" --scanner="$SCANNER_COMMAND" >/dev/null
+# Carrier: scan-complete fires fences (and one agent dispatch) later — each
+# fence is a fresh shell, so the id rides in workflow.yaml, not a shell var
+# (field: an operator had to improvise a .current-scan-id file here).
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update scan_id="$SCAN_ID" >/dev/null
+# --scanner: substitute the command resolved in check_scanner (or "manual") —
+# it is not re-needed after this line, so it carries by inline substitution.
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state arch-scan-trace scan-start --scan-id="$SCAN_ID" --scanner="<scanner command from check_scanner, or manual>" >/dev/null
 ```
 
 **If a scanner command is configured**: Execute it and capture the output.
@@ -160,6 +166,7 @@ Capture the exit code. Even if the scanner reports findings (non-zero exit), con
 **Observability emit (after scanner completes).** Compute finding count + baseline delta from the scanner output JSON when available, then trace:
 
 ```bash
+SCAN_ID=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null | jq -r '.scan_id // "unknown"')
 if [ -f .devt/state/arch-scan-report.md ]; then
   # Best-effort finding count from the report's "## Findings (N)" header
   FINDING_COUNT=$(grep -oE 'Findings \([0-9]+\)' .devt/state/arch-scan-report.md | grep -oE '[0-9]+' | head -1)
@@ -285,16 +292,22 @@ Triage decisions persist across scans — dismissed findings won't resurface in 
 
 Dispatch the architect agent to interpret findings:
 
-```
-Task(subagent_type="devt:architect", model="{models.architect}", prompt="
+<!-- BEGIN dispatch:architect:arch_health_scan -->
+<!-- EDIT-SOURCE: templates/dispatch/envelopes/architect-arch_health_scan.tmpl.md -->
+Task(subagent_type="devt:architect", prompt="
   <context>
+    <governing_rules>Read CLAUDE.md and .devt/rules/architecture.md from the project root — they are the governing law for this assessment. The project's own CLAUDE.md WINS on any conflict with .devt/rules/ baselines.</governing_rules>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
+    <guardrails_inline>Read {plugin_root}/guardrails/golden-rules.md and {plugin_root}/guardrails/engineering-principles.md before assessing.</guardrails_inline>
+    <scope_hint>{JSON array of the top-level paths in scan scope, e.g. [\"app/\", \"tests/\"] — fill from the scan target; [] means whole repo}</scope_hint>
+    <scope_trust>{JSON: {\"trust\": \"dense|sparse|empty\", \"lag_commits\": N|null, \"fresh\": true|false} — fill from the graphify staleness surface computed at workflow start; {\"trust\":\"empty\",\"lag_commits\":null,\"fresh\":false} when graphify is absent}</scope_trust>
+    <memory_signal>{Run `node {plugin_root}/bin/devt-tools.cjs memory query \"<scan topic>\" --signal=3 --json-compact` and inline the JSON result — governing ADR/CON ids, REJ tombstones, and lessons the assessment must respect; {} when the memory layer is disabled. Deliberate design choices recorded there are DISMISSALS, not findings.}</memory_signal>
     <files_to_read>
       .devt/rules/architecture.md — layer rules, module boundaries, dependency direction
       .devt/rules/coding-standards.md — coding conventions, forbidden patterns, entity standards
       .devt/rules/testing-patterns.md — test structure, coverage rules, soft-delete testing requirements
       .devt/rules/golden-rules.md (if exists) — non-negotiable project rules
       .devt/rules/patterns/common-smells.md (if exists) — project-specific anti-patterns with detection commands
-      CLAUDE.md (if exists)
     </files_to_read>
     <scanner_output>Read .devt/state/scanner-output.txt (if exists)</scanner_output>
     <evolution>Read .devt/state/evolution-report.md (if exists) — git-history hotspots, change coupling, fix density</evolution>
@@ -324,14 +337,19 @@ Task(subagent_type="devt:architect", model="{models.architect}", prompt="
     same violation in cold code (state the hotspot rank when elevating). Flag
     change-coupling pairs that lack a structural relationship (no import/call
     edge) as hidden-coupling findings — likely a missing abstraction or
-    copy-paste twins. High churn/loc + high fix count = bleeding edge; note it
-    in the health summary trend.
+    copy-paste twins. When coupling data carries confidence=low (small history),
+    treat pairs as leads to verify via imports, never as findings by themselves.
+    High churn/loc + high fix count = bleeding edge; note it in the health
+    summary trend.
+
+    Respect the memory_signal: approaches recorded as deliberate decisions or
+    REJ tombstones are dismissals ("Dismissed as deliberate"), NOT findings.
 
     **Capture knowledge candidates** (load-bearing — not optional, do this BEFORE writing arch-review.md): per your `knowledge_candidates` step, if your assessment surfaces architectural rules / patterns worth promoting (cross-component invariants, "this layer cannot depend on that layer", non-obvious design constraints), append `#KNOWLEDGE-CANDIDATE: [type=decision|concept|flow|rejected] <one-line summary>` lines to `.devt/state/scratchpad.md`. Each tag passes: specificity, durability, non-obviousness, evidence, actionability.
   </task>
   Write findings to .devt/state/arch-review.md
 ")
-```
+<!-- END dispatch:architect:arch_health_scan -->
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/architecture-health-scanner/` for additional analysis patterns the architect can use.
 

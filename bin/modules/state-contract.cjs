@@ -82,6 +82,7 @@ const KNOWN_STATE_KEYS = {
   workflow_id_history: "object",
   last_session: "string",
   stopped_at: "string",
+  scan_id: "string",
   stopped_phase: "string",
   skipped_phases: "string",
   resume_context: "string",

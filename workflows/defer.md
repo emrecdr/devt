@@ -45,11 +45,7 @@ Auto-detect capture context:
 WORKFLOW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{const w=JSON.parse(s).workflow_type;process.stdout.write(w||'')}catch{process.stdout.write('')}})")
 # The agent or persona invoking the command (default: user)
 CAPTURED_BY=${WORKFLOW:+"workflow:$WORKFLOW"}
-```
 
-Then call:
-
-```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" deferred add "$TITLE" \
   ${CONTEXT:+--context="$CONTEXT"} \
   ${TAGS:+--tags="$TAGS"} \

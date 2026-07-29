@@ -8,6 +8,26 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.219.0] - 2026-07-29
+
+The final substrate slice of the task-service field arc: the fresh-shell contract is now machine-enforced, and the architect dispatch joined the compiled-envelope system.
+
+### Added
+
+- **`scripts/check-workflow-shell-state.cjs` + gate K334 — the cross-fence lint.** Every ```bash fence runs as a fresh shell; a `$VAR` assigned in one fence and consumed in a later one is dead on arrival (the field operator improvised a `.current-scan-id` file to survive this). The lint flags assign-in-fence-i/use-in-fence-j across all workflows, with stated exemptions (env-provided names, `${X:-}` fence-local defaults, same-fence assignment) and a stated limit (bash-fence-only; prose-carried values belong to the envelope compile path). The sweep found the known arch bug **plus four live siblings nobody had reported**: `$CTX` consumed in three later fences of code-review.md, `$RANGE` in its scope step, `$SCOPE_HINT` in code-review-parallel's lane-block builder, and `$CAPTURED_BY` in defer.md.
+- **W016 downgraded to info severity** (proef field report, same day it shipped): untailored template rules are safe-by-design under the precedence line, so they must not hold a project at DEGRADED forever — guidance, not degradation. The check and its file list are unchanged.
+
+### Fixed
+
+- **All five cross-fence violations, each with the right carrier**: the arch scan-id rides `state update scan_id=...` / `state read` (the receipt's exact recommendation; `scan_id` registered as a known state key; the `--scanner` arg is inline-substituted since it's never re-needed); code-review's `$CTX` fences re-acquire the compound bundle (idempotent — short-circuits on same scope_sig+graph_head per K207); `$RANGE` re-derives with the one-liner its own prose already mandated; parallel's `$SCOPE_HINT` re-reads the workflow.yaml cache; defer's two adjacent fences merged into one.
+
+### Changed
+
+- **The architect's arch-scan dispatch is a compiled marker region** (`dispatch:architect:arch_health_scan`, rendered from `architect-arch_health_scan.tmpl.md`) — the raw prose `Task(` template that was structurally invisible to every contract gate is gone. `model="{models.architect}"` dropped entirely (the field receipt: inherit was correct, and the placeholder never resolved outside compound-init flows — the model question now belongs to the house resolution path). The template carries typed fill-contracts for `scope_hint`/`scope_trust` (JSON shapes per architect.md), a `memory_signal` block wired to `memory query --signal`, and the coupling-confidence caveat in the task body.
+- **`memory_signal` is contract-declared for the architect** — the field receipt proved it is the standalone-scan defense against untailored rules (it alone kept an architect from grading a project against contradicting boilerplate). The two dev-flow variants are exempted with the reason in the contract, not silently absent. Mutation-proven: deleting `<memory_signal>` from the compiled region fails `dispatch check-contracts`. K314's io-declare pin updated for the architect's new block list.
+
+Remaining from the arc, all receipt-gated or dedicated-session: the compound `arch-scan run` verb, the identity fallback chain (awaiting a payload capture), the curator flow's first-fire receipt, and the smoke phase-split.
+
 ## [0.218.0] - 2026-07-28
 
 Direct user field friction: the curator's promote questions were too frequent and too technical ("I do not understand what memory_promote asked"). The flow is now recurrence-gated and plain-language.
@@ -625,19 +645,4 @@ enforce:
 - **`agents/verifier.md`** gains a `run_verification` step: run `memory enforce --files=<changed>`, treat each violation as a blocking, deterministic finding.
 - **CON-003** gains a live `enforce` binding (`scripts/smoke-test.sh` must retain a `set +e` pipefail guard) — the pilot's first real-code assertion, green on the current tree.
 - Gate **K302** — behavioral: forbid flags the matching line, require flags the missing-pattern file, clean files pass, touched-file scoping works, malformed nested-map enforce errors at validate. Drift-guard stack 209 → 210 deep (K94–K302). `docs/MEMORY.md` documents the contract.
-
-## [0.184.0] - 2026-07-20
-
-### Affects-coverage density (DEF-007 part 2)
-
-Part 1 (v0.176.0) warned when an active governing doc had no `affects_paths` at all — invisible to the affects-union memory_signal. Part 2 instruments the opposite failure: a doc whose glob is so broad it claims files it never really governs, so it fires on the affects-union for nearly any change while adding no precision (mechanism-firing ≠ value). Before: nothing distinguished a tight exact-path doc from a `**` doc that matches half the tree — both just "govern" whatever changed. After: the weekly report's new **## Affects Coverage (trend)** section gives each governing doc a density — of the N tracked files its own globs CLAIM, how many M were changed in the window — sorted most-diluted-first. A `guardrails/**`+`skills/**` tombstone claiming 26 files reads visibly diluted next to an exact-path doc at 100%.
-
-Deliberately a **direction, not a target**: the denominator is scoped to each doc's own claim (a raw changed-files fraction would reward broad globs that govern nothing), a single window can't distinguish "diluted" from "quiet," and the mean-over-claiming-docs line is there to compare across reports — never a score to maximize, since narrowing a glob to nothing would "improve" it while governing less.
-
-### Added
-
-- **`memory.computeAffectsCoverage(changedFiles, fileUniverse)`** + the pure, DB-free **`memory.globReach(patterns, files)`** core (reuses the same `matchesGlob` engine `getByPath` uses, so a coverage count is exactly the file set the affects-union would match). Per governing doc in `getByPath`'s universe (active/candidate, ≥1 affects pattern, all types): `claimed` = universe ∩ globs, `matched` = changed ∩ globs, `density` = M/N (null when the globs match nothing tracked — a distinct "dead governance" pathology). Rows sort density-ascending, broadest-claim-first within a tier.
-- **`memory coverage`** CLI — `--changed`/`--universe` accept comma lists (with `--universe` omitted the denominator is `git ls-files`); exposes the metric for ad-hoc inspection and hermetic testing.
-- **Weekly report `## Affects Coverage (trend)` section** — `report generate` now aggregates the window's changed-file set (a new `git log --name-only` collector) against tracked files and renders per-doc density with the trend-not-target caveat and a mean-coverage line. New `affects_coverage` key in the `generate` JSON result.
-- Gate **K301** — behavioral on a hermetic fixture (exact-path doc → 100%, broad `**` doc → diluted 1/3, dead glob → null, most-diluted-first ordering, mean over claiming docs). Drift-guard stack 208 → 209 deep (K94–K301).
 

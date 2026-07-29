@@ -18573,8 +18573,11 @@ rm -rf "$K314_TMP"
 { printf '%s' "$K314_INL" | /usr/bin/grep -qF "$K314_BODY" \
   && ! printf '%s' "$K314_INL" | /usr/bin/grep -qF "$K314_STUB"; } || { K314_OK=0; K314_MISS="$K314_MISS inline-rules-force"; }
 printf '%s' "$K314_CFG" | /usr/bin/grep -qF "$K314_STUB" || { K314_OK=0; K314_MISS="$K314_MISS config-byref"; }
-K314_DECL=$(/usr/bin/grep -cF 'context_blocks: [governing_rules, guardrails_inline, agent_skills, task]' "$ROOT/agents/io-contracts.yaml" || true)
-[ "$K314_DECL" -ge 2 ] || { K314_OK=0; K314_MISS="$K314_MISS io-declare($K314_DECL)"; }
+# tester keeps the 4-block form; architect's list gained memory_signal (the
+# standalone-scan defense) — pin each declaration exactly.
+K314_DECL_T=$(/usr/bin/grep -cF 'context_blocks: [governing_rules, guardrails_inline, agent_skills, task]' "$ROOT/agents/io-contracts.yaml" || true)
+K314_DECL_A=$(/usr/bin/grep -cF 'context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]' "$ROOT/agents/io-contracts.yaml" || true)
+{ [ "$K314_DECL_T" -ge 1 ] && [ "$K314_DECL_A" -ge 1 ]; } || { K314_OK=0; K314_MISS="$K314_MISS io-declare(t=$K314_DECL_T,a=$K314_DECL_A)"; }
 if [ "$K314_OK" -eq 1 ]; then
   pass "K314: guardrails_mode delivery gate (default-by-reference behavioral, --guardrails-by-reference + config stub, --inline-rules forces inline, single-sourced stub, tester+architect declare guardrails_inline)"
 else
@@ -19141,6 +19144,20 @@ if [ "$K333_OK" = "1" ]; then
   pass "K333: recurrence-gated curation — candidates build evidence silently below 3×, surface as 'Ready to promote' at the bar, paraphrases count into one ledger entry, and the ask is the plain-language 3-option form"
 else
   fail "K333: curation recurrence regression ($K333_WHY)"
+fi
+
+# K334: workflow shell-state lint. Every ```bash fence runs as a fresh shell,
+# so a $VAR assigned in one fence and consumed in a later one is dead on
+# arrival — the LLM orchestrator improvises a carrier or the value silently
+# empties (field: task-service hand-rolled a .current-scan-id file; the sweep
+# then found the same class live in code-review/parallel/defer). The lint
+# makes the pattern un-shippable; carriers are `state update` or fence-local
+# re-derivation from idempotent cached calls.
+K334_OUT=$(node "$ROOT/scripts/check-workflow-shell-state.cjs" 2>&1) || K334_OUT="VIOLATIONS: $K334_OUT"
+if [ "$K334_OUT" = "OK" ]; then
+  pass "K334: no cross-fence shell-variable use in workflows (fresh-shell contract; carriers are state update / fence-local re-derivation)"
+else
+  fail "K334: cross-fence shell state — $(echo "$K334_OUT" | head -3 | tr '\n' ' ')"
 fi
 
 echo

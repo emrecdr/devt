@@ -270,6 +270,7 @@ if [ "$LANE_FILES_PROSE_ONLY" = "true" ]; then
   LANE_SCOPE_HINT_BLOCK="<scope_hint>$(printf '%s\n' "$LANE_FILES_JSON" | jq -c '.')</scope_hint>"
 else
   LANE_GRAPH_IMPACT_BLOCK='<graph_impact>Read .devt/state/graph-impact.md — pre-computed caller set + blast radius for this lane scope</graph_impact>'
+  SCOPE_HINT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.scope_hint_json // "[]"')  # fresh shell — re-read the cache
   LANE_SCOPE_HINT_BLOCK="<scope_hint>${SCOPE_HINT}</scope_hint>"
 fi
 ```

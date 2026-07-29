@@ -127,7 +127,13 @@ agents:
       primary: arch-review.md
       sidecar: null
     inputs:
-      context_blocks: [governing_rules, guardrails_inline, agent_skills, task]
+      context_blocks: [governing_rules, guardrails_inline, memory_signal, agent_skills, task]
+      # memory_signal is the standalone-scan defense against untailored rules
+      # (field: it was the only thing that kept an architect from grading a
+      # project against contradicting template boilerplate). The dev-flow
+      # variants predate the block and inherit signal via the workflow's
+      # preflight cache — exempted, not silently absent.
+      context_blocks_exempt: [dev-arch-health:memory_signal, dev-arch-review:memory_signal]
       graphify_inputs: [scope_hint, scope_trust]
 
   retro:

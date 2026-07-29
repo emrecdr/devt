@@ -130,6 +130,7 @@ The wrapper's `preflight scope-cache` persisted `scope_trust_json` + `god_node_w
 
 ```bash
 # Operator escape hatch detection
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 if [[ " ${REVIEW_SCOPE} " == *" --no-refresh "* ]] || [[ " ${REVIEW_SCOPE} " == *" --stale-ok "* ]] || [[ " $ARGUMENTS " == *" --no-refresh "* ]] || [[ " $ARGUMENTS " == *" --stale-ok "* ]]; then
   echo "[staleness] --no-refresh / --stale-ok: skipping staleness gate; forcing scope_trust.trust=sparse"
   STALENESS_TIER="bypass"
@@ -154,6 +155,7 @@ When `STALENESS_TIER` is `stale` or `unknown_lag`: issue the AskUserQuestion abo
 The wrapper computed the tier-decision tree in-process and wrote `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, symbol_anchored_caveat?, hunk_census?, severity_calibration_note?, topic_symbols_dropped_count?}`. Read the plan from the bundle (identical to the on-disk JSON) — the orchestrator then has ONE imperative instruction in substep 6, no "run the first matching" prose to skip past:
 
 ```bash
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier')
 TOOL=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tool')
 GIT_PROVIDER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.git_provider')
@@ -262,6 +264,7 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 **Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6).
 
 ```bash
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
 RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
 RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
@@ -371,6 +374,7 @@ Determine which files to review. Use ONE of these strategies (in priority order)
 1. **User-specified files**: If the user provided specific file paths or patterns, use those.
 2. **Git diff**: If no files were specified, detect changed files via the union CLI — committed range (merge-base-aware triple-dot) PLUS working tree PLUS untracked. Raw `git diff base...HEAD` returns an EMPTY set exactly when the review target is uncommitted work, silently under-scoping the review:
    ```bash
+   RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)  # fresh shell — re-derive (prose contract below)
    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} | jq -r '.files[]'
    ```
    When the task text carries `--range=<a>..<b>` (merged-PR / historical-range review), re-derive it in this block with the same one-liner scope_check uses — range mode diffs exactly that range and excludes working-tree/untracked files. Operator override: `export PRIMARY_BRANCH=development` (or whatever the project's primary branch is) before invoking /devt:review; without the flag the CLI defaults to `.devt/config.json::git.primary_branch`, then `main`.
