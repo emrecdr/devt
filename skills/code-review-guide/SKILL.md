@@ -124,6 +124,17 @@ For Vue/frontend projects, also check:
 - No dead code, commented-out code, or TODOs
 - Type hints present on all function signatures
 
+#### Altitude (weight: medium)
+
+Is each change implemented at the right depth, or as a fragile bandaid? This is the review-time complement to the "One Way To Do One Thing" golden rule — flag it read-only; the fix belongs to the programmer.
+
+- A special case layered onto shared infrastructure where generalizing the underlying mechanism would remove the branch entirely — prefer the general form over the special case
+- A second code path reaching the same outcome as an existing one (parallel command, duplicate helper, alternate on-disk format) that should be unified onto one, not left alongside
+- A workaround patching a symptom one layer above its cause (e.g. sanitizing an input the producer should never have emitted) — name the deeper site
+- State that is derived-and-stored where it could be computed, adding a sync burden
+
+In the STANDARD+ dev pipeline the `/simplify` step already runs this lens (with fixes) before review; this category is what carries it on the paths that skip simplify — standalone `/devt:review` and the SIMPLE/TRIVIAL tiers.
+
 ### Step 4: Score Each Finding
 
 Every finding gets a severity:
@@ -232,7 +243,7 @@ Score: XX/100 — VERDICT
 | Label findings as "pre-existing"               | Origin is irrelevant -- if it's visible, it's your responsibility            | Report every finding. No origin column.                   |
 | Rate "close enough" as APPROVED                | Partial compliance becomes full non-compliance over time                     | Score honestly. 78 is NEEDS_WORK, not 80.                 |
 | Skip security checks for internal code         | Internal code gets promoted to external. Supply chain attacks hit internals. | Full security checklist every time                        |
-| Say "the tests pass so it's fine"              | Passing tests prove tests pass, not that code is correct                     | Evaluate all 6 categories, not just functionality         |
+| Say "the tests pass so it's fine"              | Passing tests prove tests pass, not that code is correct                     | Evaluate all 7 categories, not just functionality         |
 | Dismiss "it follows the existing pattern"      | If the pattern is wrong, it is still a finding                               | Report it. Consistency with bad patterns is not a defense |
 | Soften scores because "flagging this is harsh" | Accuracy is not harshness                                                    | Apply deductions by severity criteria, not by feelings    |
 

@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.222.0] - 2026-07-30
+
+Adopted the strongest angle of Claude Code's built-in `/simplify` — the **altitude** lens (right-depth / generalize-vs-special-case) — into devt's read-only review path, and corrected a stale description of the skill devt already delegates to.
+
+### Added
+
+- **"Altitude" review category in `code-review-guide`** — is each change at the right depth, or a fragile bandaid? Flags special cases that should generalize the underlying mechanism, second code paths that should unify onto one, symptom-patches one layer above their cause, and derived-and-stored state. It's the read-only, review-time complement to the "One Way To Do One Thing" golden rule. Deliberately a review *technique*, not a graded rubric axis — so it reaches standalone `/devt:review` and the SIMPLE/TRIVIAL tiers (which skip the simplify step) without touching the verifier's `criteria_total` axis-count contract. (In STANDARD+ dev flows the `/simplify` step already runs this lens with fixes before review.)
+
+### Fixed
+
+- **The dev-workflow `simplify` step described `/simplify` wrong.** It claimed "3 parallel review agents (reuse, quality, efficiency)"; the built-in skill it invokes now runs **4** (reuse, simplification, efficiency, **altitude**), and "quality" was never one of them. Behavior was already current (the step delegates to the live skill) — only the prose had drifted. Also corrected the guide's "evaluate all 6 categories" anti-pattern line to 7 (the altitude add).
+
+Non-goal, by design: devt does **not** copy `/simplify`'s content — its simplify step single-sources to the built-in skill (correct per "One Way To Do One Thing"; duplicating it would be the defect the rule names). This change adds only the review-time *lens* the read-only reviewer lacked.
+
 ## [0.221.0] - 2026-07-30
 
 A new language-agnostic golden rule — and the cross-template alignment its absence exposed. The rule was found living in only 2 of 6 templates, which is itself the defect the rule names.
@@ -628,14 +642,4 @@ A workflow-backed xhigh review of the coverage + enforce work (v0.184.0–v0.186
 ### Changed (cleanup)
 
 - **One `io.cjs::listTrackedFiles(cwd, {nul})`** replaces the duplicated `git ls-files` boilerplate in `memory.trackedFiles` and `evolution.listTrackedFiles` (256MB buffer + `[]`-on-error in one place; `nul` selects `-z` vs quotePath-consistent output per caller). `state.cjs`'s assert-wired copy intentionally stays — it must distinguish "git unavailable" from "no files"; the `--others` (untracked-listing) variants are a different operation.
-
-## [0.187.0] - 2026-07-20
-
-### Template currency refresh — go + typescript-node (T4)
-
-Refreshed the `go` and `typescript-node` project-rules templates to current-stable practices, validated against live releases (July 2026). A filesystem-first check found `rust` (edition 2024, next is 2027) and `vue-bootstrap` (Vue 3.5, **Vite 8**, Pinia 3) already current — so those were left as-is apart from a one-line Pinia note, rather than churned. Content-only; K70 (9-file baseline) unaffected.
-
-- **go** — floor raised to Go 1.24+ (was 1.22+; current stable 1.26). Added: the `tool` directive in `go.mod` (retires the `tools.go` blank-import workaround), `go fix` modernizers, `os.Root` (traversal-safe FS), generic type aliases, `encoding/json/v2`, container-aware `GOMAXPROCS`, `sync.WaitGroup.Go`, and a `testing/synctest` section for deterministic concurrency tests (the top source of CI flakes).
-- **typescript-node** — TypeScript 7 (the native Go-based `tsc`, ~10× faster, same type system) and Node.js 24 LTS. The big shift: **native type-stripping** — `node app.ts` runs with no build step — documented with its two load-bearing caveats (it does *not* type-check, so `tsc --noEmit` stays the CI gate; only erasable syntax runs, so avoid `enum`/parameter-properties/`namespace`). `node --test` now runs `.ts` directly.
-- **vue-bootstrap** — one-line note that Pinia 4 (ESM-only) is current; Vue 3.5 / Vite 8 were already accurate.
 

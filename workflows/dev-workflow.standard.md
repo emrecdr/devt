@@ -124,7 +124,7 @@ _Skip this step if `simplify` is listed in `skipped_phases` from workflow state.
 
 After tests pass, run a simplification pass on the changed code before it goes to review. This catches generative debt (redundancy, over-engineering, missed reuse) that the programmer's self-review may have missed.
 
-Invoke the built-in `/simplify` skill, which spawns 3 parallel review agents (reuse, quality, efficiency) and applies fixes:
+Invoke the built-in `/simplify` skill, which spawns 4 parallel review agents (reuse, simplification, efficiency, altitude) and applies fixes:
 
 ```
 Skill(skill="simplify")
