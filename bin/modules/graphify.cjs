@@ -1944,6 +1944,29 @@ function augmentImpactMap(opts = {}) {
   const briefPath = path.join(stateDir, "preflight-brief.json");
   const droppedPath = path.join(stateDir, "topic-symbols-dropped.json");
 
+  // Skip-tier runs (skip artifact present, no map) still get the deterministic
+  // sections — the workflow's own contract ("even when it skipped") and the
+  // field-proven value: the preflight god-node fallback was a proef review's
+  // only graph signal, consumed by a lane and the consolidator. Creating the
+  // map next to the skip artifact would leave both mutually-exclusive decision
+  // artifacts and block assert-graphify-decision, so CONTENT WINS: stamp the
+  // map's provenance first line, then absorb (delete) the skip artifact —
+  // single-artifact invariant preserved, exactly the recovery the field
+  // operator hand-produced.
+  const skipPath = path.join(stateDir, "graphify-skip-reason.txt");
+  let skipAbsorbed = false;
+  if (!fs.existsSync(giPath)) {
+    let skipReason = "";
+    try { skipReason = fs.readFileSync(skipPath, "utf8").trim(); } catch { /* no skip artifact — plain absent-map case */ }
+    const provenance = skipReason
+      ? `> note: impact-plan tier=skip (${skipReason}) — this map carries only the deterministic sections appended by augment-impact-map. No MCP tier call was made.\n\n`
+      : `> note: graph-impact.md created by augment-impact-map (deterministic sections only — no MCP tier call preceded it).\n\n`;
+    try { fs.writeFileSync(giPath, provenance); } catch { /* unwritable — appends below will surface it */ }
+    if (skipReason) {
+      try { fs.unlinkSync(skipPath); skipAbsorbed = true; } catch { /* leave for the gate to flag */ }
+    }
+  }
+
   const readJson = (p, fallback) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } };
   const brief = readJson(briefPath, null);
 
@@ -2057,7 +2080,7 @@ function augmentImpactMap(opts = {}) {
     }
   }
 
-  return { sections_appended: appended, god_node_count: fileGods.length, symbol_godnode_count: symGods.length, ambiguous_count: ambCount };
+  return { sections_appended: appended, god_node_count: fileGods.length, symbol_godnode_count: symGods.length, ambiguous_count: ambCount, skip_absorbed: skipAbsorbed };
 }
 
 // B-XIII — group diff files by their dominant graphify community attribute.

@@ -285,7 +285,9 @@ if [ -n "$THOROUGH_INTENT" ] && [ "$(printf '%s\n' "$RW" | jq -r '.eligible // f
 elif [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
   echo "[review-weight] LIGHT-eligible — $(printf '%s\n' "$RW" | jq -r '.logic_file_count') logic file(s), $(printf '%s\n' "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
 else
-  if printf '%s\n' "$RW" | jq -r '(.blocked_by // []) | join("; ")' | /usr/bin/grep -q "scope unresolvable"; then
+  if [ "$(printf '%s\n' "$RW" | jq -r '.recommendation // ""')" = "explicit_scope" ]; then
+    echo "[review-weight] $(printf '%s\n' "$RW" | jq -r '.reason')"
+  elif printf '%s\n' "$RW" | jq -r '(.blocked_by // []) | join("; ")' | /usr/bin/grep -q "scope unresolvable"; then
     echo "[review-weight] SCOPE UNRESOLVABLE — the diff resolved to zero files; this is a scope failure, not a safety verdict. For a merged PR or historical range, re-run with --range=<a>..<b> in the task text."
   else
     echo "[review-weight] HEAVY recommended — $(printf '%s\n' "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
@@ -298,7 +300,7 @@ RW_ADV=$(printf '%s\n' "$RW" | jq -r '(.advisories // []) | join("; ")')
 
 <step name="scope_check" gate="scope size measured + parallel decision made if applicable">
 
-Measure the file count in the review scope. If > 10 files AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
+Measure the file count in the review scope. If the scope crosses the offer bar (>15 files, or >10 files spanning ≥3 domains) AND graphify is ready, offer the user a choice between single-dispatch (with community-filter fallback) and parallel-lane review.
 
 ```bash
 # Scope size must come from the same source identify_scope will use.
@@ -343,14 +345,20 @@ else
 fi
 echo "scope_check: file_count=${SCOPE_FILE_COUNT}, diff_loc=${DIFF_LOC}, graphify_state=${GRAPHIFY_STATE}"
 
-if [ "${SCOPE_FILE_COUNT:-0}" -gt 10 ] && [ "${GRAPHIFY_STATE:-not_ready}" = "ready" ]; then
-  echo "scope=${SCOPE_FILE_COUNT} graphify=ready" > .devt/state/scope-check-required.txt
+# Parallel-offer trigger: >15 files, OR >10 files spanning >=3 domains.
+# Field calibration (proef, 64-file/5-lane run): consolidator+verifier
+# overhead (~2 dispatches + 2 gate rounds) dominates near 10 files;
+# value proven at 20 files with >=3 domains (a 10-file lane carried 2
+# Importants a single reviewer would have skimmed).
+DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} 2>/dev/null | jq -r '.files[]?' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | /usr/bin/grep -cE '.' || echo 1)
+if { [ "${SCOPE_FILE_COUNT:-0}" -gt 15 ] || { [ "${SCOPE_FILE_COUNT:-0}" -gt 10 ] && [ "${DOMAIN_COUNT:-1}" -ge 3 ]; }; } && [ "${GRAPHIFY_STATE:-not_ready}" = "ready" ]; then
+  echo "scope=${SCOPE_FILE_COUNT} domains=${DOMAIN_COUNT} graphify=ready" > .devt/state/scope-check-required.txt
 fi
 ```
 
-If `SCOPE_FILE_COUNT ≤ 10` OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope creeps past 10 files without graphify.
+If the offer bar was NOT crossed (no `scope-check-required.txt` written) OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope grows without graphify.
 
-**Parallel-offer branch (conditional).** If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"`: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## parallel-offer` section — operator-intent short-circuit, cost/value preview, AskUserQuestion, then the answer artifact + routing (parallel → pre-write the scope artifact and delegate to `code-review-parallel.md`; single → continue to identify_scope; cancel → STOP with BLOCKED). The section ends with `.devt/state/scope-check-answer.txt` written — `state assert-scope-check-handled` gates the next step on it. The common path (≤10 files or graphify not ready) never loads this.
+**Parallel-offer branch (conditional).** If `scope-check-required.txt` was written (offer bar crossed: >15 files, or >10 spanning ≥3 domains) AND `GRAPHIFY_STATE == "ready"`: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## parallel-offer` section — operator-intent short-circuit, cost/value preview, AskUserQuestion, then the answer artifact + routing (parallel → pre-write the scope artifact and delegate to `code-review-parallel.md`; single → continue to identify_scope; cancel → STOP with BLOCKED). The section ends with `.devt/state/scope-check-answer.txt` written — `state assert-scope-check-handled` gates the next step on it. The common path (offer bar not crossed, or graphify not ready) never loads this.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check status=DONE
@@ -395,6 +403,15 @@ Write the file list to `.devt/state/code-review-input.md`:
 
 <how the file list was determined: user-specified / git-diff / impl-summary / user-prompt>
 ```
+
+**Re-anchor the bundle on the explicit scope.** The context bundle was computed BEFORE this artifact existed (diff-derived); now that the scope universe is explicit, re-run the wrapper — `scope_sig` folds the artifact's file list, so this recomputes memory_signal / impact inputs over the REAL universe instead of the diff (field: a 64-file explicit-scope review carried a signal claiming "3 changed files"):
+
+```bash
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
+echo "bundle re-anchored on explicit scope: $(printf '%s
+' "$CTX" | jq -r '.short_circuited // "recomputed"')"
+```
+
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=identify_scope status=DONE

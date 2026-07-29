@@ -8,6 +8,29 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.220.0] - 2026-07-29
+
+The proef parallel-review seam batch — a second independent field run (64-file whole-workspace review, 5-lane fan-out) reported six findings, all code-verified; the initial fixes were then **reconciled against the operator's filled receipt before commit**, which reversed one design outright and upgraded three others. The receipt also delivered the state-truth verdict the arc was waiting for: across 35 minutes, a workflow rotation, 5 lanes, and 42 gate fires, the v0.216.0 fixes held — zero state/reality disagreements, zero foreign-cid false positives.
+
+### Fixed
+
+- **`augment-impact-map` and its gate agree about skip runs — content wins.** On a tier=skip run the CLI created `graph-impact.md` next to the skip artifact; both mutually-exclusive decision artifacts existed and `assert-graphify-decision` blocked. The first fix (no-op on skip) was **refuted by the receipt**: the workflow's own contract runs augment "even when it skipped", and the deterministic god-node fallback it appends was this run's only graph signal — consumed by a lane and the consolidator. Shipped design (the operator's field-proven recovery, made mechanical): augment-on-skip stamps the map's provenance first line ("deterministic sections only, tier=skip, no MCP call") and **absorbs the skip artifact** — single-artifact invariant preserved, signal kept. The gate's both-exist remediation now names that recovery instead of implying the map should be discarded.
+- **The context bundle honors an explicit scope — and re-anchors at the right moment.** `review-context-init` derived everything from the git diff; a user-specified whole-workspace scope was invisible (the run's memory_signal claimed "3 changed files" against 64 under review). A pre-written `code-review-input.md` is now the scope universe for both bundle derivations AND the cache signature — and because the receipt proved bundle-time reading alone never fires on a fresh run (the artifact is written *after* context_init), both artifact-write sites now explicitly re-run the wrapper, which recomputes over the real universe. The signal's claim string names its universe ("across N scope file(s)" vs "changed file(s)") so lanes can't misread diff-governance as scope-governance.
+- **`review-weight` reports explicit-scope reviews honestly.** "HEAVY recommended — graph-blind … safety not provable" is noise when the operator chose full-content review; it now emits `explicit-scope review — depth is operator-chosen (N files, M domains)`, keeping the counts that feed the parallel-offer preview.
+- **Three auto-partitioner seams**: the scope-artifact read strips the `- ` bullets its upstream writes; groups sort by **file-count descending before the cap** (receipt data: lexicographic order kept two single-file config groups while dropping 17 files across 8 groups — the order bug was as damaging as the cap bug); overflow groups merge into a final `mixed-overflow` lane with a loud note instead of silently vanishing.
+- **The verifier envelope asks for what the gate demands.** `criteria_total` is now instructed in the envelope, and the rubric states the count explicitly (**7**: A–E, G, H — no axis F). The "A seventh axis" phrase that made the field verifier declare 8 is reworded to "a further hard-fail check (NOT a countable axis)". The gate's declared-≥-parsed tolerance stays (legitimate over-grading shouldn't fail); the explicit contract makes counts converge.
+- **Warm-resume guidance carries the recipe, not just the constraint.** The receipt's revised, trace-backed account: a resume asking the read-only verifier to "edit" its sidecar produced a silent stall the operator misdiagnosed under 30s patience. Read-only agents now carry an inability contract (reply with what you can't do and the Bash alternative); the resume guidance embeds the per-agent recipe (`jq … > tmp && mv`) and an orchestrator wait-rule: one full agent-turn (~60–90s) before concluding inaction.
+- Two `register-lanes` paper cuts: `registered[]` echoes the lane label, and an empty diff over a non-empty file set re-sizes by whole-file LOC with `size_class=unknown` (explicit-scope lanes registered `est_loc=0, ok` for 10–18-file full-content reviews — latent under-instruction).
+- `/devt:review`'s tool declaration gains `AskUserQuestion`.
+
+### Added
+
+- **`state lane-severity-tally`** — deterministic per-lane count of `[Critical|Important|Minor|Nit]` finding headers with totals, wired into the consolidate step: consolidated counts exceeding lane-declared counts is a stop condition; a lower count must be explained (dedupe/promotion). Receipt-driven: the consolidator caught the orchestrator's wrong tally (7 vs 10 Important) by judgment — the recount is now mechanical.
+- **Parallel-offer bar recalibrated**: >15 files, OR >10 files spanning ≥3 domains (was: >10 files flat). Receipt calibration: consolidator+verifier overhead dominates near 10 files; value proven at 20 with ≥3 domains.
+- Gate K335 — the batch behaviorally: augment-on-skip stamps provenance + absorbs the skip artifact (single-artifact invariant), criteria_total contract in template + compiled region + rubric, bullet-strip + size-sort + overflow-merge pinned.
+
+Already fixed before the report arrived: the `$CTX` fresh-shell re-acquisition it flagged (v0.219.0). Recorded for the next arc: the receipt's seam-suite design (fixture repo + stub agents that follow only their envelope instructions — would have caught four of the six findings).
+
 ## [0.219.0] - 2026-07-29
 
 The final substrate slice of the task-service field arc: the fresh-shell contract is now machine-enforced, and the architect dispatch joined the compiled-envelope system.
@@ -620,29 +643,4 @@ A validation pass over the two new memory-layer features found five edge cases, 
 - **One `toRepoRelative()` helper** for the absolute→repo-relative canonicalization; **one `activeAffectsRows()`** query shared by `getByPath` + `computeAffectsCoverage` so the governing-doc definition can't drift; **one module-level `parseCsvFlag()`** for the `--files`/`--changed`/`--universe` CLI args.
 - **The weekly report no longer runs a second `git log`** — `parseGitLog` collects the window's changed-file set in its existing walk (via an out-param) instead of re-walking it for affects-coverage.
 - `runEnforce` reads + splits each in-scope file once per run (cache) instead of once per matching rule.
-
-## [0.185.0] - 2026-07-20
-
-### Enforce assertions — declarative ADR conformance (DEF-004 pilot)
-
-A ratified decision ("the API layer must not import infrastructure directly") only holds if something checks it. DEF-004's filed trigger — "a field receipt of an ADR the review missed" — is self-defeating: it only fires once a miss is already noticed. This pilot escapes that by shipping the mechanism so it generates its own evidence. A governing ADR/CON/FLOW doc can now carry an `enforce:` block, and the verifier runs it on the touched files during the normal loop; a violation is a blocking finding routed through the existing grader/revision cycle.
-
-**The assertion is a regex, never a shell command — a deliberate safety call.** DEF-009 (v0.180.0–v0.182.0) established that shared-root docs govern *without* passing the local curator gate; an `enforce:` shell field would be arbitrary code execution from any such doc. So the contract is purely declarative — a `forbid`/`require` regex over a file glob — with zero code-execution surface.
-
-```yaml
-# on an ADR/CON/FLOW (a LIST — the frontmatter parser makes a valueless key a list,
-# so a nested map silently empties; validate errors on that):
-enforce:
-  - files: "src/api/**"
-    forbid: "import .*infrastructure"   # or: require: "<regex>"
-    message: "api layer must not import infrastructure directly"
-```
-
-### Added
-
-- **`memory.runEnforce(files)`** + **`memory enforce [--files=a,b]`** CLI — runs every active decision/concept/flow doc's `enforce:` rules against a file set (`--files` = the verifier's touched set; default = `git ls-files`). `forbid` → one violation per matching line; `require` → one per in-scope file missing the pattern. Results are DATA (`pass:false` + `violations[]`); exit stays 0 so a pipefail-guarded caller never dies. Broken regexes are skipped (caught earlier at validate).
-- **`validateFrontmatter` validates `enforce:`** — must be a non-empty list of `{files, forbid|require (valid regex), message}` objects; a nested map (which parses as empty) errors with a fix hint.
-- **`agents/verifier.md`** gains a `run_verification` step: run `memory enforce --files=<changed>`, treat each violation as a blocking, deterministic finding.
-- **CON-003** gains a live `enforce` binding (`scripts/smoke-test.sh` must retain a `set +e` pipefail guard) — the pilot's first real-code assertion, green on the current tree.
-- Gate **K302** — behavioral: forbid flags the matching line, require flags the missing-pattern file, clean files pass, touched-file scoping works, malformed nested-map enforce errors at validate. Drift-guard stack 209 → 210 deep (K94–K302). `docs/MEMORY.md` documents the contract.
 

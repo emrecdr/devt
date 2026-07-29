@@ -137,6 +137,9 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     graph data is unavailable and structural-risk cross-checks do not apply.
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
+  The sidecar MUST declare "criteria_total" (the rubric's countable axis count — 7 for the
+  code-review rubric: A–E, G, H; there is deliberately no axis F) and "criteria_met" —
+  assert-verifier-graded-all-axes blocks on a missing or short count.
 ")
 <!-- END dispatch:verifier:code_review -->
 ```
@@ -180,7 +183,7 @@ Route on `verdict`:
   ```
 - **`verdict=needs_revision`** (status=GAPS_FOUND) — apply the **repair operator**:
   - **`VITER < MAX_ITER` → RETRY**: re-dispatch the **code-reviewer** — MODE=single: the `review` step; MODE=parallel: the `consolidate` step — with each `revisions[].gap` (axis + AC-letter id + evidence) verbatim as `<reviewer_feedback>` in the prompt. Do NOT have the reviewer re-parse the markdown; the structured list is the contract.
-    **Delta-shaped revisions prefer a warm resume.** When every `revisions[]` entry is a point-fix (anchor corrections, a missing section, count fixes — no structural re-review) AND the prior writer agent is still resumable in this session, SendMessage-resume that agent with the revisions verbatim instead of a cold re-dispatch — field-measured at a fraction of cold cost (a two-anchor fix: 4 tool calls warm vs 10 cold; the paired verifier re-grade 4 vs 22). Scope the resume to the delta: fix ONLY the listed revisions, no lane-file re-reads, no synthesis re-work; on the re-grade, instruct the verifier to re-check ONLY the revised items — prior-pass axes keep their recorded grades and evidence. Resume handles are session-scoped and die at compaction: when no live handle exists, the cold re-dispatch above is the automatic fallback — which also restores fresh-eyes when the revisions look structural rather than point-shaped.
+    **Delta-shaped revisions prefer a warm resume.** When every `revisions[]` entry is a point-fix (anchor corrections, a missing section, count fixes — no structural re-review) AND the prior writer agent is still resumable in this session, SendMessage-resume that agent with the revisions verbatim instead of a cold re-dispatch — field-measured at a fraction of cold cost (a two-anchor fix: 4 tool calls warm vs 10 cold; the paired verifier re-grade 4 vs 22). Scope the resume to the delta: fix ONLY the listed revisions, no lane-file re-reads, no synthesis re-work; on the re-grade, instruct the verifier to re-check ONLY the revised items — prior-pass axes keep their recorded grades and evidence. **Match the resume prompt to the target agent's TOOLSET** — the verifier (and every read-only agent) has no Write/Edit: a resume asking it to "edit the sidecar" is unactionable and field-observed to produce silent idling; carry the per-agent recipe verbatim (verifier: sidecar edits via Bash — `jq '.criteria_total=7' verification.json > tmp && mv tmp verification.json`, never an "edit"). **After sending a resume, wait at least one full agent-turn (~60–90s) before concluding inaction** — a null sidecar re-read seconds after delivery is indistinguishable from slow processing (field: a 30s-patience read misdiagnosed a resume as ignored; the trace could not distinguish inaction from slow landing). Resume handles are session-scoped and die at compaction: when no live handle exists, the cold re-dispatch above is the automatic fallback — which also restores fresh-eyes when the revisions look structural rather than point-shaped.
     ```bash
     node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=verify verify_iteration=$((VITER+1)) verdict=GAPS_FOUND repair=RETRY
     ```

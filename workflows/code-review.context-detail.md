@@ -32,7 +32,7 @@ Loaded from substep 6 only when a drill-down response comes back anomalous (empt
 
 ## parallel-offer
 
-Entered from code-review.md::scope_check ONLY when `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"`. Ends with `.devt/state/scope-check-answer.txt` written (`parallel` | `single` | `cancel`) — the mechanical signal `state assert-scope-check-handled` requires.
+Entered from code-review.md::scope_check ONLY when the offer bar is crossed (>15 files, or >10 files spanning ≥3 domains) AND `GRAPHIFY_STATE == "ready"`. Ends with `.devt/state/scope-check-answer.txt` written (`parallel` | `single` | `cancel`) — the mechanical signal `state assert-scope-check-handled` requires.
 
 > **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. Each rendered envelope carries a `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` tag that `dispatch-hygiene-guard.sh` recognizes — preserve this short tag in your dispatch prompt (even when customizing other envelope content) to silence `raw_dispatch` warnings on registered-lane dispatches. The matcher is content-based: any one of the recognized envelope tags (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<correlation_id>cid_*`, etc.) is sufficient. This avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
 
@@ -57,7 +57,7 @@ fi
 
 If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
 
-If `SCOPE_FILE_COUNT > 10` AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user.
+If the offer bar was crossed AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user.
 
 **Cost preview with value caveat — NEVER present cost alone.** A naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (field case: the "expensive" parallel run was the one that caught two cross-lane Criticals a single pass would plausibly have missed). The preview pairs a rough banded estimate with the coverage signal:
 
@@ -98,6 +98,9 @@ if [ ! -s .devt/state/code-review-input.md ]; then
   if [ -n "$PARALLEL_SCOPE" ]; then
     { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; } > .devt/state/code-review-input.md
     echo "[scope_check] pre-wrote code-review-input.md ($(printf '%s\n' "$PARALLEL_SCOPE" | /usr/bin/grep -cE '.') files) before parallel delegation"
+    # Re-anchor the bundle: scope_sig folds the artifact, so this recomputes
+    # the signal/impact inputs over the explicit universe before lanes inherit them.
+    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH} >/dev/null 2>&1 || true
   fi
 fi
 ```

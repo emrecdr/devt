@@ -79,7 +79,7 @@ const {
   readSidecar,
   readSection,
   checkWorkflowLock,
-  workflowIdChainSet,
+  workflowIdChainSet, scopeInputFiles,
   _getFlag,
   _activeRange,
 } = require("./state-io.cjs");
@@ -130,7 +130,7 @@ const {
 } = require("./state-gates.cjs");
 const {
   slugifyLaneName,
-  listLaneOutputs,
+  listLaneOutputs, laneSeverityTally,
   _sizingExcludePatterns,
   _laneSizingLines,
   generateLaneDiff,
@@ -1198,12 +1198,18 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   let memorySignal = null;
   const affectsById = new Map();
   let filesChecked = 0;
+  // The claim must NAME its universe — a lane reading "changed files" while an
+  // explicit 64-file scope was under review misreads diff-governance as
+  // scope-governance (proef field case).
+  let scopeUniverse = "changed file(s)";
   let memAvailable = true;
   try {
     const { collectChangedFiles } = require("./review-weight.cjs");
     const mem = require("./memory.cjs");
-    const changed = collectChangedFiles(findProjectRoot(), primaryBranch || "main", _activeRange() ? { range: _activeRange() } : undefined);
+    const explicit = scopeInputFiles();
+    const changed = explicit || collectChangedFiles(findProjectRoot(), primaryBranch || "main", _activeRange() ? { range: _activeRange() } : undefined);
     filesChecked = changed.length;
+    scopeUniverse = explicit ? "scope file(s)" : "changed file(s)";
     for (const f of changed) {
       let hits = [];
       try { hits = mem.getByPath(f) || []; } catch { hits = []; }
@@ -1241,7 +1247,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
         count: docs.length,
         docs: docs.slice(0, 20),
         ...(docs.length > 20 ? { truncated_from: docs.length } : {}),
-        ...(docs.length === 0 ? { claim: `no affects-matched docs across ${filesChecked} changed file(s)` } : {}),
+        ...(docs.length === 0 ? { claim: `no affects-matched docs across ${filesChecked} ${scopeUniverse}` } : {}),
       },
       ...(supplement ? { supplement } : {}),
     };
@@ -1274,7 +1280,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
       let manifestFresh = false;
       try {
         const { collectChangedFiles } = require("./review-weight.cjs");
-        const files = collectChangedFiles(findProjectRoot(), primaryBranch, _activeRange() ? { range: _activeRange() } : undefined)
+        const files = (scopeInputFiles() || collectChangedFiles(findProjectRoot(), primaryBranch, _activeRange() ? { range: _activeRange() } : undefined))
           .filter(f => /\.(py|js|jsx|ts|tsx|go|rs|rb|java|kt|cs|php|swift|scala|c|cc|cpp|h|hpp)$/i.test(f));
         if (files.length > 0) {
           const mf = require("./graphify.cjs").manifestFreshness(files);
@@ -1870,6 +1876,8 @@ function run(subcommand, args) {
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "refresh-scope-context":
       return require("./preflight.cjs").scopeCache();
+    case "lane-severity-tally":
+      return laneSeverityTally();
     case "list-lane-outputs":
       return listLaneOutputs();
     case "update-lane":
@@ -1910,7 +1918,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, stop-hook, reactivate, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, stop-hook, reactivate, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, lane-severity-tally, changed-files, history`,
       );
   }
 }

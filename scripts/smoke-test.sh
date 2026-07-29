@@ -19160,6 +19160,39 @@ else
   fail "K334: cross-fence shell state — $(echo "$K334_OUT" | head -3 | tr '\n' ' ')"
 fi
 
+# K335: proef parallel-review seam fixes. (a) augment-impact-map on a skip-tier
+# run (no graph-impact.md) NO-OPS instead of creating the map via appendFileSync
+# — both mutually-exclusive decision artifacts existed and blocked the gate;
+# (b) the verifier envelope declares the criteria_total sidecar contract the
+# axes gate demands (guaranteed first-run retry loop without it); (c) the
+# auto-partitioner strips scope-artifact bullets and MERGES overflow groups
+# into the last lane instead of alphabetically slicing them out of coverage.
+K335_PROJ=$(mktemp -d)
+mkdir -p "$K335_PROJ/.devt/state"
+K335_OK=1; K335_WHY=""
+printf 'skip: dependents=0\n' > "$K335_PROJ/.devt/state/graphify-skip-reason.txt"
+K335_A=$(cd "$K335_PROJ" && node -e '
+const fs=require("fs");
+const g=require(process.argv[1]+"/bin/modules/graphify.cjs");
+const r=g.augmentImpactMap({projectRoot: process.cwd()});
+const map=fs.existsSync(".devt/state/graph-impact.md");
+const skip=fs.existsSync(".devt/state/graphify-skip-reason.txt");
+const prov=map && fs.readFileSync(".devt/state/graph-impact.md","utf8").startsWith("> note: impact-plan tier=skip");
+process.stdout.write((r&&r.skip_absorbed===true?"absorbed":"kept")+":"+(map?"map":"nomap")+":"+(skip?"dual":"single")+":"+(prov?"prov":"noprov"));
+' "$ROOT" 2>/dev/null)
+[ "$K335_A" = "absorbed:map:single:prov" ] || { K335_OK=0; K335_WHY="a:augment=$K335_A"; }
+/usr/bin/grep -q 'criteria_total' "$ROOT/templates/dispatch/envelopes/verifier-code_review.tmpl.md" || { K335_OK=0; K335_WHY="$K335_WHY b:tmpl"; }
+/usr/bin/grep -q 'criteria_total' "$ROOT/workflows/code-review.steps.md" || { K335_OK=0; K335_WHY="$K335_WHY b:compiled"; }
+/usr/bin/grep -q 'no axis F' "$ROOT/references/rubrics/code_review.v2.md" || { K335_OK=0; K335_WHY="$K335_WHY b:rubric"; }
+/usr/bin/grep -q 'mixed-overflow' "$ROOT/workflows/code-review-parallel.md" || { K335_OK=0; K335_WHY="$K335_WHY c:overflow"; }
+/usr/bin/grep -qF "sed -E 's/^[[:space:]]*[-*][[:space:]]+//'" "$ROOT/workflows/code-review-parallel.md" || { K335_OK=0; K335_WHY="$K335_WHY c:bullets"; }
+rm -rf "$K335_PROJ"
+if [ "$K335_OK" = "1" ]; then
+  pass "K335: seam fixes — augment-on-skip stamps provenance + absorbs the skip artifact (content wins, single-artifact invariant), verifier envelope declares criteria_total (rubric: 7, no axis F), partitioner strips bullets + size-sorts + merges overflow lanes"
+else
+  fail "K335: seam regression ($K335_WHY)"
+fi
+
 echo
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte

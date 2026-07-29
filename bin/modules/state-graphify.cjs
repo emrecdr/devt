@@ -148,7 +148,7 @@ function assertGraphifyDecision() {
     return {
       ok: false,
       reason:
-        "both graph-impact.md AND graphify-skip-reason.txt exist — mutually exclusive; orchestrator wrote both",
+        "both graph-impact.md AND graphify-skip-reason.txt exist — mutually exclusive. Recovery (content wins): keep graph-impact.md, ensure its first line is a provenance note naming tier=skip when no MCP call ran, and DELETE graphify-skip-reason.txt — do not discard the map to satisfy bookkeeping (augment-impact-map does this absorption itself on skip runs).",
       graphify_state: "ready",
     };
   }
@@ -1020,7 +1020,15 @@ function contextInitScopeSig(primaryBranch) {
     const base = primaryBranch || "main";
     const runGit = (args) => execFileSync("git", args, { cwd: proot, encoding: "utf8", timeout: 10000 }).trim();
     let files = [];
+    // Explicit scope (pre-written code-review-input.md) IS the scope universe —
+    // fold it into the signature so a scope-file change invalidates the cache
+    // the same way a diff change does.
     try {
+      const { scopeInputFiles } = require("./state-io.cjs");
+      const explicit = scopeInputFiles();
+      if (explicit) files = explicit.slice().sort();
+    } catch { /* fall through to diff */ }
+    if (files.length === 0) try {
       files = runGit(["diff", "--name-only", `${base}...HEAD`]).split("\n").map(s => s.trim()).filter(Boolean).sort();
     } catch { /* base ref unresolvable — fall through to the HEAD-only signature */ }
     let head = "";

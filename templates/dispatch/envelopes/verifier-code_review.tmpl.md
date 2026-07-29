@@ -34,4 +34,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     graph data is unavailable and structural-risk cross-checks do not apply.
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
+  The sidecar MUST declare "criteria_total" (the rubric's countable axis count — 7 for the
+  code-review rubric: A–E, G, H; there is deliberately no axis F) and "criteria_met" —
+  assert-verifier-graded-all-axes blocks on a missing or short count.
 ")

@@ -842,6 +842,25 @@ function checkWorkflowLock(preReadState) {
 // consumers must pair the chain with an mtime/ts >= anchor_ms bound to keep
 // prior-session artifacts out.
 // Returns { ids: Set<full-id>, prefixes: Set<8-char>, anchor_ms }.
+// Explicit-scope override for the context-init bundle. When a review's scope
+// was user-specified (identify_scope strategy 1 — a pre-written
+// code-review-input.md), the git-diff union is the WRONG universe: the field
+// case was a 64-file whole-workspace review whose memory_signal claimed
+// "3 changed files" because every bundle derivation was diff-blind. Returns
+// the file list (bullets stripped) or null when the artifact is absent/empty.
+function scopeInputFiles() {
+  try {
+    const p = path.join(getStateDir(), "code-review-input.md");
+    if (!fs.existsSync(p)) return null;
+    const files = fs.readFileSync(p, "utf8").split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"))
+      .map((l) => l.replace(/^[-*]\s+/, "").trim())
+      .filter(Boolean);
+    return files.length > 0 ? files : null;
+  } catch { return null; }
+}
+
 function workflowIdChainSet(yaml) {
   const ids = new Set();
   const addId = (v) => {
@@ -926,5 +945,6 @@ module.exports = {
   readSection,
   checkWorkflowLock,
   workflowIdChainSet,
+  scopeInputFiles,
   _getFlag,
 };

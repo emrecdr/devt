@@ -74,6 +74,11 @@ node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=
 
 node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
 # Bulk wrapper. YAML inline-array files: form + JSON both accepted; each lane entry optionally carries repo_root + base_ref (snake_case or camelCase). Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?,size_class,est_loc}], errors:[]} plus warn-only overlap_warning/overlaps[] when a file is assigned to multiple lanes
+node bin/devt-tools.cjs state lane-severity-tally
+# Deterministic per-lane count of [Critical|Important|Minor|Nit] finding headers across registered lane
+# review files (+totals). The consolidate step compares these against the consolidated review — makes the
+# "orchestrator's mental tally was wrong" recount mechanical instead of a consolidator judgment save
+
 
 node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]
 # Per-lane envelopes are rules-BY-REFERENCE by default: governing_rules carries rules_hash +

@@ -114,7 +114,7 @@ if [ ! -f "$SCOPE_FILES_PATH" ]; then
 fi
 
 # Read scope files (one path per line, skip blanks + comments)
-SCOPE_FILES=$(/usr/bin/grep -vE '^#|^$' "$SCOPE_FILES_PATH" 2>/dev/null || echo "")
+SCOPE_FILES=$(/usr/bin/grep -vE '^#|^$' "$SCOPE_FILES_PATH" 2>/dev/null | sed -E 's/^[[:space:]]*[-*][[:space:]]+//' || echo "")  # strip the '- ' bullets identify_scope/scope_check write
 SCOPE_FILE_COUNT=$(echo "$SCOPE_FILES" | /usr/bin/grep -cE '.' || echo 0)
 if [ "$SCOPE_FILE_COUNT" -eq 0 ]; then
   echo "FALLBACK: zero scope files — routing to single-dispatch"
@@ -187,7 +187,23 @@ for (const line of lines) {
   groups.get(prefix).push(file);
 }
 const rangeBase = (process.env.RANGE_BASE || "").trim();
-const lanes = [...groups.entries()].slice(0, 5).map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
+// Cap 5 lanes — but overflow groups MERGE into the final lane instead of
+// silently vanishing (no-silent-caps: an alphabetical slice(0,5) would have
+// dropped whole directories from review coverage — proef field case).
+// Sort by group size DESC before capping — lexicographic order spent lane
+// slots on single-file config groups while dropping the largest surfaces
+// (proef field data: .cargo(1) kept, harness/fixture/xtask(17 files) dropped).
+const entries = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+let lanes;
+if (entries.length <= 5) {
+  lanes = entries.map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
+} else {
+  const head = entries.slice(0, 4);
+  const rest = entries.slice(4);
+  console.error("partition_lanes: " + entries.length + " groups > 5-lane cap — merging [" + rest.map(([sc]) => sc).join(", ") + "] into L5 (mixed) so no group drops from coverage");
+  lanes = head.map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
+  lanes.push({ id: "L5", scope: "mixed-overflow", files: rest.flatMap(([, f]) => f), ...(rangeBase ? { base_ref: rangeBase } : {}) });
+}
 fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
 ' "$GROUPS_FILE" "$PARTITION_JSON"
 REG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state register-lanes --from="$PARTITION_JSON")
@@ -532,6 +548,26 @@ if echo "$SUBSTANCE" | /usr/bin/grep -qF '"looks_like_stub":true'; then
   echo "BLOCKED: consolidator returned stub — ${REASON}"
   exit 0
 fi
+# Deterministic severity tally — compare the machine count of lane-declared
+# findings against the consolidated review. Catches consolidator drops AND
+# orchestrator-note errors (field: a hand tally said 7 Important; the lane
+# files said 10 — the consolidator caught it by judgment; this makes the
+# recount mechanical). Counts are advisory-compared: the consolidator may
+# legitimately dedupe cross-lane duplicates or promote severities, so a
+# LOWER consolidated count with an explanation is fine — an UNEXPLAINED
+# mismatch is the stop condition.
+TALLY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state lane-severity-tally)
+echo "lane severity tally: $(printf '%s\n' "$TALLY" | jq -c '.totals') across $(printf '%s\n' "$TALLY" | jq -r '.lanes_counted') lane(s)"
+CONS_CRIT=$(/usr/bin/grep -cE '^#{2,4} *\[Critical\]' .devt/state/review.md || true)
+CONS_IMP=$(/usr/bin/grep -cE '^#{2,4} *\[Important\]' .devt/state/review.md || true)
+LANE_CRIT=$(printf '%s\n' "$TALLY" | jq -r '.totals.critical')
+LANE_IMP=$(printf '%s\n' "$TALLY" | jq -r '.totals.important')
+if [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then
+  echo "⚠️  consolidated counts EXCEED lane-declared counts (crit ${CONS_CRIT}>${LANE_CRIT} or imp ${CONS_IMP}>${LANE_IMP}) — consolidator invented findings? STOP and reconcile."
+elif [ "$CONS_CRIT" -lt "$LANE_CRIT" ] || [ "$CONS_IMP" -lt "$LANE_IMP" ]; then
+  echo "note: consolidated counts below lane totals (crit ${CONS_CRIT}/${LANE_CRIT}, imp ${CONS_IMP}/${LANE_IMP}) — verify review.md explains the delta (cross-lane dedupe / severity promotion); an unexplained drop is a lost finding."
+fi
+
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=consolidate status=DONE
 ```
 

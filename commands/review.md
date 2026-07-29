@@ -5,7 +5,7 @@ argument-hint: "[--focus=code|arch|quality] [--lite|--full] [--range=<a>..<b>]"
 ---
 
 <tool_restrictions>
-This workflow uses: Bash, Read, Glob, Grep, Agent
+This workflow uses: Bash, Read, Glob, Grep, Agent, AskUserQuestion
 </tool_restrictions>
 
 <objective>

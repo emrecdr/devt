@@ -231,6 +231,31 @@ function listLaneOutputs() {
   return { lanes };
 }
 
+// Deterministic severity tally across registered lane review files. Parses
+// the stable finding-heading markers (### [Critical|Important|Minor|Nit] ...)
+// per lane and sums — the consolidate step compares these numbers against its
+// consolidated counts and the orchestrator's notes, hard-stopping on mismatch
+// (field: a consolidator correctly recounted 10 Importants where the
+// orchestrator's mental tally said 7 — the error class exists; make the
+// recount mechanical instead of a judgment save).
+function laneSeverityTally() {
+  const { lanes } = listLaneOutputs();
+  const per_lane = {};
+  const totals = { critical: 0, important: 0, minor: 0, nit: 0 };
+  for (const lane of lanes) {
+    if (!lane.review_file || !lane.file_exists) continue;
+    let body = "";
+    try { body = fs.readFileSync(lane.review_file, "utf8"); } catch { continue; }
+    const counts = { critical: 0, important: 0, minor: 0, nit: 0 };
+    for (const m of body.matchAll(/^#{2,4}\s*\[(Critical|Important|Minor|Nit)\]/gim)) {
+      counts[m[1].toLowerCase()] += 1;
+    }
+    per_lane[lane.id] = { ...counts, cid_match: lane.cid_match };
+    for (const k of Object.keys(totals)) totals[k] += counts[k];
+  }
+  return { ok: true, per_lane, totals, lanes_counted: Object.keys(per_lane).length };
+}
+
 function _sizingExcludePatterns() {
   const pats = SIZING_EXCLUDE_DEFAULT.slice();
   try {
@@ -354,6 +379,21 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       sizeBasis = "diff";
       sizeClass = estLoc >= LANE_DIFF_SPLIT_THRESHOLD ? "split"
         : estLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
+      // An EMPTY diff over a non-empty file set is an explicit-scope lane
+      // (full-content review, nothing changed vs base) — "0 LOC, ok" would
+      // under-instruct a 10-18-file lane (proef field case: L1-L4 registered
+      // est_loc=0 for full-file review lanes). Re-size by whole-file LOC with
+      // the unknown class so the chunked-read strategy can attach.
+      if (estLoc === 0 && files.length > 0) {
+        let wholeLoc = 0;
+        for (const f of files) {
+          try {
+            const content = fs.readFileSync(f, "utf8");
+            wholeLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
+          } catch { /* missing — 0 */ }
+        }
+        if (wholeLoc > 0) { estLoc = wholeLoc; sizeBasis = "whole_file"; sizeClass = "unknown"; }
+      }
     } else {
       estLoc = 0;
       for (const f of files) {
@@ -493,7 +533,7 @@ function registerLanesFromYaml(filePath) {
       baseRef: entry.base_ref || entry.baseRef,
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
-    results.push({ id: entry.id, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
+    results.push({ id: entry.id, community: (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
@@ -611,6 +651,7 @@ function updateLane(laneId, kvPairs) {
 }
 
 module.exports = {
+  laneSeverityTally,
   slugifyLaneName,
   listLaneOutputs,
   _sizingExcludePatterns,
