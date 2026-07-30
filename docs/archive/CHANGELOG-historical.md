@@ -1,10 +1,28 @@
-# devt — Historical Changelog (v0.1.0–v0.187.0)
+# devt — Historical Changelog (v0.1.0–v0.188.0)
 
 Older release sections rotated out of the root CHANGELOG.md, newest first. The root file keeps the [Unreleased] section plus the most recent releases; everything older lives here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+
+## [0.188.0] - 2026-07-20
+
+### Enforce / affects-coverage hardening (xhigh code-review findings)
+
+A workflow-backed xhigh review of the coverage + enforce work (v0.184.0–v0.186.0) surfaced eight verified correctness findings — including two regressions the earlier F5/simplify changes introduced. All fixed and pinned by the new gate **K303** plus extended coverage in K301/K302. Drift-guard stack 210 → 211 deep (K94–K303).
+
+### Fixed
+
+- **`require` enforcement regressed to per-line matching** (F5 side effect) — a `require` regex spanning lines (`Copyright[\s\S]*Licensed`) or using `^`/`$` anchors was mis-evaluated per line, producing false conformance violations. Reverted to whole-content matching; the ReDoS bound is now a file-size skip for `require` (per-line cap stays for `forbid`).
+- **`aggregateAffectsCoverage` reported `available:true` on error** — `withDb` *returns* `{error}` (it doesn't throw) when the memory index is absent, so the simplify refactor's try/catch never fired. The result shape is now validated, so a missing index yields `available:false`.
+- **Git-sourced file universes weren't robustly based** (devt runs in arbitrary consuming repos): `git ls-files` now defaults its working dir to the project root (a subdirectory invocation no longer yields subdir-relative paths that match nothing), uses `-z` (non-ASCII names aren't `core.quotePath`-escaped), and a 256MB buffer (large monorepos no longer silently overflow the 1MB default into an empty universe). `parseGitLog` gains `--no-renames` (rename `{a => b}` arrows no longer drop renamed files from coverage), `--relative`, and the same buffer. Absolute-or-relative `--files` are canonicalized against the cwd, and paths are normalized to forward slashes (Windows).
+- **Empty `forbid` matched everything** — `runEnforce` now skips empty/whitespace patterns (validate already rejects them; this hardens the runner if one is indexed anyway).
+- **The `enforce-ignored` warning missed the status axis** — a `candidate`/`superseded` governing doc with `enforce:` is silently skipped by `runEnforce`; `memory validate` now warns on non-active status, not just non-governing doc-type.
+
+### Changed (cleanup)
+
+- **One `io.cjs::listTrackedFiles(cwd, {nul})`** replaces the duplicated `git ls-files` boilerplate in `memory.trackedFiles` and `evolution.listTrackedFiles` (256MB buffer + `[]`-on-error in one place; `nul` selects `-z` vs quotePath-consistent output per caller). `state.cjs`'s assert-wired copy intentionally stays — it must distinguish "git unavailable" from "no files"; the `--others` (untracked-listing) variants are a different operation.
 
 ## [0.187.0] - 2026-07-20
 

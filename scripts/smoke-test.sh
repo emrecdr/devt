@@ -19212,6 +19212,19 @@ else
 fi
 
 echo
+# K337: orchestration replay harness. Replays recorded .devt/state/ fixtures
+# through the real producer/gate CLI sequences the workflow prose invokes,
+# asserting the block/advance decisions — converting `field:` scar-tissue notes
+# (past silent orchestration failures no unit test caught) into regression
+# tests. Two independent field reports (task-service, proef) converged on this
+# harness; it also regression-guards shipped fixes (v0.220 explicit-scope
+# re-anchor). Pure CLI, no LLM. Detail via `node scripts/replay-orchestration.cjs`.
+if node "$ROOT/scripts/replay-orchestration.cjs" >/dev/null 2>&1; then
+  pass "K337: orchestration replay harness (explicit-scope re-anchor + union-scope + graphify three-state — run 'node scripts/replay-orchestration.cjs' for detail)"
+else
+  fail "K337: orchestration replay regression — run 'node scripts/replay-orchestration.cjs' for the failing case"
+fi
+
 echo "== test-gates.cjs subsuite =="
 # Round 9 #3: 16 named-gate assertions (assertGraphifyDecision substance-byte
 # threshold, assertArtifactPresent, assertFileQuiescent, assertClaimChecksResolved,

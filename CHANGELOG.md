@@ -8,6 +8,19 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.223.0] - 2026-07-30
+
+The orchestration replay harness — the improvement two independent field evaluations (task-service, proef) converged on, and the answer to the standing "untestable orchestration layer" concern. The workflow layer is ~10.5K lines of LLM-executed prose whose `field:` notes are a scar-tissue log of past silent failures no test could catch; this begins converting that class into regression tests.
+
+### Added
+
+- **`scripts/replay-orchestration.cjs` + gate K337.** Records a `.devt/state/` fixture for a known precondition, drives the *real* producer/gate CLI sequence the workflow prose invokes, and asserts the block/advance decision the prose promises — pure CLI, no LLM, CI-buildable (the `assert-*` and context-init verbs are pure and CLI-addressable). Distinct from `test-gates.cjs` (single-gate unit tests): this replays producer→gate *seams* against what the producer actually emits. Three cases, each citing the `field:` note it guards:
+  - **Explicit-scope bundle re-anchor** — a pre-written `code-review-input.md` (5-file scope) plus a 3-file diff asserts `review-context-init`'s memory_signal derives from the scope universe, not the diff. Regression-guards the v0.220.0 F2 fix (mutation-verified: reverting F2 reds the case).
+  - **Union scope on uncommitted work** — a fixture where `git diff base...HEAD` is empty but the working tree + untracked files are the review target asserts `state changed-files` unions them.
+  - **Graphify-decision three-state contract** — a `symbol_anchored` plan asserts the gate blocks on missing drill-downs, blocks on drill-downs *unbacked by real `get_neighbors` MCP-trace records* (the anti-fabrication / provenance check — proef's sharpened substance-gate point, already live in this gate), and advances only when the drill-downs are both substantive and MCP-traced.
+
+The design was settled by proef's filled receipt: pure gate-sequence replay first; the envelope↔gate stub-agent stage (which its provenance finding motivates) is deferred to a follow-up. Not built from this evaluation: the retracted dispatch-hygiene warn-default flip (proef's own run evidence showed block-default worked exactly as designed and warn would have been ignored).
+
 ## [0.222.0] - 2026-07-30
 
 Adopted the strongest angle of Claude Code's built-in `/simplify` — the **altitude** lens (right-depth / generalize-vs-special-case) — into devt's read-only review path, and corrected a stale description of the skill devt already delegates to.
@@ -624,22 +637,4 @@ An independent memory-layer review surfaced two confirmed code defects plus seve
 
 - **Guard Telemetry caveat.** The weekly report now notes — only when `:: ungoverned` recoveries are actually present — that the ungoverned bucket is trustworthy only for denies logged after the guard began matching absolute paths, so a long-window read doesn't mistake path-mismatches for real coverage gaps.
 - **docs/MEMORY.md** — documents the enforce blocking/advisory tier, corrects the stale "`require` matches per line" description (whole-content since the K303 hardening), adds an **enforce-vs-K-gate** boundary note (which mechanism a rule belongs in; enforce coverage is a direction, not a target), and the unknown-key validate warning.
-
-## [0.188.0] - 2026-07-20
-
-### Enforce / affects-coverage hardening (xhigh code-review findings)
-
-A workflow-backed xhigh review of the coverage + enforce work (v0.184.0–v0.186.0) surfaced eight verified correctness findings — including two regressions the earlier F5/simplify changes introduced. All fixed and pinned by the new gate **K303** plus extended coverage in K301/K302. Drift-guard stack 210 → 211 deep (K94–K303).
-
-### Fixed
-
-- **`require` enforcement regressed to per-line matching** (F5 side effect) — a `require` regex spanning lines (`Copyright[\s\S]*Licensed`) or using `^`/`$` anchors was mis-evaluated per line, producing false conformance violations. Reverted to whole-content matching; the ReDoS bound is now a file-size skip for `require` (per-line cap stays for `forbid`).
-- **`aggregateAffectsCoverage` reported `available:true` on error** — `withDb` *returns* `{error}` (it doesn't throw) when the memory index is absent, so the simplify refactor's try/catch never fired. The result shape is now validated, so a missing index yields `available:false`.
-- **Git-sourced file universes weren't robustly based** (devt runs in arbitrary consuming repos): `git ls-files` now defaults its working dir to the project root (a subdirectory invocation no longer yields subdir-relative paths that match nothing), uses `-z` (non-ASCII names aren't `core.quotePath`-escaped), and a 256MB buffer (large monorepos no longer silently overflow the 1MB default into an empty universe). `parseGitLog` gains `--no-renames` (rename `{a => b}` arrows no longer drop renamed files from coverage), `--relative`, and the same buffer. Absolute-or-relative `--files` are canonicalized against the cwd, and paths are normalized to forward slashes (Windows).
-- **Empty `forbid` matched everything** — `runEnforce` now skips empty/whitespace patterns (validate already rejects them; this hardens the runner if one is indexed anyway).
-- **The `enforce-ignored` warning missed the status axis** — a `candidate`/`superseded` governing doc with `enforce:` is silently skipped by `runEnforce`; `memory validate` now warns on non-active status, not just non-governing doc-type.
-
-### Changed (cleanup)
-
-- **One `io.cjs::listTrackedFiles(cwd, {nul})`** replaces the duplicated `git ls-files` boilerplate in `memory.trackedFiles` and `evolution.listTrackedFiles` (256MB buffer + `[]`-on-error in one place; `nul` selects `-z` vs quotePath-consistent output per caller). `state.cjs`'s assert-wired copy intentionally stays — it must distinguish "git unavailable" from "no files"; the `--others` (untracked-listing) variants are a different operation.
 
