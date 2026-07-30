@@ -8,6 +8,18 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.224.0] - 2026-07-31
+
+The proef latest-run batch — the correctness fix proef ranked first, plus two right-sized companions. Each fix site validated against the tree before the edit; the replay harness (v0.223.0) gained cases for the two that touch its surface, so this field defect is now a regression test.
+
+### Fixed
+
+- **F2 — the completeness-denominator conflation (correctness; proef's #1).** A consolidator echoed "complete across all 161 files" from `memory_signal.files_checked` while the actual review covered fewer — the affects-scan universe (161, which folds a gitignored scope artifact) was used as the review-completeness denominator, which is `code-review-input.md` (160, rubric Axis A). Root cause included this project's own v0.220 "name the universe" wording: labeling it "scope file(s)" *invited* the misread. Fix: the empty-governance claim is reframed to `no ADR/CON/FLOW governs any of the N file(s) scanned for governance` (un-conflatable with review scope), and the code-reviewer contract now states explicitly that `files_checked` is the governance-scan universe and **never** a completeness figure — completeness is measured against `code-review-input.md` only. Guarded by an updated replay-harness case (mutation-verified).
+- **F1 — the governance layer degrades loudly.** On a project with 0 `.devt/memory/` docs the entire ADR/CON/FLOW apparatus + rubric Axis E silently no-op'd — an empty layer looked identical to a compliant one, so an operator could read the N/A as a pass. `review-context-init` now detects an empty layer (`scanDocs().length === 0`), sets `memory_signal.governance_active: false`, adds `memory_layer_empty` to `degraded_fields`, and emits a loud stderr banner. A populated layer is silent. New replay-harness case (mutation-verified). Indexing external `docs/adr/*` is deferred — proef's guidance: only if it real-parses (status/supersedes/decision text), never keyword-greps, and for *signal* not adjudication.
+- **F4 — the `god_node_match` apparent contradiction.** proef saw `workflow.yaml::god_node_warnings_json.god_node_match=false` while `blast_radius=true` and read it as a bug. They are two different questions ("are the changed symbols themselves god-nodes?" vs "does the diff's caller closure reach god-nodes?") that can legitimately differ. Validation showed the field is coupled across 8 preflight sites + the code-reviewer contract + the template — so a serialized-field rename risked creating drift for a cosmetic gain. Right-sized to the clarity fix that resolves the actual concern (trust erosion): the code-reviewer contract now documents that the two values answer different questions and that `blast_radius`'s value is authoritative for severity.
+
+Not built this batch, by design: F5 (parallel-offer "% mechanical" churn signal — medium) and the F.14 cross-workflow state-contention rework (a graphify-update subagent blocked a review `reset-soft` — real friction, but it's the corruption-prevention guard and needs a design pass, not a rushed edit). Both recorded for follow-up.
+
 ## [0.223.0] - 2026-07-30
 
 The orchestration replay harness — the improvement two independent field evaluations (task-service, proef) converged on, and the answer to the standing "untestable orchestration layer" concern. The workflow layer is ~10.5K lines of LLM-executed prose whose `field:` notes are a scar-tissue log of past silent failures no test could catch; this begins converting that class into regression tests.
@@ -617,24 +629,4 @@ A second-pass memory-layer review (options v2) was validated filesystem-first. I
 ### Notes
 
 - The review's FLOW trim (TRIM-3) was **already satisfied** — `docs/MEMORY.md` already documents FLOW as a consumer-facing doc type with an expected-empty `flows/`. No change.
-
-## [0.189.0] - 2026-07-20
-
-### Memory-layer hardening — enforce trust-tier, frontmatter hygiene, retract (validated external findings)
-
-An independent memory-layer review surfaced two confirmed code defects plus several enhancement options. Each was validated filesystem-first and filtered through the project's north stars (TRIM > ADD, delegate over reimplement, value over mechanism): the aligned subset shipped; four mechanism-heavy options (FTS keyword indexing, a changelog→candidate extractor, an A/B eval harness, a `PreCompact` hook) were deliberately declined as ADD-before-value. Drift-guard stack 211 → 214 deep (K94–K306).
-
-### Fixed
-
-- **`enforce:` bypassed the shared-root trust tier.** A shared-root governing doc — whose content never passes the local curator gate — could block the verify loop through an `enforce:` rule even with `memory.shared_roots_coerce: false`, the exact coercive authority the tier (DEF-009 M2) was built to withhold. `runEnforce` now tags each violation `severity: blocking|advisory`: a shared-root violation is **advisory** (surfaced, non-blocking) unless the project grants coercion; local-doc violations always block. Top-level `pass` is false iff a blocking violation exists, and the verifier routes on it — mirroring the pre-flight guard's tier exactly. A wrong block from an unreviewed shared root would be destructive, so coercion stays an explicit grant. Pinned by **K304**.
-
-### Added
-
-- **`memory validate` warns on unrecognized frontmatter keys.** An authored-but-inert field (the retired `decay_days`, a stray `keywords`) previously failed silently. A known-key allowlist now emits an `unknown-key` **warning** — never an error, so an experimental field never hard-blocks validate-clean — applying LES-001's "gate the class on the second recurrence". Its first run caught three inert `keywords:` fields (CON-001/002/003), now trimmed.  Pinned by **K305**.
-- **`memory retract <id> [--reason=…]`** — the "never valid" sibling to `supersede`'s "changed, here's the successor". Flips a doc to `status: rejected` (dropping it from the active governing union), stamps `retracted_at` + optional `retracted_reason`, requires no successor, and keeps the file on disk (archive-never-delete). Idempotent; validates the mutated frontmatter before writing. Pinned by **K306**.
-
-### Changed
-
-- **Guard Telemetry caveat.** The weekly report now notes — only when `:: ungoverned` recoveries are actually present — that the ungoverned bucket is trustworthy only for denies logged after the guard began matching absolute paths, so a long-window read doesn't mistake path-mismatches for real coverage gaps.
-- **docs/MEMORY.md** — documents the enforce blocking/advisory tier, corrects the stale "`require` matches per line" description (whole-content since the K303 hardening), adds an **enforce-vs-K-gate** boundary note (which mechanism a rule belongs in; enforce coverage is a direction, not a target), and the unknown-key validate warning.
 

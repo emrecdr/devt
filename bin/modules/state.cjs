@@ -1190,7 +1190,11 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   // anchor genuinely is the diff. Prose FTS stays as a merge-in supplement —
   // its marginal cost is one query — but is OMITTED when empty; only the
   // PRIMARY renders an empty result, and it renders it as a checkable claim
-  // ("no affects-matched docs across N changed files"), never as a bare {}
+  // ("no ADR/CON/FLOW governs any of the N file(s) scanned for governance"),
+  // framed as a GOVERNANCE-scan count — never as a review-completeness scope,
+  // which is code-review-input.md (Axis A). The prior "scope file(s)" wording
+  // was read by a consolidator as the completeness denominator (proef: a false
+  // "complete across 161 files" claim seeded from files_checked). never a bare {}
   // that reads as "no governance applies". Field failure: the prose query
   // returned counts:{} while per-file affects correctly carried ADR/FLOW
   // governance for the same diff. Dev/research workflows deliberately keep
@@ -1198,18 +1202,19 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   let memorySignal = null;
   const affectsById = new Map();
   let filesChecked = 0;
-  // The claim must NAME its universe — a lane reading "changed files" while an
-  // explicit 64-file scope was under review misreads diff-governance as
-  // scope-governance (proef field case).
-  let scopeUniverse = "changed file(s)";
   let memAvailable = true;
+  // Governance-layer liveness: an EMPTY .devt/memory/ (0 docs) makes the whole
+  // ADR/CON/FLOW apparatus + rubric Axis E silently no-op — an empty layer and
+  // a genuinely-compliant one produce identical output, so an operator reads
+  // the N/A as a pass (proef field case). Detect 0-docs and degrade LOUDLY.
+  let governanceActive = true;
   try {
     const { collectChangedFiles } = require("./review-weight.cjs");
     const mem = require("./memory.cjs");
+    try { governanceActive = mem.scanDocs().length > 0; } catch { /* scan failed — assume active, don't false-alarm */ }
     const explicit = scopeInputFiles();
     const changed = explicit || collectChangedFiles(findProjectRoot(), primaryBranch || "main", _activeRange() ? { range: _activeRange() } : undefined);
     filesChecked = changed.length;
-    scopeUniverse = explicit ? "scope file(s)" : "changed file(s)";
     for (const f of changed) {
       let hits = [];
       try { hits = mem.getByPath(f) || []; } catch { hits = []; }
@@ -1239,15 +1244,20 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     degraded.push("memory_signal");
   } else {
     const docs = Array.from(affectsById.values());
+    if (!governanceActive) {
+      degraded.push("memory_layer_empty");
+      process.stderr.write("[devt] ⚠️ governance layer INACTIVE — .devt/memory/ has 0 ADR/CON/FLOW docs; rubric Axis E and affects governance contribute NOTHING this run (an empty layer looks identical to a compliant one). Project ADRs outside .devt/memory/ are NOT indexed. Populate via /devt:memory promote, or read the Axis-E N/A as honestly-unchecked, not passed.\n");
+    }
     memorySignal = {
       mode: "signal",
+      governance_active: governanceActive,
       primary: {
         source: "affects-union",
         files_checked: filesChecked,
         count: docs.length,
         docs: docs.slice(0, 20),
         ...(docs.length > 20 ? { truncated_from: docs.length } : {}),
-        ...(docs.length === 0 ? { claim: `no affects-matched docs across ${filesChecked} ${scopeUniverse}` } : {}),
+        ...(docs.length === 0 ? { claim: `no ADR/CON/FLOW governs any of the ${filesChecked} file(s) scanned for governance` } : {}),
       },
       ...(supplement ? { supplement } : {}),
     };

@@ -57,13 +57,57 @@ process.stdout.write("== Case 1: explicit-scope bundle re-anchor ==\n");
     fs.writeFileSync(path.join(fx.stateDir, "workflow.yaml"),
       'active: true\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: code_review\nphase: context_init\ntask: "explicit scope review"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\n');
     fx.runCli("memory", "init");
+    fs.mkdirSync(path.join(fx.devtDir, "memory", "decisions"), { recursive: true });
+    fs.writeFileSync(path.join(fx.devtDir, "memory", "decisions", "ADR-001-x.md"),
+      "---\nid: ADR-001\ntitle: t\ndoc_type: decision\nstatus: active\nconfidence: explicit\nsummary: s\n---\nbody\n");
+    fx.runCli("memory", "index");
     const r = fx.runCli("state", "review-context-init", "--scope=explicit scope review", "--primary-branch=main");
     const o = j(r.stdout);
     const prim = o && o.memory_signal && o.memory_signal.primary;
-    if (prim && prim.files_checked === 5 && /scope file/.test(prim.claim || "") && !/changed file/.test(prim.claim || "")) {
-      pass("memory_signal derives from the 5-file scope artifact, not the 3-file diff (claim names 'scope file(s)')");
+    // files_checked honors the 5-file scope artifact, not the 3-file diff (v0.220 F2).
+    // The claim is GOVERNANCE-framed and MUST NOT read as review-scope/completeness
+    // (v0.224 F2: "scope file(s)" was misread by a consolidator as the completeness
+    // denominator). files_checked is the governance-scan universe, never review coverage.
+    if (prim && prim.files_checked === 5 && /governance/.test(prim.claim || "") && !/scope file|changed file/.test(prim.claim || "")) {
+      pass("memory_signal honors the 5-file scope artifact; claim is governance-framed, not review-scope (no 'scope file'/'changed file' wording)");
     } else {
-      fail("explicit-scope re-anchor", `expected files_checked=5 + 'scope file' claim; got ${JSON.stringify(prim)}`);
+      fail("explicit-scope re-anchor", `expected files_checked=5 + governance-framed claim; got ${JSON.stringify(prim)}`);
+    }
+  } finally { fx.cleanup(); }
+}
+
+// ── Case 4: governance-layer liveness degrades LOUDLY (F1) ────────────────────
+// field: on a project with 0 .devt/memory/ docs the whole ADR/CON/FLOW + Axis-E
+// apparatus silently no-ops — an empty layer looked identical to a compliant one,
+// so an operator read the N/A as a pass. Empty must announce; populated must not.
+process.stdout.write("== Case 4: governance-layer liveness (F1 degrade-loud) ==\n");
+{
+  const fx = setupDevtFixture({ config: { graphify: { enabled: false }, git: { primary_branch: "main" } } });
+  try {
+    gitInit(fx.tmp);
+    fs.writeFileSync(path.join(fx.tmp, "base.py"), "base\n");
+    git(fx.tmp, ["add", "-A"]); git(fx.tmp, ["commit", "-qm", "base"]);
+    fs.writeFileSync(path.join(fx.stateDir, "workflow.yaml"),
+      'active: true\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: code_review\nphase: context_init\ntask: t\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\n');
+    fx.runCli("memory", "init");
+    // Empty layer → governance_active:false + a loud stderr banner.
+    let r = fx.runCli("state", "review-context-init", "--scope=t", "--primary-branch=main");
+    let o = j(r.stdout);
+    const empty = o && o.memory_signal && o.memory_signal.governance_active === false
+      && /governance layer INACTIVE/i.test(r.stderr || "");
+    // Populated layer → governance_active:true, no banner.
+    fs.mkdirSync(path.join(fx.devtDir, "memory", "decisions"), { recursive: true });
+    fs.writeFileSync(path.join(fx.devtDir, "memory", "decisions", "ADR-001-x.md"),
+      "---\nid: ADR-001\ntitle: t\ndoc_type: decision\nstatus: active\nconfidence: explicit\nsummary: s\n---\nbody\n");
+    fx.runCli("memory", "index");
+    r = fx.runCli("state", "review-context-init", "--scope=t", "--primary-branch=main", "--fresh");
+    o = j(r.stdout);
+    const populated = o && o.memory_signal && o.memory_signal.governance_active === true
+      && !/governance layer INACTIVE/i.test(r.stderr || "");
+    if (empty && populated) {
+      pass("empty .devt/memory announces governance_active:false + loud banner; populated announces true + silent");
+    } else {
+      fail("governance liveness", `empty→loud=${empty} populated→silent=${populated}`);
     }
   } finally { fx.cleanup(); }
 }

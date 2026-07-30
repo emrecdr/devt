@@ -17427,7 +17427,8 @@ fi
 # while per-file affects carried real governance); empty primary renders a
 # checkable claim; empty supplement is omitted; consumers document the shape.
 if /usr/bin/grep -q '"affects-union"' "$ROOT/bin/modules/state.cjs" \
-   && /usr/bin/grep -q "no affects-matched docs across" "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q "scanned for governance" "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -qi "governance-scan universe" "$ROOT/agents/code-reviewer.md" \
    && /usr/bin/grep -q "affects-union" "$ROOT/agents/code-reviewer.md" \
    && /usr/bin/grep -q "affects-union" "$ROOT/agents/verifier.md" \
    && /usr/bin/grep -q "affects-union" "$ROOT/docs/MEMORY.md"; then
@@ -19220,7 +19221,7 @@ echo
 # harness; it also regression-guards shipped fixes (v0.220 explicit-scope
 # re-anchor). Pure CLI, no LLM. Detail via `node scripts/replay-orchestration.cjs`.
 if node "$ROOT/scripts/replay-orchestration.cjs" >/dev/null 2>&1; then
-  pass "K337: orchestration replay harness (explicit-scope re-anchor + union-scope + graphify three-state — run 'node scripts/replay-orchestration.cjs' for detail)"
+  pass "K337: orchestration replay harness (explicit-scope re-anchor + union-scope + graphify three-state + governance-liveness — run 'node scripts/replay-orchestration.cjs' for detail)"
 else
   fail "K337: orchestration replay regression — run 'node scripts/replay-orchestration.cjs' for the failing case"
 fi
