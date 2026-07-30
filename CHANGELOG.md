@@ -8,6 +8,14 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.225.0] - 2026-07-31
+
+The F.14 follow-up promised (and deliberately deferred) in v0.224.0 — now designed and shipped as a regression test.
+
+### Fixed
+
+- **F.14 — `lane_state_guard` no longer false-blocks on unrelated subagents.** A `/graphify update` subagent, registered `"running"` in `status.json`, blocked a review `state reset-soft` for the full 30-minute freshness window (proef field case). The guard exists to stop a *lane* subagent from rotating orchestrator-owned `workflow.yaml` / `workflow_id` mid-fan-out — but that corruption can only occur while lanes are registered (`lanes[]` is written *before* lane subagents dispatch). Firing on *any* running subagent therefore stalled the operator on a false positive whenever an unrelated agent (a graphify refresh, an Explore pass) happened to be live. `_guardConcurrentRotation` now scopes the block: it skips only when `lanes[]` is **provably** empty, and remains fail-closed — a read failure still blocks, so the parallel-review protection is intact. Behavior: no registered lanes + running subagent → the operation proceeds; lanes registered + running subagent → still blocked. Guarded by replay-harness Case 5 (mutation-verified) and K195's block-path fixtures, which now register a lane so they exercise the block under the corrected scoping.
+
 ## [0.224.0] - 2026-07-31
 
 The proef latest-run batch — the correctness fix proef ranked first, plus two right-sized companions. Each fix site validated against the tree before the edit; the replay harness (v0.223.0) gained cases for the two that touch its surface, so this field defect is now a regression test.

@@ -188,5 +188,37 @@ process.stdout.write("== Case 3: graphify-decision three-state contract ==\n");
   } finally { fx.cleanup(); }
 }
 
+// ── Case 5: lane_state_guard scopes to registered lanes (F.14) ───────────────
+// field: a `/graphify update` subagent (registered "running" in status.json,
+// unrelated to any review lane) blocked a review reset-soft for the 30-min
+// freshness window. The concurrent-rotation corruption only exists when lanes
+// are registered; with zero lanes, running subagents can't be lanes → allow.
+process.stdout.write("== Case 5: lane_state_guard scopes to registered lanes (F.14) ==\n");
+{
+  const fx = setupDevtFixture({ config: {} });
+  try {
+    const running = `{"agents":{"graphify-update":{"status":"running","timestamp":"${new Date().toISOString()}"}}}`;
+    fs.writeFileSync(path.join(fx.stateDir, "status.json"), running);
+    // No lanes registered → an unrelated running subagent must NOT block reset-soft.
+    fs.writeFileSync(path.join(fx.stateDir, "workflow.yaml"),
+      'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: code_review\nphase: context_init\ntask: t\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "2026-01-01T02:00:00Z"\nstopped_phase: context_init\n');
+    let o = j(fx.runCli("state", "reset-soft").stdout);
+    const allowedNoLanes = o && o.ok === true;
+    // Lanes registered → the guard still blocks (parallel-review protection
+    // intact). reset-soft leaves status.json untouched, so the running subagent
+    // from the first write still stands — only workflow.yaml needs re-seeding.
+    fs.writeFileSync(path.join(fx.stateDir, "workflow.yaml"),
+      'active: true\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: code_review_parallel\nphase: dispatch_lanes\ntask: t\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nlanes:\n  - id: L1\n    community: core\n    review_file: .devt/state/review-lane-core.md\n    status: in_flight\n');
+    const r2 = fx.runCli("state", "reset-soft");
+    const e2 = j(r2.stdout);
+    const blockedWithLanes = /lane_state_guard: refusing/.test((e2 && e2.error) || r2.stderr || r2.stdout || "");
+    if (allowedNoLanes && blockedWithLanes) {
+      pass("guard allows reset-soft with an unrelated running subagent + no lanes; still blocks when lanes are registered");
+    } else {
+      fail("lane_state_guard scoping", `no-lanes→allowed=${allowedNoLanes} lanes→blocked=${blockedWithLanes}`);
+    }
+  } finally { fx.cleanup(); }
+}
+
 process.stdout.write(`\n== Result: ${PASS} passed, ${FAIL} failed ==\n`);
 process.exit(FAIL === 0 ? 0 : 1);

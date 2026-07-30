@@ -15118,13 +15118,18 @@ fi
 
 # K195: lane state-mutation guard (cal #37 #2). workflow.yaml + workflow_id are
 # orchestrator-owned; a lane subagent rotating/resetting them mid-fan-out is
-# the concurrent-rotation corruption. The CLI self-guards: when a FRESH
-# "running" subagent exists in status.json, `state update` (workflow_id
-# rotation) + `state reset-soft` THROW, while `state update-lane` (the safe
-# lane path that never touches workflow_id) is allowed. With no status.json
-# (normal op) nothing is blocked. Asserts: (1) fresh-running → first-activation
-# blocked, (2) fresh-running → reset-soft blocked, (3) update-lane allowed,
-# (4) no status.json → allowed, (5) stale running (crash leak) → allowed.
+# the concurrent-rotation corruption. The CLI self-guards, but the corruption
+# only exists WHILE lanes are registered (lanes[] is written before lane
+# subagents dispatch); with zero registered lanes a "running" subagent is
+# unrelated (a `/graphify update` flow, an Explore agent) and blocking it is a
+# false positive. So the guard fires only when BOTH a fresh "running" subagent
+# exists in status.json AND lanes[] is non-empty: then `state update`
+# (workflow_id rotation) + `state reset-soft` THROW, while `state update-lane`
+# (the safe lane path that never touches workflow_id) is allowed. With no
+# status.json (normal op) nothing is blocked. Asserts: (1) fresh-running +
+# lanes registered → first-activation blocked, (2) fresh-running + lanes
+# registered → reset-soft blocked, (3) update-lane allowed, (4) no status.json
+# → allowed, (5) stale running (crash leak) → allowed.
 K195_TMP=$(mktemp -d)
 mkdir -p "$K195_TMP/.devt/state"
 echo '{}' > "$K195_TMP/.devt/config.json"
@@ -15135,13 +15140,19 @@ _k195det() { node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on
 # command correctly exits 1, which pipefail+set -e would otherwise treat as a
 # suite abort — the detector already captured the verdict before exit matters.
 K195_NOFILE=$(cd "$K195_TMP" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
-# (1) fresh running → first-activation blocked (fresh dir)
+# (1) fresh running + lanes registered → first-activation blocked (fresh dir).
+# Pre-seed workflow.yaml (active:false, no created_at) WITH a lanes[] block so
+# the guard's lane-scope check sees a registered lane; first-activation then
+# rotates workflow_id and the guard fires.
 K195_T1=$(mktemp -d); mkdir -p "$K195_T1/.devt/state"; echo '{}' > "$K195_T1/.devt/config.json"
+printf 'active: false\nlanes:\n  - id: L1\n    community: core\n    review_file: .devt/state/review-lane-core.md\n    status: in_flight\n' > "$K195_T1/.devt/state/workflow.yaml"
 printf '{"agents":{"devt_code-reviewer":{"status":"running","timestamp":"%s"}}}' "$K195_NOW" > "$K195_T1/.devt/state/status.json"
 K195_BLOCK1=$(cd "$K195_T1" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
-# (2) fresh running → reset-soft blocked (activate first w/o status.json, then add it)
+# (2) fresh running + lanes registered → reset-soft blocked (activate first w/o
+# status.json, register a lane, then add the running subagent).
 K195_T2=$(mktemp -d); mkdir -p "$K195_T2/.devt/state"; echo '{}' > "$K195_T2/.devt/config.json"
 (cd "$K195_T2" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x >/dev/null 2>&1) || true
+printf '\nlanes:\n  - id: L1\n    community: core\n    review_file: .devt/state/review-lane-core.md\n    status: in_flight\n' >> "$K195_T2/.devt/state/workflow.yaml"
 printf '{"agents":{"devt_x":{"status":"running","timestamp":"%s"}}}' "$K195_NOW" > "$K195_T2/.devt/state/status.json"
 K195_BLOCK2=$(cd "$K195_T2" && node "$ROOT/bin/devt-tools.cjs" state reset-soft 2>&1 | _k195det || true)
 # (3) update-lane allowed even with fresh running
@@ -15152,7 +15163,7 @@ printf '{"agents":{"devt_x":{"status":"running","timestamp":"%s"}}}' "$K195_OLD"
 K195_STALE=$(cd "$K195_T5" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task=x 2>&1 | _k195det || true)
 rm -rf "$K195_TMP" "$K195_T1" "$K195_T2" "$K195_T5"
 if [ "$K195_NOFILE" = "allowed" ] && [ "$K195_BLOCK1" = "BLOCKED" ] && [ "$K195_BLOCK2" = "BLOCKED" ] && [ "$K195_LANE" = "allowed" ] && [ "$K195_STALE" = "allowed" ]; then
-  pass "K195: lane state-mutation guard — fresh-running blocks update(first-activation)+reset-soft; update-lane allowed; no-status-file + stale-running allowed"
+  pass "K195: lane state-mutation guard — fresh-running + lanes-registered blocks update(first-activation)+reset-soft; update-lane allowed; no-status-file + stale-running allowed"
 else
   fail "K195: lane_state_guard wrong — nofile=$K195_NOFILE(exp allowed), block1=$K195_BLOCK1(exp BLOCKED), block2=$K195_BLOCK2(exp BLOCKED), lane=$K195_LANE(exp allowed), stale=$K195_STALE(exp allowed)"
 fi
@@ -19221,7 +19232,7 @@ echo
 # harness; it also regression-guards shipped fixes (v0.220 explicit-scope
 # re-anchor). Pure CLI, no LLM. Detail via `node scripts/replay-orchestration.cjs`.
 if node "$ROOT/scripts/replay-orchestration.cjs" >/dev/null 2>&1; then
-  pass "K337: orchestration replay harness (explicit-scope re-anchor + union-scope + graphify three-state + governance-liveness — run 'node scripts/replay-orchestration.cjs' for detail)"
+  pass "K337: orchestration replay harness (explicit-scope re-anchor + union-scope + graphify three-state + governance-liveness + lane-guard-scoping — run 'node scripts/replay-orchestration.cjs' for detail)"
 else
   fail "K337: orchestration replay regression — run 'node scripts/replay-orchestration.cjs' for the failing case"
 fi

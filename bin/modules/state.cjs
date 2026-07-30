@@ -174,7 +174,18 @@ function _guardConcurrentRotation(operation) {
   if (mode === "off") return;
   const active = _activeSubagentNames();
   if (active.length === 0) return;
-  const msg = `lane_state_guard: refusing ${operation} — ${active.length} subagent(s) still running (${active.slice(0, 4).join(", ")}). workflow.yaml + workflow_id are orchestrator-owned; a lane subagent must update only its own status via 'state update-lane <id> status=...', never rotate/reset/init the shared workflow (this is the concurrent-rotation corruption). Override: config.lane_state_guard=warn|off.`;
+  // The corruption this guards is a LANE subagent rotating shared workflow
+  // state mid-fan-out — only possible when lanes are registered (lanes[] is
+  // written BEFORE lane subagents dispatch). With CONFIRMED-zero registered
+  // lanes, running subagents are unrelated (a `/graphify update` flow, an
+  // Explore agent) and blocking is a false positive that stalls the operator
+  // for the 30-min freshness window (proef field case). Fail-CLOSED: skip the
+  // block only when lanes[] is provably empty; unknown (read failure) still
+  // blocks, preserving the parallel-review protection.
+  let lanesEmpty = false;
+  try { lanesEmpty = listLaneOutputs().lanes.length === 0; } catch { /* read failure → stays false = fail-closed (block) */ }
+  if (lanesEmpty) return;
+  const msg = `lane_state_guard: refusing ${operation} — ${active.length} subagent(s) still running (${active.slice(0, 4).join(", ")}) while lanes are registered. workflow.yaml + workflow_id are orchestrator-owned; a lane subagent must update only its own status via 'state update-lane <id> status=...', never rotate/reset/init the shared workflow (this is the concurrent-rotation corruption). Override: config.lane_state_guard=warn|off.`;
   if (mode === "warn") {
     try { process.stderr.write(msg + "\n"); } catch { /* best-effort */ }
     return;
