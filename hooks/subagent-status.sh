@@ -40,12 +40,16 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # the JSONL keeps every event (field: three distinct agents collapsed into
 # one status.json record). status.json stays as the derived last-known view.
 mkdir -p .devt/state
-printf '%s\n' "{\"ts\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\"}" >> .devt/state/subagent-events.jsonl 2>/dev/null || true
+printf '%s\n' "{\"ts\":\"${TIMESTAMP}\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\"}" >> .devt/state/subagent-events.jsonl 2>/dev/null || true
 
 # New agent activity on a stop-stamped workflow means the stop was a turn
 # boundary, not an end — clear the stamp so state reads truthfully during
-# resumed work (cheap no-op when no stamp is present).
-if [[ "$ACTION" == "start" ]]; then
+# resumed work. Only spawn the reactivate process when a REAL stop stamp is on
+# disk: a bare grep beats loading the whole state module graph on every start
+# just to no-op. `reactivate` then applies the recency bound. Cleared stamps
+# serialize as `stopped_at: null` and never-stopped ones have no key — the
+# `"?[0-9]` tail matches only a genuine ISO timestamp.
+if [[ "$ACTION" == "start" ]] && grep -qE '^stopped_at: "?[0-9]' .devt/state/workflow.yaml 2>/dev/null; then
   node "$(devt_plugin_root)/bin/devt-tools.cjs" state reactivate >/dev/null 2>&1 || true
 fi
 

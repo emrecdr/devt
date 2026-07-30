@@ -8,6 +8,18 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.226.0] - 2026-07-31
+
+A deep `/simplify` pass over the last ten commits — four behavior-preserving cleanups, plus the one behavior fix that pass surfaced: `state reactivate` was resurrecting abandoned workflows across sessions.
+
+### Fixed
+
+- **`state reactivate` is now recency-bounded.** SubagentStart cleared the stop stamp on *any* stop-stamped workflow whenever *any* subagent started — with no recency check — so an abandoned, never-finalized workflow could be silently flipped back to `active=true` by unrelated agent activity in a later session (a `/graphify update`, an Explore pass), re-lying "active" to `/devt:status` and `/devt:next`. This is the same false-positive class the F.14 lane guard scopes out. `reactivate` now clears the stamp only when it falls within the 30-min `_ACTIVE_SUBAGENT_FRESH_MS` window (fail-safe: an unparseable stamp is treated as stale), preserving the intended ~2.5-min SendMessage resume while refusing cross-session resurrection. `subagent-status.sh` additionally gates the reactivate process behind a bare `grep` for a real on-disk stamp, so the heaviest spawn on the hot SubagentStart path (loading the whole state module graph) no longer fires just to no-op on the common no-stamp start. K332 gains stale-stamp negatives so the bound is red-capable in-gate.
+
+### Changed
+
+- **Internal cleanup, no behavior change (each probed behavior-equivalent before landing).** Deduplicated the token-overlap similarity in `discovery.cjs` into shared `tokenize` + `overlapRatio` + `DUP_OVERLAP_BAR` (previously inlined 4× with the `≥0.6` bar copy-pasted between `findDuplicate` and `ledgerMatch` — the "one similarity definition across the layer" the comment claimed is now literally shared). Extracted `sumWholeFileLoc` in `state-lanes.cjs` (two byte-identical whole-file LOC loops in `registerLane`). Removed dead code from the `check-workflow-shell-state` linter (a first `usedIn` predicate that structurally never fires — verified identical across a 16-sample sweep — and a no-op `for`-variable ternary). Corrected the W016 comment in `health.cjs`, which named a `config.template` field that is never written and claimed "current-template only" while the code matches against every shipped template.
+
 ## [0.225.0] - 2026-07-31
 
 The F.14 follow-up promised (and deliberately deferred) in v0.224.0 — now designed and shipped as a regression test.
@@ -618,23 +630,3 @@ devt's first real field run — a greenfield cross-service review — produced a
 ### Deferred (validated, same receipt)
 
 - context_init ceremony trim → a future step-manifest cal (the field substep-value breakdown is the input); claude-mem's per-read injection volume → upstream (not devt-tunable); lane-cap-of-5 → kept (field: no measurable degradation).
-
-## [0.190.0] - 2026-07-20
-
-### Memory injection-cost projection + queue hygiene (options-v2 review, north-star-filtered)
-
-A second-pass memory-layer review (options v2) was validated filesystem-first. It proposed mostly TRIM + measurement; the aligned subset shipped, and its two flagship "cheap projections" were **disproven on the filesystem** and deferred to their true home (DEF-006). Drift-guard stack 214 → 215 deep (K94–K307).
-
-### Added
-
-- **Memory injection-cost line in the weekly report (OPT-α).** Prices the memory/context-injection surface — what `memory_signal` + governing lines + advisories cost per workflow — by projecting `workflow-context-injector` `stdout_bytes` from the universal `run-hook.jsonl` trace (the same source `hook-cost` reads; no new collector). It reads **~0 in raw-dispatch/maintainer sessions** (the injector emits nothing without an active workflow) and reflects real cost only in workflow-running projects; the section renders only when injection actually happened in-window. In-code kill-receipt: delete the line if it changes no decision across ~3 report windows. Pinned by **K307**.
-
-### Changed (queue hygiene — no code)
-
-- **DEF-005/006 triggers de-proxied (TRIM-2).** Replaced the `corpus > 30 docs` numeric trigger with a value-shaped one (a field receipt, or the curator flagging dead-weight governance). For a solo-maintainer plugin, doc-count is a proxy that games as easily as it gates.
-- **OPT-α(% cited) / OPT-β(lane-attribution) recorded as DEF-006, not a cheap projection.** Their "projection over existing data" premise was disproven: PREFLIGHT scratchpad lines are ephemeral (truncated per workflow) and are pre-flight-guard file-coverage records, not doc-citations; and the sidecar `governing[]` carries no lane-of-origin tag. Capturing + aggregating citations *is* the deferred DEF-006 build — noted so it isn't double-built. Only OPT-α's *bytes-injected* half was a genuine projection (shipped above).
-
-### Notes
-
-- The review's FLOW trim (TRIM-3) was **already satisfied** — `docs/MEMORY.md` already documents FLOW as a consumer-facing doc type with an expected-empty `flows/`. No change.
-

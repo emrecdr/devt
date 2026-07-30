@@ -331,6 +331,20 @@ function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
 }
 
 
+// Whole-file LOC sum (trailing-newline aware) across a file set — the fallback
+// sizing basis when there's no reviewable diff (empty or failed diff).
+// Missing/unreadable files count as 0.
+function sumWholeFileLoc(files) {
+  let loc = 0;
+  for (const f of files) {
+    try {
+      const content = fs.readFileSync(f, "utf8");
+      loc += content.length === 0 ? 0 : content.split("\n").length - 1;
+    } catch { /* missing/unreadable — counts as 0 LOC */ }
+  }
+  return loc;
+}
+
 function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
   if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
     return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
@@ -385,23 +399,11 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       // est_loc=0 for full-file review lanes). Re-size by whole-file LOC with
       // the unknown class so the chunked-read strategy can attach.
       if (estLoc === 0 && files.length > 0) {
-        let wholeLoc = 0;
-        for (const f of files) {
-          try {
-            const content = fs.readFileSync(f, "utf8");
-            wholeLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
-          } catch { /* missing — 0 */ }
-        }
+        const wholeLoc = sumWholeFileLoc(files);
         if (wholeLoc > 0) { estLoc = wholeLoc; sizeBasis = "whole_file"; sizeClass = "unknown"; }
       }
     } else {
-      estLoc = 0;
-      for (const f of files) {
-        try {
-          const content = fs.readFileSync(f, "utf8");
-          estLoc += content.length === 0 ? 0 : content.split("\n").length - 1;
-        } catch { /* file missing or unreadable — counts as 0 LOC */ }
-      }
+      estLoc = sumWholeFileLoc(files);
       sizeBasis = "whole_file";
       sizeClass = "unknown";
     }

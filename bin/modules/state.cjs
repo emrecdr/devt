@@ -1880,9 +1880,18 @@ function run(subcommand, args) {
       // activity is not stopped — field: a SendMessage-resumed architect ran
       // for ~2.5 min while workflow.yaml said active:false/stopped_at, and
       // /devt:status mis-routed to "resume or start fresh" mid-scan. Clears
-      // the stamp only when one exists; otherwise a cheap no-op.
+      // the stamp only when one exists AND is recent; otherwise a cheap no-op.
       const st = readState();
       if (!st || !st.stopped_at) return { ok: true, reactivated: false, reason: "no stop stamp present" };
+      // Recency bound: only a stamp within the freshness window is a turn-
+      // boundary resume. An older stamp is an abandoned / never-finalized
+      // workflow — resurrecting it on unrelated agent activity in a later
+      // session would re-lie "active" (the false-positive class the lane guard
+      // scopes out). Fail-safe: an unparseable stamp is treated as stale.
+      const stoppedMs = Date.parse(st.stopped_at);
+      if (!Number.isFinite(stoppedMs) || Date.now() - stoppedMs > _ACTIVE_SUBAGENT_FRESH_MS) {
+        return { ok: true, reactivated: false, reason: `stop stamp outside freshness window (or unparseable) — treating as abandoned, not resuming: ${st.stopped_at}` };
+      }
       updateState(["active=true", "stopped_at=null", "stopped_phase=null"], {});
       return { ok: true, reactivated: true, reason: `stop stamp cleared — agent activity resumed after stop at ${st.stopped_at}` };
     }

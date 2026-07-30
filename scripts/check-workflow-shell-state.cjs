@@ -62,7 +62,7 @@ function assignedIn(fenceLines) {
   const names = new Set();
   for (const l of fenceLines) {
     for (const m of l.matchAll(/(?:^|[;({]|\s|\bexport\s+|\blocal\s+)([A-Z][A-Z0-9_]{2,})=/g)) names.add(m[1]);
-    for (const m of l.matchAll(/\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b/g)) names.add(m[1].toUpperCase() === m[1] ? m[1] : m[1]);
+    for (const m of l.matchAll(/\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b/g)) names.add(m[1]);
     for (const m of l.matchAll(/\bread\s+(?:-r\s+)?([A-Z][A-Z0-9_]{2,})\b/g)) names.add(m[1]);
   }
   return names;
@@ -74,9 +74,8 @@ function usedIn(fenceLines) {
     // strip single-quoted segments (no expansion there) and comments
     const l = fenceLines[i].replace(/'[^']*'/g, "''").replace(/(^|\s)#.*$/, "");
     for (const m of l.matchAll(/\$\{?([A-Z][A-Z0-9_]{2,})([:}\-=?+]|\b)/g)) {
-      const trailing = l.slice(m.index + m[0].length - m[2].length);
       // ${X:-...} / ${X:=...} carry their own default — fence-local-defensive
-      if (/^:[-=]/.test(m[2] + trailing.slice(0, 1)) || /^\{[A-Z][A-Z0-9_]*:[-=]/.test(l.slice(m.index + 1))) continue;
+      if (/^\{[A-Z][A-Z0-9_]*:[-=]/.test(l.slice(m.index + 1))) continue;
       uses.push({ name: m[1], lineOffset: i });
     }
   }

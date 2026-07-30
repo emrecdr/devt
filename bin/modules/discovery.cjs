@@ -286,24 +286,34 @@ function loadExistingMemoryDocs() {
   }
 }
 
+// Token-overlap similarity — the single "is this a near-duplicate" definition
+// for the discovery layer: 4+-char lowercased word runs, and the fraction of a
+// candidate's tokens present in another set. Shared by findDuplicate (vs
+// permanent docs) and ledgerMatch (vs the recurrence ledger) so the tokenizer
+// and the DUP_OVERLAP_BAR stay defined once.
+const DUP_OVERLAP_BAR = 0.6;
+function tokenize(str) {
+  return (str || "").toLowerCase().split(/\W+/).filter((t) => t.length >= 4);
+}
+function overlapRatio(aTokens, bTokens) {
+  if (aTokens.size === 0) return 0;
+  let overlap = 0;
+  for (const t of aTokens) if (bTokens.has(t)) overlap++;
+  return overlap / aTokens.size;
+}
+
 /**
  * Returns first dup match when candidate's title overlaps significantly with an
  * existing doc's title or summary. Coarse string-overlap heuristic — Phase 3
  * could swap in FTS5 match scoring.
  */
 function findDuplicate(candidate, existing) {
-  const candTokens = new Set(
-    (candidate.title || "").toLowerCase().split(/\W+/).filter(t => t.length >= 4)
-  );
+  const candTokens = new Set(tokenize(candidate.title));
   if (candTokens.size === 0) return null;
   for (const doc of existing) {
-    const docTokens = new Set(
-      `${doc.title} ${doc.summary || ""}`.toLowerCase().split(/\W+/).filter(t => t.length >= 4)
-    );
-    let overlap = 0;
-    for (const t of candTokens) if (docTokens.has(t)) overlap++;
-    const ratio = overlap / candTokens.size;
-    if (ratio >= 0.6) {
+    const docTokens = new Set(tokenize(`${doc.title} ${doc.summary || ""}`));
+    const ratio = overlapRatio(candTokens, docTokens);
+    if (ratio >= DUP_OVERLAP_BAR) {
       return { dup_id: doc.id, dup_title: doc.title, overlap_ratio: ratio };
     }
   }
@@ -377,19 +387,17 @@ function loadLedger() {
 }
 
 function candidateKey(title) {
-  return (title || "").toLowerCase().split(/\W+/).filter((t) => t.length >= 4).sort().join("-");
+  return tokenize(title).sort().join("-");
 }
 
-// Same 0.6 token-overlap bar findDuplicate uses against permanent docs —
+// Same DUP_OVERLAP_BAR + tokenizer findDuplicate uses against permanent docs —
 // one similarity definition across the layer.
 function ledgerMatch(title, ledger) {
-  const candTokens = new Set((title || "").toLowerCase().split(/\W+/).filter((t) => t.length >= 4));
+  const candTokens = new Set(tokenize(title));
   if (candTokens.size === 0) return null;
   for (const [key, entry] of Object.entries(ledger)) {
-    const entryTokens = new Set(`${entry.title || ""}`.toLowerCase().split(/\W+/).filter((t) => t.length >= 4));
-    let overlap = 0;
-    for (const t of candTokens) if (entryTokens.has(t)) overlap++;
-    if (overlap / candTokens.size >= 0.6) return key;
+    const entryTokens = new Set(tokenize(entry.title || ""));
+    if (overlapRatio(candTokens, entryTokens) >= DUP_OVERLAP_BAR) return key;
   }
   return null;
 }

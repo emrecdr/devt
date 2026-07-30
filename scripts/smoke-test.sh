@@ -19079,11 +19079,14 @@ fi
 #   a/b  Layer-2 self-heal — recovered artifact clears via re-probe; a still-
 #        missing artifact stays failing (field: recovery required GUESSING
 #        `state assert-artifact-present <agent>`)
-#   c    `state reactivate` clears a stop stamp once, no-ops without one
+#   c    `state reactivate` clears a FRESH stop stamp once, no-ops on the
+#        second call, and DECLINES a stale stamp (recency-bounded — a stale
+#        stamp is an abandoned workflow, not a turn-boundary resume)
 #   d    subagent-events.jsonl keeps distinct agents (status.json merges
 #        last-writer-wins — three field events collapsed into one record)
-#   e    SubagentStart on a stop-stamped workflow re-activates it (the field
-#        window: a SendMessage-resumed agent ran while state said stopped)
+#   e    SubagentStart on a FRESH stop-stamped workflow re-activates it (the
+#        field window: a SendMessage-resumed agent ran while state said
+#        stopped) but leaves a STALE stamp stopped (no cross-session resurrect)
 #   f    run-hook.js carries stderr_excerpt on nonzero exit (721B of field
 #        stderr vanished behind a byte count)
 #   g    small-history coupling annotates confidence=low (24 commits/1 author
@@ -19099,17 +19102,30 @@ K332_A=$(cd "$K332_PROJ" && node "$CLI" state assert-claim-checks-resolved 2>/de
 printf '{"source":"claim_check","agent":"tester","verdict":"failure","reason":"missing","ts":"2026-01-01T01:00:00Z","expected_path":".devt/state/test-summary.md"}\n' >> "$K332_PROJ/.devt/state/claim-check-failures.jsonl"
 K332_B=$(cd "$K332_PROJ" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write(j.ok===false?"blocks":"leaks")})')
 [ "$K332_B" = "blocks" ] || { K332_OK=0; K332_WHY="$K332_WHY b:still-missing=$K332_B"; }
-printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "2026-01-01T02:00:00Z"\nstopped_phase: implement\n' > "$K332_PROJ/.devt/state/workflow.yaml"
+# reactivate is recency-bounded: a FRESH stamp is a turn-boundary resume
+# (clears once, then no-ops); a STALE stamp is an abandoned workflow (declined,
+# NOT resurrected — the stale-resurrection false positive the bound closes).
+K332_FRESH=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+K332_STALE=$(node -e "console.log(new Date(Date.now()-2*3600*1000).toISOString().replace(/\.[0-9]+Z/,'Z'))")
+printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "%s"\nstopped_phase: implement\n' "$K332_FRESH" > "$K332_PROJ/.devt/state/workflow.yaml"
 K332_C1=$(cd "$K332_PROJ" && node "$CLI" state reactivate 2>/dev/null | /usr/bin/grep -c '"reactivated":true' || true)
 K332_C2=$(cd "$K332_PROJ" && node "$CLI" state reactivate 2>/dev/null | /usr/bin/grep -c '"reactivated":false' || true)
-{ [ "$K332_C1" = "1" ] && [ "$K332_C2" = "1" ]; } || { K332_OK=0; K332_WHY="$K332_WHY c:reactivate=$K332_C1/$K332_C2"; }
+printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "%s"\nstopped_phase: implement\n' "$K332_STALE" > "$K332_PROJ/.devt/state/workflow.yaml"
+K332_C3=$(cd "$K332_PROJ" && node "$CLI" state reactivate 2>/dev/null | /usr/bin/grep -c '"reactivated":false' || true)
+{ [ "$K332_C1" = "1" ] && [ "$K332_C2" = "1" ] && [ "$K332_C3" = "1" ]; } || { K332_OK=0; K332_WHY="$K332_WHY c:reactivate=$K332_C1/$K332_C2/stale=$K332_C3"; }
 ( cd "$K332_PROJ" && printf '{"agentName":"alpha"}' | bash "$ROOT/hooks/subagent-status.sh" start >/dev/null 2>&1 ; printf '{"agentName":"beta"}' | bash "$ROOT/hooks/subagent-status.sh" start >/dev/null 2>&1 )
 K332_D=$(/usr/bin/grep -c '"event":"start"' "$K332_PROJ/.devt/state/subagent-events.jsonl" 2>/dev/null || echo 0)
 [ "$K332_D" = "2" ] || { K332_OK=0; K332_WHY="$K332_WHY d:events=$K332_D"; }
-printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "2026-01-01T03:00:00Z"\nstopped_phase: implement\n' > "$K332_PROJ/.devt/state/workflow.yaml"
+printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "%s"\nstopped_phase: implement\n' "$K332_FRESH" > "$K332_PROJ/.devt/state/workflow.yaml"
 ( cd "$K332_PROJ" && printf '{"agentName":"gamma"}' | bash "$ROOT/hooks/subagent-status.sh" start >/dev/null 2>&1 )
 K332_E=$(/usr/bin/grep -c '^active: true' "$K332_PROJ/.devt/state/workflow.yaml" || true)
 [ "$K332_E" = "1" ] || { K332_OK=0; K332_WHY="$K332_WHY e:start-reactivate=$K332_E"; }
+# STALE stamp: the hook's stamp-gate lets it spawn (a stamp exists) but
+# reactivate's recency bound declines — the abandoned workflow stays stopped.
+printf 'active: false\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: dev\nphase: implement\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\nstopped_at: "%s"\nstopped_phase: implement\n' "$K332_STALE" > "$K332_PROJ/.devt/state/workflow.yaml"
+( cd "$K332_PROJ" && printf '{"agentName":"delta"}' | bash "$ROOT/hooks/subagent-status.sh" start >/dev/null 2>&1 )
+K332_E2=$(/usr/bin/grep -c '^active: false' "$K332_PROJ/.devt/state/workflow.yaml" || true)
+[ "$K332_E2" = "1" ] || { K332_OK=0; K332_WHY="$K332_WHY e2:stale-not-resurrected=$K332_E2"; }
 printf '#!/usr/bin/env bash\necho "k332 stderr detail" >&2\nexit 1\n' > "$ROOT/hooks/zz-k332-fail.sh"
 ( cd "$K332_PROJ" && printf '{}' | node "$ROOT/hooks/run-hook.js" zz-k332-fail.sh >/dev/null 2>&1 || true )
 rm -f "$ROOT/hooks/zz-k332-fail.sh"
@@ -19121,7 +19137,7 @@ K332_G=$(cd "$K332_G_DIR" && node "$CLI" evolution scan --no-write 2>/dev/null |
 [ "$K332_G" = "1" ] || { K332_OK=0; K332_WHY="$K332_WHY g:coupling-confidence=$K332_G"; }
 rm -rf "$K332_PROJ" "$K332_G_DIR"
 if [ "$K332_OK" = "1" ]; then
-  pass "K332: state-truth batch — Layer-2 self-heals recovered artifacts (still-missing blocks), reactivate clears stop stamps on agent activity, subagent events append without merging, hook stderr survives failure, small-history coupling annotates low confidence"
+  pass "K332: state-truth batch — Layer-2 self-heals recovered artifacts (still-missing blocks), reactivate clears FRESH stop stamps on agent activity (stale declined), subagent events append without merging, hook stderr survives failure, small-history coupling annotates low confidence"
 else
   fail "K332: state-truth regression ($K332_WHY)"
 fi

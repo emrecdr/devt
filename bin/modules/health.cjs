@@ -202,19 +202,17 @@ function runChecks(pluginRoot) {
         add(RULE_WARNING_CODES[file]);
       }
     }
-    // W016: untailored-rules detection. config.template records which template
-    // scaffolded this project; a rules file byte-identical to its template
-    // source has never been tailored — the installed boilerplate can
-    // contradict project law, and only downstream defenses (memory_signal,
-    // agent role text) stand between it and an agent grading against it.
-    // Heuristic: identical-to-CURRENT-template only (an old-template copy
-    // reads as tailored — acceptable false negative; the check is forward-
-    // looking for fresh installs).
+    // W016: untailored-rules detection. A rules file byte-identical to the
+    // same-named file in ANY shipped template has never been tailored — the
+    // installed boilerplate can contradict project law, and only downstream
+    // defenses (memory_signal, agent role text) stand between it and an agent
+    // grading against it. Template-agnostic because installs don't record which
+    // template scaffolded them; matching against every shipped template is the
+    // reliable signal. An old-template copy that no longer matches any current
+    // template reads as tailored — acceptable false negative, the check is
+    // forward-looking for fresh installs.
     if (pluginRoot) {
       try {
-        // Template-agnostic: installs don't reliably record which template
-        // scaffolded them, so a rules file byte-identical to the same-named
-        // file in ANY shipped template counts as untailored.
         const templatesRoot = path.join(pluginRoot, "templates");
         const templateDirs = fs.existsSync(templatesRoot)
           ? fs.readdirSync(templatesRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
