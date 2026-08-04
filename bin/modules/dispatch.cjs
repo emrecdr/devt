@@ -804,7 +804,30 @@ function computeEnvelopeHealth(rendered) {
   }
   // Nothing recognized — envelope shape too unusual to classify
   if (populated.length + empty.length + placeholder.length === 0) return null;
-  const status = populated.length >= 3 ? "healthy" : "degraded";
+  let status = populated.length >= 3 ? "healthy" : "degraded";
+  // Per-block escalation for graph_impact, same shape as the rubric_path check
+  // above and added for the same reason. A bare count cannot express "this lane
+  // lost its blast-radius map": with scope_hint routinely absent the practical
+  // denominator is 4, so an empty graph_impact alone could never reach the
+  // threshold — a lane dispatched with zero blast-radius context reported
+  // healthy, and the detector that should have caught an eviction certified it.
+  // Only escalate on a graph-anchored tier: when the impact plan says "skip"
+  // (or there is no plan) an empty block is absent-by-design, not a loss.
+  if (status === "healthy" && empty.includes("graph_impact")) {
+    try {
+      const fsH = require("fs");
+      const pathH = require("path");
+      const root = require("./config.cjs").findProjectRoot();
+      if (root) {
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+        const planPath = pathH.join(root, ".devt", "state", "graphify-impact-plan.json");
+        if (fsH.existsSync(planPath)) {
+          const tier = (JSON.parse(fsH.readFileSync(planPath, "utf8")) || {}).tier;
+          if (typeof tier === "string" && tier && tier !== "skip") status = "degraded";
+        }
+      }
+    } catch { /* unreadable plan — leave the count-based verdict */ }
+  }
   return { populated, empty, placeholder, status };
 }
 

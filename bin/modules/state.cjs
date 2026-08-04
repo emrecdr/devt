@@ -1328,7 +1328,32 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   try { updateState([`god_node_warnings_json=${JSON.stringify(godNodeWarnings)}`]); } catch { /* best-effort cache */ }
 
   // ── Eviction (AFTER freshness read) + impact-plan ──────────────────────
-  sh(["state", "evict-graphify"]);
+  // Session-anchored: evict only artifacts that predate THIS session's anchor.
+  // The eviction exists to clear a prior session's stale map, but it also ran
+  // on the same-run re-anchor call — which fires after the scope artifact is
+  // pre-written, changing scope_sig and defeating the freshness short-circuit —
+  // and deleted the graph-impact.md this run's impact step had just built. Five
+  // lane envelopes then pointed at a file that no longer existed. Passing the
+  // session age as the age gate preserves same-session artifacts and still
+  // evicts cross-session ones. Fail-safe: an unparseable anchor keeps the old
+  // unconditional behavior rather than silently preserving stale state.
+  let evictRes;
+  // Re-read: the anchor is stamped during activation, after the earlier read.
+  const _anchorMs = Date.parse(((readState() || {}).first_created_at) || "");
+  if (Number.isFinite(_anchorMs)) {
+    const sessionAgeMin = Math.max(1, Math.ceil((Date.now() - _anchorMs) / 60000));
+    evictRes = sh(["state", "evict-graphify", `--max-age-minutes=${sessionAgeMin}`]);
+  } else {
+    evictRes = sh(["state", "evict-graphify"]);
+  }
+  // Deleting files is a reduction — report it. The evicted/skipped record was
+  // computed and thrown away, so an orchestrator had no way to observe that
+  // its own context-init had removed the impact map.
+  let graphifyEvicted = [];
+  try {
+    const ev = JSON.parse(evictRes.stdout || "{}");
+    graphifyEvicted = (ev.evicted || []).map(e => (e && e.file) || String(e));
+  } catch { /* eviction telemetry is best-effort */ }
   let impactPlan = null;
   try { impactPlan = computeGraphifyImpactPlan({ reviewScope: scope, primaryBranch }); }
   catch { impactPlan = { tier: "skip", tool: "", args: {}, skip_reason: "impact-plan compute failed" }; degraded.push("impact_plan"); }
@@ -1352,6 +1377,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     god_node_warnings: godNodeWarnings,
     freshness,
     staleness_tier: stalenessTier,
+    graphify_evicted: graphifyEvicted,
     degraded_fields: degraded,
   };
 }

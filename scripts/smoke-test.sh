@@ -19253,6 +19253,65 @@ else
 fi
 
 echo
+# K339: envelope integrity (task-service field batch). When the impact map went
+# missing mid-run, the envelope asserted a CAUSE it could not know ("graphify
+# did not run") while graphify had in fact run a symbol-anchored blast_radius —
+# so five lane reviewers were told the opposite of what happened and told to
+# stop looking, and envelope_health then certified the context-less lanes
+# "healthy". A detector that reports healthy through the failure it exists to
+# catch is worse than no detector. Legs:
+#   a  no map + no plan  → "never ran" wording, status=absent
+#   b  no map + real tier → "DID run / evicted" wording, status=evicted
+#   c  no map + tier=skip → absent-by-design (not an eviction claim)
+#   d  the load-bearing "(no graph-impact.md available — " prefix survives on
+#      every branch (a smoke gate greps it; the health classifier keys "empty"
+#      off it)
+#   e  envelope_health degrades on empty graph_impact under a graph-anchored
+#      tier, stays healthy under tier=skip
+#   f  context-init reports what it deleted (evict-graphify's evicted[] record
+#      was computed and discarded) and session-anchors the eviction
+K339_TMP=$(mktemp -d); K339_TMP=$(cd "$K339_TMP" && pwd -P)
+mkdir -p "$K339_TMP/.devt/state"
+echo '{}' > "$K339_TMP/.devt/config.json"
+K339_OUT=$(cd "$K339_TMP" && node -e '
+const Module=require("module"), fs=require("fs"), path=require("path");
+const MDIR="'"$ROOT"'/bin/modules";
+const {loadGraphImpact}=require(MDIR+"/init.cjs");
+const P=MDIR+"/dispatch.cjs";
+const m=new Module(P,null); m.filename=P; m.paths=Module._nodeModulePaths(MDIR);
+m._compile(fs.readFileSync(P,"utf8")+"\nmodule.exports.__h=computeEnvelopeHealth;",P);
+const health=m.exports.__h;
+const planPath=path.join(".devt","state","graphify-impact-plan.json");
+const PRE=/^\(no graph-impact\.md available — /;
+const env="X".repeat(250)+"\n<scope_trust>dense</scope_trust>\n<memory_signal>sig</memory_signal>\n<rubric_content>rubric</rubric_content>\n<graph_impact>\n(no graph-impact.md available — x)\n</graph_impact>";
+const r=[];
+try{fs.unlinkSync(planPath);}catch{}
+let a=loadGraphImpact(process.cwd());
+r.push(a.status==="absent" && /never ran/.test(a.content) ? "a" : "A");
+r.push(PRE.test(a.content) ? "" : "D1");
+r.push(health(env).status==="healthy" ? "" : "E1");
+fs.writeFileSync(planPath,JSON.stringify({tier:"symbol_anchored"}));
+let b=loadGraphImpact(process.cwd());
+r.push(b.status==="evicted" && /DID run/.test(b.content) ? "b" : "B");
+r.push(PRE.test(b.content) ? "" : "D2");
+r.push(health(env).status==="degraded" ? "e" : "E2");
+fs.writeFileSync(planPath,JSON.stringify({tier:"skip"}));
+let c=loadGraphImpact(process.cwd());
+r.push(c.status==="absent" ? "c" : "C");
+r.push(health(env).status==="healthy" ? "" : "E3");
+process.stdout.write(r.join("")||"ok");
+' 2>/dev/null)
+rm -rf "$K339_TMP"
+# (f) source-level: the eviction is session-anchored and its record is surfaced
+K339_F=0
+if /usr/bin/grep -q 'max-age-minutes=\${sessionAgeMin}' "$ROOT/bin/modules/state.cjs" \
+   && /usr/bin/grep -q 'graphify_evicted' "$ROOT/bin/modules/state.cjs"; then K339_F=1; fi
+if [ "$K339_OUT" = "abec" ] && [ "$K339_F" = "1" ]; then
+  pass "K339: envelope integrity (absent-map message names a knowable cause, prefix preserved, envelope_health degrades on lost blast-radius under a graph-anchored tier, eviction session-anchored + reported)"
+else
+  fail "K339: envelope integrity regressed — legs=$K339_OUT (want abec; uppercase letter = that leg failed), session-anchor+telemetry=$K339_F (want 1)"
+fi
+
 # K338: lane-partition correctness (task-service field batch). Four legs, each
 # pinned to a defect that made community partitioning silently unavailable:
 #   a  same-basename files no longer collapse — two `__init__.py` in different

@@ -213,7 +213,10 @@ function loadInlineGuardrails(pluginRoot) {
 //   status = "present"  — file exists, content inlined (possibly truncated)
 //   status = "skipped"  — file absent, graphify-skip-reason.txt explanation
 //                         inlined when available
-//   status = "absent"   — neither file present (no graphify configured / never run)
+//   status = "evicted"  — map gone but the impact plan records a real tier, so
+//                         graphify ran and the artifact was lost afterwards
+//   status = "absent"   — neither file present, and no plan either (no graphify
+//                         configured / never run)
 //
 // Caps total content at 32 KB. When the file exceeds the cap, content carries
 // the first 32 KB plus a truncation notice. Sub-agents reading the file
@@ -246,8 +249,36 @@ function loadGraphImpact(projectRoot) {
       status: "skipped",
     };
   }
+  // Absence of both files says the map is missing; it does NOT say why. The
+  // impact plan survives evict-graphify by design (only the map, the skip
+  // reason, and the staleness marker are evictable), so a plan carrying a real
+  // tier beside a missing map is unambiguous: graphify ran and the artifact was
+  // lost afterwards. Asserting "graphify did not run" in that state told five
+  // lane reviewers the opposite of what happened AND told them to stop looking,
+  // which is how an eviction bug stayed invisible for a whole run.
+  //
+  // The "(no graph-impact.md available — " prefix is load-bearing on both
+  // branches: a smoke gate greps it, and the envelope-health classifier keys
+  // "empty" off it. Only the clause after it may change.
+  let planTier = null;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const planPath = path.join(projectRoot, ".devt", "state", "graphify-impact-plan.json");
+    if (fs.existsSync(planPath)) {
+      const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+      const t = plan && plan.tier;
+      if (typeof t === "string" && t && t !== "skip") planTier = t;
+    }
+  } catch { /* unreadable plan — fall through to the un-attributed message */ }
+  if (planTier) {
+    return {
+      content: `(no graph-impact.md available — the impact plan on disk records tier="${planTier}", so graphify DID run for this workflow and the map was evicted or deleted afterwards. Treat blast-radius context as MISSING, not absent-by-design: ask the orchestrator to re-run the impact step, or investigate with grep and say explicitly that you did.)`,
+      bytes: 0,
+      status: "evicted",
+    };
+  }
   return {
-    content: "(no graph-impact.md available — graphify did not run for this workflow; investigate with grep)",
+    content: "(no graph-impact.md available — no impact plan on disk either, so graphify most likely never ran for this workflow; investigate with grep)",
     bytes: 0,
     status: "absent",
   };
