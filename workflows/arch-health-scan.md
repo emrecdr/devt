@@ -417,6 +417,25 @@ If this was the first scan (no prior baseline), save the results as baseline aut
 
 This is a READ-ONLY workflow. Do NOT offer to fix findings inline. If the user wants fixes, they should create tasks for specific issues and run `/devt:workflow`.
 
+**The report MUST open with a contract-conforming status header**, because it
+overwrites the architect's `arch-review.md` — the artifact every later
+`state update` validates:
+
+```markdown
+## Status
+
+DONE
+```
+
+One of `DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT`. This is
+the artifact's routing field and is NOT the health assessment: a scan that ran
+to completion is `DONE` even when it reports "at risk", and the healthy /
+needs-attention / at-risk judgement stays in the Health summary above. Writing
+the verdict under any other heading (`## Verdict: HEALTHY`) leaves the file
+status-less, which does not fail this run — the phase never advances past
+`architect` here — but makes every subsequent workflow in the project emit a
+consistency warning against a file it did not write.
+
 Save the report to `.devt/state/arch-review.md` and also to the report directory:
 
 ```bash

@@ -414,19 +414,37 @@ function validateConsistency(stateOverride = null) {
   const state = stateOverride || readState();
   const stateDir = getStateDir();
 
-  // Build phase→artifact map for this workflow type from the canonical map
+  // Build phase→artifact map for this workflow type from the canonical map.
+  //
+  // Declared as data, not another `if (workflow_type !== X) delete …` branch:
+  // that cluster had reached four special cases and still missed `architect`,
+  // so a `code_review` — which never runs an architect phase — validated
+  // `arch-review.md` and a week-old file left by a different workflow emitted a
+  // consistency warning on every single `state update`. Warnings an operator is
+  // trained to ignore have stopped being warnings.
+  //
+  // PHASE_OWNER_TYPES: phase is validated ONLY for these workflow types.
+  // PHASE_EXCLUDED_TYPES: phase is validated for every type EXCEPT these.
+  // A phase in neither map is universal.
+  const PHASE_OWNER_TYPES = {
+    plan: ["plan"],
+    debug: ["debug"],
+    arch_health_scan: ["arch_health_scan"],
+    architect: ["dev", "arch_health_scan"],
+  };
+  const PHASE_EXCLUDED_TYPES = {
+    // The arch flow has no scan phase, and arch_health is the dev-side opt-in
+    // artifact — field: both rows false-fired "missing" against an arch run
+    // whose own phase artifact is the architect review.
+    scan: ["arch_health_scan"],
+    arch_health: ["arch_health_scan"],
+  };
   const PHASE_ARTIFACTS = { ...PHASE_ARTIFACT_MAP };
-  // Only include plan/debug artifacts when the workflow_type matches (reduces false positives)
-  if (state.workflow_type !== "plan") delete PHASE_ARTIFACTS.plan;
-  if (state.workflow_type !== "debug") delete PHASE_ARTIFACTS.debug;
-  if (state.workflow_type === "arch_health_scan") {
-    // The arch flow has no scan phase, and arch_health is the dev-side
-    // opt-in artifact — field: both rows false-fired "missing" against a
-    // task-service arch run whose own phase artifact is the architect review.
-    delete PHASE_ARTIFACTS.scan;
-    delete PHASE_ARTIFACTS.arch_health;
-  } else {
-    delete PHASE_ARTIFACTS.arch_health_scan;
+  for (const [phase, owners] of Object.entries(PHASE_OWNER_TYPES)) {
+    if (!owners.includes(state.workflow_type)) delete PHASE_ARTIFACTS[phase];
+  }
+  for (const [phase, excluded] of Object.entries(PHASE_EXCLUDED_TYPES)) {
+    if (excluded.includes(state.workflow_type)) delete PHASE_ARTIFACTS[phase];
   }
 
   const currentPhaseIndex = PHASE_ORDER.indexOf(state.phase);
@@ -716,12 +734,25 @@ function readSidecar(fileName) {
   // (the fields live under .data) while the assert gates read the same file
   // directly and saw them fine. Field-reported as "confusing to route on";
   // the top-level mirror makes the obvious jq path the correct one.
+  // The hoist set is every field a GATE routes on, not just the first three
+  // that were reported. `criteria_total` was the next one hit: the walk-all-axes
+  // gate reads it from the raw file and passed, while `read-sidecar | jq
+  // '.criteria_total'` returned null — same file, two answers, and an
+  // orchestrator reasonably concluded the verifier had never declared its axis
+  // count. `criteria_met` sits beside it and `lane_scores_null_reason` is the
+  // same class, so they are mirrored now rather than after the next report.
+  const HOISTED_ROUTING_FIELDS = [
+    "status", "verdict", "agent",
+    "criteria_total", "criteria_met", "lane_scores_null_reason",
+  ];
+  const hoisted = {};
+  for (const f of HOISTED_ROUTING_FIELDS) {
+    hoisted[f] = data[f] !== undefined ? data[f] : null;
+  }
   return {
     ok: true,
     file: safe,
-    status: data.status !== undefined ? data.status : null,
-    verdict: data.verdict !== undefined ? data.verdict : null,
-    agent: data.agent !== undefined ? data.agent : null,
+    ...hoisted,
     data,
     validation,
   };

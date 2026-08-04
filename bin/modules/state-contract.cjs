@@ -306,12 +306,18 @@ const JSON_INPUT_SCHEMAS = {
 // - "verification.md" — superseded by JSON_SIDECAR_SCHEMAS["verification.json"]
 // - "test-summary.md" — superseded by JSON_SIDECAR_SCHEMAS["test-summary.json"]
 // - "review.md" — superseded by JSON_SIDECAR_SCHEMAS["review.json"]
+// PARTIAL is required on every one of these: each owning agent's output_format
+// offers it for budget-walled multi-section work, and dev-workflow.complex
+// ROUTES on `Status: PARTIAL` to SendMessage-resume the architect. Omitting it
+// here meant an agent following its own contract wrote an artifact this reader
+// flagged invalid_status — the sidecar schemas already carried it, so only the
+// markdown-only artifacts drifted.
 const ARTIFACT_SCHEMA = {
-  "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "BLOCKED"],
-  "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
-  "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
-  "curation-summary.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
-  "research.md": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"],
+  "debug-summary.md": ["FIXED", "NEEDS_MORE_INVESTIGATION", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED"],
+  "arch-review.md": ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
+  "docs-summary.md": ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
+  "curation-summary.md": ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
+  "research.md": ["DONE", "DONE_WITH_CONCERNS", "PARTIAL", "BLOCKED", "NEEDS_CONTEXT"],
   // Phase 1 — Pre-Flight Brief artifact. FRESH = generated this session,
   // STALE = brief exists but workflow scope expanded beyond it (caught by Tier-2
   // File Pre-Flight in Phase 3), MISSING = brief never generated for this workflow.

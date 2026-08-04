@@ -19253,6 +19253,57 @@ else
 fi
 
 echo
+# K341: contract hygiene (task-service field batch). Four legs:
+#   a  every markdown-only ARTIFACT_SCHEMA status enum agrees with the owning
+#      agent's output_format enum. PARTIAL was offered by all five agents and
+#      accepted by none of the schemas, so an agent following its own contract
+#      wrote an artifact the reader flagged invalid_status — and
+#      dev-workflow.complex ROUTES on architect PARTIAL to SendMessage-resume.
+#      Asserted by comparison, not by pinning a literal, so the next enum edit
+#      on either side has to keep them in step.
+#   b  a code_review workflow does not validate arch-review.md. `architect` was
+#      the one phase the scoping cluster never special-cased, so a week-old file
+#      left by a different workflow emitted a consistency warning on every
+#      `state update` — warnings an operator is trained to ignore.
+#   c  read-sidecar hoists every field a gate routes on. `criteria_total` read
+#      null at top level while the walk-all-axes gate read it raw and passed.
+#   d  the arch-health report step tells its writer to emit `## Status`. It
+#      OVERWRITES the architect's conforming artifact, and its own schema had no
+#      status section — the artifact was corrupted by devt's own workflow step
+#      and detonated in the next workflow, not this one.
+K341_A=$(node -e '
+const c=require("'"$ROOT"'/bin/modules/state-contract.cjs");
+const fs=require("fs");
+const pairs=[["debug-summary.md","debugger"],["arch-review.md","architect"],["docs-summary.md","docs-writer"],["curation-summary.md","curator"],["research.md","researcher"]];
+const bad=[];
+for (const [art,agent] of pairs) {
+  const schema=c.ARTIFACT_SCHEMA[art]||[];
+  const body=fs.readFileSync("'"$ROOT"'/agents/"+agent+".md","utf8");
+  // the output_format status enum line: pipe-separated ALL-CAPS tokens
+  const line=body.split("\n").filter(l=>/^[A-Z_]+( \| [A-Z_]+)+$/.test(l.trim())).pop();
+  if (!line) { bad.push(art+":no-enum-line"); continue; }
+  const declared=line.trim().split("|").map(s=>s.trim());
+  const missing=declared.filter(d=>!schema.includes(d));
+  if (missing.length) bad.push(art+":schema-missing["+missing.join(",")+"]");
+}
+process.stdout.write(bad.length?bad.join(" "):"1");
+' 2>/dev/null)
+K341_TMP=$(mktemp -d); K341_TMP=$(cd "$K341_TMP" && pwd -P)
+mkdir -p "$K341_TMP/.devt/state"; echo '{}' > "$K341_TMP/.devt/config.json"
+printf 'active: true\nworkflow_id: 1111\nworkflow_type: code_review\nphase: verify\ntask: t\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\n' > "$K341_TMP/.devt/state/workflow.yaml"
+printf '# Arch Review\n\n## Verdict: HEALTHY — seam is sound\n\nbody\n' > "$K341_TMP/.devt/state/arch-review.md"
+K341_B=$(cd "$K341_TMP" && node "$CLI" state validate 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.mismatches||[]).filter(m=>m.expected_artifact==='arch-review.md').length));}catch(e){process.stdout.write('err');}})")
+printf '{"status":"VERIFIED","verdict":"satisfied","agent":"verifier","criteria_total":7,"criteria_met":7}' > "$K341_TMP/.devt/state/verification.json"
+K341_C=$(cd "$K341_TMP" && node "$CLI" state read-sidecar verification.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.criteria_total===7&&j.criteria_met===7?'1':'0');}catch(e){process.stdout.write('0');}})")
+rm -rf "$K341_TMP"
+K341_D=0
+if /usr/bin/grep -q 'report MUST open with a contract-conforming status header' "$ROOT/workflows/arch-health-scan.md"; then K341_D=1; fi
+if [ "$K341_A" = "1" ] && [ "$K341_B" = "0" ] && [ "$K341_C" = "1" ] && [ "$K341_D" = "1" ]; then
+  pass "K341: contract hygiene (agent status enums ⊆ ARTIFACT_SCHEMA, code_review does not score arch-review.md, read-sidecar hoists gate-routing fields, arch report emits ## Status)"
+else
+  fail "K341: contract hygiene regressed — enum-agreement=$K341_A (want 1), arch-nag-under-code_review=$K341_B (want 0), sidecar-hoist=$K341_C (want 1), arch-report-status-directive=$K341_D (want 1)"
+fi
+
 # K340: lane-severity tally parses the shapes reviewers ACTUALLY emit. The
 # parser matched only bracketed severity headings (`### [Critical]`) — the
 # format a secondary report template shows — while the reviewer agent's

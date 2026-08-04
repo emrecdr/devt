@@ -8,6 +8,15 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.230.0] - 2026-08-04
+
+### Fixed
+
+- **`PARTIAL` was offered by five agents and accepted by none of their schemas.** Every markdown-only artifact's owning agent (`debugger`, `architect`, `docs-writer`, `curator`, `researcher`) lists `PARTIAL` in its `output_format` status enum for budget-walled multi-section work, and `dev-workflow.complex` actively *routes* on architect `PARTIAL` to SendMessage-resume — but `ARTIFACT_SCHEMA` omitted it, so an agent following its own contract wrote an artifact the reader flagged `invalid_status`. The JSON sidecar schemas already carried it; only the markdown-only artifacts had drifted. K341 now asserts the two sides agree by *comparison* rather than pinning a literal, so the next enum edit on either side has to keep them in step.
+- **A `code_review` workflow scored an artifact it never writes.** `architect` was the one phase the artifact-scoping cluster never special-cased, so a week-old `arch-review.md` left by an unrelated arch run emitted a consistency warning on every single `state update` of a review. The scoping is now declared as data (`PHASE_OWNER_TYPES` / `PHASE_EXCLUDED_TYPES`) instead of a fifth `if (workflow_type !== X) delete …` branch — the accretion was itself the reason `architect` got missed.
+- **The arch-health report overwrote a conforming artifact with a status-less one.** `arch-review.md` has two writers: the architect agent, which emits `## Status`, and the report step, whose own schema had no status section at all — only "Overall assessment (healthy / needs attention / at risk)". The report step now requires a contract-conforming `## Status` header and says explicitly that it is the routing field, not the health judgement (a scan that completes is `DONE` even when it reports "at risk"). This is a delayed-detonation class: the corruption never fails the run that causes it, only the next workflow to touch the file.
+- **`read-sidecar` hoists every field a gate routes on**, not the three that were reported first. `criteria_total` read `null` at the top level while the walk-all-axes gate read it from the raw file and passed — same file, two answers. `criteria_met` and `lane_scores_null_reason` are mirrored alongside it rather than waiting for the next report.
+
 ## [0.229.0] - 2026-08-04
 
 ### Fixed
@@ -597,13 +606,3 @@ Two remaining items from the field-run sequence. Drift-guard stack 220 → 221 d
 ### Changed
 
 - **Empty `scope_hint` blocks are suppressed in rendered dispatch envelopes.** An `<scope_hint>[]</scope_hint>` line — the common case in `symbol_anchored` / `pr_scoped_diff` tiers, where `blast_radius`'s caller sets already cover the reading-scope role — is now stripped once, centrally, in `applySubstitutions` (the shared render point for all lane / consolidator / verifier envelopes). Only the empty form is stripped; a populated `scope_hint` is untouched, and the envelope's other tags keep dispatch-hygiene-guard's raw-dispatch recognition intact. (The single-path inline code-reviewer envelope is orchestrator-filled and out of scope; `scope_hint` is a pervasive block across 12+ templates with real consumers — e.g. the debugger — so suppression is deliberately empty-only, not a removal.)
-
-## [0.194.0] - 2026-07-21
-
-### Lightness pass (batch 2) — god-node basename-collision fix (the 85-line bloat)
-
-Tracing the "85-line god-node list" from the field run to its source: `checkLargeFilesGodNodes` and `checkSymbolLevelGodNodes` matched a diff file against graph nodes by **basename only**. In a service-oriented layout — where dozens of files share names (`service.py`, `routes.py`, `models.py`, `dto.py`, `config.py`, `events.py`…) — a diff touching one `service.py` pulled the top god-node from **every** `service.py` across the repo. The result: a review's `## God-node warning` section ballooned to ~85 entries, almost all from files *outside* the diff, riding into every lane's context for zero findings. Drift-guard stack 219 → 220 deep (K94–K312).
-
-### Fixed
-
-- **God-node warnings now match the diff by path suffix, not basename (K312).** Both `checkLargeFilesGodNodes` and `checkSymbolLevelGodNodes` migrate to `_pathSuffixMatch` — a helper written for exactly this ("replaces the prior `path.basename()` match that pulled symbols from EVERY same-named file across the repo") but never wired into these two functions. `app/services/a/service.py` no longer matches `app/services/b/service.py`; the relative/absolute rooting variance basename papered over is handled by segment-boundary suffix matching. The god-node warning now lists only diff-adjacent nodes — the ones a reviewer can act on. Hermetic K312 locks it (two same-basename files in different dirs → only the diffed one reported).

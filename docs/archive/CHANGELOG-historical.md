@@ -1,10 +1,20 @@
-# devt — Historical Changelog (v0.1.0–v0.193.0)
+# devt — Historical Changelog (v0.1.0–v0.194.0)
 
 Older release sections rotated out of the root CHANGELOG.md, newest first. The root file keeps the [Unreleased] section plus the most recent releases; everything older lives here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+
+## [0.194.0] - 2026-07-21
+
+### Lightness pass (batch 2) — god-node basename-collision fix (the 85-line bloat)
+
+Tracing the "85-line god-node list" from the field run to its source: `checkLargeFilesGodNodes` and `checkSymbolLevelGodNodes` matched a diff file against graph nodes by **basename only**. In a service-oriented layout — where dozens of files share names (`service.py`, `routes.py`, `models.py`, `dto.py`, `config.py`, `events.py`…) — a diff touching one `service.py` pulled the top god-node from **every** `service.py` across the repo. The result: a review's `## God-node warning` section ballooned to ~85 entries, almost all from files *outside* the diff, riding into every lane's context for zero findings. Drift-guard stack 219 → 220 deep (K94–K312).
+
+### Fixed
+
+- **God-node warnings now match the diff by path suffix, not basename (K312).** Both `checkLargeFilesGodNodes` and `checkSymbolLevelGodNodes` migrate to `_pathSuffixMatch` — a helper written for exactly this ("replaces the prior `path.basename()` match that pulled symbols from EVERY same-named file across the repo") but never wired into these two functions. `app/services/a/service.py` no longer matches `app/services/b/service.py`; the relative/absolute rooting variance basename papered over is handled by segment-boundary suffix matching. The god-node warning now lists only diff-adjacent nodes — the ones a reviewer can act on. Hermetic K312 locks it (two same-basename files in different dirs → only the diffed one reported).
 
 ## [0.193.0] - 2026-07-21
 
