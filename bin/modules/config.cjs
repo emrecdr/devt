@@ -220,6 +220,13 @@ const DEFAULTS = {
     // complaint was too-frequent, too-technical promote questions.
     promote_recurrence_threshold: 3,
     candidates_surface_cooldown_hours: 24,
+    // High-water escalation: when pending candidates reach this multiple of the
+    // surfacing threshold, the reminder speaks even while the routine cooldown
+    // is active — a backlog can otherwise grow unbounded behind it, which is how
+    // a governance layer stays empty while every check reports honestly-unchecked.
+    // Carries its own longer cooldown so the escalation stays rare enough to read.
+    candidates_high_water_multiplier: 3,
+    candidates_high_water_cooldown_hours: 168,
   },
   // Graphify integration — optional AST symbol anchoring + MCP query layer.
   // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and

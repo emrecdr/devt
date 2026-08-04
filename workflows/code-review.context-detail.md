@@ -1,6 +1,8 @@
-# code-review.md context_init — by-reference detail
+# code-review.md — by-reference detail (context_init + scope_check)
 
-Uncommon-path handling relocated out of `code-review.md`'s `context_init` so the common review path (fresh graph, no arch scanner, normal drill-down responses) doesn't load it every run. Each section is loaded on-demand: `code-review.md` reads it only when the substep's precondition fires. Anchors are referenced by mandatory-Read pointers in `code-review.md`; the pointer↔anchor bijection is enforced by smoke gate K309.
+Uncommon-path handling relocated out of `code-review.md` so the common review path (fresh graph, no arch scanner, normal drill-down responses, single-dispatch) doesn't load it every run. Each section is loaded on-demand: `code-review.md` reads it only when the substep's precondition fires. Anchors are referenced by mandatory-Read pointers in `code-review.md`; the pointer↔anchor bijection is enforced by smoke gate K309.
+
+**Sections here do NOT all belong to the same step** — read the entry line of the one you were sent to. `arch-scan-advisory` and `drill-down-recovery` are entered from `context_init`; `parallel-offer` is entered from `scope_check` and hands control to a different workflow file entirely. A reader who assumed the file's title named its only caller would be holding the wrong step in mind at the point of the run where the most state is already in play.
 
 ## arch-scan-advisory
 

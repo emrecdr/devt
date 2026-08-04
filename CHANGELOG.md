@@ -8,6 +8,18 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.231.0] - 2026-08-04
+
+### Fixed
+
+- **Three gates failed open.** Both reuse-analysis gates substituted `{"ok":true}` when their CLI crashed, so any exception silently green-lit the very step the gate exists to block; `/devt:next`'s stuck-detector substituted `{"stuck":false}`, making a broken detector indistinguishable from a healthy session. A default that says "everything is fine" is the one shape a failure handler must never take. The reuse gates now fail closed with a reason that names the failure; the detector reports the signal as unavailable rather than absent. K342 asserts no workflow reintroduces a success-shaped fallback.
+- **The curation backlog could grow unbounded behind its own cooldown.** Readiness was `count >= threshold && cooldownOk`, so a project sat at 21 pending candidates — 4.2× the surfacing threshold — with the footer reading "cooldown blocked" and the layer staying empty, which in turn made every ADR-compliance check honestly-unchecked. A high-water escalation now speaks past the routine cooldown, carrying its **own** longer window (default 7d) rather than bypassing it: the footer runs at every workflow finalize, so an unconditional override would fire all session and earn exactly the ignore-reflex that makes a quiet failure worse. The escalated line states why it is speaking ("4.2× the surfacing threshold … still unpromoted while the routine reminder is in cooldown") so it reads as a threshold breach rather than a louder copy of the ordinary reminder. Tunable via `memory.candidates_high_water_multiplier` / `candidates_high_water_cooldown_hours`.
+- **`/devt:next` and the finalize footer now share one readiness computation.** They derived it independently, so an escalation added to the footer alone would have left the `/devt:next` triage prompt — the only interactive path into curation — still suppressed by the cooldown the escalation exists to outlast. Inspecting status never consumes the escalation window; only the footer records that it spoke.
+
+### Changed
+
+- **`code-review.md` marks its single-dispatch tail as dead on the parallel branch.** After delegation both files are held at once and their `SHARED-STEP` pointers name the same target file with opposite `MODE` values, with nothing else in the text distinguishing the live set from the dead one — the point in the run where an orchestrator is already holding the most state. `code-review.context-detail.md`'s title also claimed a single owning step while one of its three sections is entered from a different step and hands control to another workflow entirely; both now say what they are.
+
 ## [0.230.0] - 2026-08-04
 
 ### Fixed
@@ -592,17 +604,3 @@ An external deep-read of the plugin against the four north stars was code-verifi
 ### Changed
 
 - **`debug.md` context_init adopts the `state workflow-context-init` wrapper + `preflight scan-prep` verb.** It was the last graphify-touching workflow still hand-rolling its init (state update + evict-graphify + `preflight generate` + an inline scan-prep decision tree — ~45 lines of bash). Now uniform with dev-workflow + quick-implement: ~6 CLI round-trips collapse to ~2 and the graphify scan-prep decision single-sources through the shared CLI. Behavior-preserving (all ~15 debug.md smoke gates green; the F13 `query_graph(task_text)` RECOVERY-branch literal kept).
-
-## [0.195.0] - 2026-07-21
-
-### Lightness pass (batch 3) — close the small gaps: parallel pre-write + empty scope_hint
-
-Two remaining items from the field-run sequence. Drift-guard stack 220 → 221 deep (K94–K313).
-
-### Fixed
-
-- **Parallel scope artifact is now pre-written before delegation (K313, completes the P0 handoff).** `scope_check` runs before `identify_scope` would write `code-review-input.md`, so its parallel branch now pre-writes the scope (from the same `changed-files` union it measured) *before* Read-ing `code-review-parallel.md`. Without this, `partition_lanes` self-recovers (K310) on **every** fresh parallel run and the loud `ABSENT` warning degrades into constant noise; the pre-write makes the common path clean and keeps the self-recovery/warning a genuine-anomaly signal. Parent-side + parallel-side self-recovery = defense in depth for the seam greenfield ranked #1.
-
-### Changed
-
-- **Empty `scope_hint` blocks are suppressed in rendered dispatch envelopes.** An `<scope_hint>[]</scope_hint>` line — the common case in `symbol_anchored` / `pr_scoped_diff` tiers, where `blast_radius`'s caller sets already cover the reading-scope role — is now stripped once, centrally, in `applySubstitutions` (the shared render point for all lane / consolidator / verifier envelopes). Only the empty form is stripped; a populated `scope_hint` is untouched, and the envelope's other tags keep dispatch-hygiene-guard's raw-dispatch recognition intact. (The single-path inline code-reviewer envelope is orchestrator-filled and out of scope; `scope_hint` is a pervasive block across 12+ templates with real consumers — e.g. the debugger — so suppression is deliberately empty-only, not a removal.)

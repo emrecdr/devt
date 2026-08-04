@@ -657,7 +657,10 @@ Skip the step entirely when graphify is disabled (`config.graphify.enabled=false
 
 ```bash
 # KEEP IN SYNC (shared contract gated by smoke gate K320): mirrored in quick-implement.md test step — the load-bearing mechanics (post-dispatch-check, read-sidecar, phase update) must match; prose + mode-specific blocks may differ freely
-REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":true}')
+# Fail-CLOSED: a crashed gate must not read as a pass. The former default
+# substituted {"ok":true}, so any exception in assert-reuse-analyzed silently
+# green-lit the very step the gate exists to block.
+REUSE_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-reuse-analyzed 2>/dev/null || echo '{"ok":false,"reason":"reuse gate CLI failed — treating as unresolved (fail-closed); re-run to see the real error"}')
 if printf '%s\n' "$REUSE_GATE" | jq -e '.ok == false' >/dev/null 2>&1; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=BLOCKED verdict=FAILED
   echo "BLOCKED: $(printf '%s\n' "$REUSE_GATE" | jq -r '.reason')"

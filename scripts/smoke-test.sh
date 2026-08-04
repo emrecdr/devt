@@ -19253,6 +19253,49 @@ else
 fi
 
 echo
+# K342: loop closure + fail-closed defaults (task-service field batch).
+#   a  no workflow substitutes a SUCCESS-shaped default for a crashed CLI. Two
+#      reuse gates fell back to {"ok":true} — any exception green-lit the step
+#      the gate exists to block — and /devt:next's stuck-detector fell back to
+#      {"stuck":false}, making a broken detector indistinguishable from a
+#      healthy session. A default that says "everything is fine" is the one
+#      shape a failure handler must never take.
+#   b  the curation backlog escalates past its own cooldown. `ready = count >=
+#      threshold && cooldownOk` let a backlog grow unbounded behind an active
+#      cooldown (field: 21 pending at 4.2x threshold, reading "cooldown
+#      blocked", governance layer empty). Escalation carries its OWN longer
+#      window so it stays rare enough to read.
+#   c  candidates-status and the finalize footer share ONE readiness
+#      computation. They derived it independently, so an escalation added to
+#      the footer alone would leave /devt:next — the only interactive path into
+#      triage — still suppressed by the cooldown it exists to outlast.
+#   d  code-review.md marks its single-dispatch tail as dead on the parallel
+#      branch. Both files are held at once and their SHARED-STEP pointers name
+#      the same target with opposite MODE values, with nothing else in the text
+#      distinguishing the live set from the dead one.
+K342_A=0
+if ! /usr/bin/grep -qF "assert-reuse-analyzed 2>/dev/null || echo '{\"ok\":true}'" "$ROOT/workflows/dev-workflow.md" \
+   && ! /usr/bin/grep -qF "assert-reuse-analyzed 2>/dev/null || echo '{\"ok\":true}'" "$ROOT/workflows/quick-implement.md" \
+   && ! /usr/bin/grep -qF '{"stuck": false, "deny_count": 0}' "$ROOT/workflows/next.md" \
+   && /usr/bin/grep -q 'fail-closed' "$ROOT/workflows/dev-workflow.md" \
+   && /usr/bin/grep -q 'fail-closed' "$ROOT/workflows/quick-implement.md"; then K342_A=1; fi
+K342_TMP=$(mktemp -d); K342_TMP=$(cd "$K342_TMP" && pwd -P)
+mkdir -p "$K342_TMP/.devt/memory"; echo '{}' > "$K342_TMP/.devt/config.json"
+node -e "require('fs').writeFileSync('$K342_TMP/.devt/memory/_suggestions.md', Array.from({length:21},(_,i)=>'### ⚖️ c'+i).join('\n'))"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$K342_TMP/.devt/memory/.last-candidate-surface"
+K342_B=$(cd "$K342_TMP" && node "$CLI" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.cooldown_passed===false&&j.escalated===true&&j.ready_to_surface===true?'1':'0');}catch(e){process.stdout.write('0');}})")
+# c: below high-water under the same active cooldown must stay quiet
+node -e "require('fs').writeFileSync('$K342_TMP/.devt/memory/_suggestions.md', Array.from({length:4},(_,i)=>'### ⚖️ c'+i).join('\n'))"
+K342_C=$(cd "$K342_TMP" && node "$CLI" memory candidates-status 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.ready_to_surface===false&&j.escalated===false?'1':'0');}catch(e){process.stdout.write('0');}})")
+rm -rf "$K342_TMP"
+K342_D=0
+if /usr/bin/grep -q 'STOP HERE' "$ROOT/workflows/code-review.md"; then K342_D=1; fi
+if [ "$K342_A" = "1" ] && [ "$K342_B" = "1" ] && [ "$K342_C" = "1" ] && [ "$K342_D" = "1" ]; then
+  pass "K342: fail-closed gate defaults (no success-shaped fallbacks), curation high-water escalates past its cooldown with its own anti-nag window, /devt:next shares the readiness computation, parallel-branch tail marked dead"
+else
+  fail "K342: regressed — fail-closed-defaults=$K342_A (want 1), high-water-escalates=$K342_B (want 1), below-high-water-quiet=$K342_C (want 1), parallel-tail-terminator=$K342_D (want 1)"
+fi
+
 # K341: contract hygiene (task-service field batch). Four legs:
 #   a  every markdown-only ARTIFACT_SCHEMA status enum agrees with the owning
 #      agent's output_format enum. PARTIAL was offered by all five agents and

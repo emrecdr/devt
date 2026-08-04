@@ -2382,6 +2382,14 @@ function run(subcommand, args) {
       }
       const aboveThreshold = count >= threshold;
       const cooldownPassed = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
+      // Same high-water escalation the finalize footer applies. /devt:next gates
+      // its "Triage memory candidates" prompt on ready_to_surface, so computing
+      // readiness differently here would leave the one interactive path into
+      // curation suppressed by the very cooldown the escalation exists to
+      // outlast — the backlog would keep growing with nothing offering to drain
+      // it. Read-only: the escalation STAMP is written by the footer path only,
+      // so merely inspecting status never consumes the escalation window.
+      const esc = candidatesEscalation({ root, count, threshold, cooldownPassed });
       json({
         count,
         threshold,
@@ -2390,7 +2398,9 @@ function run(subcommand, args) {
         hours_since_last_surface: hoursSinceLast,
         cooldown_hours: cooldownHours,
         cooldown_passed: cooldownPassed,
-        ready_to_surface: aboveThreshold && cooldownPassed,
+        high_water: esc.highWaterCount,
+        escalated: esc.escalate,
+        ready_to_surface: (aboveThreshold && cooldownPassed) || esc.escalate,
       });
       return 0;
     }
@@ -2472,6 +2482,43 @@ function run(subcommand, args) {
 // {count, threshold, cooldownOk, ready, hint} and — when ready — touches the
 // cooldown stamp, so whichever caller surfaces the hint also starts the
 // suppression window.
+// High-water escalation for the curation backlog, shared by the finalize footer
+// and the candidates-status primitive /devt:next routes on. Computing it in one
+// place is load-bearing: the two consumers previously derived readiness
+// independently, so an escalation added to one would have left the other — the
+// only interactive path into triage — still suppressed by the cooldown it
+// exists to outlast.
+//
+// `ready = count >= threshold && cooldownOk` alone let a backlog grow unbounded
+// behind an active cooldown (a field project sat at 21 pending, 4x threshold,
+// reading "cooldown blocked" while the governance layer stayed empty and every
+// ADR-compliance check reported honestly-unchecked). The escalation carries its
+// OWN longer window rather than bypassing the cooldown: the footer runs at every
+// workflow finalize, so an unconditional override would fire all session and
+// earn the ignore-reflex that makes a quiet failure worse.
+//
+// PURE — never writes the stamp. Only the footer path records that it spoke.
+function candidatesEscalation({ root, count, threshold, cooldownPassed }) {
+  const cfg = require("./config.cjs").getMergedConfig().memory || {};
+  const mult = Number.isFinite(cfg.candidates_high_water_multiplier)
+    ? cfg.candidates_high_water_multiplier : 3;
+  const highWaterHours = Number.isFinite(cfg.candidates_high_water_cooldown_hours)
+    ? cfg.candidates_high_water_cooldown_hours : 168;
+  const highWaterPath = path.join(root, ".devt", "memory", ".last-candidate-escalation");
+  const highWaterCount = Math.max(threshold, Math.ceil(threshold * mult));
+  let hoursSince = null;
+  if (fs.existsSync(highWaterPath)) {
+    try {
+      const parsed = new Date(fs.readFileSync(highWaterPath, "utf8").trim()).getTime();
+      if (!isNaN(parsed)) hoursSince = (Date.now() - parsed) / 3_600_000;
+    } catch { /* stays null */ }
+  }
+  const escalate = !cooldownPassed
+    && count >= highWaterCount
+    && (hoursSince === null || hoursSince >= highWaterHours);
+  return { escalate, highWaterCount, highWaterHours, highWaterPath };
+}
+
 function candidatesFooterStatus() {
   const cfg = require("./config.cjs").getMergedConfig().memory || {};
   const threshold = Number.isInteger(cfg.candidates_surface_threshold) ? cfg.candidates_surface_threshold : 5;
@@ -2493,17 +2540,22 @@ function candidatesFooterStatus() {
     } catch { /* stays null */ }
   }
   const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
-  const ready = count >= threshold && cooldownOk;
+  const { escalate, highWaterCount, highWaterHours, highWaterPath } =
+    candidatesEscalation({ root, count, threshold, cooldownPassed: cooldownOk });
+  const ready = (count >= threshold && cooldownOk) || escalate;
+  const stampPath = escalate ? highWaterPath : cooldownPath;
   let hint = "";
   if (ready) {
-    hint = `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`;
+    hint = escalate
+      ? `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — ${(count / threshold).toFixed(1)}x the surfacing threshold of ${threshold}, still unpromoted while the routine reminder is in cooldown. Run /devt:memory promote to triage; this escalation repeats at most every ${Math.round(highWaterHours / 24)}d.`
+      : `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`;
     try {
       const memDir = path.join(root, ".devt", "memory");
       if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
-      fs.writeFileSync(cooldownPath, new Date().toISOString() + "\n", "utf8");
+      fs.writeFileSync(stampPath, new Date().toISOString() + "\n", "utf8");
     } catch { /* best-effort */ }
   }
-  return { count, threshold, cooldownOk, ready, hint };
+  return { count, threshold, cooldownOk, ready, escalated: escalate, high_water: highWaterCount, hint };
 }
 
 module.exports = {

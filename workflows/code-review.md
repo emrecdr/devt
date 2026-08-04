@@ -553,6 +553,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=review status
 
 </step>
 
+> **If you delegated to `code-review-parallel.md` at `scope_check`, STOP HERE.**
+> Everything below this line — including the three `SHARED-STEP` pointers, which
+> carry `MODE=single` — is the single-dispatch tail and does not apply. The
+> parallel workflow owns the rest of the run and re-enters the same shared steps
+> with `MODE=parallel`. Both files are loaded at once and their pointers name the
+> same target file with opposite modes, so nothing else in the text distinguishes
+> the live set from the dead one.
+
 <!-- SHARED-STEP:verify — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `verify` step at THIS pipeline position with MODE=single — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
 
 <!-- SHARED-STEP:auto_curator — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the parallel path previously had NO auto_curator step while the shared present_findings gate demanded its artifact — field-reported as a hand-run workaround). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `auto_curator` step at THIS pipeline position with MODE=single — blocks marked for the other mode are skipped; unmarked blocks always execute. -->

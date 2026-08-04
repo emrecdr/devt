@@ -36,7 +36,9 @@ Gather all available context:
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read 2>/dev/null || echo '{"active": false}'
 
 # Stuck-signal — guardrail-deny loop detection in current session
-node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check 2>/dev/null || echo '{"stuck": false, "deny_count": 0}'
+# A crashed detector is UNKNOWN, not "not stuck" — the former default made a
+# broken stuck-detector indistinguishable from a healthy session.
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" stuck check 2>/dev/null || echo '{"stuck": null, "deny_count": null, "error": "stuck-detector failed — signal unavailable, do not read as healthy"}'
 
 # Available artifacts
 ls .devt/state/*.md .devt/state/*.yaml .devt/state/*.json 2>/dev/null || echo "NO_ARTIFACTS"
