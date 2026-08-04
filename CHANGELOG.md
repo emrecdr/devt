@@ -8,6 +8,15 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.229.0] - 2026-08-04
+
+### Fixed
+
+- **The deterministic severity recount was blind to the format reviewers actually use.** `lane-severity-tally` matched only bracketed severity headings (`### [Critical]`) — the shape a secondary report template shows — while the reviewer agent's *documented default* is axes-shape: findings are markdown table rows carrying an id like `B-1`, with severity either in a Severity column or implied by the enclosing `### Important` section. A field run therefore tallied `{0,0,0,0}` against 16 real findings. The reviewers were on-contract; the parser was the outlier. It now reads all four shapes reviewers legitimately emit — section-implied table rows, Severity-column table rows, consolidated `#### I-N` headings with `M-N` rows, and the legacy bracket headings — while deliberately *not* counting rows that merely reference a finding declared elsewhere (the id must be the row's first cell, so disposition tables don't double-count).
+- **The consolidated side shared the same bug.** `partition_lanes`' comparison grepped bracketed headings against `review.md`, so both sides could read zero and the check compared nothing to nothing — and any consolidated count above zero against a blind lane total would have fired the "consolidator invented findings — STOP" branch spuriously. Both sides now route through one parser, exposed as `state lane-severity-tally --file=<path>`.
+
+Guarded by K340, whose fixtures are the reviewer's real output shapes rather than the parser's own format — a fixture written in the format the parser already matched would have stayed green while the field stayed red, which is exactly how this shipped.
+
 ## [0.228.0] - 2026-08-04
 
 The companion to the partition batch, and the half the field report ranked higher: when the impact map went missing mid-run, the envelope asserted a cause it could not know, and the detector built to catch exactly that certified the result healthy. A recoverable absence was converted into a confident false statement — and that is what kept the underlying bug invisible for a whole run.
@@ -598,24 +607,3 @@ Tracing the "85-line god-node list" from the field run to its source: `checkLarg
 ### Fixed
 
 - **God-node warnings now match the diff by path suffix, not basename (K312).** Both `checkLargeFilesGodNodes` and `checkSymbolLevelGodNodes` migrate to `_pathSuffixMatch` — a helper written for exactly this ("replaces the prior `path.basename()` match that pulled symbols from EVERY same-named file across the repo") but never wired into these two functions. `app/services/a/service.py` no longer matches `app/services/b/service.py`; the relative/absolute rooting variance basename papered over is handled by segment-boundary suffix matching. The god-node warning now lists only diff-adjacent nodes — the ones a reviewer can act on. Hermetic K312 locks it (two same-basename files in different dirs → only the diffed one reported).
-
-## [0.193.0] - 2026-07-21
-
-### Lightness pass (batch 1) — correctness + token trims from a second greenfield field run
-
-A second parallel-review field run surfaced a real structural bug and several cost-without-conversion mechanisms. This batch ships the confirmed, validated fixes; the design-fresh items (review-weight→offer, an interactive gate profile) are staged separately. Guiding frame: **a heavy pipeline that gets skipped or silently degraded is worse than a lighter one that runs** — weight is an adoption risk, not just a token cost. Drift-guard stack 217 → 219 deep (K94–K311).
-
-### Fixed
-
-- **Parallel `/devt:review` no longer silently degrades to single-dispatch (P0, K310).** On a *fresh* parallel delegation, `scope_check` delegated to `code-review-parallel.md` before `identify_scope` wrote `code-review-input.md` — so `partition_lanes` found the scope artifact absent and silently fell back to single-dispatch. The user asked for a 5-lane review and got 1, with no signal. `partition_lanes` now **self-recovers** the scope from the same `changed-files` union `scope_check` used to trigger parallel, writes the artifact, and proceeds **parallel** — **loudly** (a silent fallback reads as "worked" when it didn't). Only a genuinely empty scope falls back to single-dispatch.
-- **`augment-impact-map` truncation banner no longer emits a fabricated denominator or misattributed cap.** `TOPIC_SYMBOLS_RAW_COUNT` was never set by any substep (the `--raw-count` arg was always `unknown`), so the banner invented a denominator; it also credited the truncation to a "blast_radius 32-symbol cap" when 32 is *devt's own* pre-truncation topic cap (applied before `blast_radius` to keep args verbatim), not blast_radius's limit. The CLI now derives the true count from the authoritative source (`preflight-brief.json::topic.symbols`, falling back to kept+dropped) and names the cap correctly. A wrong number in a review artifact is worse than no number.
-
-### Changed
-
-- **claude-mem per-read suppression extended to `Bash` (`CLAUDE_MEM_SKIP_TOOLS`).** Field-confirmed that `Bash` tool calls also triggered claude-mem's per-read observation injection; the recommended skip list now includes it (parent-side). The dominant remaining cost — subagent-read inheritance flooding the parent context in a multi-lane review — is claude-mem-internal (upstream #3274/#3324), not devt-tunable.
-- **New seam contract-tests (K310, K311).** K310 locks the parallel scope self-recovery against regression; K311 locks the render-filled correlation_id mint (every rendered dispatch envelope carries a cid). CI-time drift-guards only — no runtime weight.
-
-### Retracted (validated as no-ops before building — no code shipped)
-
-- **Graphify activity telemetry "bug"** — the `mcp-stats --include-chain` `calls:"?"` was a consumer-side jq path error (`.aggregate.total_calls` is nested), not a devt defect. Capture + `--include-chain` union both work.
-- **render-filled correlation_id "gap"** — render-filled has minted a cid into every envelope since v0.169.0; the field `raw_dispatch` came from a hand-built consolidator dispatch that didn't paste the rendered output. Usage, not defect (K311 locks the existing behavior).

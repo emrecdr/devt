@@ -587,8 +587,13 @@ fi
 # mismatch is the stop condition.
 TALLY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state lane-severity-tally)
 echo "lane severity tally: $(printf '%s\n' "$TALLY" | jq -c '.totals') across $(printf '%s\n' "$TALLY" | jq -r '.lanes_counted') lane(s)"
-CONS_CRIT=$(/usr/bin/grep -cE '^#{2,4} *\[Critical\]' .devt/state/review.md || true)
-CONS_IMP=$(/usr/bin/grep -cE '^#{2,4} *\[Important\]' .devt/state/review.md || true)
+# Consolidated side uses the SAME parser as the lane side. It previously
+# grepped bracketed severity headings, a format reviewers rarely emit (the
+# documented default is axes-shape table rows), so both sides could read zero
+# and the comparison below silently compared nothing to nothing.
+CONS_TALLY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state lane-severity-tally --file=.devt/state/review.md 2>/dev/null || echo '{}')
+CONS_CRIT=$(printf '%s\n' "$CONS_TALLY" | jq -r '.totals.critical // 0')
+CONS_IMP=$(printf '%s\n' "$CONS_TALLY" | jq -r '.totals.important // 0')
 LANE_CRIT=$(printf '%s\n' "$TALLY" | jq -r '.totals.critical')
 LANE_IMP=$(printf '%s\n' "$TALLY" | jq -r '.totals.important')
 if [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then

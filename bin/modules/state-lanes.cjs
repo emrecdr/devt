@@ -238,7 +238,67 @@ function listLaneOutputs() {
 // (field: a consolidator correctly recounted 10 Importants where the
 // orchestrator's mental tally said 7 — the error class exists; make the
 // recount mechanical instead of a judgment save).
-function laneSeverityTally() {
+// Counts findings by severity across every shape a reviewer legitimately
+// emits. The previous regex matched only bracketed severity headings
+// (`### [Critical]`) — the format a secondary report template shows — while
+// the reviewer agent's DOCUMENTED DEFAULT is axes-shape, where findings are
+// markdown table rows carrying an id like `B-1` and severity either in a
+// Severity column or implied by the enclosing `### Important` section. A field
+// run therefore tallied {0,0,0,0} against 16 real findings: the "mechanical
+// safety net" the consolidate step leans on was blind, and its EXCEED branch
+// would have fired spuriously had the orchestrator trusted it.
+//
+// Shapes counted:
+//   `### [Critical] file:line`   legacy — the heading IS one finding
+//   `### Important` + table rows section heading sets severity for its rows
+//   `| B-1 | file | line | Important | …`  severity from a Severity column
+//   `#### I-1 — title`           consolidated per-finding heading
+// Deliberately NOT counted: rows that merely REFERENCE a finding elsewhere
+// (`| \`.gitignore\` | Finding B-1 (Minor) |`) — the id must be the row's
+// first cell, so disposition tables don't double-count.
+function tallyFindingsBySeverity(body) {
+  const counts = { critical: 0, important: 0, minor: 0, nit: 0 };
+  if (!body || typeof body !== "string") return counts;
+  let section = null;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const h = line.match(/^#{2,6}\s+(.*)$/);
+    if (h) {
+      const title = h[1].trim();
+      const bracket = title.match(/^\[(Critical|Important|Minor|Nit)\]/i);
+      if (bracket) { counts[bracket[1].toLowerCase()] += 1; continue; }
+      const bare = title.match(/^(Critical|Important|Minor|Nit)s?\s*$/i);
+      if (bare) { section = bare[1].toLowerCase(); continue; }
+      const idHead = title.match(/^([A-Z]{1,2}-\d+)\b/);
+      if (idHead && section) { counts[section] += 1; continue; }
+      section = null; // any other heading closes the severity section
+      continue;
+    }
+    if (line.startsWith("|")) {
+      const cells = line.split("|").slice(1, -1).map(c => c.trim());
+      if (cells.length === 0) continue;
+      if (cells.every(c => c === "" || /^:?-{2,}:?$/.test(c))) continue; // separator row
+      const first = cells[0].replace(/`/g, "").trim();
+      if (!/^[A-Z]{1,2}-\d+$/.test(first)) continue; // header row, or a reference table
+      const col = cells.find(c => /^(Critical|Important|Minor|Nit)$/i.test(c));
+      const sev = col ? col.toLowerCase() : section;
+      if (sev && counts[sev] !== undefined) counts[sev] += 1;
+    }
+  }
+  return counts;
+}
+
+function laneSeverityTally(opts = {}) {
+  // Single-file mode single-sources the same parser for the CONSOLIDATED side.
+  // The consolidate step's own grep used the bracket format too, so fixing the
+  // lane side alone would leave the EXCEED comparison incoherent.
+  if (opts.file) {
+    let body = "";
+    try { body = fs.readFileSync(opts.file, "utf8"); }
+    catch { return { ok: false, reason: `unreadable: ${opts.file}`, totals: { critical: 0, important: 0, minor: 0, nit: 0 } }; }
+    return { ok: true, file: opts.file, totals: tallyFindingsBySeverity(body) };
+  }
   const { lanes } = listLaneOutputs();
   const per_lane = {};
   const totals = { critical: 0, important: 0, minor: 0, nit: 0 };
@@ -246,10 +306,7 @@ function laneSeverityTally() {
     if (!lane.review_file || !lane.file_exists) continue;
     let body = "";
     try { body = fs.readFileSync(lane.review_file, "utf8"); } catch { continue; }
-    const counts = { critical: 0, important: 0, minor: 0, nit: 0 };
-    for (const m of body.matchAll(/^#{2,4}\s*\[(Critical|Important|Minor|Nit)\]/gim)) {
-      counts[m[1].toLowerCase()] += 1;
-    }
+    const counts = tallyFindingsBySeverity(body);
     per_lane[lane.id] = { ...counts, cid_match: lane.cid_match };
     for (const k of Object.keys(totals)) totals[k] += counts[k];
   }

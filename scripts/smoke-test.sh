@@ -19253,6 +19253,41 @@ else
 fi
 
 echo
+# K340: lane-severity tally parses the shapes reviewers ACTUALLY emit. The
+# parser matched only bracketed severity headings (`### [Critical]`) — the
+# format a secondary report template shows — while the reviewer agent's
+# DOCUMENTED DEFAULT is axes-shape: findings are markdown table rows carrying
+# an id like `B-1`, with severity either in a Severity column or implied by the
+# enclosing `### Important` section. A field run tallied {0,0,0,0} against 16
+# real findings, so the deterministic recount the consolidate step leans on was
+# blind AND its EXCEED branch would have fired spuriously on any consolidated
+# count above zero. The consolidated side shared the same bracket-only grep, so
+# both sides could read zero and compare nothing to nothing.
+#
+# Fixtures are the reviewer's real output shapes, NOT the parser's own format —
+# a fixture written in the format the parser already matched would be green
+# while the field stayed red, which is exactly how this shipped.
+K340_TMP=$(mktemp -d); K340_TMP=$(cd "$K340_TMP" && pwd -P)
+printf '### Important\n\n| # | File | Line | Finding |\n| --- | --- | --- | --- |\n| B-1 | app/r.py | 132 | guard only via PATCH |\n| B-2 | app/m.py | 74 | docstring drift |\n### Minor\n\n| B-3 | docs/T.md | 463 | stale step |\n' > "$K340_TMP/axes_section.md"
+printf '### Axis B — Finding specificity\n\n| # | File | Line | Severity | Finding |\n| --- | --- | --- | --- | --- |\n| B-1 | app/o.py | 106 | Important | no retry backoff |\n| B-2 | app/e.py | 22 | Minor | uuid default |\n\n### Axis A — disposition\n| `.gitignore` | Finding B-1 (Minor) |\n' > "$K340_TMP/axes_column.md"
+printf '### Important\n\n#### I-1 — guard tested only via PATCH [merged: L1 B-1 + L4 B-3]\n#### I-2 — outbox no backoff [L2 B-1]\n\n### Minor\n\n| M-1 | L1 B-2 | app/m.py | 74 | docstring drift |\n' > "$K340_TMP/consolidated.md"
+printf '### [Critical] src/a.py:10\nbody\n### [Important] src/b.py:20\nbody\n' > "$K340_TMP/legacy.md"
+K340_T() { node "$CLI" state lane-severity-tally --file="$1" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const t=JSON.parse(s).totals;process.stdout.write(t.critical+'/'+t.important+'/'+t.minor+'/'+t.nit);}catch(e){process.stdout.write('err');}})"; }
+K340_A=$(K340_T "$K340_TMP/axes_section.md")     # 2 Important + 1 Minor
+K340_B=$(K340_T "$K340_TMP/axes_column.md")      # 1 Important + 1 Minor; reference row NOT counted
+K340_C=$(K340_T "$K340_TMP/consolidated.md")     # 2 Important (#### I-N) + 1 Minor (M-N row)
+K340_D=$(K340_T "$K340_TMP/legacy.md")           # bracket headings still counted
+rm -rf "$K340_TMP"
+# The consolidated side must route through the same parser, not a bracket grep.
+K340_E=0
+if /usr/bin/grep -q 'lane-severity-tally --file=.devt/state/review.md' "$ROOT/workflows/code-review-parallel.md" \
+   && ! /usr/bin/grep -qE "CONS_CRIT=\\\$\(/usr/bin/grep" "$ROOT/workflows/code-review-parallel.md"; then K340_E=1; fi
+if [ "$K340_A" = "0/2/1/0" ] && [ "$K340_B" = "0/1/1/0" ] && [ "$K340_C" = "0/2/1/0" ] && [ "$K340_D" = "1/1/0/0" ] && [ "$K340_E" = "1" ]; then
+  pass "K340: severity tally reads axes-shape (section-implied + Severity column), consolidated #### I-N + M-N rows, and legacy bracket headings; reference rows not double-counted; consolidated side shares the parser"
+else
+  fail "K340: severity tally regressed — axes_section=$K340_A (want 0/2/1/0), axes_column=$K340_B (want 0/1/1/0), consolidated=$K340_C (want 0/2/1/0), legacy=$K340_D (want 1/1/0/0), consolidated-uses-parser=$K340_E (want 1)"
+fi
+
 # K339: envelope integrity (task-service field batch). When the impact map went
 # missing mid-run, the envelope asserted a CAUSE it could not know ("graphify
 # did not run") while graphify had in fact run a symbol-anchored blast_radius —

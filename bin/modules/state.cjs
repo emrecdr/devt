@@ -1932,8 +1932,10 @@ function run(subcommand, args) {
       return require("./reuse-search.cjs").deriveReuseCandidates(args.join(" "));
     case "refresh-scope-context":
       return require("./preflight.cjs").scopeCache();
-    case "lane-severity-tally":
-      return laneSeverityTally();
+    case "lane-severity-tally": {
+      const fileArg = _getFlag(args, "--file");
+      return laneSeverityTally(fileArg ? { file: fileArg } : {});
+    }
     case "list-lane-outputs":
       return listLaneOutputs();
     case "update-lane":
