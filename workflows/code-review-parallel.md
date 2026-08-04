@@ -126,10 +126,25 @@ fi
 # with per-file dominant-community grouping when the graph has community
 # attributes from Leiden clustering. Otherwise mode=fallback and the bash
 # branch below uses the legacy top-2-level path partition.
-LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions --target-lanes=5 2>/dev/null || echo '{"mode":"fallback"}')
+# stderr is CAPTURED, not discarded: lane-suggestions exits non-zero for
+# operationally-reachable reasons (a credential-safety refusal that names its
+# own --allow bypass), and `2>/dev/null || echo '{"mode":"fallback"}'` turned
+# that into a reason-less fallback the next line then mislabelled as a graphify
+# capability gap. A degraded partition must say why it degraded.
+LANE_ERR=$(mktemp)
+LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions --target-lanes=5 2>"$LANE_ERR")
+LANE_RC=$?
+if [ "$LANE_RC" -ne 0 ] || [ -z "$LANE_SUG" ]; then
+  LANE_SUG=$(jq -nc --arg e "$(tr '\n' ' ' < "$LANE_ERR" | cut -c1-400)" --arg rc "$LANE_RC" \
+    '{mode:"fallback", reason:("lane-suggestions exited " + $rc + ": " + ($e | if . == "" then "no stderr" else . end))}')
+fi
+rm -f "$LANE_ERR"
 LANE_MODE=$(printf '%s\n' "$LANE_SUG" | jq -r '.mode // "fallback"')
 
 GROUPS_FILE=$(mktemp)
+# Clear any prior run's degradation record before deciding this run's — a
+# stale "we degraded" artifact is exactly as misleading as no artifact at all.
+rm -f .devt/state/partition-degraded.txt
 if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MODE" = "service_boundary" ]; then
   # Community / partial / service-boundary partition: each group becomes one
   # lane. The prefix label is "community-N" for Leiden-numbered groups,
@@ -156,8 +171,22 @@ else
     PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
     echo "$PREFIX|$FILE"
   done | sort > "$GROUPS_FILE"
-  FALLBACK_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason // "graphify disabled"')
+  # No `.reason` means the CLI produced nothing parseable — say that, rather
+  # than naming a cause. The former default asserted a specific subsystem was
+  # switched off, which was a falsehood on projects whose graphify was enabled
+  # and fully clustered, sending the operator to the wrong place entirely.
+  FALLBACK_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason // "unknown — lane-suggestions returned no reason"')
   echo "partition_lanes: ${SCOPE_FILE_COUNT} files → path-based partition (community fallback: ${FALLBACK_REASON})"
+  # PERSIST the degradation. stdout scrolls past under a 20-block orchestration
+  # and is invisible to every downstream agent; lanes were told nothing about
+  # why their partition was semantic-free. This artifact survives the session,
+  # is greppable by the consolidator, and lets a gate assert that a
+  # graph-ready project didn't silently path-partition.
+  printf 'mode=%s\nexit_code=%s\nreason=%s\nfile_count=%s\n' \
+    "$LANE_MODE" "${LANE_RC:-0}" "$FALLBACK_REASON" "$SCOPE_FILE_COUNT" \
+    > .devt/state/partition-degraded.txt
+  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state graphify-fallback-trace error \
+    --skill=code-review-parallel --operation=lane-suggestions --reason="$FALLBACK_REASON" >/dev/null 2>&1 || true
 fi
 
 UNIQUE_PREFIXES=$(cut -d'|' -f1 "$GROUPS_FILE" | sort -u)

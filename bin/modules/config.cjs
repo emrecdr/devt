@@ -255,6 +255,18 @@ const DEFAULTS = {
     // still scores "large"). Ratio of comment/import/prose-only hunks over
     // total hunks, [0..1]. Set to 1.1 to never attach the note.
     severity_note_threshold: 0.5,
+    // Basenames exempt from the credential/key/secret denylist that gates the
+    // path-taking graphify subcommands. Unioned with argv --allow. Without a
+    // config path a repo carrying one flagged basename (a checked-in
+    // `.env.example`) had those subcommands degrade on every run with no
+    // per-project way to say "this one is safe". Matched by basename equality
+    // or prefix — never substring-on-full-path.
+    sensitive_allow: [],
+    // Share of total scope the largest lane may hold before lane-suggestions
+    // declares the partition too skewed for parallelism and hands back to the
+    // path-based fallback. Raise for repos whose communities are legitimately
+    // lopsided; lower to demand tighter balance.
+    lane_skew_threshold: 0.40,
     // Framework request/response/DI builtins filtered from blast_radius +
     // get_neighbors dependents (defaults span FastAPI/Spring/Django/.NET/
     // Express — see graphify.cjs::_FRAMEWORK_BUILTIN_LABELS_DEFAULT). Entries

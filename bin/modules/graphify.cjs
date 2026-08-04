@@ -2315,16 +2315,35 @@ function laneSuggestions(diffFiles, options) {
   // Per-file: collect community counts across all matching nodes, pick the
   // mode. Files with no matching nodes flag a fallback so the orchestrator
   // doesn't silently drop them.
-  const wantBasenames = new Set(diffFiles.map(f => path.basename(f)));
+  // Keyed by the ORIGINAL diff path, not basename. Basename keying collapsed
+  // every same-named file in the diff into one entry — `__init__.py`,
+  // `index.ts`, `mod.rs`, `conftest.py` — so a multi-package diff reported a
+  // fraction of its real coverage AND force-merged unrelated files into one
+  // community, corrupting both the coverage denominator and the skew
+  // numerator. Basename is still the lookup index (cheap), but a basename
+  // shared by several diff files is disambiguated by path suffix.
+  const diffByBasename = new Map();
+  for (const f of diffFiles) {
+    const bn = path.basename(f);
+    if (!diffByBasename.has(bn)) diffByBasename.set(bn, []);
+    diffByBasename.get(bn).push(f);
+  }
   const byFileCommunityCounts = new Map();
   for (const [, node] of nodeMap) {
     const sf = node && node.source_file;
     if (!sf) continue;
-    const bn = path.basename(sf);
-    if (!wantBasenames.has(bn)) continue;
     if (node.community === undefined || node.community === null) continue;
-    if (!byFileCommunityCounts.has(bn)) byFileCommunityCounts.set(bn, new Map());
-    const counts = byFileCommunityCounts.get(bn);
+    const candidates = diffByBasename.get(path.basename(sf));
+    if (!candidates) continue;
+    // One candidate → attribute directly (no ambiguity to resolve, and
+    // requiring a suffix match here would drop files whose graph root differs
+    // from the diff root). Several → only the path-suffix match may claim it.
+    const target = candidates.length === 1
+      ? candidates[0]
+      : candidates.find(c => _pathSuffixMatch(c, sf));
+    if (!target) continue;
+    if (!byFileCommunityCounts.has(target)) byFileCommunityCounts.set(target, new Map());
+    const counts = byFileCommunityCounts.get(target);
     counts.set(node.community, (counts.get(node.community) || 0) + 1);
   }
   // A strict-coverage check that requires 100% of diff files to have graph
@@ -2348,15 +2367,15 @@ function laneSuggestions(diffFiles, options) {
   }
   const uncoveredCount = diffFiles.length - byFileCommunityCounts.size;
   const coverageRatio = byFileCommunityCounts.size / diffFiles.length;
-  // Pick dominant community per file (max count wins).
+  // Pick dominant community per file (max count wins). Keyed by diff path.
   const fileToCommunity = new Map();
-  for (const [bn, counts] of byFileCommunityCounts) {
+  for (const [fpath, counts] of byFileCommunityCounts) {
     let bestC = null;
     let bestN = 0;
     for (const [c, n] of counts) {
       if (n > bestN) { bestC = c; bestN = n; }
     }
-    fileToCommunity.set(bn, bestC);
+    fileToCommunity.set(fpath, bestC);
   }
   // Group input files (preserve original path strings, not basenames).
   // Files without a community attribute previously collapsed into a single
@@ -2388,7 +2407,7 @@ function laneSuggestions(diffFiles, options) {
 
   const groupsByCommunity = new Map();
   for (const f of diffFiles) {
-    const c = fileToCommunity.get(path.basename(f));
+    const c = fileToCommunity.get(f);
     let key;
     if (c === null || c === undefined) {
       const arch = _archetype(f);
@@ -2420,16 +2439,36 @@ function laneSuggestions(diffFiles, options) {
       mergedCommunities: [g.community],
     }));
     const leftovers = groups.slice(targetLanes);
+    // Balance-aware merge. Similarity alone piled every prefix-adjacent
+    // leftover onto one anchor, manufacturing the very skew the guard below
+    // then rejected: a field diff of 46 covered files across 36 communities
+    // had a RAW skew of 11%, but consolidation produced a single 24-file lane
+    // (51%) and the whole community partition was discarded for a path-based
+    // grab-bag. A soft capacity keeps similarity in charge of WHICH home a
+    // leftover joins, while load decides among the already-crowded ones.
+    const totalFiles = groups.reduce((s, g) => s + g.files.length, 0);
+    // Cap at the exact fair share. Earlier slack (1.5x) let one anchor absorb
+    // past fair share before the cap bit, producing 4/2/2 where 3/3/2 was
+    // available — and the skew guard below then rejected the whole partition
+    // for an imbalance consolidation had itself introduced.
+    const softCap = Math.max(1, Math.ceil(totalFiles / targetLanes));
     for (const lg of leftovers) {
       // Pick the anchor whose files share the longest common path prefix with
       // this leftover group's files. Cheap proxy for graph-distance — matches
       // the manual domain-based consolidation pattern of grouping by
-      // top-level path component.
-      let bestAnchor = anchors[0];
+      // top-level path component. Anchors under the soft cap are preferred;
+      // once every anchor is full the cap lifts so nothing is ever dropped.
+      const underCap = anchors.filter(a => a.files.length < softCap);
+      const pool = underCap.length > 0 ? underCap : anchors;
+      let bestAnchor = pool[0];
       let bestScore = -1;
-      for (const a of anchors) {
+      for (const a of pool) {
         const score = _avgPrefixSimilarity(a.files, lg.files);
-        if (score > bestScore) { bestScore = score; bestAnchor = a; }
+        // Equal affinity → lighter anchor, so ties spread instead of stacking.
+        if (score > bestScore || (score === bestScore && a.files.length < bestAnchor.files.length)) {
+          bestScore = score;
+          bestAnchor = a;
+        }
       }
       bestAnchor.files.push(...lg.files);
       bestAnchor.mergedCommunities.push(lg.community);
@@ -2446,39 +2485,55 @@ function laneSuggestions(diffFiles, options) {
     };
   }
 
-  if (uncoveredCount > 0) {
-    // Skew check: if the largest group dominates the covered scope (>40%),
-    // the partition is too skewed to drive parallelism — one lane would do
-    // most of the work while others sit nearly idle. Downgrade to
-    // mode=fallback with a reason so the orchestrator falls back to
-    // path-based partitioning instead of accepting the bad partition.
-    // Threshold 0.40 chosen against observed pathology: a single dominant
-    // group plus a handful of noise buckets approaching ~95% skew on a
-    // small-lane request.
-    const SKEW_THRESHOLD = 0.40;
-    const totalCovered = groups.reduce((s, g) => s + g.files.length, 0);
-    const maxGroup = groups.reduce((m, g) => Math.max(m, g.files.length), 0);
-    const skewRatio = totalCovered > 0 ? maxGroup / totalCovered : 0;
-    if (skewRatio > SKEW_THRESHOLD) {
-      return {
-        mode: "fallback",
-        groups: [],
-        reason: `partial-coverage partition too skewed (largest group ${maxGroup}/${totalCovered}=${(skewRatio * 100).toFixed(0)}% of covered scope, > ${(SKEW_THRESHOLD * 100).toFixed(0)}% threshold); orchestrator should use path-based fallback`,
-        skew_ratio: Number(skewRatio.toFixed(4)),
-        coverage_ratio: Number(coverageRatio.toFixed(4)),
-      };
-    }
-    const result = {
+  // Skew check: if the largest group dominates the COVERED scope, the
+  // partition is too skewed to drive parallelism — one lane would do most of
+  // the work while others sit nearly idle. Downgrade to mode=fallback with a
+  // reason so the orchestrator uses path-based partitioning instead.
+  //
+  // Both sides count LANE files (covered + uncovered): the question is what
+  // share of the review workload one lane carries, and an uncovered file in a
+  // lane is still a file someone reviews. The former "of covered scope" wording
+  // described a different population than the math used — the mislabel, not the
+  // arithmetic, was the defect.
+  //
+  // Runs for full coverage too: lane balance is a parallelism property and has
+  // nothing to do with whether some files lack graph nodes. Gating it on
+  // uncoveredCount > 0 let an identically-dominant 100%-covered partition through
+  // unchecked.
+  const SKEW_THRESHOLD = (() => {
+    try {
+      const t = (getConfig() || {}).lane_skew_threshold;
+      return typeof t === "number" && t > 0 && t <= 1 ? t : 0.40;
+    } catch { return 0.40; }
+  })();
+  const laneTotal = groups.reduce((s, g) => s + g.files.length, 0);
+  const maxGroup = groups.reduce((m, g) => Math.max(m, g.files.length), 0);
+  const skewRatio = laneTotal > 0 ? maxGroup / laneTotal : 0;
+  // Never flag skew no partition of this shape could avoid. With G groups over
+  // N files the smallest achievable max-share is ceil(N/G)/N — two files in two
+  // communities are 50% "skewed" while being perfectly balanced. Applying a
+  // flat threshold there rejects optimal partitions for being small.
+  const minAchievableShare = groups.length > 0 ? Math.ceil(laneTotal / groups.length) / laneTotal : 1;
+  const skewIsAvoidable = SKEW_THRESHOLD >= minAchievableShare;
+  if (skewIsAvoidable && skewRatio > SKEW_THRESHOLD) {
+    return {
+      mode: "fallback",
+      groups: [],
+      reason: `partition too skewed (largest lane ${maxGroup}/${laneTotal}=${(skewRatio * 100).toFixed(0)}% of total scope, > ${(SKEW_THRESHOLD * 100).toFixed(0)}% threshold); orchestrator should use path-based fallback`,
+      skew_ratio: Number(skewRatio.toFixed(4)),
+      coverage_ratio: Number(coverageRatio.toFixed(4)),
+    };
+  }
+  const result = uncoveredCount > 0
+    ? {
       mode: "partial",
       groups,
       covered_count: byFileCommunityCounts.size,
       uncovered_count: uncoveredCount,
       coverage_ratio: Number(coverageRatio.toFixed(4)),
-    };
-    if (consolidationMeta) result.consolidation = consolidationMeta;
-    return result;
-  }
-  const result = { mode: "community", groups };
+    }
+    : { mode: "community", groups };
+  result.skew_ratio = Number(skewRatio.toFixed(4));
   if (consolidationMeta) result.consolidation = consolidationMeta;
   return result;
 }
@@ -3230,35 +3285,65 @@ function run(subcommand, args) {
   // because `.ssh/` appears as substring. Basename-only matching
   // covers every documented use case (basenames like `.env.example`,
   // `id_rsa.example`) while preventing path-traversal-via-substring.
+  // argv --allow unioned with graphify.sensitive_allow. Without a config path
+  // every workflow shelling out would have to hardcode --allow per project,
+  // which is why a repo carrying one flagged basename stayed degraded forever.
   const allowPatterns = args
     .filter(a => a.startsWith("--allow="))
     .map(a => a.slice("--allow=".length))
-    .filter(Boolean);
+    .filter(Boolean)
+    .concat((() => {
+      try {
+        const cfgAllow = (getConfig() || {}).sensitive_allow;
+        return Array.isArray(cfgAllow) ? cfgAllow.filter(p => typeof p === "string" && p) : [];
+      } catch { return []; }
+    })());
+  // Per-FILE filter, not per-call abort. These subcommands match path STRINGS
+  // against a locally-loaded graph.json — they never read file contents and
+  // never leave the process — so refusing one path is a reason to drop that
+  // path, not to abandon the other N-1. Aborting the whole call made a single
+  // `.env.example` in a diff permanently disable community lane partitioning
+  // for a repo, reported as an unrelated capability gap (field case). Mirrors
+  // static-compress.cjs's existing `refused_sensitive[]` semantics. Exit 2 is
+  // reserved for "nothing usable survived".
   const filterSensitive = (files) => {
     const { isSensitivePath } = require("./sensitive-path.cjs");
-    const blocked = files.filter((f) => {
-      if (!isSensitivePath(f)) return false;
-      // Apply --allow whitelist: equality or prefix match on basename.
+    const kept = [];
+    const refused = [];
+    for (const f of files) {
+      // --allow whitelist: equality or prefix match on basename (never
+      // substring-on-full-path — `--allow=/.ssh/` must not whitelist
+      // `nested/.ssh/id_rsa`).
       const base = path.basename(f);
-      for (const pat of allowPatterns) {
-        if (base === pat || base.startsWith(pat)) return false;
-      }
-      return true;
-    });
-    if (blocked.length > 0) {
-      const allowHint = allowPatterns.length > 0
-        ? ` (current --allow patterns: ${JSON.stringify(allowPatterns)})`
-        : " — bypass with --allow=<substring> for known-safe paths (e.g. --allow=.env.example)";
-      process.stderr.write(
-        `graphify: refused ${blocked.length} sensitive path(s) — ` +
-        JSON.stringify(blocked) +
-        " (matches credential/key/secret pattern). " +
-        "Rename if false-positive, or remove from input list" + allowHint + ".\n",
-      );
-      return null;
+      const allowed = allowPatterns.some(pat => base === pat || base.startsWith(pat));
+      if (!isSensitivePath(f) || allowed) kept.push(f);
+      else refused.push(f);
     }
-    return files;
+    if (refused.length > 0) {
+      const allowHint = allowPatterns.length > 0
+        ? ` (current allow patterns: ${JSON.stringify(allowPatterns)})`
+        : " — allow with --allow=<basename> or graphify.sensitive_allow in .devt/config.json (e.g. .env.example)";
+      process.stderr.write(
+        `graphify: dropped ${refused.length} sensitive path(s) from input — ` +
+        JSON.stringify(refused) +
+        " (matches credential/key/secret pattern); " +
+        (kept.length > 0
+          ? `continuing with ${kept.length} file(s)`
+          : "no usable input remains") +
+        ". Rename if false-positive" + allowHint + ".\n",
+      );
+    }
+    return { kept, refused };
   };
+  // Attach the refusal record only to object-shaped results. Several of these
+  // subcommands return a bare array whose shape IS the consumer contract —
+  // spreading a key into one silently turns it into an index-keyed object.
+  // Array results still report the refusal via filterSensitive's stderr line.
+  const withRefused = (result, refused) => (
+    refused.length && result && typeof result === "object" && !Array.isArray(result)
+      ? { ...result, refused_sensitive: refused }
+      : result
+  );
 
   switch (subcommand) {
     case "status": {
@@ -3398,9 +3483,11 @@ function run(subcommand, args) {
       const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify check-large-files <file>... [--edge-threshold=50]\n"); return 2; }
-      files = filterSensitive(files);
-      if (files === null) return 2;
-      json(checkLargeFilesGodNodes(files, threshold));
+      const sens = filterSensitive(files);
+      if (sens.kept.length === 0) return 2;
+      // Array return — shape is the consumer contract, so the refusal rides
+      // the stderr line filterSensitive already emitted rather than a key.
+      json(withRefused(checkLargeFilesGodNodes(sens.kept, threshold), sens.refused));
       return 0;
     }
     case "check-symbol-godnodes": {
@@ -3408,9 +3495,9 @@ function run(subcommand, args) {
       const threshold = thresholdArg ? Math.max(1, parseInt(thresholdArg.split("=")[1], 10) || 50) : 50;
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify check-symbol-godnodes <file>... [--edge-threshold=50]\n"); return 2; }
-      files = filterSensitive(files);
-      if (files === null) return 2;
-      json(checkSymbolLevelGodNodes(files, threshold));
+      const sens = filterSensitive(files);
+      if (sens.kept.length === 0) return 2;
+      json(withRefused(checkSymbolLevelGodNodes(sens.kept, threshold), sens.refused));
       return 0;
     }
     case "augment-impact-map": {
@@ -3444,9 +3531,9 @@ function run(subcommand, args) {
       }
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify symbols-in-files <file>... [--limit=10]\n"); return 2; }
-      files = filterSensitive(files);
-      if (files === null) return 2;
-      json(symbolsInFiles(files, limit));
+      const sens = filterSensitive(files);
+      if (sens.kept.length === 0) return 2;
+      json(withRefused(symbolsInFiles(sens.kept, limit), sens.refused));
       return 0;
     }
     case "compose-drilldowns": {
@@ -3482,15 +3569,15 @@ function run(subcommand, args) {
     case "lane-suggestions": {
       let files = args.filter(a => !a.startsWith("--"));
       if (files.length === 0) { process.stderr.write("Usage: graphify lane-suggestions <file>... [--target-lanes=N]\n"); return 2; }
-      files = filterSensitive(files);
-      if (files === null) return 2;
+      const sens = filterSensitive(files);
+      if (sens.kept.length === 0) return 2;
       const tlArg = args.find(a => a.startsWith("--target-lanes="));
       const opts = {};
       if (tlArg) {
         const v = parseInt(tlArg.split("=")[1], 10);
         if (Number.isInteger(v) && v > 0) opts.targetLanes = v;
       }
-      json(laneSuggestions(files, opts));
+      json(withRefused(laneSuggestions(sens.kept, opts), sens.refused));
       return 0;
     }
     case "adaptive-threshold": {

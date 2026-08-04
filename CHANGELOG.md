@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.162.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.227.0] - 2026-08-04
+
+Community lane partitioning, which a field run reported as quietly unavailable, was disabled by four stacked defects. Each was reproduced against the reporting project's real 1,137-node Leiden graph before the fix, and the same scope now partitions into five balanced lanes instead of falling back to a path-based grab-bag.
+
+### Fixed
+
+- **A credential-safety refusal aborted the whole call.** The denylist guarding graphify's four path-taking subcommands refused the entire invocation when *any* input matched, so one checked-in `.env.example` in a 48-file review scope permanently disabled community partitioning for that repo — every run, with no operator-visible cause. These subcommands match path *strings* against a locally-loaded `graph.json`; they never read file contents and never leave the process, so a flagged path is now dropped from the input and named in `refused_sensitive[]` while the rest of the batch proceeds. Exit 2 is reserved for "nothing usable survived". Converges on the per-file `refused_sensitive[]` semantics `static-compress` already shipped. New `graphify.sensitive_allow` config (unioned with `--allow`) so a project can mark a known-safe basename once instead of every caller hardcoding a flag.
+- **Coverage and grouping were keyed by basename.** Any two diff files sharing a name — `__init__.py`, `index.ts`, `mod.rs`, `conftest.py` — collapsed into one entry, so a multi-package diff under-reported its coverage *and* force-merged unrelated files into a single community, corrupting the skew numerator and denominator at once. Keying is now the diff path, with basename retained only as the lookup index and same-name candidates disambiguated by path suffix. On the field scope this moved coverage from 71% to 97.9%.
+- **Consolidation manufactured the skew the guard then rejected.** Merging leftover communities by path-similarity alone let one anchor absorb without limit: a diff whose *raw* community skew was 11% consolidated into a single 24-file lane at 51%, and the whole partition was discarded. The merge is now capped at each anchor's fair share, with similarity still choosing the home among under-capacity anchors and the cap lifting if every anchor fills.
+- **The skew guard flagged partitions no shape could improve.** Two files in two communities are 50% "skewed" while perfectly balanced. The guard now computes the smallest achievable max-share for the partition's shape and stays silent when the threshold is unreachable — and it runs at full coverage too, instead of only when some file lacked graph nodes. Its denominator and reason string now describe the same population they measure (largest lane over total scope); the arithmetic was self-consistent, the label was not. Threshold is config-overridable via `graphify.lane_skew_threshold`.
+- **The workflow converted a safety refusal into a false capability claim.** `lane-suggestions` was invoked with `2>/dev/null || echo '{"mode":"fallback"}'`, so a non-zero exit — including the refusal above, which names its own bypass flag — became a reason-less fallback that the next line labelled as graphify being switched off. On a project with graphify enabled and a fully-clustered graph, that sent the operator to the wrong subsystem. stderr and the exit code are now captured into the fallback reason, the no-reason default names itself as unknown rather than asserting a cause, and the degradation is **persisted** to `.devt/state/partition-degraded.txt` (scope-bound, evicted on soft reset) so lanes, the consolidator, and gates can see it — transcript echoes scroll past under a long orchestration and reach no downstream agent.
+
+Guarded by K338 (four legs) and a restated K76, which now asserts the stronger per-file property: a mixed input proceeds *and* names what it dropped.
+
 ## [0.226.0] - 2026-07-31
 
 A deep `/simplify` pass over the last ten commits — four behavior-preserving cleanups, plus the one behavior fix that pass surfaced: `state reactivate` was resurrecting abandoned workflows across sessions.
@@ -610,23 +624,3 @@ The compound `review-context-init` wrapper banked context_init's CLI round-trips
 - **`pr_scoped_diff` tier now has an executable branch in substep 6.** The non-GitHub PR path (`state.cjs` emits `tier="pr_scoped_diff"`, executed identically to `symbol_anchored` — `blast_radius` over diff symbols) previously had no `if tier == …` branch in the review workflow; the deleted tier-decision table was its only mention. Substep 6's `symbol_anchored` branch and the drill-down follow-up now both cover `pr_scoped_diff` — closing a latent gap the table had masked, and making the workflow more correct than the pre-refactor documentation.
 - **Substance-threshold recovery is discoverable at the point of failure.** Substep 7's `assert-graphify-decision` gate-failure prose now cross-references `code-review.context-detail.md → ## drill-down-recovery` for the `drill-down section below substance threshold` reason, so the orchestrator re-anchors thin sections on `args.symbols` and re-runs the gate instead of stopping. (The other two recovery cases — empty, oversize — are observable at substep 6.)
 - **K309 disjointness strengthened.** The partition gate now checks one body-only sentinel per relocated passage (a partial re-inline that duplicates content while leaving the pointer is now caught, not just a 2-token spot-check), and requires each pointer to name the detail file, not just a valid anchor.
-
-## [0.191.0] - 2026-07-20
-
-### First-field-run calibration fixes (greenfield T1 receipt)
-
-devt's first real field run — a greenfield cross-service review — produced a first-hand calibration. Every reported issue was validated against the code before acting, which mattered: the report's headline *"memory_signal came back empty"* was a **misread of its own run**. The cached `memory_signal_json` shows `files_checked:42, count:2` — the affects-union fired correctly on FLOW-001 + ADR-002. No memory bug existed; the fixes below are the validated remainder. Drift-guard stack 215 → 216 deep (K94–K308).
-
-### Fixed
-
-- **Lane size-band discounts generated / lockfile / append-only files (K308).** A lane whose diff is mostly generated churn — a changelog archive, a `*.lock` bump — no longer trips a spurious "split the lane": `size_class` is driven by the *reviewable* diff (`est_loc`), the full count is preserved as `diff_lines_raw`, and the file stays in the lane's coverage. Generic denylist (`*.lock`, `CHANGELOG*.md`, `*-ARCHIVE.md`, `*.min.js/css`, `*.map`/`*.snap`), extendable via `review.size_exclude_globs`. Field: a lane sized at ~29,900 diff-LOC that was 96% append-only changelog archive nearly triggered a needless split.
-- **`/devt:review` flag-parse tokenizes `--focus=`** instead of interpolating the whole argument blob into the routing table. A prose task description that merely mentions `--focus` no longer risks misrouting — the command matches a standalone `--focus=<value>` token and passes the remaining scope text verbatim.
-
-### Changed
-
-- **Graphify drill-down runs inline before its gate.** The top-3 `get_neighbors` follow-up is now explicitly executed in the same pass as `blast_radius`, before the graphify-decision gate — removing the chicken-and-egg block where an orchestrator hit the gate first, then had to hand-produce the drill-down sections.
-- **Weekly-report instrument honesty (two caveats).** (1) The affects-coverage section warns, when the window has **0 commits**, that it counts *committed* history only — so staged/uncommitted work reads 0% and must not be read as "the memory layer governs nothing" (this exact artifact caused a field LLM to misdiagnose a working affects-union as empty). (2) The injection-cost line is retitled **"devt Memory Injection Cost"** and caveats that it measures devt's `workflow-context-injector` only — not co-installed plugins' Read-hook injections (e.g. claude-mem's per-read observation blocks, field-measured far larger).
-
-### Deferred (validated, same receipt)
-
-- context_init ceremony trim → a future step-manifest cal (the field substep-value breakdown is the input); claude-mem's per-read injection volume → upstream (not devt-tunable); lane-cap-of-5 → kept (field: no measurable degradation).

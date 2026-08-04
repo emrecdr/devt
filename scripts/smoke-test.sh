@@ -11498,27 +11498,40 @@ else
 fi
 
 # K76: graphify sensitive-path denylist (caveman is_sensitive_path port).
-# Refuses CLI file args matching credential/key/secret patterns at the 4
+# Guards CLI file args matching credential/key/secret patterns at the 4
 # file-accepting subcommands (lane-suggestions, check-large-files,
-# check-symbol-godnodes, symbols-in-files). Closes the disclosure path
-# where a .env or ~/.ssh/id_rsa accidentally passed to graphify would
-# flow into MCP queries. Round-trip: 3 sensitive-path fixtures must
-# return exit 2 + clean path returns exit 0.
+# check-symbol-godnodes, symbols-in-files).
+#
+# Granularity is per-FILE, not per-call: these subcommands match path STRINGS
+# against a locally-loaded graph.json — they never read file contents — so a
+# flagged path is dropped from the input and named in `refused_sensitive[]`
+# while the rest of the batch proceeds. Aborting the whole call made one
+# checked-in `.env.example` permanently disable community lane partitioning
+# for a repo, surfaced as an unrelated capability gap (field case). Exit 2 is
+# reserved for "nothing usable survived".
+# Asserts: (1) mixed input → exit 0, sensitive file named in refused_sensitive,
+# clean file still processed; (2)+(3) all-sensitive input → exit 2;
+# (4) clean input → exit 0 with no refused_sensitive key.
 K76_TMP=$(mktemp -d)
 mkdir -p "$K76_TMP/.devt" "$K76_TMP/graphify-out"
 echo '{"graphify":{"enabled":true}}' > "$K76_TMP/.devt/config.json"
 echo '{"directed":true,"multigraph":false,"graph":{"built_at_commit":"x"},"nodes":[],"links":[]}' > "$K76_TMP/graphify-out/graph.json"
-# Fixture 1: credentials.json → refuse. Wrapped in `if` so `set -e` doesn't
-# trip on the expected exit 2 from the denylist.
+# Fixture 1: mixed → the sensitive path is dropped, the call proceeds.
+K76_T1_OUT=$( (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py credentials.json 2>/dev/null) || true)
 if (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py credentials.json >/dev/null 2>&1); then K76_T1=0; else K76_T1=$?; fi
+K76_T1_REF=$(printf '%s' "$K76_T1_OUT" | /usr/bin/grep -c 'credentials.json' || true)
+# Fixtures 2+3: nothing usable survives the filter → exit 2. Wrapped in `if`
+# so `set -e` doesn't trip on the expected nonzero.
 if (cd "$K76_TMP" && node "$CLI" graphify symbols-in-files /tmp/fake/.ssh/id_rsa >/dev/null 2>&1); then K76_T2=0; else K76_T2=$?; fi
 if (cd "$K76_TMP" && node "$CLI" graphify check-large-files my-api-key.env >/dev/null 2>&1); then K76_T3=0; else K76_T3=$?; fi
+K76_T4_OUT=$( (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py docs/README.md 2>/dev/null) || true)
 if (cd "$K76_TMP" && node "$CLI" graphify lane-suggestions src/auth.py docs/README.md >/dev/null 2>&1); then K76_T4=0; else K76_T4=$?; fi
+K76_T4_REF=$(printf '%s' "$K76_T4_OUT" | /usr/bin/grep -c 'refused_sensitive' || true)
 rm -rf "$K76_TMP"
-if [ "$K76_T1" = "2" ] && [ "$K76_T2" = "2" ] && [ "$K76_T3" = "2" ] && [ "$K76_T4" = "0" ]; then
-  pass "K76: graphify sensitive-path denylist (credentials/ssh/secret-token refused, clean path ok)"
+if [ "$K76_T1" = "0" ] && [ "$K76_T1_REF" != "0" ] && [ "$K76_T2" = "2" ] && [ "$K76_T3" = "2" ] && [ "$K76_T4" = "0" ] && [ "$K76_T4_REF" = "0" ]; then
+  pass "K76: graphify sensitive-path denylist — per-file drop (mixed input proceeds, refused path named), all-sensitive input exits 2, clean input untouched"
 else
-  fail "K76: graphify denylist mismatch — credentials=$K76_T1 (want 2), ssh=$K76_T2 (want 2), secret=$K76_T3 (want 2), clean=$K76_T4 (want 0)"
+  fail "K76: graphify denylist mismatch — mixed=$K76_T1 (want 0) named=$K76_T1_REF (want >0), ssh=$K76_T2 (want 2), secret=$K76_T3 (want 2), clean=$K76_T4 (want 0) clean_refused_key=$K76_T4_REF (want 0)"
 fi
 
 # K77: static-compress round-trip (caveman-shrink port). Compresses prose
@@ -19240,6 +19253,54 @@ else
 fi
 
 echo
+# K338: lane-partition correctness (task-service field batch). Four legs, each
+# pinned to a defect that made community partitioning silently unavailable:
+#   a  same-basename files no longer collapse — two `__init__.py` in different
+#      packages are distinct covered files, not one. Basename keying under-
+#      reported coverage AND force-merged unrelated files into one community,
+#      corrupting the skew numerator and denominator at once.
+#   b  consolidation is balance-aware — merging by path-similarity alone piled
+#      leftovers onto one anchor, manufacturing the skew the guard then
+#      rejected (field: raw skew 11% consolidated into a 51% lane, whole
+#      partition discarded).
+#   c  the skew guard never fires on a partition no shape could improve —
+#      2 files in 2 communities are 50% "skewed" while perfectly balanced.
+#   d  the workflow no longer names a false cause when the CLI produces no
+#      reason ("graphify disabled" was asserted on a fully-clustered graph).
+K338_TMP=$(mktemp -d)
+K338_TMP=$(cd "$K338_TMP" && pwd -P)
+mkdir -p "$K338_TMP/.devt/state" "$K338_TMP/graphify-out"
+echo '{"graphify":{"enabled":true}}' > "$K338_TMP/.devt/config.json"
+node -e "
+const fs=require('fs');
+const nodes=[];
+// two same-basename files in different packages, distinct communities
+nodes.push({id:'p1',label:'PkgAInit',source_file:'src/pkg_a/__init__.py',community:11});
+nodes.push({id:'p2',label:'PkgBInit',source_file:'src/pkg_b/__init__.py',community:22});
+// eight more single-file communities across two domains, to force consolidation
+for (let i=0;i<4;i++) nodes.push({id:'x'+i,label:'X'+i,source_file:'src/pkg_a/m'+i+'.py',community:100+i});
+for (let i=0;i<4;i++) nodes.push({id:'y'+i,label:'Y'+i,source_file:'src/pkg_b/n'+i+'.py',community:200+i});
+fs.writeFileSync('$K338_TMP/graphify-out/graph.json',JSON.stringify({directed:true,multigraph:false,graph:{built_at_commit:'x'},nodes,links:[]}));
+"
+K338_FILES="src/pkg_a/__init__.py src/pkg_b/__init__.py src/pkg_a/m0.py src/pkg_a/m1.py src/pkg_a/m2.py src/pkg_a/m3.py src/pkg_b/n0.py src/pkg_b/n1.py src/pkg_b/n2.py src/pkg_b/n3.py"
+# (a) both __init__.py counted separately → 10 covered, mode=community
+K338_A=$(cd "$K338_TMP" && node "$CLI" graphify lane-suggestions $K338_FILES 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const n=(j.groups||[]).reduce((a,g)=>a+g.files.length,0);process.stdout.write(j.mode==='community'&&n===10?'1':'0');}catch(e){process.stdout.write('0');}})")
+# (b) consolidation to 3 lanes stays within fair share (ceil(10/3)=4)
+K338_B=$(cd "$K338_TMP" && node "$CLI" graphify lane-suggestions $K338_FILES --target-lanes=3 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const g=j.groups||[];const mx=g.reduce((m,x)=>Math.max(m,x.files.length),0);process.stdout.write(g.length===3&&mx<=4?'1':'0');}catch(e){process.stdout.write('0');}})")
+# (c) structurally-minimal partition (2 files, 2 communities) is NOT flagged
+K338_C=$(cd "$K338_TMP" && node "$CLI" graphify lane-suggestions src/pkg_a/__init__.py src/pkg_b/__init__.py 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.mode==='community'?'1':'0');}catch(e){process.stdout.write('0');}})")
+rm -rf "$K338_TMP"
+# (d) no false-cause default, and the degradation is persisted not just echoed
+K338_D=0
+if ! /usr/bin/grep -qF 'reason // "graphify disabled"' "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -q 'partition-degraded.txt' "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -qF '2>"$LANE_ERR"' "$ROOT/workflows/code-review-parallel.md"; then K338_D=1; fi
+if [ "$K338_A" = "1" ] && [ "$K338_B" = "1" ] && [ "$K338_C" = "1" ] && [ "$K338_D" = "1" ]; then
+  pass "K338: lane-partition correctness (same-basename files distinct, consolidation within fair share, minimal partitions unflagged, no false-cause fallback reason + degradation persisted)"
+else
+  fail "K338: lane-partition regressed — basename-distinct=$K338_A (want 1), balanced-consolidation=$K338_B (want 1), minimal-unflagged=$K338_C (want 1), honest-persisted-fallback=$K338_D (want 1)"
+fi
+
 # K337: orchestration replay harness. Replays recorded .devt/state/ fixtures
 # through the real producer/gate CLI sequences the workflow prose invokes,
 # asserting the block/advance decisions — converting `field:` scar-tissue notes

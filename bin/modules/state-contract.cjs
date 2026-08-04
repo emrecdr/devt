@@ -450,6 +450,7 @@ const STATE_FILE_CONTRACT = {
     "graphify-impact-plan.json", // bash-computed tier+tool decision for code-review impact step
     "graphify-skip-reason.txt", // explicit-skip artifact when the impact step's plan == "skip"
     "staleness-suppressed.txt", // mechanical-override artifact when staleness gate forces scope_trust='sparse'
+    "partition-degraded.txt",   // why a lane partition fell back — survives the session for lanes/consolidator/gates
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
     "review.md", "code-review-input.md",
@@ -556,6 +557,10 @@ const RESET_SOFT_EVICT_PATTERNS = [
   /^review-depth\.txt$/,
   /^dispatch-stamps\.jsonl$/,
   /^graphify-impact-plan\.json$/,
+  // Records WHY a lane partition degraded. Scope-bound: carrying a prior
+  // review's degradation reason into a healthy run misreports the new
+  // partition exactly as badly as reporting nothing.
+  /^partition-degraded\.txt$/,
 ];
 
 /**
