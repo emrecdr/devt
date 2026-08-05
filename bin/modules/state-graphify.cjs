@@ -93,6 +93,14 @@ const {
 // When graphify is not ready (disabled or graph missing), the gate auto-passes —
 // the assertion is about orchestrator obedience to the workflow contract, not
 // about graphify being installed.
+// Full attestation for an args override. Shared by the gate that rejects a
+// partial attestation and by the regeneration path that must carry a complete
+// one forward — the two must not drift, or a field the gate demands could be
+// silently dropped on rewrite.
+const ATTESTATION_FIELDS = Object.freeze([
+  "original_args", "override_args", "override_reason", "override_evidence", "override_by", "timestamp",
+]);
+
 function assertGraphifyDecision() {
   const graphify = require("./graphify.cjs");
   const status = graphify.status();
@@ -119,8 +127,7 @@ function assertGraphifyDecision() {
     if (fs.existsSync(planPath)) {
       const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
       if (plan && plan.args_overridden === true) {
-        const required = ["original_args", "override_args", "override_reason", "override_evidence", "override_by", "timestamp"];
-        const missing = required.filter((k) => {
+        const missing = ATTESTATION_FIELDS.filter((k) => {
           const v = plan[k];
           if (v === undefined || v === null) return true;
           if (typeof v === "string") return v.trim() === "";
@@ -612,13 +619,67 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   // Capture the dropped tail to a sidecar so reviewers can spot-check
   // whether high-risk symbols were silently excluded.
   const TOPIC_CAP = 32;
-  const topicSymbols = topicSymbolsRaw.slice(0, TOPIC_CAP);
-  const topicSymbolsCount = topicSymbols.length;
-  let topicSymbolsDroppedCount = 0;
+
+  // The branch diff, fetched at most once per call. Two consumers below need
+  // the same `-U0` range — symbol ranking and the hunk census — and each used
+  // to fork its own git and hold its own copy of a diff that can run to the
+  // 32 MB cap. null means "unavailable", which both consumers degrade on.
+  let _branchDiff;
+  const branchDiffText = () => {
+    if (_branchDiff !== undefined) return _branchDiff;
+    try {
+      const { spawnSync } = require("child_process");
+      const d = spawnSync("git", ["diff", "-U0", `${primaryBranch}...HEAD`], {
+        cwd: findProjectRoot(), encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
+      });
+      _branchDiff = (d.status !== 0 || !d.stdout) ? null : d.stdout;
+    } catch { _branchDiff = null; }
+    return _branchDiff;
+  };
+
+  // Identifiers appearing on changed lines of the branch diff. Used to rank
+  // the topic list before the cap bites: the incoming order is by topic score
+  // (graph centrality), which fills the budget with untouched siblings that
+  // merely share a file with a changed symbol while genuinely-changed
+  // production functions fall off the tail. Field: a review's args carried a
+  // bare TypeVar and 13 untouched DTOs while five changed functions were
+  // truncated away. Membership, not definition — a symbol referenced by the
+  // diff is in scope for the review even if declared elsewhere.
+  const changedSymbolNames = () => {
+    const text = branchDiffText();
+    if (!text) return null;
+    const names = new Set();
+    for (const line of text.split("\n")) {
+      if (line.startsWith("+++") || line.startsWith("---")) continue;
+      if (line[0] !== "+" && line[0] !== "-") continue;
+      for (const m of line.slice(1).matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) names.add(m[0]);
+    }
+    return names;
+  };
+
+  // Rank diff members ahead of the rest, then cut once — kept list and dropped
+  // tail are the two halves of one slice, so they cannot disagree. Only pay for
+  // the diff when the cap actually truncates something; with no diff signal
+  // (detached base, git failure) topic order stands rather than dropping the
+  // cap and breaking the verbatim-args contract.
+  let ordered = topicSymbolsRaw;
+  let topicSymbolsDiffRanked = false;
   if (topicSymbolsRawCount > TOPIC_CAP) {
-    const dropped = topicSymbolsRaw.slice(TOPIC_CAP);
-    topicSymbolsDroppedCount = dropped.length;
-    try { atomicWriteJsonSync(droppedPath, dropped); } catch { /* best-effort */ }
+    const changed = changedSymbolNames();
+    if (changed && changed.size > 0) {
+      // Stable partition — order within each group is preserved, so ranking
+      // only ever promotes diff members past non-members.
+      ordered = topicSymbolsRaw.filter((s) => changed.has(s))
+        .concat(topicSymbolsRaw.filter((s) => !changed.has(s)));
+      topicSymbolsDiffRanked = true;
+    }
+  }
+  const topicSymbols = ordered.slice(0, TOPIC_CAP);
+  const topicSymbolsCount = topicSymbols.length;
+  const droppedSymbols = ordered.slice(TOPIC_CAP);
+  const topicSymbolsDroppedCount = droppedSymbols.length;
+  if (topicSymbolsDroppedCount > 0) {
+    try { atomicWriteJsonSync(droppedPath, droppedSymbols); } catch { /* best-effort */ }
   } else {
     try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
   }
@@ -899,12 +960,8 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   // to skip wiring/cascade checks.
   const hunkCensus = () => {
     try {
-      const { spawnSync } = require("child_process");
-      const proot = findProjectRoot();
-      const d = spawnSync("git", ["diff", "-U0", `${primaryBranch}...HEAD`], {
-        cwd: proot, encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
-      });
-      if (d.status !== 0 || !d.stdout) return null;
+      const diffText = branchDiffText();
+      if (!diffText) return null;
       const PROSE_EXT = /\.(md|rst|txt|adoc)$/i;
       // A changed line is cosmetic when blank, comment-only, or import/using/
       // require-only. Language-general by construction (Python/JS/TS/Go/Java/
@@ -918,7 +975,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
       const closeHunk = () => {
         if (inHunk) { total++; if (hunkCosmetic) cosmetic++; inHunk = false; }
       };
-      for (const line of d.stdout.split("\n")) {
+      for (const line of diffText.split("\n")) {
         if (line.startsWith("diff --git")) {
           closeHunk();
           const m = line.match(/ b\/(.+)$/);
@@ -934,8 +991,9 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
       }
       closeHunk();
       let renames = 0;
+      const { spawnSync } = require("child_process");
       const r = spawnSync("git", ["diff", "--name-status", "-M90", `${primaryBranch}...HEAD`], {
-        cwd: proot, encoding: "utf8", timeout: 10000,
+        cwd: findProjectRoot(), encoding: "utf8", timeout: 10000,
       });
       if (r.status === 0) renames = r.stdout.split("\n").filter(l => /^R(9\d|100)\t/.test(l)).length;
       return {
@@ -969,12 +1027,56 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (symbolAnchoredCaveat) plan.symbol_anchored_caveat = symbolAnchoredCaveat;
   if (census) plan.hunk_census = census;
   if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
-  if (topicSymbolsDroppedCount > 0) plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
+  if (topicSymbolsDroppedCount > 0) {
+    plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
+    // Whether the truncation was diff-ranked or fell back to topic order —
+    // a reader auditing what was dropped needs to know which ordering produced
+    // the tail. Diff-ranking is safe to apply to this budget ONLY because the
+    // structural signal (high-edge/god-node symbols) reaches the impact map
+    // through graphify's post-MCP augmentation, which does not draw on this
+    // budget. If augmentation ever becomes coupled to it, this budget must
+    // reserve slots for high-edge symbols again.
+    plan.topic_symbols_diff_ranked = topicSymbolsDiffRanked;
+  }
   if (symbolSources) plan.symbol_sources = symbolSources;
   if (anchorsDropped && anchorsDropped.length > 0) plan.anchors_dropped = anchorsDropped;
   if (corpusBlindFiles.length > 0) plan.corpus_blind_files = corpusBlindFiles;
   if (corpusBlindCaveat) plan.corpus_blind_caveat = corpusBlindCaveat;
   if (manifestFreshnessSummary) plan.manifest_freshness = manifestFreshnessSummary;
+
+  // An attested override is a deliberate deviation with evidence attached, and
+  // regeneration must not silently revert it. Field: a context-init re-anchor
+  // rewrote this file mid-review, dropping args_overridden plus the whole
+  // attestation and restoring the generated args the orchestrator had rejected.
+  // assert-graphify-decision passed clean afterwards — it only inspects an
+  // attestation when args_overridden === true, so a wiped one is invisible to
+  // it, while the impact map still cited an attestation that no longer existed.
+  // The map is regenerable from the graph; the audit trail is not.
+  try {
+    const prior = fs.existsSync(planPath) ? JSON.parse(fs.readFileSync(planPath, "utf8")) : null;
+    if (prior && prior.args_overridden === true) {
+      if (prior.tier === plan.tier) {
+        // Same tier — the override still targets this tool, so it stays in
+        // force. Carried forward even when incomplete, so the gate keeps its
+        // ability to reject a partial attestation instead of seeing it vanish.
+        plan.args_overridden = true;
+        for (const k of ATTESTATION_FIELDS) {
+          if (prior[k] !== undefined) plan[k] = prior[k];
+        }
+        if (prior.override_args !== undefined) plan.args = prior.override_args;
+        plan.regenerated_args = args;
+        plan.regenerated_at = new Date().toISOString();
+      } else {
+        // Tier changed: the override was written against a different tool and
+        // reapplying it would send the wrong args. It still may not vanish —
+        // park it so an auditor sees the deviation and why it stopped applying.
+        plan.superseded_attestation = { tier: prior.tier };
+        for (const k of ATTESTATION_FIELDS) {
+          if (prior[k] !== undefined) plan.superseded_attestation[k] = prior[k];
+        }
+      }
+    }
+  } catch { /* unreadable prior plan — regenerate clean */ }
 
   try { atomicWriteJsonSync(planPath, plan); } catch { /* best-effort */ }
   return plan;

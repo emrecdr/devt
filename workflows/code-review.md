@@ -442,9 +442,17 @@ if [ -f .devt/state/graphify-skip-reason.txt ]; then
 elif [ -f .devt/state/graph-impact.md ]; then
   GRAPHIFY_STATUS='{"skipped":false,"impact_map":".devt/state/graph-impact.md"}'
 else
+  # Neither artifact present. At context_init this combination is a hard gate
+  # failure, so reaching the dispatch step in this state means the decision was
+  # made and then undone. Surfacing it as skipped:null let the reviewer run with
+  # no blast radius and no indication anything was lost.
   GRAPHIFY_STATUS='{"skipped":null,"reason":"no decision artifact"}'
+  echo "BLOCKED — graphify decision artifact missing at dispatch time (it existed at context_init)."
+  echo "Re-run the impact tier (context_init substep 6) before dispatching the reviewer."
 fi
 ```
+
+If the block above prints `BLOCKED`, **STOP** and rebuild `graph-impact.md` rather than dispatching. A deliberately skipped tier writes `graphify-skip-reason.txt` and takes the first branch, so this path only fires when a decision was recorded and then lost.
 
 Substitute into the `<memory_signal>` block below.
 

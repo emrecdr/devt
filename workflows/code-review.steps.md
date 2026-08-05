@@ -388,14 +388,27 @@ if [ -n "$WID" ]; then
     SKIP_REASON=$(cat .devt/state/graphify-skip-reason.txt)
     echo "Graphify activity: SKIPPED (plan=$PLAN_TIER, reason: $SKIP_REASON)"
   else
+    # Derive one readable line from both queries. Echoing the raw mcp-stats
+    # JSON technically carried the counts, but a reader had to hand-parse two
+    # ~600-byte blobs to answer "did graphify run?" — field-observed: an
+    # operator gave up and recovered the counts with their own awk over the
+    # trace, then reported those instead. A surface that is not read is not a
+    # surface. The zero case says which of the two causes it cannot rule out.
     echo "Graphify activity: tier=$PLAN_TIER"
-    echo "$GRAPHIFY_SUMMARY"
-    echo "$GRAPHIFY_UPSTREAM"
+    printf '%s\n%s\n' "$GRAPHIFY_SUMMARY" "$GRAPHIFY_UPSTREAM" | jq -rs '
+      [ .[] | select(type == "object") ] as $docs
+      | ([ $docs[] | .aggregate.total_calls // 0 ] | add // 0) as $total
+      | if $total == 0 then
+          "  no graphify MCP calls recorded for this workflow_id — the integration did not run, or the trace is unavailable"
+        else
+          "  \($total) call(s), \([ $docs[] | .aggregate.total_errors // 0 ] | add) error(s) — "
+          + ([ $docs[] | .tools[]? | "\(.tool | sub("^mcp__[a-z_-]*graphify__"; "")) ×\(.calls)" ] | join(", "))
+        end' 2>/dev/null || echo "  graphify activity unavailable — mcp-stats returned no parseable output"
   fi
 fi
 ```
 
-Surface the output verbatim in the user report under "Graphify activity". When the trace file is missing or `workflow_id` is unset (legacy workflow.yaml predating auto-stamp), emit `Graphify activity: telemetry unavailable` and continue — best-effort.
+Surface the emitted lines verbatim in the user report under "Graphify activity" — they are already reader-ready, so do not re-summarise or re-derive the counts. When the trace file is missing or `workflow_id` is unset (legacy workflow.yaml predating auto-stamp), emit `Graphify activity: telemetry unavailable` and continue — best-effort.
 
 This is a READ-ONLY workflow. Do NOT offer to fix findings. If the user wants fixes applied, they should run `/implement` or `/workflow` with the review findings as input.
 

@@ -1122,10 +1122,13 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   // ── init review (fail-fast; payload needed by the dispatch envelope) ───
   // Runs ahead of the freshness short-circuit so BOTH paths return the init
   // payload — the code-review dispatch envelope fills governing_rules / models
-  // / inline_rubrics from it, and a short-circuit must not starve those. init
-  // is read-only context assembly; it does not evict graph-impact.md, so it is
-  // safe before the freshness check (the eviction-after-freshness invariant is
-  // about evict-graphify, not init).
+  // / inline_rubrics from it, and a short-circuit must not starve those.
+  // init is NOT read-only: it calls evictWorkflowArtifacts, which chains
+  // graphify eviction. That chain is anchored on first_created_at, so it can
+  // only take artifacts predating this session — which is what makes running
+  // init ahead of the freshness check safe. It is not safe because init
+  // "doesn't evict"; an earlier revision of this comment claimed exactly that
+  // and the ungated chain underneath it destroyed same-session impact maps.
   const initRes = sh(["init", initMode]);
   if (!initRes.ok) {
     return { ok: false, prerequisite_failed: `init ${initMode}`, detail: initRes.stderr || initRes.stdout };
@@ -1328,24 +1331,18 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   try { updateState([`god_node_warnings_json=${JSON.stringify(godNodeWarnings)}`]); } catch { /* best-effort cache */ }
 
   // ── Eviction (AFTER freshness read) + impact-plan ──────────────────────
-  // Session-anchored: evict only artifacts that predate THIS session's anchor.
-  // The eviction exists to clear a prior session's stale map, but it also ran
-  // on the same-run re-anchor call — which fires after the scope artifact is
-  // pre-written, changing scope_sig and defeating the freshness short-circuit —
-  // and deleted the graph-impact.md this run's impact step had just built. Five
-  // lane envelopes then pointed at a file that no longer existed. Passing the
-  // session age as the age gate preserves same-session artifacts and still
-  // evicts cross-session ones. Fail-safe: an unparseable anchor keeps the old
-  // unconditional behavior rather than silently preserving stale state.
-  let evictRes;
+  // Session-anchored: evict only artifacts that predate THIS session's anchor,
+  // so a prior session's stale map goes and this run's does not. The field
+  // failure was the ungated chain inside evictWorkflowArtifacts (reached via
+  // `init` above), not this call.
+  //
+  // Fail-safe: an unparseable anchor keeps unconditional eviction rather than
+  // silently preserving stale state.
   // Re-read: the anchor is stamped during activation, after the earlier read.
   const _anchorMs = Date.parse(((readState() || {}).first_created_at) || "");
-  if (Number.isFinite(_anchorMs)) {
-    const sessionAgeMin = Math.max(1, Math.ceil((Date.now() - _anchorMs) / 60000));
-    evictRes = sh(["state", "evict-graphify", `--max-age-minutes=${sessionAgeMin}`]);
-  } else {
-    evictRes = sh(["state", "evict-graphify"]);
-  }
+  const evictRes = Number.isFinite(_anchorMs)
+    ? sh(["state", "evict-graphify", `--min-mtime-ms=${_anchorMs}`])
+    : sh(["state", "evict-graphify"]);
   // Deleting files is a reduction — report it. The evicted/skipped record was
   // computed and thrown away, so an orchestrator had no way to observe that
   // its own context-init had removed the impact map.
@@ -1795,6 +1792,8 @@ function run(subcommand, args) {
       const opts = { dryRun: args.includes("--dry-run") };
       const ageArg = _getFlag(args, "--max-age-minutes");
       if (ageArg) opts.maxAgeMinutes = parseInt(ageArg, 10);
+      const anchorArg = _getFlag(args, "--min-mtime-ms");
+      if (anchorArg) opts.minMtimeMs = parseInt(anchorArg, 10);
       return audit.evictGraphifyArtifacts(opts);
     }
     case "evict-workflow-artifacts": {

@@ -235,7 +235,7 @@ const GRAPHIFY_EVICTABLE = Object.freeze([
 ]);
 
 function evictGraphifyArtifacts(opts = {}) {
-  const { dryRun = false, maxAgeMinutes = null } = opts;
+  const { dryRun = false, maxAgeMinutes = null, minMtimeMs = null } = opts;
   const root = findProjectRoot();
   if (!root) {
     return { ok: false, reason: "no_project_root", evicted: [], skipped: [] };
@@ -248,7 +248,14 @@ function evictGraphifyArtifacts(opts = {}) {
   const evicted = [];
   const skipped = [];
   const nowMs = Date.now();
-  const maxAgeMs = maxAgeMinutes != null ? Number(maxAgeMinutes) * 60 * 1000 : null;
+  // One cutoff, two entry forms: an absolute session anchor, or a duration a
+  // caller already converted from one. Both mean "keep anything written at or
+  // after this instant", so they resolve to a single instant here rather than
+  // two gates in the loop — held apart, they drifted by up to the rounding in
+  // the duration conversion and carried two `skipped` labels for one condition.
+  const cutoffMs = minMtimeMs != null ? Number(minMtimeMs)
+    : maxAgeMinutes != null ? nowMs - Number(maxAgeMinutes) * 60 * 1000
+    : null;
 
   for (const filename of GRAPHIFY_EVICTABLE) {
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -257,13 +264,15 @@ function evictGraphifyArtifacts(opts = {}) {
       skipped.push({ file: filename, reason: "absent" });
       continue;
     }
-    // mtime gate — when set, only evict files older than the threshold.
-    // Lets concurrent workflows within a session preserve their own fresh state.
-    if (maxAgeMs != null) {
+    // Session gate — the same predicate the WORKFLOW_SCOPED_CANONICAL sweep
+    // applies: anything written at or after the cutoff belongs to this session
+    // and must survive. Stat failure falls through to eviction rather than
+    // preserving state nothing can vouch for.
+    if (cutoffMs != null) {
       try {
-        const ageMs = nowMs - fs.statSync(fullPath).mtimeMs;
-        if (ageMs < maxAgeMs) {
-          skipped.push({ file: filename, reason: "fresh", age_ms: Math.round(ageMs) });
+        const mtimeMs = fs.statSync(fullPath).mtimeMs;
+        if (mtimeMs >= cutoffMs) {
+          skipped.push({ file: filename, reason: "same_session", age_ms: Math.round(nowMs - mtimeMs) });
           continue;
         }
       } catch {
@@ -354,57 +363,73 @@ function evictWorkflowArtifacts(opts = {}) {
   const evicted = [];
   const skipped = [];
 
-  for (const filename of WORKFLOW_EVICTABLE) {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const fullPath = path.join(stateDir, filename);
-    if (!fs.existsSync(fullPath)) {
-      skipped.push({ file: filename, reason: "absent" });
-      continue;
-    }
-    if (dryRun) {
-      evicted.push({ file: filename, dry_run: true });
-      continue;
-    }
-    try {
-      fs.unlinkSync(fullPath);
-      evicted.push({ file: filename });
-    } catch (e) {
-      skipped.push({ file: filename, reason: "unlink_failed", error: String(e && e.message || e) });
-    }
-  }
-
-  // Workflow-scoped canonical sweep. These filenames carry a single PR's
-  // output (review.md, test-summary.{md,json}, etc.) and should be evicted
-  // when their mtime predates the current session's first_created_at —
-  // otherwise the verifier grades against the PRIOR PR's review.md and
-  // silently produces wrong verdicts. The anchor read below also serves
-  // the slug-variant sweep that follows.
+  // Session anchor + whether a run is in flight.
+  //
+  // Read through the canonical state reader rather than a regex over raw YAML:
+  // any quoting or indentation the reader accepts but a regex misses would
+  // silently disarm the guard.
   let anchorMs = 0;
+  let priorIsActive = false;
   try {
-    const wfYaml = fs.readFileSync(path.join(stateDir, "workflow.yaml"), "utf8");
-    const m = wfYaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
-    if (m) {
-      const parsed = new Date(m[1].trim()).getTime();
-      if (Number.isFinite(parsed)) anchorMs = parsed;
-    }
-  } catch { /* no workflow.yaml — sweep without staleness gate */ }
-  if (anchorMs > 0) {
-    for (const filename of WORKFLOW_SCOPED_CANONICAL) {
+    const st = state.readState() || {};
+    priorIsActive = String(st.active) === "true";
+    const parsed = Date.parse(st.first_created_at || "");
+    if (Number.isFinite(parsed)) anchorMs = parsed;
+  } catch { /* no workflow.yaml — sweep without the session gate */ }
+
+  // Written at or after this session's anchor. Stat failure is NOT survival:
+  // state nothing can vouch for is treated as residue.
+  const survivesSession = (fullPath) => {
+    if (anchorMs <= 0) return false;
+    try { return fs.statSync(fullPath).mtimeMs >= anchorMs; } catch { return false; }
+  };
+
+  // Two contracts, deliberately different.
+  //
+  // "stale_only" (canonical + slug outputs): evict ONLY what predates the
+  // session anchor. A current-session write always survives, and with no
+  // anchor at all staleness is unjudgeable, so nothing is touched.
+  //
+  // "unless_in_flight" (gate markers): the opposite contract — a marker MUST
+  // NOT outlive its workflow, or a stale one silently satisfies the next
+  // workflow's gate, so being recent is no defence once the run is closed.
+  // Freshness may only protect it while a run is genuinely in flight.
+  // Ungated, this deleted a live run's verification.{json,md}, its
+  // dropped-symbols sidecar and its markers on a mid-flight re-entry, and the
+  // terminal verifier gate then blocked on a verifier that had in fact run.
+  const sweep = (filenames, reason, mode) => {
+    for (const filename of filenames) {
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       const fullPath = path.join(stateDir, filename);
-      if (!fs.existsSync(fullPath)) continue;
-      try {
-        if (fs.statSync(fullPath).mtimeMs >= anchorMs) continue;
-      } catch { continue; }
-      if (dryRun) { evicted.push({ file: filename, dry_run: true, reason: "stale_canonical" }); continue; }
+      if (!fs.existsSync(fullPath)) {
+        if (!reason) skipped.push({ file: filename, reason: "absent" });
+        continue;
+      }
+      if (mode === "stale_only" && anchorMs <= 0) continue;
+      const protectedByFreshness = mode === "stale_only" ? true : priorIsActive;
+      if (protectedByFreshness && survivesSession(fullPath)) {
+        skipped.push({ file: filename, reason: "same_session" });
+        continue;
+      }
+      if (dryRun) {
+        evicted.push(reason ? { file: filename, dry_run: true, reason } : { file: filename, dry_run: true });
+        continue;
+      }
       try {
         fs.unlinkSync(fullPath);
-        evicted.push({ file: filename, reason: "stale_canonical" });
+        evicted.push(reason ? { file: filename, reason } : { file: filename });
       } catch (e) {
         skipped.push({ file: filename, reason: "unlink_failed", error: String(e && e.message || e) });
       }
     }
-  }
+  };
+
+  sweep(WORKFLOW_EVICTABLE, null, "unless_in_flight");
+  // Workflow-scoped canonical outputs — a single PR's review.md /
+  // test-summary.* / verification.*. Left in place across a workflow boundary,
+  // the verifier grades against the PRIOR PR's review and produces a confident
+  // wrong verdict.
+  sweep(WORKFLOW_SCOPED_CANONICAL, "stale_canonical", "stale_only");
 
   // Slug-variant sweep — field evidence: a project accumulated
   // 167 stale files in .devt/state/ (review-pr367-*, review-architecture.md,
@@ -422,19 +447,15 @@ function evictWorkflowArtifacts(opts = {}) {
     /^verification-[A-Za-z0-9_.-]+\.(md|json)$/,
     /^slice-[A-Za-z0-9_.-]+\.md$/,
   ];
-  // anchorMs reused from the H11 canonical sweep above — single read, two consumers.
+  // Same session predicate as the sweeps above — one read, three consumers.
   try {
     for (const entry of fs.readdirSync(stateDir)) {
       if (!SLUG_VARIANT_PATTERNS.some(re => re.test(entry))) continue;
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       const fullPath = path.join(stateDir, entry);
-      if (anchorMs > 0) {
-        try {
-          if (fs.statSync(fullPath).mtimeMs >= anchorMs) {
-            skipped.push({ file: entry, reason: "fresh" });
-            continue;
-          }
-        } catch { /* stat failed — fall through to attempt */ }
+      if (survivesSession(fullPath)) {
+        skipped.push({ file: entry, reason: "same_session" });
+        continue;
       }
       if (dryRun) {
         evicted.push({ file: entry, dry_run: true });
@@ -449,8 +470,22 @@ function evictWorkflowArtifacts(opts = {}) {
     }
   } catch { /* readdir failure is non-fatal */ }
 
-  // Chain evictGraphifyArtifacts — workflow eviction is a superset
-  const graphifyResult = evictGraphifyArtifacts({ dryRun });
+  // Chain evictGraphifyArtifacts — workflow eviction is a superset.
+  // Anchored on the same session cutoff the canonical sweep above uses.
+  // Ungated, this deleted a graph-impact.md the CURRENT run had just built:
+  // context-init calls `init`, `init` lands here, and the map died before the
+  // orchestrator ever dispatched — leaving lane envelopes pointing at a file
+  // that no longer existed while the workflow's own health field, which
+  // nothing blocks on, was the only trace. A zero-second-old map was reachable
+  // by this path. Cross-session artifacts still predate the anchor and go.
+  // Same contract as the gate markers, for the same reason: graph-impact.md
+  // SATISFIES assert-graphify-decision, so a map that outlives its workflow
+  // would let a new run's gate pass on the prior run's blast radius. Freshness
+  // protects it only while a run is in flight; once closed it goes and the next
+  // context_init rebuilds it.
+  const graphifyResult = evictGraphifyArtifacts(
+    priorIsActive && anchorMs > 0 ? { dryRun, minMtimeMs: anchorMs } : { dryRun }
+  );
   for (const item of (graphifyResult.evicted || [])) {
     evicted.push(item);
   }

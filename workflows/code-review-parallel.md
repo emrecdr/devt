@@ -237,7 +237,9 @@ fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
 ' "$GROUPS_FILE" "$PARTITION_JSON"
 REG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state register-lanes --from="$PARTITION_JSON")
 rm -f "$PARTITION_JSON" "$GROUPS_FILE"
-printf '%s\n' "$REG" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring)'
+# review_file is printed because it is load-bearing for the claim-check and is
+# NOT guessable — it is slugified from the scope string and truncates mid-word.
+printf '%s\n' "$REG" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring) + " → " + (.review_file // "?")'
 
 LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 LANE_COUNT=$(printf '%s\n' "$LANES_OUT" | jq '.lanes | length')
@@ -305,6 +307,18 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules rules_hash="{governing_rules.rules_hash}">by-reference: Read the .devt/rules/ files relevant to your lane scope from disk ({governing_rules.paths_included, .devt/rules/* entries only}). CLAUDE.md is auto-injected by the harness — do not re-read it.</governing_rules>` — rules-by-reference is the lane default: the rules body is byte-identical across all N lanes and lane agents share the orchestrator's working tree, so inlining it multiplies ~57KB per lane for zero signal gain. Inline the full content only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
 - `<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>` — ABSOLUTE path (`{plugin_root}` fills from `$CTX.init.plugin_root` / render substitution): a plugin-root-relative rubric path is unresolvable from every project cwd, and lanes that can't find the rubric silently self-grade ad hoc. Rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric at `<rubric_path>` FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently including H) — the same axes the verifier will grade. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
+
+**Pre-dispatch graphify re-check.** The decision gate ran at `context_init` — before the scope artifact was pre-written and the bundle re-anchored. Anything that removed the map in between leaves `<graph_impact>` as a by-reference pointer to a file that is not there, and every lane inherits it at once. Re-run the same gate here, where the pointer is actually handed out:
+
+```bash
+GRAPHIFY_GATE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-graphify-decision 2>&1)
+if [ "$(printf '%s\n' "$GRAPHIFY_GATE" | jq -r '.ok // "false"')" = "false" ]; then
+  echo "BLOCKED — the graphify decision that held at context_init no longer holds at dispatch:"
+  printf '%s\n' "$GRAPHIFY_GATE" | jq -r '.reason // "no reason reported"'
+fi
+```
+
+If that prints `BLOCKED`, **STOP**. Re-run the impact tier (`context_init` substep 6) to rebuild `graph-impact.md`, then re-enter this step. Do not dispatch lanes with a dead `<graph_impact>` pointer — a skipped tier is legitimate and passes this gate via `graphify-skip-reason.txt`; a missing artifact with no skip reason is not.
 
 **L1-v2 prose-only lane cache suppression.** When ALL files in `<lane_files>` have a prose extension (`.md`, `.rst`, `.txt`, `.adoc`), the lane's `<graph_impact>` block must be a `not_applicable` stub rather than the global cache. Why: a prose-only README lane otherwise receives the global preflight cache (`effect_size: large, god_node_match: true`) computed against the FULL PR scope including code files — pure noise for a markdown-only review. Detect AND compute the actual block in bash so the dispatch uses `${LANE_GRAPH_IMPACT_BLOCK}` / `${LANE_SCOPE_HINT_BLOCK}` directly (no orchestrator judgment step):
 

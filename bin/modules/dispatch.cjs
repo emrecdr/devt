@@ -1678,11 +1678,29 @@ function cmdRenderLanes(target, options) {
     // full files only for context around changed hunks. size_class=chunked/
     // split additionally gets the hunk-enumeration read strategy (proven at
     // ~8000 diff lines; without it a large diff gets one shallow pass).
-    if (lane.diff_artifact) {
+    // Gated on size_basis, not just artifact presence: a lane sized by
+    // whole_file has an EMPTY diff artifact, and calling a 0-byte file "the
+    // change under review" is false while hunk enumeration greps a file with
+    // no hunks. Those lanes get the whole-file method instead.
+    //
+    // Tested for whole_file rather than for diff, so a lane whose size_basis is
+    // absent (older tool version, hand-edited workflow.yaml) keeps the
+    // historical diff-first behaviour instead of silently losing its method.
+    if (lane.diff_artifact && lane.size_basis !== "whole_file") {
       blockLines.push(`    <lane_diff>${lane.diff_artifact}</lane_diff>`);
       let method = `Read ${lane.diff_artifact} FIRST — that diff IS the change under review for this lane (merge-base diff: committed + working tree + untracked). Read full files only to verify context around changed hunks and cascade effects.`;
       if (lane.size_class === "chunked" || lane.size_class === "split") {
         method += ` The diff is large (${lane.est_loc} lines): enumerate per-file hunks first (Grep '^diff --git' against the diff file), then read it file-by-file in priority order rather than one pass.`;
+      }
+      blockLines.push(`    <lane_method>${method}</lane_method>`);
+    } else if (lane.size_basis === "whole_file") {
+      // The files ARE the scope (blast radius, or explicit full-content
+      // review), not a change set. Stating that is what stopped a field lane
+      // from reporting "no changes found" — previously the operator had to
+      // hand-write it into the prompt.
+      let method = `This lane has NO diff — its files are the review scope in full (blast radius or explicit scope), not a change set. Do NOT report "no changes found": read the files directly and review them against this lane's stated concern.`;
+      if (lane.size_class === "chunked") {
+        method += ` The footprint is large (${lane.est_loc} lines): read file-by-file in priority order rather than one pass.`;
       }
       blockLines.push(`    <lane_method>${method}</lane_method>`);
     }

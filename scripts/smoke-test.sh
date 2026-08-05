@@ -7210,8 +7210,11 @@ rm -rf "$F40_TMP"
 # F41: ARGS CONTRACT pre-truncation. After cal #37 #3, the contract lives in
 # state.cjs::computeGraphifyImpactPlan — TOPIC_CAP = 32 + slice(0, TOPIC_CAP)
 # before args is built. Presence check on the cap constant + slice idiom.
+# Receiver-agnostic: the list reaching the slice may be diff-ranked first, so
+# pin the cap-slice idiom and the raw-list default rather than one variable name.
 if /usr/bin/grep -qE "TOPIC_CAP = 32" "$ROOT/bin/modules/state-graphify.cjs" \
-  && /usr/bin/grep -qE "topicSymbolsRaw\.slice\(0, TOPIC_CAP\)" "$ROOT/bin/modules/state-graphify.cjs"; then
+  && /usr/bin/grep -qE "\.slice\(0, TOPIC_CAP\)" "$ROOT/bin/modules/state-graphify.cjs" \
+  && /usr/bin/grep -qE "ordered = topicSymbolsRaw" "$ROOT/bin/modules/state-graphify.cjs"; then
   pass "F41a: computeGraphifyImpactPlan pre-truncates topic.symbols to TOPIC_CAP=32 BEFORE building blast_radius args (P2 fix)"
 else
   fail "F41a: code-review.md missing ARGS-CONTRACT pre-truncation — VERBATIM contract still unimplementable at symbols > 32"
@@ -19296,6 +19299,145 @@ else
   fail "K342: regressed — fail-closed-defaults=$K342_A (want 1), high-water-escalates=$K342_B (want 1), below-high-water-quiet=$K342_C (want 1), parallel-tail-terminator=$K342_D (want 1)"
 fi
 
+# K343: same-session artifact survival + audit-trail durability (greenfield
+# field batch). Six legs:
+#   a  a graph-impact.md written by the CURRENT session survives `init`, while
+#      a cross-session one is still evicted. init chains graphify eviction
+#      through evictWorkflowArtifacts; ungated, that deleted a zero-second-old
+#      impact map mid-review and left lane envelopes pointing at nothing.
+#   b  an attested args override survives plan regeneration. The gate that
+#      rejects a partial attestation only fires on args_overridden===true, so a
+#      regeneration that dropped the whole block passed clean — the map is
+#      rebuildable, the audit trail is not.
+#   c  a tier change parks the attestation as superseded rather than dropping
+#      it (the override targets a different tool and must not be reapplied).
+#   d  both review paths re-check the graphify decision at DISPATCH time, not
+#      only at context_init — the destruction happens between the two.
+#   e  lane outputs resolve review-lane-<ID>.md as an alias for the slugified
+#      review_file (the slug truncates mid-word; hand-written prompts miss it
+#      and every claim-check reads file_exists:false).
+#   f  an empty-diff lane gets a real read class (the git-unusable half is
+#      K267's, which pins whole_file/unknown for that case).
+K343_T=$(mktemp -d); K343_T=$(cd "$K343_T" && pwd -P)
+mkdir -p "$K343_T/.devt/state"
+echo '{"graphify":{"enabled":false}}' > "$K343_T/.devt/config.json"
+(cd "$K343_T" && git init -q -b main && git config user.email t@t && git config user.name t) >/dev/null 2>&1
+cat > "$K343_T/.devt/state/workflow.yaml" <<'K343EOF'
+active: true
+workflow_type: code_review
+phase: context_init
+status: IN_PROGRESS
+iteration: 0
+first_created_at: "2026-08-05T16:05:13.338Z"
+created_at: "2026-08-05T16:05:39.406Z"
+workflow_id: 21ebaa78-6545-4e34-af32-aa2628203358
+task: "k343"
+K343EOF
+echo "same-session map" > "$K343_T/.devt/state/graph-impact.md"
+echo "stale" > "$K343_T/.devt/state/graphify-skip-reason.txt"
+touch -t 202607011005 "$K343_T/.devt/state/graphify-skip-reason.txt"
+(cd "$K343_T" && node "$CLI" init review "k343" ) >/dev/null 2>&1
+K343_A=0
+if [ -f "$K343_T/.devt/state/graph-impact.md" ] && [ ! -f "$K343_T/.devt/state/graphify-skip-reason.txt" ]; then K343_A=1; fi
+# (b) + (c) attestation durability across regeneration
+cat > "$K343_T/.devt/state/graphify-impact-plan.json" <<'K343EOF'
+{"tier":"skip","tool":"","args":{"symbols":["kept"]},"args_overridden":true,
+ "original_args":{"symbols":["gen"]},"override_args":{"symbols":["kept"]},
+ "override_reason":"r","override_evidence":"e","override_by":"o","timestamp":"2026-08-05T17:20:00.000Z"}
+K343EOF
+(cd "$K343_T" && node "$CLI" state compute-impact-plan) >/dev/null 2>&1
+K343_B=$(node -e '
+  const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const need=["args_overridden","original_args","override_args","override_reason","override_evidence","override_by","timestamp"];
+  const intact=need.every(k=>p[k]!==undefined);
+  console.log(intact && JSON.stringify(p.args)===JSON.stringify(p.override_args) ? "1":"0");
+' "$K343_T/.devt/state/graphify-impact-plan.json" 2>/dev/null || echo 0)
+node -e '
+  const f=process.argv[1]; const p=JSON.parse(require("fs").readFileSync(f,"utf8"));
+  p.tier="a_different_tier"; require("fs").writeFileSync(f,JSON.stringify(p));
+' "$K343_T/.devt/state/graphify-impact-plan.json" 2>/dev/null
+(cd "$K343_T" && node "$CLI" state compute-impact-plan) >/dev/null 2>&1
+K343_C=$(node -e '
+  const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const s=p.superseded_attestation;
+  console.log(s && s.override_reason==="r" && s.tier==="a_different_tier" ? "1":"0");
+' "$K343_T/.devt/state/graphify-impact-plan.json" 2>/dev/null || echo 0)
+rm -rf "$K343_T"
+# Only the two discriminating greps: 'BLOCKED' already had six matches in the
+# parallel workflow and 'no decision artifact' predates the fix in code-review.md,
+# so both pass on an unfixed tree and would have made this leg read as four
+# guarantees while delivering two.
+K343_D=0
+if /usr/bin/grep -q 'assert-graphify-decision' "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -q 'missing at dispatch time' "$ROOT/workflows/code-review.md"; then K343_D=1; fi
+# (e) id-alias resolution for lane outputs
+K343_E_T=$(mktemp -d); K343_E_T=$(cd "$K343_E_T" && pwd -P)
+mkdir -p "$K343_E_T/.devt/state"; echo '{}' > "$K343_E_T/.devt/config.json"
+cat > "$K343_E_T/.devt/state/workflow.yaml" <<K343EOF
+active: true
+workflow_type: code_review
+phase: review
+status: IN_PROGRESS
+iteration: 0
+first_created_at: "2020-01-01T00:00:00.000Z"
+task: "k343e"
+lanes:
+  - id: "L1"
+    community: "some very long scope string"
+    slug: "some_very_long_scope_strin"
+    review_file: "$K343_E_T/.devt/state/review-lane-some_very_long_scope_strin.md"
+    status: "in_flight"
+    redispatch_count: 0
+K343EOF
+printf '# lane written under the id name\n' > "$K343_E_T/.devt/state/review-lane-L1.md"
+K343_E=$(cd "$K343_E_T" && node "$CLI" state list-lane-outputs 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
+  try{const j=JSON.parse(s);const l=(j.lanes||[])[0]||{};
+    console.log(l.file_exists===true && l.review_file_resolved_via==="id_alias" ? "1":"0");
+  }catch(e){console.log("0");}});' 2>/dev/null || echo 0)
+rm -rf "$K343_E_T"
+# (f) empty-diff lane classifies for reading; git-unusable stays unknown
+K343_F_T=$(mktemp -d); K343_F_T=$(cd "$K343_F_T" && pwd -P)
+(cd "$K343_F_T" && git init -q -b main && git config user.email t@t && git config user.name t \
+  && node -e 'require("fs").writeFileSync("big.py","x = 1\n".repeat(4000))' \
+  && git add -A && git -c commit.gpgsign=false commit -qm base \
+  && node "$CLI" init workflow "k343f" ) >/dev/null 2>&1
+K343_F=$(cd "$K343_F_T" && node "$CLI" state register-lane --id=L1 --scope=cascade --files=big.py --base=main 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
+  try{const l=(JSON.parse(s).lane)||{};
+    console.log(l.size_basis==="whole_file" && l.size_class==="chunked" ? "1":"0:"+l.size_basis+"/"+l.size_class);
+  }catch(e){console.log("0:parse");}});' 2>/dev/null || echo 0)
+rm -rf "$K343_F_T"
+# (g) in-flight contract for gate markers. Both directions matter and they pull
+# opposite ways: an ACTIVE run's markers must survive a mid-flight re-entry
+# (else the verifier gate blocks on a verifier that ran), while a CLOSED run's
+# markers must go regardless of how recently they were written (else a stale
+# marker satisfies the next workflow's gate). Same fixture, only `active` differs.
+K343_G=1
+for K343_ACT in true false; do
+  K343_G_T=$(mktemp -d); K343_G_T=$(cd "$K343_G_T" && pwd -P)
+  mkdir -p "$K343_G_T/.devt/state"
+  echo '{"graphify":{"enabled":false}}' > "$K343_G_T/.devt/config.json"
+  (cd "$K343_G_T" && git init -q -b main) >/dev/null 2>&1
+  printf 'active: %s\nworkflow_type: code_review\nphase: verify\nstatus: IN_PROGRESS\niteration: 0\nfirst_created_at: "2020-01-01T00:00:00.000Z"\ntask: "k343g"\n' "$K343_ACT" > "$K343_G_T/.devt/state/workflow.yaml"
+  for K343_F_NAME in verification.json consolidator-ran.txt graph-impact.md; do
+    echo x > "$K343_G_T/.devt/state/$K343_F_NAME"
+  done
+  (cd "$K343_G_T" && node "$CLI" init review "k343g") >/dev/null 2>&1
+  K343_SURV=0
+  for K343_F_NAME in verification.json consolidator-ran.txt graph-impact.md; do
+    [ -f "$K343_G_T/.devt/state/$K343_F_NAME" ] && K343_SURV=$((K343_SURV + 1))
+  done
+  rm -rf "$K343_G_T"
+  if [ "$K343_ACT" = "true" ] && [ "$K343_SURV" != "3" ]; then K343_G=0; fi
+  if [ "$K343_ACT" = "false" ] && [ "$K343_SURV" != "0" ]; then K343_G=0; fi
+done
+if [ "$K343_A" = "1" ] && [ "$K343_B" = "1" ] && [ "$K343_C" = "1" ] && [ "$K343_D" = "1" ] && [ "$K343_E" = "1" ] && [ "$K343_F" = "1" ] && [ "$K343_G" = "1" ]; then
+  pass "K343: same-session graphify artifacts survive init (cross-session still evicted), attested overrides survive plan regeneration (superseded on tier change), both review paths re-check the decision at dispatch, lane id-alias resolves, empty-diff lanes get a read class, gate markers survive an in-flight re-entry but never outlive a closed workflow"
+else
+  fail "K343: regressed — same-session-survives=$K343_A (want 1), attestation-preserved=$K343_B (want 1), superseded-on-tier-change=$K343_C (want 1), dispatch-recheck=$K343_D (want 1), id-alias=$K343_E (want 1), empty-diff-class=$K343_F (want 1), in-flight-marker-contract=$K343_G (want 1)"
+fi
+
 # K341: contract hygiene (task-service field batch). Four legs:
 #   a  every markdown-only ARTIFACT_SCHEMA status enum agrees with the owning
 #      agent's output_format enum. PARTIAL was offered by all five agents and
@@ -19433,7 +19575,7 @@ process.stdout.write(r.join("")||"ok");
 rm -rf "$K339_TMP"
 # (f) source-level: the eviction is session-anchored and its record is surfaced
 K339_F=0
-if /usr/bin/grep -q 'max-age-minutes=\${sessionAgeMin}' "$ROOT/bin/modules/state.cjs" \
+if /usr/bin/grep -q 'min-mtime-ms=\${_anchorMs}' "$ROOT/bin/modules/state.cjs" \
    && /usr/bin/grep -q 'graphify_evicted' "$ROOT/bin/modules/state.cjs"; then K339_F=1; fi
 if [ "$K339_OUT" = "abec" ] && [ "$K339_F" = "1" ]; then
   pass "K339: envelope integrity (absent-map message names a knowable cause, prefix preserved, envelope_health degrades on lost blast-radius under a graph-anchored tier, eviction session-anchored + reported)"

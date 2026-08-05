@@ -87,6 +87,14 @@ const {
 // invalid filenames. Rule: lowercase, replace non-alphanum with underscore,
 // collapse repeats, trim, cap at 32 chars. Deterministic and stable across
 // re-partitions.
+// Lane review artifacts are named `review-lane-<key>.md` — keyed by slug when
+// registered, by lane id when the reader resolves a hand-written prompt. Both
+// go through here so they cannot drift: if the shape ever moves and only the
+// writer follows, the alias stops resolving and every lane reads as missing.
+function laneReviewPath(dir, key) {
+  return path.join(dir, `review-lane-${key}.md`);
+}
+
 function slugifyLaneName(name) {
   if (!name || typeof name !== "string") return "ungrouped";
   const slug = name.toLowerCase()
@@ -136,9 +144,10 @@ function listLaneOutputs() {
       (block.match(/^\s+redispatch_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
     // Lane sizing fields written by registerLane (both the auto-partitioner
     // and hand-rolled partitions route through it). size_class is diff-LOC
-    // based (ok/chunked/split) or "unknown" when diff generation fell back to
-    // whole-file counting. Absent on lanes registered by older tool versions
-    // or stripped during a manual workflow.yaml edit.
+    // based (ok/chunked/split); an empty diff re-sizes on whole-file LOC
+    // (ok/chunked), and only an unusable git context yields "unknown". Absent
+    // on lanes registered by older tool versions or stripped during a manual
+    // workflow.yaml edit.
     const fileCount = parseInt(
       (block.match(/^\s+file_count:\s*(\d+)\s*$/m) || [])[1] || "0", 10);
     const estLoc = parseInt(
@@ -151,13 +160,32 @@ function listLaneOutputs() {
     let sizeBytes = 0;
     let exists = false;
     let mtimeMs = 0;
-    if (reviewFile) {
-      try {
-        const stat = fs.statSync(reviewFile);
-        sizeBytes = stat.size;
-        mtimeMs = stat.mtimeMs;
-        exists = true;
-      } catch { /* file absent — leave defaults */ }
+    let resolvedFile = reviewFile ? reviewFile.trim() : null;
+    let aliasResolved = false;
+    if (resolvedFile) {
+      const statInto = (p) => {
+        try {
+          const stat = fs.statSync(p);
+          sizeBytes = stat.size;
+          mtimeMs = stat.mtimeMs;
+          return true;
+        } catch { return false; }
+      };
+      exists = statInto(resolvedFile);
+      // review_file is slugified from the lane's scope string, which truncates
+      // mid-word and is not obviously derivable. An operator writing dispatch
+      // prompts by hand naturally names the lane by id, and every lane then
+      // reported file_exists:false with the reviews sitting on disk beside the
+      // expected path — enough to fail every claim-check and trigger a full
+      // round of pointless re-dispatches. Accept the id-form as an alias.
+      if (!exists) {
+        const alias = laneReviewPath(path.dirname(resolvedFile), String(id).trim());
+        if (alias !== resolvedFile && statInto(alias)) {
+          resolvedFile = alias;
+          exists = true;
+          aliasResolved = true;
+        }
+      }
     }
     // stale when the on-disk file is older than this session's anchor;
     // absent files cannot be classified (no mtime) so they stay stale=false
@@ -180,9 +208,9 @@ function listLaneOutputs() {
     // a bare count.
     let cidMatch = "absent";
     let cidPrefix = null;
-    if (exists && reviewFile && chain.prefixes.size > 0) {
+    if (exists && resolvedFile && chain.prefixes.size > 0) {
       try {
-        const fd = fs.openSync(reviewFile, "r");
+        const fd = fs.openSync(resolvedFile, "r");
         const buf = Buffer.alloc(2048);
         try { fs.readSync(fd, buf, 0, 2048, 0); } finally { fs.closeSync(fd); }
         const head = buf.toString("utf-8");
@@ -212,7 +240,8 @@ function listLaneOutputs() {
     lanes.push({
       id: id ? id.trim() : null,
       community: community ? community.trim() : null,
-      review_file: reviewFile ? reviewFile.trim() : null,
+      review_file: resolvedFile,
+      ...(aliasResolved ? { review_file_registered: reviewFile.trim(), review_file_resolved_via: "id_alias" } : {}),
       status: status ? status.trim() : null,
       redispatch_count: redispatchCount,
       file_count: fileCount,
@@ -450,22 +479,32 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       sizeBasis = "diff";
       sizeClass = estLoc >= LANE_DIFF_SPLIT_THRESHOLD ? "split"
         : estLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
-      // An EMPTY diff over a non-empty file set is an explicit-scope lane
-      // (full-content review, nothing changed vs base) — "0 LOC, ok" would
-      // under-instruct a 10-18-file lane (proef field case: L1-L4 registered
-      // est_loc=0 for full-file review lanes). Re-size by whole-file LOC with
-      // the unknown class so the chunked-read strategy can attach.
+      // An EMPTY diff over a non-empty file set is a full-content lane — an
+      // explicit scope, or a blast radius whose files are the cascade rather
+      // than the change. "0 LOC, ok" under-instructs a 10-18-file lane, so
+      // re-size by whole-file LOC.
+      //
+      // Capped at "chunked" deliberately: whole-file LOC predicts READ effort,
+      // so it can justify chunking, but says nothing about change volume, so it
+      // must never justify a split — that conflation is what made whole-file
+      // sizing useless before lanes moved to diff LOC.
       if (estLoc === 0 && files.length > 0) {
         const wholeLoc = sumWholeFileLoc(files);
-        if (wholeLoc > 0) { estLoc = wholeLoc; sizeBasis = "whole_file"; sizeClass = "unknown"; }
+        if (wholeLoc > 0) {
+          estLoc = wholeLoc;
+          sizeBasis = "whole_file";
+          sizeClass = wholeLoc >= LANE_DIFF_CHUNKED_THRESHOLD ? "chunked" : "ok";
+        }
       }
     } else {
+      // No usable git context — the diff is unknown, not empty. Claiming a
+      // class here would be a fake one, so the lane reports none.
       estLoc = sumWholeFileLoc(files);
       sizeBasis = "whole_file";
       sizeClass = "unknown";
     }
     const fileCount = files.length;
-    const reviewFile = path.join(dir, `review-lane-${slug}.md`);
+    const reviewFile = laneReviewPath(dir, slug);
     const registeredAt = new Date().toISOString();
     const laneEntry = {
       id,
@@ -592,7 +631,12 @@ function registerLanesFromYaml(filePath) {
       baseRef: entry.base_ref || entry.baseRef,
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
-    results.push({ id: entry.id, community: (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null, ok: r.ok, reason: r.reason || null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
+    // review_file is surfaced because it is load-bearing and NOT derivable by
+    // eye: it is slugified from the scope string and truncates mid-word, so an
+    // operator writing dispatch prompts by hand cannot guess it. The batch path
+    // dropped it while the single-lane path returned it, and every hand-written
+    // lane then reported file_exists:false.
+    results.push({ id: entry.id, community: (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null, ok: r.ok, reason: r.reason || null, review_file: r.ok && r.lane ? r.lane.review_file : null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
