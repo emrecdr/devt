@@ -57,6 +57,13 @@ Read `resolved_skills.code-reviewer` from the compound `init` output (`$CTX.init
 
 > Context_init runs 9 substeps in order — bash + assert blocks under each. Substep markers are navigation anchors; the orchestrator must execute every block in sequence regardless of how they're labelled. Shares the compound-wrapper substep SEMANTICS with dev-workflow.md::context_init (same wrapper, same cached signals) — keep those in sync; prose layout may differ (this path lazy-loads uncommon-branch detail via code-review.context-detail.md).
 
+**`REVIEW_SCOPE` binding contract — read before running any block below.** `REVIEW_SCOPE` is the operator's task text. Each Bash call is a **fresh shell**, so the variable does not survive from one block to the next and must be re-bound inside every block that reads it. There are exactly two acquisition modes and no third:
+
+- **Substeps 0 and 1** — bind from the arguments directly: `REVIEW_SCOPE="$ARGUMENTS"`. State does not yet carry the task at this point.
+- **Every block after substep 1** — re-acquire from state, which substep 1 persisted: `REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')`.
+
+Never leave it unbound and never re-type the scope from memory. An unbound `REVIEW_SCOPE` does not error — `review-context-init` substitutes the literal string `code review` into `workflow.yaml::task`, the Pre-Flight Brief query, and the memory signal, so preflight searches for the words "code review" and every downstream consumer reads a plausible-looking, content-free scope. Worse, a *later* block that calls `review-context-init` with an unbound variable **overwrites** the good task with that literal. The failure signature is `task` reading exactly `code review` while the operator supplied a paragraph; `review-context-init` reports it as `scope_missing: true` in its bundle.
+
 ### Substep 0: Stale-workflow pre-flight (auto-reset for unambiguous cases; prompt otherwise)
 
 Detect whether `workflow.yaml` is stale before the first `state update` — a leftover raw_dispatch/claim-check counter from a days-old prior workflow trips a KILL gate and blocks this brand-new review at substep 1.
@@ -64,8 +71,9 @@ Detect whether `workflow.yaml` is stale before the first `state update` — a le
 `state auto-reset-if-stale` fires on EITHER (task+workflow_type changed AND >1h old) OR (prior workflow COMPLETED AND >1h old); resetSoft is non-destructive (preserves workflow_id_history, session anchors, .devt/memory, phase artifacts). The `--workflow-type="code_review"` below is correct even for reviews that later go parallel — scope_check rotates it to `code_review_parallel` mid-run (rotating `workflow_id` too); same-run consumers are chain-aware (`workflow_id_history` + `first_created_at`), cross-rotation telemetry uses `mcp-stats --include-chain`. `--fresh` in the task skips the check and forces `state reset-soft`.
 
 ```bash
+REVIEW_SCOPE="$ARGUMENTS"   # substep 0 — state does not carry the task yet
 # Operator-override path: --fresh flag in args triggers unconditional reset.
-if [[ " ${REVIEW_SCOPE} " == *" --fresh "* ]] || [[ " $ARGUMENTS " == *" --fresh "* ]]; then
+if [[ " ${REVIEW_SCOPE} " == *" --fresh "* ]]; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset-soft 2>&1 | head -1
   echo "[review] --fresh: state reset-soft applied; proceeding to substep 1"
 else
@@ -98,7 +106,11 @@ If `IS_STALE=0`: continue to substep 1 silently (no prompt, no overhead).
 Run the compound context-init wrapper ONCE. It performs `init review`, activates the workflow (`active=true workflow_type=code_review phase=context_init`), runs `preflight generate` (Topic Pre-Flight Brief), computes + caches `memory_signal` / `scope_hint` / `scope_trust` / `god_node_warnings`, evicts stale Graphify artifacts, and computes the Graphify impact-plan — collapsing what were ~8 sequential CLI round-trips into one. It is read-only of prior-phase artifacts (does NOT reset `.devt/state/`; substep 0 handled the on-demand soft-reset for stale workflows), so a legitimate resumed review keeps its artifacts.
 
 ```bash
+REVIEW_SCOPE="$ARGUMENTS"   # substep 1 — this call is what PERSISTS task to state; later blocks read it back
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
+if [ "$(printf '%s\n' "$CTX" | jq -r '.scope_missing // false')" = "true" ]; then
+  echo "⚠️  scope_missing: REVIEW_SCOPE was empty — task/preflight/memory-signal fell back to a literal default. Re-bind from the operator's task text and re-run this substep before continuing."
+fi
 PREREQ_FAILED=$(printf '%s\n' "$CTX" | jq -r '.prerequisite_failed // empty')
 if [ -n "$PREREQ_FAILED" ]; then
   echo "BLOCKED: compound init failed — review-context-init prerequisite ${PREREQ_FAILED}: $(printf '%s\n' "$CTX" | jq -r '.detail // ""')"
@@ -130,7 +142,8 @@ The wrapper's `preflight scope-cache` persisted `scope_trust_json` + `god_node_w
 
 ```bash
 # Operator escape hatch detection
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
+REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell — rebind from state, NOT from memory (an unbound scope overwrites task with a literal)
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 if [[ " ${REVIEW_SCOPE} " == *" --no-refresh "* ]] || [[ " ${REVIEW_SCOPE} " == *" --stale-ok "* ]] || [[ " $ARGUMENTS " == *" --no-refresh "* ]] || [[ " $ARGUMENTS " == *" --stale-ok "* ]]; then
   echo "[staleness] --no-refresh / --stale-ok: skipping staleness gate; forcing scope_trust.trust=sparse"
   STALENESS_TIER="bypass"
@@ -155,7 +168,8 @@ When `STALENESS_TIER` is `stale` or `unknown_lag`: issue the AskUserQuestion abo
 The wrapper computed the tier-decision tree in-process and wrote `.devt/state/graphify-impact-plan.json` carrying `{tier, tool, args, skip_reason, git_provider, pr_scoped_skip_reason, pr_diff_caveat?, symbol_anchored_caveat?, hunk_census?, severity_calibration_note?, topic_symbols_dropped_count?}`. Read the plan from the bundle (identical to the on-disk JSON) — the orchestrator then has ONE imperative instruction in substep 6, no "run the first matching" prose to skip past:
 
 ```bash
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
+REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell — rebind from state, NOT from memory (an unbound scope overwrites task with a literal)
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier')
 TOOL=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tool')
 GIT_PROVIDER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.git_provider')
@@ -264,7 +278,8 @@ The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason
 **Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6).
 
 ```bash
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # fresh shell — re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
+REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell — rebind from state, NOT from memory (an unbound scope overwrites task with a literal)
+CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
 RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
 RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
 RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
@@ -407,6 +422,7 @@ Write the file list to `.devt/state/code-review-input.md`:
 **Re-anchor the bundle on the explicit scope.** The context bundle was computed BEFORE this artifact existed (diff-derived); now that the scope universe is explicit, re-run the wrapper — `scope_sig` folds the artifact's file list, so this recomputes memory_signal / impact inputs over the REAL universe instead of the diff (field: a 64-file explicit-scope review carried a signal claiming "3 changed files"):
 
 ```bash
+REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell — rebind from state before a call that REWRITES task
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
 echo "bundle re-anchored on explicit scope: $(printf '%s
 ' "$CTX" | jq -r '.short_circuited // "recomputed"')"

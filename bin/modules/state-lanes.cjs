@@ -267,79 +267,126 @@ function listLaneOutputs() {
 // (field: a consolidator correctly recounted 10 Importants where the
 // orchestrator's mental tally said 7 — the error class exists; make the
 // recount mechanical instead of a judgment save).
-// Counts findings by severity across every shape a reviewer legitimately
-// emits. The previous regex matched only bracketed severity headings
-// (`### [Critical]`) — the format a secondary report template shows — while
-// the reviewer agent's DOCUMENTED DEFAULT is axes-shape, where findings are
-// markdown table rows carrying an id like `B-1` and severity either in a
-// Severity column or implied by the enclosing `### Important` section. A field
-// run therefore tallied {0,0,0,0} against 16 real findings: the "mechanical
-// safety net" the consolidate step leans on was blind, and its EXCEED branch
-// would have fired spuriously had the orchestrator trusted it.
-//
-// Shapes counted:
-//   `### [Critical] file:line`   legacy — the heading IS one finding
-//   `### Important` + table rows section heading sets severity for its rows
-//   `| B-1 | file | line | Important | …`  severity from a Severity column
-//   `#### I-1 — title`           consolidated per-finding heading
-// Deliberately NOT counted: rows that merely REFERENCE a finding elsewhere
-// (`| \`.gitignore\` | Finding B-1 (Minor) |`) — the id must be the row's
-// first cell, so disposition tables don't double-count.
-function tallyFindingsBySeverity(body) {
-  const counts = { critical: 0, important: 0, minor: 0, nit: 0 };
-  if (!body || typeof body !== "string") return counts;
-  let section = null;
-  for (const raw of body.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    const h = line.match(/^#{2,6}\s+(.*)$/);
-    if (h) {
-      const title = h[1].trim();
-      const bracket = title.match(/^\[(Critical|Important|Minor|Nit)\]/i);
-      if (bracket) { counts[bracket[1].toLowerCase()] += 1; continue; }
-      const bare = title.match(/^(Critical|Important|Minor|Nit)s?\s*$/i);
-      if (bare) { section = bare[1].toLowerCase(); continue; }
-      const idHead = title.match(/^([A-Z]{1,2}-\d+)\b/);
-      if (idHead && section) { counts[section] += 1; continue; }
-      section = null; // any other heading closes the severity section
-      continue;
-    }
-    if (line.startsWith("|")) {
-      const cells = line.split("|").slice(1, -1).map(c => c.trim());
-      if (cells.length === 0) continue;
-      if (cells.every(c => c === "" || /^:?-{2,}:?$/.test(c))) continue; // separator row
-      const first = cells[0].replace(/`/g, "").trim();
-      if (!/^[A-Z]{1,2}-\d+$/.test(first)) continue; // header row, or a reference table
-      const col = cells.find(c => /^(Critical|Important|Minor|Nit)$/i.test(c));
-      const sev = col ? col.toLowerCase() : section;
-      if (sev && counts[sev] !== undefined) counts[sev] += 1;
-    }
-  }
-  return counts;
+const _SEVERITIES = ["critical", "important", "minor", "nit"];
+
+function _normalizeCounts(raw) {
+  const out = {};
+  for (const k of _SEVERITIES) out[k] = Number.isFinite(raw && raw[k]) ? raw[k] : 0;
+  return out;
 }
 
-function laneSeverityTally(opts = {}) {
-  // Single-file mode single-sources the same parser for the CONSOLIDATED side.
-  // The consolidate step's own grep used the bracket format too, so fixing the
-  // lane side alone would leave the EXCEED comparison incoherent.
-  if (opts.file) {
-    let body = "";
-    try { body = fs.readFileSync(opts.file, "utf8"); }
-    catch { return { ok: false, reason: `unreadable: ${opts.file}`, totals: { critical: 0, important: 0, minor: 0, nit: 0 } }; }
-    return { ok: true, file: opts.file, totals: tallyFindingsBySeverity(body) };
-  }
-  const { lanes } = listLaneOutputs();
-  const per_lane = {};
+// Per-lane JSON sidecars written by each lane reviewer. This is the only lane
+// total the consolidator cannot author, which is what makes it the primary
+// basis: the consolidator's raw_lane_finding_counts stays as a cross-check,
+// catching the case where the two disagree, but it cannot catch a drop that is
+// under-reported consistently. Returns null when no lane wrote one, so the
+// caller falls back and SAYS it fell back.
+function _laneSidecarCounts() {
+  let lanes = [];
+  try { ({ lanes } = listLaneOutputs()); } catch { return null; }
   const totals = { critical: 0, important: 0, minor: 0, nit: 0 };
-  for (const lane of lanes) {
-    if (!lane.review_file || !lane.file_exists) continue;
-    let body = "";
-    try { body = fs.readFileSync(lane.review_file, "utf8"); } catch { continue; }
-    const counts = tallyFindingsBySeverity(body);
-    per_lane[lane.id] = { ...counts, cid_match: lane.cid_match };
-    for (const k of Object.keys(totals)) totals[k] += counts[k];
+  const per_lane = {};
+  const missing = [];
+  for (const lane of lanes || []) {
+    if (!lane.review_file) continue;
+    const p = String(lane.review_file).replace(/\.md$/, ".json");
+    let d = null;
+    try { d = JSON.parse(fs.readFileSync(p, "utf8")); }
+    catch { missing.push(lane.id); continue; }
+    let counts = d.severity_counts;
+    if (!counts && Array.isArray(d.findings)) {
+      counts = {};
+      for (const f of d.findings) {
+        const s = f && typeof f.severity === "string" ? f.severity.toLowerCase() : null;
+        if (s && _SEVERITIES.includes(s)) counts[s] = (counts[s] || 0) + 1;
+      }
+    }
+    const norm = _normalizeCounts(counts);
+    per_lane[lane.id] = norm;
+    for (const k of _SEVERITIES) totals[k] += norm[k];
   }
-  return { ok: true, per_lane, totals, lanes_counted: Object.keys(per_lane).length };
+  const found = Object.keys(per_lane).length;
+  return found > 0 ? { totals, per_lane, lanes_with_sidecar: found, lanes_missing_sidecar: missing } : null;
+}
+
+// Severity counts come from review.json — the schema'd sidecar the consolidator
+// already writes — never from re-parsing the rendered prose.
+//
+// The prose parser this replaces was a SECOND SOURCE OF TRUTH that disagreed
+// with the first silently and confidently. It read {0,0,0,0} off a 91KB review
+// whose own sidecar carried 3 critical / 37 important, then fired the "counts
+// below lane totals — an unexplained drop is a lost finding" branch, costing a
+// real investigation into 29 findings that had never gone anywhere. Tightening
+// the regex was never the fix: the dispatch envelope instructs the consolidator
+// to "Group findings by file for the consolidated output" while the parser
+// counted severity headings, so the contract and the parser could not both be
+// satisfied. A gate whose failure mode is confident wrong numbers is worse than
+// no gate.
+//
+// `lane_declared` is the consolidator's OWN raw_lane_finding_counts. It is
+// self-reported, so it catches INCONSISTENCY — the common failure — but not a
+// consolidator that drops findings and under-reports the raw total to match.
+// `basis` names that weakness at the call site rather than letting the gate read
+// as stronger than it is; per-lane JSON sidecars are what would make this side
+// machine-derived at source.
+function laneSeverityTally(opts = {}) {
+  const sidecar = opts.file || path.join(getStateDir(), "review.json");
+  let parsed = null;
+  try { parsed = JSON.parse(fs.readFileSync(sidecar, "utf8")); }
+  catch (e) {
+    // Fail CLOSED. A zero-shaped or success-shaped default here is precisely
+    // the failure this rewrite exists to remove.
+    return { ok: false, reason: `review sidecar unreadable or malformed: ${sidecar} (${e && e.message})`, source: sidecar };
+  }
+  const consolidated = _normalizeCounts(parsed.severity_counts);
+  const selfReported = parsed.raw_lane_finding_counts ? _normalizeCounts(parsed.raw_lane_finding_counts) : null;
+  const sidecars = _laneSidecarCounts();
+  const laneDeclared = sidecars ? sidecars.totals : selfReported;
+  const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+
+  // Narrative guard: every finding the sidecar declares must be REACHABLE in the
+  // rendered review by its id. This is the honest form of the check the prose
+  // parser was reaching for — it asks "did the narrative lose a finding the
+  // sidecar knows about", which is answerable, instead of re-deriving severities
+  // the sidecar already states.
+  let idsMissing = [];
+  const rendered = sidecar.replace(/\.json$/, ".md");
+  try {
+    const body = fs.readFileSync(rendered, "utf8");
+    idsMissing = findings
+      .map(f => f && f.id)
+      .filter(id => typeof id === "string" && id && !body.includes(id));
+  } catch { idsMissing = null; } // rendered review absent — guard unavailable, not passing
+
+  const out = {
+    ok: true,
+    source: sidecar,
+    basis: sidecars ? "lane_sidecars" : "consolidator_self_reported_lane_totals",
+    consolidated,
+    lane_declared: laneDeclared,
+    findings_listed: findings.length,
+    ids_missing_from_review: idsMissing,
+  };
+  if (sidecars) {
+    out.lanes_with_sidecar = sidecars.lanes_with_sidecar;
+    out.lanes_missing_sidecar = sidecars.lanes_missing_sidecar;
+    out.per_lane = sidecars.per_lane;
+    // Cross-check: the consolidator's own lane totals against the lanes'. They
+    // are independent sources, so a disagreement means one of them is wrong —
+    // which is the whole reason to keep the weaker one around.
+    if (selfReported) {
+      out.self_reported_lane_totals = selfReported;
+      const disagree = _SEVERITIES.filter(k => selfReported[k] !== sidecars.totals[k]);
+      if (disagree.length > 0) {
+        out.cross_check_mismatch = disagree.map(k => `${k}: lanes=${sidecars.totals[k]} vs review.json=${selfReported[k]}`).join("; ");
+      }
+    }
+  }
+  if (laneDeclared) {
+    out.delta = {};
+    for (const k of _SEVERITIES) out.delta[k] = consolidated[k] - laneDeclared[k];
+  }
+  return out;
 }
 
 function _sizingExcludePatterns() {
@@ -659,7 +706,59 @@ function registerLanesFromYaml(filePath) {
     out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;
     out.overlaps = overlaps.slice(0, 10);
   }
+
+  // Coverage set-difference against the DECLARED scope universe. The auto-
+  // partitioner merges overflow groups into an anchor lane, so nothing it emits
+  // can drop; a hand-authored lanes.yaml had no equivalent guarantee and a field
+  // partition silently omitted two files while the run reported complete
+  // coverage. Only code-review-input.md answers this — the blast radius answers
+  // a different question ("should this have been in scope?") and folding it in
+  // here would flag dependents that were never review targets.
+  const declared = _declaredScopeFiles();
+  if (declared) {
+    const assigned = new Set(Array.from(fileOwners.keys()).map(_normScopePath));
+    const unassigned = declared.filter(f => !assigned.has(_normScopePath(f)));
+    out.scope_declared = declared.length;
+    out.scope_unassigned = unassigned;
+    if (unassigned.length > 0) {
+      out.coverage_warning = `${unassigned.length} of ${declared.length} declared file(s) are in NO lane — any consolidated claim of complete coverage would be false`;
+      // Persisted so the consolidator envelope can carry the list. A warning
+      // printed at partition time scrolls past twenty blocks before the
+      // consolidator writes "no uncovered scope" in good faith; the envelope
+      // makes that claim impossible rather than merely discouraged.
+      try { atomicWriteFileSync(path.join(getStateDir(), "lane-unassigned.txt"), unassigned.join("\n") + "\n"); } catch { /* advisory */ }
+    } else {
+      try { fs.unlinkSync(path.join(getStateDir(), "lane-unassigned.txt")); } catch { /* absent is the normal case */ }
+    }
+  }
   return out;
+}
+
+function _normScopePath(p) {
+  let s = String(p || "").trim().replace(/^\.\//, "");
+  if (path.isAbsolute(s)) { try { s = path.relative(findProjectRoot(), s); } catch { /* keep absolute */ } }
+  return s;
+}
+
+// Parses the `- <path>` bullets under the `## Files` heading of
+// code-review-input.md. Returns null when the artifact is absent — the caller
+// then makes no coverage claim at all, rather than reporting zero gaps from zero
+// knowledge.
+function _declaredScopeFiles() {
+  const p = path.join(getStateDir(), "code-review-input.md");
+  let body = "";
+  try { body = fs.readFileSync(p, "utf8"); } catch { return null; }
+  const files = [];
+  let inFiles = false;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    if (h) { inFiles = /^files\b/i.test(h[1].trim()); continue; }
+    if (!inFiles) continue;
+    const m = line.match(/^[-*]\s+(.+)$/);
+    if (m) files.push(m[1].replace(/`/g, "").trim());
+  }
+  return files.length > 0 ? files : null;
 }
 
 

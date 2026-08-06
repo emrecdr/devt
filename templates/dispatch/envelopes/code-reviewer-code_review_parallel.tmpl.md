@@ -17,6 +17,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {provenance_protocol}
     <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
+    <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   <task>
@@ -44,6 +45,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       correlation_id>` — the consolidator-dispatched gate verifies this id against the render
       stamp, which is what proves review.md came from a dispatched synthesis agent.
     - Group findings by file for the consolidated output.
+    - <unassigned_scope> lists declared files that were in NO lane. When it is non-empty you
+      MUST NOT report complete coverage: carry the list into review.json::uncovered_scope and
+      say so in review.md. Coverage is a claim about the declared scope universe, not about
+      the lanes you happened to receive.
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so
       the reader knows coverage is partial.

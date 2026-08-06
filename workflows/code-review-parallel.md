@@ -240,6 +240,14 @@ rm -f "$PARTITION_JSON" "$GROUPS_FILE"
 # review_file is printed because it is load-bearing for the claim-check and is
 # NOT guessable — it is slugified from the scope string and truncates mid-word.
 printf '%s\n' "$REG" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring) + " → " + (.review_file // "?")'
+# Coverage set-difference vs code-review-input.md. Warn-only here — the binding
+# form is the <unassigned_scope> block the consolidator envelope carries, since
+# a line printed at partition time scrolls past long before coverage is claimed.
+COV_WARN=$(printf '%s\n' "$REG" | jq -r '.coverage_warning // empty')
+if [ -n "$COV_WARN" ]; then
+  echo "⚠️  ${COV_WARN}"
+  printf '%s\n' "$REG" | jq -r '.scope_unassigned[] | "     unassigned: " + .'
+fi
 
 LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
 LANE_COUNT=$(printf '%s\n' "$LANES_OUT" | jq '.lanes | length')
@@ -534,6 +542,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     {provenance_protocol}
     <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
+    <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
   </context>
   <task>
@@ -561,6 +570,10 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       correlation_id>` — the consolidator-dispatched gate verifies this id against the render
       stamp, which is what proves review.md came from a dispatched synthesis agent.
     - Group findings by file for the consolidated output.
+    - <unassigned_scope> lists declared files that were in NO lane. When it is non-empty you
+      MUST NOT report complete coverage: carry the list into review.json::uncovered_scope and
+      say so in review.md. Coverage is a claim about the declared scope universe, not about
+      the lanes you happened to receive.
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so
       the reader knows coverage is partial.
@@ -591,29 +604,48 @@ if echo "$SUBSTANCE" | /usr/bin/grep -qF '"looks_like_stub":true'; then
   echo "BLOCKED: consolidator returned stub — ${REASON}"
   exit 0
 fi
-# Deterministic severity tally — compare the machine count of lane-declared
-# findings against the consolidated review. Catches consolidator drops AND
-# orchestrator-note errors (field: a hand tally said 7 Important; the lane
-# files said 10 — the consolidator caught it by judgment; this makes the
-# recount mechanical). Counts are advisory-compared: the consolidator may
-# legitimately dedupe cross-lane duplicates or promote severities, so a
-# LOWER consolidated count with an explanation is fine — an UNEXPLAINED
-# mismatch is the stop condition.
+# Deterministic severity tally — both sides read review.json, the schema'd
+# sidecar. Nothing re-derives severities from the rendered prose: that parser
+# read {0,0,0,0} off a review whose sidecar carried 3 critical / 37 important
+# and then reported findings as lost. Counts are advisory-compared: the
+# consolidator may legitimately dedupe cross-lane duplicates or promote
+# severities, so a LOWER consolidated count with an explanation is fine — an
+# UNEXPLAINED mismatch is the stop condition.
 TALLY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state lane-severity-tally)
-echo "lane severity tally: $(printf '%s\n' "$TALLY" | jq -c '.totals') across $(printf '%s\n' "$TALLY" | jq -r '.lanes_counted') lane(s)"
-# Consolidated side uses the SAME parser as the lane side. It previously
-# grepped bracketed severity headings, a format reviewers rarely emit (the
-# documented default is axes-shape table rows), so both sides could read zero
-# and the comparison below silently compared nothing to nothing.
-CONS_TALLY=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state lane-severity-tally --file=.devt/state/review.md 2>/dev/null || echo '{}')
-CONS_CRIT=$(printf '%s\n' "$CONS_TALLY" | jq -r '.totals.critical // 0')
-CONS_IMP=$(printf '%s\n' "$CONS_TALLY" | jq -r '.totals.important // 0')
-LANE_CRIT=$(printf '%s\n' "$TALLY" | jq -r '.totals.critical')
-LANE_IMP=$(printf '%s\n' "$TALLY" | jq -r '.totals.important')
-if [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then
-  echo "⚠️  consolidated counts EXCEED lane-declared counts (crit ${CONS_CRIT}>${LANE_CRIT} or imp ${CONS_IMP}>${LANE_IMP}) — consolidator invented findings? STOP and reconcile."
-elif [ "$CONS_CRIT" -lt "$LANE_CRIT" ] || [ "$CONS_IMP" -lt "$LANE_IMP" ]; then
-  echo "note: consolidated counts below lane totals (crit ${CONS_CRIT}/${LANE_CRIT}, imp ${CONS_IMP}/${LANE_IMP}) — verify review.md explains the delta (cross-lane dedupe / severity promotion); an unexplained drop is a lost finding."
+if [ "$(printf '%s\n' "$TALLY" | jq -r '.ok')" != "true" ]; then
+  echo "⚠️  severity tally unavailable: $(printf '%s\n' "$TALLY" | jq -r '.reason') — the consolidated review cannot be count-checked. Do NOT report coverage as verified."
+else
+  CONS_CRIT=$(printf '%s\n' "$TALLY" | jq -r '.consolidated.critical')
+  CONS_IMP=$(printf '%s\n' "$TALLY" | jq -r '.consolidated.important')
+  LANE_CRIT=$(printf '%s\n' "$TALLY" | jq -r '.lane_declared.critical // empty')
+  LANE_IMP=$(printf '%s\n' "$TALLY" | jq -r '.lane_declared.important // empty')
+  echo "severity tally: consolidated $(printf '%s\n' "$TALLY" | jq -c '.consolidated') vs lane-declared $(printf '%s\n' "$TALLY" | jq -c '.lane_declared') ($(printf '%s\n' "$TALLY" | jq -r '.findings_listed') findings listed)"
+  # Basis matters: lane_sidecars is machine-derived per lane and the
+  # consolidator cannot author it; the fallback is the consolidator's own
+  # raw_lane_finding_counts, which catches inconsistency but not a drop
+  # under-reported to match.
+  if [ "$(printf '%s\n' "$TALLY" | jq -r '.basis')" = "consolidator_self_reported_lane_totals" ]; then
+    echo "note: no per-lane JSON sidecars found — lane totals are the consolidator's own self-report, so this comparison cannot catch a consistently under-reported drop."
+  fi
+  XCHECK=$(printf '%s\n' "$TALLY" | jq -r '.cross_check_mismatch // empty')
+  if [ -n "$XCHECK" ]; then
+    echo "⚠️  lane sidecars disagree with review.json's own lane totals (${XCHECK}) — two independent sources, so one is wrong. STOP and reconcile."
+  fi
+  if [ -z "$LANE_CRIT" ]; then
+    echo "note: review.json carries no raw_lane_finding_counts — consolidated counts stand unchecked against the lanes."
+  elif [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then
+    echo "⚠️  consolidated counts EXCEED the review's own lane totals (crit ${CONS_CRIT}>${LANE_CRIT} or imp ${CONS_IMP}>${LANE_IMP}) — the sidecar contradicts itself. STOP and reconcile."
+  elif [ "$CONS_CRIT" -lt "$LANE_CRIT" ] || [ "$CONS_IMP" -lt "$LANE_IMP" ]; then
+    echo "note: consolidated counts below lane totals (crit ${CONS_CRIT}/${LANE_CRIT}, imp ${CONS_IMP}/${LANE_IMP}) — verify review.md explains the delta (cross-lane dedupe / severity promotion); an unexplained drop is a lost finding."
+  fi
+  # Narrative guard: a finding the sidecar declares but the rendered review never
+  # names is a finding the reader will never see.
+  MISSING=$(printf '%s\n' "$TALLY" | jq -r 'if .ids_missing_from_review == null then "UNAVAILABLE" else (.ids_missing_from_review | join(", ")) end')
+  if [ "$MISSING" = "UNAVAILABLE" ]; then
+    echo "⚠️  review.md unreadable — cannot confirm every sidecar finding reaches the narrative."
+  elif [ -n "$MISSING" ]; then
+    echo "⚠️  ${MISSING} — declared in review.json but absent from review.md. The narrative dropped a finding the sidecar counts. STOP and reconcile."
+  fi
 fi
 
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=consolidate status=DONE

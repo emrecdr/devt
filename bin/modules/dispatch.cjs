@@ -684,6 +684,26 @@ function cmdRenderFilled(target, options) {
     } catch { /* no registry — placeholder stays visible; envelope_health flags it */ }
   }
 
+  // Uncovered-scope injection. A partition-time warning about unassigned files
+  // scrolls past twenty orchestration blocks before the consolidator writes its
+  // coverage claim; the field case wrote "there is no uncovered scope" in good
+  // faith while two declared files sat in no lane. Naming them IN the envelope
+  // makes the false claim impossible rather than merely discouraged, which is
+  // why this is an envelope block and not a louder log line.
+  if (out.includes("{unassigned_scope}")) {
+    let block = "none — every file in code-review-input.md is assigned to a lane";
+    try {
+      const unassigned = fs.readFileSync(path.join(require("./state.cjs").getStateDir(), "lane-unassigned.txt"), "utf8")
+        .split("\n").map(s => s.trim()).filter(Boolean);
+      if (unassigned.length > 0) {
+        block = `${unassigned.length} declared file(s) are in NO lane and were reviewed by nobody:\n      ` +
+          unassigned.join("\n      ") +
+          `\n      You MUST NOT claim complete coverage. State these as uncovered in review.md and in review.json::uncovered_scope, with whatever reason you can establish (deliberately excluded vs partition error).`;
+      }
+    } catch { /* no artifact — the default "none" line stands */ }
+    out = out.replace("{unassigned_scope}", block);
+  }
+
   // <orchestrator_notes> injection (--notes-file). Free-text run-specific
   // directives ride inside <context> so custom judgment doesn't require
   // hand-rolling the whole envelope. Unreadable file is a loud error, not a
@@ -1724,9 +1744,18 @@ function cmdRenderLanes(target, options) {
     // so each lane writes to its own review_file. Without this, all lanes
     // would clobber the same path.
     if (lane.review_file) {
+      // The JSON sidecar is what makes the lane side of the severity comparison
+      // machine-derived at source. Without it the only lane totals available are
+      // the consolidator's own raw_lane_finding_counts — self-reported, so a
+      // consolidator that drops findings and under-reports the raw total to
+      // match reads as consistent. One Write per lane buys a number the
+      // consolidator cannot author.
+      const laneSidecar = String(lane.review_file).replace(/\.md$/, ".json");
       injected = injected.replace(
         /Write review to \.devt\/state\/review\.md/g,
-        `Write review to ${lane.review_file}`,
+        `Write review to ${lane.review_file}, AND write the machine-readable sidecar ${laneSidecar} carrying ` +
+        `{"severity_counts":{"critical":N,"important":N,"minor":N,"nit":N},"findings":[{"id":"<id>","severity":"critical|important|minor|nit"}]}. ` +
+        `The counts must match the findings you wrote in the markdown — the consolidation step compares them and an unexplained gap blocks`,
       );
     }
     if (options.outDir) {

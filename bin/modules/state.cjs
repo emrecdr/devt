@@ -1104,6 +1104,18 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     } catch { primaryBranch = "main"; }
   }
   const degraded = [];
+  // An absent scope is a DEGRADED run, not a defaulted one. `scope || taskDefault`
+  // substitutes a literal like "code review" into three consumers at once —
+  // workflow.yaml::task, `preflight generate`, and the memory signal query — and
+  // every one of them then operates on a content-free string that looks like a
+  // real task. Field signature: task reading exactly the taskDefault while the
+  // operator had passed a full paragraph, because the workflow's REVIEW_SCOPE was
+  // never bound (shell state does not survive between Bash calls). Nothing failed;
+  // preflight simply searched for the words "code review".
+  const scopeMissing = !scope || !String(scope).trim();
+  if (scopeMissing) {
+    degraded.push(`scope empty — task/preflight/memory-signal all fall back to the literal "${taskDefault}"; the caller did not bind a scope string`);
+  }
   // Range is written before any child CLI runs so the entire bundle tree
   // (init, preflight generate, impact-plan) sees one consistent scope; an
   // absent range EXPLICITLY clears any prior value.
@@ -1375,6 +1387,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     freshness,
     staleness_tier: stalenessTier,
     graphify_evicted: graphifyEvicted,
+    scope_missing: scopeMissing,
     degraded_fields: degraded,
   };
 }

@@ -2443,7 +2443,12 @@ function run(subcommand, args) {
       // there is no hook-facing CLI mode anymore (the --hint-only flag was
       // test-only code kept alive by its own gate; retired).
       const st = candidatesFooterStatus();
-      process.stdout.write(`[memory] candidates-footer: ${st.count} pending / threshold ${st.threshold} / cooldown ${st.cooldownOk ? "ok" : "blocked"}\n`);
+      // The gate word must never read "blocked" on a turn the footer is in fact
+      // speaking — a field operator read exactly that line ("22 pending /
+      // threshold 5 / cooldown blocked") and reasonably concluded the layer was
+      // suppressed rather than escalating.
+      const gate = st.escalated ? `escalated at ${st.level}x threshold` : (st.cooldownOk ? "cooldown ok" : "cooldown blocked");
+      process.stdout.write(`[memory] candidates-footer: ${st.count} pending / threshold ${st.threshold} / ${gate}\n`);
       if (st.ready) {
         process.stdout.write(`\n${st.hint}\n`);
       }
@@ -2492,31 +2497,46 @@ function run(subcommand, args) {
 // `ready = count >= threshold && cooldownOk` alone let a backlog grow unbounded
 // behind an active cooldown (a field project sat at 21 pending, 4x threshold,
 // reading "cooldown blocked" while the governance layer stayed empty and every
-// ADR-compliance check reported honestly-unchecked). The escalation carries its
-// OWN longer window rather than bypassing the cooldown: the footer runs at every
-// workflow finalize, so an unconditional override would fire all session and
-// earn the ignore-reflex that makes a quiet failure worse.
+// ADR-compliance check reported honestly-unchecked).
+//
+// The escalation fires on COUNT movement, not elapsed time. A time window is the
+// wrong axis for a monotonically growing backlog: the first shipped version
+// carried its own 168h cooldown, so it spoke once at 4x and then went silent for
+// a week while the backlog kept growing — anti-correlated with urgency, and the
+// field hit exactly that (22 pending, 4.4x threshold, footer reading "cooldown
+// blocked"). It now re-fires at each integer multiplier crossing (2x, 3x, 4x…),
+// with the hour floor acting as a burst rate-limit so a session that tags 40
+// candidates at once produces one line, not forty.
+//
+// The stamp records the level it last spoke at, so a backlog that stops growing
+// stops talking. An unparseable stamp reads as level 0 — it re-escalates once
+// and re-records, which is the safe direction.
 //
 // PURE — never writes the stamp. Only the footer path records that it spoke.
 function candidatesEscalation({ root, count, threshold, cooldownPassed }) {
   const cfg = require("./config.cjs").getMergedConfig().memory || {};
   const mult = Number.isFinite(cfg.candidates_high_water_multiplier)
-    ? cfg.candidates_high_water_multiplier : 3;
-  const highWaterHours = Number.isFinite(cfg.candidates_high_water_cooldown_hours)
-    ? cfg.candidates_high_water_cooldown_hours : 168;
+    ? cfg.candidates_high_water_multiplier : 2;
+  const floorHours = Number.isFinite(cfg.candidates_escalation_floor_hours)
+    ? cfg.candidates_escalation_floor_hours : 1;
   const highWaterPath = path.join(root, ".devt", "memory", ".last-candidate-escalation");
   const highWaterCount = Math.max(threshold, Math.ceil(threshold * mult));
+  const level = threshold > 0 ? Math.floor(count / threshold) : 0;
+  let lastLevel = 0;
   let hoursSince = null;
   if (fs.existsSync(highWaterPath)) {
     try {
-      const parsed = new Date(fs.readFileSync(highWaterPath, "utf8").trim()).getTime();
+      const rec = JSON.parse(fs.readFileSync(highWaterPath, "utf8"));
+      if (Number.isFinite(rec.level)) lastLevel = rec.level;
+      const parsed = new Date(rec.at).getTime();
       if (!isNaN(parsed)) hoursSince = (Date.now() - parsed) / 3_600_000;
-    } catch { /* stays null */ }
+    } catch { /* level 0, no elapsed — escalates once and re-records */ }
   }
   const escalate = !cooldownPassed
     && count >= highWaterCount
-    && (hoursSince === null || hoursSince >= highWaterHours);
-  return { escalate, highWaterCount, highWaterHours, highWaterPath };
+    && level > lastLevel
+    && (hoursSince === null || hoursSince >= floorHours);
+  return { escalate, highWaterCount, level, lastLevel, floorHours, highWaterPath };
 }
 
 function candidatesFooterStatus() {
@@ -2540,22 +2560,26 @@ function candidatesFooterStatus() {
     } catch { /* stays null */ }
   }
   const cooldownOk = hoursSinceLast === null || hoursSinceLast >= cooldownHours;
-  const { escalate, highWaterCount, highWaterHours, highWaterPath } =
+  const { escalate, highWaterCount, level, floorHours, highWaterPath } =
     candidatesEscalation({ root, count, threshold, cooldownPassed: cooldownOk });
   const ready = (count >= threshold && cooldownOk) || escalate;
-  const stampPath = escalate ? highWaterPath : cooldownPath;
   let hint = "";
   if (ready) {
     hint = escalate
-      ? `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — ${(count / threshold).toFixed(1)}x the surfacing threshold of ${threshold}, still unpromoted while the routine reminder is in cooldown. Run /devt:memory promote to triage; this escalation repeats at most every ${Math.round(highWaterHours / 24)}d.`
+      ? `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — ${(count / threshold).toFixed(1)}x the surfacing threshold of ${threshold}, still unpromoted while the routine reminder is in cooldown. Run /devt:memory promote to triage; this repeats each time the backlog crosses another ${threshold}.`
       : `💭 ${count} memory candidates pending in .devt/memory/_suggestions.md — run /devt:memory promote to triage.`;
     try {
       const memDir = path.join(root, ".devt", "memory");
       if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
-      fs.writeFileSync(stampPath, new Date().toISOString() + "\n", "utf8");
+      // Two stamps, two shapes: the escalation records the LEVEL it spoke at so
+      // it can stay quiet until the backlog crosses the next multiple, while the
+      // routine cooldown stamp stays a bare timestamp (other readers parse it
+      // directly as a date).
+      if (escalate) fs.writeFileSync(highWaterPath, JSON.stringify({ at: new Date().toISOString(), level, count }) + "\n", "utf8");
+      else fs.writeFileSync(cooldownPath, new Date().toISOString() + "\n", "utf8");
     } catch { /* best-effort */ }
   }
-  return { count, threshold, cooldownOk, ready, escalated: escalate, high_water: highWaterCount, hint };
+  return { count, threshold, cooldownOk, ready, escalated: escalate, high_water: highWaterCount, level, floor_hours: floorHours, hint };
 }
 
 module.exports = {

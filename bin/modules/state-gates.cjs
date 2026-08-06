@@ -3076,7 +3076,26 @@ function aggregateKnowledgeCandidates() {
     }
   }
   if (byContent.size === 0) {
-    return { ok: true, sources_scanned: sources.length, aggregated: 0, total_seen: totalLines, reason: "no #KNOWLEDGE-CANDIDATE lines in lane outputs" };
+    // This aggregator is a RESCUE path: agents are told to tag scratchpad.md
+    // directly, so zero here is the NORMAL result of on-contract behaviour, not
+    // a failure. Saying only "no lines in lane outputs" reads as a loss — a
+    // field operator saw it beside six lane files that each discussed knowledge
+    // candidates in prose and concluded the harvest was broken, while 64 correctly
+    // tagged lines sat in scratchpad.md. Report where the candidates actually are.
+    let inScratchpad = 0;
+    try {
+      inScratchpad = (fs.readFileSync(path.join(dir, "scratchpad.md"), "utf8").match(/^#KNOWLEDGE-CANDIDATE:/gm) || []).length;
+    } catch { /* absent — stays 0 */ }
+    return {
+      ok: true,
+      sources_scanned: sources.length,
+      aggregated: 0,
+      total_seen: totalLines,
+      scratchpad_tags: inScratchpad,
+      reason: inScratchpad > 0
+        ? `no tags to rescue from lane outputs — ${inScratchpad} already tagged directly in scratchpad.md, which is where agents are told to write them (nothing lost)`
+        : "no #KNOWLEDGE-CANDIDATE lines in lane outputs AND none in scratchpad.md — this run captured no candidates anywhere",
+    };
   }
   // Determine which entries scratchpad already carries (so re-runs don't
   // duplicate). Compare full line content rather than just bodies — the

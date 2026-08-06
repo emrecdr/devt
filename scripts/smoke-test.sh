@@ -19438,6 +19438,94 @@ else
   fail "K343: regressed — same-session-survives=$K343_A (want 1), attestation-preserved=$K343_B (want 1), superseded-on-tier-change=$K343_C (want 1), dispatch-recheck=$K343_D (want 1), id-alias=$K343_E (want 1), empty-diff-class=$K343_F (want 1), in-flight-marker-contract=$K343_G (want 1)"
 fi
 
+# K344: the falsifiability batch. Each leg covers a component that made a
+# confident claim no consumer could check — the shape the field report named as
+# the common root of its two most expensive defects.
+#   a/b  lane coverage: a hand-authored partition dropped two declared files
+#        while the run reported complete coverage. The auto-partitioner merges
+#        overflow groups so it cannot drop; register-lanes had no equivalent
+#        check. Set-difference vs code-review-input.md, and SILENT when the
+#        partition is complete (a check that always speaks trains the ignore
+#        reflex).
+#   c    the warning must reach the consolidator as an envelope block, not just
+#        a partition-time log line twenty blocks upstream of the coverage claim.
+#   d    scope binding: REVIEW_SCOPE was referenced 12+ times in code-review.md
+#        and assigned nowhere, so an unbound run silently persisted the literal
+#        taskDefault into task + preflight + memory-signal. Every
+#        review-context-init call site must be preceded by a binding, because a
+#        LATER unbound call overwrites the good task.
+#   e    the bundle names that substitution rather than absorbing it.
+#   f    escalation fires on COUNT movement. The first version carried a 168h
+#        window, so it spoke once and went quiet for a week while the backlog
+#        grew — anti-correlated with urgency. This leg is red on that version:
+#        the stamp is 2h old (inside the old window) but the level has risen.
+#   g    the lane aggregator is a RESCUE path — agents are told to tag
+#        scratchpad.md, so zero rescued is the normal on-contract result. Saying
+#        only "no lines in lane outputs" reads as a loss: an operator saw it
+#        beside six lane files discussing candidates in prose and concluded the
+#        harvest was broken while 64 correct tags sat in scratchpad. The zero
+#        case must say where the candidates actually are.
+K344_TMP=$(mktemp -d); K344_TMP=$(cd "$K344_TMP" && pwd -P)
+mkdir -p "$K344_TMP/.devt/state" "$K344_TMP/.devt/memory"
+printf '# Review Scope\n\n## Files\n\n- app/a.py\n- app/b.py\n- app/c.py\n' > "$K344_TMP/.devt/state/code-review-input.md"
+printf '{"lanes":[{"id":"L1","scope":"one","files":["app/a.py"]},{"id":"L2","scope":"two","files":["app/b.py"]}]}' > "$K344_TMP/partial.json"
+printf '{"lanes":[{"id":"L1","scope":"one","files":["app/a.py","app/c.py"]},{"id":"L2","scope":"two","files":["app/b.py"]}]}' > "$K344_TMP/full.json"
+K344_REG() { (cd "$K344_TMP" && node "$CLI" state register-lanes --from="$1" 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(eval(process.argv[1]));}catch(e){process.stdout.write('err');}})" "$2"; }
+K344_A=$(K344_REG "$K344_TMP/partial.json" '(j.scope_unassigned||[]).join(",")')
+K344_B=$(K344_REG "$K344_TMP/full.json" 'String(!j.coverage_warning && (j.scope_unassigned||[]).length===0)')
+K344_C=0
+if /usr/bin/grep -q '{unassigned_scope}' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" \
+   && /usr/bin/grep -q 'lane-unassigned.txt' "$ROOT/bin/modules/dispatch.cjs"; then K344_C=1; fi
+# Every review-context-init call site preceded by a REVIEW_SCOPE binding.
+K344_D=$(node -e "
+const fs=require('fs');const L=fs.readFileSync('$ROOT/workflows/code-review.md','utf8').split('\n');
+let bad=0;
+L.forEach((l,i)=>{ if(l.trim().startsWith('CTX=')&&l.includes('review-context-init --scope=')){ if(!(L[i-1]||'').includes('REVIEW_SCOPE=')) bad++; }});
+process.stdout.write(String(bad));")
+K344_E=0
+if /usr/bin/grep -q 'scope_missing' "$ROOT/bin/modules/state.cjs" && /usr/bin/grep -q 'scope_missing' "$ROOT/workflows/code-review.md"; then K344_E=1; fi
+# Escalation: stamp 2h old at level 2, backlog now at level 4 -> must speak.
+printf '%s\n' '### ⚖️ one' '### ⚖️ two' '### ⚖️ three' '### ⚖️ four' '### ⚖️ five' '### ⚖️ six' '### ⚖️ seven' '### ⚖️ eight' '### ⚖️ nine' '### ⚖️ ten' '### ⚖️ eleven' '### ⚖️ twelve' '### ⚖️ thirteen' '### ⚖️ fourteen' '### ⚖️ fifteen' '### ⚖️ sixteen' '### ⚖️ seventeen' '### ⚖️ eighteen' '### ⚖️ nineteen' '### ⚖️ twenty' > "$K344_TMP/.devt/memory/_suggestions.md"
+node -e "
+const fs=require('fs');const d='$K344_TMP/.devt/memory';
+fs.writeFileSync(d+'/.last-candidate-surface',new Date().toISOString());
+fs.writeFileSync(d+'/.last-candidate-escalation',JSON.stringify({at:new Date(Date.now()-2*3600*1000).toISOString(),level:2,count:10}));"
+K344_F=$( (cd "$K344_TMP" && node "$CLI" memory candidates-footer 2>/dev/null) | /usr/bin/grep -c 'escalated at 4x threshold' || true)
+printf 'x\n#KNOWLEDGE-CANDIDATE: [type=concept] tagged in the documented sink\n' > "$K344_TMP/.devt/state/scratchpad.md"
+printf '# Lane\n\n## Knowledge candidates\n\nDiscussed in prose, tags went to scratchpad.\n' > "$K344_TMP/.devt/state/review-lane-x.md"
+K344_G=$( (cd "$K344_TMP" && node "$CLI" state aggregate-knowledge-candidates 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.scratchpad_tags===1&&/nothing lost/.test(j.reason)?'1':'0');}catch(e){process.stdout.write('err');}})")
+# h — per-lane JSON sidecars are the PRIMARY lane basis (the consolidator cannot
+# author them); its own raw_lane_finding_counts survives as a cross-check, and a
+# disagreement between the two independent sources is named.
+(cd "$K344_TMP" && git init -q >/dev/null 2>&1; printf 'x\n' > a.py; printf 'y\n' > b.py
+ printf '{"lanes":[{"id":"L1","scope":"one","files":["a.py"]},{"id":"L2","scope":"two","files":["b.py"]}]}' > sc.json
+ node "$CLI" state update active=true workflow_type=code_review_parallel phase=partition_lanes task=sandbox >/dev/null 2>&1
+ node "$CLI" state register-lanes --from=sc.json >/dev/null 2>&1)
+node -e "
+const fs=require('fs');const d='$K344_TMP/.devt/state';
+const wf=fs.readFileSync(d+'/workflow.yaml','utf8');
+for(const m of wf.matchAll(/review_file:\s*\"([^\"]+)\"/g)){
+  fs.writeFileSync(m[1].replace(/\.md\$/,'.json'),JSON.stringify({severity_counts:{critical:1,important:2,minor:0,nit:0}}));
+  fs.writeFileSync(m[1],'# lane\n');
+}
+fs.writeFileSync(d+'/review.json',JSON.stringify({severity_counts:{critical:2,important:4,minor:0,nit:0},raw_lane_finding_counts:{critical:2,important:9,minor:0,nit:0},findings:[{id:'C-1'},{id:'C-2'}]}));
+fs.writeFileSync(d+'/review.md','# R\n\nC-1 and C-2 both discussed.\n');" 2>/dev/null
+K344_H=$( (cd "$K344_TMP" && node "$CLI" state lane-severity-tally 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.basis==='lane_sidecars'&&j.lane_declared.important===4&&/lanes=4 vs review.json=9/.test(j.cross_check_mismatch||'')?'1':'0');}catch(e){process.stdout.write('err');}})")
+rm -rf "$K344_TMP"
+# i — the split alternative tolerates interior words, so routing no longer rests
+# on the `multiple agents` alternative alone; a plain review still no-matches so
+# the offer bar (and the AskUserQuestion) still decides.
+K344_I_RE=$(/usr/bin/grep -m1 "^PARALLEL_INTENT_RE=" "$ROOT/workflows/code-review.context-detail.md" | sed "s/^PARALLEL_INTENT_RE='//; s/'\$//")
+K344_I=0
+if echo "split this review between multiple systems" | /usr/bin/grep -qE "$K344_I_RE" \
+   && ! echo "review the auth module carefully" | /usr/bin/grep -qE "$K344_I_RE" \
+   && /usr/bin/grep -q "no-match branch, not a default-to-single branch" "$ROOT/workflows/code-review.context-detail.md"; then K344_I=1; fi
+if [ "$K344_A" = "app/c.py" ] && [ "$K344_B" = "true" ] && [ "$K344_C" = "1" ] && [ "$K344_D" = "0" ] && [ "$K344_E" = "1" ] && [ "$K344_F" = "1" ] && [ "$K344_G" = "1" ] && [ "$K344_H" = "1" ] && [ "$K344_I" = "1" ]; then
+  pass "K344: lane coverage set-difference names unassigned files and stays silent when complete, the list rides the consolidator envelope, every review-context-init call site binds its scope, an empty scope is reported not absorbed, curation escalation re-fires on multiplier crossing, a zero rescue-harvest says where the candidates are, lane sidecars are the primary severity basis with the self-report kept as a named cross-check, and parallel-intent no longer rests on one alternative"
+else
+  fail "K344: falsifiability batch regressed — unassigned=$K344_A (want app/c.py), silent-when-complete=$K344_B (want true), envelope-injection=$K344_C (want 1), unbound-scope-sites=$K344_D (want 0), scope_missing-surfaced=$K344_E (want 1), escalation-on-level-crossing=$K344_F (want 1), zero-harvest-legible=$K344_G (want 1), lane-sidecar-basis+crosscheck=$K344_H (want 1), intent-regex-widened=$K344_I (want 1)"
+fi
+
 # K341: contract hygiene (task-service field batch). Four legs:
 #   a  every markdown-only ARTIFACT_SCHEMA status enum agrees with the owning
 #      agent's output_format enum. PARTIAL was offered by all five agents and
@@ -19489,39 +19577,40 @@ else
   fail "K341: contract hygiene regressed — enum-agreement=$K341_A (want 1), arch-nag-under-code_review=$K341_B (want 0), sidecar-hoist=$K341_C (want 1), arch-report-status-directive=$K341_D (want 1)"
 fi
 
-# K340: lane-severity tally parses the shapes reviewers ACTUALLY emit. The
-# parser matched only bracketed severity headings (`### [Critical]`) — the
-# format a secondary report template shows — while the reviewer agent's
-# DOCUMENTED DEFAULT is axes-shape: findings are markdown table rows carrying
-# an id like `B-1`, with severity either in a Severity column or implied by the
-# enclosing `### Important` section. A field run tallied {0,0,0,0} against 16
-# real findings, so the deterministic recount the consolidate step leans on was
-# blind AND its EXCEED branch would have fired spuriously on any consolidated
-# count above zero. The consolidated side shared the same bracket-only grep, so
-# both sides could read zero and compare nothing to nothing.
-#
-# Fixtures are the reviewer's real output shapes, NOT the parser's own format —
-# a fixture written in the format the parser already matched would be green
-# while the field stayed red, which is exactly how this shipped.
+# K340: the severity tally reads the SCHEMA'D SIDECAR, never the rendered prose.
+# Re-deriving severities from markdown was a second source of truth that
+# disagreed with the first silently: a field run read {0,0,0,0} off a 91KB
+# review whose own review.json carried 3 critical / 37 important, then reported
+# findings as lost. Tightening the regex was never the fix — the dispatch
+# envelope instructs the consolidator to "Group findings by file" while the
+# parser counted severity headings, so the contract and the parser could not
+# both be satisfied. Legs (f)/(g) are the ones that stay red if anyone
+# reintroduces prose counting.
 K340_TMP=$(mktemp -d); K340_TMP=$(cd "$K340_TMP" && pwd -P)
-printf '### Important\n\n| # | File | Line | Finding |\n| --- | --- | --- | --- |\n| B-1 | app/r.py | 132 | guard only via PATCH |\n| B-2 | app/m.py | 74 | docstring drift |\n### Minor\n\n| B-3 | docs/T.md | 463 | stale step |\n' > "$K340_TMP/axes_section.md"
-printf '### Axis B — Finding specificity\n\n| # | File | Line | Severity | Finding |\n| --- | --- | --- | --- | --- |\n| B-1 | app/o.py | 106 | Important | no retry backoff |\n| B-2 | app/e.py | 22 | Minor | uuid default |\n\n### Axis A — disposition\n| `.gitignore` | Finding B-1 (Minor) |\n' > "$K340_TMP/axes_column.md"
-printf '### Important\n\n#### I-1 — guard tested only via PATCH [merged: L1 B-1 + L4 B-3]\n#### I-2 — outbox no backoff [L2 B-1]\n\n### Minor\n\n| M-1 | L1 B-2 | app/m.py | 74 | docstring drift |\n' > "$K340_TMP/consolidated.md"
-printf '### [Critical] src/a.py:10\nbody\n### [Important] src/b.py:20\nbody\n' > "$K340_TMP/legacy.md"
-K340_T() { node "$CLI" state lane-severity-tally --file="$1" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const t=JSON.parse(s).totals;process.stdout.write(t.critical+'/'+t.important+'/'+t.minor+'/'+t.nit);}catch(e){process.stdout.write('err');}})"; }
-K340_A=$(K340_T "$K340_TMP/axes_section.md")     # 2 Important + 1 Minor
-K340_B=$(K340_T "$K340_TMP/axes_column.md")      # 1 Important + 1 Minor; reference row NOT counted
-K340_C=$(K340_T "$K340_TMP/consolidated.md")     # 2 Important (#### I-N) + 1 Minor (M-N row)
-K340_D=$(K340_T "$K340_TMP/legacy.md")           # bracket headings still counted
+printf '{"severity_counts":{"critical":3,"important":37,"minor":39,"nit":3},"raw_lane_finding_counts":{"critical":3,"important":44,"minor":43,"nit":3},"findings":[{"id":"C-1"},{"id":"I-7"},{"id":"M-2"}]}' > "$K340_TMP/review.json"
+# Rendered review deliberately groups BY FILE (the envelope's own instruction)
+# and carries no severity headings at all — the shape that read zero in the field.
+printf '# Consolidated Review\n\n## Findings by file\n\n### `app/r.py`\n\nC-1 privilege escalation\nI-7 missing backoff\n\n### `app/m.py`\n\nM-2 docstring drift\n' > "$K340_TMP/review.md"
+printf '{"severity_counts":{"critical":1,"important":2},"findings":[{"id":"C-1"},{"id":"I-9"}]}' > "$K340_TMP/gap.json"
+printf '# Review\n\nC-1 is the only finding the narrative carries.\n' > "$K340_TMP/gap.md"
+K340_Q() { node "$CLI" state lane-severity-tally --file="$1" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(eval(process.argv[1]));}catch(e){process.stdout.write('err');}})" "$2"; }
+K340_A=$(K340_Q "$K340_TMP/review.json" 'j.consolidated.critical+"/"+j.consolidated.important')
+K340_B=$(K340_Q "$K340_TMP/review.json" 'j.lane_declared.critical+"/"+j.lane_declared.important')
+K340_C=$(K340_Q "$K340_TMP/review.json" 'String(j.ids_missing_from_review.length)')
+K340_D=$(K340_Q "$K340_TMP/gap.json" 'j.ids_missing_from_review.join(",")')
+K340_E=$(K340_Q "$K340_TMP/absent.json" 'String(j.ok)')
 rm -rf "$K340_TMP"
-# The consolidated side must route through the same parser, not a bracket grep.
-K340_E=0
-if /usr/bin/grep -q 'lane-severity-tally --file=.devt/state/review.md' "$ROOT/workflows/code-review-parallel.md" \
-   && ! /usr/bin/grep -qE "CONS_CRIT=\\\$\(/usr/bin/grep" "$ROOT/workflows/code-review-parallel.md"; then K340_E=1; fi
-if [ "$K340_A" = "0/2/1/0" ] && [ "$K340_B" = "0/1/1/0" ] && [ "$K340_C" = "0/2/1/0" ] && [ "$K340_D" = "1/1/0/0" ] && [ "$K340_E" = "1" ]; then
-  pass "K340: severity tally reads axes-shape (section-implied + Severity column), consolidated #### I-N + M-N rows, and legacy bracket headings; reference rows not double-counted; consolidated side shares the parser"
+# The workflow must consume the sidecar fields, not re-grep review.md prose.
+K340_F=0
+if /usr/bin/grep -q "jq -r '.consolidated.critical'" "$ROOT/workflows/code-review-parallel.md" \
+   && ! /usr/bin/grep -q 'lane-severity-tally --file=.devt/state/review.md' "$ROOT/workflows/code-review-parallel.md"; then K340_F=1; fi
+# No severity-heading parser may survive in the module.
+K340_G=0
+if ! /usr/bin/grep -q 'tallyFindingsBySeverity' "$ROOT/bin/modules/state-lanes.cjs"; then K340_G=1; fi
+if [ "$K340_A" = "3/37" ] && [ "$K340_B" = "3/44" ] && [ "$K340_C" = "0" ] && [ "$K340_D" = "I-9" ] && [ "$K340_E" = "false" ] && [ "$K340_F" = "1" ] && [ "$K340_G" = "1" ]; then
+  pass "K340: severity tally is sidecar-sourced (consolidated + lane-declared), flags sidecar findings missing from the narrative, fails closed on an absent sidecar, and no prose severity parser remains"
 else
-  fail "K340: severity tally regressed — axes_section=$K340_A (want 0/2/1/0), axes_column=$K340_B (want 0/1/1/0), consolidated=$K340_C (want 0/2/1/0), legacy=$K340_D (want 1/1/0/0), consolidated-uses-parser=$K340_E (want 1)"
+  fail "K340: severity tally regressed — consolidated=$K340_A (want 3/37), lane_declared=$K340_B (want 3/44), by-file-review-missing-ids=$K340_C (want 0), gap-detect=$K340_D (want I-9), absent-sidecar-ok=$K340_E (want false), workflow-consumes-sidecar=$K340_F (want 1), prose-parser-gone=$K340_G (want 1)"
 fi
 
 # K339: envelope integrity (task-service field batch). When the impact map went

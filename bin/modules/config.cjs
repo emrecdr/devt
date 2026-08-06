@@ -224,9 +224,12 @@ const DEFAULTS = {
     // surfacing threshold, the reminder speaks even while the routine cooldown
     // is active — a backlog can otherwise grow unbounded behind it, which is how
     // a governance layer stays empty while every check reports honestly-unchecked.
-    // Carries its own longer cooldown so the escalation stays rare enough to read.
-    candidates_high_water_multiplier: 3,
-    candidates_high_water_cooldown_hours: 168,
+    // Re-fires on each integer multiplier crossing (2x -> 3x -> 4x); the floor is
+    // a rate limit on bursts, NOT a gate. Time-gating a monotonically growing
+    // backlog is the wrong axis: the escalation would then be anti-correlated
+    // with urgency, going quiet for longer the worse the backlog gets.
+    candidates_high_water_multiplier: 2,
+    candidates_escalation_floor_hours: 1,
   },
   // Graphify integration — optional AST symbol anchoring + MCP query layer.
   // Enabling requires `pip install graphifyy[mcp]` (or uv tool/pipx equivalent) and

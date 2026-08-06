@@ -41,7 +41,14 @@ Entered from code-review.md::scope_check ONLY when the offer bar is crossed (>15
 **Operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question. Pre-detect the intent and auto-write the answer:
 
 ```bash
-PARALLEL_INTENT_RE='(parallel|split (across|between|into) (multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
+# The split alternative allows interior words: operators write "split this
+# review between multiple agents", not the contiguous "split between multiple".
+# Field near-miss: that phrasing matched on the `multiple agents` alternative
+# alone, so one alternative carried the whole routing decision. Spelling
+# tolerance is deliberately NOT added — "paralel" missed and chasing
+# "parralel"/"paralell" is unbounded over-fitting. The real safety net is the
+# else branch: an undetected intent must ASK, never guess.
+PARALLEL_INTENT_RE='(parallel|split[^.]{0,30}(multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
 SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|no parallel|no fan[ -]out|one[ -]reviewer)'
 SCOPE_LOWER=$(echo "${REVIEW_SCOPE}" | tr '[:upper:]' '[:lower:]')
 if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
@@ -54,12 +61,13 @@ elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
   SCOPE_CHECK_DECISION="single"
 else
   SCOPE_CHECK_DECISION=""
+  echo "[scope_check] no explicit parallel/single intent in task text — the offer bar decides, and if crossed the operator MUST be asked (do not infer a default)"
 fi
 ```
 
 If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
 
-If the offer bar was crossed AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user.
+If the offer bar was crossed AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user. **An empty `SCOPE_CHECK_DECISION` with the offer bar crossed is precisely when AskUserQuestion must fire** — it is the no-match branch, not a default-to-single branch. The short-circuit above exists to avoid re-asking an *answered* question; silently picking a path when the regex found nothing is the opposite failure, and the more expensive one, because a near-miss then routes the review without the operator ever seeing a choice.
 
 **Cost preview with value caveat — NEVER present cost alone.** A naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (field case: the "expensive" parallel run was the one that caught two cross-lane Criticals a single pass would plausibly have missed). The preview pairs a rough banded estimate with the coverage signal:
 

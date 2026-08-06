@@ -73,11 +73,13 @@ node bin/devt-tools.cjs state register-lane --id=L1 --scope=<community> --files=
 # Formal registration shortcut for orchestrators with a hand-rolled partition (the auto-partitioner routes through the same path). Generates the lane's diff artifact .devt/state/lane-diff-<id>.txt (merge-base diff of the lane's files: committed + working tree + untracked) and writes the canonical lane entry into workflow.yaml::lanes[] with derived metadata: slug via slugifyLaneName, file_count, est_loc = DIFF line count, size_basis (diff|whole_file), size_class (ok <3000 / chunked ≥3000 / split ≥8000 diff lines; unknown when diff generation fell back to whole-file counting), repo_root, base_ref, diff_artifact, registered_at. --repo-root + --base support cross-repo lanes (a sibling repository with its own diff base — sizing + artifact computed in that repo); defaults: project root + config git.primary_branch, then main. Per-lane files persist to .devt/state/lane-files/<id>.json sidecar (also carries repo_root/base_ref/size_class/diff_artifact). Validates id matches /^L\d+$/; rejects duplicates without --overwrite. Lock-aware read-modify-write
 
 node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml|.json>
-# Bulk wrapper. YAML inline-array files: form + JSON both accepted; each lane entry optionally carries repo_root + base_ref (snake_case or camelCase). Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?,size_class,est_loc}], errors:[]} plus warn-only overlap_warning/overlaps[] when a file is assigned to multiple lanes
-node bin/devt-tools.cjs state lane-severity-tally
-# Deterministic per-lane count of [Critical|Important|Minor|Nit] finding headers across registered lane
-# review files (+totals). The consolidate step compares these against the consolidated review — makes the
-# "orchestrator's mental tally was wrong" recount mechanical instead of a consolidator judgment save
+# Bulk wrapper. YAML inline-array files: form + JSON both accepted; each lane entry optionally carries repo_root + base_ref (snake_case or camelCase). Loops registerLane with allowOverwrite=true so bulk re-runs are idempotent. Returns {ok, registered:[{id,ok,reason?,size_class,est_loc}], errors:[]} plus warn-only overlap_warning/overlaps[] when a file is assigned to multiple lanes, and scope_unassigned[]/coverage_warning when a file declared in code-review-input.md landed in no lane (also written to .devt/state/lane-unassigned.txt, which the consolidator envelope injects as <unassigned_scope>)
+node bin/devt-tools.cjs state lane-severity-tally [--file=<review.json>]
+# Severity counts read from review.json — the schema'd sidecar — never re-derived from the rendered
+# prose. Returns {consolidated, lane_declared (the review's own raw_lane_finding_counts, hence
+# basis:"consolidator_self_reported_lane_totals"), delta, findings_listed, ids_missing_from_review}.
+# Fails closed ({ok:false}) when the sidecar is absent or malformed. ids_missing_from_review names
+# findings the sidecar declares but the rendered review never mentions — the narrative-loss guard
 
 
 node bin/devt-tools.cjs dispatch render-lanes [--out=<dir>] [--inline-rules]
