@@ -8,6 +8,13 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.235.0] - 2026-08-07
+
+### Fixed
+
+- **The path-fallback partitioner built a grab-bag lane.** Beyond the 5-lane cap it kept the four largest groups and swept everything else into a single `mixed-overflow` lane — on a 9-domain diff that is five unrelated services sharing one review, and a lane whose scope is "everything left over" has no coherent lens, which is the one thing a lane needs. Leftovers now join their most path-similar anchor with a fair-share load balance, so nothing drops *and* nothing becomes a grab-bag. The community path in `graphify.cjs` had already been fixed this way after an identical incident; the fallback kept the naive version, so which merge strategy ran depended on whether the graph had community data. Verified on the reported shape: 9 groups → 5 lanes of 10/9/9/4/4, all 36 files preserved, no overflow lane.
+- **The gate guarding that merge could be satisfied by prose asserting the opposite.** K335 grepped `code-review-parallel.md` for the string `mixed-overflow`; a rewrite whose comment read "no mixed-overflow grab-bag lane" kept the gate green while the behaviour inverted. It now *runs* the partitioner against a 9-group fixture and asserts the lane shape — `5:36:coherent`, red against the previous implementation. A gate satisfiable by a sentence saying the opposite is not a gate.
+
 ## [0.234.0] - 2026-08-07
 
 The batch after the batch. v0.233.0 moved the severity gate onto the schema'd sidecar so it would stop asserting things it couldn't see — and then asserted something it couldn't see, because the sidecar field it compared against had no declared shape. A guard that cries wolf on a correct artifact is worse than no guard: it trains the operator to skip it.
@@ -598,10 +605,4 @@ An external post-0198 verification pass reproduced a silent-corruption class: th
 ### Changed
 
 - **`guardrails_mode` config-absent fallback aligned `inline` → `by-reference`.** The authoritative default has lived in `config.cjs` DEFAULTS as `by-reference` since the measured flip, but the secondary fallbacks in `dispatch.cjs` and `init.cjs` (fired only on a total config-read failure) still read `|| "inline"` — so a degraded path silently reverted guardrails to the *expensive* inline mode, the opposite of the intended default. Both now read `|| "by-reference"` and use the same `!== "inline"` idiom as `rules_mode` / `rubric_mode`, and the stale "defaults to inline / opt-in until field-measured" comments are corrected to match reality.
-
-## [0.198.1] - 2026-07-21
-
-### Fixed
-
-- **`review-weight`'s "scope unresolvable — empty diff" message now names the base.** Field calibration surfaced that the message hid *which* base resolved to empty — so a base mismatch (the workflow computing scope against `main` while the operator meant `development`) read as a bare "empty diff" the operator couldn't diagnose. It now reads `empty diff for base '<base>' (<base>...HEAD + working tree + untracked all empty); if that base is wrong, set git.primary_branch in .devt/config.json (or export PRIMARY_BRANCH), else … pass --range=<a>..<b>`. Complements the v0.198.0 `PRIMARY_BRANCH`→config fix by making any residual base mismatch immediately legible.
 

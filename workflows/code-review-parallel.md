@@ -227,11 +227,28 @@ let lanes;
 if (entries.length <= 5) {
   lanes = entries.map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
 } else {
-  const head = entries.slice(0, 4);
-  const rest = entries.slice(4);
-  console.error("partition_lanes: " + entries.length + " groups > 5-lane cap — merging [" + rest.map(([sc]) => sc).join(", ") + "] into L5 (mixed) so no group drops from coverage");
-  lanes = head.map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
-  lanes.push({ id: "L5", scope: "mixed-overflow", files: rest.flatMap(([, f]) => f), ...(rangeBase ? { base_ref: rangeBase } : {}) });
+  // Leftovers join their most path-similar anchor, load-balanced — they do NOT
+  // become one "mixed-overflow" grab-bag. A lane whose scope is "everything
+  // left over" has no coherent review lens, which is the one thing a lane needs:
+  // field-reported on a 9-domain diff where five unrelated services would have
+  // shared a single lane. The community path in graphify.cjs was already fixed
+  // this way after an identical incident; this fallback kept the naive version,
+  // so the two merge strategies disagreed depending on which branch ran.
+  const anchors = entries.slice(0, 5).map(([scope, files]) => ({ scope, files: files.slice() }));
+  const shared = (a, b) => { const x = a.split("/"), y = b.split("/"); let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++; return i; };
+  const fair = Math.ceil(entries.reduce((s, [, f]) => s + f.length, 0) / 5);
+  for (const [scope, files] of entries.slice(5)) {
+    let best = null, bestKey = [-1, Infinity];
+    for (const a of anchors) {
+      // Similarity picks WHICH home; load decides among equally-similar ones, so
+      // one anchor cannot absorb every prefix-adjacent leftover.
+      const key = [shared(scope, a.scope), -Math.max(0, a.files.length - fair)];
+      if (key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) { best = a; bestKey = key; }
+    }
+    best.files.push(...files);
+  }
+  console.error("partition_lanes: " + entries.length + " groups > 5-lane cap — merged [" + entries.slice(5).map(([sc]) => sc).join(", ") + "] into the most path-similar anchors (no group drops from coverage, and no mixed-overflow grab-bag lane)");
+  lanes = anchors.map((a, n) => ({ id: "L" + (n + 1), scope: a.scope, files: a.files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
 }
 fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
 ' "$GROUPS_FILE" "$PARTITION_JSON"

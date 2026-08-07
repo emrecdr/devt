@@ -19228,7 +19228,32 @@ process.stdout.write((r&&r.skip_absorbed===true?"absorbed":"kept")+":"+(map?"map
 /usr/bin/grep -q 'criteria_total' "$ROOT/templates/dispatch/envelopes/verifier-code_review.tmpl.md" || { K335_OK=0; K335_WHY="$K335_WHY b:tmpl"; }
 /usr/bin/grep -q 'criteria_total' "$ROOT/workflows/code-review.steps.md" || { K335_OK=0; K335_WHY="$K335_WHY b:compiled"; }
 /usr/bin/grep -q 'no axis F' "$ROOT/references/rubrics/code_review.v2.md" || { K335_OK=0; K335_WHY="$K335_WHY b:rubric"; }
-/usr/bin/grep -q 'mixed-overflow' "$ROOT/workflows/code-review-parallel.md" || { K335_OK=0; K335_WHY="$K335_WHY c:overflow"; }
+# Overflow groups merge into the most path-similar anchor and NO grab-bag lane
+# is produced. Asserted by RUNNING the partitioner, not by grepping for a word:
+# the previous form grepped 'mixed-overflow', so a rewrite whose prose said "no
+# mixed-overflow grab-bag lane" satisfied it while the behaviour inverted. A
+# gate that can be satisfied by a sentence saying the opposite is not a gate.
+K335_PART=$(node -e '
+const fs=require("fs"), os=require("os"), path=require("path");
+const src=fs.readFileSync(process.argv[1],"utf8");
+const blocks=[...src.matchAll(/```bash\n([\s\S]*?)```/g)].map(m=>m[1]);
+const big=blocks.sort((a,b)=>b.length-a.length)[0];
+const i=big.indexOf("node -e \x27"), j=big.indexOf("\x27 \"$GROUPS_FILE\"", i);
+const script=big.slice(i+("node -e \x27").length, j);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),"k335p"));
+const doms={"a/x":7,"a/y":6,"a/z":5,"b/p":4,"b/q":3,"c/r":2,"d/s":4,"e/t":3,"f/u":2};
+const rows=[]; for(const [d,n] of Object.entries(doms)) for(let k=0;k<n;k++) rows.push(d+"|"+d+"/f"+k+".py");
+const gf=path.join(dir,"g.txt"), of=path.join(dir,"o.json");
+fs.writeFileSync(gf, rows.sort().join("\n")+"\n");
+require("child_process").spawnSync(process.execPath,["-e",script,gf,of],{encoding:"utf8"});
+let out=""; try{ out=fs.readFileSync(of,"utf8"); }catch{ process.stdout.write("norun"); process.exit(0); }
+const lanes=JSON.parse(out).lanes;
+const files=lanes.reduce((s,l)=>s+l.files.length,0);
+const grabbag=lanes.some(l=>/mixed|overflow|misc|grab/i.test(l.scope));
+fs.rmSync(dir,{recursive:true,force:true});
+process.stdout.write(lanes.length+":"+files+":"+(grabbag?"grabbag":"coherent"));
+' "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || true)
+[ "$K335_PART" = "5:36:coherent" ] || { K335_OK=0; K335_WHY="$K335_WHY c:overflow($K335_PART want 5:36:coherent)"; }
 /usr/bin/grep -qF "sed -E 's/^[[:space:]]*[-*][[:space:]]+//'" "$ROOT/workflows/code-review-parallel.md" || { K335_OK=0; K335_WHY="$K335_WHY c:bullets"; }
 rm -rf "$K335_PROJ"
 if [ "$K335_OK" = "1" ]; then
