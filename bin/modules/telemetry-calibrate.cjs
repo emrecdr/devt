@@ -2,7 +2,7 @@
 
 /**
  * Telemetry calibrate — mines .devt/state/hook-trace/run-hook.jsonl +
- * dispatch-warnings.jsonl + gate-trace.jsonl + claim-check-failures.jsonl
+ * dispatch-warnings.jsonl + gate-trace.jsonl + claim-checks.jsonl
  * and emits a calibration report.
  *
  * Purpose: data-driven recalibration of guard thresholds, inlined surface
@@ -189,7 +189,7 @@ function calibrate(options = {}) {
   const hookTraceFile = path.join(dir, "hook-trace", "run-hook.jsonl");
   const gateTraceFile = path.join(dir, "gate-trace.jsonl");
   const dispatchWarnFile = path.join(dir, "dispatch-warnings.jsonl");
-  const claimCheckFile = path.join(dir, "claim-check-failures.jsonl");
+  const claimCheckFile = path.join(dir, "claim-checks.jsonl");
 
   const hook = readJsonlLines(hookTraceFile);
   const gate = readJsonlLines(gateTraceFile);

@@ -106,7 +106,11 @@ if [ ! -s .devt/state/code-review-input.md ]; then
   RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
   PARALLEL_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
   if [ -n "$PARALLEL_SCOPE" ]; then
-    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; } > .devt/state/code-review-input.md
+    # Same shape identify_scope documents, ## Source included. The two emitters
+    # disagreed: an orchestrator following the documented template produced a
+    # section this pre-write omitted, and the scope parser tolerated only the
+    # shorter form — so writing the artifact CORRECTLY was what broke it.
+    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$PARALLEL_SCOPE" | sed 's/^/- /'; echo; echo "## Source"; echo; echo "git-diff${PRIMARY_BRANCH:+ (base: $PRIMARY_BRANCH)}${RANGE:+ (range: $RANGE)}"; } > .devt/state/code-review-input.md
     echo "[scope_check] pre-wrote code-review-input.md ($(printf '%s\n' "$PARALLEL_SCOPE" | /usr/bin/grep -cE '.') files) before parallel delegation"
     # Re-anchor the bundle: scope_sig folds the artifact, so this recomputes
     # the signal/impact inputs over the explicit universe before lanes inherit them.

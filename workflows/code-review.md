@@ -96,7 +96,7 @@ If auto-reset fired OR `--fresh` was used: continue to substep 1.
 
 If `IS_STALE=1` (stale but not auto-resettable — e.g., same workflow_type, or task changed but <24h old), use AskUserQuestion with three options:
 
-- Question: `Stale workflow state detected: ${STALE_REASON}. Reset accumulators? (preserves workflow_id_history + .devt/memory/ + phase artifacts like impl-summary.md / graph-impact.md / review.md; rotates dispatch-warnings.jsonl + claim-check-failures.jsonl; assigns fresh workflow_id + first_created_at so KILL gate counts from zero)`
+- Question: `Stale workflow state detected: ${STALE_REASON}. Reset accumulators? (preserves workflow_id_history + .devt/memory/ + phase artifacts like impl-summary.md / graph-impact.md / review.md; rotates dispatch-warnings.jsonl + claim-checks.jsonl; assigns fresh workflow_id + first_created_at so KILL gate counts from zero)`
 - Options: `Reset` (recommended for new reviews on stale state) / `Continue without reset` (proceed — KILL gate may fire on subsequent state updates) / `Cancel`
 
 If user picks `Reset`: run `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset-soft` and continue to substep 1. If `Continue`: proceed (operator accepts the KILL-gate risk). If `Cancel`: STOP with BLOCKED.

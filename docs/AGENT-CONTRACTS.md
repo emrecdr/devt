@@ -145,7 +145,7 @@ Source of truth for the rules themselves is the agent and workflow markdown plus
 
 ### Layer-1 claim-check — canonical + polymorphic lane forms
 
-**Rule.** Workflow orchestrators verify "agent claims it wrote X" against ground truth via `state assert-artifact-present <agent>` after each output-writing dispatch. The CLI reads the agent's `outputs.primary` from `agents/io-contracts.yaml`, asserts the file exists + is non-empty, and persists the result to `claim-check-failures.jsonl` for Layer-2 (`assertClaimChecksResolved`) to read at finalize.
+**Rule.** Workflow orchestrators verify "agent claims it wrote X" against ground truth via `state assert-artifact-present <agent>` after each output-writing dispatch. The CLI reads the agent's `outputs.primary` from `agents/io-contracts.yaml`, asserts the file exists + is non-empty, and persists the result to `claim-checks.jsonl` for Layer-2 (`assertClaimChecksResolved`) to read at finalize.
 
 **Polymorphic form (per-lane).** When an agent writes per-lane artifacts (currently only `code-reviewer` in `code-review-parallel.md`), the CLI accepts `state assert-artifact-present <agent>:lane-<id>`. The lane form resolves `expected_path` from `workflow.yaml::lanes[].review_file` instead of `io-contracts.yaml`, and the persisted agent key includes the suffix so Layer-2's per-agent latest-verdict computation treats each lane as a distinct stream within the workflow window. Successful re-dispatch overwrites prior stub/missing records (last-write-wins per agent key).
 

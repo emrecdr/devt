@@ -130,7 +130,7 @@ Your tool surface does not include `mcp__*graphify*`. Use the `<scope_hint>` blo
 ")
 <!-- END dispatch:debugger:debug -->
 
-**Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Why: without a Layer-1 check at the dispatch site, Layer-2's `assert-claim-checks-resolved` at finalize passes vacuously when no Layer-1 calls ever fired (`claim-check-failures.jsonl` stays absent regardless of dispatch outcome).
+**Claim-check (Q11)**: Before proceeding past the debugger dispatch, mechanically verify the debugger wrote its declared output. Why: without a Layer-1 check at the dispatch site, Layer-2's `assert-claim-checks-resolved` at finalize passes vacuously when no Layer-1 calls ever fired (`claim-checks.jsonl` stays absent regardless of dispatch outcome).
 
 ```bash
 PDC=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state post-dispatch-check debugger)

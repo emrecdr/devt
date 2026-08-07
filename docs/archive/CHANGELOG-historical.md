@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.202.0] - 2026-07-22
+
+### Changed
+
+- **README `### CI` section slimmed ~36KB → <1KB (gate K319).** The section inlined a single run-on paragraph enumerating every drift-guard gate (107 of them, K94–K259) — a third of the entire README, and a count-sync burden that went stale the instant a gate was added (it stopped at K259 while the stack runs past K300). Nobody kept it synced because nobody could. The per-gate rationale already lives in the `## [X.Y.Z]` CHANGELOG entry that introduced each gate; the README now keeps a concise floor-based summary (`K94+`, 200+ gates) and points to CHANGELOG for the detail. New gate **K319** budgets the section at ≤2500B so the enumeration can't creep back — the count-sync relief K117's floor conversion started, finished on the README side.
+
 ## [0.201.0] - 2026-07-22
 
 ### Removed

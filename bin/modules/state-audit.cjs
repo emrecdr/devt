@@ -52,6 +52,9 @@ const CANONICAL_SUBDIRS = new Set([
   // to sweep. Protecting individual filenames instead would fix one file and
   // let the next project-owned artifact reproduce the bug.
   "project",
+  "hook-trace",   // universal hook invocation trace (run-hook.js). A directory,
+                  // so it was bulk-moved whole; hook-cost + weekly-report +
+                  // telemetry-calibrate read only the live path.
 ]);
 
 function classify(filename, knownCanonical) {
@@ -139,8 +142,27 @@ function auditStateFiles(opts = {}) {
   };
 }
 
+// Two populations, and the bug was one policy over both.
+//
+// devt-owned = matches the STATE_FILE_CONTRACT (canonical / pattern_allowed /
+// ephemeral). Foreign = matched nothing, so devt did not write it. That
+// question is answerable with certainty; age is a proxy, and it is wrong in
+// exactly the case that hurt — a repo-committed file is ALWAYS older than the
+// workflow, so a project's test baseline qualified for archival on every run
+// while the test that reads it failed and blamed the branch.
+//
+// Git-tracking looked like a cleaner authorship signal and is not available:
+// projects gitignore .devt/state/ wholesale, so "did the project commit it?"
+// answers no for the baseline too.
+//
+// autoSweep (init's unattended call) archives ONLY devt-owned files and
+// reports the foreign ones. An operator running `state cleanup` by hand still
+// sweeps foreign files — the harm was the silence and the automation, not the
+// archival, and a project whose scratch shares the directory still needs a way
+// to clear it.
 function cleanupStateFiles(opts = {}) {
   const dryRun = opts.dryRun !== false;
+  const autoSweep = opts.autoSweep === true;
   const audit = auditStateFiles({ projectRoot: opts.projectRoot });
   if (!audit.ok) return audit;
 
@@ -173,7 +195,9 @@ function cleanupStateFiles(opts = {}) {
   const patternAllowedCutoffMs = Number.isFinite(patternAllowedCutoffParsed) ? patternAllowedCutoffParsed : staleCutoffMs;
 
   const toArchive = [];
+  const foreign = [];
   for (const f of audit.buckets.ad_hoc) {
+    if (autoSweep) { foreign.push({ name: f.name, size: f.size, isDir: !!f.isDir }); continue; }
     if (adHocCutoffMs != null && f.mtimeMs >= adHocCutoffMs) continue; // fresh — preserve
     toArchive.push({ ...f, reason: "ad_hoc" });
   }
@@ -187,8 +211,10 @@ function cleanupStateFiles(opts = {}) {
     }
   }
 
+  foreign.sort((a, b) => a.name.localeCompare(b.name));
+
   if (toArchive.length === 0) {
-    return { ok: true, dryRun, archived: [], total_bytes_archived: 0, archive_path: null };
+    return { ok: true, dryRun, archived: [], total_bytes_archived: 0, archive_path: null, foreign, foreign_count: foreign.length };
   }
 
   const archiveTs = new Date().toISOString().replace(/[:.]/g, "-");
@@ -215,12 +241,32 @@ function cleanupStateFiles(opts = {}) {
     totalBytes += f.size || 0;
   }
 
+  // The archive is the only place the eviction is recoverable from, so it
+  // carries its own explanation. A file's presence here is otherwise
+  // indistinguishable from a file nobody wanted.
+  if (!dryRun && archived.length > 0) {
+    const lines = [
+      `# devt state archive — ${archiveTs}`,
+      `# Each row: <reason>\t<file>. Restore with: mv <file> ../../`,
+      "",
+      ...archived.map((a) => `${a.reason}\t${a.name}`),
+    ];
+    if (foreign.length > 0) {
+      lines.push("", "# NOT archived — devt did not write these, so they were left in place:",
+        ...foreign.map((f) => `left_in_place\t${f.name}`));
+    }
+    try { fs.writeFileSync(`${archiveDir}${path.sep}MANIFEST.txt`, lines.join("\n") + "\n"); }
+    catch { /* manifest is explanatory, not load-bearing */ }
+  }
+
   return {
     ok: true,
     dryRun,
     archived,
     total_bytes_archived: totalBytes,
     archive_path: dryRun ? null : archiveDir,
+    foreign,
+    foreign_count: foreign.length,
   };
 }
 

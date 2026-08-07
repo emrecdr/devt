@@ -255,7 +255,7 @@ for LANE_ID in $(printf '%s\n' "$LANES_JSON" | jq -r '.lanes[].id'); do
   LANE_SIZE=$(printf '%s\n' "$LANES_JSON" | jq -r --arg id "$LANE_ID" '.lanes[] | select(.id == $id) | .file_size_bytes')
   if [ -f "$LANE_FILE" ]; then LANE_SIZE=$(wc -c < "$LANE_FILE" | tr -d ' '); fi
   # Per-lane Layer-1 — persists file-existence + size > 0 record + substance
-  # verdict (post-substance-aware Layer-1) to claim-check-failures.jsonl.
+  # verdict (post-substance-aware Layer-1) to claim-checks.jsonl.
   # Coarser than the substance check below; this catches "lane wrote nothing
   # at all". Both records overwrite on successful re-dispatch.
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-artifact-present "code-reviewer:lane-${LANE_ID}" > /dev/null
@@ -437,6 +437,28 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       correlation_id>` — the consolidator-dispatched gate verifies this id against the render
       stamp, which is what proves review.md came from a dispatched synthesis agent.
     - Group findings by file for the consolidated output.
+    - review.json MUST carry "raw_lane_finding_counts" in EXACTLY this shape — a per-lane
+      breakdown keyed by lane id, optionally beside a roll-up:
+        "raw_lane_finding_counts": {
+          "by_lane": {"L1": {"critical":N,"important":N,"minor":N,"nit":N}, "L2": {...}},
+          "raw_total": {"critical":N,"important":N,"minor":N,"nit":N}
+        }
+      `by_lane` is the field that matters: it is checked lane-by-lane against the per-lane
+      sidecars, so it is the one number here that can be verified rather than trusted. If you
+      supply a roll-up too it must equal the sum of by_lane — a disagreement between your own
+      two figures is reported as a defect.
+    - Coverage vocabulary — report these SEPARATELY in review.json::coverage; they are four
+      different claims and collapsing them is how a review overstates itself:
+        "files_assigned"      — declared files that went to some lane
+        "files_mentioned"     — files named anywhere in review.md
+        "files_with_findings" — files carrying at least one kept finding
+        "files_cleared"       — files a lane verified with CONCRETE evidence of why there is
+                                nothing to report ("base class is sole owner of X, both callers
+                                re-verified"), not a bare "no issues found"
+      A clean verification is a finding. When a lane proves a file safe, that proof must reach
+      review.md — dropping it silently turns "verified safe" into "not mentioned", and those
+      are indistinguishable to every downstream reader. Never report an N-of-M coverage figure
+      without saying WHICH of these four N counts.
     - <unassigned_scope> lists declared files that were in NO lane. When it is non-empty you
       MUST NOT report complete coverage: carry the list into review.json::uncovered_scope and
       say so in review.md. Coverage is a claim about the declared scope universe, not about

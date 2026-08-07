@@ -51,7 +51,7 @@ const DEFAULTS = {
   // Layer-2 claim-check enforcement. Mirrors dispatch_hygiene_mode pattern.
   // Workflow Layer-1 (state assert-artifact-present) prints [BLOCKED]
   // inline; Layer-2 (state assert-claim-checks-resolved) reads
-  // claim-check-failures.jsonl at finalize phases. block: unresolved
+  // claim-checks.jsonl at finalize phases. block: unresolved
   // failures fail the finalize gate. warn: surfaces summary but allows
   // advance. off: gate auto-passes. Same default rationale as
   // dispatch_hygiene_mode — block-default makes the audit-trail review

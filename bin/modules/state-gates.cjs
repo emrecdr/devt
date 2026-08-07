@@ -404,10 +404,15 @@ function assertVerifierShortCircuit({ agent } = {}) {
   // silently bypass the verifier safety net for any sidecar produced before
   // the contract existed. Require an EXPLICIT empty array as the negative
   // claim — anything else (undefined, null, non-array) → verifier runs.
+  // Says ABSENT, not "the agent skipped a contract". Not every dispatch asks
+  // for this field — the parallel consolidator's task block enumerates the
+  // review.json requirements and never names it — so a blaming reason string
+  // sends whoever debugs this next to interrogate an agent that was never told.
+  // The routing is identical either way: absent means the verifier runs.
   if (!Object.prototype.hasOwnProperty.call(parsed, "self_flagged_uncertainties")) {
     return {
       short_circuit: false,
-      reason: `${sidecarName} does not declare self_flagged_uncertainties — agent did not engage with the self-flag contract; verifier must run as safety net (use [] to explicitly assert no uncertainties)`,
+      reason: `${sidecarName} carries no self_flagged_uncertainties field — verifier runs as safety net. Absent is not a failed claim: check whether this agent's dispatch asked for the field at all before treating it as a gap (a sidecar that DOES engage the contract writes [] to assert no uncertainties)`,
       sidecar_path: sidecarPath,
       sidecar_status: status,
     };
@@ -1020,7 +1025,7 @@ function assertPreflightSemanticQuality(args) {
 //   {ok:false, agent, expected_path, exists:false, reason}
 //   {ok:false, agent, reason: "agent not declared in io-contracts"}
 // Layer-2 wrapper persists every result (success + failure) to
-// claim-check-failures.jsonl. Layer-2 assertClaimChecksResolved reads the
+// claim-checks.jsonl. Layer-2 assertClaimChecksResolved reads the
 // jsonl at finalize. Persistence is fail-open; the wrapped result is the
 // authoritative return value.
 function assertArtifactPresent(agent) {
@@ -2274,7 +2279,7 @@ function autoskillRejCheck(args) {
 // Unified gate-trace.jsonl observability. Every assert-* CLI subcommand
 // appends one record so there is a single source of truth for "did gate X
 // fire? what verdict? when?". Complements the per-class jsonls
-// (dispatch-warnings, claim-check-failures) without duplicating them — those
+// (dispatch-warnings, claim-checks) without duplicating them — those
 // carry rich per-gate forensic data; this carries the firing-rate + verdict
 // timeline.
 //
@@ -2455,7 +2460,7 @@ function postDispatchCheck(agent, args) {
   const hasBudget = Number.isFinite(iteration) && Number.isFinite(maxIterations);
   const budgetExhausted = hasBudget && iteration >= maxIterations;
 
-  const claim = assertArtifactPresent(agent); // persists claim-check-failures.jsonl
+  const claim = assertArtifactPresent(agent); // persists claim-checks.jsonl
   let recover;
   try { recover = recoverPartialImpl(agent); }
   catch (e) { recover = { recovery_needed: false, reason: `recover-partial-impl unavailable: ${(e && e.message) || e}` }; }
@@ -2634,13 +2639,13 @@ function persistClaimCheckResult(result) {
       workflow_id: workflowId,
     });
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    fs.appendFileSync(path.join(dir, "claim-check-failures.jsonl"), record + "\n");
+    fs.appendFileSync(path.join(dir, "claim-checks.jsonl"), record + "\n");
   } catch { /* persistence is best-effort */ }
 }
 
 
 // Layer-2 post-hoc finalize gate — mirrors the assertNoRawDispatchesThisSession
-// pattern. Walks claim-check-failures.jsonl, builds per-agent latest verdict
+// pattern. Walks claim-checks.jsonl, builds per-agent latest verdict
 // in workflow window, counts unresolved failures.
 //
 // Resolution semantic: append-only audit trail with verdict field. For each
@@ -2654,7 +2659,7 @@ function persistClaimCheckResult(result) {
 function assertClaimChecksResolved() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const failsPath = path.join(dir, "claim-check-failures.jsonl");
+  const failsPath = path.join(dir, "claim-checks.jsonl");
   if (!fs.existsSync(failsPath)) {
     // Honest read of the absent file: structurally fine (nothing to resolve)
     // but ambiguous about coverage. Without explicit flagging, a workflow that
@@ -2666,7 +2671,7 @@ function assertClaimChecksResolved() {
     return {
       ok: true,
       unresolved_count: 0,
-      reason: "claim-check-failures.jsonl absent — no Layer-1 assert-artifact-present calls fired in this workflow window. OK if the workflow_type doesn't dispatch output-writing agents or hasn't reached an output-writing phase yet. Investigate as a coverage gap if dispatches DID happen but Layer-1 calls were skipped (cross-check gate-trace.jsonl for assert-artifact-present entries in this window).",
+      reason: "claim-checks.jsonl absent — no Layer-1 assert-artifact-present calls fired in this workflow window. OK if the workflow_type doesn't dispatch output-writing agents or hasn't reached an output-writing phase yet. Investigate as a coverage gap if dispatches DID happen but Layer-1 calls were skipped (cross-check gate-trace.jsonl for assert-artifact-present entries in this window).",
     };
   }
   let mode = "block";

@@ -204,7 +204,7 @@ process.stdout.write("== assertClaimChecksResolved ==\n");
   const { stateDir, runCli, cleanup } = setupDevtFixture({
     config: { graphify: { enabled: false }, claim_check_mode: "off" },
   });
-  seedArtifact(stateDir, "claim-check-failures.jsonl",
+  seedArtifact(stateDir, "claim-checks.jsonl",
     JSON.stringify({ source: "claim_check", ts: new Date().toISOString(), agent: "programmer", ok: false }) + "\n");
   const r = runCli("state", "assert-claim-checks-resolved");
   const j = parseJson(r.stdout);
@@ -223,7 +223,7 @@ process.stdout.write("== assertClaimChecksResolved ==\n");
   // Append an unresolved Layer-1 failure timestamped now. Gate looks for
   // verdict==="failure" (or success+substance_verdict===stub); ok:false alone
   // isn't the trigger — verdict is the discriminator per state.cjs:4587.
-  seedArtifact(stateDir, "claim-check-failures.jsonl",
+  seedArtifact(stateDir, "claim-checks.jsonl",
     JSON.stringify({ source: "claim_check", ts: new Date().toISOString(), agent: "programmer", verdict: "failure", reason: "stub artifact" }) + "\n");
   const r = runCli("state", "assert-claim-checks-resolved");
   const j = parseJson(r.stdout);

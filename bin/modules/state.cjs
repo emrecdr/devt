@@ -42,6 +42,7 @@ const {
   STATE_FILE_CONTRACT,
   RESET_SOFT_CLEAR_KEYS,
   RESET_SOFT_ROTATE_LOGS,
+  TERMINAL_VERDICTS,
   RESET_SOFT_EVICT_PATTERNS,
   TRUNCATABLE_ARTIFACTS,
   _DISK_WARN_MB,
@@ -759,6 +760,26 @@ function stalenessCheck({ task, workflowType } = {}) {
     !prev.stopped_at && !prev.resume_context
   );
 
+  // A review that lands NEEDS_WORK is FINISHED — the next step is fixing code
+  // and reviewing again, not resuming a verdict already delivered. But it parks
+  // at phase=present_findings, never phase=complete, so `priorCompleted` was
+  // false; and a re-review after fixes reuses the task text, so `taskChanged`
+  // was false too. Neither auto-reset branch fired, and the prior run's
+  // raw_dispatch + claim-check counters carried into a run that looked new.
+  // Field evidence: an operator's standing habit of appending `--fresh` to
+  // every re-review, compensating for exactly this.
+  //
+  // A terminal verdict is the same "nothing to resume" signal phase=complete
+  // carries. Interrupted runs (no verdict, or paused with stopped_at /
+  // resume_context) still go through the operator prompt — those may
+  // legitimately continue.
+  const priorVerdict = String(prev.verdict || "").toUpperCase();
+  const priorTerminalVerdict = Boolean(
+    prev.active !== true &&
+    TERMINAL_VERDICTS.has(priorVerdict) &&
+    !prev.stopped_at && !prev.resume_context
+  );
+
   const taskChanged = Boolean(typeof task === "string" && task.length > 0 && priorTask && priorTask !== task);
   const workflowTypeChanged = Boolean(typeof workflowType === "string" && workflowType.length > 0 && priorWorkflowType && priorWorkflowType !== workflowType);
 
@@ -789,12 +810,14 @@ function stalenessCheck({ task, workflowType } = {}) {
   // prompt — counters and artifacts may legitimately continue there.
   const autoResetRecommended = Boolean(
     (taskChanged && workflowTypeChanged && ageStale) ||
-    (priorCompleted && ageStale)
+    ((priorCompleted || priorTerminalVerdict) && ageStale)
   );
 
   let reason = "fresh";
   if (autoResetRecommended && !(taskChanged && workflowTypeChanged)) {
-    reason = `auto-reset recommended: prior workflow completed (phase=complete, ${ageHours.toFixed(1)}h old) — nothing to resume, counters rotate for the new run`;
+    reason = priorCompleted
+      ? `auto-reset recommended: prior workflow completed (phase=complete, ${ageHours.toFixed(1)}h old) — nothing to resume, counters rotate for the new run`
+      : `auto-reset recommended: prior workflow reached a terminal verdict (${priorVerdict} at phase=${prev.phase || "unknown"}, ${ageHours.toFixed(1)}h old) — the verdict was delivered, so there is nothing to resume; counters rotate for the new run`;
   } else if (autoResetRecommended) {
     reason = `auto-reset recommended: task changed ('${priorTask}' → '${task}'), workflow_type changed ('${priorWorkflowType}' → '${workflowType}'), prior workflow ${ageHours.toFixed(1)}h old — unambiguous new working session`;
   } else if (stale) {
@@ -1506,7 +1529,7 @@ function listInstances() {
 // single routing verdict so each workflow keeps only the routing SEMANTICS
 // (what each action means for its agent) and drops the mechanical branching.
 // Composes the two existing functions; side-effect-free beyond the
-// claim-check-failures.jsonl append assertArtifactPresent already performs
+// claim-checks.jsonl append assertArtifactPresent already performs
 // (do NOT re-persist). recoverPartialImpl handles agents with no
 // sidecar/expected_sections gracefully, so it is safe to call for every agent.
 // The parallel-lane state machine (code-review-parallel.md) is deliberately
@@ -1816,7 +1839,7 @@ function run(subcommand, args) {
     }
     // Every assert-* gate firing logs to gate-trace.jsonl via traceGate
     // wrapper for unified observability. assertArtifactPresent already
-    // persists to claim-check-failures.jsonl; gate-trace.jsonl adds the
+    // persists to claim-checks.jsonl; gate-trace.jsonl adds the
     // unified firing-rate + verdict timeline across all 14 gates.
     case "assert-graphify-decision":
       return traceGate("assert-graphify-decision", () => assertGraphifyDecision());

@@ -414,6 +414,7 @@ const RESET_EXEMPT = new Set([
   "workflow-id-rotations.jsonl",        // audit log of every workflow_id mutation (prev_id, new_id, source, pid, argv). RESET_EXEMPT because rotations BY resetSoft are themselves the events being audited — wiping the log on reset would erase the forensic trail for the bug that motivated it.
   "lane-status-overrides.jsonl",        // operator lane-verdict override rationales (update-lane override_reason=). Survives reset so post-hoc audits can distinguish "gate wrong, operator overrode with reason" from "gate right, lane redispatched".
   "static-compress.jsonl",              // static-compress calibration log (compress/restore actions with byte ratios). Survives reset so calibration data isn't lost when a workflow resets between compression runs; membership here also makes it audit-canonical, so `state cleanup` never archives it.
+  "gate-trace.jsonl",                   // forensic gate-decision trace. Same contract as dispatch-warnings.jsonl. Not declaring it cost more than tidiness: telemetry-calibrate + hook-cost + weekly-report read ONLY the live path, so an undeclared trace was archived at every init and devt's own cost analytics had a horizon of one workflow.
 ]);
 
 
@@ -474,6 +475,9 @@ const STATE_FILE_CONTRACT = {
     "probe-failures.jsonl",        // append-only diagnostic log of graphify+python probe failures; RESET_EXEMPT so health subcommand can surface root-cause across sessions
     "workflow-id-rotations.jsonl", // append-only audit log of workflow_id mutations (prev, new, source, pid, argv); RESET_EXEMPT for forensics
     "lane-status-overrides.jsonl", // append-only audit log of update-lane override_reason= annotations; RESET_EXEMPT for post-hoc gate audits
+    "claim-checks.jsonl",       // Layer-1 claim-check log (successes AND failures — the success rows are what prove each lane wrote its artifact). Rotated by resetSoft rather than reset-exempt, so it belongs here rather than in RESET_EXEMPT
+    "status.json",              // subagent-status.sh + state.cjs run status
+    "lane-unassigned.txt",      // declared-scope files in no lane (coverage set-difference from register-lanes)
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
@@ -492,6 +496,8 @@ const STATE_FILE_CONTRACT = {
     "^debug-(context|investigation|summary)-[A-Za-z0-9_.-]+\\.md$",
     "^[a-z][a-z0-9]*(-[a-z0-9]+)+-summary\\.md$",  // topical summaries (module-md-update-summary.md) when no slugged class fits. ≥2 segments before "-summary" required: single-word forms (test-summary.md) ARE the canonical namespace — F10e enforces the disjointness
     "^lane-diff-L\\d+\\.txt$",   // per-lane diff artifact from register-lane
+    "^review-lane-[A-Za-z0-9_.-]+\\.json$",  // per-lane severity sidecar. The .md side rides the review-* pattern above; the .json side matched nothing and was classified foreign — devt's own dispatch renders the write instruction for it
+    "^[a-z][a-z0-9-]*\\.archive-[0-9A-Za-z:.\\-]+\\.jsonl$",  // logs rotated by resetSoft. Undeclared, these were litter one devt command created and the next archived 22 seconds later
   ],
   ephemeral_patterns: [
     "^\\..*\\.tmp$",       // hidden temp files
@@ -519,13 +525,21 @@ const RESET_SOFT_CLEAR_KEYS = [
 ];
 
 
+// Verdicts that mean the workflow DELIVERED its answer. Reaching one is the
+// same "nothing to resume" signal `phase: complete` carries — a NEEDS_WORK
+// review is finished as a review; the next step is fixing code and running
+// again. Without this, a re-review parked at phase=present_findings looked
+// resumable and carried the prior run's counters into it.
+const TERMINAL_VERDICTS = new Set(["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK", "PASS", "FAILED"]);
+
+
 // Logs rotated by resetSoft. Cross-workflow accumulators that the KILL gate +
 // claim-check gate read MUST be rotated, else gates re-fire immediately on the
 // preserved counts. Field receipt: a 51-raw-dispatch KILL gate from
 // a 20-day-old workflow blocked a brand-new review's first state.update call.
 const RESET_SOFT_ROTATE_LOGS = [
   "dispatch-warnings.jsonl",
-  "claim-check-failures.jsonl",
+  "claim-checks.jsonl",
 ];
 
 
@@ -819,6 +833,7 @@ module.exports = {
   STATE_FILE_CONTRACT,
   RESET_SOFT_CLEAR_KEYS,
   RESET_SOFT_ROTATE_LOGS,
+  TERMINAL_VERDICTS,
   RESET_SOFT_EVICT_PATTERNS,
   TRUNCATABLE_ARTIFACTS,
   _DISK_WARN_MB,

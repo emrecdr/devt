@@ -600,6 +600,20 @@ function initWorkflow(task, pluginRoot, initVerb) {
     warnings.push(".devt/config.json not found. Run /devt:setup --init to configure project.");
   }
 
+  // One line, and the foreign count is stated separately on purpose.
+  // "archived 4 files" is ignorable; "2 not written by devt" is the part that
+  // makes a reader open the manifest, and it is the only part that can point
+  // at damage outside devt's own state. Silence when there is nothing to say.
+  const summarizeSweep = (r) => {
+    if (!r || r.ok === false) return null;
+    const n = (r.archived || []).length;
+    const f = r.foreign_count || 0;
+    if (n === 0 && f === 0) return null;
+    const where = r.archive_path ? ` → ${path.basename(r.archive_path)}/` : "";
+    if (f === 0) return `swept ${n} devt file(s)${where}`;
+    return `swept ${n} devt file(s)${where} · ⚠ ${f} not written by devt, left in place (run 'devt-tools state audit' to list)`;
+  };
+
   // Sanitize task text before it flows into agent prompts
   let sanitizedTask = task || null;
   const injectionWarning = [];
@@ -626,6 +640,7 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // Without this, stale gate-satisfaction markers from a prior session would persist
   // into the new workflow's state directory and falsely satisfy freshness gates.
   // Eviction is best-effort — failure does not block init.
+  let sweepReport = null;
   try {
     const { evictWorkflowArtifacts, cleanupStateFiles } = require("./state-audit.cjs");
     evictWorkflowArtifacts({ dryRun: false });
@@ -650,8 +665,9 @@ function initWorkflow(task, pluginRoot, initVerb) {
         if (m) priorCreatedAt = m[1].trim();
       }
     } catch { /* fall through with null — adHocStaleDays takes over */ }
-    cleanupStateFiles({
+    const swept = cleanupStateFiles({
       dryRun: false,
+      autoSweep: true,
       staleDays: 1,
       adHocStaleDays: 1,
       adHocCutoffMtime: priorCreatedAt,
@@ -660,6 +676,8 @@ function initWorkflow(task, pluginRoot, initVerb) {
       // couldn't catch.
       patternAllowedCutoffMtime: priorCreatedAt,
     });
+    sweepReport = summarizeSweep(swept);
+    if (sweepReport) process.stderr.write(`[devt] ${sweepReport}\n`);
   } catch { /* non-fatal */ }
 
   // Reset workflow.yaml on every init * call so stale prior-session values
@@ -741,7 +759,7 @@ function initWorkflow(task, pluginRoot, initVerb) {
           // failure does not block init.
           try {
             const stateDirPath = path.join(projectRoot, ".devt", "state");
-            const COUNTER_LOGS = ["dispatch-warnings.jsonl", "claim-check-failures.jsonl"];
+            const COUNTER_LOGS = ["dispatch-warnings.jsonl", "claim-checks.jsonl"];
             const archiveTs = new Date().toISOString().replace(/[:.]/g, "-");
             for (const logName of COUNTER_LOGS) {
               const src = path.join(stateDirPath, logName);
@@ -805,6 +823,10 @@ function initWorkflow(task, pluginRoot, initVerb) {
     },
     claude_md_exists: claudeMdExists,
     config_exists: configExists,
+    // Carried into the bundle, not only stderr: a 20-block orchestration
+    // scrolls stderr past the operator, and the foreign count is the one
+    // signal here that can point at damage outside .devt/state/.
+    state_sweep: sweepReport,
     state_dir: path.join(projectRoot, ".devt", "state"),
     tdd_mode: state.tdd_mode || false,
     tier: seededTier,

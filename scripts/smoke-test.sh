@@ -9810,21 +9810,36 @@ rm -rf "$N10_TMP"
 # backlog item. Live fixture-based — no static-only greps.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# O1: cleanup wired into init.cjs sweeps stale ad_hoc files while preserving
-# fresh ad_hoc (current-session work-in-progress).
+# O1: init's unattended sweep is authorship-scoped, and the manual escape hatch
+# still isn't. This gate USED to assert that init archives stale foreign files
+# — which is the defect, not the contract: a project's committed test baseline
+# is foreign AND always older than the workflow, so it qualified on every run
+# and the test that read it failed blaming the branch. Age was never the
+# question; authorship is.
+#
+# Four legs, because dropping any one of them re-opens a different hole:
+#   a — stale FOREIGN survives init (the fix)
+#   b — stale devt-owned is still archived (the sweep still works; a fix that
+#       disabled it would pass leg a while abandoning the directory)
+#   c — fresh foreign survives (unchanged)
+#   d — explicit `state cleanup` STILL archives foreign, so an operator whose
+#       own scratch shares the directory keeps a way to clear it
 O1_TMP=$(mktemp -d)
 mkdir -p "$O1_TMP/.devt/state"
 touch -t 202604010000.00 "$O1_TMP/.devt/state/council-stale.md"
-touch -t 202604010000.00 "$O1_TMP/.devt/state/simplify2-quality.md"
 touch -t 202604010000.00 "$O1_TMP/.devt/state/review-impl.json"
+touch -t 202604010000.00 "$O1_TMP/.devt/state/orphaned-write.tmp"
 touch "$O1_TMP/.devt/state/fresh-work.md"
 (cd "$O1_TMP" && node "$CLI" init workflow "o1 test" >/dev/null 2>&1)
-O1_STALE_GONE=$([ ! -f "$O1_TMP/.devt/state/council-stale.md" ] && [ ! -f "$O1_TMP/.devt/state/simplify2-quality.md" ] && [ ! -f "$O1_TMP/.devt/state/review-impl.json" ] && echo 1 || echo 0)
+O1_FOREIGN_KEPT=$([ -f "$O1_TMP/.devt/state/council-stale.md" ] && [ -f "$O1_TMP/.devt/state/review-impl.json" ] && echo 1 || echo 0)
+O1_OWNED_GONE=$([ ! -f "$O1_TMP/.devt/state/orphaned-write.tmp" ] && echo 1 || echo 0)
 O1_FRESH_KEPT=$([ -f "$O1_TMP/.devt/state/fresh-work.md" ] && echo 1 || echo 0)
-if [ "$O1_STALE_GONE" = "1" ] && [ "$O1_FRESH_KEPT" = "1" ]; then
-  pass "O1 (H1): init.cjs cleanup sweeps stale ad_hoc, preserves fresh ad_hoc (stale=gone, fresh=kept)"
+(cd "$O1_TMP" && node "$CLI" state cleanup --apply >/dev/null 2>&1)
+O1_MANUAL_SWEEPS=$([ ! -f "$O1_TMP/.devt/state/council-stale.md" ] && echo 1 || echo 0)
+if [ "$O1_FOREIGN_KEPT" = "1" ] && [ "$O1_OWNED_GONE" = "1" ] && [ "$O1_FRESH_KEPT" = "1" ] && [ "$O1_MANUAL_SWEEPS" = "1" ]; then
+  pass "O1: init sweep is authorship-scoped (stale foreign kept, stale devt-owned archived, fresh kept) and manual 'state cleanup' still sweeps foreign"
 else
-  fail "O1: init cleanup broken (stale_gone=$O1_STALE_GONE fresh_kept=$O1_FRESH_KEPT)"
+  fail "O1: init sweep regressed — foreign_kept=$O1_FOREIGN_KEPT (want 1), owned_gone=$O1_OWNED_GONE (want 1), fresh_kept=$O1_FRESH_KEPT (want 1), manual_sweeps=$O1_MANUAL_SWEEPS (want 1)"
 fi
 rm -rf "$O1_TMP"
 
@@ -10893,10 +10908,10 @@ EOF_K51
 K51_LARGE=$(cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
 # Stub file (header-only — em-dash)
 echo "# Impl — in progress" > "$K51_TMP/.devt/state/impl-summary.md"
-rm -f "$K51_TMP/.devt/state/claim-check-failures.jsonl"
+rm -f "$K51_TMP/.devt/state/claim-checks.jsonl"
 cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer > /dev/null 2>&1
 cd "$ROOT"
-K51_STUB=$(tail -1 "$K51_TMP/.devt/state/claim-check-failures.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
+K51_STUB=$(tail -1 "$K51_TMP/.devt/state/claim-checks.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
 K51_L2_BLOCK=$(cd "$K51_TMP" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
 # Substantive retry
 cat > "$K51_TMP/.devt/state/impl-summary.md" <<EOF_K51_SUB
@@ -10911,7 +10926,7 @@ Sliding-window counters chosen over fixed-window to avoid boundary burst effect.
 EOF_K51_SUB
 cd "$K51_TMP" && node "$CLI" state assert-artifact-present programmer > /dev/null 2>&1
 cd "$ROOT"
-K51_RETRY=$(tail -1 "$K51_TMP/.devt/state/claim-check-failures.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
+K51_RETRY=$(tail -1 "$K51_TMP/.devt/state/claim-checks.jsonl" 2>/dev/null | jq -r '.substance_verdict' 2>/dev/null || echo "")
 K51_L2_PASS=$(cd "$K51_TMP" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | jq -r '.ok' 2>/dev/null || echo "")
 if [ "$K51_LARGE" = "substantive" ] && [ "$K51_STUB" = "stub" ] && [ "$K51_L2_BLOCK" = "false" ] && \
    [ "$K51_RETRY" = "substantive" ] && [ "$K51_L2_PASS" = "true" ]; then
@@ -14841,7 +14856,7 @@ else
   fail "K182: ROI parser refinement wrong — got: $K182_OUT"
 fi
 
-# K183: initWorkflow rotates dispatch-warnings.jsonl + claim-check-failures.jsonl
+# K183: initWorkflow rotates dispatch-warnings.jsonl + claim-checks.jsonl
 # when closed prior workflow detected (closes same-day-churn KILL-gate gap for
 # block-mode users). Asserts: closed workflow + 2 counter logs → init rotates
 # both to archive sidecars.
@@ -14855,14 +14870,14 @@ first_created_at: "2026-06-25T00:00:00.000Z"
 task: "prior"
 YEOF
 echo '{"ts":"2026-06-25T01:00:00Z","source":"raw_dispatch"}' > "$K183_TMP/.devt/state/dispatch-warnings.jsonl"
-echo '{"ts":"2026-06-25T01:00:00Z","agent":"programmer","exists":false}' > "$K183_TMP/.devt/state/claim-check-failures.jsonl"
+echo '{"ts":"2026-06-25T01:00:00Z","agent":"programmer","exists":false}' > "$K183_TMP/.devt/state/claim-checks.jsonl"
 cd "$K183_TMP" && node "$ROOT/bin/devt-tools.cjs" init review "new task" >/dev/null 2>&1
 LIVE_DW=$([ -f "$K183_TMP/.devt/state/dispatch-warnings.jsonl" ] && echo "present" || echo "rotated")
-LIVE_CC=$([ -f "$K183_TMP/.devt/state/claim-check-failures.jsonl" ] && echo "present" || echo "rotated")
+LIVE_CC=$([ -f "$K183_TMP/.devt/state/claim-checks.jsonl" ] && echo "present" || echo "rotated")
 ARCHIVE_COUNT=$(ls "$K183_TMP/.devt/state"/*archive*.jsonl 2>/dev/null | wc -l | tr -d ' ')
 cd "$ROOT"; rm -rf "$K183_TMP"
 if [ "$LIVE_DW" = "rotated" ] && [ "$LIVE_CC" = "rotated" ] && [ "$ARCHIVE_COUNT" = "2" ]; then
-  pass "K183: initWorkflow rotates counter logs (dispatch-warnings + claim-check-failures) on closed-workflow detection (cal #34 #6)"
+  pass "K183: initWorkflow rotates counter logs (dispatch-warnings + claim-checks) on closed-workflow detection (cal #34 #6)"
 else
   fail "K183: counter rotation wrong — dw=$LIVE_DW (rotated), cc=$LIVE_CC (rotated), archives=$ARCHIVE_COUNT (expected 2)"
 fi
@@ -19135,11 +19150,11 @@ K332_PROJ=$(mktemp -d)
 mkdir -p "$K332_PROJ/.devt/state"
 K332_OK=1; K332_WHY=""
 printf 'active: true\nworkflow_id: 11112222-3333-4444-5555-666677778888\nworkflow_type: arch_health_scan\nphase: arch_health_scan\ntask: "t"\nfirst_created_at: "2026-01-01T00:00:00Z"\ncreated_at: "2026-01-01T00:00:00Z"\n' > "$K332_PROJ/.devt/state/workflow.yaml"
-printf '{"source":"claim_check","agent":"architect","verdict":"failure","reason":"missing","ts":"2026-01-01T01:00:00Z","expected_path":".devt/state/arch-review.md"}\n' > "$K332_PROJ/.devt/state/claim-check-failures.jsonl"
+printf '{"source":"claim_check","agent":"architect","verdict":"failure","reason":"missing","ts":"2026-01-01T01:00:00Z","expected_path":".devt/state/arch-review.md"}\n' > "$K332_PROJ/.devt/state/claim-checks.jsonl"
 node -e "require('fs').writeFileSync(process.argv[1]+'/.devt/state/arch-review.md','# Arch Review\n\n## Findings\n\n'+('Substantive analysis line. '.repeat(80)))" "$K332_PROJ"
 K332_A=$(cd "$K332_PROJ" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.ok===true&&Array.isArray(j.self_healed)&&j.self_healed[0]==="architect")?"heal":"no-heal")})')
 [ "$K332_A" = "heal" ] || { K332_OK=0; K332_WHY="a:self-heal=$K332_A"; }
-printf '{"source":"claim_check","agent":"tester","verdict":"failure","reason":"missing","ts":"2026-01-01T01:00:00Z","expected_path":".devt/state/test-summary.md"}\n' >> "$K332_PROJ/.devt/state/claim-check-failures.jsonl"
+printf '{"source":"claim_check","agent":"tester","verdict":"failure","reason":"missing","ts":"2026-01-01T01:00:00Z","expected_path":".devt/state/test-summary.md"}\n' >> "$K332_PROJ/.devt/state/claim-checks.jsonl"
 K332_B=$(cd "$K332_PROJ" && node "$CLI" state assert-claim-checks-resolved 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write(j.ok===false?"blocks":"leaks")})')
 [ "$K332_B" = "blocks" ] || { K332_OK=0; K332_WHY="$K332_WHY b:still-missing=$K332_B"; }
 # reactivate is recency-bounded: a FRESH stamp is a turn-boundary resume
@@ -19639,13 +19654,19 @@ for(const m of wf.matchAll(/review_file:\s*\"([^\"]+)\"/g)){
 }
 fs.writeFileSync(d+'/review.json',JSON.stringify({severity_counts:{critical:2,important:4,minor:0,nit:0},raw_lane_finding_counts:{by_lane:{L1:{critical:1,important:2},L2:{critical:1,important:2}},raw_total:{critical:2,important:4,minor:0,nit:0}}}));
 fs.writeFileSync(d+'/review.md','# R\n');
+fs.writeFileSync(d+'/rollup-only.json',JSON.stringify({severity_counts:{critical:2,important:4,minor:0,nit:0},raw_lane_finding_counts:{raw_total:{critical:2,important:4,minor:0,nit:0}}}));
+fs.writeFileSync(d+'/rollup-only.md','# R\n');
 fs.writeFileSync(d+'/drift.json',JSON.stringify({severity_counts:{critical:1,important:1,minor:0,nit:0},raw_lane_finding_counts:{per_lane_totals:{L1:3}}}));
 fs.writeFileSync(d+'/drift.md','# R\n');" 2>/dev/null
 K345_Q() { (cd "$K345_TMP" && node "$CLI" state lane-severity-tally ${2:+--file=$2} 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String(eval(process.argv[1])));}catch(e){process.stdout.write('err');}})" "$1"; }
-K345_A=$(K345_Q 'j.self_reported_shape+":"+j.self_reported_lane_totals.important')
+# by_lane outranks any roll-up when both are present — it is checkable against
+# the lane sidecars, while a roll-up is a number the consolidator typed. The
+# roll-up shim still has to work on its own, or a consolidator that writes only
+# a total loses the cross-check the way the field run did.
+K345_A="$(K345_Q 'j.self_reported_shape+":"+j.self_reported_lane_totals.important')/$(K345_Q 'j.self_reported_shape+":"+j.self_reported_lane_totals.important' "$K345_TMP/.devt/state/rollup-only.json")"
 K345_B=$(K345_Q '(j.cross_check_mismatch?"MISMATCH":"")+(j.cross_check_unavailable?"unavail":"")' "$K345_TMP/.devt/state/drift.json")
 K345_C=$(K345_Q '(j.ids_missing_from_review===null)+":"+/unavailable/.test(j.narrative_guard||"")')
-K345_E=$( (cd "$K345_TMP" && printf '# Review\n\n## Findings\n\nA substantive body with plenty of words so the stub detector does not trip on it at all here.\n' > .devt/state/review.md; node "$CLI" state assert-artifact-present code-reviewer >/dev/null 2>&1; tail -1 .devt/state/claim-check-failures.jsonl) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).ok));}catch(e){process.stdout.write('err');}})")
+K345_E=$( (cd "$K345_TMP" && printf '# Review\n\n## Findings\n\nA substantive body with plenty of words so the stub detector does not trip on it at all here.\n' > .devt/state/review.md; node "$CLI" state assert-artifact-present code-reviewer >/dev/null 2>&1; tail -1 .devt/state/claim-checks.jsonl) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).ok));}catch(e){process.stdout.write('err');}})")
 K345_F=$( (cd "$K345_TMP" && node "$CLI" mcp-stats --correlation-id=nomatch_zzz 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).aggregate.total_calls));}catch(e){process.stdout.write('err');}})")
 # g — .devt/state/project/ is the project's half of the directory and is never
 # swept. A test baseline living beside devt's own artifacts was archived on
@@ -19669,10 +19690,10 @@ if /usr/bin/grep -q '{lane_sample}' "$ROOT/templates/dispatch/envelopes/verifier
    && /usr/bin/grep -q 'laneSampleForVerification' "$ROOT/bin/modules/dispatch.cjs" \
    && /usr/bin/grep -q 'READ-ONLY analysis with findings and recommendations. No edits or writes to \*\*project source\*\*' "$ROOT/workflows/code-review.md"; then K345_I=1; fi
 rm -rf "$K345_TMP"
-if [ "$K345_A" = "raw_total:4" ] && [ "$K345_B" = "unavail" ] && [ "$K345_C" = "true:true" ] && [ "$K345_D" = "1" ] && [ "$K345_E" = "true" ] && [ "$K345_F" = "0" ] && [ "$K345_G" = "true" ] && [ "$K345_H" = "true" ] && [ "$K345_I" = "1" ]; then
+if [ "$K345_A" = "by_lane:4/raw_total:4" ] && [ "$K345_B" = "unavail" ] && [ "$K345_C" = "true:true" ] && [ "$K345_D" = "1" ] && [ "$K345_E" = "true" ] && [ "$K345_F" = "0" ] && [ "$K345_G" = "true" ] && [ "$K345_H" = "true" ] && [ "$K345_I" = "1" ]; then
   pass "K345: severity blocks read a raw_total roll-up, unparseable shapes report as unreadable rather than as a count disagreement, the narrative guard declares itself unavailable instead of returning an empty pass, lane cids survive a mid-run workflow-id rotation, claim-check records carry ok, a zero-match mcp-stats filter returns a zeroed aggregate, .devt/state/project/ survives cleanup, and the verifier samples the highest LOC-per-finding lane"
 else
-  fail "K345: guard-cries-wolf batch regressed — raw_total-shim=$K345_A (want raw_total:4), drift-not-mismatch=$K345_B (want unavail), narrative-guard-honest=$K345_C (want true:true), cid-frozen-at-registration=$K345_D (want 1), claim-check-ok=$K345_E (want true), zero-match-aggregate=$K345_F (want 0), project-subdir-protected=$K345_G (want true), lane-sample-ranks=$K345_H (want true), verifier-sample-wired=$K345_I (want 1)"
+  fail "K345: guard-cries-wolf batch regressed — rollup-shim=$K345_A (want by_lane:4/raw_total:4), drift-not-mismatch=$K345_B (want unavail), narrative-guard-honest=$K345_C (want true:true), cid-frozen-at-registration=$K345_D (want 1), claim-check-ok=$K345_E (want true), zero-match-aggregate=$K345_F (want 0), project-subdir-protected=$K345_G (want true), lane-sample-ranks=$K345_H (want true), verifier-sample-wired=$K345_I (want 1)"
 fi
 
 # K341: contract hygiene (task-service field batch). Four legs:
@@ -19868,6 +19889,115 @@ if [ "$K338_A" = "1" ] && [ "$K338_B" = "1" ] && [ "$K338_C" = "1" ] && [ "$K338
   pass "K338: lane-partition correctness (same-basename files distinct, consolidation within fair share, minimal partitions unflagged, no false-cause fallback reason + degradation persisted)"
 else
   fail "K338: lane-partition regressed — basename-distinct=$K338_A (want 1), balanced-consolidation=$K338_B (want 1), minimal-unflagged=$K338_C (want 1), honest-persisted-fallback=$K338_D (want 1)"
+fi
+
+# F35: the auto-sweep archives devt's own files and LEAVES foreign ones.
+# Behavioral, not a grep for the word "foreign": a project's committed test
+# baseline lived in .devt/state/, was classified ad_hoc, and was archived on
+# every review — the drift test that read it then failed and blamed the branch.
+# Asserts the classifier AND the sweep: the two devt-written files this batch
+# declared (gate-trace.jsonl, review-lane-*.json) must survive as recognized,
+# the ephemeral must be archived, the two foreign files must remain on disk,
+# and the manifest must name what was left behind.
+F35_T=$(mktemp -d); mkdir -p "$F35_T/.devt/state"; printf '{}' > "$F35_T/.devt/config.json"
+printf 'baseline' > "$F35_T/.devt/state/canonical-baseline.json"
+printf 'x' > "$F35_T/.devt/state/fix-L1.md"
+printf 'g' > "$F35_T/.devt/state/gate-trace.jsonl"
+printf 'j' > "$F35_T/.devt/state/review-lane-audit.json"
+printf 'o' > "$F35_T/.devt/state/orphan.tmp"
+F35_OUT=$(node -e "
+const a=require('$ROOT/bin/modules/state-audit.cjs');
+const r=a.cleanupStateFiles({dryRun:false,autoSweep:true,projectRoot:'$F35_T',staleDays:1,adHocStaleDays:1});
+const arch=(r.archived||[]).map(x=>x.name).sort().join(',');
+console.log(arch+'|'+r.foreign_count+'|'+(r.foreign||[]).map(f=>f.name).sort().join(','));
+" 2>/dev/null || echo "ERR")
+F35_SURV=1
+for f in canonical-baseline.json fix-L1.md gate-trace.jsonl review-lane-audit.json; do
+  [ -f "$F35_T/.devt/state/$f" ] || F35_SURV=0
+done
+F35_MAN=0
+/usr/bin/grep -q 'left_in_place	canonical-baseline.json' "$F35_T"/.devt/state/.archive/cleanup-*/MANIFEST.txt 2>/dev/null && F35_MAN=1
+rm -rf "$F35_T"
+if [ "$F35_OUT" = "orphan.tmp|2|canonical-baseline.json,fix-L1.md" ] && [ "$F35_SURV" = "1" ] && [ "$F35_MAN" = "1" ]; then
+  pass "F35: auto-sweep is authorship-scoped (devt-owned archived, foreign left on disk + named in MANIFEST)"
+else
+  fail "F35: auto-sweep regressed — got '$F35_OUT' (want 'orphan.tmp|2|canonical-baseline.json,fix-L1.md'), survivors=$F35_SURV manifest=$F35_MAN"
+fi
+
+# F36: the severity cross-check reads by_lane and names WHICH lane drifted.
+# The reader previously accepted flat or a raw_total roll-up only; a field run
+# wrote {by_lane,declared_totals} and the cross-check went dark reporting an
+# unreadable shape. Seeds a consolidator that under-reports L2's minor count
+# AND contradicts its own roll-up, then asserts both are named — a silent
+# preference for by_lane would fix the number and hide the event.
+F36_T=$(mktemp -d); mkdir -p "$F36_T/.devt/state"; printf '{}' > "$F36_T/.devt/config.json"
+printf 'active: true\nworkflow_type: code_review_parallel\nphase: consolidate\nlanes:\n  - id: L1\n    scope: a\n    status: complete\n    review_file: .devt/state/review-lane-a.md\n  - id: L2\n    scope: b\n    status: complete\n    review_file: .devt/state/review-lane-b.md\n' > "$F36_T/.devt/state/workflow.yaml"
+printf '{"severity_counts":{"critical":0,"important":2,"minor":1,"nit":0}}' > "$F36_T/.devt/state/review-lane-a.json"
+printf '{"severity_counts":{"critical":1,"important":0,"minor":3,"nit":0}}' > "$F36_T/.devt/state/review-lane-b.json"
+printf '{"status":"DONE","verdict":"NEEDS_WORK","severity_counts":{"critical":1,"important":2,"minor":4,"nit":0},"raw_lane_finding_counts":{"by_lane":{"L1":{"critical":0,"important":2,"minor":1,"nit":0},"L2":{"critical":1,"important":0,"minor":1,"nit":0}},"declared_totals":{"critical":1,"important":2,"minor":4,"nit":0}},"findings":[{"id":"F1","severity":"important"}]}' > "$F36_T/.devt/state/review.json"
+printf '# R\nF1 here.\n' > "$F36_T/.devt/state/review.md"
+F36_OUT=$(cd "$F36_T" && node -e "
+const L=require('$ROOT/bin/modules/state-lanes.cjs');
+const r=L.laneSeverityTally({});
+console.log([r.basis,r.self_reported_shape,r.per_lane_cross_check,(r.per_lane_mismatches||[]).join(';'),(r.self_report_internal_mismatch?'internal_named':'internal_silent'),(r.cross_check_unavailable?'DARK':'ran')].join('|'));
+" 2>/dev/null || echo "ERR")
+rm -rf "$F36_T"
+case "$F36_OUT" in
+  "lane_sidecars|by_lane|MISMATCH|L2: minor lane=3 vs review.json=1|internal_named|ran")
+    pass "F36: severity cross-check reads by_lane, names the drifting lane, and reports the consolidator's self-contradiction" ;;
+  *)
+    fail "F36: severity cross-check regressed — got '$F36_OUT'" ;;
+esac
+
+# F37: the scope parser reads ONLY the ## Files section. devt authored
+# code-review-input.md two ways — identify_scope documents a ## Source section,
+# the parallel pre-write omitted it — and the parser took every non-heading
+# line, so the provenance descriptor became a phantom file in the declared
+# universe. Following the DOCUMENTED template was what triggered it. Asserts
+# all three shapes yield exactly the real files, including the bare list that
+# has no ## Files heading at all.
+F37_T=$(mktemp -d)
+printf '# Review Scope\n\n## Files\n\n- app/a.py\n- app/b.py\n\n## Source\n\ngit-diff (union: merge-base development...HEAD), --base=development\n' > "$F37_T/documented.md"
+printf '# Review Scope\n\n## Files\n\n- app/a.py\n- app/b.py\n' > "$F37_T/short.md"
+printf -- '- app/a.py\n- app/b.py\n' > "$F37_T/bare.md"
+F37_OUT=$(node -e "
+const fs=require('fs');
+const src=fs.readFileSync('$ROOT/bin/modules/state-lanes.cjs','utf8');
+const m=src.match(/function _scopeFilesFromArtifact[\s\S]*?\n}/);
+if(!m){console.log('NOFN');process.exit(0)}
+const f=new Function('fs','return '+m[0])(fs);
+console.log(['documented','short','bare'].map(n=>(f('$F37_T/'+n+'.md')||[]).join(',')).join('|'));
+" 2>/dev/null || echo "ERR")
+rm -rf "$F37_T"
+if [ "$F37_OUT" = "app/a.py,app/b.py|app/a.py,app/b.py|app/a.py,app/b.py" ]; then
+  pass "F37: scope parser is section-aware (## Source descriptor is not a phantom file; bare lists still parse)"
+else
+  fail "F37: scope parser regressed — got '$F37_OUT' (want the same 2 files from all three shapes)"
+fi
+
+# F38: a terminal verdict auto-resets; an interrupted run does not.
+# A NEEDS_WORK review parks at phase=present_findings, never phase=complete,
+# and a re-review reuses the task text — so neither auto-reset branch fired and
+# the prior run's counters carried into a run that looked new. Field evidence:
+# an operator appending --fresh to every re-review by reflex. The two negative
+# legs are the load-bearing half: mid-flight work must still be resumable.
+F38_T=$(mktemp -d); mkdir -p "$F38_T/.devt/state"; printf '{}' > "$F38_T/.devt/config.json"
+F38_OLD=$(node -e "console.log(new Date(Date.now()-5*3600*1000).toISOString())")
+f38() { printf 'active: false\nworkflow_type: code_review\nphase: %s\n%stask: "review branch X"\ncreated_at: "%s"\n' "$1" "$2" "$F38_OLD" > "$F38_T/.devt/state/workflow.yaml"
+  (cd "$F38_T" && node "$CLI" state staleness-check --task="review branch X" --workflow-type=code_review 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).auto_reset_recommended)}catch{console.log('ERR')}})"); }
+F38_NW=$(f38 present_findings 'verdict: NEEDS_WORK
+')
+F38_CO=$(f38 complete 'verdict: PASS
+')
+F38_MID=$(f38 dispatch_lanes '')
+F38_PAUSED=$(f38 present_findings "verdict: NEEDS_WORK
+stopped_at: \"$F38_OLD\"
+")
+rm -rf "$F38_T"
+if [ "$F38_NW" = "true" ] && [ "$F38_CO" = "true" ] && [ "$F38_MID" = "false" ] && [ "$F38_PAUSED" = "false" ]; then
+  pass "F38: terminal verdict (NEEDS_WORK) auto-resets like phase=complete; mid-flight + paused runs stay resumable"
+else
+  fail "F38: staleness auto-reset regressed — needs_work=$F38_NW (want true), complete=$F38_CO (want true), midflight=$F38_MID (want false), paused=$F38_PAUSED (want false)"
 fi
 
 # K337: orchestration replay harness. Replays recorded .devt/state/ fixtures

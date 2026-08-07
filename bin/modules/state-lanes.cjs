@@ -298,6 +298,63 @@ function _readSeverityBlock(raw) {
   return { counts: null, shape: "unrecognized" };
 }
 
+// Roll-up keys seen in the field beside a by_lane breakdown. Accepting a set of
+// names is a concession, not a design: the previous fix guessed ONE name
+// (raw_total), a run wrote another (declared_totals), and the cross-check went
+// dark again four versions later. The durable half of that fix is pinning the
+// shape at the PRODUCER — which is where it now lives, rendered into the
+// consolidator's task block.
+const _ROLLUP_KEYS = ["raw_total", "declared_totals", "totals", "total"];
+
+// `by_lane` outranks any roll-up: it is checkable, lane by lane, against
+// sidecars the consolidator cannot author, while a roll-up is a number the
+// consolidator typed. When both exist and disagree, the disagreement is
+// REPORTED rather than silently resolved — the only two ways to get there are a
+// consolidator arithmetic error or a consolidator that dropped findings from
+// by_lane while keeping the headline total, and the second is exactly the
+// lost-finding case this gate exists to catch. Preferring by_lane quietly would
+// fix the count and hide the event.
+function _readLaneDeclaredBlock(raw) {
+  if (!raw || typeof raw !== "object") return { counts: null, shape: "absent", by_lane: null };
+  let rollUp = null, rollUpKey = null;
+  for (const k of _ROLLUP_KEYS) {
+    if (raw[k] && typeof raw[k] === "object" && _SEVERITIES.some(s => Number.isFinite(raw[k][s]))) {
+      rollUp = _normalizeCounts(raw[k]); rollUpKey = k; break;
+    }
+  }
+  const byLaneRaw = raw.by_lane && typeof raw.by_lane === "object" ? raw.by_lane : null;
+  let byLane = null;
+  if (byLaneRaw) {
+    byLane = {};
+    for (const [laneId, block] of Object.entries(byLaneRaw)) {
+      if (block && typeof block === "object" && _SEVERITIES.some(s => Number.isFinite(block[s]))) {
+        byLane[laneId] = _normalizeCounts(block);
+      }
+    }
+    if (Object.keys(byLane).length === 0) byLane = null;
+  }
+
+  if (byLane) {
+    const summed = { critical: 0, important: 0, minor: 0, nit: 0 };
+    for (const c of Object.values(byLane)) for (const k of _SEVERITIES) summed[k] += c[k];
+    const out = { counts: summed, shape: "by_lane", by_lane: byLane };
+    if (rollUp) {
+      const off = _SEVERITIES.filter(k => rollUp[k] !== summed[k]);
+      out.roll_up_key = rollUpKey;
+      out.roll_up = rollUp;
+      if (off.length > 0) {
+        out.internal_mismatch = off
+          .map(k => `${k}: by_lane sums to ${summed[k]} but ${rollUpKey} says ${rollUp[k]}`)
+          .join("; ");
+      }
+    }
+    return out;
+  }
+  if (_SEVERITIES.some(k => Number.isFinite(raw[k]))) return { counts: _normalizeCounts(raw), shape: "flat", by_lane: null };
+  if (rollUp) return { counts: rollUp, shape: rollUpKey, by_lane: null };
+  return { counts: null, shape: "unrecognized", by_lane: null };
+}
+
 // Per-lane JSON sidecars written by each lane reviewer. This is the only lane
 // total the consolidator cannot author, which is what makes it the primary
 // basis: the consolidator's raw_lane_finding_counts stays as a cross-check,
@@ -363,7 +420,7 @@ function laneSeverityTally(opts = {}) {
   }
   const consolidatedRead = _readSeverityBlock(parsed.severity_counts);
   const consolidated = consolidatedRead.counts || { critical: 0, important: 0, minor: 0, nit: 0 };
-  const selfReportedRead = _readSeverityBlock(parsed.raw_lane_finding_counts);
+  const selfReportedRead = _readLaneDeclaredBlock(parsed.raw_lane_finding_counts);
   const selfReported = selfReportedRead.counts;
   const sidecars = _laneSidecarCounts();
   const laneDeclared = sidecars ? sidecars.totals : selfReported;
@@ -415,14 +472,48 @@ function laneSeverityTally(opts = {}) {
     if (selfReported) {
       out.self_reported_lane_totals = selfReported;
       out.self_reported_shape = selfReportedRead.shape;
+      if (selfReportedRead.internal_mismatch) {
+        // The consolidator disagreed with ITSELF. Reported before the
+        // lane comparison because it localizes the error to one artifact.
+        out.self_report_internal_mismatch = selfReportedRead.internal_mismatch;
+      }
       const disagree = _SEVERITIES.filter(k => selfReported[k] !== sidecars.totals[k]);
       if (disagree.length > 0) {
         out.cross_check_mismatch = disagree.map(k => `${k}: lanes=${sidecars.totals[k]} vs review.json=${selfReported[k]}`).join("; ");
       }
+      // Per lane, not just in aggregate. The aggregate answers "did a finding
+      // get lost"; this answers "which lane lost it", and only the second is
+      // actionable without re-reading every lane file. It also lets this guard
+      // and the lane sample corroborate each other: a lane that drifts here AND
+      // gets sampled is a far stronger signal than either alone.
+      if (selfReportedRead.by_lane) {
+        const byLane = selfReportedRead.by_lane;
+        const perLaneMismatches = [];
+        for (const [laneId, laneCounts] of Object.entries(sidecars.per_lane)) {
+          const claimed = byLane[laneId];
+          if (!claimed) {
+            perLaneMismatches.push(`${laneId}: wrote a sidecar but review.json::by_lane omits it entirely`);
+            continue;
+          }
+          const off = _SEVERITIES.filter(k => claimed[k] !== laneCounts[k]);
+          if (off.length > 0) {
+            perLaneMismatches.push(`${laneId}: ${off.map(k => `${k} lane=${laneCounts[k]} vs review.json=${claimed[k]}`).join(", ")}`);
+          }
+        }
+        for (const laneId of Object.keys(byLane)) {
+          if (!sidecars.per_lane[laneId]) {
+            perLaneMismatches.push(`${laneId}: claimed in review.json::by_lane but no lane sidecar backs it`);
+          }
+        }
+        out.per_lane_cross_check = perLaneMismatches.length === 0
+          ? `all ${Object.keys(sidecars.per_lane).length} lane(s) agree`
+          : "MISMATCH";
+        if (perLaneMismatches.length > 0) out.per_lane_mismatches = perLaneMismatches;
+      }
     } else {
       out.cross_check_unavailable = selfReportedRead.shape === "absent"
         ? "review.json carries no raw_lane_finding_counts — the lane totals stand unchecked against the consolidator's own figures"
-        : "review.json::raw_lane_finding_counts is in an unrecognized shape — expected flat {critical,important,minor,nit} or a raw_total roll-up. NOT a count disagreement: the cross-check could not run";
+        : "review.json::raw_lane_finding_counts is in an unrecognized shape — expected {by_lane:{<lane id>:{critical,important,minor,nit}}}, a flat block, or a roll-up under one of: " + _ROLLUP_KEYS.join("/") + ". NOT a count disagreement: the cross-check could not run";
     }
   }
   if (laneDeclared) {
@@ -980,11 +1071,28 @@ function _normScopePath(p) {
 // declared files at all, silently disabling the coverage check. Permissive
 // (the bash behaviour) is the correct side: a heading is presentation, and the
 // coverage claim must be about every path the artifact names.
+// Section-aware, because code-review-input.md has more than one section and
+// only `## Files` holds files. Reading every non-heading line parsed the
+// `## Source` provenance descriptor as a path: it became a phantom entry in
+// the declared universe, landed in lane-unassigned.txt, and pushed the
+// consolidator into its "MUST NOT report complete coverage" branch over a
+// line that was never a file.
+//
+// Falls back to whole-body when no `## Files` heading exists — a hand-written
+// bare list is still a legal scope artifact and must keep parsing.
 function _scopeFilesFromArtifact(p) {
   let body = "";
   try { body = fs.readFileSync(p, "utf8"); } catch { return null; }
+  const lines = body.split("\n");
+  const start = lines.findIndex((l) => /^##\s+Files\s*$/i.test(l.trim()));
+  const scoped = start === -1
+    ? lines
+    : lines.slice(start + 1, (() => {
+        const rest = lines.slice(start + 1).findIndex((l) => /^#{1,6}\s+/.test(l.trim()));
+        return rest === -1 ? lines.length : start + 1 + rest;
+      })());
   const files = [];
-  for (const raw of body.split("\n")) {
+  for (const raw of scoped) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     files.push(line.replace(/^[-*]\s+/, "").replace(/`/g, "").trim());

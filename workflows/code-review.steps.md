@@ -279,6 +279,24 @@ When bash prints `auto_curator: SKIP` or `auto_curator: DISABLED`, no dispatch �
 
 <step name="present_findings" gate="findings are reported to the user (parallel: with lane provenance)">
 
+**Foreign-file notice.** `.devt/state/` is shared scratch from the project's side and private state from devt's, and that collision is what let a review archive a file a project's test suite reads. The sweep no longer touches files devt didn't write — it reports them. Surface the count HERE as well as at init, because init's stderr scrolls past under a 20-block orchestration (the same argument `partition-degraded.txt` is persisted for):
+
+```bash
+FOREIGN=$(node -e "
+const a=require('${CLAUDE_PLUGIN_ROOT}/bin/modules/state-audit.cjs');
+const r=a.auditStateFiles({});
+if(!r.ok){process.exit(0)}
+const f=(r.buckets.ad_hoc||[]).map(x=>x.name);
+if(f.length)console.log(f.length+' | '+f.slice(0,8).join(', ')+(f.length>8?', …':''));
+" 2>/dev/null || true)
+if [ -n "$FOREIGN" ]; then
+  echo "note: ${FOREIGN%% |*} file(s) in .devt/state/ were not written by devt and were left untouched: ${FOREIGN#*| }"
+  echo "      (devt never auto-archives these. Anything the project must keep belongs in .devt/state/project/; 'state cleanup --apply' sweeps them deliberately.)"
+fi
+```
+
+Include the notice in the findings you present when it fires. It is not a review finding — say so — but a file devt declined to touch is the one signal here that can point at state outside devt's own.
+
 **Execution-receipt shortcut — one call for the whole finalize gate set.** `state assert-all --phase=complete` runs every gate registered for this workflow_type's complete transition (same YAML registry `advance-phase` consults) and returns one JSON verdict — per-gate `{gate, ok, reason, elapsed_ms, detail}` plus `all_ok` — with a NONZERO EXIT CODE on any failure. Prefer it when composing gates into pipelines: a mangled pipeline (unquoted-var no-op, jq on empty stdin) renders the inline blocks below as blank output that reads like a pass, while an exit code survives any output mangling. The inline per-gate blocks remain canonical for step-by-step remediation (each carries its fix guidance); on assert-all failure, consult the failing gate's block below.
 
 **Auto-curator-considered gate.** Before presenting findings, assert that auto-curation was considered (not silently skipped):
