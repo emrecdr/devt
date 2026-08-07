@@ -1972,9 +1972,11 @@ function augmentImpactMap(opts = {}) {
 
   // Resolve the diff files (the two god-node CLIs need them).
   let diffFiles = Array.isArray(opts.files) ? opts.files.slice() : [];
+  let resolvedBase = opts.files ? "caller-supplied" : null;
   if (diffFiles.length === 0) {
     try {
-      const base = opts.baseRef || (brief && brief.git && brief.git.primary_branch) || "main";
+      const base = require("./config.cjs").resolvePrimaryBranch(opts.baseRef);
+      resolvedBase = base;
       // Union collection (committed range + working tree + untracked) — the
       // same semantic every scope-sensitive consumer uses; a bare base...HEAD
       // diff goes blind on uncommitted trees.
@@ -2080,7 +2082,12 @@ function augmentImpactMap(opts = {}) {
     }
   }
 
-  return { sections_appended: appended, god_node_count: fileGods.length, symbol_godnode_count: symGods.length, ambiguous_count: ambCount, skip_absorbed: skipAbsorbed };
+  // base_ref + diff_file_count are reported because a wrong base is the one
+  // error this command cannot raise: it scans the wrong file set thoroughly and
+  // returns a confident clean result. An operator was setting PRIMARY_BRANCH by
+  // hand on every run for exactly this reason — the number was unknowable from
+  // the output.
+  return { sections_appended: appended, god_node_count: fileGods.length, symbol_godnode_count: symGods.length, ambiguous_count: ambCount, skip_absorbed: skipAbsorbed, base_ref: resolvedBase, diff_file_count: diffFiles.length };
 }
 
 // B-XIII — group diff files by their dominant graphify community attribute.

@@ -596,7 +596,7 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     try {
       const { getMergedConfig } = require("./config.cjs");
       const cfg = getMergedConfig();
-      primaryBranch = (cfg && cfg.git && cfg.git.primary_branch) || "main";
+      primaryBranch = require("./config.cjs").resolvePrimaryBranch(null, cfg);
     } catch { primaryBranch = "main"; }
   }
 

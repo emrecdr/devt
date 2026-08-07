@@ -1123,7 +1123,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   if (!primaryBranch) {
     try {
       const cfg = require("./config.cjs").getMergedConfig();
-      primaryBranch = (cfg && cfg.git && cfg.git.primary_branch) || "main";
+      primaryBranch = require("./config.cjs").resolvePrimaryBranch(null, cfg);
     } catch { primaryBranch = "main"; }
   }
   const degraded = [];
@@ -1729,7 +1729,7 @@ function run(subcommand, args) {
       if (!base) {
         try {
           const cfg = require("./config.cjs").getMergedConfig();
-          base = (cfg.git && cfg.git.primary_branch) || "main";
+          base = require("./config.cjs").resolvePrimaryBranch(null, cfg);
         } catch { base = "main"; }
       }
       // --range=<a>..<b> (or a single ref): explicit commit-range scope for

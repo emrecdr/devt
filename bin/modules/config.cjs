@@ -742,4 +742,23 @@ function isMemoryEnabled(cfg) {
   return !(cfg && cfg.memory && cfg.memory.enabled === false);
 }
 
-module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, readJsonSafe, isMemoryEnabled, DEFAULTS };
+
+// The diff base every scope-sensitive consumer measures against. One resolver
+// because seven sites had re-implemented it and the eighth got it wrong: it
+// read `brief.git.primary_branch` from preflight-brief.json, which carries no
+// `git` block at all, so the lookup never resolved and the "main" literal was
+// the final answer — then passed EXPLICITLY to collectChangedFiles, defeating
+// that function's own base handling. On a project whose primary branch is
+// `development`, the god-node scan ran over 289 files instead of 92 and said
+// nothing, because a wrong base does not error: it reviews the wrong thing
+// thoroughly. Pass an explicit ref to override; pass nothing to get the
+// project's configured branch.
+function resolvePrimaryBranch(explicit, cfg) {
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  let c = cfg;
+  if (!c) { try { c = getMergedConfig(); } catch { c = null; } }
+  const v = c && c.git && c.git.primary_branch;
+  return (typeof v === "string" && v.trim()) ? v.trim() : "main";
+}
+
+module.exports = { run, getMergedConfig, findProjectRoot, deepMerge, readJsonSafe, isMemoryEnabled, resolvePrimaryBranch, DEFAULTS };

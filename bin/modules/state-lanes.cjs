@@ -677,7 +677,7 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
   if (!laneBaseRef) {
     try {
       const cfg = require("./config.cjs").getMergedConfig();
-      laneBaseRef = (cfg.git && cfg.git.primary_branch) || "main";
+      laneBaseRef = require("./config.cjs").resolvePrimaryBranch(null, cfg);
     } catch { laneBaseRef = "main"; }
   }
   // Lock so concurrent register-lane calls don't lose entries on the

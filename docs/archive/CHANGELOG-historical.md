@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.204.0] - 2026-07-25
+
+Both items surfaced by a post-release deep-validation pass (adversarial mutation-testing of the session's new gates + an audit for further improvements).
+
+### Added
+
+- **Coordinator routing-table content-parity gate.** The `workflows/do.md` ↔ `agents/devt-coordinator.md` routing tables were gated on **row-count parity only** — the file's own drift note admitted it "does not catch column-content drift," so two equal-row tables could route a command to a different target, rename a command, or diverge on a `--flag` form undetected. The gate now also asserts the sorted `/devt:` command-token sets (full form incl. flags, extracted from table rows) are **identical** — the same drift class K320 closes for the implement/test bodies. Verified adversarially (mutating `/devt:ship`→`/devt:shipx` turns it red).
+
+### Fixed
+
+- **Smoke suite is now robust to a pre-existing "running" subagent in the dogfood repo.** Several gates (K4 among them) exercise the CLI against the repo's own `.devt/state/`, where `init workflow` is blocked by the lane-state-guard when `status.json` shows a fresh running agent — a crashed prior session (or a hook test) would abort the **entire** suite before the Result line. The setup now snapshots + clears `status.json` at start and restores it in the EXIT trap (mirroring the existing `workflow.yaml` tripwire), and the 8 bare `init workflow` calls are guarded with `|| true` so any init failure degrades to a visible gate failure instead of an ungraceful abort. Verified: injecting a running agent, the suite now runs 1068/0 instead of aborting at K4.
+
 ## [0.203.0] - 2026-07-22
 
 ### Added

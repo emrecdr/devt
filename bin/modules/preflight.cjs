@@ -317,7 +317,7 @@ function extractDiffSymbols(opts = {}) {
     if (wfRange) throw new Error("range-scoped");
     const { getMergedConfig } = require("./config.cjs");
     const cfg = getMergedConfig();
-    const primary = (cfg && cfg.git && typeof cfg.git.primary_branch === "string" && cfg.git.primary_branch) || "main";
+    const primary = require("./config.cjs").resolvePrimaryBranch(null, cfg);
     // Three-dot syntax: symbols changed on this branch since divergence from
     // primary. This is the PR diff for typical feature-branch workflows.
     ranges.push(`${primary}...HEAD`);

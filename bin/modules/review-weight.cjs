@@ -168,7 +168,7 @@ function assessReviewWeight(opts = {}) {
       const proot = opts.projectRoot || findProjectRoot();
       if (!resolvedBase) {
         const gc = getMergedConfig();
-        resolvedBase = (gc && gc.git && gc.git.primary_branch) || "main";
+        resolvedBase = require("./config.cjs").resolvePrimaryBranch(null, gc);
       }
       files = collectChangedFiles(proot, resolvedBase, opts.range ? { range: opts.range } : undefined);
       filesReadable = true;

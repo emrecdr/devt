@@ -8,6 +8,21 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.241.0] - 2026-08-08
+
+### Fixed
+
+- **The god-node scan measured against the wrong branch on any project whose primary branch isn't `main`.** `augment-impact-map` resolved its diff base from `brief.git.primary_branch` — a field `preflight-brief.json` has never carried, in any version. The lookup therefore never resolved, the `"main"` literal beside it was the real answer, and that literal was then passed **explicitly** to `collectChangedFiles`, which interpolates whatever it is given and silently catches an unreachable ref. On a project configured with `primary_branch: development`, the scan ran over **289 files instead of 92** — three times the correct set — and reported nothing, because a wrong base cannot raise: it scans the wrong thing thoroughly and returns a confident clean result. That output feeds `<god_node_warnings>` into every reviewer dispatch. Found by validating an operator's standing habit of exporting `PRIMARY_BRANCH` by hand "even after confirming config has it right" — the workaround was masking this.
+
+### Changed
+
+- **One resolver for the diff base.** Seven sites had each re-implemented `(cfg && cfg.git && cfg.git.primary_branch) || "main"`, and the eighth disagreed with all of them — which is the actual root cause, not the one wrong line. `config.cjs::resolvePrimaryBranch(explicit, cfg)` is now the single implementation and every consumer routes through it; an explicit ref still overrides, a blank one falls through to config. A gate leg fails if any module resolves it independently again.
+- **`augment-impact-map` reports the base it used.** The result now carries `base_ref` and `diff_file_count`. A wrong base is the one error this command cannot raise, so the number has to be visible — that invisibility is precisely what the operator was compensating for.
+
+### Added
+
+- **F43** — three legs: the resolver contract (explicit overrides, blank falls through), `augment-impact-map` exercised end-to-end on a repo that has **no `main` branch at all** so the old literal yields an empty scan, and a structural check that no module re-implements the resolution. Verified falsifiable: reverting the fix reports `augment_base=main:EMPTY`.
+
 ## [0.240.0] - 2026-08-07
 
 ### Fixed
@@ -605,16 +620,4 @@ A third external deep-read (post-0203) was validated finding-by-finding: 13 find
 - R6 ("allow-hooks fail closed if `_common.sh` breaks") — severity refuted: exit 1 is a *non-blocking* hook error to the harness (only exit 2 blocks), so the failure mode is fail-open-with-noise; the proposed `source … || echo '{}'` would hide guard death and was not adopted.
 - The injector "runs the full CLI on every prompt with no idle short-circuit" — partly wrong: the `state read` is mtime-cached; the unconditional per-prompt cost is the context-builder spawn.
 - PreToolUse matcher-merge and injector idle short-circuit — refuted by measurement (profile-skips cost ~1ms; the cache works); recorded as validated non-issues rather than shipped.
-
-## [0.204.0] - 2026-07-25
-
-Both items surfaced by a post-release deep-validation pass (adversarial mutation-testing of the session's new gates + an audit for further improvements).
-
-### Added
-
-- **Coordinator routing-table content-parity gate.** The `workflows/do.md` ↔ `agents/devt-coordinator.md` routing tables were gated on **row-count parity only** — the file's own drift note admitted it "does not catch column-content drift," so two equal-row tables could route a command to a different target, rename a command, or diverge on a `--flag` form undetected. The gate now also asserts the sorted `/devt:` command-token sets (full form incl. flags, extracted from table rows) are **identical** — the same drift class K320 closes for the implement/test bodies. Verified adversarially (mutating `/devt:ship`→`/devt:shipx` turns it red).
-
-### Fixed
-
-- **Smoke suite is now robust to a pre-existing "running" subagent in the dogfood repo.** Several gates (K4 among them) exercise the CLI against the repo's own `.devt/state/`, where `init workflow` is blocked by the lane-state-guard when `status.json` shows a fresh running agent — a crashed prior session (or a hook test) would abort the **entire** suite before the Result line. The setup now snapshots + clears `status.json` at start and restores it in the EXIT trap (mirroring the existing `workflow.yaml` tripwire), and the 8 bare `init workflow` calls are guarded with `|| true` so any init failure degrades to a visible gate failure instead of an ungraceful abort. Verified: injecting a running agent, the suite now runs 1068/0 instead of aborting at K4.
 

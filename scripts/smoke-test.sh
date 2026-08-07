@@ -20034,6 +20034,52 @@ else
   fail "F38: staleness auto-reset regressed — needs_work=$F38_NW (want true), complete=$F38_CO (want true), midflight=$F38_MID (want false), paused=$F38_PAUSED (want false)"
 fi
 
+# F43: the diff base is the project's configured branch, on every path.
+# augment-impact-map resolved it from `brief.git.primary_branch` — a field
+# preflight-brief.json has never carried — so the lookup silently fell through
+# to the "main" literal, which was then passed EXPLICITLY to
+# collectChangedFiles and defeated any downstream default. On a project whose
+# primary branch is `development` the god-node scan ran over 289 files instead
+# of 92 and reported nothing, because a wrong base does not error: it reviews
+# the wrong thing thoroughly. Field evidence: an operator setting
+# PRIMARY_BRANCH by hand on every run "even after confirming config has it
+# right".
+#
+# Leg a is the resolver contract; leg b is the real repo, on a branch named
+# anything but main, asserting the file set matches the configured base and NOT
+# the literal. Leg c is the structural half — no module may re-implement the
+# resolution, which is how the eighth site came to disagree with the other
+# seven.
+F43_T=$(mktemp -d)
+( cd "$F43_T" && git init -q -b development . && git config user.email t@t && git config user.name t
+  mkdir -p .devt/state && printf '{"git":{"primary_branch":"development"}}' > .devt/config.json
+  echo base > base.txt && git add -A && git commit -qm init
+  git checkout -q -b feature && for i in 1 2 3; do echo "x$i" > "f$i.txt"; done
+  git add -A && git commit -qm feat ) >/dev/null 2>&1 || true
+F43_A=$(cd "$F43_T" && node -e "
+const c=require('$ROOT/bin/modules/config.cjs');
+console.log([c.resolvePrimaryBranch(),c.resolvePrimaryBranch('rel-1'),c.resolvePrimaryBranch('  ')].join('|'));
+" 2>/dev/null || echo ERR)
+# Through the REAL call path — augmentImpactMap resolving its own base, not the
+# resolver in isolation. This is the leg that was silently wrong: the fixture
+# repo has no `main` at all, so the old literal produced an empty file set and
+# a confident clean scan.
+printf '# Graph Impact\n' > "$F43_T/.devt/state/graph-impact.md"
+F43_B=$(cd "$F43_T" && node -e "
+const g=require('$ROOT/bin/modules/graphify.cjs');
+const r=g.augmentImpactMap({projectRoot:process.cwd()});
+console.log(r.base_ref + ':' + (r.diff_file_count >= 3 ? 'saw-files' : 'EMPTY'));
+" 2>/dev/null || echo ERR)
+rm -rf "$F43_T"
+# Any module resolving primary_branch itself instead of calling the resolver.
+F43_C=$( { /usr/bin/grep -lE 'primary_branch[^\n]*\|\|[[:space:]]*"main"' "$ROOT"/bin/modules/*.cjs 2>/dev/null || true; } \
+  | { /usr/bin/grep -vE '/(config|setup|state-contract|review-weight)\.cjs$' || true; } | wc -l | tr -d ' ')
+if [ "$F43_A" = "development|rel-1|development" ] && [ "$F43_B" = "development:saw-files" ] && [ "$F43_C" = "0" ]; then
+  pass "F43: diff base resolves to the configured primary branch (explicit ref overrides, blank falls through), augment-impact-map reports the base it used, and no module re-implements the resolution"
+else
+  fail "F43: primary-branch resolution regressed — resolver=$F43_A (want development|rel-1|development), augment_base=$F43_B (want development:saw-files), rogue_impls=$F43_C (want 0)"
+fi
+
 # K337: orchestration replay harness. Replays recorded .devt/state/ fixtures
 # through the real producer/gate CLI sequences the workflow prose invokes,
 # asserting the block/advance decisions — converting `field:` scar-tissue notes
