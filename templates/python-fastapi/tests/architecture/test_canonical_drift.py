@@ -1,6 +1,6 @@
 """CI gate: fails when a NEW canonical-entity drift is introduced.
 
-Existing debt is captured in ``.devt/state/canonical-baseline.json``; this
+Existing debt is captured in ``.devt/state/project/canonical-baseline.json``; this
 test passes until something new lands. To pay off debt: fix the field, re-run
 ``python3 .devt/rules/arch-scan.py --canonical-only --write-baseline=...``.
 
@@ -30,7 +30,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCANNER = REPO / ".devt" / "rules" / "arch-scan.py"
-BASELINE = REPO / ".devt" / "state" / "canonical-baseline.json"
+BASELINE = REPO / ".devt" / "state" / "project" / "canonical-baseline.json"
 
 _BLOCKING_SEVERITIES = {"critical", "high"}
 
@@ -75,7 +75,7 @@ def test_no_new_canonical_entity_drift() -> None:
         "(critical/high). Fix the code OR — if accepted as debt — "
         "regenerate the baseline:",
         "",
-        "  python3 .devt/rules/arch-scan.py --canonical-only --write-baseline=.devt/state/canonical-baseline.json",
+        "  python3 .devt/rules/arch-scan.py --canonical-only --write-baseline=.devt/state/project/canonical-baseline.json",
         "",
     ]
     for f in blockers[:25]:

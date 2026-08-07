@@ -19526,6 +19526,87 @@ else
   fail "K344: falsifiability batch regressed — unassigned=$K344_A (want app/c.py), silent-when-complete=$K344_B (want true), envelope-injection=$K344_C (want 1), unbound-scope-sites=$K344_D (want 0), scope_missing-surfaced=$K344_E (want 1), escalation-on-level-crossing=$K344_F (want 1), zero-harvest-legible=$K344_G (want 1), lane-sidecar-basis+crosscheck=$K344_H (want 1), intent-regex-widened=$K344_I (want 1)"
 fi
 
+# K345: the guard-cries-wolf batch. A guard that reports a problem on a correct
+# artifact is worse than absent — it trains the operator to skip it, and the
+# field run hit exactly that.
+#   a  severity blocks accept a `raw_total` roll-up beside `by_lane`. A
+#      consolidator wrote {by_lane:{…}, raw_total:{…}}; the reader indexed the
+#      severity keys directly, got four undefineds, floored to four zeros.
+#   b  a shape the reader cannot parse is NOT a count disagreement. Announcing
+#      one produced a full-severity "STOP and reconcile" against perfectly
+#      consistent data. Drift must be loud AS DRIFT.
+#   c  with no findings[] to check against, the narrative guard must report
+#      itself unavailable — `ids_missing_from_review: []` is a success shape
+#      asserted over data that was never inspected.
+#   d  lane correlation ids are FROZEN at registration. A workflow-type change
+#      rotates workflow_id, and a rotation between register-lanes and
+#      render-lanes gave all six field lanes two different cids; only
+#      chain-aware matching kept the run alive.
+#   e  claim-check records carry `ok`. It was derived into `verdict` and never
+#      written, so every record read back ok:null — `ok === false` matched
+#      nothing and `!ok` matched everything.
+#   f  a zero-match mcp-stats filter returns a ZEROED aggregate, not null;
+#      `.aggregate.total_calls` must read 0 rather than throw.
+K345_TMP=$(mktemp -d); K345_TMP=$(cd "$K345_TMP" && pwd -P)
+mkdir -p "$K345_TMP/.devt/state" "$K345_TMP/.devt/memory"
+# A populated trace whose ids differ from the query — leg f must exercise the
+# zero-MATCH path, not the absent-trace path (which correctly returns an error).
+printf '{"ts":"2026-08-01T00:00:00.000Z","tool":"mcp__devt-memory__query_fts","ok":true,"correlation_id":"aaaa1111"}\n' > "$K345_TMP/.devt/memory/_mcp-trace.jsonl"
+(cd "$K345_TMP" && git init -q >/dev/null 2>&1; printf 'x\n' > a.py; printf 'y\n' > b.py
+ printf '{"lanes":[{"id":"L1","scope":"one","files":["a.py"]},{"id":"L2","scope":"two","files":["b.py"]}]}' > l.json
+ node "$CLI" state update active=true workflow_type=code_review phase=partition_lanes task=k345 >/dev/null 2>&1
+ node "$CLI" state register-lanes --from=l.json >/dev/null 2>&1)
+K345_REGCID=$( (cd "$K345_TMP" && node "$CLI" state read) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const w=JSON.parse(s);process.stdout.write((w.lanes&&w.lanes[0]&&w.lanes[0].correlation_id)||'none');}catch(e){process.stdout.write('err');}})")
+# Rotate the workflow id the way the field run did: a workflow_type transition.
+(cd "$K345_TMP" && node "$CLI" state update workflow_type=code_review_parallel >/dev/null 2>&1)
+K345_D=$( (cd "$K345_TMP" && node "$CLI" dispatch render-lanes 2>/dev/null) | /usr/bin/grep -c "$K345_REGCID" || true)
+[ "$K345_D" -gt 0 ] && K345_D=1
+# Nested raw_lane_finding_counts + a findings-free review.json — the field shape.
+node -e "
+const fs=require('fs');const d='$K345_TMP/.devt/state';
+const wf=fs.readFileSync(d+'/workflow.yaml','utf8');
+for(const m of wf.matchAll(/review_file:\s*\"([^\"]+)\"/g)){
+  fs.writeFileSync(m[1].replace(/\.md\$/,'.json'),JSON.stringify({severity_counts:{critical:1,important:2,minor:0,nit:0}}));
+  fs.writeFileSync(m[1],'# lane\n');
+}
+fs.writeFileSync(d+'/review.json',JSON.stringify({severity_counts:{critical:2,important:4,minor:0,nit:0},raw_lane_finding_counts:{by_lane:{L1:{critical:1,important:2},L2:{critical:1,important:2}},raw_total:{critical:2,important:4,minor:0,nit:0}}}));
+fs.writeFileSync(d+'/review.md','# R\n');
+fs.writeFileSync(d+'/drift.json',JSON.stringify({severity_counts:{critical:1,important:1,minor:0,nit:0},raw_lane_finding_counts:{per_lane_totals:{L1:3}}}));
+fs.writeFileSync(d+'/drift.md','# R\n');" 2>/dev/null
+K345_Q() { (cd "$K345_TMP" && node "$CLI" state lane-severity-tally ${2:+--file=$2} 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(String(eval(process.argv[1])));}catch(e){process.stdout.write('err');}})" "$1"; }
+K345_A=$(K345_Q 'j.self_reported_shape+":"+j.self_reported_lane_totals.important')
+K345_B=$(K345_Q '(j.cross_check_mismatch?"MISMATCH":"")+(j.cross_check_unavailable?"unavail":"")' "$K345_TMP/.devt/state/drift.json")
+K345_C=$(K345_Q '(j.ids_missing_from_review===null)+":"+/unavailable/.test(j.narrative_guard||"")')
+K345_E=$( (cd "$K345_TMP" && printf '# Review\n\n## Findings\n\nA substantive body with plenty of words so the stub detector does not trip on it at all here.\n' > .devt/state/review.md; node "$CLI" state assert-artifact-present code-reviewer >/dev/null 2>&1; tail -1 .devt/state/claim-check-failures.jsonl) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).ok));}catch(e){process.stdout.write('err');}})")
+K345_F=$( (cd "$K345_TMP" && node "$CLI" mcp-stats --correlation-id=nomatch_zzz 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(s).aggregate.total_calls));}catch(e){process.stdout.write('err');}})")
+# g — .devt/state/project/ is the project's half of the directory and is never
+# swept. A test baseline living beside devt's own artifacts was archived on
+# three consecutive runs, and the failure read as a regression in the branch
+# under review. Protecting one filename would fix one file; the collision is
+# that projects treat .devt/state/ as shared scratch.
+mkdir -p "$K345_TMP/.devt/state/project"
+printf '{"b":1}\n' > "$K345_TMP/.devt/state/project/canonical-baseline.json"
+printf '{"b":1}\n' > "$K345_TMP/.devt/state/loose-baseline.json"
+touch -t 202601010000 "$K345_TMP/.devt/state/project/canonical-baseline.json" "$K345_TMP/.devt/state/loose-baseline.json"
+K345_G=$( (cd "$K345_TMP" && node -e "
+const a=require('$ROOT/bin/modules/state-audit.cjs');
+const r=a.cleanupStateFiles({dryRun:true,staleDays:1,adHocStaleDays:1});
+const names=(r.moved||r.archived||[]).map(x=>String(x.file||x.name||x));
+process.stdout.write(String(!names.some(n=>n.includes('project')) && names.some(n=>n.includes('loose-baseline'))));") )
+# h — the verifier samples the highest LOC-per-finding lane, and says so rather
+# than claiming a single-dispatch review has unsampleable lanes.
+K345_H=$( (cd "$K345_TMP" && node "$CLI" state lane-sample 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.sample?String(j.sample.loc_per_finding>=0&&j.ranked.length>0):'nosample');}catch(e){process.stdout.write('err');}})")
+K345_I=0
+if /usr/bin/grep -q '{lane_sample}' "$ROOT/templates/dispatch/envelopes/verifier-code_review.tmpl.md" \
+   && /usr/bin/grep -q 'laneSampleForVerification' "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -q 'READ-ONLY analysis with findings and recommendations. No edits or writes to \*\*project source\*\*' "$ROOT/workflows/code-review.md"; then K345_I=1; fi
+rm -rf "$K345_TMP"
+if [ "$K345_A" = "raw_total:4" ] && [ "$K345_B" = "unavail" ] && [ "$K345_C" = "true:true" ] && [ "$K345_D" = "1" ] && [ "$K345_E" = "true" ] && [ "$K345_F" = "0" ] && [ "$K345_G" = "true" ] && [ "$K345_H" = "true" ] && [ "$K345_I" = "1" ]; then
+  pass "K345: severity blocks read a raw_total roll-up, unparseable shapes report as unreadable rather than as a count disagreement, the narrative guard declares itself unavailable instead of returning an empty pass, lane cids survive a mid-run workflow-id rotation, claim-check records carry ok, a zero-match mcp-stats filter returns a zeroed aggregate, .devt/state/project/ survives cleanup, and the verifier samples the highest LOC-per-finding lane"
+else
+  fail "K345: guard-cries-wolf batch regressed — raw_total-shim=$K345_A (want raw_total:4), drift-not-mismatch=$K345_B (want unavail), narrative-guard-honest=$K345_C (want true:true), cid-frozen-at-registration=$K345_D (want 1), claim-check-ok=$K345_E (want true), zero-match-aggregate=$K345_F (want 0), project-subdir-protected=$K345_G (want true), lane-sample-ranks=$K345_H (want true), verifier-sample-wired=$K345_I (want 1)"
+fi
+
 # K341: contract hygiene (task-service field batch). Four legs:
 #   a  every markdown-only ARTIFACT_SCHEMA status enum agrees with the owning
 #      agent's output_format enum. PARTIAL was offered by all five agents and

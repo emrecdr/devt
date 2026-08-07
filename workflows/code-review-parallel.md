@@ -631,6 +631,14 @@ else
   if [ -n "$XCHECK" ]; then
     echo "⚠️  lane sidecars disagree with review.json's own lane totals (${XCHECK}) — two independent sources, so one is wrong. STOP and reconcile."
   fi
+  # A shape the reader cannot parse is NOT a disagreement. Announcing one was
+  # the field failure: perfectly consistent counts produced a full-severity
+  # "STOP and reconcile", and a guard that cries wolf on correct artifacts
+  # trains the operator to skip it.
+  XUNAVAIL=$(printf '%s\n' "$TALLY" | jq -r '.cross_check_unavailable // empty')
+  [ -n "$XUNAVAIL" ] && echo "note: cross-check did not run — ${XUNAVAIL}"
+  CWARN=$(printf '%s\n' "$TALLY" | jq -r '.consolidated_warning // empty')
+  [ -n "$CWARN" ] && echo "⚠️  ${CWARN}"
   if [ -z "$LANE_CRIT" ]; then
     echo "note: review.json carries no raw_lane_finding_counts — consolidated counts stand unchecked against the lanes."
   elif [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then
@@ -640,9 +648,11 @@ else
   fi
   # Narrative guard: a finding the sidecar declares but the rendered review never
   # names is a finding the reader will never see.
-  MISSING=$(printf '%s\n' "$TALLY" | jq -r 'if .ids_missing_from_review == null then "UNAVAILABLE" else (.ids_missing_from_review | join(", ")) end')
-  if [ "$MISSING" = "UNAVAILABLE" ]; then
-    echo "⚠️  review.md unreadable — cannot confirm every sidecar finding reaches the narrative."
+  GUARD=$(printf '%s\n' "$TALLY" | jq -r '.narrative_guard // "evaluated"')
+  MISSING=$(printf '%s\n' "$TALLY" | jq -r '(.ids_missing_from_review // []) | join(", ")')
+  if [ "$GUARD" != "evaluated" ]; then
+    echo "⚠️  narrative guard did NOT run — ${GUARD}"
+    echo "CAVEAT_REQUIRED=narrative-guard"
   elif [ -n "$MISSING" ]; then
     echo "⚠️  ${MISSING} — declared in review.json but absent from review.md. The narrative dropped a finding the sidecar counts. STOP and reconcile."
   fi
@@ -650,6 +660,12 @@ fi
 
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=consolidate status=DONE
 ```
+
+**If the block printed `CAVEAT_REQUIRED=narrative-guard`, edit `review.md` now** — append the caveat to its `## Verdict` section, verbatim:
+
+> **Coverage caveat:** the narrative guard did not run for this review (`review.json` declares no `findings[]` index), so nothing verified that every counted finding actually appears in the text below. Severity totals are still machine-derived from the lane sidecars.
+
+A guard that cannot evaluate must say so **where the review is read**, not only in orchestration output. The field case printed `findings_listed: 0` inside a dense JSON line and the operator nearly skipped past it — an unevaluable guard whose silence is indistinguishable from a pass is the failure this whole surface exists to prevent.
 
 </step>
 

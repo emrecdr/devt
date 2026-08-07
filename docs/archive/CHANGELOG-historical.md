@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.198.0] - 2026-07-21
+
+### Field-report fixes (greenfield calibration) + measured guardrails default flip
+
+A calibration field run surfaced five items; double-verification (a code-verify agent + a controlled git fixture) confirmed three real fixes, corrected two of the report's own claims, and pinned #1's true root cause. Plus the measured `guardrails_mode` flip and the staleness silent-warn unification.
+
+### Fixed
+
+- **Review/dev scope no longer mis-bases to `main` on non-main-default repos (K317).** `PRIMARY_BRANCH` was consumed as `${PRIMARY_BRANCH:-main}` at 12 sites across 6 workflows but never assigned from config — so on a repo with `git.primary_branch: "development"`, every scope computation (review-weight, changed-files, domain count, parallel scope, merge-base, the context-init wrapper) silently used `main`. The field report framed it as a review-weight *diff divergence*; a controlled fixture proved review-weight's diff is correct given the right base — the CLIs already default `--base` to `config.git.primary_branch`. Fix: pass the flag only when `PRIMARY_BRANCH` is explicitly set (`${PRIMARY_BRANCH:+--base=...}`), letting the CLI fall back to config (the one raw `git merge-base` resolves config inline). Backward-compatible — no config still means `main`. Also unblocks the `--lite` auto-suggest, which had been reading false scope numbers.
+- **Impact-plan `args.symbols` no longer leaks docstring prose (K317).** `graphify.cjs::symbolsInFiles` pushed a node's `label` with no identifier gate; docstring pseudo-nodes carry a real `source_file` (so the concept/file/json filters miss them) but a prose label with spaces. A whitespace filter now drops them before they reach the impact plan (with a `docstring_filtered` counter) — whitespace, **not** a length cap: field data showed 92 legitimate symbols over 64 chars. Low-severity hygiene (graphify's own blast_radius noise filter already absorbed the fragments downstream).
+- **Lane `correlation_id` is stamped at registration (K317).** `register-lane` now stamps a deterministic `cid_<workflow_id_prefix>_<lane_id>` (matching render-lanes) into the lane record, and `list-lane-outputs` surfaces it + falls back to it for `cid_match` — so the consolidate step's `cid_match != "foreign"` stale-lane filter and trace-back work immediately after registration instead of only after a reviewer echoes the cid into the review file.
+
+### Changed
+
+- **`dispatch.guardrails_mode` default flipped `inline` → `by-reference`.** Measured: ~6.1K tok/programmer dispatch, ~3.9K reviewer, ~3.3K tester saved (~13–19K tok per STANDARD dev run), on the same proven stub mechanism `rules_mode` uses; the guardrails stub directs an unconditional disk read, and `--inline-rules` restores inline for worktree-isolated dispatches. (K314 flipped to assert the by-reference default; D-11 forces inline to keep verifying the full-content load path.)
+- **`--lite` suggestion suppressed on thoroughness intent.** When the review task text carries `detailed` / `thorough` / `audit` / cascade intent, the light-eligible suggestion is withheld (the operator can still pass `--lite`) — reusing the parallel short-circuit's intent-signal class.
+- **Staleness silent-warn band unified across debug / quick-implement / research-task.** The `0 < lag < threshold` middle band now emits a one-line `[staleness]` note and continues, matching `/devt:review`'s tiered `warn` tier (these three were previously silent for mid-range staleness).
+
+### Corrected (field-report claims softened under verification)
+
+- The "review-weight vs changed-files internal divergence" was refuted — both call the same `collectChangedFiles`; the real bug was `PRIMARY_BRANCH` never sourced from config (above).
+- The docstring-symbol impact was downgraded from "confirmed bug" to low-severity hygiene — no wrong blast_radius was ever observed.
+
 ## [0.197.0] - 2026-07-21
 
 ### Composite claim-check / finalize CLI verbs + K117 gate-count floor

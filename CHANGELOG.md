@@ -8,6 +8,25 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.234.0] - 2026-08-07
+
+The batch after the batch. v0.233.0 moved the severity gate onto the schema'd sidecar so it would stop asserting things it couldn't see — and then asserted something it couldn't see, because the sidecar field it compared against had no declared shape. A guard that cries wolf on a correct artifact is worse than no guard: it trains the operator to skip it.
+
+### Fixed
+
+- **The severity cross-check reported a total disagreement against perfectly consistent data.** `raw_lane_finding_counts` was specified without a shape, so a consolidator wrote `{by_lane:{…}, raw_total:{…}}`; the reader indexed the severity keys directly, got four `undefined`s, floored them to four zeros, and announced every severity mismatched — "STOP and reconcile" on a review whose lane sidecars and roll-up agreed exactly. The shape is now declared: flat `{critical,important,minor,nit}`, with a `raw_total` roll-up accepted beside a `by_lane` breakdown. Anything else is **drift, and drift is loud as drift** — reported as `cross_check_unavailable` with the expected shapes named, never as a count disagreement. This is the same defect as the prose parser one layer in: fixing "prose vs sidecar" without pinning the shape simply relocated it to "sidecar shape vs reader".
+- **The narrative guard returned a success shape over data it never inspected.** With no `findings[]` index in `review.json` it emitted `ids_missing_from_review: []` — indistinguishable from "checked, nothing missing". It now reports `null` plus a `narrative_guard` reason, and the consolidate step propagates the caveat into `review.md` itself. A guard that cannot evaluate has to say so where the review is read; the field operator saw `findings_listed: 0` inside a dense JSON line and nearly skipped past it.
+- **A mid-run workflow-id rotation gave every lane two correlation ids.** A `workflow_type` transition rotates `workflow_id`, and a rotation landing between `register-lanes` and `render-lanes` meant six lanes were registered as `cid_7e2fa293_*` and dispatched as `cid_08417ab9_*`. Only chain-aware matching kept the run alive — a consumer comparing by string equality would have dropped every lane as foreign, the exact failure the workflow warns about elsewhere. The registry already stored the id; render now reads it instead of recomputing. Safe because `cid_match` resolves against the id chain, so a cid older than the current id still reads `current`.
+- **Claim-check records carried `ok: null` on every success.** The field was derived into `verdict` and never written, so a consumer filtering `ok === false` matched nothing while one filtering `!ok` matched every success as a failure — same datum, two opposite wrong answers.
+- **A zero-match `mcp-stats` filter returned `aggregate: null`.** The obvious `.aggregate.total_calls` threw instead of reporting zero. An empty result set now returns a zeroed aggregate; shape stability across the empty case is the point of returning a summary object.
+- **A review archived a baseline the project's own test suite reads.** `context_init` sweeps unrecognized files out of `.devt/state/`, and a project keeping a canonical-drift baseline there lost it on three consecutive runs — the resulting failure flagged a service the branch never touched and read as a regression in the code under review. The root cause is not any filename: projects treat `.devt/state/` as shared scratch while devt treats it as private state. **`.devt/state/project/` is now the project's half and is never swept**, the python-fastapi template's baseline moves there, and the READ-ONLY claim — which promised more than it could deliver — now says it covers project *source*, not `.devt/state/`.
+
+### Added
+
+- **The verifier samples one lane.** It graded only the consolidated review, so a lane that quietly stopped early was invisible: its thin output merges in indistinguishably from a genuinely clean slice. The sampled lane is the highest **LOC-per-finding** — not the largest (often legitimately dense) and not the one with the most findings (which selects the lane that already worked hardest). "Big diff, few findings" is where under-review hides; on the run this came from it selects a 1061-line lane with 11 findings over a 331-line lane with 10. A weak sample annotates `review.md` rather than blocking a completed review.
+
+Guarded by K345 (nine legs), each verified red against the pre-fix tree.
+
 ## [0.233.0] - 2026-08-06
 
 A field batch about **falsifiability**. Every fix below is the same defect wearing different clothes: a component asserted something about coverage that no consumer could check. The severity gate asserted counts nobody diffed against a schema'd source; a hand-authored partition asserted completeness nobody diffed against the declared scope; an unbound scope variable asserted a task nobody compared to what the operator typed.
@@ -585,27 +604,4 @@ An external post-0198 verification pass reproduced a silent-corruption class: th
 ### Fixed
 
 - **`review-weight`'s "scope unresolvable — empty diff" message now names the base.** Field calibration surfaced that the message hid *which* base resolved to empty — so a base mismatch (the workflow computing scope against `main` while the operator meant `development`) read as a bare "empty diff" the operator couldn't diagnose. It now reads `empty diff for base '<base>' (<base>...HEAD + working tree + untracked all empty); if that base is wrong, set git.primary_branch in .devt/config.json (or export PRIMARY_BRANCH), else … pass --range=<a>..<b>`. Complements the v0.198.0 `PRIMARY_BRANCH`→config fix by making any residual base mismatch immediately legible.
-
-## [0.198.0] - 2026-07-21
-
-### Field-report fixes (greenfield calibration) + measured guardrails default flip
-
-A calibration field run surfaced five items; double-verification (a code-verify agent + a controlled git fixture) confirmed three real fixes, corrected two of the report's own claims, and pinned #1's true root cause. Plus the measured `guardrails_mode` flip and the staleness silent-warn unification.
-
-### Fixed
-
-- **Review/dev scope no longer mis-bases to `main` on non-main-default repos (K317).** `PRIMARY_BRANCH` was consumed as `${PRIMARY_BRANCH:-main}` at 12 sites across 6 workflows but never assigned from config — so on a repo with `git.primary_branch: "development"`, every scope computation (review-weight, changed-files, domain count, parallel scope, merge-base, the context-init wrapper) silently used `main`. The field report framed it as a review-weight *diff divergence*; a controlled fixture proved review-weight's diff is correct given the right base — the CLIs already default `--base` to `config.git.primary_branch`. Fix: pass the flag only when `PRIMARY_BRANCH` is explicitly set (`${PRIMARY_BRANCH:+--base=...}`), letting the CLI fall back to config (the one raw `git merge-base` resolves config inline). Backward-compatible — no config still means `main`. Also unblocks the `--lite` auto-suggest, which had been reading false scope numbers.
-- **Impact-plan `args.symbols` no longer leaks docstring prose (K317).** `graphify.cjs::symbolsInFiles` pushed a node's `label` with no identifier gate; docstring pseudo-nodes carry a real `source_file` (so the concept/file/json filters miss them) but a prose label with spaces. A whitespace filter now drops them before they reach the impact plan (with a `docstring_filtered` counter) — whitespace, **not** a length cap: field data showed 92 legitimate symbols over 64 chars. Low-severity hygiene (graphify's own blast_radius noise filter already absorbed the fragments downstream).
-- **Lane `correlation_id` is stamped at registration (K317).** `register-lane` now stamps a deterministic `cid_<workflow_id_prefix>_<lane_id>` (matching render-lanes) into the lane record, and `list-lane-outputs` surfaces it + falls back to it for `cid_match` — so the consolidate step's `cid_match != "foreign"` stale-lane filter and trace-back work immediately after registration instead of only after a reviewer echoes the cid into the review file.
-
-### Changed
-
-- **`dispatch.guardrails_mode` default flipped `inline` → `by-reference`.** Measured: ~6.1K tok/programmer dispatch, ~3.9K reviewer, ~3.3K tester saved (~13–19K tok per STANDARD dev run), on the same proven stub mechanism `rules_mode` uses; the guardrails stub directs an unconditional disk read, and `--inline-rules` restores inline for worktree-isolated dispatches. (K314 flipped to assert the by-reference default; D-11 forces inline to keep verifying the full-content load path.)
-- **`--lite` suggestion suppressed on thoroughness intent.** When the review task text carries `detailed` / `thorough` / `audit` / cascade intent, the light-eligible suggestion is withheld (the operator can still pass `--lite`) — reusing the parallel short-circuit's intent-signal class.
-- **Staleness silent-warn band unified across debug / quick-implement / research-task.** The `0 < lag < threshold` middle band now emits a one-line `[staleness]` note and continues, matching `/devt:review`'s tiered `warn` tier (these three were previously silent for mid-range staleness).
-
-### Corrected (field-report claims softened under verification)
-
-- The "review-weight vs changed-files internal divergence" was refuted — both call the same `collectChangedFiles`; the real bug was `PRIMARY_BRANCH` never sourced from config (above).
-- The docstring-symbol impact was downgraded from "confirmed bug" to low-severity hygiene — no wrong blast_radius was ever observed.
 

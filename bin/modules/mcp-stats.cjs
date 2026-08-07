@@ -398,7 +398,15 @@ function run(subcommand, args) {
       by: opts.top ? (opts.by || "calls") : null,
     },
     ...(chainHint ? { hint: chainHint } : {}),
-    ...(summary ? { aggregate: summary.aggregate, tools } : { aggregate: null, tools: [] }),
+    // A filter that matches nothing returns a ZEROED aggregate, not null. The
+    // null forced every consumer to null-check before reading a count, and the
+    // obvious `.aggregate.total_calls` throws instead of reporting zero — which
+    // is what a caller asking "how many calls matched this id?" actually wants
+    // to hear. Shape stability across the empty case is the whole point of
+    // returning a summary object.
+    ...(summary
+      ? { aggregate: summary.aggregate, tools }
+      : { aggregate: { total_calls: 0, total_errors: 0, error_rate: 0, first_ts: null, last_ts: null, tools_used: 0 }, tools: [] }),
   });
   return 0;
 }

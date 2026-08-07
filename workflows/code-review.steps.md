@@ -119,6 +119,7 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     {prior_outputs}
     {provenance_protocol}
     <files_to_read>.devt/state/review.md, .devt/state/code-review-input.md</files_to_read>
+    <lane_sample>{lane_sample}</lane_sample>
     <impl_summary>Read .devt/state/impl-summary.md (if exists — code-review may follow an implementation phase)</impl_summary>
     <decisions>Read .devt/state/decisions.md (if exists)</decisions>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -128,6 +129,16 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     Spot-check the review's thoroughness, specificity, severity calibration, and remediation
     concreteness using the rubric in <rubric_path>. Read review.md as the artifact under review.
     If axes fail, emit revisions[] keyed by axis-letter (A-1, B-3, etc.) for the reviewer to address.
+
+    **Lane sample (parallel reviews only).** When <lane_sample> names a lane file, Read it and grade
+    that ONE lane against the same rubric. Consolidation hides a lane that stopped early: its thin
+    output merges into the review indistinguishably from a genuinely clean slice, and grading only
+    the consolidated artifact can never surface it. The named lane is the highest LOC-per-finding
+    lane — the "big diff, few findings" cell where under-review hides — not the biggest and not the
+    one with the most findings. Report the result as a `lane_sample` object in verification.json
+    ({lane_id, verdict, reasoning}). A weak sample does NOT block the review: record it, and add a
+    one-line note under that lane's entry in `review.md`'s Lane Provenance section so a reader of the
+    review — not only a reader of verification.json — knows that lane's depth is suspect.
 
     Cross-reference the review's remediation against `.devt/state/graph-impact.md` when present.
     The orchestrator wrote that file from upstream Graphify MCP during context_init. When the

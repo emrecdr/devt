@@ -44,6 +44,14 @@ const CANONICAL_SUBDIRS = new Set([
   "threads",      // session handoffs + cross-session threads — an OPEN thread
                   // must never be bulk-archived out from under a future session
   "lane-files",   // round 8 register-lane sidecar dir (per-lane files arrays)
+  // The project's own half of .devt/state/. Projects treat this directory as
+  // shared scratch while devt treats it as private state, and that collision —
+  // not any single filename — is what let a review archive a baseline the
+  // project's test suite reads, three runs running. Anything a project needs to
+  // SURVIVE a devt run belongs here; everything else in .devt/state/ is devt's
+  // to sweep. Protecting individual filenames instead would fix one file and
+  // let the next project-owned artifact reproduce the bug.
+  "project",
 ]);
 
 function classify(filename, knownCanonical) {

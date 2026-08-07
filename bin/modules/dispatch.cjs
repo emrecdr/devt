@@ -684,6 +684,23 @@ function cmdRenderFilled(target, options) {
     } catch { /* no registry — placeholder stays visible; envelope_health flags it */ }
   }
 
+  // Lane-sample injection for the verifier. Empty on the single-dispatch path —
+  // there are no lanes — so the same envelope serves both without a mode flag.
+  if (out.includes("{lane_sample}")) {
+    let block = "none — single-dispatch review, no lanes to sample";
+    try {
+      const s = require("./state.cjs").laneSampleForVerification();
+      if (s && s.sample) {
+        block = `${s.sample.review_file} (lane ${s.sample.id}${s.sample.community ? ` / ${s.sample.community}` : ""}: ` +
+          `${s.sample.est_loc} changed lines, ${s.sample.findings} finding(s), ` +
+          `${s.sample.loc_per_finding} lines per finding — the highest ratio of ${s.ranked.length} lane(s))`;
+      } else if (s && s.reason) {
+        block = `none — ${s.reason}`;
+      }
+    } catch { /* no lane registry — the default line stands */ }
+    out = out.replace("{lane_sample}", block);
+  }
+
   // Uncovered-scope injection. A partition-time warning about unassigned files
   // scrolls past twenty orchestration blocks before the consolidator writes its
   // coverage claim; the field case wrote "there is no uncovered scope" in good
@@ -1656,7 +1673,17 @@ function cmdRenderLanes(target, options) {
         if (data.community) community = data.community;
       }
     } catch { /* sidecar missing or malformed — emit envelope without files block */ }
-    const correlationId = `cid_${workflowIdPrefix}_${lane.id}`;
+    // Frozen at registration, not recomputed. A `state update` that changes the
+    // workflow type rotates workflow_id, and a rotation landing between
+    // register-lanes and render-lanes gave every lane TWO cids — one in
+    // workflow.yaml, a different one in the envelope the reviewer echoed back
+    // (field: cid_7e2fa293_* registered, cid_08417ab9_* rendered, all six
+    // lanes). Only chain-aware matching kept the run alive; a consumer
+    // comparing by string equality would have dropped every lane as foreign.
+    // Reading the stored value is safe precisely because cid_match resolves
+    // against the workflow_id chain, so a cid older than the current id still
+    // reads "current".
+    const correlationId = lane.correlation_id || `cid_${workflowIdPrefix}_${lane.id}`;
     // Compact auto_memory summary injected per-lane (cal #36 #5 from
     // receipt #9). The full auto_memory_json is already substituted via
     // cmdRenderFilled in the base envelope (cal #32 Rank #2), but lanes

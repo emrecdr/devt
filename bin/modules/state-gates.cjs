@@ -2615,6 +2615,12 @@ function persistClaimCheckResult(result) {
       ts: new Date().toISOString(),
       source: "claim_check",
       agent: result.agent,
+      // Both the boolean and the word. `verdict` was derived from result.ok
+      // while `ok` itself was never written, so every record read back with
+      // ok:null — a consumer filtering `ok === false` saw nothing and one
+      // filtering `!ok` saw every success as a failure. Same datum, two
+      // opposite wrong answers.
+      ok: result.ok === true,
       verdict: result.ok ? "success" : "failure",
       // Substance-aware Layer-1 — substance_verdict added alongside the
       // file-presence verdict so Layer-2 can distinguish "file present

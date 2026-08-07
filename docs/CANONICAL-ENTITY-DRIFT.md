@@ -130,14 +130,14 @@ python3 .devt/rules/arch-scan.py [--canonical-only] [--registry=PATH] \
 ```bash
 # First-run capture — accept existing debt
 python3 .devt/rules/arch-scan.py --canonical-only \
-    --write-baseline=.devt/state/canonical-baseline.json
+    --write-baseline=.devt/state/project/canonical-baseline.json
 
 # Commit the baseline — it's a contract reviewed in PRs
-git add .devt/state/canonical-baseline.json
+git add .devt/state/project/canonical-baseline.json
 
 # Subsequent runs (CI) — gate fails only on NEW violations
 python3 .devt/rules/arch-scan.py --canonical-only \
-    --baseline=.devt/state/canonical-baseline.json
+    --baseline=.devt/state/project/canonical-baseline.json
 ```
 
 Findings are fingerprinted as `(category, file, line, fingerprint)` where
@@ -157,7 +157,7 @@ def test_no_new_canonical_entity_drift() -> None:
     result = subprocess.run([
         sys.executable, ".devt/rules/arch-scan.py",
         "--canonical-only", "--json",
-        f"--baseline={REPO / '.devt/state/canonical-baseline.json'}",
+        f"--baseline={REPO / '.devt/state/project/canonical-baseline.json'}",
     ], capture_output=True, text=True, check=False)
     report = json.loads(result.stdout)
     blockers = [f for f in report["findings"] if f["severity"] in {"critical", "high"}]
@@ -258,12 +258,12 @@ python3 .devt/rules/arch-scan.py --canonical-only
 
 # 2. Generate baseline + report
 python3 .devt/rules/arch-scan.py --canonical-only \
-    --write-baseline=.devt/state/canonical-baseline.json \
+    --write-baseline=.devt/state/project/canonical-baseline.json \
     --report=docs/reports/CANONICAL-DRIFT.md
 
 # 3. Confirm baseline absorbs everything
 python3 .devt/rules/arch-scan.py --canonical-only \
-    --baseline=.devt/state/canonical-baseline.json
+    --baseline=.devt/state/project/canonical-baseline.json
 # expected: exit 0
 
 # 4. Synthetic violation — add `country: str` to any model class, run gate,

@@ -9,7 +9,7 @@ This workflow uses: Bash, Read, Glob, Grep, Agent, AskUserQuestion
 </tool_restrictions>
 
 <objective>
-Perform a standalone code review of the current changes or specified files. Read-only — no edits or writes. `--focus` switches the lens: code (default), arch (architectural-health scan), quality (lint/typecheck/tests gate). `--range=<a>..<b>` reviews an explicit commit range (merged PR, historical work) — without it, a review of work already on the primary branch resolves an empty diff and starves scope detection.
+Perform a standalone code review of the current changes or specified files. Read-only with respect to **project source** — the workflow does write its own `.devt/state/` artifacts and archives unrecognized files out of that directory, so project-owned inputs belong in `.devt/state/project/`. `--focus` switches the lens: code (default), arch (architectural-health scan), quality (lint/typecheck/tests gate). `--range=<a>..<b>` reviews an explicit commit range (merged PR, historical work) — without it, a review of work already on the primary branch resolves an empty diff and starves scope detection.
 </objective>
 
 <process>

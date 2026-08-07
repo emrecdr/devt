@@ -275,6 +275,29 @@ function _normalizeCounts(raw) {
   return out;
 }
 
+// THE declared shape for a severity block is flat: {critical, important, minor,
+// nit}. `raw_lane_finding_counts` additionally accepts a `raw_total` roll-up,
+// because consolidators legitimately want per-lane breakdown alongside the
+// total and the field was specified without a shape.
+//
+// Everything else is DRIFT, and drift must be loud. Reading an unrecognized
+// object with `raw[k]` yields four undefineds, floors to four zeros, and
+// manufactures a total disagreement out of perfectly consistent data — a field
+// run wrote {by_lane:{...}, raw_total:{...}} and the cross-check reported every
+// severity mismatched against zero. Returning null instead of zeros is what
+// lets the caller say "unreadable" rather than assert a difference it cannot
+// see. This is the same defect the prose parser had, one layer in: the failure
+// relocated from "prose vs sidecar" to "sidecar shape vs reader", which is what
+// pinning the shape prevents from happening a third time.
+function _readSeverityBlock(raw) {
+  if (!raw || typeof raw !== "object") return { counts: null, shape: "absent" };
+  if (_SEVERITIES.some(k => Number.isFinite(raw[k]))) return { counts: _normalizeCounts(raw), shape: "flat" };
+  if (raw.raw_total && typeof raw.raw_total === "object" && _SEVERITIES.some(k => Number.isFinite(raw.raw_total[k]))) {
+    return { counts: _normalizeCounts(raw.raw_total), shape: "raw_total" };
+  }
+  return { counts: null, shape: "unrecognized" };
+}
+
 // Per-lane JSON sidecars written by each lane reviewer. This is the only lane
 // total the consolidator cannot author, which is what makes it the primary
 // basis: the consolidator's raw_lane_finding_counts stays as a cross-check,
@@ -338,8 +361,10 @@ function laneSeverityTally(opts = {}) {
     // the failure this rewrite exists to remove.
     return { ok: false, reason: `review sidecar unreadable or malformed: ${sidecar} (${e && e.message})`, source: sidecar };
   }
-  const consolidated = _normalizeCounts(parsed.severity_counts);
-  const selfReported = parsed.raw_lane_finding_counts ? _normalizeCounts(parsed.raw_lane_finding_counts) : null;
+  const consolidatedRead = _readSeverityBlock(parsed.severity_counts);
+  const consolidated = consolidatedRead.counts || { critical: 0, important: 0, minor: 0, nit: 0 };
+  const selfReportedRead = _readSeverityBlock(parsed.raw_lane_finding_counts);
+  const selfReported = selfReportedRead.counts;
   const sidecars = _laneSidecarCounts();
   const laneDeclared = sidecars ? sidecars.totals : selfReported;
   const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
@@ -363,23 +388,41 @@ function laneSeverityTally(opts = {}) {
     source: sidecar,
     basis: sidecars ? "lane_sidecars" : "consolidator_self_reported_lane_totals",
     consolidated,
+    consolidated_shape: consolidatedRead.shape,
     lane_declared: laneDeclared,
     findings_listed: findings.length,
-    ids_missing_from_review: idsMissing,
+    // null (not []) when review.json declares no findings[] — an empty array
+    // reads as "checked, nothing missing", which is a success shape asserted on
+    // data that was never inspected.
+    ids_missing_from_review: findings.length > 0 ? idsMissing : null,
+    narrative_guard: findings.length > 0
+      ? (idsMissing === null ? "unavailable — review.md unreadable" : "evaluated")
+      : "unavailable — review.json declares no findings[] index to check against",
   };
+  if (consolidatedRead.shape !== "flat") {
+    out.consolidated_warning = consolidatedRead.shape === "absent"
+      ? "review.json carries no severity_counts — consolidated totals read as zero and cannot be trusted"
+      : "review.json::severity_counts is in an unrecognized shape — consolidated totals read as zero and cannot be trusted";
+  }
   if (sidecars) {
     out.lanes_with_sidecar = sidecars.lanes_with_sidecar;
     out.lanes_missing_sidecar = sidecars.lanes_missing_sidecar;
     out.per_lane = sidecars.per_lane;
     // Cross-check: the consolidator's own lane totals against the lanes'. They
     // are independent sources, so a disagreement means one of them is wrong —
-    // which is the whole reason to keep the weaker one around.
+    // which is the whole reason to keep the weaker one around. A shape it
+    // cannot read is NOT a disagreement, and saying so was the entire bug.
     if (selfReported) {
       out.self_reported_lane_totals = selfReported;
+      out.self_reported_shape = selfReportedRead.shape;
       const disagree = _SEVERITIES.filter(k => selfReported[k] !== sidecars.totals[k]);
       if (disagree.length > 0) {
         out.cross_check_mismatch = disagree.map(k => `${k}: lanes=${sidecars.totals[k]} vs review.json=${selfReported[k]}`).join("; ");
       }
+    } else {
+      out.cross_check_unavailable = selfReportedRead.shape === "absent"
+        ? "review.json carries no raw_lane_finding_counts — the lane totals stand unchecked against the consolidator's own figures"
+        : "review.json::raw_lane_finding_counts is in an unrecognized shape — expected flat {critical,important,minor,nit} or a raw_total roll-up. NOT a count disagreement: the cross-check could not run";
     }
   }
   if (laneDeclared) {
@@ -387,6 +430,50 @@ function laneSeverityTally(opts = {}) {
     for (const k of _SEVERITIES) out.delta[k] = consolidated[k] - laneDeclared[k];
   }
   return out;
+}
+
+// The verifier grades the consolidated review and nothing else, so a lane that
+// quietly stopped early is invisible: its thin output is indistinguishable from
+// a genuinely clean slice once merged. Sampling one lane makes that
+// falsifiable.
+//
+// Rank by LOC-per-finding, not by size and not by finding count. Most-findings
+// selects the lane that already worked hardest; largest-by-LOC is closer but
+// still selects legitimately dense work. "Big diff, few findings" is the cell
+// where under-review actually hides — on the run this came from, that ranked
+// a 1061-line lane with 11 findings (~96) over a 331-line lane with 10 (~33).
+// A lane with a real diff and ZERO findings ranks highest of all, which is the
+// right instinct.
+function laneSampleForVerification() {
+  const { lanes } = listLaneOutputs();
+  const sidecars = _laneSidecarCounts();
+  const ranked = [];
+  for (const lane of lanes || []) {
+    if (!lane.review_file || !lane.file_exists) continue;
+    const counts = sidecars && sidecars.per_lane ? sidecars.per_lane[lane.id] : null;
+    if (!counts) continue;
+    const est_loc = Number.isFinite(lane.est_loc) ? lane.est_loc : 0;
+    const findings = _SEVERITIES.reduce((s, k) => s + counts[k], 0);
+    ranked.push({
+      id: lane.id,
+      community: lane.community || null,
+      review_file: lane.review_file,
+      est_loc,
+      findings,
+      loc_per_finding: findings > 0 ? Math.round(est_loc / findings) : est_loc,
+    });
+  }
+  if (ranked.length === 0) {
+    return {
+      ok: true,
+      sample: null,
+      reason: (lanes || []).length === 0
+        ? "single-dispatch review, no lanes to sample"
+        : "no lane carries both a diff size and a findings sidecar — cannot rank, so no lane is sampled",
+    };
+  }
+  ranked.sort((a, b) => b.loc_per_finding - a.loc_per_finding);
+  return { ok: true, sample: ranked[0], ranked };
 }
 
 function _sizingExcludePatterns() {
@@ -854,6 +941,7 @@ function updateLane(laneId, kvPairs) {
 
 module.exports = {
   laneSeverityTally,
+  laneSampleForVerification,
   slugifyLaneName,
   listLaneOutputs,
   _sizingExcludePatterns,

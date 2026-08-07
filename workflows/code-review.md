@@ -1,6 +1,8 @@
 # Code Review Workflow
 
-Standalone code review: READ-ONLY analysis with findings and recommendations. No edits or writes to project code.
+Standalone code review: READ-ONLY analysis with findings and recommendations. No edits or writes to **project source**.
+
+> **Scope of the read-only guarantee.** It covers your source tree, not `.devt/state/`. This workflow writes its own artifacts there, and `context_init` archives unrecognized files out of it into `.devt/state/.archive/cleanup-<ts>/`. A project that keeps its own inputs in `.devt/state/` — a test baseline, a fixture, a golden file — will find them moved mid-run, and the resulting test failure looks like a regression in the branch under review. Put anything the project itself reads in **`.devt/state/project/`**, which devt never sweeps.
 
 ---
 
