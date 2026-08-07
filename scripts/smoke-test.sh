@@ -7244,17 +7244,40 @@ else
   fail "F32b: parallel-lane threshold is not the canonical 10"
 fi
 
-# F33 — partition_lanes caps at 5 + falls back when graphify unavailable.
-if /usr/bin/grep -qF -- '--target-lanes=5' "$ROOT/workflows/code-review-parallel.md" \
-  && /usr/bin/grep -qF 'entries.length <= targetLanes' "$ROOT/bin/modules/state-lanes.cjs"; then
-  pass "F33a: code-review-parallel.md partition_lanes caps at 5"
+# F33 — partition_lanes caps at 5 + routes to single-dispatch on an empty
+# scope. BEHAVIOURAL: both legs used to grep prose, and F33b's pattern
+# ('routing.*single-dispatch') is satisfied by the very echo line that reports
+# the fallback — so it passed whether or not the fallback worked, on the one
+# path whose silent failure ran a 5-lane review as 1. `state partition-lanes`
+# returns the routing decision, so ask it.
+F33_TMP=$(mktemp -d); F33_TMP=$(cd "$F33_TMP" && pwd -P)
+F33_RUN() { # $1 = group count; emits "<lanes>:<merged?>"
+  local d="$F33_TMP/g$1"; mkdir -p "$d/.devt/state"
+  (cd "$d" && git init -q >/dev/null 2>&1
+   node -e '
+   const fs=require("fs"); const n=parseInt(process.argv[1],10); const rows=[];
+   for(let i=0;i<n;i++){ const dir="d"+i+"/s"; fs.mkdirSync(dir,{recursive:true}); const f=dir+"/f.py"; fs.writeFileSync(f,"x\n"); rows.push(f); }
+   fs.writeFileSync(".devt/state/code-review-input.md","# Review Scope\n\n## Files\n\n"+rows.map(r=>"- "+r).join("\n")+"\n");' "$1"
+   node "$CLI" state update active=true workflow_type=code_review_parallel phase=context_init task=f33 >/dev/null 2>&1
+   node "$CLI" state partition-lanes --target-lanes=5 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);process.stdout.write((j.registered||[]).length+':'+((j.merged_groups&&j.merged_groups.length)?'merged':'nomerge'));}catch(e){process.stdout.write('err');}})"
+}
+F33_AT=$(F33_RUN 5)   # exactly at the cap — must NOT merge
+F33_OVER=$(F33_RUN 8) # over the cap — must cap and merge
+# Empty scope (artifact absent, nothing changed) must ROUTE, not partition.
+mkdir -p "$F33_TMP/empty/.devt/state"
+F33_ROUTE=$( (cd "$F33_TMP/empty" && git init -q >/dev/null 2>&1
+  node "$CLI" state update active=true workflow_type=code_review_parallel phase=context_init task=f33 >/dev/null 2>&1
+  node "$CLI" state partition-lanes 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).action);}catch(e){process.stdout.write('err');}})")
+rm -rf "$F33_TMP"
+if [ "$F33_AT" = "5:nomerge" ] && [ "$F33_OVER" = "5:merged" ]; then
+  pass "F33a: partition_lanes caps at 5 — exactly-at-cap partitions without merging, over-cap merges into anchors"
 else
-  fail "F33a: partition_lanes does not cap at 5 lanes"
+  fail "F33a: cap semantics regressed — at-cap=$F33_AT (want 5:nomerge), over-cap=$F33_OVER (want 5:merged)"
 fi
-if /usr/bin/grep -qE 'FALLBACK.*graphify|graph-impact.md absent|routing.*single-dispatch' "$ROOT/workflows/code-review-parallel.md"; then
-  pass "F33b: code-review-parallel.md falls back to single-dispatch when graphify unavailable"
+if [ "$F33_ROUTE" = "route_single_dispatch" ]; then
+  pass "F33b: an unrecoverable empty scope returns action=route_single_dispatch (the caller degrades deliberately, not silently)"
 else
-  fail "F33b: graphify-unavailable fallback missing in partition_lanes"
+  fail "F33b: empty-scope routing regressed — action=$F33_ROUTE (want route_single_dispatch)"
 fi
 
 # F34 — per-lane F28 substance check + retry-once-then-defer.

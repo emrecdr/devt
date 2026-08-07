@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.201.0] - 2026-07-22
+
+### Removed
+
+- **`static-compress --plugin-build` retired, gate K84 with it.** The maintainer-mode CLI that prose-shrank the plugin's OWN `guardrails/` + `skills/` implemented exactly the transformation REJ-001 rejected. Three independent reasons converged on removal: it was wired into **no** release path (verified: zero references in `scripts/release.sh` + `.github/`, and known-unwired for months); its measured payoff was the cache-invisible **0.06–0.19%/dispatch** REJ-001 already cites (editing cached content is briefly net-negative); and running it against a real tree silently corrupted the corpus (the article-stripping the K84-hermetic fix in `0.199.0` had to fence off). Its only exercise was K84 — a gate verifying the CLI surface existed. Removed: the `--plugin-build` / `--allow-dirty` / `--root` flags, `compressPluginBuild` + `_compressPluginFile`, and gate K84 (a gate retires with its subject — RETIREMENT-WATCH policy). `static-compress` keeps `--all` / `--restore` / single-file compression on a project's own `.devt/rules/` — the surface REJ-001 does not cover. Recorded loudly: REJ-001 gains a "Machinery status" section, the RETIREMENT-WATCH strip-ledger gains the entry, and KCORPUS remains the whole-corpus tripwire against any future in-place mutation.
+
 ## [0.200.0] - 2026-07-22
 
 ### Hook-runtime consolidation

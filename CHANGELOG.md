@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.238.0] - 2026-08-07
+
+### Changed
+
+- **The partition gates test the partitioner instead of grepping for words about it.** An audit of all 532 gates found 78 that only grep prose and never execute anything; of those, 11 have pass messages claiming *runtime behaviour* — the class where the words can be present while the behaviour is wrong, which is how the previous release's overflow leg stayed green as the merge inverted. `F33b` was the worst of them: its pattern `routing.*single-dispatch` is satisfied by the very echo line that *reports* the fallback, so it passed whether or not the fallback worked — on the one path whose silent failure ran a five-lane review as one. Both F33 legs now call `state partition-lanes` and assert the decision it returns: exactly-at-cap partitions without merging, over-cap caps and merges, and an unrecoverable empty scope returns `action: route_single_dispatch`. Verified value-sensitive (the same fixture at `--target-lanes=4` yields `4:merged` against the gate's `5:merged`), and the remaining nine behaviour-claiming text-only gates are recorded for the same treatment.
+
 ## [0.237.0] - 2026-08-07
 
 ### Changed
@@ -590,10 +596,4 @@ Both items surfaced by a post-release deep-validation pass (adversarial mutation
 ### Changed
 
 - **README `### CI` section slimmed ~36KB → <1KB (gate K319).** The section inlined a single run-on paragraph enumerating every drift-guard gate (107 of them, K94–K259) — a third of the entire README, and a count-sync burden that went stale the instant a gate was added (it stopped at K259 while the stack runs past K300). Nobody kept it synced because nobody could. The per-gate rationale already lives in the `## [X.Y.Z]` CHANGELOG entry that introduced each gate; the README now keeps a concise floor-based summary (`K94+`, 200+ gates) and points to CHANGELOG for the detail. New gate **K319** budgets the section at ≤2500B so the enumeration can't creep back — the count-sync relief K117's floor conversion started, finished on the README side.
-
-## [0.201.0] - 2026-07-22
-
-### Removed
-
-- **`static-compress --plugin-build` retired, gate K84 with it.** The maintainer-mode CLI that prose-shrank the plugin's OWN `guardrails/` + `skills/` implemented exactly the transformation REJ-001 rejected. Three independent reasons converged on removal: it was wired into **no** release path (verified: zero references in `scripts/release.sh` + `.github/`, and known-unwired for months); its measured payoff was the cache-invisible **0.06–0.19%/dispatch** REJ-001 already cites (editing cached content is briefly net-negative); and running it against a real tree silently corrupted the corpus (the article-stripping the K84-hermetic fix in `0.199.0` had to fence off). Its only exercise was K84 — a gate verifying the CLI surface existed. Removed: the `--plugin-build` / `--allow-dirty` / `--root` flags, `compressPluginBuild` + `_compressPluginFile`, and gate K84 (a gate retires with its subject — RETIREMENT-WATCH policy). `static-compress` keeps `--all` / `--restore` / single-file compression on a project's own `.devt/rules/` — the surface REJ-001 does not cover. Recorded loudly: REJ-001 gains a "Machinery status" section, the RETIREMENT-WATCH strip-ledger gains the entry, and KCORPUS remains the whole-corpus tripwire against any future in-place mutation.
 
