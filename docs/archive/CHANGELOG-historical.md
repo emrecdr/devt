@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.200.0] - 2026-07-22
+
+### Hook-runtime consolidation
+
+The stdin read and plugin-root resolution that every hook re-implemented are now single-sourced in `hooks/_common.sh`. This makes the argv→stdin (E2BIG) fix — which had to be applied to the hook ecosystem one script at a time — structurally un-reintroducible: a new hook sources the helper and inherits the correct, tty-guarded, time-boxed read for free.
+
+### Changed
+
+- **`hooks/_common.sh` single-sources `devt_read_stdin` + `devt_plugin_root`.** All 10 stdin-consuming hooks (`bash-guard`, `dispatch-hygiene-guard`, `memory-auto-index`, `pre-flight-guard`, `prompt-guard`, `read-before-edit-guard`, `stop`, `subagent-status`, `task-truncation-detector`, `workflow-context-injector`) now `source` it instead of carrying an inline `INPUT="" / if ! [ -t 0 ]; then timeout N cat …` block. Hook-specific empty-input actions (an allow-hook echoes `{}` before exit; others exit silently) stay in each hook. `devt_plugin_root` prefers the `PLUGIN_ROOT` the runner already exports, falling back to `$0`-relative resolution for direct invocation.
+- **`workflow-context-injector` stdin read is now tty-guarded + time-boxed.** It previously used a bare `cat` with no `[ -t 0 ]` guard — robust only because the runner always pipes stdin; a direct or on-a-tty invocation could block. It now uses `devt_read_stdin` like the others.
+
+### Added
+
+- **Gate K318** enforces the consolidation: `_common.sh` defines both helpers, every stdin hook sources it and calls `devt_read_stdin`, none re-implements the inline `timeout N cat` read, and the sourced helper delivers end-to-end (bash-guard deny path survives the source).
+
 ## [0.199.0] - 2026-07-22
 
 ### Smoke-suite corpus safety (K84 hermetic + corpus-integrity gate)

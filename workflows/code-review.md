@@ -277,41 +277,10 @@ fi
 
 The pre-step is intentionally permissive: a `claude-mem-skipped.txt` with reason satisfies the gate. The point is to make the consideration explicit — silent skips are the failure mode.
 
-**Review-weight advisory (shadow mode — NON-gating).** Compute the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the blast headline cached in `$CTX`, and ANNOUNCE it. This never changes behavior on its own — only the operator's `--lite` / `--full` flag does (substep 6).
+**Review-weight advisory (shadow mode — NON-gating).** `review-weight advise` computes the fail-safe light-vs-heavy verdict from the diff (path-based risk surface + logic-file/domain counts) plus the cached blast headline, and prints it. It reads the impact-plan tier, `god_node_warnings`, and `blast.effect_size` straight from disk — the hand-rolled version re-ran the entire compound `review-context-init` to obtain three fields that were already sitting there. Thoroughness intent in the task text suppresses a `--lite` suggestion. This never changes behavior on its own; only the operator's `--lite` / `--full` flag does (substep 6).
 
 ```bash
-REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell — rebind from state, NOT from memory (an unbound scope overwrites task with a literal)
-CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})  # re-acquire the cached bundle (short-circuits on same scope_sig+graph_head)
-RW_TIER=$(printf '%s\n' "$CTX" | jq -r '.impact_plan.tier // empty')
-RW_GOD=$(printf '%s\n' "$CTX" | jq -r 'if .god_node_warnings.god_node_match == true then "true" elif .god_node_warnings.god_node_match == false then "false" else empty end')
-RW_EFFECT=$(jq -r '.blast.effect_size // empty' .devt/state/preflight-brief.json 2>/dev/null)
-RW_ARGS="${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH}"
-RANGE=$(echo " ${REVIEW_SCOPE} ${ARGUMENTS:-} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-[ -n "$RANGE" ] && RW_ARGS="$RW_ARGS --range=$RANGE"
-[ -n "$RW_TIER" ]   && RW_ARGS="$RW_ARGS --tier=$RW_TIER"
-[ -n "$RW_GOD" ]    && RW_ARGS="$RW_ARGS --god-node=$RW_GOD"
-[ -n "$RW_EFFECT" ] && RW_ARGS="$RW_ARGS --effect-size=$RW_EFFECT"
-RW=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight assess $RW_ARGS 2>/dev/null || echo '{}')
-# Thoroughness-intent suppression: if the task text asks for a detailed / deep /
-# audit / cascade review, do NOT suggest --lite even when the diff is
-# light-eligible — honoring stated intent (same signal class the parallel
-# short-circuit reads). The operator can still pass --lite explicitly.
-THOROUGH_INTENT=$(echo " ${REVIEW_SCOPE:-} ${ARGUMENTS:-} " | /usr/bin/grep -oiE 'detailed|thorough|in-depth|deep.?dive|comprehensive|audit|all (possible )?(cascade|effect)' | head -1)
-if [ -n "$THOROUGH_INTENT" ] && [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
-  echo "[review-weight] LIGHT suggestion suppressed — task text signals thoroughness ('${THOROUGH_INTENT}'); keeping the heavy path. Pass --lite explicitly to override."
-elif [ "$(printf '%s\n' "$RW" | jq -r '.eligible // false')" = "true" ]; then
-  echo "[review-weight] LIGHT-eligible — $(printf '%s\n' "$RW" | jq -r '.logic_file_count') logic file(s), $(printf '%s\n' "$RW" | jq -r '.domain_count') domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down."
-else
-  if [ "$(printf '%s\n' "$RW" | jq -r '.recommendation // ""')" = "explicit_scope" ]; then
-    echo "[review-weight] $(printf '%s\n' "$RW" | jq -r '.reason')"
-  elif printf '%s\n' "$RW" | jq -r '(.blocked_by // []) | join("; ")' | /usr/bin/grep -q "scope unresolvable"; then
-    echo "[review-weight] SCOPE UNRESOLVABLE — the diff resolved to zero files; this is a scope failure, not a safety verdict. For a merged PR or historical range, re-run with --range=<a>..<b> in the task text."
-  else
-    echo "[review-weight] HEAVY recommended — $(printf '%s\n' "$RW" | jq -r '(.blocked_by // ["unknown"]) | join("; ")')"
-  fi
-fi
-RW_ADV=$(printf '%s\n' "$RW" | jq -r '(.advisories // []) | join("; ")')
-[ -n "$RW_ADV" ] && echo "[review-weight] advisories (non-blocking): $RW_ADV"
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" review-weight advise ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH}
 ```
 </step>
 

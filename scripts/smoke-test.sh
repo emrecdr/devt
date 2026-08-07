@@ -19542,6 +19542,35 @@ else
   fail "K344: falsifiability batch regressed — unassigned=$K344_A (want app/c.py), silent-when-complete=$K344_B (want true), envelope-injection=$K344_C (want 1), unbound-scope-sites=$K344_D (want 0), scope_missing-surfaced=$K344_E (want 1), escalation-on-level-crossing=$K344_F (want 1), zero-harvest-legible=$K344_G (want 1), lane-sidecar-basis+crosscheck=$K344_H (want 1), intent-regex-widened=$K344_I (want 1)"
 fi
 
+# K346: `review-weight advise` owns the announce protocol. The workflow
+# hand-rolled 25 lines that re-ran the FULL compound review-context-init purely
+# to read three fields already cached on disk (impact-plan tier,
+# god_node_warnings, blast effect_size), then branched four ways and echoed.
+# Legs (a)/(b) are behavioural — the thoroughness-intent suppression is the one
+# branch a field operator actually hit, and it is invisible to a grep.
+K346_TMP=$(mktemp -d); K346_TMP=$(cd "$K346_TMP" && pwd -P)
+(cd "$K346_TMP" && git init -q >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && mkdir -p .devt/state && printf 'x\n' > a.py && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 \
+  && printf 'y\n' >> a.py \
+  && printf '{"tier":"symbol_anchored","tool":"blast_radius","args":{}}' > .devt/state/graphify-impact-plan.json \
+  && printf '{"blast":{"effect_size":"small"}}' > .devt/state/preflight-brief.json)
+K346_ADV() { (cd "$K346_TMP" && node "$CLI" state update active=true workflow_type=code_review phase=context_init task="$1" god_node_warnings_json='{"god_node_match":false}' >/dev/null 2>&1; node "$CLI" review-weight advise 2>/dev/null | head -1); }
+K346_A=$(K346_ADV "tidy a small helper")
+K346_B=$(K346_ADV "deep-dive audit of the whole cascade")
+rm -rf "$K346_TMP"
+case "$K346_A" in *"LIGHT-eligible"*) K346_A="light";; *) K346_A="other:$K346_A";; esac
+case "$K346_B" in *"LIGHT suggestion suppressed"*) K346_B="suppressed";; *) K346_B="other:$K346_B";; esac
+# The workflow must CALL advise, and must no longer re-run the compound bundle
+# just to feed the advisory.
+K346_C=0
+if /usr/bin/grep -qF 'review-weight advise' "$ROOT/workflows/code-review.md" \
+   && ! /usr/bin/grep -qF 'review-weight assess' "$ROOT/workflows/code-review.md"; then K346_C=1; fi
+if [ "$K346_A" = "light" ] && [ "$K346_B" = "suppressed" ] && [ "$K346_C" = "1" ]; then
+  pass "K346: review-weight advise emits the light-eligible line, suppresses it on thoroughness intent, and the workflow calls it instead of re-running the compound bundle to hand-assemble flags"
+else
+  fail "K346: review-weight advise regressed — light=$K346_A (want light), intent-suppression=$K346_B (want suppressed), workflow-calls-advise=$K346_C (want 1)"
+fi
+
 # K345: the guard-cries-wolf batch. A guard that reports a problem on a correct
 # artifact is worse than absent — it trains the operator to skip it, and the
 # field run hit exactly that.

@@ -275,9 +275,70 @@ function _parseFlag(args, name) {
   return a ? a.slice(pfx.length) : undefined;
 }
 
+// `advise` = assess + the whole announce protocol the workflow used to hand-roll:
+// 25 lines that re-ran the FULL compound review-context-init purely to read
+// three fields that are already cached on disk (impact-plan tier,
+// god_node_warnings, blast effect_size), then branched four ways and echoed.
+// Reading them directly is equivalent and strictly cheaper. The advisory is
+// shadow-mode: it never changes behaviour, only the operator's --lite/--full
+// flag does, so this returns lines to print and nothing else.
+function adviseReviewWeight(opts = {}) {
+  const path = require("path");
+  const fs = require("fs");
+  const state = require("./state.cjs");
+  const dir = state.getStateDir();
+  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return null; } };
+  const st = state.readState() || {};
+  const scope = String(st.task || "");
+  const plan = readJson("graphify-impact-plan.json");
+  const brief = readJson("preflight-brief.json");
+  // readState() already parses the *_json state fields, so this arrives as an
+  // OBJECT — JSON.parse would throw straight into a swallowing catch and leave
+  // the signal undefined, which reads as "god-node unknown" and forces a
+  // graph-blind HEAVY verdict on a genuinely light change. Accept both shapes.
+  let god;
+  try {
+    const raw = st.god_node_warnings_json;
+    const g = (typeof raw === "string" ? JSON.parse(raw || "{}") : raw) || {};
+    if (typeof g.god_node_match === "boolean") god = g.god_node_match;
+  } catch { /* absent — stays undefined, which is the fail-safe direction */ }
+  const range = opts.range || (scope.match(/--range=(\S+)/) || [])[1];
+  const verdict = assessReviewWeight({
+    baseRef: opts.base,
+    range,
+    effectSize: (brief && brief.blast && brief.blast.effect_size) || undefined,
+    godNodeMatch: god,
+    tier: (plan && plan.tier) || undefined,
+  });
+  const lines = [];
+  // Thoroughness-intent suppression: a task asking for a detailed / deep /
+  // audit / cascade review must not be offered --lite even when the diff is
+  // light-eligible. Honouring stated intent, same signal class the parallel
+  // short-circuit reads.
+  const intent = (scope.match(/detailed|thorough|in-depth|deep.?dive|comprehensive|audit|all (possible )?(cascade|effect)/i) || [])[0];
+  if (verdict.eligible && intent) {
+    lines.push(`[review-weight] LIGHT suggestion suppressed — task text signals thoroughness ('${intent}'); keeping the heavy path. Pass --lite explicitly to override.`);
+  } else if (verdict.eligible) {
+    lines.push(`[review-weight] LIGHT-eligible — ${verdict.logic_file_count} logic file(s), ${verdict.domain_count} domain(s), no risk surface, no god-node. Heavy path running; pass --lite to scale down.`);
+  } else if (verdict.recommendation === "explicit_scope") {
+    lines.push(`[review-weight] ${verdict.reason}`);
+  } else if ((verdict.blocked_by || []).join("; ").includes("scope unresolvable")) {
+    lines.push("[review-weight] SCOPE UNRESOLVABLE — the diff resolved to zero files; this is a scope failure, not a safety verdict. For a merged PR or historical range, re-run with --range=<a>..<b> in the task text.");
+  } else {
+    lines.push(`[review-weight] HEAVY recommended — ${(verdict.blocked_by || ["unknown"]).join("; ")}`);
+  }
+  if ((verdict.advisories || []).length) lines.push(`[review-weight] advisories (non-blocking): ${verdict.advisories.join("; ")}`);
+  return { ok: true, verdict, lines };
+}
+
 function run(subcommand, args) {
   args = args || [];
-  const USAGE = "Usage: review-weight assess [--base=<ref>] [--range=<a>..<b>] [--files=<csv>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n";
+  const USAGE = "Usage: review-weight assess|advise [--base=<ref>] [--range=<a>..<b>] [--files=<csv>] [--effect-size=<s>] [--god-node=<true|false>] [--tier=<t>]\n";
+  if (subcommand === "advise") {
+    const r = adviseReviewWeight({ base: _parseFlag(args, "base"), range: _parseFlag(args, "range") });
+    process.stdout.write(r.lines.join("\n") + "\n");
+    return 0;
+  }
   if (subcommand !== "assess") {
     process.stderr.write(USAGE);
     return 2;
@@ -310,4 +371,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, assessReviewWeight, collectChangedFiles, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };
+module.exports = { run, assessReviewWeight, adviseReviewWeight, collectChangedFiles, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };

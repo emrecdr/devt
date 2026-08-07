@@ -8,6 +8,18 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.237.0] - 2026-08-07
+
+### Changed
+
+- **`review-weight advise` owns the announce protocol.** The advisory was 25 lines of workflow bash that re-ran the **entire compound `review-context-init`** solely to read three fields already cached on disk — the impact-plan tier, `god_node_warnings`, and `blast.effect_size` — then assembled six flags, branched four ways, and echoed. One call now does all of it, reading those fields directly: equivalent, strictly cheaper, and the four branches become testable instead of living in a markdown fence. **−3.0KB from `code-review.md`.**
+
+### Fixed
+
+- **The advisory read a god-node signal that was never there.** `readState()` already parses the `*_json` state fields, so `god_node_warnings_json` arrives as an object; `JSON.parse` on it threw straight into a swallowing catch and left the signal `undefined`. Undefined reads as "god-node unknown", which forces a graph-blind **HEAVY** verdict on a genuinely light change — the advisory would have recommended the heavy path forever, and the failure was invisible because the fail-safe direction looks like a real answer. Both shapes are accepted now. Found by writing the gate: the behavioural leg failed where a grep-shaped one would have passed.
+
+Guarded by K346 — light-eligible and thoroughness-suppression are asserted by running the advisory, not by matching its text.
+
 ## [0.236.0] - 2026-08-07
 
 The first net-negative release of this arc. The review workflow surface had grown every release while the field kept reporting orientation cost; measuring where the bytes actually were found one bash block holding 19% of `code-review-parallel.md`.
@@ -584,19 +596,4 @@ Both items surfaced by a post-release deep-validation pass (adversarial mutation
 ### Removed
 
 - **`static-compress --plugin-build` retired, gate K84 with it.** The maintainer-mode CLI that prose-shrank the plugin's OWN `guardrails/` + `skills/` implemented exactly the transformation REJ-001 rejected. Three independent reasons converged on removal: it was wired into **no** release path (verified: zero references in `scripts/release.sh` + `.github/`, and known-unwired for months); its measured payoff was the cache-invisible **0.06–0.19%/dispatch** REJ-001 already cites (editing cached content is briefly net-negative); and running it against a real tree silently corrupted the corpus (the article-stripping the K84-hermetic fix in `0.199.0` had to fence off). Its only exercise was K84 — a gate verifying the CLI surface existed. Removed: the `--plugin-build` / `--allow-dirty` / `--root` flags, `compressPluginBuild` + `_compressPluginFile`, and gate K84 (a gate retires with its subject — RETIREMENT-WATCH policy). `static-compress` keeps `--all` / `--restore` / single-file compression on a project's own `.devt/rules/` — the surface REJ-001 does not cover. Recorded loudly: REJ-001 gains a "Machinery status" section, the RETIREMENT-WATCH strip-ledger gains the entry, and KCORPUS remains the whole-corpus tripwire against any future in-place mutation.
-
-## [0.200.0] - 2026-07-22
-
-### Hook-runtime consolidation
-
-The stdin read and plugin-root resolution that every hook re-implemented are now single-sourced in `hooks/_common.sh`. This makes the argv→stdin (E2BIG) fix — which had to be applied to the hook ecosystem one script at a time — structurally un-reintroducible: a new hook sources the helper and inherits the correct, tty-guarded, time-boxed read for free.
-
-### Changed
-
-- **`hooks/_common.sh` single-sources `devt_read_stdin` + `devt_plugin_root`.** All 10 stdin-consuming hooks (`bash-guard`, `dispatch-hygiene-guard`, `memory-auto-index`, `pre-flight-guard`, `prompt-guard`, `read-before-edit-guard`, `stop`, `subagent-status`, `task-truncation-detector`, `workflow-context-injector`) now `source` it instead of carrying an inline `INPUT="" / if ! [ -t 0 ]; then timeout N cat …` block. Hook-specific empty-input actions (an allow-hook echoes `{}` before exit; others exit silently) stay in each hook. `devt_plugin_root` prefers the `PLUGIN_ROOT` the runner already exports, falling back to `$0`-relative resolution for direct invocation.
-- **`workflow-context-injector` stdin read is now tty-guarded + time-boxed.** It previously used a bare `cat` with no `[ -t 0 ]` guard — robust only because the runner always pipes stdin; a direct or on-a-tty invocation could block. It now uses `devt_read_stdin` like the others.
-
-### Added
-
-- **Gate K318** enforces the consolidation: `_common.sh` defines both helpers, every stdin hook sources it and calls `devt_read_stdin`, none re-implements the inline `timeout N cat` read, and the sourced helper delivers end-to-end (bash-guard deny path survives the source).
 
