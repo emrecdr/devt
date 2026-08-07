@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.199.0] - 2026-07-22
+
+### Smoke-suite corpus safety (K84 hermetic + corpus-integrity gate)
+
+An external post-0198 verification pass reproduced a silent-corruption class: the K84 smoke gate compressed the *live* `guardrails/` + `skills/` corpus in place and relied on `git checkout` to undo it. That cleanup is a no-op in a git-less checkout (archive install, shallow / no-`.git` tree), so a smoke run there left the REJ-001 prose-shrink transformation **permanent** — 21 files / ~6,982 bytes altered (article-stripped skill descriptions and guardrail bodies) — while the suite stayed green. Real CI checks out with `.git`, so cleanup fired there; the hazard was specifically git-less installs.
+
+### Fixed
+
+- **K84 is now hermetic — the live corpus is never a test subject.** The gate copies `guardrails/` + `skills/` into a `mktemp` fixture and points the compressor at it via a new `--plugin-build --root=<dir>` override (`compressPluginBuild` gained an `opts.root`, ~5 lines), following the K77/K81 fixture pattern. All `git diff` / `git checkout` / patch-restore logic is gone — the compressor *cannot* reach the working tree because it never receives its path. A new hermeticity assertion confirms the compressor reported the fixture (not the repo root) as `plugin_root`.
+- **`read-before-edit-guard.sh` reads hook input from stdin, not `process.argv`.** The 8th and last hook still passing the JSON payload on argv — a large payload could hit `E2BIG` and silently skip the guard. Now `printf '%s' "$INPUT" | node -e "… fs.readFileSync(0,'utf8') …"`, matching the other seven hooks hardened earlier.
+
+### Added
+
+- **KCORPUS corpus-integrity gate.** A whole-corpus sha256 of `guardrails/` + `skills/` is captured before any gate runs and asserted byte-identical at suite end. This is the tripwire for the *entire* in-place-mutation class — independent of which pinned phrase a content-grep gate happens to watch (only 1 of the pinned-phrase gates could have caught the article-stripping) and independent of which gate causes the mutation, present or future. Belt to K84's suspenders; degrades safe (absent `shasum` → empty digests → no-op).
+
+### Changed
+
+- **`guardrails_mode` config-absent fallback aligned `inline` → `by-reference`.** The authoritative default has lived in `config.cjs` DEFAULTS as `by-reference` since the measured flip, but the secondary fallbacks in `dispatch.cjs` and `init.cjs` (fired only on a total config-read failure) still read `|| "inline"` — so a degraded path silently reverted guardrails to the *expensive* inline mode, the opposite of the intended default. Both now read `|| "by-reference"` and use the same `!== "inline"` idiom as `rules_mode` / `rubric_mode`, and the stale "defaults to inline / opt-in until field-measured" comments are corrected to match reality.
+
 ## [0.198.1] - 2026-07-21
 
 ### Fixed

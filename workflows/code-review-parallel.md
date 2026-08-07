@@ -90,185 +90,35 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update workflow_type=code_
 
 Partition scope files into lanes. Community-first when graphify is enabled AND the graph has community attributes (B-XIII), otherwise tries service-boundary auto-detect (R7-W6), otherwise falls back to top-level directory path grouping. The `graphify lane-suggestions` CLI returns `mode: "community"` with per-file dominant-community grouping when usable, `mode: "service_boundary"` when the graph has no community labels but ≥80% of diff files match a common service-prefix pattern (`app/services/X/`, `services/X/`, `packages/X/`, etc. — community field carries the service name), or `mode: "fallback"` when neither applies. The fallback case is the legacy path partition. The orchestrator does not pick between modes — the CLI decides and the bash branch routes.
 
-```bash
-SCOPE_FILES_PATH=".devt/state/code-review-input.md"
-if [ ! -f "$SCOPE_FILES_PATH" ]; then
-  # SEAM (P0): this workflow is only entered via delegation from
-  # code-review.md::scope_check, which runs BEFORE identify_scope writes
-  # code-review-input.md — so on a canonical FRESH parallel delegation the file
-  # is absent here. Silently routing to single-dispatch defeated the user's
-  # explicit parallel choice (field-confirmed: a 5-lane review silently ran as 1).
-  # Self-recover the scope from the SAME changed-files union scope_check used to
-  # decide parallel, LOUDLY — a silent fallback reads as "worked" when it didn't.
-  echo "⚠️  [partition_lanes] code-review-input.md ABSENT — scope artifact not written before parallel delegation (scope_check delegates before identify_scope). Self-recovering scope from the changed-files union instead of silently degrading to single-dispatch."
-  RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-  RECOVERED=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE} 2>/dev/null | jq -r '.files[]?' 2>/dev/null)
-  if [ -n "$RECOVERED" ]; then
-    { echo "# Review Scope"; echo; echo "## Files"; echo; printf '%s\n' "$RECOVERED" | sed 's/^/- /'; } > "$SCOPE_FILES_PATH"
-    echo "[partition_lanes] recovered $(printf '%s\n' "$RECOVERED" | /usr/bin/grep -cE '.') scope file(s) → proceeding with PARALLEL (not degrading to single-dispatch)."
-  else
-    echo "FALLBACK: code-review-input.md absent AND changed-files recovery empty — genuinely empty scope, routing to single-dispatch."
-    node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
-    exit 0
-  fi
-fi
+**What `state partition-lanes` does** (one call — the whole pipeline was 156 lines of bash carrying an embedded `node -e` script, which could not be unit-tested and whose cap/merge half had silently diverged from the community path's):
 
-# Read scope files (one path per line, skip blanks + comments)
-SCOPE_FILES=$(/usr/bin/grep -vE '^#|^$' "$SCOPE_FILES_PATH" 2>/dev/null | sed -E 's/^[[:space:]]*[-*][[:space:]]+//' || echo "")  # strip the '- ' bullets identify_scope/scope_check write
-SCOPE_FILE_COUNT=$(echo "$SCOPE_FILES" | /usr/bin/grep -cE '.' || echo 0)
-if [ "$SCOPE_FILE_COUNT" -eq 0 ]; then
-  echo "FALLBACK: zero scope files — routing to single-dispatch"
+1. **Scope self-recovery.** `scope_check` delegates here BEFORE `identify_scope` writes `code-review-input.md`, so on a fresh parallel delegation the artifact is absent. The scope is recovered LOUDLY from the same changed-files union `scope_check` used — silently routing to single-dispatch defeated the operator's explicit parallel choice (field-confirmed: a 5-lane review ran as 1). Only a genuinely empty scope returns `action: route_single_dispatch`.
+2. **Community-first partition** via `graphify lane-suggestions`. Modes `community` / `partial` / `service_boundary` group by community; anything else falls back to **top-2-level path** grouping (`src/auth/x.ts` → `src/auth`; flat layouts use top-1; root files get `root`). `lane-suggestions` stderr is carried into the reason — it exits non-zero for reachable causes like a credential-safety refusal, and a reason-less fallback gets mislabelled as a graphify capability gap.
+3. **Degradation is persisted** to `.devt/state/partition-degraded.txt` (plus a `graphify-fallback-trace`), because stdout scrolls past under a 20-block orchestration and is invisible to every downstream agent. Any prior run's record is cleared first — a stale "we degraded" artifact is as misleading as none.
+4. **Cap at 5 lanes, merging overflow into the most path-similar anchor** under a fair-share load cap. Nothing drops and nothing becomes a `mixed-overflow` grab-bag: a lane whose scope is "everything left over" has no coherent review lens.
+5. **Registers through `register-lanes`**, so sizing, per-lane diff artifacts, and lane-files sidecars are identical to a hand-rolled partition.
+
+```bash
+REVIEW_SCOPE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state read | jq -r '.task // ""')  # fresh shell
+RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
+PART=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state partition-lanes --target-lanes=5 ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} ${RANGE:+--range=$RANGE})
+if [ "$(printf '%s\n' "$PART" | jq -r '.action')" = "route_single_dispatch" ]; then
+  echo "FALLBACK: $(printf '%s\n' "$PART" | jq -r '.reason') — routing to single-dispatch"
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=context_init status=DONE workflow_type=code_review
   exit 0
 fi
-
-# B-XIII: try community-first partition. lane-suggestions returns mode=community
-# with per-file dominant-community grouping when the graph has community
-# attributes from Leiden clustering. Otherwise mode=fallback and the bash
-# branch below uses the legacy top-2-level path partition.
-# stderr is CAPTURED, not discarded: lane-suggestions exits non-zero for
-# operationally-reachable reasons (a credential-safety refusal that names its
-# own --allow bypass), and `2>/dev/null || echo '{"mode":"fallback"}'` turned
-# that into a reason-less fallback the next line then mislabelled as a graphify
-# capability gap. A degraded partition must say why it degraded.
-LANE_ERR=$(mktemp)
-LANE_SUG=$(echo "$SCOPE_FILES" | tr '\n' ' ' | xargs node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify lane-suggestions --target-lanes=5 2>"$LANE_ERR")
-LANE_RC=$?
-if [ "$LANE_RC" -ne 0 ] || [ -z "$LANE_SUG" ]; then
-  LANE_SUG=$(jq -nc --arg e "$(tr '\n' ' ' < "$LANE_ERR" | cut -c1-400)" --arg rc "$LANE_RC" \
-    '{mode:"fallback", reason:("lane-suggestions exited " + $rc + ": " + ($e | if . == "" then "no stderr" else . end))}')
-fi
-rm -f "$LANE_ERR"
-LANE_MODE=$(printf '%s\n' "$LANE_SUG" | jq -r '.mode // "fallback"')
-
-GROUPS_FILE=$(mktemp)
-# Clear any prior run's degradation record before deciding this run's — a
-# stale "we degraded" artifact is exactly as misleading as no artifact at all.
-rm -f .devt/state/partition-degraded.txt
-if [ "$LANE_MODE" = "community" ] || [ "$LANE_MODE" = "partial" ] || [ "$LANE_MODE" = "service_boundary" ]; then
-  # Community / partial / service-boundary partition: each group becomes one
-  # lane. The prefix label is "community-N" for Leiden-numbered groups,
-  # "community-<service>" for service-boundary groups (R7-W6 — the community
-  # field carries the service name string), or "ungrouped" for partial-mode
-  # uncovered files. The downstream slug generation handles all three labels.
-  printf '%s\n' "$LANE_SUG" | jq -r '.groups[] | (if .community == null then "ungrouped" else "community-" + (.community|tostring) end) as $c | .files[] | $c + "|" + .' | sort > "$GROUPS_FILE"
-  if [ "$LANE_MODE" = "partial" ]; then
-    COVERED=$(printf '%s\n' "$LANE_SUG" | jq -r '.covered_count')
-    UNCOVERED=$(printf '%s\n' "$LANE_SUG" | jq -r '.uncovered_count')
-    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → partial community partition (covered: ${COVERED}, ungrouped: ${UNCOVERED})"
-  elif [ "$LANE_MODE" = "service_boundary" ]; then
-    SB_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason')
-    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → service-boundary partition (${SB_REASON}) (R7-W6)"
-  else
-    echo "partition_lanes: ${SCOPE_FILE_COUNT} files → community-driven partition (B-XIII)"
-  fi
-else
-  # Fallback: group by top-2-level path (e.g., "src/auth/middleware.ts" →
-  # "src/auth"). For flat layouts (single top-level), falls back to
-  # top-1-level. Top-level files get "root".
-  echo "$SCOPE_FILES" | while IFS= read -r FILE; do
-    [ -z "$FILE" ] && continue
-    PREFIX=$(echo "$FILE" | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }')
-    echo "$PREFIX|$FILE"
-  done | sort > "$GROUPS_FILE"
-  # No `.reason` means the CLI produced nothing parseable — say that, rather
-  # than naming a cause. The former default asserted a specific subsystem was
-  # switched off, which was a falsehood on projects whose graphify was enabled
-  # and fully clustered, sending the operator to the wrong place entirely.
-  FALLBACK_REASON=$(printf '%s\n' "$LANE_SUG" | jq -r '.reason // "unknown — lane-suggestions returned no reason"')
-  echo "partition_lanes: ${SCOPE_FILE_COUNT} files → path-based partition (community fallback: ${FALLBACK_REASON})"
-  # PERSIST the degradation. stdout scrolls past under a 20-block orchestration
-  # and is invisible to every downstream agent; lanes were told nothing about
-  # why their partition was semantic-free. This artifact survives the session,
-  # is greppable by the consolidator, and lets a gate assert that a
-  # graph-ready project didn't silently path-partition.
-  printf 'mode=%s\nexit_code=%s\nreason=%s\nfile_count=%s\n' \
-    "$LANE_MODE" "${LANE_RC:-0}" "$FALLBACK_REASON" "$SCOPE_FILE_COUNT" \
-    > .devt/state/partition-degraded.txt
-  node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state graphify-fallback-trace error \
-    --skill=code-review-parallel --operation=lane-suggestions --reason="$FALLBACK_REASON" >/dev/null 2>&1 || true
-fi
-
-UNIQUE_PREFIXES=$(cut -d'|' -f1 "$GROUPS_FILE" | sort -u)
-PREFIX_COUNT=$(echo "$UNIQUE_PREFIXES" | /usr/bin/grep -cE '.')
-echo "partition_lanes: ${PREFIX_COUNT} groups (cap=5 in next step)"
-
-# Build a partition JSON from the grouped files (cap 5 lanes) and register
-# through the canonical CLI — sizing (diff-LOC size_class), per-lane diff
-# artifacts (lane-diff-<id>.txt), and lane-files sidecars all come from
-# register-lanes, identical to hand-rolled partitions. This replaces a
-# hand-built YAML splice that duplicated sizing with a different (whole-file)
-# metric and skipped the sidecars render-lanes needs.
-# Range-scoped review: every lane diffs against the range start (the proven
-# per-lane base_ref plumbing, now auto-wired from --range).
-RANGE=$(echo " ${REVIEW_SCOPE} " | /usr/bin/grep -oE -- '--range=[^ ]+' | head -1 | cut -d= -f2)
-export RANGE_BASE=${RANGE%%..*}
-PARTITION_JSON=$(mktemp)
-node -e '
-const fs = require("fs");
-const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
-const groups = new Map();
-for (const line of lines) {
-  const i = line.indexOf("|");
-  if (i < 1) continue;
-  const prefix = line.slice(0, i), file = line.slice(i + 1);
-  if (!groups.has(prefix)) groups.set(prefix, []);
-  groups.get(prefix).push(file);
-}
-const rangeBase = (process.env.RANGE_BASE || "").trim();
-// Cap 5 lanes — but overflow groups MERGE into the final lane instead of
-// silently vanishing (no-silent-caps: an alphabetical slice(0,5) would have
-// dropped whole directories from review coverage — proef field case).
-// Sort by group size DESC before capping — lexicographic order spent lane
-// slots on single-file config groups while dropping the largest surfaces
-// (proef field data: .cargo(1) kept, harness/fixture/xtask(17 files) dropped).
-const entries = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
-let lanes;
-if (entries.length <= 5) {
-  lanes = entries.map(([scope, files], n) => ({ id: "L" + (n + 1), scope, files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
-} else {
-  // Leftovers join their most path-similar anchor, load-balanced — they do NOT
-  // become one "mixed-overflow" grab-bag. A lane whose scope is "everything
-  // left over" has no coherent review lens, which is the one thing a lane needs:
-  // field-reported on a 9-domain diff where five unrelated services would have
-  // shared a single lane. The community path in graphify.cjs was already fixed
-  // this way after an identical incident; this fallback kept the naive version,
-  // so the two merge strategies disagreed depending on which branch ran.
-  const anchors = entries.slice(0, 5).map(([scope, files]) => ({ scope, files: files.slice() }));
-  const shared = (a, b) => { const x = a.split("/"), y = b.split("/"); let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++; return i; };
-  const fair = Math.ceil(entries.reduce((s, [, f]) => s + f.length, 0) / 5);
-  for (const [scope, files] of entries.slice(5)) {
-    let best = null, bestKey = [-1, Infinity];
-    for (const a of anchors) {
-      // Similarity picks WHICH home; load decides among equally-similar ones, so
-      // one anchor cannot absorb every prefix-adjacent leftover.
-      const key = [shared(scope, a.scope), -Math.max(0, a.files.length - fair)];
-      if (key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) { best = a; bestKey = key; }
-    }
-    best.files.push(...files);
-  }
-  console.error("partition_lanes: " + entries.length + " groups > 5-lane cap — merged [" + entries.slice(5).map(([sc]) => sc).join(", ") + "] into the most path-similar anchors (no group drops from coverage, and no mixed-overflow grab-bag lane)");
-  lanes = anchors.map((a, n) => ({ id: "L" + (n + 1), scope: a.scope, files: a.files, ...(rangeBase ? { base_ref: rangeBase } : {}) }));
-}
-fs.writeFileSync(process.argv[2], JSON.stringify({ lanes }));
-' "$GROUPS_FILE" "$PARTITION_JSON"
-REG=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state register-lanes --from="$PARTITION_JSON")
-rm -f "$PARTITION_JSON" "$GROUPS_FILE"
+printf '%s\n' "$PART" | jq -r '"partition_lanes: " + (.scope_file_count|tostring) + " files → " + .partition_note + " (" + (.group_count|tostring) + " groups, cap=5)"'
+printf '%s\n' "$PART" | jq -r 'if .scope_recovered then "⚠️  code-review-input.md was ABSENT — recovered " + (.scope_recovered|tostring) + " file(s) from the changed-files union; proceeding PARALLEL rather than silently degrading" else empty end'
+printf '%s\n' "$PART" | jq -r 'if .merged_groups then "     merged beyond the cap into the most path-similar anchors: " + (.merged_groups|join(", ")) else empty end'
 # review_file is printed because it is load-bearing for the claim-check and is
 # NOT guessable — it is slugified from the scope string and truncates mid-word.
-printf '%s\n' "$REG" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring) + " → " + (.review_file // "?")'
-# Coverage set-difference vs code-review-input.md. Warn-only here — the binding
-# form is the <unassigned_scope> block the consolidator envelope carries, since
-# a line printed at partition time scrolls past long before coverage is claimed.
-COV_WARN=$(printf '%s\n' "$REG" | jq -r '.coverage_warning // empty')
+printf '%s\n' "$PART" | jq -r '.registered[] | "  lane " + .id + ": size_class=" + (.size_class // "?") + " est_loc=" + ((.est_loc // 0)|tostring) + " → " + (.review_file // "?")'
+COV_WARN=$(printf '%s\n' "$PART" | jq -r '.coverage_warning // empty')
 if [ -n "$COV_WARN" ]; then
   echo "⚠️  ${COV_WARN}"
-  printf '%s\n' "$REG" | jq -r '.scope_unassigned[] | "     unassigned: " + .'
+  printf '%s\n' "$PART" | jq -r '.scope_unassigned[] | "     unassigned: " + .'
 fi
-
-LANES_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
-LANE_COUNT=$(printf '%s\n' "$LANES_OUT" | jq '.lanes | length')
-echo "Partitioned into ${LANE_COUNT} lanes (cap=5)"
+echo "Partitioned into $(printf '%s\n' "$PART" | jq -r '.lane_count') lanes (cap=5)"
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=partition_lanes status=DONE
 ```
 

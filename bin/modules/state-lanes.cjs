@@ -821,6 +821,147 @@ function registerLanesFromYaml(filePath) {
   return out;
 }
 
+// Deterministic partition pipeline, lifted verbatim out of
+// code-review-parallel.md::partition_lanes — 156 lines of bash carrying an
+// embedded `node -e` script inside a markdown fence. Nothing in it needed
+// orchestrator judgment: scope recovery, lane-suggestions, mode branching,
+// path grouping, degradation persistence, cap/merge, and registration are all
+// mechanical. Living as prose it cost ~10.7KB of every parallel review's
+// context, could not be unit-tested, and its cap/merge half silently diverged
+// from the community path's.
+//
+// Control flow the CALLER must still own: two conditions route the whole review
+// back to single-dispatch. A library cannot exit a workflow, so those return
+// `action: "route_single_dispatch"` with a reason rather than performing it.
+function partitionLanes(opts = {}) {
+  const { spawnSync } = require("child_process");
+  const dir = getStateDir();
+  const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
+  const proot = findProjectRoot();
+  const targetLanes = Number.isInteger(opts.targetLanes) && opts.targetLanes > 0 ? opts.targetLanes : 5;
+  const sh = (args) => {
+    const r = spawnSync("node", [selfBin, ...args], { cwd: proot, encoding: "utf8", timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+    return { code: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  };
+  const scopePath = path.join(dir, "code-review-input.md");
+  const out = { ok: true, action: "partitioned", target_lanes: targetLanes };
+
+  // 1 — scope self-recovery. scope_check delegates here BEFORE identify_scope
+  // writes the artifact, so on a canonical fresh parallel delegation it is
+  // absent. Silently routing to single-dispatch defeated the operator's explicit
+  // parallel choice (field: a 5-lane review ran as 1), so recovery is loud and
+  // only a genuinely empty scope routes away.
+  if (!fs.existsSync(scopePath)) {
+    out.scope_artifact_absent = true;
+    const cf = sh(["state", "changed-files", ...(opts.base ? [`--base=${opts.base}`] : []), ...(opts.range ? [`--range=${opts.range}`] : [])]);
+    let files = [];
+    try { files = (JSON.parse(cf.stdout).files || []).filter(Boolean); } catch { files = []; }
+    if (files.length === 0) {
+      return { ok: true, action: "route_single_dispatch", reason: "code-review-input.md absent AND changed-files recovery empty — genuinely empty scope" };
+    }
+    atomicWriteFileSync(scopePath, `# Review Scope\n\n## Files\n\n${files.map(f => `- ${f}`).join("\n")}\n`);
+    out.scope_recovered = files.length;
+  }
+
+  const scopeFiles = _scopeFilesFromArtifact(scopePath) || [];
+  if (scopeFiles.length === 0) {
+    return { ok: true, action: "route_single_dispatch", reason: "zero scope files in code-review-input.md" };
+  }
+  out.scope_file_count = scopeFiles.length;
+
+  // 2 — community-first partition. stderr is CAPTURED, not discarded:
+  // lane-suggestions exits non-zero for operationally-reachable reasons (a
+  // credential-safety refusal naming its own --allow bypass), and swallowing it
+  // produced a reason-less fallback that was then mislabelled as a graphify
+  // capability gap. A degraded partition must say why it degraded.
+  const sug = sh(["graphify", "lane-suggestions", ...scopeFiles, `--target-lanes=${targetLanes}`]);
+  let laneSug = null;
+  try { laneSug = JSON.parse(sug.stdout); } catch { laneSug = null; }
+  if (sug.code !== 0 || !laneSug) {
+    laneSug = { mode: "fallback", reason: `lane-suggestions exited ${sug.code}: ${sug.stderr ? sug.stderr.slice(0, 400) : "no stderr"}` };
+  }
+  const mode = laneSug.mode || "fallback";
+  out.mode = mode;
+
+  // A stale "we degraded" artifact is exactly as misleading as no artifact.
+  const partitionDegradedPath = path.join(dir, "partition-degraded.txt");
+  try { fs.unlinkSync(partitionDegradedPath); } catch { /* absent is the normal case */ }
+
+  const groups = new Map();
+  const push = (label, file) => { if (!groups.has(label)) groups.set(label, []); groups.get(label).push(file); };
+  if (mode === "community" || mode === "partial" || mode === "service_boundary") {
+    for (const g of (laneSug.groups || [])) {
+      const label = g.community == null ? "ungrouped" : `community-${g.community}`;
+      for (const f of (g.files || [])) push(label, f);
+    }
+    if (mode === "partial") out.partition_note = `partial community partition (covered: ${laneSug.covered_count}, ungrouped: ${laneSug.uncovered_count})`;
+    else if (mode === "service_boundary") out.partition_note = `service-boundary partition (${laneSug.reason})`;
+    else out.partition_note = "community-driven partition";
+  } else {
+    // Top-2-level path grouping; flat layouts fall back to top-1; root files
+    // get "root".
+    for (const f of scopeFiles) {
+      const parts = String(f).split("/");
+      push(parts.length >= 3 ? `${parts[0]}/${parts[1]}` : (parts.length === 2 ? parts[0] : "root"), f);
+    }
+    // No `.reason` means the CLI produced nothing parseable — say that rather
+    // than naming a cause. The former default asserted a specific subsystem was
+    // off, a falsehood on fully-clustered projects that sent operators to the
+    // wrong place entirely.
+    const reason = laneSug.reason || "unknown — lane-suggestions returned no reason";
+    out.partition_note = `path-based partition (community fallback: ${reason})`;
+    out.degraded = true;
+    out.degraded_reason = reason;
+    // Persisted because stdout scrolls past under a 20-block orchestration and
+    // is invisible to every downstream agent: lanes were told nothing about why
+    // their partition was semantic-free.
+    try {
+      atomicWriteFileSync(partitionDegradedPath, `mode=${mode}\nexit_code=${sug.code}\nreason=${reason}\nfile_count=${scopeFiles.length}\n`);
+    } catch { /* advisory */ }
+    sh(["state", "graphify-fallback-trace", "error", "--skill=code-review-parallel", "--operation=lane-suggestions", `--reason=${reason}`]);
+  }
+  out.group_count = groups.size;
+
+  // 3 — cap + merge. Overflow groups join their most path-similar anchor under a
+  // fair-share load cap. They do NOT become one grab-bag: a lane whose scope is
+  // "everything left over" has no coherent review lens, which is the one thing a
+  // lane needs.
+  const rangeBase = opts.range ? String(opts.range).split("..")[0] : "";
+  const entries = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  let lanes;
+  if (entries.length <= targetLanes) {
+    lanes = entries.map(([scope, files], n) => ({ id: `L${n + 1}`, scope, files }));
+  } else {
+    const anchors = entries.slice(0, targetLanes).map(([scope, files]) => ({ scope, files: files.slice() }));
+    const shared = (a, b) => { const x = a.split("/"), y = b.split("/"); let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++; return i; };
+    const fair = Math.ceil(entries.reduce((s, [, f]) => s + f.length, 0) / targetLanes);
+    for (const [scope, files] of entries.slice(targetLanes)) {
+      let best = null, bestKey = [-1, -Infinity];
+      for (const a of anchors) {
+        const key = [shared(scope, a.scope), -Math.max(0, a.files.length - fair)];
+        if (key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) { best = a; bestKey = key; }
+      }
+      best.files.push(...files);
+    }
+    out.merged_groups = entries.slice(targetLanes).map(([sc]) => sc);
+    lanes = anchors.map((a, n) => ({ id: `L${n + 1}`, scope: a.scope, files: a.files }));
+  }
+  if (rangeBase) for (const l of lanes) l.base_ref = rangeBase;
+
+  // 4 — register through the canonical path so sizing, per-lane diff artifacts,
+  // and lane-files sidecars are identical to a hand-rolled partition.
+  const tmp = path.join(dir, `.partition-${process.pid}.json`);
+  atomicWriteFileSync(tmp, JSON.stringify({ lanes }));
+  let reg;
+  try { reg = registerLanesFromYaml(tmp); } finally { try { fs.unlinkSync(tmp); } catch { /* best-effort */ } }
+  out.registered = (reg && reg.registered) || [];
+  if (reg && reg.errors && reg.errors.length) out.errors = reg.errors;
+  if (reg && reg.coverage_warning) { out.coverage_warning = reg.coverage_warning; out.scope_unassigned = reg.scope_unassigned; }
+  if (reg && reg.overlap_warning) out.overlap_warning = reg.overlap_warning;
+  out.lane_count = (listLaneOutputs().lanes || []).length;
+  return out;
+}
+
 function _normScopePath(p) {
   let s = String(p || "").trim().replace(/^\.\//, "");
   if (path.isAbsolute(s)) { try { s = path.relative(findProjectRoot(), s); } catch { /* keep absolute */ } }
@@ -831,21 +972,28 @@ function _normScopePath(p) {
 // code-review-input.md. Returns null when the artifact is absent — the caller
 // then makes no coverage claim at all, rather than reporting zero gaps from zero
 // knowledge.
-function _declaredScopeFiles() {
-  const p = path.join(getStateDir(), "code-review-input.md");
+// ONE parser for the scope artifact. The partitioner and the coverage
+// set-difference read the same file and previously disagreed: the partitioner's
+// bash took every non-comment, non-blank line with its bullet stripped, while
+// this returned only bullets under a `## Files` heading — so a scope file
+// written without that heading partitioned normally and then reported no
+// declared files at all, silently disabling the coverage check. Permissive
+// (the bash behaviour) is the correct side: a heading is presentation, and the
+// coverage claim must be about every path the artifact names.
+function _scopeFilesFromArtifact(p) {
   let body = "";
   try { body = fs.readFileSync(p, "utf8"); } catch { return null; }
   const files = [];
-  let inFiles = false;
   for (const raw of body.split("\n")) {
     const line = raw.trim();
-    const h = line.match(/^#{1,6}\s+(.*)$/);
-    if (h) { inFiles = /^files\b/i.test(h[1].trim()); continue; }
-    if (!inFiles) continue;
-    const m = line.match(/^[-*]\s+(.+)$/);
-    if (m) files.push(m[1].replace(/`/g, "").trim());
+    if (!line || line.startsWith("#")) continue;
+    files.push(line.replace(/^[-*]\s+/, "").replace(/`/g, "").trim());
   }
-  return files.length > 0 ? files : null;
+  return files.length > 0 ? files.filter(Boolean) : null;
+}
+
+function _declaredScopeFiles() {
+  return _scopeFilesFromArtifact(path.join(getStateDir(), "code-review-input.md"));
 }
 
 
@@ -942,6 +1090,7 @@ function updateLane(laneId, kvPairs) {
 module.exports = {
   laneSeverityTally,
   laneSampleForVerification,
+  partitionLanes,
   slugifyLaneName,
   listLaneOutputs,
   _sizingExcludePatterns,

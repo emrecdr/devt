@@ -7245,7 +7245,8 @@ else
 fi
 
 # F33 — partition_lanes caps at 5 + falls back when graphify unavailable.
-if /usr/bin/grep -qE 'head -5|cap.*5 lanes' "$ROOT/workflows/code-review-parallel.md"; then
+if /usr/bin/grep -qF -- '--target-lanes=5' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF 'entries.length <= targetLanes' "$ROOT/bin/modules/state-lanes.cjs"; then
   pass "F33a: code-review-parallel.md partition_lanes caps at 5"
 else
   fail "F33a: partition_lanes does not cap at 5 lanes"
@@ -7428,8 +7429,8 @@ fi
 rm -rf "$G4_TMP"
 
 # G5: path-based partition_lanes (presence check)
-if /usr/bin/grep -q "path-based" "$ROOT/workflows/code-review-parallel.md" \
-  && /usr/bin/grep -q "top-2-level path" "$ROOT/workflows/code-review-parallel.md"; then
+if /usr/bin/grep -q "top-2-level path" "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF 'path-based partition (community fallback' "$ROOT/bin/modules/state-lanes.cjs"; then
   pass "G5a: code-review-parallel.md partition_lanes uses path-based partitioning (no graphify community dependency)"
 else
   fail "G5a: partition_lanes still depends on community labels"
@@ -16996,7 +16997,7 @@ fi
 # through register-lanes instead of hand-building a lanes YAML splice (one
 # sizing implementation, sidecars + diff artifacts for both partition paths).
 if /usr/bin/grep -q "trigger is STRUCTURAL" "$ROOT/agents/code-reviewer.md" \
-   && /usr/bin/grep -qF 'register-lanes --from="$PARTITION_JSON"' "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -qF 'reg = registerLanesFromYaml(tmp)' "$ROOT/bin/modules/state-lanes.cjs" \
    && ! /usr/bin/grep -q "devt-lanes-block.yaml" "$ROOT/workflows/code-review-parallel.md" \
    && /usr/bin/grep -q "render-filled code-reviewer:code_review_parallel" "$ROOT/workflows/code-review-parallel.md"; then
   pass "K270: structural synthesis trigger in agent body + auto-partitioner routes through register-lanes + consolidate documents the render path"
@@ -17776,7 +17777,7 @@ printf '%s' "$K293_RW" | /usr/bin/grep -q "scope unresolvable" || { K293_OK=0; K
   && /usr/bin/grep -qF 'low marginal yield' "$ROOT/bin/modules/review-weight.cjs"; } || { K293_OK=0; K293_MISS="$K293_MISS cli-pins"; }
 K293_WF=$({ /usr/bin/grep -c 'RANGE=$(echo " ${REVIEW_SCOPE}' "$ROOT/workflows/code-review.md" || true; })
 { [ "$K293_WF" -ge 3 ] \
-  && /usr/bin/grep -qF 'RANGE_BASE=${RANGE%%..*}' "$ROOT/workflows/code-review-parallel.md" \
+  && /usr/bin/grep -qF 'String(opts.range).split("..")[0]' "$ROOT/bin/modules/state-lanes.cjs" \
   && /usr/bin/grep -qF -- '--range=<a>..<b>' "$ROOT/commands/review.md" \
   && /usr/bin/grep -qF 'readWorkflowRange' "$ROOT/bin/modules/preflight.cjs"; } || { K293_OK=0; K293_MISS="$K293_MISS workflow-pins(range-blocks=$K293_WF)"; }
 if [ "$K293_OK" -eq 1 ]; then
@@ -18506,10 +18507,10 @@ fi
 # (field: a 5-lane review silently ran as 1). Locks the fix against regression.
 K310_OK=1; K310_WHY=""
 PWF="$ROOT/workflows/code-review-parallel.md"
-/usr/bin/grep -qF 'Self-recovering scope from the changed-files union' "$PWF" || { K310_OK=0; K310_WHY="no-self-recovery"; }
-/usr/bin/grep -qF 'state changed-files' "$PWF" || { K310_OK=0; K310_WHY="no-changed-files-call"; }
-/usr/bin/grep -qF 'proceeding with PARALLEL' "$PWF" || { K310_OK=0; K310_WHY="no-parallel-continue"; }
-/usr/bin/grep -qF 'code-review-input.md ABSENT' "$PWF" || { K310_OK=0; K310_WHY="not-loud"; }
+/usr/bin/grep -qF 'recovered LOUDLY from the same changed-files union' "$PWF" || { K310_OK=0; K310_WHY="no-self-recovery"; }
+/usr/bin/grep -qF '"state", "changed-files"' "$ROOT/bin/modules/state-lanes.cjs" || { K310_OK=0; K310_WHY="no-changed-files-call"; }
+/usr/bin/grep -qF 'proceeding PARALLEL rather than silently degrading' "$PWF" || { K310_OK=0; K310_WHY="no-parallel-continue"; }
+/usr/bin/grep -qF 'code-review-input.md was ABSENT' "$PWF" || { K310_OK=0; K310_WHY="not-loud"; }
 if [ "$K310_OK" = "1" ]; then
   pass "K310: parallel partition_lanes self-recovers scope from changed-files (loud) instead of silently degrading to single-dispatch (P0 field-confirmed)"
 else
@@ -19233,28 +19234,18 @@ process.stdout.write((r&&r.skip_absorbed===true?"absorbed":"kept")+":"+(map?"map
 # the previous form grepped 'mixed-overflow', so a rewrite whose prose said "no
 # mixed-overflow grab-bag lane" satisfied it while the behaviour inverted. A
 # gate that can be satisfied by a sentence saying the opposite is not a gate.
-K335_PART=$(node -e '
-const fs=require("fs"), os=require("os"), path=require("path");
-const src=fs.readFileSync(process.argv[1],"utf8");
-const blocks=[...src.matchAll(/```bash\n([\s\S]*?)```/g)].map(m=>m[1]);
-const big=blocks.sort((a,b)=>b.length-a.length)[0];
-const i=big.indexOf("node -e \x27"), j=big.indexOf("\x27 \"$GROUPS_FILE\"", i);
-const script=big.slice(i+("node -e \x27").length, j);
-const dir=fs.mkdtempSync(path.join(os.tmpdir(),"k335p"));
-const doms={"a/x":7,"a/y":6,"a/z":5,"b/p":4,"b/q":3,"c/r":2,"d/s":4,"e/t":3,"f/u":2};
-const rows=[]; for(const [d,n] of Object.entries(doms)) for(let k=0;k<n;k++) rows.push(d+"|"+d+"/f"+k+".py");
-const gf=path.join(dir,"g.txt"), of=path.join(dir,"o.json");
-fs.writeFileSync(gf, rows.sort().join("\n")+"\n");
-require("child_process").spawnSync(process.execPath,["-e",script,gf,of],{encoding:"utf8"});
-let out=""; try{ out=fs.readFileSync(of,"utf8"); }catch{ process.stdout.write("norun"); process.exit(0); }
-const lanes=JSON.parse(out).lanes;
-const files=lanes.reduce((s,l)=>s+l.files.length,0);
-const grabbag=lanes.some(l=>/mixed|overflow|misc|grab/i.test(l.scope));
-fs.rmSync(dir,{recursive:true,force:true});
-process.stdout.write(lanes.length+":"+files+":"+(grabbag?"grabbag":"coherent"));
-' "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || true)
-[ "$K335_PART" = "5:36:coherent" ] || { K335_OK=0; K335_WHY="$K335_WHY c:overflow($K335_PART want 5:36:coherent)"; }
-/usr/bin/grep -qF "sed -E 's/^[[:space:]]*[-*][[:space:]]+//'" "$ROOT/workflows/code-review-parallel.md" || { K335_OK=0; K335_WHY="$K335_WHY c:bullets"; }
+K335_PART=$(K335_PD=$(mktemp -d); K335_PD=$(cd "$K335_PD" && pwd -P); cd "$K335_PD" && git init -q >/dev/null 2>&1
+mkdir -p .devt/state
+node -e '
+const fs=require("fs");
+const doms={"a/x":3,"a/y":2,"a/z":2,"b/p":1,"b/q":1,"c/r":1,"d/s":1,"e/t":1,"f/u":1};
+const rows=[]; for(const [d,n] of Object.entries(doms)) for(let k=0;k<n;k++){ fs.mkdirSync(d,{recursive:true}); const f=d+"/f"+k+".py"; fs.writeFileSync(f,"x\n"); rows.push(f); }
+fs.writeFileSync(".devt/state/code-review-input.md","# Review Scope\n\n## Files\n\n"+rows.map(r=>"- "+r).join("\n")+"\n");'
+node "$CLI" state update active=true workflow_type=code_review_parallel phase=context_init task=k335 >/dev/null 2>&1
+node "$CLI" state partition-lanes --target-lanes=5 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);const reg=j.registered||[];const files=reg.reduce((a,r)=>a+(r.file_count||0),0);const grab=reg.some(r=>/mixed|overflow|misc|grab/i.test(r.community||''));process.stdout.write(reg.length+':'+files+':'+(grab?'grabbag':'coherent'));}catch(e){process.stdout.write('norun');}})"
+cd /; rm -rf "$K335_PD")
+[ "$K335_PART" = "5:13:coherent" ] || { K335_OK=0; K335_WHY="$K335_WHY c:overflow($K335_PART want 5:13:coherent)"; }
+/usr/bin/grep -qF 'replace(/^[-*]\s+/, "")' "$ROOT/bin/modules/state-lanes.cjs" || { K335_OK=0; K335_WHY="$K335_WHY c:bullets"; }
 rm -rf "$K335_PROJ"
 if [ "$K335_OK" = "1" ]; then
   pass "K335: seam fixes — augment-on-skip stamps provenance + absorbs the skip artifact (content wins, single-artifact invariant), verifier envelope declares criteria_total (rubric: 7, no axis F), partitioner strips bullets + size-sorts + merges overflow lanes"
@@ -19817,9 +19808,10 @@ K338_C=$(cd "$K338_TMP" && node "$CLI" graphify lane-suggestions src/pkg_a/__ini
 rm -rf "$K338_TMP"
 # (d) no false-cause default, and the degradation is persisted not just echoed
 K338_D=0
-if ! /usr/bin/grep -qF 'reason // "graphify disabled"' "$ROOT/workflows/code-review-parallel.md" \
+if ! /usr/bin/grep -qF 'graphify disabled' "$ROOT/bin/modules/state-lanes.cjs" \
    && /usr/bin/grep -q 'partition-degraded.txt' "$ROOT/workflows/code-review-parallel.md" \
-   && /usr/bin/grep -qF '2>"$LANE_ERR"' "$ROOT/workflows/code-review-parallel.md"; then K338_D=1; fi
+   && /usr/bin/grep -qF 'partitionDegradedPath' "$ROOT/bin/modules/state-lanes.cjs" \
+   && /usr/bin/grep -qF 'sug.stderr ? sug.stderr.slice(0, 400)' "$ROOT/bin/modules/state-lanes.cjs"; then K338_D=1; fi
 if [ "$K338_A" = "1" ] && [ "$K338_B" = "1" ] && [ "$K338_C" = "1" ] && [ "$K338_D" = "1" ]; then
   pass "K338: lane-partition correctness (same-basename files distinct, consolidation within fair share, minimal partitions unflagged, no false-cause fallback reason + degradation persisted)"
 else
