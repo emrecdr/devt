@@ -14757,9 +14757,43 @@ fi
 # (parallel/single intent in REVIEW_SCOPE text → auto-writes answer, skips
 # redundant AskUserQuestion). Asserts: SCOPE_CHECK_DECISION="parallel"
 # literal exists in workflow.
+# Classifies with the SHIPPED regexes (extracted from the workflow, never
+# copied here — a copy would drift and keep passing) across the cases that
+# matter. The literal-grep this replaces passed while the branch order was
+# inverted: every phrase that DECLINES a fan-out contains the word it declines,
+# so "no parallel" matched the parallel test first and routed the operator into
+# the seven-lane dispatch they had just ruled out — with the AskUserQuestion
+# skipped, so nothing offered a correction. A gate that greps for
+# SCOPE_CHECK_DECISION="parallel" cannot see that; it is present either way.
+K178_RE_P=$(/usr/bin/sed -n "s/^PARALLEL_INTENT_RE=//p" "$ROOT/workflows/code-review.context-detail.md" | head -1 | /usr/bin/sed "s/^'//;s/'$//")
+K178_RE_S=$(/usr/bin/sed -n "s/^SINGLE_INTENT_RE=//p" "$ROOT/workflows/code-review.context-detail.md" | head -1 | /usr/bin/sed "s/^'//;s/'$//")
+# Mirrors the workflow's branch ORDER — single first. If the workflow flips back,
+# the negation cases below fail here.
+K178_FIRST_BRANCH=$(/usr/bin/grep -oE '^(if|elif) echo .*(SINGLE|PARALLEL)_INTENT_RE' "$ROOT/workflows/code-review.context-detail.md" | head -1)
+K178_ORDER_OK=$(printf '%s' "$K178_FIRST_BRANCH" | /usr/bin/grep -c 'SINGLE_INTENT_RE' || true)
+k178_classify() {
+  local L; L=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+  if echo "$L" | /usr/bin/grep -qE "$K178_RE_S"; then echo "single"
+  elif echo "$L" | /usr/bin/grep -qE "$K178_RE_P"; then echo "parallel"
+  else echo "ask"; fi
+}
+K178_BAD=""
+k178_case() { local got; got=$(k178_classify "$1"); [ "$got" = "$2" ] || K178_BAD="$K178_BAD [$1 -> $got, want $2]"; }
+k178_case 'Split this review between multiple agents for parallel running' parallel
+k178_case 'fan out across community lanes' parallel
+k178_case 'use N agents per-lane' parallel
+k178_case 'review this, no parallel' single
+k178_case 'single agent, no fan-out please' single
+k178_case 'do not fan out, one reviewer only' single
+k178_case 'without parallel lanes' single
+k178_case 'use a single reviewer' single
+k178_case 'review the branch' ask
+k178_case 'check the auth module for bugs' ask
 K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.context-detail.md" 2>/dev/null || echo 0)
-if [ "$K178_OUT" -ge "1" ]; then
-  pass "K178: parallel-offer carries the operator-explicit short-circuit (parallel/single intent detected pre-AskUserQuestion; body in code-review.context-detail.md)"
+if [ -n "$K178_BAD" ] || [ "$K178_ORDER_OK" != "1" ]; then
+  fail "K178: intent short-circuit misroutes —$K178_BAD${K178_BAD:+ }(single-branch-first=$K178_ORDER_OK, want 1)"
+elif [ "$K178_OUT" -ge "1" ]; then
+  pass "K178: intent short-circuit classifies correctly on all 10 cases incl. negations (no parallel / do not fan out route to SINGLE, not into the fan-out they decline)"
 else
   fail "K178: scope_check short-circuit missing — got count: $K178_OUT"
 fi

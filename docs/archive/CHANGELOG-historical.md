@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.203.0] - 2026-07-22
+
+### Added
+
+- **Gate K320 — implement/test KEEP-IN-SYNC contract.** `dev-workflow.md` and `quick-implement.md` carry deliberately-divergent implement/test step bodies (dev is the full pipeline — verifier, arch, scope-requirements blocks; quick is the fast path). A deep scan measured them ~50% diverged, and most of the divergence is *intentional* — so rather than force them into a ~50%-mode-forked shared file (which would be less legible than two honest bodies, and is resident-neutral anyway), K320 asserts the LOAD-BEARING mechanical contract — `post-dispatch-check`, sidecar routing (`read-sidecar` + status enum), `phase=` update — is present in BOTH step bodies. It catches a silent gate-drop of the shared contract (the exact drift the review paths hit before K275) while letting prose + mode-specific blocks differ freely. The four `KEEP IN SYNC` markers now name the gate so the enforcement is legible to a maintainer editing either body. (Considered the full K275-style extraction; the scan showed the bodies are too divergent and too intentionally different for a shared file to be a net win — detection over deduplication.)
+
 ## [0.202.0] - 2026-07-22
 
 ### Changed

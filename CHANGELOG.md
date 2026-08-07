@@ -8,6 +8,16 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.240.0] - 2026-08-07
+
+### Fixed
+
+- **"No parallel" started a seven-lane parallel review.** The scope_check intent short-circuit tested `PARALLEL_INTENT_RE` before `SINGLE_INTENT_RE` — and every phrase that *declines* a fan-out contains the word it declines. "review this, no parallel", "single agent, no fan-out please", and "do not fan out, one reviewer only" all matched the parallel test on the substring inside the refusal and routed the operator into exactly what they had ruled out. The single-intent regex already listed `no parallel` and `no fan[ -]out`, so the negation case was anticipated; only the branch order was wrong. This is worse than a bad guess, because the short-circuit exists to **skip the AskUserQuestion** — there was no correction step, no error, and the only symptom was a fan-out the operator had declined in writing. Single is now tested first (its phrases are specific; a bare "parallel" substring is not) and the regex covers `not/without/avoid/don't` forms. The residual case — "run in parallel, not a single agent" reading as single — is rare and fails toward the cheaper dispatch.
+
+### Changed
+
+- **K178 tests the classifier instead of grepping for a literal.** It extracted `SCOPE_CHECK_DECISION="parallel"` from the workflow and asserted the string was present — which it was, in every inverted variant. The gate now pulls both regexes from the shipped workflow (never a copy, which would drift and keep passing) and classifies ten task strings including the three negations, plus asserts the branch order structurally. Verified falsifiable: reverting the order turns it red. Of the nine gates flagged as claiming runtime behavior, five were re-examined and left alone — "does file A reference symbol B" is a text question by nature, and converting an honestly-scoped wiring gate adds cost without adding truth. Two more (the god-node emitter, the ambiguous-bindings chain) run through graphify, and a gate that silently skips when a binary is absent is worse than a text gate that always runs.
+
 ## [0.239.0] - 2026-08-07
 
 ### Fixed
@@ -607,10 +617,4 @@ Both items surfaced by a post-release deep-validation pass (adversarial mutation
 ### Fixed
 
 - **Smoke suite is now robust to a pre-existing "running" subagent in the dogfood repo.** Several gates (K4 among them) exercise the CLI against the repo's own `.devt/state/`, where `init workflow` is blocked by the lane-state-guard when `status.json` shows a fresh running agent — a crashed prior session (or a hook test) would abort the **entire** suite before the Result line. The setup now snapshots + clears `status.json` at start and restores it in the EXIT trap (mirroring the existing `workflow.yaml` tripwire), and the 8 bare `init workflow` calls are guarded with `|| true` so any init failure degrades to a visible gate failure instead of an ungraceful abort. Verified: injecting a running agent, the suite now runs 1068/0 instead of aborting at K4.
-
-## [0.203.0] - 2026-07-22
-
-### Added
-
-- **Gate K320 — implement/test KEEP-IN-SYNC contract.** `dev-workflow.md` and `quick-implement.md` carry deliberately-divergent implement/test step bodies (dev is the full pipeline — verifier, arch, scope-requirements blocks; quick is the fast path). A deep scan measured them ~50% diverged, and most of the divergence is *intentional* — so rather than force them into a ~50%-mode-forked shared file (which would be less legible than two honest bodies, and is resident-neutral anyway), K320 asserts the LOAD-BEARING mechanical contract — `post-dispatch-check`, sidecar routing (`read-sidecar` + status enum), `phase=` update — is present in BOTH step bodies. It catches a silent gate-drop of the shared contract (the exact drift the review paths hit before K275) while letting prose + mode-specific blocks differ freely. The four `KEEP IN SYNC` markers now name the gate so the enforcement is legible to a maintainer editing either body. (Considered the full K275-style extraction; the scan showed the bodies are too divergent and too intentionally different for a shared file to be a net win — detection over deduplication.)
 

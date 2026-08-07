@@ -49,16 +49,24 @@ Entered from code-review.md::scope_check ONLY when the offer bar is crossed (>15
 # "parralel"/"paralell" is unbounded over-fitting. The real safety net is the
 # else branch: an undetected intent must ASK, never guess.
 PARALLEL_INTENT_RE='(parallel|split[^.]{0,30}(multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
-SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|no parallel|no fan[ -]out|one[ -]reviewer)'
+SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|one[ -]reviewer|(no|not|without|avoid|dont|don.t)[^.]{0,24}(parallel|fan[ -]out|lanes|multiple agents))'
 SCOPE_LOWER=$(echo "${REVIEW_SCOPE}" | tr '[:upper:]' '[:lower:]')
-if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
-  echo "parallel" > .devt/state/scope-check-answer.txt
-  echo "[scope_check] operator-explicit short-circuit: parallel intent detected in task text — skipping AskUserQuestion"
-  SCOPE_CHECK_DECISION="parallel"
-elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
+# SINGLE is tested FIRST, and the order is the whole fix. Every phrase that
+# declines a fan-out contains the word it declines — "no parallel", "do not fan
+# out" — so a parallel-first test matched the substring inside the refusal and
+# routed the operator into the exact thing they ruled out. Worse than a wrong
+# guess: this branch SKIPS the AskUserQuestion, so there was no correction step.
+# Single phrases are all specific; a bare "parallel" substring is not. The
+# residual collateral ("run in parallel, not a single agent" reads as single) is
+# rare and fails toward the cheaper dispatch — the review still happens.
+if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
   echo "single" > .devt/state/scope-check-answer.txt
   echo "[scope_check] operator-explicit short-circuit: single intent detected in task text — skipping AskUserQuestion"
   SCOPE_CHECK_DECISION="single"
+elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
+  echo "parallel" > .devt/state/scope-check-answer.txt
+  echo "[scope_check] operator-explicit short-circuit: parallel intent detected in task text — skipping AskUserQuestion"
+  SCOPE_CHECK_DECISION="parallel"
 else
   SCOPE_CHECK_DECISION=""
   echo "[scope_check] no explicit parallel/single intent in task text — the offer bar decides, and if crossed the operator MUST be asked (do not infer a default)"
