@@ -13056,21 +13056,24 @@ fi
 # G, silently skipping axis H "## Axis H — Dispatch warnings acknowledgment".
 # Verdict came back satisfied despite the missing axis grade.
 # Fixture: workflow.yaml (workflow_type=code_review) + verification.json with
-# criteria_total=7 → expect ok:false with missing_axes_count=1 (rubric has 8
-# axes A–H after the F2 rename).
+# criteria_total one short → expect ok:false with missing_axes_count=1. The
+# expected total is hardcoded ON PURPOSE: deriving it from the rubric would
+# make the gate tautological (that derivation is exactly what the CLI does),
+# so this is an independent second statement of the axis count and must be
+# re-anchored by hand whenever an axis is added or retired.
 K115_TMP=$(mktemp -d)
 mkdir -p "$K115_TMP/.devt/state"
 K115_OLD_TS=$(node -e "console.log(new Date(Date.now() - 60000).toISOString())")
 printf 'active: true\nworkflow_id: k115-test\nworkflow_type: code_review\nphase: verify\ntier: STANDARD\niteration: 1\ntask: "k115 fixture"\nfirst_created_at: "%s"\ncreated_at: "%s"\n' "$K115_OLD_TS" "$K115_OLD_TS" > "$K115_TMP/.devt/state/workflow.yaml"
-# code_review.v2.md has 7 axes total (A,B,C,D,E,G in table + H as heading;
-# F is genuinely absent). criteria_total=6 simulates the cal #22 case where
-# verifier stopped one axis short of the rubric's declared count.
-printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":6,"criteria_met":6}\n' > "$K115_TMP/.devt/state/verification.json"
+# code_review.v2.md has 8 axes total (A,B,C,D,E,G in table + H and I as
+# headings; F is genuinely absent). criteria_total=7 simulates the cal #22
+# case where verifier stopped one axis short of the rubric's declared count.
+printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":7,"criteria_met":7}\n' > "$K115_TMP/.devt/state/verification.json"
 K115_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-verifier-graded-all-axes 2>/dev/null) || K115_RESULT=""
 K115_OK=$(set +eo pipefail; echo "$K115_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===false?'no':'yes');}catch{console.log('parse-err');}})") || K115_OK="parse-err"
 K115_MISSING=$(set +eo pipefail; echo "$K115_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.missing_axes_count||0);}catch{console.log('parse-err');}})") || K115_MISSING="parse-err"
-# Happy path: criteria_total matches rubric axis count (7)
-printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":7,"criteria_met":7}\n' > "$K115_TMP/.devt/state/verification.json"
+# Happy path: criteria_total matches rubric axis count (8)
+printf '{"verdict":"satisfied","status":"VERIFIED","criteria_total":8,"criteria_met":8}\n' > "$K115_TMP/.devt/state/verification.json"
 K115_MATCH_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-verifier-graded-all-axes 2>/dev/null) || K115_MATCH_RESULT=""
 K115_MATCH_OK=$(set +eo pipefail; echo "$K115_MATCH_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===true?'yes':'no');}catch{console.log('parse-err');}})") || K115_MATCH_OK="parse-err"
 # Also verify dev workflow_type returns gate-does-not-apply (no axis taxonomy)
@@ -13079,7 +13082,7 @@ K115_DEV_RESULT=$(set +eo pipefail; cd "$K115_TMP" && node "$CLI" state assert-v
 K115_DEV_OK=$(set +eo pipefail; echo "$K115_DEV_RESULT" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.ok===true && /does not use axis taxonomy/.test(o.reason||'')?'yes':'no');}catch{console.log('parse-err');}})") || K115_DEV_OK="parse-err"
 rm -rf "$K115_TMP"
 if [ "$K115_OK" = "no" ] && [ "$K115_MISSING" = "1" ] && [ "$K115_MATCH_OK" = "yes" ] && [ "$K115_DEV_OK" = "yes" ]; then
-  pass "K115: assert-verifier-graded-all-axes catches verifier stopping short (criteria_total=6 vs rubric=7 → ok=false, missing=1); passes on match (criteria_total=7); skips dev workflow (no axis taxonomy)"
+  pass "K115: assert-verifier-graded-all-axes catches verifier stopping short (criteria_total=7 vs rubric=8 → ok=false, missing=1); passes on match (criteria_total=8); skips dev workflow (no axis taxonomy)"
 else
   fail "K115: walk-all-axes broken — miss_ok_no=$K115_OK miss_count=$K115_MISSING match_ok_yes=$K115_MATCH_OK dev_skip_yes=$K115_DEV_OK"
 fi
@@ -20112,6 +20115,63 @@ echo "== Corpus integrity =="
 # `--plugin-build` flag embodied, or any future in-place transform — this
 # catches it whole-corpus, independent of which pinned phrase a content-grep
 # gate happens to watch.
+# F44: the operator's task reaches the agents that act on it.
+# workflow.yaml::task was substituted into the programmer / researcher /
+# verifier / architect templates via {task_description} and into NO
+# code-reviewer template, so every review devt ran answered the envelope's
+# generic "review these files for quality" instead of the question the
+# operator asked — and the only field workaround was hand-appending the
+# mandate to each of eight lane dispatches. Asserts NON-EMPTY, not merely
+# present: every gate in the envelope path checked that blocks exist and none
+# checked that they say anything, which is exactly why the gap survived.
+F44_T=$(mktemp -d); mkdir -p "$F44_T/.devt/state" "$F44_T/.devt/rules"
+printf '{}' > "$F44_T/.devt/config.json"
+for f in architecture coding-standards quality-gates review-checklist; do printf '# %s\n' "$f" > "$F44_T/.devt/rules/$f.md"; done
+(cd "$F44_T" && git init -q . >/dev/null 2>&1)
+F44_MANDATE="Audit enrichment depth and OpenAPI completeness"
+(cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task="$F44_MANDATE" phase=review --skip-gates >/dev/null 2>&1)
+f44_render() { (cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled "$1" 2>/dev/null); }
+F44_SINGLE=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c 'OpenAPI completeness' || true; })
+F44_PAR=$(f44_render code-reviewer:code_review_parallel | { /usr/bin/grep -c 'OpenAPI completeness' || true; })
+F44_TAG=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c '<operator_mandate>' || true; })
+# An empty task must yield NO block at all — an empty <operator_mandate></...>
+# would read as "the operator asked for nothing", which is a different claim
+# from "no operator task was recorded".
+(cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" state update task="" --skip-gates >/dev/null 2>&1)
+F44_EMPTY=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c '<operator_mandate>' || true; })
+rm -rf "$F44_T"
+if [ "$F44_SINGLE" -ge 1 ] && [ "$F44_PAR" -ge 1 ] && [ "$F44_TAG" -eq 1 ] && [ "$F44_EMPTY" -eq 0 ]; then
+  pass "F44: operator mandate reaches single + parallel code-reviewer envelopes as one non-empty <operator_mandate> block; an empty task emits no block"
+else
+  fail "F44: operator-mandate injection regressed — single=$F44_SINGLE (want >=1), parallel=$F44_PAR (want >=1), tag_count=$F44_TAG (want 1), empty_task_block=$F44_EMPTY (want 0)"
+fi
+
+# F45: the producer template names every field the reader requires.
+# review.json was specified in three places that shared ZERO fields — the
+# sidecar schema (status/verdict/agent), the consolidator envelope
+# (raw_lane_finding_counts/score/…), and laneSeverityTally
+# (severity_counts/findings) — so a consolidator inventing
+# `consolidated_severity_counts` and `top_findings` was the only behavior
+# available to it, and the tally silently read {0,0,0,0} for a review with 75
+# findings. reader_fields is the single source; this gate pairs it to the
+# template so a reader gaining a dependency cannot leave the producer silent.
+F45_MISS=$(node -e "
+  const c = require('$ROOT/bin/modules/state-contract.cjs');
+  const fs = require('fs');
+  const want = (c.JSON_SIDECAR_SCHEMAS['review.json'] || {}).reader_fields || [];
+  const tmpl = fs.readFileSync('$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md','utf8');
+  console.log(want.filter(f => !tmpl.includes(f)).join(',') || 'none');
+" 2>/dev/null)
+F45_DECL=$(node -e "
+  const c = require('$ROOT/bin/modules/state-contract.cjs');
+  console.log(((c.JSON_SIDECAR_SCHEMAS['review.json']||{}).reader_fields||[]).length);
+" 2>/dev/null)
+if [ "$F45_MISS" = "none" ] && [ "${F45_DECL:-0}" -ge 7 ]; then
+  pass "F45: every review.json reader_field ($F45_DECL declared) is pinned in the consolidator producer template"
+else
+  fail "F45: producer/reader contract drift — fields declared by reader_fields but absent from code-reviewer-code_review_parallel.tmpl.md: $F45_MISS (declared_count=$F45_DECL, want >=7)"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

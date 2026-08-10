@@ -255,6 +255,19 @@ const JSON_SIDECAR_SCHEMAS = {
     status: ["DONE", "PARTIAL", "BLOCKED"],
     verdict: ["APPROVED", "APPROVED_WITH_NOTES", "NEEDS_WORK"],
     agent: ["code-reviewer"],
+    // Fields the consolidation readers require, declared so the producer
+    // template can be gated against them. review.json was specified in three
+    // places that shared ZERO fields — this schema (status/verdict/agent), the
+    // consolidator envelope (raw_lane_finding_counts/score/lane_scores/…), and
+    // state-lanes.cjs::laneSeverityTally (severity_counts/findings) — so a
+    // consolidator inventing names was the only behavior available to it, and
+    // a field one reader needs went unnamed by every producer surface. This is
+    // the list the producer-template gate compares against; a reader that
+    // starts depending on a new field adds it here first.
+    reader_fields: [
+      "severity_counts", "findings", "raw_lane_finding_counts",
+      "coverage", "uncovered_scope", "lane_scores", "score",
+    ],
     checks: [
       // A silent all-null lane_scores[] reads as a working feature (the lane
       // score distribution is the parallel report's headline) — field: every

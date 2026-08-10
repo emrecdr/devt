@@ -181,7 +181,7 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules rules_hash="{governing_rules.rules_hash}">by-reference: Read the .devt/rules/ files relevant to your lane scope from disk ({governing_rules.paths_included, .devt/rules/* entries only}). CLAUDE.md is auto-injected by the harness — do not re-read it.</governing_rules>` — rules-by-reference is the lane default: the rules body is byte-identical across all N lanes and lane agents share the orchestrator's working tree, so inlining it multiplies ~57KB per lane for zero signal gain. Inline the full content only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
-- `<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>` — ABSOLUTE path (`{plugin_root}` fills from `$CTX.init.plugin_root` / render substitution): a plugin-root-relative rubric path is unresolvable from every project cwd, and lanes that can't find the rubric silently self-grade ad hoc. Rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric at `<rubric_path>` FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently including H) — the same axes the verifier will grade. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
+- `<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>` — ABSOLUTE path (`{plugin_root}` fills from `$CTX.init.plugin_root` / render substitution): a plugin-root-relative rubric path is unresolvable from every project cwd, and lanes that can't find the rubric silently self-grade ad hoc. Rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric at `<rubric_path>` FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently H and I) — the same axes the verifier will grade. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
 
 **Pre-dispatch graphify re-check.** The decision gate ran at `context_init` — before the scope artifact was pre-written and the bundle re-anchored. Anything that removed the map in between leaves `<graph_impact>` as a by-reference pointer to a file that is not there, and every lane inherits it at once. Re-run the same gate here, where the pointer is actually handed out:
 
@@ -433,6 +433,24 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       "verdict" — status absent fails the sidecar consistency check on every later state update.
       When any lane_scores[].score is null, add "lane_scores_null_reason" (one line: why lanes
       could not self-score) — a silent all-null distribution reads as a working feature.
+    - review.json MUST carry "severity_counts" under EXACTLY that name:
+        "severity_counts": {"critical":N,"important":N,"minor":N,"nit":N}
+      These are the consolidated (post-dedupe) totals. Do NOT rename it — not
+      "consolidated_severity_counts", not any other variant, however well the alternative reads
+      in context. The consolidation reader looks up this exact key, and a renamed field reads as
+      an absent one: the totals come back {0,0,0,0} and the review reports no findings it found.
+    - review.json MUST carry "findings" — an array of EVERY kept finding, under exactly that
+      name:
+        "findings": [{"id":"<id>","severity":"critical|important|minor|nit","file":"<path>"}]
+      COMPLETE, not a top-N. This array is the index the narrative guard checks review.md
+      against, so a truncated array silently shrinks what gets verified. If you also want a
+      highlights list, add it under a DIFFERENT name beside this one — never in place of it.
+    - Finding ids: pick any scheme you like, but each finding's `id` MUST appear VERBATIM in its
+      own heading in review.md (e.g. `### L3:I-1 · Important · <title>`). Inline references
+      elsewhere in the prose stay free-form — write `I-1` or `M-5` bare inside a lane's own
+      section if that reads better. The guard needs exactly one guaranteed match site per
+      finding; the heading is it. Without that anchor a review whose ids render one way in JSON
+      and another way in prose is reported as having lost every finding it actually kept.
     - MANDATORY provenance header: the FIRST lines of review.md include `Correlation: <your
       correlation_id>` — the consolidator-dispatched gate verifies this id against the render
       stamp, which is what proves review.md came from a dispatched synthesis agent.
@@ -528,7 +546,13 @@ else
   [ -n "$XUNAVAIL" ] && echo "note: cross-check did not run — ${XUNAVAIL}"
   CWARN=$(printf '%s\n' "$TALLY" | jq -r '.consolidated_warning // empty')
   [ -n "$CWARN" ] && echo "⚠️  ${CWARN}"
-  if [ -z "$LANE_CRIT" ]; then
+  # Unreadable severity_counts yields nulls, not zeros, so the comparison below
+  # must not run: `[ null -gt 3 ]` is a shell error, and more importantly there
+  # is nothing to compare. Report the gap and skip.
+  CERR=$(printf '%s\n' "$TALLY" | jq -r '.consolidated.error // empty')
+  if [ -n "$CERR" ]; then
+    echo "⚠️  consolidated severity counts UNAVAILABLE — ${CERR}. Do NOT report severity totals for this review; fix review.json::severity_counts and re-run."
+  elif [ -z "$LANE_CRIT" ]; then
     echo "note: review.json carries no raw_lane_finding_counts — consolidated counts stand unchecked against the lanes."
   elif [ "$CONS_CRIT" -gt "$LANE_CRIT" ] || [ "$CONS_IMP" -gt "$LANE_IMP" ]; then
     echo "⚠️  consolidated counts EXCEED the review's own lane totals (crit ${CONS_CRIT}>${LANE_CRIT} or imp ${CONS_IMP}>${LANE_IMP}) — the sidecar contradicts itself. STOP and reconcile."

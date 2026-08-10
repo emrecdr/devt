@@ -419,7 +419,18 @@ function laneSeverityTally(opts = {}) {
     return { ok: false, reason: `review sidecar unreadable or malformed: ${sidecar} (${e && e.message})`, source: sidecar };
   }
   const consolidatedRead = _readSeverityBlock(parsed.severity_counts);
-  const consolidated = consolidatedRead.counts || { critical: 0, important: 0, minor: 0, nit: 0 };
+  // Unknown reads as null, never as 0. A zero is a confident claim ("this
+  // review found no criticals"); the sibling `consolidated_warning` only
+  // protects a consumer that reads the WHOLE object, and a consumer selecting
+  // `.consolidated` — the obvious thing to do — got four zeros with nothing
+  // attached to say they were fiction. A zero that means "unknown" is the
+  // specific shape that survives field selection intact and wrong.
+  const consolidated = consolidatedRead.counts || {
+    critical: null, important: null, minor: null, nit: null,
+    error: consolidatedRead.shape === "absent"
+      ? "review.json carries no severity_counts — consolidated totals are unknown, not zero"
+      : "review.json::severity_counts is in an unrecognized shape — consolidated totals are unknown, not zero",
+  };
   const selfReportedRead = _readLaneDeclaredBlock(parsed.raw_lane_finding_counts);
   const selfReported = selfReportedRead.counts;
   const sidecars = _laneSidecarCounts();
@@ -435,9 +446,20 @@ function laneSeverityTally(opts = {}) {
   const rendered = sidecar.replace(/\.json$/, ".md");
   try {
     const body = fs.readFileSync(rendered, "utf8");
+    // Compare on an alphanumeric-normalised key, not raw substring. A sidecar
+    // writing `L3:I-1` beside prose writing `L3 I-1` is the SAME finding, and
+    // the exact-match form reported 70 of 75 findings missing from a review
+    // that carried every one of them — a full-severity STOP earned by a
+    // separator. Normalising collapses `L3:I-1`, `L3 I-1`, `[L3] I-1` and
+    // `#L3-I-1` to one key. The producer's heading-anchor rule is the other
+    // half: it guarantees one match site per finding even when the prose
+    // drops the lane prefix in inline references, which is the dominant and
+    // entirely natural way models write them inside a lane's own section.
+    const normalize = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normalizedBody = normalize(body);
     idsMissing = findings
       .map(f => f && f.id)
-      .filter(id => typeof id === "string" && id && !body.includes(id));
+      .filter(id => typeof id === "string" && id && !normalizedBody.includes(normalize(id)));
   } catch { idsMissing = null; } // rendered review absent — guard unavailable, not passing
 
   const out = {

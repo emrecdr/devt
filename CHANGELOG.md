@@ -8,6 +8,38 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.242.0] - 2026-08-10
+
+### The reviewer never knew what it was asked
+
+**The operator's task reached every agent except the one reviewing.** `workflow.yaml::task` was substituted into the programmer, researcher, verifier and architect envelopes via `{task_description}` — and into **none** of the six code-reviewer templates. Every review devt has ever run answered the envelope's generic *"review the following files for quality, correctness, and standards compliance"* instead of the question the operator actually typed. Rendered from one state, the mandate appeared once in the programmer envelope and zero times in the reviewer's. The field workaround was hand-appending the mandate to all eight lane dispatches; the failure mode and the workaround are indistinguishable to every gate in the envelope path, which is how it survived this long.
+
+`<operator_mandate>` is now injected at the render chokepoint, so it reaches all 26 templates and every dispatch path at once. It rides as its own block rather than interpolated into `<task>`: that body carries the rubric self-grade directive, the graph-impact consumption protocol and the knowledge-candidates step, and two voices in one block read as a contradiction wherever they differ in specificity. An empty task emits no block at all — "no mandate recorded" and "the operator asked for nothing" are different claims.
+
+**`dispatch run --task=` was destroying the envelope to deliver the task.** It replaced the entire `<task>` body, discarding the self-grade directive, the graph-impact protocol and the knowledge-candidates step — the envelope's whole contract, silently, on the one path built to carry an operator's words. It now overrides `<operator_mandate>` and leaves `<task>` intact.
+
+**No safety net existed.** The verifier *does* receive `<original_task>` — and no rubric axis covered it, so the mandate was delivered to the one agent never told to check it. New **Axis I — Operator mandate coverage** grades whether the review answered the question, including the clauses that passed: a clause satisfied but never mentioned is indistinguishable from one skipped. In synthesis mode it grades the consolidated document, because eight lanes answering a clause that consolidation then drops is the same outcome as never asking. `criteria_total` 7 → 8.
+
+**Per-lane focus was unreachable from the documented path.** `cmdRenderLanes` always honored `focusByLane`, but only `run-lanes` passed it — so the pointer-stub form the parallel workflow documents as *the* dispatch shape could not carry per-lane emphasis. `render-lanes` now accepts `--lane-<id>-focus=`.
+
+**`envelope_health` could not see the placeholders it exists to catch.** Its classifier matched `{token}` but not brace-wrapped prose, so `{injected from .devt/config.json if available}` and `{learning_context — …}` scored "populated" and the health block certified as healthy the very envelopes that shipped literal template syntax to their agents. Widened to catch any brace-wrapped non-JSON body. `operator_mandate` joins the monitored set but stays **out** of the healthy/degraded count — counting it would let a populated mandate lift an otherwise-degraded envelope over the bar, inverting the point of watching it.
+
+### review.json had three specifications that shared zero fields
+
+The sidecar schema declared `status`/`verdict`/`agent`; the consolidator envelope pinned `raw_lane_finding_counts`/`score`/`lane_scores`/`coverage`; `laneSeverityTally` read `severity_counts`/`findings`. No field appeared in all three. A consolidator emitting `consolidated_severity_counts` and `top_findings` was not misbehaving — given three specs that disagree, inventing names was the only behavior available to it, and the tally silently read `{0,0,0,0}` for a review carrying 75 findings.
+
+`reader_fields` now declares what the readers require, the producer template pins every one of them, and a gate pairs the two so a reader gaining a dependency cannot leave the producer silent. `findings[]` is pinned as **complete, not a top-N** — the field model truncated to 5 of 75 because the surrounding language said "top findings".
+
+**A zero that means "unknown" is the shape that survives field selection.** Unreadable `severity_counts` yielded four confident zeros with the warning sitting *beside* them, so a consumer running `jq '.consolidated'` — the obvious thing to do — got `{0,0,0,0}` and nothing saying it was fiction. Unknown now reads as `null` with the error *inside* the object.
+
+**The narrative guard cried wolf on a correct review.** It substring-matched sidecar ids against `review.md`, so a sidecar writing `L3:I-1` beside prose writing `L3 I-1` reported 70 of 75 findings missing — a full-severity STOP earned by a separator, and a guard that does that trains operators to skip it. Matching is now alphanumeric-normalised, and the producer must anchor each finding's id verbatim in its own heading while inline references stay free-form (dropping the lane prefix inside a lane's own section is how models naturally write, and the guard should not fight it). The guard stays loud: it has yet to produce a true positive in the field, but the drop it exists to catch demonstrably happened while it was reporting `unavailable`.
+
+### Gates
+
+- **F44** — the mandate reaches single + parallel reviewer envelopes as one non-empty block; an empty task emits none. Asserts non-emptiness deliberately: every gate in this path checked that blocks *exist* and none checked that they *say* anything.
+- **F45** — every `reader_fields` entry is pinned in the producer template.
+- **K115** re-anchored to the 8-axis taxonomy; the expected count stays hardcoded on purpose, since deriving it from the rubric is what the CLI already does and would make the gate tautological.
+
 ## [0.241.0] - 2026-08-08
 
 ### Fixed
@@ -588,36 +620,3 @@ The v3 report's spawn-count batch proposed four legs; live `duration_ms` telemet
 ### Fixed
 
 - **bash-guard perf budget 6000ms → 8000ms.** The ceiling boundary-flaked twice in three days under full-suite load (6019ms, 6827ms) while idle p50 sits ~3000ms — pure scheduler contention, not a regression. 8000ms still catches the catastrophic class the gate exists for (a hook spawning subagents lands >10s).
-
-## [0.205.0] - 2026-07-26
-
-### v3-report residuals — every item code-verified before implementation
-
-A third external deep-read (post-0203) was validated finding-by-finding: 13 findings confirmed (2 with corrected severity/mechanics, 2 expanded beyond the report), 1 fix-direction rejected. This release ships the validated small-fix tier; the measured token/latency tier follows separately.
-
-### Fixed
-
-- **The tester dispatch gets the claim-check every other agent already had (R3, K320).** Six agents were claim-checked after dispatch (programmer ×2, code-reviewer ×2, debugger, architect, verifier) — the tester was the only output-writing dispatch without one, i.e. the one agent whose partial output stayed invisible until the verifier stage. Both test bodies now run `state post-dispatch-check tester` (proven working behaviorally: missing artifact → `redispatch` with the io-contracts reason; present → `proceed`) and K320's test-step token list pins it.
-- **KCORPUS digests ALL corpus files and is honestly fail-loud (R1+R2).** The gate hashed only `*.md` — `skills/complexity-assessment/assets/keywords.yaml` is a behavioral input (the assess step reads it) that in-place mutation could corrupt silently. Now all files under `guardrails/` + `skills/` are hashed (`.DS_Store` pruned). The "degrades safe: absent shasum → no-op" comment was false — under `set -euo pipefail` a missing shasum aborted the suite with a bare exit 127. Deliberately kept **fail-loud** (an integrity gate that can quietly stop tripping is worse than one that refuses to run — the report's `|| true` suggestion was rejected) and made legible: an explicit `command -v shasum` check fails with a named error. The abort-path non-assertion is now documented (the `SUITE_COMPLETED` sentinel already forces failure there).
-- **`_common.sh` honors `CLAUDE_PLUGIN_ROOT` again (R5).** Three hooks' inner node blocks still read `CLAUDE_PLUGIN_ROOT` directly, but the consolidated `devt_plugin_root` had dropped it from the fallback chain — now `PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` → `$0`-relative, one consistent contract.
-- **Config schema truth restored, both directions (N3, expanded).** `graphify.rebuild_debounce_seconds` (read by `maybe-refresh`, documented in GRAPHIFY.md) and `preflight.domain_hints` (read by lane-A extraction, documented in MEMORY.md, dogfooded in this repo's own config) were absent from DEFAULTS — the CON-005 inverse, where the unknown-key warning can't protect their nesting. Both added with rationale comments. The README hook-profile table had drifted **three** ways (a ghost `dispatch-scope-guard.sh` row surviving that hook's long-ago merge into `dispatch-hygiene-guard.sh`, a missing `task-truncation-detector.sh` row, and `read-before-edit-guard.sh` shown at `standard` after its demotion to full-only — the third error found during validation, not in the report). Fixed, plus three more merge-leftover ghost references the report missed: `config.cjs`'s consumer comment, `docs/AGENT-CONTRACTS.md`'s cross-ref list, and `docs/STATE-RULES.md`'s writer attribution.
-- Comment truth one-liners: `workflow-context-injector`'s stdin read documents its tty-guard/timeout semantics (R4); KCORPUS documents why the EXIT trap doesn't re-assert (R7).
-
-### Removed
-
-- **`scripts/prompt-injection-scan.sh` retired (N5).** A duplicate pattern list of `security.cjs::scanForInjection` — the two were literally cross-NOTEd as "parallel implementation" of each other — and invoked by no CI job, smoke section, or hook. Two drift-prone pattern lists in a security control, one of them dead. Deleted; `security.cjs` is the single implementation. Deliberately NO new CLI verb: nothing consumes one, and maintained-but-unwired machinery is the exact class the `--plugin-build` retirement closed. RETIREMENT-WATCH ledger records it.
-
-### Changed
-
-- **`session-start.sh` no longer touches `~/.claude/commands/` on plugin-managed installs (N6).** The per-session symlink re-link (`rm -rf` + `ln -sf` into user-global state) is a pre-plugin-era registration mechanism; marketplace installs get native command registration. Now gated: a `PLUGIN_ROOT` under `~/.claude/plugins/` skips it; manual-clone installs keep the current behavior.
-
-### Added
-
-- **Gate K321** — hook-profile TABLE parity (README + CLAUDE.md ↔ `run-hook.js::HOOK_PROFILES`, hook set AND per-profile membership, both directions — the class none of K315/K155 covered) plus pins for every fix in this batch (env contract, KCORPUS scope + fail-loud, DEFAULTS keys, ghost-name absence, scanner retirement, symlink gating).
-
-### Corrected (v3-report claims adjusted under verification)
-
-- R6 ("allow-hooks fail closed if `_common.sh` breaks") — severity refuted: exit 1 is a *non-blocking* hook error to the harness (only exit 2 blocks), so the failure mode is fail-open-with-noise; the proposed `source … || echo '{}'` would hide guard death and was not adopted.
-- The injector "runs the full CLI on every prompt with no idle short-circuit" — partly wrong: the `state read` is mtime-cached; the unconditional per-prompt cost is the context-builder spawn.
-- PreToolUse matcher-merge and injector idle short-circuit — refuted by measurement (profile-skips cost ~1ms; the cache works); recorded as validated non-issues rather than shipped.
-

@@ -619,7 +619,7 @@ function cmdRenderFilled(target, options) {
   // instruction stays STRONG — a weak or absent "walk EVERY declared axis"
   // directive is what degrades lane reviews to topic-shape output.
   if (rubricByRef && subs.inline_rubrics) {
-    const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently including axis H). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
+    const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently H and I). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
     // Stub every configured rubric key — not just the ones loadInlineRubrics
     // returned — so an oversized-rubric empty map still resolves each template's
     // {inline_rubrics.<type>} placeholder to the stub instead of leaking it.
@@ -746,6 +746,34 @@ function cmdRenderFilled(target, options) {
   // delivery modes carry the same contract text; the sub-tags themselves
   // signal the mode.
 
+  // <operator_mandate> injection. workflow.yaml::task reached the programmer,
+  // researcher, verifier and architect templates via {task_description} and
+  // NO code-reviewer template — so every review answered the generic "review
+  // these files for quality" question instead of the one the operator asked,
+  // and the only field workaround was hand-appending the mandate to each
+  // dispatch. Injected as its own block rather than interpolated into <task>
+  // because <task> carries the rubric self-grade directive, the graph-impact
+  // protocol and the knowledge-candidates step: replacing that body is what
+  // `dispatch run --task=` did, and it silently cost those instructions.
+  // Two blocks read as "house rules + this job's rules"; one block reads as a
+  // contradiction wherever the two differ in specificity.
+  //
+  // Injected BEFORE computeEnvelopeHealth so a placeholder or empty mandate
+  // is classified like any other monitored block.
+  const mandate = (
+    typeof subs.task === "string" ? subs.task
+      // A task whose text looks like JSON is type-punned into an object by the
+      // state reader; stringifying keeps the mandate legible instead of
+      // silently emitting nothing for that operator.
+      : subs.task && typeof subs.task === "object" ? JSON.stringify(subs.task)
+        : ""
+  ).trim();
+  if (mandate) {
+    const block = `    <operator_mandate>\n${mandate}\n    </operator_mandate>\n  `;
+    const lastIdx = out.lastIndexOf("</context>");
+    out = lastIdx >= 0 ? out.slice(0, lastIdx) + block + out.slice(lastIdx) : out + "\n" + block;
+  }
+
   // Inject <envelope_health> block before </context>. Surfaces (not gates)
   // the substantive payload state of 5 monitored context blocks so the
   // receiving agent can compensate for degraded inputs. The presence check
@@ -784,8 +812,17 @@ function cmdRenderFilled(target, options) {
 function classifyBlockBody(raw) {
   if (raw === null || raw === undefined) return "absent";
   const body = String(raw).trim();
-  if (/^\{[\w.\-\[\]"]+\}$/.test(body)) {
-    return "placeholder";
+  // A placeholder is brace-wrapped text that never got substituted. The
+  // charclass form this replaced matched only `{token}`, so the prose-shaped
+  // placeholders — `{injected from .devt/config.json if available}`,
+  // `{learning_context — …}` — scored "populated" and envelope_health
+  // certified as healthy the very envelopes that shipped literal template
+  // syntax to their agents. JSON payloads are brace-wrapped too, so anything
+  // that parses is content, not a placeholder.
+  if (/^\{[^{}]+\}$/.test(body)) {
+    let parsed = true;
+    try { JSON.parse(body); } catch { parsed = false; }
+    if (!parsed) return "placeholder";
   }
   if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
     return "empty";
@@ -803,7 +840,13 @@ function classifyBlockBody(raw) {
 // anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
 function computeEnvelopeHealth(rendered) {
   if (!rendered || typeof rendered !== "string" || rendered.length < 200) return null;
-  const MONITORED = ["scope_trust", "scope_hint", "memory_signal", "graph_impact", "rubric_content"];
+  // THRESHOLD_BLOCKS are the discovery-quality signals the healthy/degraded
+  // count is computed from. operator_mandate is classified and reported
+  // alongside them but stays OUT of that count deliberately: counting it would
+  // let a populated mandate lift an otherwise-degraded envelope over the bar,
+  // which inverts the point of monitoring it.
+  const THRESHOLD_BLOCKS = ["scope_trust", "scope_hint", "memory_signal", "graph_impact", "rubric_content"];
+  const MONITORED = [...THRESHOLD_BLOCKS, "operator_mandate"];
   const populated = [];
   const empty = [];
   const placeholder = [];
@@ -841,7 +884,11 @@ function computeEnvelopeHealth(rendered) {
   }
   // Nothing recognized — envelope shape too unusual to classify
   if (populated.length + empty.length + placeholder.length === 0) return null;
-  let status = populated.length >= 3 ? "healthy" : "degraded";
+  let status = populated.filter((n) => THRESHOLD_BLOCKS.includes(n)).length >= 3 ? "healthy" : "degraded";
+  // A mandate block that rendered but carries a placeholder or empty body is a
+  // substitution failure on the one input that says what the operator asked
+  // for. Absent is not escalated — no task means no mandate, which is correct.
+  if (placeholder.includes("operator_mandate") || empty.includes("operator_mandate")) status = "degraded";
   // Per-block escalation for graph_impact, same shape as the rubric_path check
   // above and added for the same reason. A bare count cannot express "this lane
   // lost its blast-radius map": with scope_hint routinely absent the practical
@@ -1388,17 +1435,24 @@ function run(subcommand, args) {
         return 2;
       }
 
-      // Substitute the rendered <task>...</task> block content with the
-      // user-provided task text. Match across newlines (template tasks span
-      // multiple lines). When the template has no <task> block (uncommon
-      // for investigative agents but possible for docs-writer / curator),
-      // fall through and emit the envelope as-is with a stderr advisory so
-      // the user knows the --task content wasn't injected.
-      const taskBlockRe = /<task>[\s\S]*?<\/task>/;
-      if (taskBlockRe.test(envelope)) {
-        envelope = envelope.replace(taskBlockRe, "<task>\n" + taskText + "\n</task>");
+      // --task= rides in <operator_mandate> beside an INTACT <task>. It used
+      // to overwrite the <task> body outright, which took the rubric
+      // self-grade directive, the graph-impact consumption protocol and the
+      // knowledge-candidates step with it — the envelope's whole contract,
+      // discarded silently, on the one path built to carry an operator's
+      // words. Overrides rather than appends to the state-derived mandate
+      // cmdRenderFilled already injected: this flag is the more specific
+      // instruction for this dispatch, and two mandate blocks would read as a
+      // contradiction rather than as reinforcement.
+      const mandateBlock = `    <operator_mandate>\n${taskText.trim()}\n    </operator_mandate>\n  `;
+      const renderedMandateRe = /[ \t]*<operator_mandate>[\s\S]*?<\/operator_mandate>\n?[ \t]*/;
+      if (renderedMandateRe.test(envelope)) {
+        envelope = envelope.replace(renderedMandateRe, mandateBlock);
       } else {
-        process.stderr.write("dispatch run: warning — template for " + agentArg + " has no <task> block; --task content not injected. Envelope emitted as-is.\n");
+        const lastCtx = envelope.lastIndexOf("</context>");
+        envelope = lastCtx >= 0
+          ? envelope.slice(0, lastCtx) + mandateBlock + envelope.slice(lastCtx)
+          : envelope + "\n" + mandateBlock;
       }
 
       process.stdout.write(envelope + (envelope.endsWith("\n") ? "" : "\n"));
@@ -1430,6 +1484,7 @@ function run(subcommand, args) {
       // structurally impossible.
       //
       // Args: [target] [--target=agent:workflow] [--out=dir] [--inline-rules]
+      //       [--lane-<id>-focus=<text>]...
       const positional = args.filter(a => !a.startsWith("--"));
       const targetFlag = args.find(a => a.startsWith("--target="));
       let target = targetFlag
@@ -1438,8 +1493,20 @@ function run(subcommand, args) {
       const outFlag = args.find(a => a.startsWith("--out="));
       const outDir = outFlag ? outFlag.slice("--out=".length) : null;
       const inlineRules = args.includes("--inline-rules");
+      // Per-lane focus, same flag shape run-lanes accepts. cmdRenderLanes has
+      // always honored focusByLane; only run-lanes ever passed it, so the
+      // pointer-stub path the parallel workflow documents as the dispatch form
+      // could not carry per-lane emphasis at all. The global mandate is what
+      // the operator typed; this is the orchestrator's judgment about which
+      // clause bites hardest in which slice, and it needs both to be reachable
+      // from one command.
+      const focusByLane = new Map();
+      for (const a of args) {
+        const m = a.match(/^--lane-([\w-]+)-focus=(.*)$/);
+        if (m) focusByLane.set(m[1], m[2]);
+      }
       try {
-        const result = cmdRenderLanes(target, { outDir, inlineRules });
+        const result = cmdRenderLanes(target, { outDir, inlineRules, focusByLane });
         if (result.lane_count === 0) {
           // Don't silently exit non-zero — tell the operator why and how to
           // proceed. Round 9 #4 fix; previously empty stdout + exit 2 made

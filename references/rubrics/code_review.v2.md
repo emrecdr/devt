@@ -41,7 +41,7 @@ The verifier evaluates the review against **six axes**. Each axis must pass for 
 | **E. ADR Compliance section** | If `node ${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs memory affects <file>` returns hits for any scope file, `review.md` MUST include an `## ADR Compliance` section that addresses each affected ADR/CON/FLOW. Reviews missing this section when memory affects-paths returned hits are gaps. (Skip this axis when memory layer is disabled OR no affects hits exist for any scope file.) | Run `memory affects` for each scope file; if hits, grep review.md for ADR Compliance section. |
 | **G. Reuse Discipline** | When `.devt/state/reuse-candidates.md` exists AND lists ≥1 candidate, `review.md` MUST include a `## Reuse Discipline` section with a per-candidate decision (REUSED / EXTENDED / REJECTED). Missing section is a gap. REUSED claims must be verifiable via import + call site in the diff; REJECTED reasons must be technically specific (wrong abstraction level, async mismatch, state mutation conflict) — generic reasons ("different style", "not quite right") are gaps. EXTENDED claims must show modification of the cited function, not a parallel reimplementation. (Skip this axis when `reuse-candidates.md` is absent or empty.) | If `reuse-candidates.md` exists and is non-empty: grep `review.md` for `## Reuse Discipline`; for each REUSED, grep the diff for the cited import + call site; for each REJECTED, read the rejection reason and assess specificity; for each EXTENDED, verify the candidate function was modified not duplicated. A programmer-claimed REUSED with no import in the diff is a Critical violation (not just a gap). |
 
-**Sidecar count contract**: `criteria_total` in verification.json = **7** — the six table axes (A–E, G) plus Axis H below. The axis labels run A–H with **no axis F** (retired; the letter is deliberately unused — do not invent one to make the count even). The REJ hard-fail below is a verdict override, not a counted axis.
+**Sidecar count contract**: `criteria_total` in verification.json = **8** — the six table axes (A–E, G) plus Axis H and Axis I below. The axis labels run A–I with **no axis F** (retired; the letter is deliberately unused — do not invent one to make the count even). The REJ hard-fail below is a verdict override, not a counted axis.
 
 A further hard-fail check — **REJ tombstone alignment** (NOT a countable axis; do not include it in `criteria_total`) — is a hard fail rather than a gap: if `review.md` proposes (in any remediation) an approach whose keywords match a REJ tombstone via `memory rejected-keywords`, the verdict is `failed` (not `needs_revision`). The reviewer is recommending something the team explicitly tombstoned; that's not a "fix this and retry" — it's a structural confusion that needs human review.
 
@@ -58,9 +58,23 @@ Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread bec
 
 **Verifier check (axis H grading):**
 
-This is the H axis in the rubric's grading taxonomy (A–H). If the section is missing from `review.md`, axis H fails. The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings. The claimed counts themselves are checked mechanically at present_findings (`state assert-dispatch-warnings-acknowledged` compares the section's counts line against the file) — that gate runs last and needs no model honesty, so the verifier does not need to re-derive the numbers.
+This is the H axis in the rubric's grading taxonomy (A–I). If the section is missing from `review.md`, axis H fails. The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings. The claimed counts themselves are checked mechanically at present_findings (`state assert-dispatch-warnings-acknowledged` compares the section's counts line against the file) — that gate runs last and needs no model honesty, so the verifier does not need to re-derive the numbers.
 
 **Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, the section may state `n/a (no incidents logged this session)` in one line and pass.
+
+## Axis I — Operator mandate coverage
+
+The dispatch's `<operator_mandate>` block is what the operator actually asked for, distinct from the generic `<task>` every envelope carries. This axis grades whether the review answered *that* question.
+
+**Bar:** every distinct clause of `<operator_mandate>` is addressed explicitly in `review.md`, **including the ones that pass** — a clause satisfied but never mentioned is indistinguishable from one that was skipped.
+
+**How to check:** enumerate the mandate's clauses; locate each answer. A clause covered only by incidental findings — findings touching the topic without stating the conclusion asked for — does not pass. "Seven findings mention OpenAPI" does not answer "is the OpenAPI surface complete".
+
+**Gap shape:** `{id: "operator-mandate", gap: "clause N unanswered — review reports <what it did> but never states <what was asked>"}`.
+
+**Synthesis mode:** grades the *consolidated* document, not the lanes. Lanes answering a clause that consolidation then drops is the exact failure this axis exists to catch: the answer existed and never reached the reader.
+
+**Skip condition:** absent or empty `<operator_mandate>` — say so and pass. Never invent a mandate to grade against.
 
 ## Reject these shortcuts
 

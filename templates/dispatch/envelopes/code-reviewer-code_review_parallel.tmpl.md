@@ -41,6 +41,24 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       "verdict" — status absent fails the sidecar consistency check on every later state update.
       When any lane_scores[].score is null, add "lane_scores_null_reason" (one line: why lanes
       could not self-score) — a silent all-null distribution reads as a working feature.
+    - review.json MUST carry "severity_counts" under EXACTLY that name:
+        "severity_counts": {"critical":N,"important":N,"minor":N,"nit":N}
+      These are the consolidated (post-dedupe) totals. Do NOT rename it — not
+      "consolidated_severity_counts", not any other variant, however well the alternative reads
+      in context. The consolidation reader looks up this exact key, and a renamed field reads as
+      an absent one: the totals come back {0,0,0,0} and the review reports no findings it found.
+    - review.json MUST carry "findings" — an array of EVERY kept finding, under exactly that
+      name:
+        "findings": [{"id":"<id>","severity":"critical|important|minor|nit","file":"<path>"}]
+      COMPLETE, not a top-N. This array is the index the narrative guard checks review.md
+      against, so a truncated array silently shrinks what gets verified. If you also want a
+      highlights list, add it under a DIFFERENT name beside this one — never in place of it.
+    - Finding ids: pick any scheme you like, but each finding's `id` MUST appear VERBATIM in its
+      own heading in review.md (e.g. `### L3:I-1 · Important · <title>`). Inline references
+      elsewhere in the prose stay free-form — write `I-1` or `M-5` bare inside a lane's own
+      section if that reads better. The guard needs exactly one guaranteed match site per
+      finding; the heading is it. Without that anchor a review whose ids render one way in JSON
+      and another way in prose is reported as having lost every finding it actually kept.
     - MANDATORY provenance header: the FIRST lines of review.md include `Correlation: <your
       correlation_id>` — the consolidator-dispatched gate verifies this id against the render
       stamp, which is what proves review.md came from a dispatched synthesis agent.
