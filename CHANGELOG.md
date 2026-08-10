@@ -58,6 +58,18 @@ The sidecar schema declared `status`/`verdict`/`agent`; the consolidator envelop
 - **`{models.code_reviewer}`** (underscore) in three example blocks resolved to nothing against the hyphenated key. Outside any marker region, which is why `compile --check` reported no drift.
 - **`Unknown command:` now names the command families.** `Unknown state subcommand:` already lists its ~70 names, which turns a wrong guess into a self-correction in one round trip; the top-level path printed generic help. A field operator improvising `scratchpad aggregate` learned only that it was wrong, never that `state aggregate-knowledge-candidates` was what they wanted.
 
+### Second field report, same release
+
+greenfield re-ran against the in-flight build and reported two bugs. One was already fixed by the work above — their `envelope_health` observation predates the placeholder-detection widening, which catches all seven realistic unsubstituted template forms. The other was live:
+
+**The consolidator-provenance gate failed on a consolidator that had genuinely been dispatched.** It matched `Correlation:\s*(cid_…)` while its own template quotes that header in backticks, so an agent following the instruction renders `` Correlation: `cid_…` `` or `` **Correlation:** `cid_…` `` — and neither matched. The gate rejected output produced by obeying its own template. (Their diagnosis said backticks block the match; whole-line backticking actually matches fine — it is a code-span *id* or a bolded label that fails.) The reader now tolerates markdown decoration between label and id. Loosening is safe because the captured id must still equal a real dispatch-stamp record, so a stray match falls through rather than passing anything.
+
+**Lanes could not see each other's scope.** Cross-lane observations were guesses that happened to survive because the consolidator deduped them — luck, not design. Each lane envelope now carries `<lane_neighbors>`: one line per other lane with its community, file count, and top-level areas, plus the instruction to name the owning lane rather than fix or re-review a neighbor's file. The data was already in the orchestrator's hands at render time.
+
+**Lane sidecars pinned `id` + `severity` only**, so a lane emitting exactly that was compliant and the consolidator had to re-read its markdown to recover what each finding was — the re-derivation the sidecar exists to prevent. `file` and `title` are now required.
+
+**Verified negatives are documented rather than improvised.** The single highest-leverage input to one field consolidation was a notes block carrying hypotheses the orchestrator had already tested and refuted; it pre-empted a re-derivation and stopped a disproved hypothesis resurfacing as a phantom Critical. That was something the operator had to think of unprompted. `--notes-file` now documents a `## Verified Negatives` section, and the synthesis template instructs the consolidator to treat it as settled.
+
 ### Gates
 
 - **F44** — the mandate reaches the reviewer on **both** dispatch paths: 4/4 compiled marker regions carry the block, the render path substitutes it exactly once, task-bearing templates get no second copy, and an empty task emits nothing. The compiled-region leg is the load-bearing one — a CLI-only assertion passes while the path the canonical review actually uses stays unfixed. Asserts non-emptiness deliberately: every gate in this path checked that blocks *exist* and none checked that they *say* anything.

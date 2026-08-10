@@ -635,7 +635,15 @@ function assertConsolidatorDispatched() {
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const reviewPath = path.join(dir, "review.md");
     if (fs.existsSync(stampsPath) && fs.existsSync(reviewPath)) {
-      const embedded = (fs.readFileSync(reviewPath, "utf8").match(/Correlation:\s*(cid_[A-Za-z0-9_-]+)/) || [])[1];
+      // Tolerate markdown decoration between the label and the id. The
+      // template mandates this header and quotes it in backticks, so an agent
+      // following the instruction naturally renders `Correlation: `cid_…`` or
+      // `**Correlation:** `cid_…`` — and the strict `:\s*` form matched
+      // neither, failing the gate on output produced by obeying its own
+      // template. Loosening is safe: the captured id must still equal a real
+      // dispatch-stamp record below, so a stray match falls through rather
+      // than passing anything.
+      const embedded = (fs.readFileSync(reviewPath, "utf8").match(/Correlation[^A-Za-z0-9]{0,12}?(cid_[A-Za-z0-9_-]+)/) || [])[1];
       if (embedded) {
         for (const line of fs.readFileSync(stampsPath, "utf8").split("\n").filter(Boolean)) {
           let rec; try { rec = JSON.parse(line); } catch { continue; }

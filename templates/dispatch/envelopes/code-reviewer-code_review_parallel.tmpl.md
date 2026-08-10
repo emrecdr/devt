@@ -93,6 +93,13 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so
       the reader knows coverage is partial.
+    - `<orchestrator_notes>` may carry a `## Verified Negatives` section: hypotheses the
+      orchestrator already tested and DISPROVED, with the evidence. Treat each as settled. Do NOT
+      re-derive it, do NOT promote a lane finding that contradicts it without new evidence of your
+      own, and when a lane raised it anyway, say in the provenance that it was pre-disproved and
+      why. These are the cheapest findings in the review — someone already paid to answer them,
+      and a consolidator that re-opens them either burns the budget again or ships a phantom
+      finding the orchestrator had already refuted.
 
     Self-grade against the rubric as you write (axes that apply to synthesis: A — every lane
     referenced; B — every kept finding carries file:line + severity + rule ref; C — severity

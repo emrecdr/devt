@@ -1757,6 +1757,28 @@ function cmdRenderLanes(target, options) {
   });
   const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
+  // Per-lane ownership map, computed once. Lanes could not see each other's
+  // scope, so any observation touching a neighbor's files was a guess — it
+  // worked in the field only because the consolidator deduped, which is luck
+  // rather than design. One line per neighbor turns "I think another lane
+  // covers this" into a precise handoff, and it is data the orchestrator
+  // already holds at render time.
+  const laneOwnership = lanes.map((l) => {
+    let f = [];
+    let c = l.community || l.scope || "";
+    try {
+      const p = pathLocal.join(sidecarDir, `${l.id}.json`);
+      if (fsLocal.existsSync(p)) {
+        const d = JSON.parse(fsLocal.readFileSync(p, "utf8"));
+        if (Array.isArray(d.files)) f = d.files;
+        if (d.community) c = d.community;
+      }
+    } catch { /* sidecar unreadable — the lane still appears, with no areas */ }
+    // Top-level directories are the useful granularity: a full file list per
+    // neighbor would multiply the whole partition into every lane envelope.
+    const areas = [...new Set(f.map((x) => (String(x).split("/")[0] || x)))].slice(0, 4);
+    return { id: l.id, community: c, count: f.length, areas };
+  });
   const out = [];
   const summary = [];
   for (const lane of lanes) {
@@ -1814,6 +1836,14 @@ function cmdRenderLanes(target, options) {
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
       `    <memory_affects>${memoryAffects}</memory_affects>`,
     ];
+    const neighbors = laneOwnership.filter((n) => n.id !== lane.id);
+    if (neighbors.length > 0) {
+      blockLines.push(
+        `    <lane_neighbors>Other lanes in this review own the areas below. A finding whose fix lives in another lane's files is THEIRS — name the lane and the file rather than fixing or re-reviewing it here, and say so explicitly so the consolidator can route it instead of guessing.\n` +
+        neighbors.map((n) => `      ${n.id} (${n.community || "unscoped"}): ${n.count} file(s)${n.areas.length ? ` under ${n.areas.join(", ")}` : ""}`).join("\n") +
+        `\n    </lane_neighbors>`,
+      );
+    }
     if (autoMemorySummary) {
       blockLines.push(`    <auto_memory>${autoMemorySummary}</auto_memory>`);
     }
@@ -1879,7 +1909,11 @@ function cmdRenderLanes(target, options) {
       injected = injected.replace(
         /Write review to \.devt\/state\/review\.md/g,
         `Write review to ${lane.review_file}, AND write the machine-readable sidecar ${laneSidecar} carrying ` +
-        `{"severity_counts":{"critical":N,"important":N,"minor":N,"nit":N},"findings":[{"id":"<id>","severity":"critical|important|minor|nit"}]}. ` +
+        `{"severity_counts":{"critical":N,"important":N,"minor":N,"nit":N},` +
+        `"findings":[{"id":"<id>","severity":"critical|important|minor|nit","file":"<path>","title":"<one line>"}]}. ` +
+        `Every one of those four finding fields is REQUIRED. id+severity alone satisfies a counter but not a consolidator: ` +
+        `without file and title it must re-read your markdown to learn what each finding was, which is the re-derivation the ` +
+        `sidecar exists to avoid. ` +
         `The counts must match the findings you wrote in the markdown — the consolidation step compares them and an unexplained gap blocks`,
       );
     }

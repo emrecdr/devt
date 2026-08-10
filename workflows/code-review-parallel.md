@@ -151,6 +151,8 @@ fi
 - **Per-lane envelopes**: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-lanes --out=<dir>` — one envelope file per registered lane with `<lane_id>`/`<lane_files>`/`<correlation_id>`/`<memory_affects>`/`<lane_diff>`+`<lane_method>` already injected (it pins the per-file review template internally; you never pass `:auto`). **Dispatch via the POINTER STUB — the sanctioned first-class form**: `--out` returns a per-lane `stub` field (also printed as a stderr trailer so tailed output shows it) of the shape `<correlation_id>cid_…</correlation_id>\n<envelope path="…" rules_hash="…" sha256="…">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>` — paste ONE stub per Task() prompt. This keeps ~50KB envelopes out of orchestrator context entirely, the cid satisfies the hygiene guard, and the sha256 covers the full envelope body so a consumer can confirm the file it Reads is the file the orchestrator rendered — `dispatch verify-envelope <path> --sha256=<hash>` performs that check (nothing performs it for you; the digest is an auditable anchor, not an enforced one). Do NOT hand-invent pointer prompts; the stub IS the contract. Per-lane focus + task suffix ride via `dispatch run-lanes` directive flags.
 - **Consolidator envelope**: `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review_parallel [--notes-file=<path>]` — resolves the synthesis template with `<lane_files>` pre-filled from the registry (terminal lanes, foreign cids excluded — the same filter the pre-gate bash uses). `--notes-file` injects free-text `<orchestrator_notes>` (cross-lane reconciliation directives, validation evidence, hand-included-lane annotations) so run-specific judgment never requires hand-rolling the envelope.
 
+  **Write a `## Verified Negatives` section into that notes file whenever you disproved something during the run** — a hypothesis you tested and refuted, with the evidence and one line of reasoning. This is the highest-value block the consolidator receives: it pre-empts the re-derivation and stops a refuted hypothesis resurfacing as a phantom finding, and the synthesis template instructs the consolidator to treat the section as settled. Field-reported as the single largest contributor to one consolidation's quality — and as something the operator had to think of unprompted, which is why it is written down here.
+
 See `skills/dispatch-helpers/SKILL.md` for the worked example.
 
 ```bash
@@ -485,6 +487,13 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     - Add a `## Lane Provenance` section listing each lane's id, community, status, and finding
       count contributed. Lanes with status=deferred contribute zero findings — still list them so
       the reader knows coverage is partial.
+    - `<orchestrator_notes>` may carry a `## Verified Negatives` section: hypotheses the
+      orchestrator already tested and DISPROVED, with the evidence. Treat each as settled. Do NOT
+      re-derive it, do NOT promote a lane finding that contradicts it without new evidence of your
+      own, and when a lane raised it anyway, say in the provenance that it was pre-disproved and
+      why. These are the cheapest findings in the review — someone already paid to answer them,
+      and a consolidator that re-opens them either burns the budget again or ships a phantom
+      finding the orchestrator had already refuted.
 
     Self-grade against the rubric as you write (axes that apply to synthesis: A — every lane
     referenced; B — every kept finding carries file:line + severity + rule ref; C — severity
