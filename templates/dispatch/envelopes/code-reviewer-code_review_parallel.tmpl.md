@@ -19,6 +19,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <lane_files>{lane_files_newline_separated}</lane_files>
     <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+    <operator_mandate>{task_description}</operator_mandate>
   </context>
   <task>
     Synthesize the N lane review files listed in <lane_files> into a single .devt/state/review.md

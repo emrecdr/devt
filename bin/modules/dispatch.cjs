@@ -406,7 +406,22 @@ function applySubstitutions(template, subs) {
   // tags keep dispatch-hygiene-guard's raw-dispatch recognition intact.
   out = out.replace(/^[ \t]*<scope_hint>\[\]<\/scope_hint>[ \t]*\r?\n/gm, "");
 
+  // Same treatment for an unfilled operator mandate. `<operator_mandate></...>`
+  // asserts the operator asked for nothing, which is a different claim from
+  // "no task was recorded" — and rubric Axis I skips on absent, not on empty.
+  out = out.replace(/^[ \t]*<operator_mandate>\s*<\/operator_mandate>[ \t]*\r?\n/gm, "");
+
   return out;
+}
+
+// The state reader type-puns `task:` — a quoted JSON-shaped value comes back
+// as an object, a numeric-looking one as a number. Every consumer renders this
+// into prose, so coerce once here: an object reaching a template renders
+// "[object Object]" and a number reaching a truthiness check reads as absent.
+function _taskToText(value) {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
 function buildSubstitutionTable(agent, loadOpts) {
@@ -496,7 +511,7 @@ function buildSubstitutionTable(agent, loadOpts) {
     auto_memory_json: autoMemoryJson,
     god_node_warnings_json: s.god_node_warnings_json,
     graphify_status_json: s.graphify_status_json,
-    task: s.task || s.task_description || "",
+    task: _taskToText(s.task) || _taskToText(s.task_description),
     CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
     // Same value under the init-payload field name, so {plugin_root} fills
     // identically from render-side substitution AND orchestrator LLM-fill
@@ -584,6 +599,9 @@ function cmdRenderFilled(target, options) {
     ? !!options.guardrailsByReference
     : (modeCfg.guardrails_mode || "by-reference") !== "inline";
   const subs = buildSubstitutionTable(agent, { inlineByteCap: !rulesByRef });
+  if (options && typeof options.taskOverride === "string" && options.taskOverride.trim()) {
+    subs.task = options.taskOverride.trim();
+  }
 
   // --rules-exclude=<list>: opt-in CLAUDE.md (and other governing_rules.content
   // entries) section strip by exact `## Heading` match. Per-dispatch opt-in
@@ -746,36 +764,8 @@ function cmdRenderFilled(target, options) {
   // delivery modes carry the same contract text; the sub-tags themselves
   // signal the mode.
 
-  // <operator_mandate> injection. workflow.yaml::task reached the programmer,
-  // researcher, verifier and architect templates via {task_description} and
-  // NO code-reviewer template — so every review answered the generic "review
-  // these files for quality" question instead of the one the operator asked,
-  // and the only field workaround was hand-appending the mandate to each
-  // dispatch. Injected as its own block rather than interpolated into <task>
-  // because <task> carries the rubric self-grade directive, the graph-impact
-  // protocol and the knowledge-candidates step: replacing that body is what
-  // `dispatch run --task=` did, and it silently cost those instructions.
-  // Two blocks read as "house rules + this job's rules"; one block reads as a
-  // contradiction wherever the two differ in specificity.
-  //
-  // Injected BEFORE computeEnvelopeHealth so a placeholder or empty mandate
-  // is classified like any other monitored block.
-  const mandate = (
-    typeof subs.task === "string" ? subs.task
-      // A task whose text looks like JSON is type-punned into an object by the
-      // state reader; stringifying keeps the mandate legible instead of
-      // silently emitting nothing for that operator.
-      : subs.task && typeof subs.task === "object" ? JSON.stringify(subs.task)
-        : ""
-  ).trim();
-  if (mandate) {
-    const block = `    <operator_mandate>\n${mandate}\n    </operator_mandate>\n  `;
-    const lastIdx = out.lastIndexOf("</context>");
-    out = lastIdx >= 0 ? out.slice(0, lastIdx) + block + out.slice(lastIdx) : out + "\n" + block;
-  }
-
   // Inject <envelope_health> block before </context>. Surfaces (not gates)
-  // the substantive payload state of 5 monitored context blocks so the
+  // the substantive payload state of 6 monitored context blocks so the
   // receiving agent can compensate for degraded inputs. The presence check
   // at code-reviewer.md::workflow_context_assertion is "forgiving" by
   // design — even `{}` empty payloads pass it. Field-observed: lane
@@ -820,9 +810,7 @@ function classifyBlockBody(raw) {
   // syntax to their agents. JSON payloads are brace-wrapped too, so anything
   // that parses is content, not a placeholder.
   if (/^\{[^{}]+\}$/.test(body)) {
-    let parsed = true;
-    try { JSON.parse(body); } catch { parsed = false; }
-    if (!parsed) return "placeholder";
+    try { JSON.parse(body); } catch { return "placeholder"; }
   }
   if (body === "" || body === "{}" || body === "[]" || /^\(no .* available — /.test(body)) {
     return "empty";
@@ -832,9 +820,9 @@ function classifyBlockBody(raw) {
 
 // Classify the substantive payload state of each monitored context
 // block. Returns {populated:[names], empty:[names], placeholder:[names],
-// status:"healthy"|"degraded"} where status is "healthy" when ≥3 of 5 are
-// populated. Returns null when the envelope is too short to meaningfully
-// classify (e.g., a stub render). The 5 monitored blocks are the ones whose
+// status:"healthy"|"degraded"} where status is "healthy" when ≥3 of the 5
+// THRESHOLD_BLOCKS are populated. Returns null when the envelope is too short to meaningfully
+// classify (e.g., a stub render). The counted blocks are the ones whose
 // emptiness materially degrades a lane reviewer's discovery quality: scope
 // signal (scope_trust/scope_hint), memory anchor (memory_signal), graph
 // anchor (graph_impact), and rubric inlined for axis-walk (rubric_content).
@@ -1413,7 +1401,7 @@ function run(subcommand, args) {
 
       const taskFlag = args.find(a => a.startsWith("--task="));
       if (!taskFlag) {
-        process.stderr.write("dispatch run: --task=\"...\" required (the task text to inject into the envelope's <task> block)\n");
+        process.stderr.write("dispatch run: --task=\"...\" required (the operator task text for this dispatch)\n");
         return 2;
       }
       const taskText = taskFlag.slice("--task=".length);
@@ -1428,31 +1416,28 @@ function run(subcommand, args) {
         : [];
       const rulesExclude = _mergeConfigRulesExclude(flagList);
 
+      // --task= overrides the state task for this render, so it fills every
+      // task placeholder the template declares — {task_description} and the
+      // <operator_mandate> block alike. It used to overwrite the rendered
+      // <task> body outright, which took the rubric self-grade directive, the
+      // graph-impact consumption protocol and the knowledge-candidates step
+      // with it: the envelope's whole contract, discarded silently, on the one
+      // path built to carry an operator's words.
       let envelope;
-      try { envelope = cmdRenderFilled(target, { rulesExclude }); }
+      try { envelope = cmdRenderFilled(target, { rulesExclude, taskOverride: taskText }); }
       catch (err) {
         process.stderr.write(err.message + "\n");
         return 2;
       }
 
-      // --task= rides in <operator_mandate> beside an INTACT <task>. It used
-      // to overwrite the <task> body outright, which took the rubric
-      // self-grade directive, the graph-impact consumption protocol and the
-      // knowledge-candidates step with it — the envelope's whole contract,
-      // discarded silently, on the one path built to carry an operator's
-      // words. Overrides rather than appends to the state-derived mandate
-      // cmdRenderFilled already injected: this flag is the more specific
-      // instruction for this dispatch, and two mandate blocks would read as a
-      // contradiction rather than as reinforcement.
-      const mandateBlock = `    <operator_mandate>\n${taskText.trim()}\n    </operator_mandate>\n  `;
-      const renderedMandateRe = /[ \t]*<operator_mandate>[\s\S]*?<\/operator_mandate>\n?[ \t]*/;
-      if (renderedMandateRe.test(envelope)) {
-        envelope = envelope.replace(renderedMandateRe, mandateBlock);
-      } else {
+      // Templates with no task placeholder at all (tester, docs-writer,
+      // curator, retro) would otherwise swallow the flag silently.
+      if (!envelope.includes("<operator_mandate>")) {
+        const block = `    <operator_mandate>\n${taskText.trim()}\n    </operator_mandate>\n  `;
         const lastCtx = envelope.lastIndexOf("</context>");
         envelope = lastCtx >= 0
-          ? envelope.slice(0, lastCtx) + mandateBlock + envelope.slice(lastCtx)
-          : envelope + "\n" + mandateBlock;
+          ? envelope.slice(0, lastCtx) + block + envelope.slice(lastCtx)
+          : envelope + "\n" + block;
       }
 
       process.stdout.write(envelope + (envelope.endsWith("\n") ? "" : "\n"));
@@ -1500,11 +1485,7 @@ function run(subcommand, args) {
       // the operator typed; this is the orchestrator's judgment about which
       // clause bites hardest in which slice, and it needs both to be reachable
       // from one command.
-      const focusByLane = new Map();
-      for (const a of args) {
-        const m = a.match(/^--lane-([\w-]+)-focus=(.*)$/);
-        if (m) focusByLane.set(m[1], m[2]);
-      }
+      const focusByLane = _parseLaneFocusFlags(args);
       try {
         const result = cmdRenderLanes(target, { outDir, inlineRules, focusByLane });
         if (result.lane_count === 0) {
@@ -1551,13 +1532,7 @@ function run(subcommand, args) {
       const partitionPath = flag("partition");
       const suffixPath = flag("task-suffix");
       const outDir = flag("out");
-      // --lane-<id>-focus=<text> — parse all occurrences. The <id> segment
-      // matches the lane id registered in workflow.yaml::lanes[].id.
-      const focusByLane = new Map();
-      for (const a of args) {
-        const m = a.match(/^--lane-([\w-]+)-focus=(.*)$/);
-        if (m) focusByLane.set(m[1], m[2]);
-      }
+      const focusByLane = _parseLaneFocusFlags(args);
 
       // Register lanes from --partition file (if provided) BEFORE rendering.
       // File format: same YAML/JSON shape as `state register-lanes --from`.
@@ -1641,6 +1616,20 @@ function run(subcommand, args) {
 // with the CLI flag list. Returns deduped array. Empty when neither source
 // has entries. Safe on missing config / missing nested key — returns the flag
 // list unchanged.
+// --lane-<id>-focus=<text>, parsed identically by render-lanes and run-lanes.
+// The <id> segment matches the lane id registered in workflow.yaml::lanes[].id.
+// Shared so the flag's grammar — which id characters are legal, how greedily
+// the value is captured — cannot mean two different things depending on which
+// command the operator reached for.
+function _parseLaneFocusFlags(args) {
+  const focusByLane = new Map();
+  for (const a of args) {
+    const m = a.match(/^--lane-([\w-]+)-focus=(.*)$/);
+    if (m) focusByLane.set(m[1], m[2]);
+  }
+  return focusByLane;
+}
+
 function _mergeConfigRulesExclude(flagList) {
   let configList = [];
   try {

@@ -64,7 +64,7 @@ This is the H axis in the rubric's grading taxonomy (A–I). If the section is m
 
 ## Axis I — Operator mandate coverage
 
-The dispatch's `<operator_mandate>` block is what the operator actually asked for, distinct from the generic `<task>` every envelope carries. This axis grades whether the review answered *that* question.
+The operator's ask reaches you as `<operator_mandate>` or, on the verifier envelope, as `<original_task>` — read whichever your dispatch carries. Either is the contract the operator actually stated, distinct from the generic `<task>` every envelope carries. This axis grades whether the review answered *that* question.
 
 **Bar:** every distinct clause of `<operator_mandate>` is addressed explicitly in `review.md`, **including the ones that pass** — a clause satisfied but never mentioned is indistinguishable from one that was skipped.
 
@@ -74,7 +74,7 @@ The dispatch's `<operator_mandate>` block is what the operator actually asked fo
 
 **Synthesis mode:** grades the *consolidated* document, not the lanes. Lanes answering a clause that consolidation then drops is the exact failure this axis exists to catch: the answer existed and never reached the reader.
 
-**Skip condition:** absent or empty `<operator_mandate>` — say so and pass. Never invent a mandate to grade against.
+**Skip condition:** both blocks absent or empty — say so and pass. Never invent a mandate to grade against.
 
 ## Reject these shortcuts
 

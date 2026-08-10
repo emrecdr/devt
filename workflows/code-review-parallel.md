@@ -411,6 +411,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <lane_files>{lane_files_newline_separated}</lane_files>
     <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
+    <operator_mandate>{task_description}</operator_mandate>
   </context>
   <task>
     Synthesize the N lane review files listed in <lane_files> into a single .devt/state/review.md
@@ -548,7 +549,7 @@ else
   [ -n "$CWARN" ] && echo "⚠️  ${CWARN}"
   # Unreadable severity_counts yields nulls, not zeros, so the comparison below
   # must not run: `[ null -gt 3 ]` is a shell error, and more importantly there
-  # is nothing to compare. Report the gap and skip.
+  # is nothing to compare.
   CERR=$(printf '%s\n' "$TALLY" | jq -r '.consolidated.error // empty')
   if [ -n "$CERR" ]; then
     echo "⚠️  consolidated severity counts UNAVAILABLE — ${CERR}. Do NOT report severity totals for this review; fix review.json::severity_counts and re-run."

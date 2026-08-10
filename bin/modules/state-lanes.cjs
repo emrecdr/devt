@@ -420,16 +420,18 @@ function laneSeverityTally(opts = {}) {
   }
   const consolidatedRead = _readSeverityBlock(parsed.severity_counts);
   // Unknown reads as null, never as 0. A zero is a confident claim ("this
-  // review found no criticals"); the sibling `consolidated_warning` only
-  // protects a consumer that reads the WHOLE object, and a consumer selecting
-  // `.consolidated` — the obvious thing to do — got four zeros with nothing
-  // attached to say they were fiction. A zero that means "unknown" is the
-  // specific shape that survives field selection intact and wrong.
-  const consolidated = consolidatedRead.counts || {
-    critical: null, important: null, minor: null, nit: null,
-    error: consolidatedRead.shape === "absent"
+  // review found no criticals"), and a consumer selecting `.consolidated` —
+  // the obvious thing to do — got four of them with nothing attached to say
+  // they were fiction. A zero meaning "unknown" is the shape that survives
+  // field selection intact and wrong, so the explanation rides INSIDE the
+  // object rather than beside it.
+  const unreadableReason = consolidatedRead.counts ? null : (
+    consolidatedRead.shape === "absent"
       ? "review.json carries no severity_counts — consolidated totals are unknown, not zero"
-      : "review.json::severity_counts is in an unrecognized shape — consolidated totals are unknown, not zero",
+      : "review.json::severity_counts is in an unrecognized shape — consolidated totals are unknown, not zero"
+  );
+  const consolidated = consolidatedRead.counts || {
+    critical: null, important: null, minor: null, nit: null, error: unreadableReason,
   };
   const selfReportedRead = _readLaneDeclaredBlock(parsed.raw_lane_finding_counts);
   const selfReported = selfReportedRead.counts;
@@ -478,10 +480,15 @@ function laneSeverityTally(opts = {}) {
       ? (idsMissing === null ? "unavailable — review.md unreadable" : "evaluated")
       : "unavailable — review.json declares no findings[] index to check against",
   };
-  if (consolidatedRead.shape !== "flat") {
-    out.consolidated_warning = consolidatedRead.shape === "absent"
-      ? "review.json carries no severity_counts — consolidated totals read as zero and cannot be trusted"
-      : "review.json::severity_counts is in an unrecognized shape — consolidated totals read as zero and cannot be trusted";
+  if (unreadableReason) {
+    // Byte-identical to the sentence inside `consolidated`, so the two
+    // surfaces cannot disagree about what the object holds.
+    out.consolidated_warning = unreadableReason;
+  } else if (consolidatedRead.shape !== "flat") {
+    // Counts ARE readable here — they came from a roll-up key instead of flat
+    // severity keys. Saying "read as zero" would be false, which is what the
+    // single shape-!==-flat branch used to claim for this case.
+    out.consolidated_warning = `review.json::severity_counts was read from a "${consolidatedRead.shape}" roll-up rather than flat severity keys — totals are usable, but the producer shape drifted from the pinned contract`;
   }
   if (sidecars) {
     out.lanes_with_sidecar = sidecars.lanes_with_sidecar;

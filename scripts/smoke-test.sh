@@ -20115,15 +20115,21 @@ echo "== Corpus integrity =="
 # `--plugin-build` flag embodied, or any future in-place transform — this
 # catches it whole-corpus, independent of which pinned phrase a content-grep
 # gate happens to watch.
-# F44: the operator's task reaches the agents that act on it.
+# F44: the operator's task reaches the reviewer on BOTH dispatch paths.
 # workflow.yaml::task was substituted into the programmer / researcher /
 # verifier / architect templates via {task_description} and into NO
-# code-reviewer template, so every review devt ran answered the envelope's
-# generic "review these files for quality" instead of the question the
-# operator asked — and the only field workaround was hand-appending the
-# mandate to each of eight lane dispatches. Asserts NON-EMPTY, not merely
-# present: every gate in the envelope path checked that blocks exist and none
-# checked that they say anything, which is exactly why the gap survived.
+# code-reviewer template, so every review answered the envelope's generic
+# "review these files for quality" instead of the question the operator asked.
+#
+# Leg (a) is the one that matters and is easy to get wrong: the canonical
+# /devt:review does NOT call render-filled — it dispatches from the COMPILED
+# marker region in the workflow markdown, with placeholders filled by the
+# orchestrator at dispatch time. A CLI-only assertion passes while the
+# dominant path stays unfixed, so the compiled regions are checked directly.
+F44_REGIONS=0
+for F44_WF in code-review.md dev-workflow.md quick-implement.md code-review-parallel.md; do
+  /usr/bin/grep -q '<operator_mandate>' "$ROOT/workflows/$F44_WF" && F44_REGIONS=$((F44_REGIONS+1))
+done
 F44_T=$(mktemp -d); mkdir -p "$F44_T/.devt/state" "$F44_T/.devt/rules"
 printf '{}' > "$F44_T/.devt/config.json"
 for f in architecture coding-standards quality-gates review-checklist; do printf '# %s\n' "$f" > "$F44_T/.devt/rules/$f.md"; done
@@ -20131,41 +20137,45 @@ for f in architecture coding-standards quality-gates review-checklist; do printf
 F44_MANDATE="Audit enrichment depth and OpenAPI completeness"
 (cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task="$F44_MANDATE" phase=review --skip-gates >/dev/null 2>&1)
 f44_render() { (cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled "$1" 2>/dev/null); }
-F44_SINGLE=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c 'OpenAPI completeness' || true; })
-F44_PAR=$(f44_render code-reviewer:code_review_parallel | { /usr/bin/grep -c 'OpenAPI completeness' || true; })
-F44_TAG=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c '<operator_mandate>' || true; })
+# One render, two questions asked of it — substituted text AND exactly one tag.
+F44_OUT=$(f44_render code-reviewer:code_review)
+F44_SINGLE=$(printf '%s\n' "$F44_OUT" | { /usr/bin/grep -c "$F44_MANDATE" || true; })
+F44_TAG=$(printf '%s\n' "$F44_OUT" | { /usr/bin/grep -c '<operator_mandate>' || true; })
+F44_PAR=$(f44_render code-reviewer:code_review_parallel | { /usr/bin/grep -c "$F44_MANDATE" || true; })
+# Templates that already carry the task via {task_description} must not also
+# receive a second copy — the mandate is a placeholder, not an injection, so
+# duplication here means someone re-added an unconditional inject.
+F44_DUP=$(f44_render verifier:code_review | { /usr/bin/grep -c "$F44_MANDATE" || true; })
 # An empty task must yield NO block at all — an empty <operator_mandate></...>
 # would read as "the operator asked for nothing", which is a different claim
-# from "no operator task was recorded".
+# from "no operator task was recorded", and rubric Axis I skips on absent.
 (cd "$F44_T" && node "$ROOT/bin/devt-tools.cjs" state update task="" --skip-gates >/dev/null 2>&1)
-F44_EMPTY=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c '<operator_mandate>' || true; })
+F44_EMPTY=$(f44_render code-reviewer:code_review | { /usr/bin/grep -c 'operator_mandate' || true; })
 rm -rf "$F44_T"
-if [ "$F44_SINGLE" -ge 1 ] && [ "$F44_PAR" -ge 1 ] && [ "$F44_TAG" -eq 1 ] && [ "$F44_EMPTY" -eq 0 ]; then
-  pass "F44: operator mandate reaches single + parallel code-reviewer envelopes as one non-empty <operator_mandate> block; an empty task emits no block"
+if [ "$F44_REGIONS" -eq 4 ] && [ "$F44_SINGLE" -ge 1 ] && [ "$F44_PAR" -ge 1 ] \
+   && [ "$F44_TAG" -eq 1 ] && [ "$F44_DUP" -eq 1 ] && [ "$F44_EMPTY" -eq 0 ]; then
+  pass "F44: operator mandate reaches the reviewer on both paths — 4/4 compiled regions carry the block, render substitutes it once, no duplicate on task-bearing templates, empty task emits nothing"
 else
-  fail "F44: operator-mandate injection regressed — single=$F44_SINGLE (want >=1), parallel=$F44_PAR (want >=1), tag_count=$F44_TAG (want 1), empty_task_block=$F44_EMPTY (want 0)"
+  fail "F44: operator-mandate delivery regressed — compiled_regions=$F44_REGIONS (want 4), single=$F44_SINGLE (want >=1), parallel=$F44_PAR (want >=1), tag_count=$F44_TAG (want 1), verifier_copies=$F44_DUP (want 1), empty_task_block=$F44_EMPTY (want 0)"
 fi
 
 # F45: the producer template names every field the reader requires.
 # review.json was specified in three places that shared ZERO fields — the
-# sidecar schema (status/verdict/agent), the consolidator envelope
-# (raw_lane_finding_counts/score/…), and laneSeverityTally
-# (severity_counts/findings) — so a consolidator inventing
-# `consolidated_severity_counts` and `top_findings` was the only behavior
-# available to it, and the tally silently read {0,0,0,0} for a review with 75
-# findings. reader_fields is the single source; this gate pairs it to the
-# template so a reader gaining a dependency cannot leave the producer silent.
-F45_MISS=$(node -e "
+# sidecar schema, the consolidator envelope, and laneSeverityTally — so a
+# consolidator inventing `consolidated_severity_counts` and `top_findings` was
+# the only behavior available to it, and the tally read {0,0,0,0} for a review
+# with 75 findings. reader_fields is the single source; this pairs it to the
+# producer so a reader gaining a dependency cannot leave the producer silent.
+# The `-ge 7` floor stops an emptied reader_fields from passing vacuously.
+F45_OUT=$(node -e "
   const c = require('$ROOT/bin/modules/state-contract.cjs');
   const fs = require('fs');
   const want = (c.JSON_SIDECAR_SCHEMAS['review.json'] || {}).reader_fields || [];
   const tmpl = fs.readFileSync('$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md','utf8');
-  console.log(want.filter(f => !tmpl.includes(f)).join(',') || 'none');
+  console.log((want.filter(f => !tmpl.includes(f)).join(',') || 'none') + '|' + want.length);
 " 2>/dev/null)
-F45_DECL=$(node -e "
-  const c = require('$ROOT/bin/modules/state-contract.cjs');
-  console.log(((c.JSON_SIDECAR_SCHEMAS['review.json']||{}).reader_fields||[]).length);
-" 2>/dev/null)
+F45_MISS=${F45_OUT%%|*}
+F45_DECL=${F45_OUT##*|}
 if [ "$F45_MISS" = "none" ] && [ "${F45_DECL:-0}" -ge 7 ]; then
   pass "F45: every review.json reader_field ($F45_DECL declared) is pinned in the consolidator producer template"
 else
