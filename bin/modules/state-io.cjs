@@ -209,9 +209,17 @@ function parseSimpleYaml(content) {
       if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\"/g, '"');
         // JSON-shaped strings parse back to structured data so downstream
-        // consumers see objects/arrays, not stringified blobs.
-        if ((value.startsWith("{") && value.endsWith("}")) ||
-            (value.startsWith("[") && value.endsWith("]"))) {
+        // consumers see objects/arrays, not stringified blobs — but only for
+        // keys that are DECLARED structured. Promoting on value shape alone
+        // type-punned free text: an operator whose review scope happened to
+        // start with `{` got `task` back as an object, and every consumer
+        // renders it into prose. devt already marks its structured fields with
+        // the `_json` suffix, so that convention is the whitelist;
+        // workflow_id_history predates it and is named without one.
+        const structured = /_json$/.test(key) || key === "workflow_id_history";
+        if (structured &&
+            ((value.startsWith("{") && value.endsWith("}")) ||
+             (value.startsWith("[") && value.endsWith("]")))) {
           try { result[key] = JSON.parse(value); }
           catch { result[key] = value; }
         } else {
@@ -262,7 +270,12 @@ function serializeSimpleYaml(obj) {
       for (const [k, v] of Object.entries(lane)) {
         if (k === "id") continue;
         if (typeof v === "string") {
-          lines.push(`    ${k}: "${v.replace(/"/g, '\\"')}"`);
+          // Escape newlines exactly as the top-level string branch does. A raw
+          // newline inside a lane field wrote a physical line break into the
+          // middle of a quoted value, and the reader then truncated the value
+          // and dropped every lane declared after it — silent data loss that
+          // needed no LLM, just a scope description someone pasted.
+          lines.push(`    ${k}: "${v.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`);
         } else {
           lines.push(`    ${k}: ${v}`);
         }

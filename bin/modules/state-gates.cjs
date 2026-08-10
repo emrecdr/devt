@@ -3169,7 +3169,17 @@ function assertPreflightFresh() {
     return { ok: true, reason: "no workflow.yaml — gate does not apply" };
   }
   if (!fs.existsSync(briefPath)) {
-    return { ok: true, reason: "no preflight-brief.json — preflight disabled or failed gracefully" };
+    // Warn, don't pass silently. This gate caught a STALE brief and never a
+    // missing one, so a green result said nothing about whether preflight had
+    // run at all — the absent case is the one where the agent got no governing
+    // docs, no REJ tombstones, and no scope hint. Not a hard block: preflight
+    // is legitimately disabled on some projects, and blocking there would
+    // punish a supported configuration.
+    return {
+      ok: true,
+      warn: true,
+      reason: "no preflight-brief.json — preflight either never ran or failed; the dispatch carries no governing-doc or REJ-tombstone signal",
+    };
   }
 
   let createdAt;

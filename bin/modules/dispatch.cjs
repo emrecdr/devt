@@ -190,7 +190,12 @@ function listMarkerRegions() {
 // renderEnvelope is the single chokepoint: cmdCompile (workflow compiled
 // regions), cmdRender, cmdRenderFilled, and render-lanes all route through it,
 // so compiled + rendered output is byte-identical to the pre-constant era.
-const CONTEXT_LOADED_CONTRACT = "governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.";
+// The claim this used to end on — "the verifier checks that your reads cover
+// the rules your findings depend on" — was false: no rubric axis grades the
+// Context Loaded section, and the only enforcement anywhere is a heading
+// presence check that emits a warning. A stated guarantee that does not hold
+// is worse than a missing one, because it stops people from looking.
+const CONTEXT_LOADED_CONTRACT = "governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — that section is how a reader can tell a selective read from a skipped one. Sub-tags carrying full content inline need no disk reads and no section.";
 
 function renderEnvelope(agent, workflowId, contracts) {
   if (!contracts.agents[agent]) {
@@ -1443,6 +1448,43 @@ function run(subcommand, args) {
       process.stdout.write(envelope + (envelope.endsWith("\n") ? "" : "\n"));
       return 0;
     }
+    case "verify-envelope": {
+      // The pointer stub advertises a sha256 over the full envelope body. It
+      // was computed, persisted, and compared NOWHERE — the workflow called it
+      // "an integrity contract, not convention" while nothing could check it.
+      // This is the missing half: one command, so the claim describes
+      // something a consumer can actually do.
+      //
+      // Args: <path> --sha256=<hash>
+      const positional = args.filter(a => !a.startsWith("--"));
+      const envPath = positional[0];
+      const shaFlag = args.find(a => a.startsWith("--sha256="));
+      if (!envPath || !shaFlag) {
+        process.stderr.write("Usage: dispatch verify-envelope <path> --sha256=<hash>\n");
+        return 2;
+      }
+      const expected = shaFlag.slice("--sha256=".length).trim();
+      let body;
+      try { body = fs.readFileSync(envPath, "utf8"); }
+      catch (e) {
+        json({ ok: false, reason: `envelope unreadable: ${e.message}`, path: envPath });
+        return 1;
+      }
+      // Same digest shape render emits: sha256 of the full body, first 16 hex.
+      const actual = require("crypto").createHash("sha256").update(body).digest("hex").slice(0, 16);
+      const match = actual === expected;
+      json({
+        ok: match,
+        path: envPath,
+        expected,
+        actual,
+        bytes: Buffer.byteLength(body, "utf8"),
+        reason: match
+          ? "envelope matches the digest the orchestrator rendered"
+          : "envelope does NOT match the rendered digest — the file changed between render and dispatch, or the stub is from a different render",
+      });
+      return match ? 0 : 1;
+    }
     case "compile": {
       const mode = args.includes("--write") ? "write" : "check";
       const result = cmdCompile(mode);
@@ -1601,7 +1643,7 @@ function run(subcommand, args) {
       }
     }
     default:
-      process.stderr.write("Usage: dispatch <list|contracts|check-contracts|render|render-filled|render-lanes|run-lanes|run|compile|decompose|warnings>\n");
+      process.stderr.write("Usage: dispatch <list|contracts|check-contracts|render|render-filled|render-lanes|run-lanes|run|verify-envelope|compile|decompose|warnings>\n");
       return 2;
   }
 }

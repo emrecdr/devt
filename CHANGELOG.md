@@ -36,10 +36,33 @@ The sidecar schema declared `status`/`verdict`/`agent`; the consolidator envelop
 
 **The narrative guard cried wolf on a correct review.** It substring-matched sidecar ids against `review.md`, so a sidecar writing `L3:I-1` beside prose writing `L3 I-1` reported 70 of 75 findings missing — a full-severity STOP earned by a separator, and a guard that does that trains operators to skip it. Matching is now alphanumeric-normalised, and the producer must anchor each finding's id verbatim in its own heading while inline references stay free-form (dropping the lane prefix inside a lane's own section is how models naturally write, and the guard should not fight it). The guard stays loud: it has yet to produce a true positive in the field, but the drop it exists to catch demonstrably happened while it was reporting `unavailable`.
 
+### Verified wrong answers
+
+**The stale-workflow check reported `acted=0` on a reset that had fired.** `code-review.md` captured `auto-reset-if-stale` with `2>&1` and parsed `tail -1`. stdout carries the JSON — always exactly one line, since `JSON.stringify` escapes newlines on the wire — but stderr carries the `[devt]` banner, which embeds the operator's task with **raw** newlines. Merging the two and taking the last line fed banner prose to `JSON.parse` whenever they interleaved. Reproduced once in ~30 attempts: a real race, not a deterministic bug. The adjacent staleness call six lines below already used `2>/dev/null` and parsed whole stdout; both now do.
+
+**The post-implementation graph refresh had never fired.** `programmer.md` writes `files_changed` and every consumer reads it; only the graphify-refresh branch tested `files_modified`, a name no producer emits. Its condition was always false, so devt declined to refresh the graph it had just invalidated and handed the next workflow a degraded `scope_trust`. Gate **F46** pairs the field name across producer and branch.
+
+**Free text that looked like JSON was type-punned into an object.** `parseSimpleYaml` promoted any `{…}`-shaped value, so an operator whose review scope opened with a brace got `task` back as an object — and every consumer renders it into prose. Promotion now keys off the `_json` suffix devt already uses to mark structured fields, rather than off the shape of the value.
+
+**A newline in a lane field silently dropped every lane after it.** `serializeSimpleYaml` escaped newlines for top-level strings and not for lane fields, writing a raw line break into the middle of a quoted value; the reader then truncated it and lost the rest of `lanes[]`. Needs no LLM — just a multi-line scope description. Gate **F47** covers both round-trips.
+
+**`register-lanes` derives `code-review-input.md` when it is absent.** The hand-rolled partition shortcut never runs `scope_check`, so nothing pre-wrote the artifact — while every lane envelope still says to read it and the verifier's axis A treats its absence as a failure. It is now a consequence of registering lanes. It also carries a cover check against the change set, reported as **numbers rather than an alarm**: a partition may scope to a subset deliberately and blast-radius lanes legitimately include unchanged files, so only an exact match is asserted and anything else is stated for the operator to judge.
+
+### False guarantees
+
+> A stated guarantee that does not hold is worse than a missing one, because it stops people from looking.
+
+- **The pointer-stub sha256 was decorative.** Computed, persisted, advertised as "an integrity contract, not convention" — and compared nowhere. `dispatch verify-envelope <path> --sha256=<hash>` is the missing half; the prose now says the digest is an auditable anchor and names the command that checks it, instead of implying something already does.
+- **The Context-Loaded contract claimed "the verifier checks that your reads cover the rules your findings depend on."** No rubric axis grades that section. The claim is gone; the requirement and its actual purpose remain.
+- **`assertPreflightFresh` passed silently when the brief was missing.** It caught a stale brief and never an absent one, so green said nothing about whether preflight ran. Now warns — not blocks, since preflight is legitimately disabled on some projects.
+- **`{models.code_reviewer}`** (underscore) in three example blocks resolved to nothing against the hyphenated key. Outside any marker region, which is why `compile --check` reported no drift.
+- **`Unknown command:` now names the command families.** `Unknown state subcommand:` already lists its ~70 names, which turns a wrong guess into a self-correction in one round trip; the top-level path printed generic help. A field operator improvising `scratchpad aggregate` learned only that it was wrong, never that `state aggregate-knowledge-candidates` was what they wanted.
+
 ### Gates
 
 - **F44** — the mandate reaches the reviewer on **both** dispatch paths: 4/4 compiled marker regions carry the block, the render path substitutes it exactly once, task-bearing templates get no second copy, and an empty task emits nothing. The compiled-region leg is the load-bearing one — a CLI-only assertion passes while the path the canonical review actually uses stays unfixed. Asserts non-emptiness deliberately: every gate in this path checked that blocks *exist* and none checked that they *say* anything.
 - **F45** — every `reader_fields` entry is pinned in the producer template.
+- **F46** / **F47** cover the field-name pairing and the state round-trips above.
 - **K115** re-anchored to the 8-axis taxonomy; the expected count stays hardcoded on purpose, since deriving it from the rubric is what the CLI already does and would make the gate tautological.
 
 ## [0.241.0] - 2026-08-08

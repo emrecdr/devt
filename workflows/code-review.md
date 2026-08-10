@@ -79,8 +79,14 @@ if [[ " ${REVIEW_SCOPE} " == *" --fresh "* ]]; then
   node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state reset-soft 2>&1 | head -1
   echo "[review] --fresh: state reset-soft applied; proceeding to substep 1"
 else
-  AUTO_RESET=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state auto-reset-if-stale --task="${REVIEW_SCOPE}" --workflow-type="code_review" 2>&1)
-  ACTED=$(echo "$AUTO_RESET" | tail -1 | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).acted===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
+  # stdout carries the JSON; stderr carries the human-readable [devt] banner,
+  # which embeds the task text with RAW newlines. Merging them with 2>&1 and
+  # then taking `tail -1` fed banner prose to JSON.parse whenever the two
+  # streams interleaved — the parse threw, the catch printed 0, and a reset
+  # that HAD fired reported acted=0. Read stdout alone: it is always exactly
+  # one line, because JSON.stringify escapes the newlines on the wire.
+  AUTO_RESET=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state auto-reset-if-stale --task="${REVIEW_SCOPE}" --workflow-type="code_review" 2>/dev/null)
+  ACTED=$(echo "$AUTO_RESET" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{try{console.log(JSON.parse(s).acted===true?'1':'0')}catch{console.log('0')}});" 2>/dev/null)
   if [ "$ACTED" = "1" ]; then
     echo "[review] auto-reset fired (task+type+age unambiguous new session); proceeding to substep 1"
   else
@@ -459,7 +465,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — that section is how a reader can tell a selective read from a skipped one. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <memory_signal>{memory_signal_json}</memory_signal>
     <!-- auto_memory carries user-curated decisions (laneH from
          ~/.claude/projects/<projHash>/memory/*.md) + claude-mem observations

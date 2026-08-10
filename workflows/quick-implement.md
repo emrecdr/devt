@@ -191,7 +191,7 @@ Task(subagent_type="devt:programmer", model="{models.programmer}", prompt="
       <architecture>{governing_rules.content[\".devt/rules/architecture.md\"]}</architecture>
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
     </governing_rules>
-    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — that section is how a reader can tell a selective read from a skipped one. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <guardrails_inline>
       <golden_rules>{inline_guardrails["golden-rules.md"]}</golden_rules>
       <engineering_principles>{inline_guardrails["engineering-principles.md"]}</engineering_principles>
@@ -256,7 +256,7 @@ Route on `status` (`DONE|DONE_WITH_CONCERNS|PARTIAL|BLOCKED|NEEDS_CONTEXT`):
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement status=$STATUS
 ```
 
-**Post-implementation graphify refresh** — When `graphify.enabled=true` AND `impl-summary.json::files_modified` is non-empty, branch on `config.graphify.auto_refresh_post_impl` (default `"ask"`):
+**Post-implementation graphify refresh** — When `graphify.enabled=true` AND `impl-summary.json::files_changed` is non-empty, branch on `config.graphify.auto_refresh_post_impl` (default `"ask"`):
 
 - **`"ask"` (default)** AND interactive (non-autonomous) mode: emit AskUserQuestion with header "Graphify refresh", question "Code changes landed. The graph is now N commits behind reality. Refresh now?", three options:
     1. **Refresh now (recommended)** — runs `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60`, surfaces one-line confirmation.
@@ -265,7 +265,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=implement sta
 - **`true`** OR autonomous mode: silently call `node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" graphify maybe-refresh --force --timeout=60` and surface a one-line confirmation (`🔄 Refreshed graphify graph after impl (Xs)` or `⚠️ Graphify refresh skipped: <reason>`).
 - **`false`**: surface only the one-line tip — `💡 Code changes made — run `graphify update .` to refresh the project graph; downstream review/debug agents see the new symbols. Skip if you'll re-review immediately.` No prompt, no refresh.
 
-Skip entirely when graphify is disabled or `files_modified` is empty.
+Skip entirely when graphify is disabled or `files_changed` is empty.
 
 </step>
 
@@ -299,7 +299,7 @@ Task(subagent_type="devt:tester", model="{models.tester}", prompt="
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <testing_patterns>{governing_rules.content[\".devt/rules/testing-patterns.md\"]}</testing_patterns>
     </governing_rules>
-    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — that section is how a reader can tell a selective read from a skipped one. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <guardrails_inline>
       <golden_rules>{inline_guardrails[\"golden-rules.md\"]}</golden_rules>
     </guardrails_inline>
@@ -374,7 +374,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       <quality_gates>{governing_rules.content[\".devt/rules/quality-gates.md\"]}</quality_gates>
       <review_checklist>{governing_rules.content[\".devt/rules/review-checklist.md\"]}</review_checklist>
     </governing_rules>
-    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — the verifier checks that your reads cover the rules your findings depend on. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
+    <context_loaded_contract>governing_rules delivery: any sub-tag above carrying a (by-reference: …) stub means Read that rules file from disk when relevant to your scope, and record every file you actually read in a `## Context Loaded` section of your output artifact (name + full/section read) — that section is how a reader can tell a selective read from a skipped one. Sub-tags carrying full content inline need no disk reads and no section.</context_loaded_contract>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>
     <scope_trust>{scope_trust_json}</scope_trust>

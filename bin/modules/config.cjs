@@ -326,7 +326,7 @@ const DEFAULTS = {
     // --debounce=N.
     rebuild_debounce_seconds: 30,
     // After an implementation phase writes new code (impl-summary.json with
-    // non-empty files_modified), the workflow decides how to handle the now-
+    // non-empty files_changed), the workflow decides how to handle the now-
     // stale graph. Three accepted values:
     //   "ask"   — prompt user via AskUserQuestion: refresh now / skip / always-on (default)
     //   true    — silently auto-invoke `maybe-refresh --force` (autonomous flows)

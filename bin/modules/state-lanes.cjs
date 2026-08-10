@@ -937,6 +937,51 @@ function registerLanesFromYaml(filePath) {
     } else {
       try { fs.unlinkSync(path.join(getStateDir(), "lane-unassigned.txt")); } catch { /* absent is the normal case */ }
     }
+  } else {
+    // No declared scope: the hand-rolled partition shortcut reaches here,
+    // because it never runs scope_check and so nothing pre-wrote the artifact.
+    // Every lane envelope still says `Read .devt/state/code-review-input.md`
+    // and the verifier's axis A treats its absence as a failure, so a
+    // sanctioned path was emitting dispatches that reference a file the path
+    // does not create. Deriving it from the lane union makes the artifact a
+    // consequence of registering lanes rather than something to remember.
+    const union = Array.from(fileOwners.keys()).sort();
+    if (union.length > 0) {
+      // Cover check against the change set. Reported as NUMBERS, not as an
+      // alarm: both directions have legitimate causes — a partition may scope
+      // to a subset on purpose, and blast-radius lanes carry files that were
+      // never changed. Only an exact match is asserted; anything else is
+      // stated and left to the operator. Calling a deliberate subset a WARNING
+      // is how a check earns the reflex to skip it.
+      let cover = "cover check unavailable (no git range)";
+      try {
+        const { collectChangedFiles } = require("./review-weight.cjs");
+        const { resolvePrimaryBranch, findProjectRoot } = require("./config.cjs");
+        // devt's own state artifacts are never review targets; in a project
+        // that gitignores .devt/state they never appear, and in one that does
+        // not they would drown the real signal.
+        const changed = (collectChangedFiles(findProjectRoot(), resolvePrimaryBranch(null)) || [])
+          .filter(f => !/(^|\/)\.devt\//.test(f));
+        if (changed.length > 0) {
+          const changedSet = new Set(changed.map(_normScopePath));
+          const unionSet = new Set(union.map(_normScopePath));
+          const unlaned = changed.filter(f => !unionSet.has(_normScopePath(f)));
+          const beyond = union.filter(f => !changedSet.has(_normScopePath(f)));
+          cover = (unlaned.length === 0 && beyond.length === 0)
+            ? `${union.length} assigned = ${changed.length} changed, exact cover`
+            : `${union.length} assigned vs ${changed.length} changed — ${unlaned.length} changed file(s) in no lane, ${beyond.length} lane file(s) outside the change set`;
+          if (unlaned.length > 0) out.cover_check_unlaned = unlaned.slice(0, 20);
+          if (beyond.length > 0) out.cover_check_beyond_change_set = beyond.slice(0, 20);
+        }
+      } catch { /* no git / no repo — the artifact is still worth writing */ }
+      const body = `# Review Scope\n\n## Files\n\n${union.map(f => `- ${f}`).join("\n")}\n\n` +
+                   `## Source\n\nlane-partition (${lanes.length} lanes) — ${cover}\n`;
+      try {
+        atomicWriteFileSync(path.join(getStateDir(), "code-review-input.md"), body);
+        out.scope_derived = union.length;
+        out.scope_cover_check = cover;
+      } catch { /* advisory — registration itself still succeeded */ }
+    }
   }
   return out;
 }

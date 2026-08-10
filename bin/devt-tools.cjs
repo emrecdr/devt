@@ -191,10 +191,28 @@ function main() {
           process.exit(1);
         });
         return; // async — don't fall through to main() exit
-      default:
+      default: {
+        // Name the nearest real commands, not just the full usage dump.
+        // `Unknown state subcommand:` already lists its ~70 names and that
+        // turns a wrong guess into a self-correction in one round trip; the
+        // top-level path printed generic help instead, so an operator who
+        // improvised `scratchpad aggregate` learned only that it was wrong,
+        // never that `state aggregate-knowledge-candidates` was what they
+        // wanted.
+        const known = [
+          "init", "state", "config", "models", "setup", "memory", "dispatch",
+          "preflight", "discovery", "evolution", "report", "update", "health",
+          "security", "grader", "mcp-stats", "graphify", "deferred",
+          "bash-guard", "prose-shrink", "static-compress",
+        ];
+        const target = String(command || "");
+        const near = known.filter(c => c.includes(target) || target.includes(c) || c[0] === target[0]);
         console.error(`Unknown command: ${command}`);
+        if (near.length) console.error(`Closest commands: ${near.join(", ")}`);
+        console.error(`All commands: ${known.join(", ")}`);
         printUsage();
         process.exit(1);
+      }
     }
   } catch (err) {
     console.error(JSON.stringify({ error: err.message }));

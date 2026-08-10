@@ -20182,6 +20182,55 @@ else
   fail "F45: producer/reader contract drift — fields declared by reader_fields but absent from code-reviewer-code_review_parallel.tmpl.md: $F45_MISS (declared_count=$F45_DECL, want >=7)"
 fi
 
+# F46: the post-implementation graph refresh reads the field the producer
+# writes. programmer.md's sidecar declares `files_changed` and every consumer
+# (tester.md, the dispatch blocks) reads it; only the graphify-refresh branch
+# tested `files_modified`, a name no producer emits — so its condition was
+# always false and devt never refreshed the graph it had just invalidated,
+# silently degrading scope_trust for the next workflow.
+F46_PROD=$({ /usr/bin/grep -c '"files_changed"' "$ROOT/agents/programmer.md" || true; })
+F46_STALE=0
+for F46_F in workflows/dev-workflow.md workflows/quick-implement.md bin/modules/config.cjs; do
+  F46_N=$({ /usr/bin/grep -c 'files_modified' "$ROOT/$F46_F" || true; })
+  F46_STALE=$((F46_STALE + F46_N))
+done
+F46_WIRED=0
+for F46_F in workflows/dev-workflow.md workflows/quick-implement.md; do
+  /usr/bin/grep -q 'impl-summary.json::files_changed' "$ROOT/$F46_F" && F46_WIRED=$((F46_WIRED+1))
+done
+if [ "${F46_PROD:-0}" -ge 1 ] && [ "$F46_STALE" -eq 0 ] && [ "$F46_WIRED" -eq 2 ]; then
+  pass "F46: graphify refresh branches on files_changed — the field programmer.md actually writes (zero files_modified ghosts)"
+else
+  fail "F46: producer/consumer field drift — producer_decl=$F46_PROD (want >=1), files_modified_ghosts=$F46_STALE (want 0), wired_workflows=$F46_WIRED (want 2)"
+fi
+
+# F47: state round-trips survive free text. parseSimpleYaml promoted any
+# JSON-SHAPED value to an object, so a review scope that happened to start with
+# `{` came back as an object and rendered "[object Object]" into every
+# envelope; and serializeSimpleYaml escaped newlines for top-level strings but
+# NOT for lane fields, so a multi-line lane scope wrote a raw line break into a
+# quoted value and the reader dropped every lane after it. Both are silent.
+F47_OUT=$(node -e '
+  const { parseSimpleYaml, serializeSimpleYaml } = require("'"$ROOT"'/bin/modules/state-io.cjs");
+  const out = [];
+  // free text that looks like JSON stays a string
+  out.push(typeof parseSimpleYaml("task: \"{\\\"scope\\\":\\\"api\\\"}\"\n").task);
+  // declared-structured keys still promote
+  const s = parseSimpleYaml("memory_signal_json: \"{\\\"a\\\":1}\"\nworkflow_id_history: \"[\\\"x\\\"]\"\n");
+  out.push(typeof s.memory_signal_json === "object" && Array.isArray(s.workflow_id_history) ? "promoted" : "BROKEN");
+  // multi-line lane field round-trips without eating later lanes
+  const st = { phase: "review", lanes: [{ id: "L1", scope: "multi\nline" }, { id: "L2", scope: "b" }] };
+  const back = parseSimpleYaml(serializeSimpleYaml(st));
+  out.push(String(back.lanes.length));
+  out.push("scope" in back ? "LEAKED" : "clean");
+  console.log(out.join("|"));
+' 2>/dev/null)
+if [ "$F47_OUT" = "string|promoted|2|clean" ]; then
+  pass "F47: JSON-shaped free text stays a string, declared _json keys still promote, multi-line lane fields round-trip without dropping later lanes"
+else
+  fail "F47: state round-trip regressed — got '$F47_OUT', want 'string|promoted|2|clean'"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"
