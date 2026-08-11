@@ -482,8 +482,14 @@ function buildSubstitutionTable(agent, loadOpts) {
       `\`## Drill-down: <SYM> [call: <corr_id>]\` section in graph-impact.md, append `+
       `\`(via call: <corr_id>)\` to that finding. The 8-char hex correlation_id maps `+
       `1-to-1 to a specific MCP call — \`node bin/devt-tools.cjs mcp-stats `+
-      `--correlation-id=<id>\` resolves the call back to its args + response, so `+
-      `downstream auditors can verify the graph-derived signal. Skip the citation `+
+      `--correlation-id=<id>\` resolves it against .devt/memory/_mcp-trace.jsonl. `+
+      `That returns the call's TOOL, TIMESTAMP, DURATION, OK/ERROR and an args `+
+      `FINGERPRINT (args_fp) — never the args or the response, which devt `+
+      `deliberately does not log. The result shape is {aggregate, tools[], `+
+      `entries_considered}: read \`tools\` for the per-tool breakdown, not a `+
+      `guessed key name — a jq selector that misses returns null, which is `+
+      `indistinguishable from a broken feature and has been reported as one. `+
+      `Skip the citation `+
       `when no drill-down is the source (grep-derived, code-derived, doc-derived).`+
       `</provenance_protocol>`
     : "";

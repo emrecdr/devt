@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### The provenance protocol promised args and responses it never logs
+
+`<provenance_protocol>` told agents that `mcp-stats --correlation-id=<id>` "resolves the call back to its **args + response**". It does not — the trace records `args_fp` (a fingerprint) and `args_size`, and devt deliberately never logs args or results. An auditor following that instruction got metadata and reasonably concluded the mechanism was broken. It now states what actually comes back (tool, timestamp, duration, ok/error, args fingerprint), names the trace path, and names the result shape — `{aggregate, tools[], entries_considered}` — because a jq selector that misses returns `null`, which is indistinguishable from a broken feature.
+
+The reported failure itself was **refuted**: `mcp-stats --correlation-id=1db6d7a0` resolves against the field trace (1 entry, timestamps), `--include-chain` returns 288 calls with a populated `tools` array, and `_meta.correlation_id` is emitted on both the MCP and CLI paths. The nulls came from querying `by_tool`, a key that does not exist — the same class of error that produced two bad gates in this batch before being caught.
+
 ### The scratchpad's documented reset is now real
 
 `skills/scratchpad/SKILL.md` says *"Ephemeral: do not treat the scratchpad as permanent storage — it resets between workflows"*, and `reset-soft` left it untouched — so it accumulated across every workflow a project ever ran. Field: **80 KB, 345 lines, 143 `#KNOWLEDGE-CANDIDATE` tags** spanning domains absent from the diff, and it grew during the run that reported it. Four entries explicitly invalidate earlier ones ("CORRECTS the stale line-9 candidate", "is FALSE", "must NOT be promoted to memory") — and the curator promotes from that pile, so the memory layer's entire premise, that it is trustworthy, was being fed known-refuted claims.
