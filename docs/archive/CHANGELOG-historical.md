@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.206.0] - 2026-07-26
+
+### Measured token + latency batch — the two receipt-supported levers, and only those
+
+The v3 report's spawn-count batch proposed four legs; live `duration_ms` telemetry supported exactly two. The other two (PreToolUse matcher-merge, injector idle short-circuit) were refuted by measurement — profile-skips cost ~1ms and the injector's `state read` is already mtime-cached — and are recorded as validated non-issues, not shipped.
+
+### Changed
+
+- **`stop.sh` collapsed to one compound CLI call — measured p50 928ms → ~440ms per turn end (N/spawn 9 → 2).** The Stop hook fires at every response end in all profiles and ran a chain of 8 `node` spawns (stop-loop guard parse, `state read`, knowledge-candidate harvest, curation footer, field extraction, conditional deactivation stamp, stopReason emission). New `state stop-hook` verb does all of it in-process with a byte-identical output contract: `stop_hook_active` → no output; active+incomplete → `WARNING` stopReason + the same `stopped_at`/`stopped_phase`/`active=false` stamp through the same `updateState` path (deactivation-gate semantics inherited); otherwise the base stopReason — every leg best-effort so a failure degrades toward the base message instead of blocking shutdown. The hook wrapper is 5 lines: read stdin, pipe to the verb, fail open. Also retires the chain's `STATE_JSON`-via-`process.argv` pattern (the same argv family the hook ecosystem was converted off). The curation-hint logic is single-sourced: `memory.cjs::candidatesFooterStatus()` now serves both the `candidates-footer` CLI case and the verb — same counts, same cooldown-stamp side effect.
+- **`devt-graphify-mcp` stops charging disabled installs — tools/list 4,643B → 298B (−93.6%) when graphify is off (N1).** The server advertised all 9 tool schemas in every session even with `graphify.enabled=false` (the DEFAULT) and no graph built — degradation existed only at call time. `listTools()` now consults `graphify.status()`: not-ready projects advertise only `status` (a probing agent learns the state + enable path from it; enabling is a setup event — restart re-lists the full surface). `tools/call` still resolves every tool regardless of listing, so an unlisted call degrades gracefully instead of erroring. A ready project's surface is byte-identical to before.
+
+### Added
+
+- **Gate K323** — stop-hook behavioral parity (loop-guard silence, WARNING + stop stamp on active+incomplete, base stopReason otherwise, hook wired to the single-spawn path). The curation-hint leg stays covered by K300, which drives the real `stop.sh`.
+- **The graphify MCP tools/list gate now probes both directions in fixtures** (disabled dir → status-only; ready fixture → full surface) so the repo's own graphify state never decides the verdict; the `get_community` inversion gate now checks the ready surface, where the check is meaningful. The `--self-test` registry-drift check now inspects the `TOOLS` registry itself instead of the conditional advertisement.
+
+### Fixed
+
+- **bash-guard perf budget 6000ms → 8000ms.** The ceiling boundary-flaked twice in three days under full-suite load (6019ms, 6827ms) while idle p50 sits ~3000ms — pure scheduler contention, not a regression. 8000ms still catches the catastrophic class the gate exists for (a hook spawning subagents lands >10s).
+
 ## [0.205.0] - 2026-07-26
 
 ### v3-report residuals — every item code-verified before implementation
