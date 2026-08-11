@@ -14,6 +14,14 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 **`criteria_total` said 7 in the verifier envelope while the rubric said 8.** Axis I took the code-review rubric to 8 axes; the envelope prose and a copy-paste `jq` recipe still said 7. `assert-verifier-graded-all-axes` counts from the *rubric*, so a verifier obediently following its envelope declares 7 and fails the gate on a **correct** verification. The field run survived only because the verifier read the rubric, caught the contradiction and overrode its own envelope — a more compliant agent would have failed. Both sites now instruct counting from the loaded rubric rather than quoting a number. (The first fix went into the compiled copy rather than the template; `compile --check` caught it, which is what the `EDIT-SOURCE` marker exists for.)
 
+### Lane diffs now carry the source line numbers reviewers are graded on
+
+Field-measured as the cause of every real defect in one run's output: **34 wrong `file:line` citations across five lanes.** The mechanism is the tool's, not the reviewer's — a lane is told the diff IS the change under review, the rubric then grades it on *source* `file:line`, and the only number in the buffer was the buffer's own position. The cleanest evidence: one lane scored **85/85 correct** on files read with a numbered tool and **0/18** on files read through `sed` — perfect correlation with the reading method.
+
+Every diff line is now prefixed with its true source line number, parsed from each hunk's `@@ -a,b +c,d @@` header. Removed lines get no number, because they do not exist in the file anyone would open. The lane contract gained the other half: cite the annotated number with the repo-relative path from the `+++ b/<path>` header, and never cite a line read through a numberless view (`sed -n a,bp`, `head`, `tail`) — re-read with `Read` or `grep -n` first.
+
+**The obvious gate was tested and rejected before shipping this.** A file-exists + EOF-bounds check over 89 field citations produced **zero** failures while 34 were wrong: a buffer position lands inside a long file and looks entirely plausible. So **F50** asserts the number is *right* against ground truth, and fails if the fixture's buffer position ever coincides with the source line — a gate that can pass on a degenerate fixture proves nothing. Annotation touches the artifact only; sizing and diffstat still compute from the raw diff.
+
 ### post-dispatch-check no longer recommends a destructive action against a live agent
 
 Run against a still-executing consolidator it returned `action: redispatch` — an agent that writes its artifact at the *end* of a long synthesis is indistinguishable, by artifact presence alone, from one that returned without writing. Acting on it would have duplicated a five-artifact synthesis. It now returns `still_in_flight` when a subagent is live, and still emits `redispatch` when none is or the entry is stale (**F49**).

@@ -16997,7 +16997,9 @@ let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
     console.log(f.length === 0 ? "OK" : "FAIL:" + f.join("; "));
   } catch(e) { console.log("FAIL:parse"); }
 });' 2>/dev/null || echo "FAIL:node error")
-K267_UNTRACKED=$({ /usr/bin/grep -c "^+new" "$K267_T/.devt/state/lane-diff-L1.txt" 2>/dev/null || true; } | tr -d " ")
+# The artifact is source-line-annotated (`<n>| +new`), so this asserts the
+# untracked file reached the diff AND that its lines carry source numbers.
+K267_UNTRACKED=$({ /usr/bin/grep -cE "[0-9]\| \+new" "$K267_T/.devt/state/lane-diff-L1.txt" 2>/dev/null || true; } | tr -d " ")
 K267_FALLBACK=$(cd "$K267_T" && node "$CLI" state register-lane --id=L2 --scope=norepo --files=f.py --repo-root=/nonexistent-repo-root 2>/dev/null | node -e '
 let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
   try { const j = JSON.parse(s); const l = j.lane || {};
@@ -20289,6 +20291,42 @@ if [ "$F49_NOLEDGER" = "redispatch" ] && [ "$F49_LIVE" = "still_in_flight" ] && 
   pass "F49: post-dispatch-check withholds the destructive redispatch verdict while a subagent is live, and still emits it when none is (or the entry is stale)"
 else
   fail "F49: liveness gating broken — no_ledger=$F49_NOLEDGER (want redispatch), live=$F49_LIVE (want still_in_flight), stale=$F49_STALE (want redispatch)"
+fi
+
+# F50: lane diffs carry SOURCE line numbers, and the numbers are true.
+# A lane is told the diff IS the change under review, then graded on source
+# file:line — so the only number in the buffer was its own position. Field:
+# 34 wrong citations across five lanes, and one lane scored 85/85 on files
+# read with a numbered tool against 0/18 on files read through `sed`. The
+# obvious gate does not substitute: 89 field citations passed an
+# existence+EOF check while 34 were wrong, because a buffer position lands
+# inside a long file and looks plausible. Only the number being RIGHT helps,
+# so this asserts against ground truth rather than against the format.
+F50_T=$(mktemp -d); mkdir -p "$F50_T/.devt/state"
+(cd "$F50_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t)
+mkdir -p "$F50_T/app"
+node -e "require('fs').writeFileSync('$F50_T/app/f.py', Array.from({length:60},(_,i)=>'line'+(i+1)).join('\n')+'\n')"
+(cd "$F50_T" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+# Insert a line at source position 30 — its buffer position in the diff will
+# be nowhere near 30, which is exactly the confusion under test.
+node -e "
+  const fs=require('fs'); const p='$F50_T/app/f.py';
+  const l=fs.readFileSync(p,'utf8').split('\n'); l.splice(29,0,'MARKER_AT_30');
+  fs.writeFileSync(p,l.join('\n'));"
+(cd "$F50_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review_parallel task=f50 phase=partition_lanes --skip-gates >/dev/null 2>&1)
+printf '{"lanes":[{"id":"L1","scope":"core","files":["app/f.py"]}]}' > "$F50_T/lanes.json"
+(cd "$F50_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from=lanes.json >/dev/null 2>&1)
+# Ground truth from the file itself vs the number the diff advertises.
+F50_TRUE=$({ /usr/bin/grep -n 'MARKER_AT_30' "$F50_T/app/f.py" || true; } | cut -d: -f1)
+F50_ANNOT=$({ /usr/bin/grep -oE '[0-9]+\| \+MARKER_AT_30' "$F50_T/.devt/state/lane-diff-L1.txt" || true; } | cut -d'|' -f1 | tr -d ' ')
+F50_BUFPOS=$({ /usr/bin/grep -n 'MARKER_AT_30' "$F50_T/.devt/state/lane-diff-L1.txt" || true; } | cut -d: -f1)
+rm -rf "$F50_T"
+# The buffer position must DIFFER from the source line, or the fixture is not
+# exercising the confusion and a passing gate would prove nothing.
+if [ "$F50_ANNOT" = "$F50_TRUE" ] && [ -n "$F50_TRUE" ] && [ "$F50_BUFPOS" != "$F50_TRUE" ]; then
+  pass "F50: lane-diff lines carry their true source line number (annotated $F50_ANNOT = source $F50_TRUE, while the buffer position is $F50_BUFPOS)"
+else
+  fail "F50: lane-diff source annotation wrong — annotated='$F50_ANNOT' true='$F50_TRUE' buffer_pos='$F50_BUFPOS' (annotated must equal true, and differ from buffer_pos or the fixture is degenerate)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

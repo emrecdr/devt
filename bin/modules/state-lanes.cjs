@@ -629,6 +629,59 @@ function _laneSizingLines(body) {
 }
 
 
+// Prefix every diff line with the SOURCE line number it corresponds to in the
+// post-change file, derived from each hunk's `@@ -a,b +c,d @@` header.
+//
+// Why: a lane is told the diff IS the change under review, and the rubric then
+// requires source `file:line` citations. Without numbers in the buffer the only
+// number a reviewer has is the buffer position, and field measurement is
+// unambiguous — 34 wrong citations across five lanes, with one lane scoring
+// 85/85 correct on files it read with a numbered tool and 0/18 on files it read
+// through a numberless view. Perfect correlation with the reading method, which
+// makes this the tool's defect and not the reviewer's.
+//
+// A file:line-exists check does NOT substitute: 89 field citations were tested
+// for existence and EOF bounds with zero failures while 34 were wrong, because
+// a buffer position lands inside a long file and looks entirely plausible.
+// Removed lines get no number — they do not exist in the file anyone would
+// open — which also stops a reviewer citing a deleted line as a live one.
+function _annotateDiffWithSourceLines(body) {
+  if (!body) return body;
+  const out = [
+    "# Lane diff — the leading number is the SOURCE line in the post-change file.",
+    "# Cite THAT number, never this file's own line position. Removed (-) lines",
+    "# show no number: they do not exist in the file you would open.",
+    "#",
+  ];
+  let newLine = 0;
+  let inHunk = false;
+  for (const line of body.split("\n")) {
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLine = parseInt(hunk[1], 10);
+      inHunk = true;
+      out.push(`      | ${line}`);
+      continue;
+    }
+    // File headers reset hunk tracking so a malformed hunk can't leak its
+    // counter into the next file's numbering.
+    if (/^(diff --git |index |--- |\+\+\+ |old mode |new mode |similarity |rename |Binary )/.test(line)) {
+      inHunk = false;
+      out.push(`      | ${line}`);
+      continue;
+    }
+    if (!inHunk || line.startsWith("\\")) { out.push(`      | ${line}`); continue; }
+    if (line.startsWith("-")) { out.push(`      | ${line}`); continue; }
+    if (line.startsWith("+") || line.startsWith(" ") || line === "") {
+      out.push(`${String(newLine).padStart(6)}| ${line}`);
+      newLine++;
+      continue;
+    }
+    out.push(`      | ${line}`);
+  }
+  return out.join("\n");
+}
+
 // Generates .devt/state/lane-diff-<id>.txt: merge-base diff of the lane's
 // files (committed + staged + unstaged in one pass) plus /dev/null diffs for
 // untracked lane files. Returns {ok, artifact, diff_lines} or {ok: false}.
@@ -657,7 +710,9 @@ function generateLaneDiff({ id, files, repoRoot, baseRef, stateDir }) {
     }
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const artifact = path.join(stateDir, `lane-diff-${id}.txt`);
-    atomicWriteFileSync(artifact, body);
+    // Annotate the ARTIFACT only. Every metric below is computed from the raw
+    // unified diff, so the numbering cannot perturb sizing or the diffstat.
+    atomicWriteFileSync(artifact, _annotateDiffWithSourceLines(body));
     // Diffstat basis: count only +/- change lines (not context, hunk headers,
     // or the +++/--- file headers). Raw artifact line count field-measured
     // ~25% over the true changed-line count, which breaks any comparison

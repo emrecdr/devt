@@ -1869,7 +1869,8 @@ function cmdRenderLanes(target, options) {
     // historical diff-first behaviour instead of silently losing its method.
     if (lane.diff_artifact && lane.size_basis !== "whole_file") {
       blockLines.push(`    <lane_diff>${lane.diff_artifact}</lane_diff>`);
-      let method = `Read ${lane.diff_artifact} FIRST — that diff IS the change under review for this lane (merge-base diff: committed + working tree + untracked). Read full files only to verify context around changed hunks and cascade effects.`;
+      let method = `Read ${lane.diff_artifact} FIRST — that diff IS the change under review for this lane (merge-base diff: committed + working tree + untracked). Read full files only to verify context around changed hunks and cascade effects.`
+        + ` CITATIONS: each diff line is prefixed with its SOURCE line number (\`  123| +code\`) — cite THAT number with the repo-relative path from the \`+++ b/<path>\` header, never this file's own line position. If you read anything through a numberless view (\`sed -n a,bp\`, \`head\`, \`tail\`), you cannot cite a line from it: re-read with Read or \`grep -n\` before writing a file:line. A wrong-but-plausible line number is worse than none — it sends the implementer to the wrong function and no gate can catch it, because it exists and is in range.`;
       if (lane.size_class === "chunked" || lane.size_class === "split") {
         method += ` The diff is large (${lane.est_loc} lines): enumerate per-file hunks first (Grep '^diff --git' against the diff file), then read it file-by-file in priority order rather than one pass.`;
       }
