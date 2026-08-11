@@ -55,14 +55,14 @@ Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread bec
 
 **What goes in the section:**
 
-- First line (machine-checked): `counts: raw_dispatch=N resolved=M cliff_signal=K` — the live totals from the file WITHIN THIS WORKFLOW'S WINDOW: count only records with `ts >= workflow.yaml::first_created_at` (the ledger is RESET_EXEMPT, so prior-session records persist on disk; the mechanical gate counts in-window only, and out-of-window counting diverges even when honestly live-read — field incident: a synthesis counted a prior day's record and failed the gate). `dispatch warnings --since=<first_created_at>` gives the window-scoped counts mechanically. (resolved = records with a matching `source: "resolution"` annotation).
+- First line (machine-checked, and matched wherever it appears — prose around it is welcome, including prose that mentions the word counts): `counts: raw_dispatch=N resolved=M cliff_signal=K` — the live totals from the file WITHIN THIS WORKFLOW'S WINDOW: count only records with `ts >= workflow.yaml::first_created_at` (the ledger is RESET_EXEMPT, so prior-session records persist on disk; the mechanical gate counts in-window only, and out-of-window counting diverges even when honestly live-read — field incident: a synthesis counted a prior day's record and failed the gate). `dispatch warnings --since=<first_created_at>` gives the window-scoped counts mechanically. (resolved = records with a matching `source: "resolution"` annotation).
 - Then either nothing more (when the counts are noise), OR a structured triage when counts are non-trivial (≥3 unresolved of either class): one bullet per incident class with the corrective action taken or deferred. Resolved records render as `resolved: <reason>` — a resolution is an annotation, not a deletion.
 
 **Verifier check (axis H grading):**
 
 Missing section → axis H fails; emit `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section"}`. Informational only — never changes severity calibration for actual findings. Do NOT re-derive the counts: `state assert-dispatch-warnings-acknowledged` compares them against the file at present_findings, and that gate needs no model honesty.
 
-**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, say which — `n/a (ledger absent — no dispatch was ever recorded)` vs `counts: raw_dispatch=0 resolved=0 cliff_signal=0 (ledger present, clean)`. They are different claims: an absent ledger means the guard never wrote, and reporting that as zeros is indistinguishable from a clean run.
+**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, say which — `n/a (ledger absent — no dispatch was ever recorded)` vs `counts: raw_dispatch=0 resolved=0 cliff_signal=0 (ledger present, clean)`. They are different claims: an absent ledger means the guard never wrote, and reporting that as zeros is indistinguishable from a clean run. Explaining that distinction in the section is encouraged, not penalised — say why you chose the form you chose.
 
 ## Axis I — Operator mandate coverage
 

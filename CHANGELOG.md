@@ -8,6 +8,24 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### A corrected review scope survives a cache hit, and `init` stops eating the task
+
+Field: an operator passed a 1.6KB `--scope` and read back the literal `code review`. Two independent writers produced that, and they had been repairing each other on the common path — which is why nothing ever caught it.
+
+`init review` with no task argument wrote its `code review` placeholder **unconditionally**. Every context-init bundle runs `init` at the top purely for its payload, so the real task was destroyed on the way past. On the recompute path the later activation write happened to restore it; on the cached path nothing rewrites it afterwards, so the damage stood. `init` now preserves an existing task when the caller supplies none and still honours an explicit one — same fix for `init workflow`, which nulled it instead.
+
+The freshness short-circuit returned **above** the activation write, so re-running with corrected scope text re-served the stale task indefinitely and the only exit was `state update task=` by hand. The short-circuit now persists a supplied scope. The cache key stays the changed-file set: caching the expensive computation is right, caching the task text is not.
+
+That same early return carried no `scope_missing` and hardcoded `degraded_fields` to `[]`, so the degrade signal existed only on the path the operator was **not** on — and the CLI's own hint steers you onto the path without it. Both fields are real on both paths now, and an empty scope never overwrites a task an earlier call got right.
+
+`--fresh` was recommended by the short-circuit's own stderr hint and parsed by nothing; `review-context-init` accepted three flags and silently discarded it. It now bypasses the cache, as the hint always claimed. The message also names what the cache key is derived from and whether `task` was written this call — the two facts that cost the reporter three re-runs to establish by reading `workflow.yaml` directly (**F61**).
+
+### Two gates stop reporting on mechanisms they never consulted
+
+**Axis H punished explanation.** Its `n/a` branch was disqualified by a bare substring test for `counts:` across the whole section, so a consolidator explaining *why* zeros would mislead failed on its own explanation while a terser answer passed — and the failure message claimed the section lacked a valid `n/a` while one sat in it, sending the reader to look for a formatting fault in the line that was already correct. The branch is now chosen by what **parses**, not by which tokens appear, and the failure names what was actually found. Field consequence worth recording: the retry hid the reasoning and shipped three zeros that read as "verified clean" when the honest claim was "nothing was recorded" — the gate rejected the better answer and accepted the misleading one.
+
+**The raw-dispatch gate passed vacuously.** The hygiene guard appends only on a violation, so a violation-free ledger and a guard that never ran produce the same silence — and the gate reported the first. The universal hook trace already records every invocation, so the evidence existed and nothing read it. A zero count now reads `clean` only with an in-window guard firing behind it, `unknown` otherwise (advisory, never blocking), with `guard_fired` and `evidence` on the result. Firings are window-scoped, so a pre-anchor fire or a different hook is not mistaken for evidence (**F62**).
+
 ## [0.242.2] - 2026-08-11
 
 ### A hinted path now says whether the branch touched it

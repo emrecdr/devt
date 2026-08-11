@@ -2847,12 +2847,80 @@ function assertClaimChecksResolved() {
 }
 
 
+function _workflowWindowAnchorMs(dir) {
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const wfPath = path.join(dir, "workflow.yaml");
+    if (!fs.existsSync(wfPath)) return 0;
+    const m = fs.readFileSync(wfPath, "utf8").match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) return 0;
+    const parsed = new Date(m[1].trim()).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch { return 0; }
+}
+
+
+// Liveness evidence for the dispatch-hygiene guard. The guard appends ONLY on a
+// violation, so a violation-free ledger and a guard that never ran produce the
+// same silence — and this gate reported the first. The universal hook trace
+// already records every invocation, so the evidence existed the whole time and
+// nothing consulted it. Returns null when the trace itself is unreadable: "we
+// cannot tell" is a different claim from "it did not fire", and the caller says
+// which one it is rather than collapsing both into a pass.
+function _hygieneGuardFirings(dir, sinceMs) {
+  let body;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    body = fs.readFileSync(path.join(dir, "hook-trace", "run-hook.jsonl"), "utf8");
+  } catch { return null; }
+  let fired = 0;
+  for (const line of body.split("\n")) {
+    if (!line) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec.script !== "dispatch-hygiene-guard.sh") continue;
+      const ts = rec.ts ? new Date(rec.ts).getTime() : NaN;
+      if (Number.isFinite(ts) && ts >= sinceMs) fired++;
+    } catch { /* malformed line — skip */ }
+  }
+  return fired;
+}
+
+
+// A zero count is only "clean" when something was watching. Splits the old
+// single pass verdict into clean / unknown so a consumer can tell the guard
+// found nothing from the guard never having looked.
+function _guardLivenessVerdict(dir, anchorMs, base) {
+  const fired = _hygieneGuardFirings(dir, anchorMs);
+  if (fired === null) {
+    return { ...base, ok: true, warn: true, guard_fired: null, evidence: "unknown",
+      reason: `${base.reason} — but the hook trace is unreadable, so a clean run cannot be told apart from a guard that never fired` };
+  }
+  if (fired === 0) {
+    return { ...base, ok: true, warn: true, guard_fired: 0, evidence: "unknown",
+      reason: `${base.reason} — but dispatch-hygiene-guard.sh has ZERO firings in this window, so this is "unknown", not "clean" (check DEVT_HOOK_PROFILE / DEVT_DISABLED_HOOKS)` };
+  }
+  return { ...base, ok: true, guard_fired: fired, evidence: "guard_fired",
+    reason: `${base.reason} — dispatch-hygiene-guard.sh fired ${fired}x in this window and recorded nothing` };
+}
+
+
 function assertNoRawDispatchesThisSession() {
   const dir = getStateDir();
+  // Only count dispatches from the CURRENT workflow. `created_at` (rotates on
+  // init) not `first_created_at` (immutable session anchor): each new workflow
+  // gets a clean window, so a pass/fail reflects ONLY its own dispatch hygiene.
+  const anchorMs = _workflowWindowAnchorMs(dir);
+  if (anchorMs === 0) {
+    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
+  }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
   if (!fs.existsSync(warningsPath)) {
-    return { ok: true, raw_dispatch_count: 0, reason: "dispatch-warnings.jsonl absent — no dispatches recorded" };
+    return _guardLivenessVerdict(dir, anchorMs, {
+      raw_dispatch_count: 0,
+      reason: "no raw dispatches recorded in this workflow's window (dispatch-warnings.jsonl absent)",
+    });
   }
   // Honor the same config knob the PreToolUse hook reads. When mode is "warn"
   // or "off", this gate returns ok:true with the count surfaced so consumers
@@ -2877,28 +2945,6 @@ function assertNoRawDispatchesThisSession() {
       killThreshold = cfg.dispatch_hygiene_kill_threshold;
     }
   } catch { /* keep defaults on any failure */ }
-
-  // Read workflow anchor — only count dispatches from the CURRENT workflow.
-  // Use `created_at` (rotates on init *) not `first_created_at` (immutable
-  // session anchor). Workflow-scope matches the gate's intent: each new
-  // workflow gets a clean window, so a workflow's pass/fail reflects ONLY
-  // its own dispatch hygiene, not accumulated history across the session.
-  let anchorMs = 0;
-  try {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const wfPath = path.join(dir, "workflow.yaml");
-    if (fs.existsSync(wfPath)) {
-      const yaml = fs.readFileSync(wfPath, "utf8");
-      const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
-      if (m) {
-        const parsed = new Date(m[1].trim()).getTime();
-        if (Number.isFinite(parsed)) anchorMs = parsed;
-      }
-    }
-  } catch { /* no anchor — gate auto-passes since we can't bound the workflow window */ }
-  if (anchorMs === 0) {
-    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
-  }
 
   const body = fs.readFileSync(warningsPath, "utf8");
   // Two passes: collect in-window raw_dispatch records AND resolution
@@ -2934,14 +2980,23 @@ function assertNoRawDispatchesThisSession() {
   const agents = unresolved.map(r => r.agent || "(unknown)");
   const rawDispatchCount = agents.length;
   if (rawDispatchCount === 0) {
-    return {
-      ok: true,
+    // Resolved records are themselves proof the guard ran — it wrote them.
+    // Only a ledger with nothing in-window needs the trace to tell clean from
+    // never-looked.
+    if (resolvedCount > 0) {
+      return {
+        ok: true,
+        raw_dispatch_count: 0,
+        resolved_count: resolvedCount,
+        evidence: "guard_fired",
+        reason: `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`,
+      };
+    }
+    return _guardLivenessVerdict(dir, anchorMs, {
       raw_dispatch_count: 0,
-      resolved_count: resolvedCount,
-      reason: resolvedCount > 0
-        ? `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`
-        : "no raw dispatches in this workflow's window",
-    };
+      resolved_count: 0,
+      reason: "no raw dispatches in this workflow's window",
+    });
   }
   // Kill-threshold runs BEFORE the mode check — hard-limit safety
   // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
@@ -3071,22 +3126,35 @@ function assertDispatchWarningsAcknowledged() {
     actual.resolved = rawInWindow.filter(r => r.warning_id && resolvedIds.has(r.warning_id)).length;
   }
 
-  // n/a form is valid only when there is genuinely nothing to report.
-  if (/\bn\/a\b/i.test(section) && !/counts:/.test(section)) {
-    if (fileEmpty || (actual.raw_dispatch === 0 && actual.cliff_signal === 0)) {
-      return { ok: true, claimed: null, actual, reason: "n/a claim consistent — no in-window incidents" };
-    }
-    return {
-      ok: false, claimed: null, actual,
-      reason: `review.md claims 'n/a' but the file carries in-window incidents (raw_dispatch=${actual.raw_dispatch}, cliff_signal=${actual.cliff_signal}) — Axis H must be a live read, not inherited from lane sections`,
-    };
-  }
-
+  // Which claim the section makes is decided by what PARSES, not by which
+  // tokens appear anywhere in it. The n/a branch used to be disqualified by a
+  // bare substring test for `counts:` across the whole section, so a
+  // consolidator that explained WHY zeros would mislead was disqualified by its
+  // own explanation while a terser answer passed. Field: the retry hid the
+  // reasoning and shipped three zeros that read as "verified clean" when the
+  // honest claim was "nothing was recorded" — the gate rejected the better
+  // answer and accepted the misleading one. A gate that can only be satisfied
+  // by withholding reasoning trains the thing it audits.
   const cm = section.match(/counts:\s*raw_dispatch=(\d+)\s+resolved=(\d+)\s+cliff_signal=(\d+)/);
+
   if (!cm) {
+    if (/\bn\/a\b/i.test(section)) {
+      if (fileEmpty || (actual.raw_dispatch === 0 && actual.cliff_signal === 0)) {
+        return { ok: true, claimed: null, actual, reason: "n/a claim consistent — no in-window incidents" };
+      }
+      return {
+        ok: false, claimed: null, actual,
+        reason: `review.md claims 'n/a' but the file carries in-window incidents (raw_dispatch=${actual.raw_dispatch}, cliff_signal=${actual.cliff_signal}) — Axis H must be a live read, not inherited from lane sections`,
+      };
+    }
+    // Name what was actually found. The old message asserted the section lacked
+    // a valid 'n/a' even when one was sitting in it, sending the reader to look
+    // for a formatting fault in the line that was already correct.
     return {
       ok: false, claimed: null, actual,
-      reason: "section lacks the machine-readable first line 'counts: raw_dispatch=N resolved=M cliff_signal=K' (or a valid 'n/a' when nothing is logged)",
+      reason: /counts:/i.test(section)
+        ? "section carries a 'counts:' line that does not parse — the required shape is exactly 'counts: raw_dispatch=N resolved=M cliff_signal=K'"
+        : "section declares neither 'counts: raw_dispatch=N resolved=M cliff_signal=K' nor 'n/a' — one of the two is required",
     };
   }
   const claimed = { raw_dispatch: parseInt(cm[1], 10), resolved: parseInt(cm[2], 10), cliff_signal: parseInt(cm[3], 10) };

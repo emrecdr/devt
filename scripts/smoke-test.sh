@@ -15654,7 +15654,10 @@ _k213() {
   printf 'active: true\nworkflow_type: %s\ntier: %s\nphase: finalize\nfirst_created_at: "2026-07-02T00:00:00Z"\ncreated_at: "2026-07-02T00:00:00Z"\n' "$1" "$2" > "$d/.devt/state/workflow.yaml"
   echo 'reason=task_too_routine' > "$d/.devt/state/knowledge-candidates-none.txt"
   [ "$1" = "dev" ] && echo '{"verdict":"VERIFIED","criteria_total":3,"criteria_met":3,"findings":[]}' > "$d/.devt/state/verification.json"
-  (cd "$d" && node "$ROOT/bin/devt-tools.cjs" state advance-phase complete active=false 2>&1) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).advanced===true?'advanced':'blocked')}catch{process.stdout.write('err')}})"
+  # stdout carries the JSON; stderr carries the human-readable [devt] banners
+  # advisory gates emit. Merging them fed banner prose to JSON.parse, so an
+  # advisory warning on a gate that still PASSED read as 'err' here.
+  (cd "$d" && node "$ROOT/bin/devt-tools.cjs" state advance-phase complete active=false 2>/dev/null) | node -e "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).advanced===true?'advanced':'blocked')}catch{process.stdout.write('err')}})"
   rm -rf "$d"
 }
 K213_DEV=$(_k213 dev STANDARD)
@@ -20682,6 +20685,63 @@ if [ "$F61_OUT" = "persisted,reported,bypassed,preserved,set" ]; then
   pass "F61: a corrected scope survives a cache hit, an absent one is reported not silently defaulted, --fresh bypasses the cache, and init preserves a scoped task while still honouring an explicit one"
 else
   fail "F61: context-init scope handling regressed — got '$F61_OUT' (want persisted,reported,bypassed,preserved,set)"
+fi
+
+# F62: two gates that reported on mechanisms they never consulted.
+# Axis H disqualified its own n/a branch with a bare substring test for
+# `counts:` across the whole section, so a consolidator explaining WHY zeros
+# would mislead failed on its explanation while a terser answer passed — and
+# the failure message claimed the section lacked a valid n/a while one sat in
+# it. Field: the retry hid the reasoning and shipped three zeros reading as
+# "verified clean" when the honest claim was "nothing was recorded".
+# The raw-dispatch gate reported an absent ledger as "no dispatches", but the
+# guard only ever appends on a violation, so clean and never-ran were the same
+# silence. The universal hook trace already recorded every firing; nothing read
+# it. Zero is now "clean" only with a firing to back it.
+F62_T=$(mktemp -d); mkdir -p "$F62_T/.devt/state/hook-trace"
+printf '{}' > "$F62_T/.devt/config.json"
+(cd "$F62_T" && git init -q . >/dev/null 2>&1)
+cat > "$F62_T/probe.cjs" <<'F62EOF'
+const fs = require("fs"), path = require("path");
+const g = require(process.env.DEVT_MODULES + "/state-gates.cjs");
+const dir = path.join(process.cwd(), ".devt", "state");
+const ANCHOR = "2026-08-01T00:00:00Z";
+const out = [];
+const H = "# R\n\nSubstantive body with enough content to read as a real review.\n\n## Dispatch warnings (session-scoped)\n\n";
+const NA = "n/a (ledger absent — no dispatch was ever recorded)\n";
+fs.writeFileSync(path.join(dir, "workflow.yaml"), `created_at: "${ANCHOR}"\n`);
+fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), "");
+const axis = (body) => { fs.writeFileSync(path.join(dir, "review.md"), body); return g.assertDispatchWarningsAcknowledged(); };
+out.push(axis(H + NA).ok ? "terse" : "TERSE_BROKE");
+// The whole point: an honest n/a plus prose that happens to say "counts:".
+out.push(axis(H + NA + "\nI considered emitting counts: with zeros, but zeros imply the ledger was read and found empty.\n").ok ? "explained" : "PUNISHED");
+const mal = axis(H + "counts: raw_dispatch=0\n");
+out.push(!mal.ok && /does not parse/.test(mal.reason) ? "named" : "MISDIAGNOSED");
+// Liveness: zero is only clean when something was watching.
+fs.rmSync(path.join(dir, "dispatch-warnings.jsonl"), { force: true });
+fs.rmSync(path.join(dir, "hook-trace"), { recursive: true, force: true });
+const noTrace = g.assertNoRawDispatchesThisSession();
+out.push(noTrace.ok && noTrace.warn === true && noTrace.evidence === "unknown" ? "unknown" : "VACUOUS");
+fs.mkdirSync(path.join(dir, "hook-trace"), { recursive: true });
+const tr = (recs) => fs.writeFileSync(path.join(dir, "hook-trace", "run-hook.jsonl"), recs.map((r) => JSON.stringify(r)).join("\n") + "\n");
+// A pre-anchor firing and a different hook must NOT count as evidence.
+tr([{ ts: "2026-07-01T00:00:00Z", script: "dispatch-hygiene-guard.sh" }, { ts: "2026-08-05T00:00:00Z", script: "bash-guard.sh" }]);
+const stale = g.assertNoRawDispatchesThisSession();
+out.push(stale.warn === true && stale.guard_fired === 0 ? "windowed" : "LEAKED");
+tr([{ ts: "2026-08-05T00:00:00Z", script: "dispatch-hygiene-guard.sh" }, { ts: "2026-08-05T00:01:00Z", script: "dispatch-hygiene-guard.sh" }]);
+const live = g.assertNoRawDispatchesThisSession();
+out.push(live.ok && !live.warn && live.evidence === "guard_fired" && live.guard_fired === 2 ? "clean" : "NOEVIDENCE");
+// A real in-window raw dispatch must still block.
+fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), JSON.stringify({ ts: "2026-08-05T00:00:00Z", source: "raw_dispatch", agent: "devt:code-reviewer", warning_id: "w1" }) + "\n");
+out.push(g.assertNoRawDispatchesThisSession().ok === false ? "blocks" : "LETSTHROUGH");
+console.log(out.join(","));
+F62EOF
+F62_OUT=$(cd "$F62_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
+rm -rf "$F62_T"
+if [ "$F62_OUT" = "terse,explained,named,unknown,windowed,clean,blocks" ]; then
+  pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window guard firing to back it, 'unknown' otherwise, and a real dispatch still blocks"
+else
+  fail "F62: gate-honesty regressed — got '$F62_OUT' (want terse,explained,named,unknown,windowed,clean,blocks)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
