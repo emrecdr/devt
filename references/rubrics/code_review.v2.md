@@ -49,7 +49,9 @@ A further hard-fail check — **REJ tombstone alignment** (NOT a countable axis;
 
 Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread because operators forget the CLI exists. To force acknowledgment at finalize time, `review.md` MUST include a `## Dispatch warnings (session-scoped)` section.
 
-**Source contract — LIVE READ, never inherited.** The section MUST be produced from a read of `.devt/state/dispatch-warnings.jsonl` performed while writing `review.md` — never from lane files, prior summaries, or memory. This axis is an orchestrator-level, dispatch-time signal: warnings are written AT dispatch, so any earlier snapshot (a lane's own section, an envelope rendered before dispatch) is stale by construction. In synthesis mode this is an explicit exception to "consolidate, don't re-review": lane sections about dispatch warnings are lane-local claims about a file that changed after they were written — discard them and read the file. Field incident: a consolidator honestly synthesized five lanes' "file is absent" claims while its own dispatch's warning sat in the log.
+**LANE REVIEWERS SKIP THIS AXIS.** It is orchestrator-level and dispatch-time: warnings are written AT dispatch, so a lane's snapshot is stale by construction and every lane produces the same near-identical paragraph the consolidator must then discard. Say "skipped — orchestrator-level axis" and move on.
+
+**Source contract — LIVE READ, never inherited.** The section MUST be produced from a read of `.devt/state/dispatch-warnings.jsonl` performed while writing the consolidated `review.md` — never from lane files, prior summaries, or memory. In synthesis mode this is an explicit exception to "consolidate, don't re-review": discard the lane claims and read the file. Field incident: a consolidator honestly synthesized five lanes' "file is absent" claims while its own dispatch's warning sat in the log.
 
 **What goes in the section:**
 
@@ -58,9 +60,9 @@ Session-scoped telemetry (`.devt/state/dispatch-warnings.jsonl`) sits unread bec
 
 **Verifier check (axis H grading):**
 
-This is the H axis in the rubric's grading taxonomy (A–I). If the section is missing from `review.md`, axis H fails. The verifier emits `needs_revision` with `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section — acknowledge counts or cite explicit triage"}`. Treat as informational only — does not change Critical/Important severity calibration for actual findings. The claimed counts themselves are checked mechanically at present_findings (`state assert-dispatch-warnings-acknowledged` compares the section's counts line against the file) — that gate runs last and needs no model honesty, so the verifier does not need to re-derive the numbers.
+Missing section → axis H fails; emit `revisions[]` entry `{id: "dispatch-warnings", gap: "review.md missing required ## Dispatch warnings (session-scoped) section"}`. Informational only — never changes severity calibration for actual findings. Do NOT re-derive the counts: `state assert-dispatch-warnings-acknowledged` compares them against the file at present_findings, and that gate needs no model honesty.
 
-**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, the section may state `n/a (no incidents logged this session)` in one line and pass.
+**Skip condition:** when `dispatch-warnings.jsonl` does not exist OR is zero-bytes, say which — `n/a (ledger absent — no dispatch was ever recorded)` vs `counts: raw_dispatch=0 resolved=0 cliff_signal=0 (ledger present, clean)`. They are different claims: an absent ledger means the guard never wrote, and reporting that as zeros is indistinguishable from a clean run.
 
 ## Axis I — Operator mandate coverage
 

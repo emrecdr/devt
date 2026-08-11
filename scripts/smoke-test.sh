@@ -20468,6 +20468,33 @@ else
   fail "F55: tester contract regressed:$F55_WHY"
 fi
 
+# F56: orchestrator-level axes are asked once, and an absent ledger is not
+# reported as a clean one. Axis H is a dispatch-time signal, but every lane
+# self-grades every axis, so five lanes each wrote the same stale-by-
+# construction paragraph that the consolidator then had to discard. Worse,
+# the skip wording let "ledger absent" and "ledger clean" render identically —
+# the exact silence-is-a-pass shape devt's own narrative-guard caveat exists
+# to prevent. Also pins the inline-rubric fallback as LOUD: over the byte cap
+# loadInlineRubrics returns null content and every dispatch loses its inline
+# rubric, and dispatch.cjs used to discard that warning.
+F56_OK=1; F56_WHY=""
+{ /usr/bin/grep -q 'LANE REVIEWERS SKIP THIS AXIS' "$ROOT/references/rubrics/code_review.v2.md"; } || { F56_OK=0; F56_WHY="$F56_WHY lanes-not-excused"; }
+{ /usr/bin/grep -q 'ledger absent — no dispatch was ever recorded' "$ROOT/references/rubrics/code_review.v2.md"; } || { F56_OK=0; F56_WHY="$F56_WHY absent-vs-clean-collapsed"; }
+{ /usr/bin/grep -qF 'ir.warnings' "$ROOT/bin/modules/dispatch.cjs"; } || { F56_OK=0; F56_WHY="$F56_WHY rubric-fallback-silent"; }
+# Behavioral: the shipped trio must still inline, or every lane silently
+# self-grades ad hoc against a rubric it never received.
+F56_INLINE=$(node -e "
+  const { loadInlineRubrics } = require('$ROOT/bin/modules/init.cjs');
+  const r = loadInlineRubrics('$ROOT', null, {dev:'dev.v1.md', code_review:'code_review.v2.md', code_review_parallel:'code_review.v2.md'});
+  console.log((r.content !== null) + ':' + r.bytes);
+" 2>/dev/null)
+case "$F56_INLINE" in true:*) ;; *) F56_OK=0; F56_WHY="$F56_WHY over-cap($F56_INLINE)";; esac
+if [ "$F56_OK" -eq 1 ]; then
+  pass "F56: axis H is orchestrator-only (lanes excused), absent ledger reads differently from a clean one, inline-rubric fallback is announced, trio still inlines ($F56_INLINE)"
+else
+  fail "F56: orchestrator-axis / rubric-budget contract regressed:$F56_WHY"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

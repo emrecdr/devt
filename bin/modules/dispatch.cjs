@@ -449,6 +449,14 @@ function buildSubstitutionTable(agent, loadOpts) {
   const gr = loadGoverningRules(projectRoot, loadOpts);
   const ig = loadInlineGuardrails(PLUGIN_ROOT);
   const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
+  // Announce the degradation. Over the byte cap, loadInlineRubrics returns
+  // content: null and every dispatch silently loses its inline rubric — the
+  // init path propagates that warning and this one dropped it, so the only
+  // symptom was lanes self-grading ad hoc. A reduction nobody is told about
+  // is the failure mode, not the reduction.
+  if (ir && Array.isArray(ir.warnings) && ir.warnings.length > 0) {
+    try { process.stderr.write(`[devt] dispatch: ${ir.warnings.join("; ")}\n`); } catch { /* non-fatal */ }
+  }
   const gi = loadGraphImpact(projectRoot);
   // Prior-output sidecar injection — auto-discovers .devt/state/*.json
   // produced by upstream agents. Skips the consumer's own sidecar so

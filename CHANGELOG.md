@@ -14,6 +14,12 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 **`criteria_total` said 7 in the verifier envelope while the rubric said 8.** Axis I took the code-review rubric to 8 axes; the envelope prose and a copy-paste `jq` recipe still said 7. `assert-verifier-graded-all-axes` counts from the *rubric*, so a verifier obediently following its envelope declares 7 and fails the gate on a **correct** verification. The field run survived only because the verifier read the rubric, caught the contradiction and overrode its own envelope — a more compliant agent would have failed. Both sites now instruct counting from the loaded rubric rather than quoting a number. (The first fix went into the compiled copy rather than the template; `compile --check` caught it, which is what the `EDIT-SOURCE` marker exists for.)
 
+### Orchestrator-level axes are asked once, not once per lane
+
+Axis H is a dispatch-time signal, and every lane self-grades every axis — so five lanes each wrote the same stale-by-construction paragraph that the consolidator then had to discard. Lanes are now excused from it explicitly. Its skip wording also let "ledger absent" and "ledger clean" render identically (`n/a — no incidents logged`), which is the silence-is-a-pass shape devt's own narrative-guard caveat exists to prevent: an absent `dispatch-warnings.jsonl` means the guard never wrote, and reporting that as zeros is indistinguishable from a clean run. The two now read differently (**F56**).
+
+**The inline-rubric fallback was silent on the path that matters.** Over the byte cap, `loadInlineRubrics` returns `content: null` and every dispatch loses its inline rubric — lanes then self-grade ad hoc against a rubric they never received. `init` propagated that warning; `dispatch` discarded it. It now announces. Rubric prose was trimmed to stay under the cap rather than raising it: at 149 bytes of headroom the corpus is close to the ceiling, and the *silence* was the defect, not the number.
+
 ### Telemetry stopped discarding three quarters of its own log
 
 `gate-trace.jsonl` has four writers and only `persistGateTrace` emits a `gate` key — council, arch-scan and graphify-fallback identify themselves with `source`. The aggregator keyed on `gate` alone, so those three landed on disk and were skipped, including the records three skill files name as their measurement channel, while the aggregate read as complete. It now keys on `gate` **or** `source`, and reports `_unkeyed_records` rather than dropping silently.
