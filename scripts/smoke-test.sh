@@ -20581,6 +20581,50 @@ else
   fail "F59: affects match-breadth regressed — classifier='$F59_OUT' (want broad,exact,narrow,broad), wired=$F59_WIRED (want >=2)"
 fi
 
+# F60: a hinted path says whether the branch actually touched it. Every
+# suggested_reading entry arrives through the same channel — a governing doc's
+# affects glob — so a file IN the change set and one merely governed by the
+# same ADR were indistinguishable. Field: three hinted files behaved three
+# different ways (one changed, one the remediation site for a finding, one
+# neither) and two lanes spent prose explaining that a hinted file was out of
+# scope. Emitted as a SIBLING map: four agent contracts document scope_hint as
+# a JSON array of paths, and breaking that shape costs more than it buys.
+F60_T=$(mktemp -d); mkdir -p "$F60_T/.devt/state" "$F60_T/.devt/memory/concepts" "$F60_T/app"
+printf '{}' > "$F60_T/.devt/config.json"
+printf 'x=1\n' > "$F60_T/app/changed.py"; printf 'y=2\n' > "$F60_T/app/untouched.py"
+cat > "$F60_T/.devt/memory/concepts/CON-001-scope.md" <<'F60EOF'
+---
+id: CON-001
+title: Audit scope concept
+doc_type: concept
+status: active
+confidence: verified
+summary: governs audit mapper behaviour and its tests
+affects_paths: ["app/changed.py", "app/untouched.py"]
+affects_symbols: []
+links: []
+---
+# CON-001
+Body about audit mapper scope.
+F60EOF
+(cd "$F60_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+printf 'x=2  # changed\n' > "$F60_T/app/changed.py"
+(cd "$F60_T" && node "$ROOT/bin/devt-tools.cjs" memory index >/dev/null 2>&1)
+(cd "$F60_T" && node "$ROOT/bin/devt-tools.cjs" preflight generate "audit mapper scope" >/dev/null 2>&1)
+F60_OUT=$(node -e "
+  const d = JSON.parse(require('fs').readFileSync('$F60_T/.devt/state/preflight-brief.json','utf8'));
+  const p = d.scope_hint_provenance || {};
+  console.log((p['app/changed.py']||'-') + ',' + (p['app/untouched.py']||'-'));
+" 2>/dev/null)
+rm -rf "$F60_T"
+F60_DOC=$({ /usr/bin/grep -c 'scope_hint_provenance' "$ROOT/agents/code-reviewer.md" || true; } | tr -d ' ')
+if [ "$F60_OUT" = "in_diff,governed_only" ] && [ "${F60_DOC:-0}" -ge 1 ]; then
+  pass "F60: scope_hint entries carry provenance — a changed file reads in_diff, a governed-but-untouched one reads governed_only, and the reviewer contract says what to do with each"
+else
+  fail "F60: scope_hint provenance regressed — got '$F60_OUT' (want in_diff,governed_only), contract_documented=$F60_DOC (want >=1)"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

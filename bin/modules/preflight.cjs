@@ -1654,6 +1654,38 @@ function generate(taskText, opts) {
   // existing semantic: "did we generate ANY suggestions, of any kind").
   const suggestedReadingTotal = suggestedReading.files.length + suggestedReading.symbols.length;
 
+  // Per-entry provenance. Every suggested file arrives through the same
+  // channel (a governing doc's affects glob, or the wiki), so a file IN the
+  // change set and one merely governed by the same ADR are indistinguishable
+  // to the reader. Field: three hinted files behaved three different ways —
+  // one changed, one the remediation site for a finding, one neither — and two
+  // lanes spent prose explaining that a hinted file was out of scope.
+  //
+  // Kept as a SIBLING map rather than richer scope_hint entries: four agent
+  // contracts document scope_hint as "a JSON array of file paths", and
+  // breaking that to annotate it would cost more than the annotation is worth.
+  // Consumers that don't know this field ignore it.
+  const scopeHintProvenance = {};
+  try {
+    const { collectChangedFiles } = require("./review-weight.cjs");
+    const { resolvePrimaryBranch } = require("./config.cjs");
+    const changed = new Set(
+      (collectChangedFiles(findProjectRoot(), resolvePrimaryBranch(null)) || [])
+        .map(f => String(f).replace(/^\.\//, "")),
+    );
+    const wiki = new Set(wikiPaths);
+    for (const f of suggestedReading.files) {
+      const norm = String(f).replace(/^\.\//, "");
+      if (wiki.has(f)) scopeHintProvenance[f] = "wiki";
+      else if (changed.has(norm)) scopeHintProvenance[f] = "in_diff";
+      else scopeHintProvenance[f] = "governed_only";
+    }
+  } catch {
+    // No git range — say so rather than labelling everything governed_only,
+    // which would assert a distinction that was never computed.
+    for (const f of suggestedReading.files) scopeHintProvenance[f] = "unknown";
+  }
+
   const lanes = { A, B, C, D, E, F, G, H };
   const generatedAt = new Date().toISOString();
   const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
@@ -1826,6 +1858,9 @@ function generate(taskText, opts) {
     })),
     suggested_reading: suggestedReading,
     scope_hint: { confidence: scopeHintConfidence },
+    // path -> "in_diff" | "governed_only" | "wiki" | "unknown". See the
+    // computation above for why this is a sibling map, not richer entries.
+    scope_hint_provenance: scopeHintProvenance,
     hyperedges_matched: hyperedgesMatched,
     hyperedges_suppressed_reason: hyperedgesSuppressedReason,
     blast: {

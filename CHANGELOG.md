@@ -8,6 +8,14 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### A hinted path now says whether the branch touched it
+
+Every `suggested_reading` entry arrives through the same channel — a governing doc's affects glob — so a file **in the change set** and one merely governed by the same ADR were indistinguishable to the reader. Field: three hinted files behaved three different ways (one changed, one the remediation site for an Important finding, one neither), and two lanes spent prose explaining that a hinted file was out of scope.
+
+`preflight-brief.json::scope_hint_provenance` now classes each entry `in_diff` / `governed_only` / `wiki` / `unknown`, and the reviewer contract says what to do with each — notably that a `governed_only` path is often exactly where a fix belongs even though it is not under review, so it belongs in remediation rather than as a finding site. `unknown` is emitted when no diff range is available rather than defaulting to `governed_only`, which would assert a distinction that was never computed.
+
+Kept as a **sibling map** rather than richer `scope_hint` entries: four agent contracts document `scope_hint` as "a JSON array of file paths", and breaking that shape to annotate it costs more than the annotation is worth (**F60**).
+
 ### The state parser survives a hand-edited workflow.yaml
 
 Two silent data-loss paths, both reproduced by direct execution. A **blank line between lane items** ended the lanes block — blank lines are not two-space indented — so every later lane was dropped and its fields leaked into the top-level state namespace beside `phase` and `tier`. A **bare `key:` heading an indented block** matched no value regex, so its children were promoted to top level while the parent vanished, inventing state keys out of someone else's nesting.
