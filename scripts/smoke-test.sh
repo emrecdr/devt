@@ -17475,14 +17475,15 @@ else
 fi
 
 # K283: pointer-dispatch stubs — render-filled mints a correlation_id, --out
-# writes the envelope to the canonical dispatch dir and prints the ~200-byte
+# writes the envelope to the canonical dispatch dir (resolved via getStateDir,
+# never rebuilt from cwd) and prints the ~200-byte
 # stub (cid + envelope path + read-and-execute contract); render-lanes
 # summaries carry per-lane stubs. Field-measured: pointer dispatch kept ~50K
 # tokens of envelope bodies out of orchestrator output on one run.
 if /usr/bin/grep -qF 'correlation_id>${cidRF}' "$ROOT/bin/modules/dispatch.cjs" \
-   && /usr/bin/grep -qF '".devt", "state", "dispatch"' "$ROOT/bin/modules/dispatch.cjs" \
+   && /usr/bin/grep -qF 'getStateDir(), "dispatch"' "$ROOT/bin/modules/dispatch.cjs" \
    && /usr/bin/grep -q "execute its contents as your complete dispatch instructions" "$ROOT/bin/modules/dispatch.cjs" \
-   && /usr/bin/grep -q "bytes: injected.length, envelope_sha256" "$ROOT/bin/modules/dispatch.cjs"; then
+   && /usr/bin/grep -q "bytes: laneBody.length, envelope_sha256" "$ROOT/bin/modules/dispatch.cjs"; then
   pass "K283: pointer-dispatch stubs — render-filled cid + --out stub emission + render-lanes per-lane stubs"
 else
   fail "K283: pointer stub surface regressed in dispatch.cjs"
@@ -20383,6 +20384,32 @@ if [ "$F52_OUT" = "Central,Alpha,Rare,Beta" ]; then
   pass "F52: diff-member symbols rank by mention count (Central>Alpha>Rare) with non-members last — centrality, not membership"
 else
   fail "F52: symbol centrality ranking broken — got '$F52_OUT', want 'Central,Alpha,Rare,Beta'"
+fi
+
+# F53: state writers resolve the SAME directory the readers do. subagent-status
+# wrote status.json to a bare `.devt/state` and dispatch stamped
+# dispatch-stamps.jsonl under process.cwd(), while both readers go through
+# getStateDir() — which honours DEVT_WORKFLOW_ID. Under multi-instance mode the
+# concurrent-rotation guard and assert-consolidator-dispatched each read an
+# absent file and passed, disabling themselves in exactly the concurrent case
+# they exist for. Also asserts the unresolved-agent-name diagnostic reaches
+# disk: it was first written to stderr inside a `2>/dev/null` substitution,
+# where it was produced and discarded in the same breath.
+F53_T=$(mktemp -d); cd "$F53_T" >/dev/null 2>&1
+printf '{"agentName":"code-reviewer"}' | bash "$ROOT/hooks/subagent-status.sh" start >/dev/null 2>&1
+F53_DEFAULT=$([ -f "$F53_T/.devt/state/status.json" ] && echo 1 || echo 0)
+DEVT_WORKFLOW_ID=inst42 bash -c "printf '{\"agentName\":\"code-reviewer\"}' | bash '$ROOT/hooks/subagent-status.sh' start" >/dev/null 2>&1
+F53_INSTANCE=$([ -f "$F53_T/.devt/state/inst42/status.json" ] && echo 1 || echo 0)
+# A payload with no agent-name key must record WHICH keys it had.
+printf '{"session_id":"a","transcript_path":"/t","cwd":"/t"}' | bash "$ROOT/hooks/subagent-status.sh" stop >/dev/null 2>&1
+F53_PROBE=$({ /usr/bin/grep -c 'payload_keys' "$F53_T/.devt/state/subagent-events.jsonl" || true; } | tr -d ' ')
+cd "$ROOT" >/dev/null 2>&1; rm -rf "$F53_T"
+# And no module may reconstruct a state path from cwd instead of getStateDir.
+F53_CWD=$({ /usr/bin/grep -cE 'process\.cwd\(\)[^)]*\)?, *"\.devt"' "$ROOT/bin/modules/dispatch.cjs" || true; } | tr -d ' ')
+if [ "$F53_DEFAULT" = "1" ] && [ "$F53_INSTANCE" = "1" ] && [ "$F53_PROBE" -ge 1 ] && [ "$F53_CWD" = "0" ]; then
+  pass "F53: status + stamp writers resolve through getStateDir (default AND DEVT_WORKFLOW_ID), unresolved agent-name payloads record their keys, no cwd-built state paths remain in dispatch.cjs"
+else
+  fail "F53: state-path split-brain — default_write=$F53_DEFAULT (want 1), instance_write=$F53_INSTANCE (want 1), payload_probe=$F53_PROBE (want >=1), cwd_state_paths=$F53_CWD (want 0)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

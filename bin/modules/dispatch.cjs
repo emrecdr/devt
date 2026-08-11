@@ -1116,7 +1116,7 @@ function cmdCompile(mode) {
 // (a workflow envelope absent on Task(devt:* …)). JSONL shape per entry:
 //   { ts, source, agent, prompt_bytes, prompt_preview }
 function cmdWarnings(args) {
-  const tracePath = path.join(process.cwd(), ".devt/state/dispatch-warnings.jsonl");
+  const tracePath = path.join(require("./state.cjs").getStateDir(), "dispatch-warnings.jsonl");
   // `warnings resolve <warning_id> --reason="…" [--evidence="…"]` — scoped,
   // per-record remediation. Resolution is an ANNOTATION appended to the same
   // JSONL (source='resolution'); the original record persists and Axis-H /
@@ -1354,7 +1354,13 @@ function run(subcommand, args) {
       // model-memory contract; a CLI stamp is not. Best-effort append.
       try {
         const stampCid = (out.match(/<correlation_id>(cid_[A-Za-z0-9_-]+)<\/correlation_id>/) || [])[1] || cidRF;
-        const stampPath = require("path").join(process.cwd(), ".devt", "state", "dispatch-stamps.jsonl");
+        // getStateDir(), not cwd: the reader resolves through it, and it
+        // honours DEVT_WORKFLOW_ID. Writing to a cwd-relative path put the
+        // stamp somewhere assertConsolidatorDispatched never looks under
+        // multi-instance mode — disabling the check that proves review.md came
+        // from a real dispatch, in the concurrent case it exists for. The cwd
+        // form also broke whenever devt-tools ran from a subdirectory.
+        const stampPath = require("path").join(require("./state.cjs").getStateDir(), "dispatch-stamps.jsonl");
         require("fs").appendFileSync(stampPath, JSON.stringify({ agent: agentSlugRF, workflow_id: wfIdRF, cid: stampCid, ts: new Date().toISOString() }) + "\n");
       } catch { /* state dir absent — stamp is optional evidence, never blocking */ }
       // --out[=path]: write the envelope to disk and print a ~200-byte
@@ -1371,7 +1377,7 @@ function run(subcommand, args) {
         const explicit = outArgRF.startsWith("--out=") ? outArgRF.slice("--out=".length) : null;
         const outPath = explicit && explicit.length > 0
           ? explicit
-          : pathRF.join(process.cwd(), ".devt", "state", "dispatch", `${target.replace(/[^A-Za-z0-9_-]/g, "-")}.txt`);
+          : pathRF.join(require("./state.cjs").getStateDir(), "dispatch", `${target.replace(/[^A-Za-z0-9_-]/g, "-")}.txt`);
         fsRF.mkdirSync(pathRF.dirname(outPath), { recursive: true });
         // Hash the BYTES WRITTEN, not the pre-write buffer. The writer appends
         // a trailing newline and the digest omitted it, so the reported hash
@@ -1761,7 +1767,7 @@ function cmdRenderLanes(target, options) {
     // but force inline when --inline-rules protects a worktree-isolated lane.
     ...(options.inlineRules ? { guardrailsByReference: false } : {}),
   });
-  const stateDir = pathLocal.join(process.cwd(), ".devt", "state");
+  const stateDir = require("./state.cjs").getStateDir();
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
   // Per-lane ownership map, computed once. Lanes could not see each other's
   // scope, so any observation touching a neighbor's files was a guess — it
@@ -1901,7 +1907,17 @@ function cmdRenderLanes(target, options) {
     }
     const laneBlocks = blockLines.join("\n");
     // Inject lane context blocks right before the closing </context> tag.
-    let injected = base.replace(/(\n\s*<\/context>)/, "\n" + laneBlocks + "$1");
+    // Anchor on the LAST </context>, matching every other injection site in
+    // this file. A forward regex takes the FIRST match, and inlined governing
+    // rules can mention the tag in prose — the case the envelope_health
+    // injection was explicitly written to avoid. Both anchors ran over the
+    // same string here (cmdRenderLanes builds `base` from cmdRenderFilled), so
+    // the two policies disagreed by construction and only stayed benign
+    // because current envelopes contain exactly one </context>.
+    const laneCtxIdx = base.lastIndexOf("</context>");
+    let injected = laneCtxIdx >= 0
+      ? base.slice(0, laneCtxIdx) + laneBlocks + "\n  " + base.slice(laneCtxIdx)
+      : base;
     // Override the canonical "Write review to .devt/state/review.md" trailer
     // so each lane writes to its own review_file. Without this, all lanes
     // would clobber the same path.
@@ -1941,7 +1957,7 @@ function cmdRenderLanes(target, options) {
       // orchestrator rendered.
       const envShaLane = require("crypto").createHash("sha256").update(laneBody).digest("hex").slice(0, 16);
       const stub = `<correlation_id>${correlationId}</correlation_id>\n<envelope path="${outPath}"${laneRulesHash ? ` rules_hash="${laneRulesHash}"` : ""} sha256="${envShaLane}">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`;
-      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length, envelope_sha256: envShaLane, stub });
+      summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: laneBody.length, envelope_sha256: envShaLane, stub });
     } else {
       out.push(`<!-- LANE: ${lane.id} (community=${community}, correlation_id=${correlationId}, files=${files.length}) -->`);
       out.push(injected);

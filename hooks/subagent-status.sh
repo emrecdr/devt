@@ -31,12 +31,15 @@ if [[ -n "$INPUT" ]]; then
       const v = d && d[k];
       if (typeof v === 'string' && v.trim()) { raw = v.trim(); break; }
     }
-    // When none match, emit the payload's TOP-LEVEL KEY NAMES (never values —
+    // When none match, report the payload's TOP-LEVEL KEY NAMES (never values —
     // this is a hook payload and may carry paths or prompt text) so the next
-    // run diagnoses the gap instead of recording 'unknown' forever.
+    // run diagnoses the gap instead of recording 'unknown' forever. Emitted on
+    // STDOUT after a tab, not stderr: this whole substitution is wrapped in
+    // 2>/dev/null to keep the hook silent on malformed input, so a stderr
+    // diagnostic would be written and immediately discarded.
+    let probe = '';
     if (!raw) {
-      const keys = Object.keys(d || {}).slice(0, 12).join(',');
-      process.stderr.write('[devt] subagent-status: no agent-name key in payload; top-level keys: ' + keys + '\n');
+      probe = Object.keys(d || {}).slice(0, 12).join(',');
       raw = 'unknown';
     }
     let name = String(raw);
@@ -44,8 +47,13 @@ if [[ -n "$INPUT" ]]; then
     name = name.replace(/[^a-zA-Z0-9\-_]/g, '_').slice(0, 64);
     // Guard against prototype pollution keys
     if (['__proto__', 'constructor', 'prototype'].includes(name)) name = '_' + name;
-    process.stdout.write(name);
+    process.stdout.write(name + (probe ? '\t' + probe : ''));
   " 2>/dev/null) || AGENT_NAME="unknown"
+  # Split the name from the diagnostic tail.
+  PAYLOAD_KEYS="${AGENT_NAME#*$'\t'}"
+  [[ "$PAYLOAD_KEYS" == "$AGENT_NAME" ]] && PAYLOAD_KEYS=""
+  AGENT_NAME="${AGENT_NAME%%$'\t'*}"
+  [[ -z "$AGENT_NAME" ]] && AGENT_NAME="unknown"
 fi
 
 STATUS="running"
@@ -59,8 +67,23 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # same-name (or unresolved-"unknown") agents merge last-writer-wins there;
 # the JSONL keeps every event (field: three distinct agents collapsed into
 # one status.json record). status.json stays as the derived last-known view.
-mkdir -p .devt/state
-printf '%s\n' "{\"ts\":\"${TIMESTAMP}\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\"}" >> .devt/state/subagent-events.jsonl 2>/dev/null || true
+# Mirror bin/modules/state-io.cjs::getStateDir — every reader resolves through
+# it, and it honours DEVT_WORKFLOW_ID. Writing to a bare `.devt/state` put this
+# ledger where the readers do not look under multi-instance mode, which
+# silently disabled the concurrent-rotation guard in exactly the concurrent
+# case it exists for. Resolved in bash rather than by shelling out to the CLI:
+# this hook fires on every subagent start/stop (260 times in one field run) and
+# a node spawn per event is not worth one path.
+DEVT_STATE_DIR=".devt/state"
+if [[ -n "${DEVT_WORKFLOW_ID:-}" ]] && [[ "${DEVT_WORKFLOW_ID}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+  DEVT_STATE_DIR=".devt/state/${DEVT_WORKFLOW_ID}"
+fi
+mkdir -p "$DEVT_STATE_DIR"
+if [[ -n "${PAYLOAD_KEYS:-}" ]]; then
+  printf '%s\n' "{\"ts\":\"${TIMESTAMP}\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\",\"payload_keys\":\"${PAYLOAD_KEYS}\"}" >> "$DEVT_STATE_DIR/subagent-events.jsonl" 2>/dev/null || true
+else
+  printf '%s\n' "{\"ts\":\"${TIMESTAMP}\",\"event\":\"${ACTION}\",\"agent\":\"${AGENT_NAME}\"}" >> "$DEVT_STATE_DIR/subagent-events.jsonl" 2>/dev/null || true
+fi
 
 # New agent activity on a stop-stamped workflow means the stop was a turn
 # boundary, not an end — clear the stamp so state reads truthfully during
@@ -69,14 +92,14 @@ printf '%s\n' "{\"ts\":\"${TIMESTAMP}\",\"event\":\"${ACTION}\",\"agent\":\"${AG
 # just to no-op. `reactivate` then applies the recency bound. Cleared stamps
 # serialize as `stopped_at: null` and never-stopped ones have no key — the
 # `"?[0-9]` tail matches only a genuine ISO timestamp.
-if [[ "$ACTION" == "start" ]] && grep -qE '^stopped_at: "?[0-9]' .devt/state/workflow.yaml 2>/dev/null; then
+if [[ "$ACTION" == "start" ]] && grep -qE '^stopped_at: "?[0-9]' "$DEVT_STATE_DIR/workflow.yaml" 2>/dev/null; then
   node "$(devt_plugin_root)/bin/devt-tools.cjs" state reactivate >/dev/null 2>&1 || true
 fi
 
 # Write status — merge into existing status.json to preserve concurrent agent tracking
 node -e "
   const fs = require('fs');
-  const statusFile = '.devt/state/status.json';
+  const statusFile = process.argv[4] + '/status.json';
   let agents = {};
   try { agents = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch {}
   if (!agents.agents) agents = { agents: {} };
@@ -84,4 +107,4 @@ node -e "
   const tmp = statusFile + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(agents, null, 2) + '\n');
   fs.renameSync(tmp, statusFile);
-" "$AGENT_NAME" "$STATUS" "$TIMESTAMP"
+" "$AGENT_NAME" "$STATUS" "$TIMESTAMP" "$DEVT_STATE_DIR"
