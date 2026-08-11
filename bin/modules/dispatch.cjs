@@ -1373,9 +1373,15 @@ function run(subcommand, args) {
           ? explicit
           : pathRF.join(process.cwd(), ".devt", "state", "dispatch", `${target.replace(/[^A-Za-z0-9_-]/g, "-")}.txt`);
         fsRF.mkdirSync(pathRF.dirname(outPath), { recursive: true });
-        fsRF.writeFileSync(outPath, out.endsWith("\n") ? out : out + "\n");
+        // Hash the BYTES WRITTEN, not the pre-write buffer. The writer appends
+        // a trailing newline and the digest omitted it, so the reported hash
+        // could never match the file — deterministically, on every render.
+        // Dormant while nothing compared; `dispatch verify-envelope` made it
+        // an actionable false alarm on untouched envelopes.
+        const bodyRF = out.endsWith("\n") ? out : out + "\n";
+        fsRF.writeFileSync(outPath, bodyRF);
         const rulesHashRF = (out.match(/rules_hash=\\?"([0-9a-f]{6,})/) || [])[1] || null;
-        const envShaRF = require("crypto").createHash("sha256").update(out).digest("hex").slice(0, 16);
+        const envShaRF = require("crypto").createHash("sha256").update(bodyRF).digest("hex").slice(0, 16);
         const stub = [
           `<correlation_id>${cidRF}</correlation_id>`,
           `<envelope path="${outPath}"${rulesHashRF ? ` rules_hash="${rulesHashRF}"` : ""} sha256="${envShaRF}">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`,
@@ -1921,7 +1927,9 @@ function cmdRenderLanes(target, options) {
       if (!fsLocal.existsSync(options.outDir)) fsLocal.mkdirSync(options.outDir, { recursive: true });
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
       const outPath = pathLocal.join(options.outDir, `lane-${lane.id}.txt`);
-      fsLocal.writeFileSync(outPath, injected + (injected.endsWith("\n") ? "" : "\n"));
+      // Hash the BYTES WRITTEN — see the render-filled site for the same fix.
+      const laneBody = injected.endsWith("\n") ? injected : injected + "\n";
+      fsLocal.writeFileSync(outPath, laneBody);
       // Paste-ready pointer stub per lane — the field-validated dispatch shape
       // (the operator hand-built exactly this by copying cid tags into pointer
       // prompts; the guard passed on content with zero matcher changes).
@@ -1930,7 +1938,7 @@ function cmdRenderLanes(target, options) {
       // the integrity anchor that upgrades pointer dispatch from convention
       // to contract: a consumer can verify the file it Reads is the file the
       // orchestrator rendered.
-      const envShaLane = require("crypto").createHash("sha256").update(injected).digest("hex").slice(0, 16);
+      const envShaLane = require("crypto").createHash("sha256").update(laneBody).digest("hex").slice(0, 16);
       const stub = `<correlation_id>${correlationId}</correlation_id>\n<envelope path="${outPath}"${laneRulesHash ? ` rules_hash="${laneRulesHash}"` : ""} sha256="${envShaLane}">Read the envelope file at the path above and execute its contents as your complete dispatch instructions.</envelope>`;
       summary.push({ id: lane.id, community, correlation_id: correlationId, files: files.length, path: outPath, bytes: injected.length, envelope_sha256: envShaLane, stub });
     } else {

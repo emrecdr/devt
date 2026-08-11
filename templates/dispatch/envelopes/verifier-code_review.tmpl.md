@@ -45,7 +45,11 @@ Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
     graph data is unavailable and structural-risk cross-checks do not apply.
   </task>
   Write verification to .devt/state/verification.md AND .devt/state/verification.json (sidecar).
-  The sidecar MUST declare "criteria_total" (the rubric's countable axis count — 7 for the
-  code-review rubric: A–E, G, H; there is deliberately no axis F) and "criteria_met" —
-  assert-verifier-graded-all-axes blocks on a missing or short count.
+  The sidecar MUST declare "criteria_total" and "criteria_met" —
+  assert-verifier-graded-all-axes blocks on a missing or short count. **Count the axes in the
+  rubric you actually loaded** — every `## Axis [A-Z] —` heading plus every `| **[A-Z]. ` table
+  row — and never trust a number quoted in this envelope. The gate counts from the RUBRIC, so a
+  stale figure here fails a CORRECT verification. (Field: this line said 7 after Axis I took the
+  rubric to 8; the run survived only because the verifier read the rubric, caught the
+  contradiction, and overrode its own envelope.)
 ")

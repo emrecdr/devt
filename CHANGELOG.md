@@ -8,6 +8,18 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### First receipt on v0.242.0 — two of these were my own regressions
+
+**The envelope digest never matched the file it named.** Both render paths hashed the pre-write buffer while the writer appended a trailing newline, so the advertised `sha256` was wrong on *every* render, deterministically. Dormant for as long as nothing compared it — and v0.242.0 shipped `dispatch verify-envelope`, which turned a wrong number into a confident false alarm telling a lane its untouched envelope had been tampered with. Making a false guarantee actionable without first checking the guarantee was true is the same defect class the release was closing. Both paths now hash the bytes written (**F48**, verified falsifiable).
+
+**`criteria_total` said 7 in the verifier envelope while the rubric said 8.** Axis I took the code-review rubric to 8 axes; the envelope prose and a copy-paste `jq` recipe still said 7. `assert-verifier-graded-all-axes` counts from the *rubric*, so a verifier obediently following its envelope declares 7 and fails the gate on a **correct** verification. The field run survived only because the verifier read the rubric, caught the contradiction and overrode its own envelope — a more compliant agent would have failed. Both sites now instruct counting from the loaded rubric rather than quoting a number. (The first fix went into the compiled copy rather than the template; `compile --check` caught it, which is what the `EDIT-SOURCE` marker exists for.)
+
+### post-dispatch-check no longer recommends a destructive action against a live agent
+
+Run against a still-executing consolidator it returned `action: redispatch` — an agent that writes its artifact at the *end* of a long synthesis is indistinguishable, by artifact presence alone, from one that returned without writing. Acting on it would have duplicated a five-artifact synthesis. It now returns `still_in_flight` when a subagent is live, and still emits `redispatch` when none is or the entry is stale (**F49**).
+
+**The liveness probe had to be built around a defect to work at all.** Every `status.json` record in the field run is keyed `unknown`: `subagent-status.sh` looks for `agentName`/`name` and the harness payload carries neither, across 260 invocations with ~1.8 KB of input each. Per-agent status tracking has therefore never worked. A probe matching strictly on agent name would have passed review and done nothing in production, so it matches the placeholder too — coarse-but-live over precise-but-dead, sharpening automatically once names resolve. The extractor now tries every plausible key and, when all miss, logs the payload's top-level **key names** (never values — it is a hook payload) so the next run diagnoses the gap instead of recording `unknown` forever.
+
 ## [0.242.0] - 2026-08-11
 
 ### The reviewer never knew what it was asked

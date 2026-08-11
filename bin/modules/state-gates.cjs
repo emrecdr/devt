@@ -2459,6 +2459,36 @@ function cmdAssertAll(args) {
 }
 
 
+// Is a dispatch still in flight? Read from the subagent-status ledger. Local
+// rather than reusing state.cjs::_activeSubagentNames because state.cjs
+// requires this module — the duplication buys an acyclic graph.
+//
+// Deliberately matches on the agent name OR the placeholder the writer falls
+// back to. Field evidence: every status.json record in a real run is keyed
+// `unknown`, because the hook could not find an agent-name key in the harness
+// payload. A strictly name-matched probe would therefore never fire — it would
+// look correct in review and do nothing in production, which is the failure
+// class this whole batch is about. Coarse-but-live beats precise-but-dead; it
+// sharpens automatically once names resolve.
+function _dispatchStillInFlight(agent) {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(getStateDir(), "status.json"), "utf8"));
+    const agents = (data && data.agents) || {};
+    const now = Date.now();
+    for (const [name, info] of Object.entries(agents)) {
+      if (!info || info.status !== "running") continue;
+      const named = String(name);
+      if (named !== "unknown" && !named.includes(agent)) continue;
+      const ts = Date.parse(info.timestamp || "");
+      // A "running" entry older than the freshness window is a crashed agent,
+      // not a live one — treating it as live would strand the caller forever.
+      if (Number.isFinite(ts) && (now - ts) > _ACTIVE_SUBAGENT_FRESH_MS) continue;
+      return named === "unknown" ? "unnamed_agent_running" : "named_agent_running";
+    }
+  } catch { /* no ledger — cannot prove liveness, fall through */ }
+  return null;
+}
+
 function postDispatchCheck(agent, args) {
   if (!agent || typeof agent !== "string" || agent.startsWith("--")) {
     return { ok: false, action: "investigate", reason: "Usage: state post-dispatch-check <agent> [--iteration=N] [--max-iterations=M]" };
@@ -2491,8 +2521,24 @@ function postDispatchCheck(agent, args) {
     action = "investigate";
     reason = `artifact missing after ${iteration}/${maxIterations} iterations — retry budget exhausted, escalate to the user. (${claim.reason || (recover && recover.reason) || ""})`;
   } else {
-    action = "redispatch";
-    reason = claim.reason || (recover && recover.reason) || "artifact missing — re-dispatch the agent.";
+    // `redispatch` is the one destructive verdict this check emits — acting on
+    // it duplicates a whole dispatch. An agent that writes its artifact at the
+    // END of a long synthesis is indistinguishable, by artifact presence alone,
+    // from one that returned without writing. Field: run against a live
+    // consolidator, this recommended re-running a 5-artifact synthesis.
+    // A probe that cannot tell "still working" from "failed" must return
+    // indeterminate, never a destructive remediation.
+    const inFlight = _dispatchStillInFlight(agent);
+    if (inFlight) {
+      action = "still_in_flight";
+      reason =
+        `artifact missing, but a subagent is still running (${inFlight}) — this check cannot ` +
+        "distinguish \"still writing\" from \"returned without writing\", so it is NOT recommending " +
+        "a re-dispatch. Wait for the dispatch to return, then re-run this check.";
+    } else {
+      action = "redispatch";
+      reason = claim.reason || (recover && recover.reason) || "artifact missing — re-dispatch the agent.";
+    }
   }
 
   return {

@@ -20231,6 +20231,66 @@ else
   fail "F47: state round-trip regressed — got '$F47_OUT', want 'string|promoted|2|clean'"
 fi
 
+# F48: the reported envelope digest is the digest of the bytes on disk.
+# Both render paths hashed the pre-write buffer while the writer appended a
+# trailing newline, so the advertised sha256 could never match the file it
+# named — deterministically, on every render. Harmless while nothing compared
+# it; `dispatch verify-envelope` turned it into a confident false alarm that
+# told a lane its untouched envelope had been tampered with. Round-trips the
+# real thing rather than re-deriving the hash the same way the code does.
+F48_T=$(mktemp -d); mkdir -p "$F48_T/.devt/state" "$F48_T/.devt/rules"
+printf '{}' > "$F48_T/.devt/config.json"
+for f in architecture coding-standards quality-gates review-checklist; do printf '# %s\n' "$f" > "$F48_T/.devt/rules/$f.md"; done
+(cd "$F48_T" && git init -q . >/dev/null 2>&1)
+(cd "$F48_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task="digest fixture" phase=review --skip-gates >/dev/null 2>&1)
+F48_ENV="$F48_T/env.txt"
+F48_REPORTED=$( { (cd "$F48_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review --out="$F48_ENV" 2>/dev/null) || true; } | { /usr/bin/grep -oE 'sha256="[0-9a-f]+"' || true; } | cut -d'"' -f2)
+# verify-envelope is the consumer the contract names — ask IT, not a re-hash.
+# Parse the JSON rather than grepping it: the CLI pretty-prints, so `"ok": true`
+# carries a space and a compact-shaped pattern silently matches nothing. It also
+# exits nonzero on mismatch by design, hence the `|| true` guards.
+f48_verify() {
+  { (cd "$F48_T" && node "$ROOT/bin/devt-tools.cjs" dispatch verify-envelope "$F48_ENV" --sha256="$1" 2>/dev/null) || true; } \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).ok===true?'true':'false')}catch{console.log('parse-err')}})" 2>/dev/null
+}
+F48_OK=$(f48_verify "$F48_REPORTED")
+# A mutated envelope must still be rejected — the check has to keep its teeth.
+printf 'tampered\n' >> "$F48_ENV"
+F48_TAMPER=$(f48_verify "$F48_REPORTED")
+rm -rf "$F48_T"
+if [ -n "$F48_REPORTED" ] && [ "$F48_OK" = "true" ] && [ "$F48_TAMPER" = "false" ]; then
+  pass "F48: reported envelope digest matches the bytes written — verify-envelope passes a fresh render and still rejects a mutated one"
+else
+  fail "F48: envelope digest contract broken — reported='$F48_REPORTED' fresh_ok=$F48_OK (want true) tamper_ok=$F48_TAMPER (want false)"
+fi
+
+# F49: post-dispatch-check does not recommend a destructive action against a
+# live agent. `redispatch` duplicates a whole dispatch; an agent that writes
+# its artifact at the END of a long synthesis looks identical, by artifact
+# presence alone, to one that returned without writing. Field: run against a
+# live consolidator it recommended re-running a 5-artifact synthesis.
+# Leg (b) uses the key `unknown` on purpose — that is the ONLY key real
+# status.json records carry, because the hook cannot find an agent-name key in
+# the harness payload. A probe matching strictly on agent name would pass
+# review and never fire in production.
+F49_T=$(mktemp -d); mkdir -p "$F49_T/.devt/state"
+(cd "$F49_T" && git init -q . >/dev/null 2>&1)
+(cd "$F49_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review_parallel task="f49" phase=verify --skip-gates >/dev/null 2>&1)
+f49_action() { (cd "$F49_T" && node "$ROOT/bin/devt-tools.cjs" state post-dispatch-check code-reviewer 2>/dev/null) | { /usr/bin/grep -oE '"action":"[a-z_]+"' || true; } | head -1 | cut -d'"' -f4; }
+F49_NOLEDGER=$(f49_action)
+F49_NOW=$(node -e "console.log(new Date().toISOString().replace(/\.\d+Z\$/,'Z'))")
+F49_OLD=$(node -e "console.log(new Date(Date.now()-2*3600*1000).toISOString().replace(/\.\d+Z\$/,'Z'))")
+printf '{"agents":{"unknown":{"status":"running","timestamp":"%s"}}}' "$F49_NOW" > "$F49_T/.devt/state/status.json"
+F49_LIVE=$(f49_action)
+printf '{"agents":{"unknown":{"status":"running","timestamp":"%s"}}}' "$F49_OLD" > "$F49_T/.devt/state/status.json"
+F49_STALE=$(f49_action)
+rm -rf "$F49_T"
+if [ "$F49_NOLEDGER" = "redispatch" ] && [ "$F49_LIVE" = "still_in_flight" ] && [ "$F49_STALE" = "redispatch" ]; then
+  pass "F49: post-dispatch-check withholds the destructive redispatch verdict while a subagent is live, and still emits it when none is (or the entry is stale)"
+else
+  fail "F49: liveness gating broken — no_ledger=$F49_NOLEDGER (want redispatch), live=$F49_LIVE (want still_in_flight), stale=$F49_STALE (want redispatch)"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

@@ -19,7 +19,27 @@ AGENT_NAME="unknown"
 if [[ -n "$INPUT" ]]; then
   AGENT_NAME=$(printf '%s' "$INPUT" | node -e "
     const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-    let name = String(d.agentName || d.name || 'unknown');
+    // Try every key the harness has plausibly used for the agent identity.
+    // Field evidence: 260 invocations carrying ~1.8KB payloads all resolved to
+    // 'unknown', so per-agent status tracking has never worked here and every
+    // consumer keyed on the name silently saw one merged record. The payload
+    // shape is harness-owned and can change between versions, hence a list
+    // rather than one key.
+    const CANDIDATES = ['agentName','name','subagent_type','subagentType','agent_type','agentType','agent'];
+    let raw = null;
+    for (const k of CANDIDATES) {
+      const v = d && d[k];
+      if (typeof v === 'string' && v.trim()) { raw = v.trim(); break; }
+    }
+    // When none match, emit the payload's TOP-LEVEL KEY NAMES (never values —
+    // this is a hook payload and may carry paths or prompt text) so the next
+    // run diagnoses the gap instead of recording 'unknown' forever.
+    if (!raw) {
+      const keys = Object.keys(d || {}).slice(0, 12).join(',');
+      process.stderr.write('[devt] subagent-status: no agent-name key in payload; top-level keys: ' + keys + '\n');
+      raw = 'unknown';
+    }
+    let name = String(raw);
     // Sanitize: alphanumeric, hyphens, underscores only; max 64 chars
     name = name.replace(/[^a-zA-Z0-9\-_]/g, '_').slice(0, 64);
     // Guard against prototype pollution keys
