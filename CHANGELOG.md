@@ -8,6 +8,8 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+## [0.242.2] - 2026-08-11
+
 ### A hinted path now says whether the branch touched it
 
 Every `suggested_reading` entry arrives through the same channel — a governing doc's affects glob — so a file **in the change set** and one merely governed by the same ADR were indistinguishable to the reader. Field: three hinted files behaved three different ways (one changed, one the remediation site for an Important finding, one neither), and two lanes spent prose explaining that a hinted file was out of scope.
@@ -724,14 +726,3 @@ Post-release adversarial validation of the 0.205.0–0.209.0 batch: every new ga
 ### Changed
 
 - **The Context-Loaded contract is single-sourced (N4, K325).** The read-and-record paragraph the by-reference stubs lean on was copy-pasted 28× (byte-identical — verified by checksum — but 14 hand-maintained template copies + 14 compiled copies of pure drift surface). It now lives once in `dispatch.cjs::CONTEXT_LOADED_CONTRACT` and is render-time expanded into every envelope's `{context_loaded_contract}` placeholder — `renderEnvelope` is the single chokepoint (`compile`, `render`, `render-filled`, and `render-lanes` all route through it, verified at call-site level), so compiled workflow regions and rendered envelopes are **byte-identical to before** (`dispatch compile --check`: 21 regions, zero drift; workflows untouched). Templates carry only the placeholder. Gate **K325** locks it: constant present, zero literal template bodies, 14 placeholder templates, compiled regions still full-text for the LLM-fill path, rendered envelope carries the body with no placeholder leak.
-
-
-## [0.207.0] - 2026-07-26
-
-### Changed
-
-- **`state.cjs` split into a 5-submodule family behind a facade (N2).** The repo's self-development hotspot — 8,183 lines / 391KB / 107 functions / a 73-case router in one file, the #1 merge-conflict surface — is now `state-contract.cjs` (42 shared constant tables), `state-io.cjs` (paths, YAML, locking, read-only accessors incl. `validateConsistency` + `workflowIdChainSet`), `state-gates.cjs` (43 assert-*/registry/claim-check/trace functions, incl. the lane-flavored gates — placing them here is what breaks the lanes↔gates cycle), `state-lanes.cjs` (lane CRUD/sizing/diffs), `state-graphify.cjs` (impact plan, graphify gates, ROI), with `state.cjs` keeping the mutation core, the context-init compounds, `run()`, and a re-export of the full 59-name public surface. **Mechanical**: function bodies are verbatim line-moves (goldens byte-identical modulo timestamps); the only insertions are five documented call-time requires where a gate reaches a lane/graphify function (avoiding load cycles — every submodule loads standalone). Every consumer keeps requiring `bin/modules/state.cjs` unchanged: export surface verified identical 59/59, behavioral goldens identical, CI's inline require + `check-state-contract.cjs` untouched. 45 smoke content-grep pins were repointed to the `state*.cjs` family and 2 awk constant-readers to `state-contract.cjs`. Facade: 8,183 → 1,968 lines (one 7-line read-only helper, `_activeRange`, relocated to state-io as a shared accessor).
-
-### Added
-
-- **Gate K324** — the facade contract: every submodule loads standalone (cycle guard), none requires the facade back, the facade export surface stays ≥ the 59-name floor, and a 2,600-line ceiling keeps the hotspot from silently regrowing in place.

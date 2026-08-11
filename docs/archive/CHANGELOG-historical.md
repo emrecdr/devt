@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.207.0] - 2026-07-26
+
+### Changed
+
+- **`state.cjs` split into a 5-submodule family behind a facade (N2).** The repo's self-development hotspot — 8,183 lines / 391KB / 107 functions / a 73-case router in one file, the #1 merge-conflict surface — is now `state-contract.cjs` (42 shared constant tables), `state-io.cjs` (paths, YAML, locking, read-only accessors incl. `validateConsistency` + `workflowIdChainSet`), `state-gates.cjs` (43 assert-*/registry/claim-check/trace functions, incl. the lane-flavored gates — placing them here is what breaks the lanes↔gates cycle), `state-lanes.cjs` (lane CRUD/sizing/diffs), `state-graphify.cjs` (impact plan, graphify gates, ROI), with `state.cjs` keeping the mutation core, the context-init compounds, `run()`, and a re-export of the full 59-name public surface. **Mechanical**: function bodies are verbatim line-moves (goldens byte-identical modulo timestamps); the only insertions are five documented call-time requires where a gate reaches a lane/graphify function (avoiding load cycles — every submodule loads standalone). Every consumer keeps requiring `bin/modules/state.cjs` unchanged: export surface verified identical 59/59, behavioral goldens identical, CI's inline require + `check-state-contract.cjs` untouched. 45 smoke content-grep pins were repointed to the `state*.cjs` family and 2 awk constant-readers to `state-contract.cjs`. Facade: 8,183 → 1,968 lines (one 7-line read-only helper, `_activeRange`, relocated to state-io as a shared accessor).
+
+### Added
+
+- **Gate K324** — the facade contract: every submodule loads standalone (cycle guard), none requires the facade back, the facade export surface stays ≥ the 59-name floor, and a 2,600-line ceiling keeps the hotspot from silently regrowing in place.
+
 ## [0.206.0] - 2026-07-26
 
 ### Measured token + latency batch — the two receipt-supported levers, and only those
