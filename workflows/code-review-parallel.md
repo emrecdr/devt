@@ -387,7 +387,13 @@ for LF in $(echo "$LANE_FILES" | tr ',' ' '); do
 done
 ```
 
-Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction. Generate it via `dispatch render-filled code-reviewer:code_review_parallel [--notes-file=<path>]` — `<lane_files>` arrives pre-filled from the registry and `--notes-file` carries any run-specific reconciliation directives as `<orchestrator_notes>`; the agent's synthesis mode triggers structurally on a `<lane_files>` block listing review-lane artifacts, so customized task prose cannot silently skip the consolidator contract (marker step 0 included). The canonical shape:
+**Snapshot the lane artifacts BEFORE dispatching.** Lane status reaching `substance_pass` does not mean a lane file has stopped moving — a lane can correct its own citations minutes after it reported, and the consolidator is reading those files the whole time. Field run: the consolidator was dispatched at ~10:53 and lane artifacts were rewritten at 10:57, 11:02 and 11:11, one of them a 12-citation fix; `review.md` was synthesized from the pre-correction copies and shipped stale pointers that the orchestrator then had to hunt down. Two separate citation audits over "the same" artifact returned non-overlapping results, because each writer believed it held the corrected version.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state snapshot-lanes
+```
+
+Issue a SINGLE `Task(subagent_type="devt:code-reviewer", …)` call with the synthesis instruction. Generate it via `dispatch render-filled code-reviewer:code_review_parallel [--out=<path>] [--notes-file=<path>]` — `--out` writes the envelope to disk and prints a paste-ready pointer stub with a `correlation_id` and `sha256`, exactly as `render-lanes --out` does for lanes. **Use it rather than hand-authoring a pointer prompt**: a hand-invented correlation id does not match the render stamp, and `assert-consolidator-dispatched` correctly refuses the resulting review.md (field-observed) — `<lane_files>` arrives pre-filled from the registry and `--notes-file` carries any run-specific reconciliation directives as `<orchestrator_notes>`; the agent's synthesis mode triggers structurally on a `<lane_files>` block listing review-lane artifacts, so customized task prose cannot silently skip the consolidator contract (marker step 0 included). The canonical shape:
 
 ```
 <!-- BEGIN dispatch:code-reviewer:code_review_parallel -->
@@ -520,6 +526,17 @@ if echo "$SUBSTANCE" | /usr/bin/grep -qF '"looks_like_stub":true'; then
   REASON=$(echo "$SUBSTANCE" | /usr/bin/grep -oE '"reason":"[^"]*"' || echo '"reason":"unknown"')
   echo "BLOCKED: consolidator returned stub — ${REASON}"
   exit 0
+fi
+# Did any lane move while synthesis was reading it? Compared against the
+# snapshot taken at consolidation entry. Advisory, not a block: the correct
+# recovery is to reconcile the affected citations/counts, not to discard a
+# review that is otherwise sound.
+LANE_STABLE=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state assert-lanes-unchanged)
+if [ "$(printf '%s\n' "$LANE_STABLE" | jq -r '.ok')" != "true" ]; then
+  echo "⚠️  $(printf '%s\n' "$LANE_STABLE" | jq -r '.reason')"
+  echo "CAVEAT_REQUIRED=lane-drift"
+elif [ "$(printf '%s\n' "$LANE_STABLE" | jq -r '.warn // empty')" = "true" ]; then
+  echo "note: $(printf '%s\n' "$LANE_STABLE" | jq -r '.reason')"
 fi
 # Deterministic severity tally — both sides read review.json, the schema'd
 # sidecar. Nothing re-derives severities from the rendered prose: that parser

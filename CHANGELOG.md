@@ -14,6 +14,18 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 **`criteria_total` said 7 in the verifier envelope while the rubric said 8.** Axis I took the code-review rubric to 8 axes; the envelope prose and a copy-paste `jq` recipe still said 7. `assert-verifier-graded-all-axes` counts from the *rubric*, so a verifier obediently following its envelope declares 7 and fails the gate on a **correct** verification. The field run survived only because the verifier read the rubric, caught the contradiction and overrode its own envelope — a more compliant agent would have failed. Both sites now instruct counting from the loaded rubric rather than quoting a number. (The first fix went into the compiled copy rather than the template; `compile --check` caught it, which is what the `EDIT-SOURCE` marker exists for.)
 
+### Lane artifacts are content-pinned across synthesis
+
+`assert-lanes-quiesced` checks lane *status*, and status is the wrong signal: a lane reaches `substance_pass` and can still be rewritten in place afterwards. Field run — the consolidator was dispatched at ~10:53 and lane artifacts were rewritten at 10:57, 11:02 and 11:11, one of them a 12-citation correction. `review.md` was synthesized from the pre-correction copies and shipped stale pointers, and two independent citation audits over "the same" artifact returned **non-overlapping** results because each writer believed it held the corrected version. That is a race on authority, and nothing in the pipeline could see it.
+
+`state snapshot-lanes` records per-lane content hashes at consolidation entry; `state assert-lanes-unchanged` compares after the consolidator returns and names the lanes that moved. Advisory rather than blocking — the correct recovery is to reconcile the affected citations, not discard a review that is otherwise sound. An absent snapshot **warns**: "never recorded" and "recorded and stable" are different claims (**F51**).
+
+### Symbol ranking is by diff centrality, not bare membership
+
+Reported as "no relevance ranking against the diff" — and the field artifacts say otherwise: `topic_symbols_diff_ranked: true`, ranking on, and `ImpersonationResult` dropped anyway despite appearing **9 times** in that diff. The membership partition splits the pool in two, which does nothing once a branch touches more symbols than the 32 cap: the entire cap falls inside the members bucket, still ordered by upstream topic order. Diff members now sort by mention count, ties keeping upstream order, non-members untouched at the tail (**F52**).
+
+The same report's identifier-validation half checked out as **low impact** rather than wrong: the six prose tokens (`Check`, `Consider`, `You`, `Double`, `Not`, `Python`) score 0–2 diff mentions, so they already ranked below every real member and displaced nothing. Worth filtering eventually; it was not what cost the central types their slots.
+
 ### Lane diffs now carry the source line numbers reviewers are graded on
 
 Field-measured as the cause of every real defect in one run's output: **34 wrong `file:line` citations across five lanes.** The mechanism is the tool's, not the reviewer's — a lane is told the diff IS the change under review, the rubric then grades it on *source* `file:line`, and the only number in the buffer was the buffer's own position. The cleanest evidence: one lane scored **85/85 correct** on files read with a numbered tool and **0/18** on files read through `sed` — perfect correlation with the reading method.

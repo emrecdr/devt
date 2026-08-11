@@ -409,6 +409,84 @@ function _laneSidecarCounts() {
 // `basis` names that weakness at the call site rather than letting the gate read
 // as stronger than it is; per-lane JSON sidecars are what would make this side
 // machine-derived at source.
+// Content-hash every lane artifact. Taken at consolidation entry, compared
+// after the consolidator returns.
+//
+// assertLanesQuiesced already checks lane STATUS, and status is the wrong
+// signal for this: a lane reaches substance_pass and can still be rewritten in
+// place afterwards. Field run — consolidator dispatched ~10:53; lane artifacts
+// rewritten at 10:57, 11:02 and 11:11 while synthesis was reading them, one of
+// them a 12-citation correction. review.md was built from pre-correction copies
+// and shipped stale pointers, and two independent citation audits over "the
+// same" artifact returned non-overlapping results because each writer believed
+// it held the corrected version. That is a race on authority, not just content,
+// and nothing in the pipeline could see it.
+function _hashLaneArtifacts() {
+  const crypto = require("crypto");
+  const { lanes } = listLaneOutputs();
+  const entries = [];
+  for (const lane of (lanes || [])) {
+    if (!lane || !lane.review_file) continue;
+    const rec = { id: lane.id, review_file: lane.review_file, sha256: null, bytes: null };
+    try {
+      const buf = fs.readFileSync(lane.review_file);
+      rec.sha256 = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 16);
+      rec.bytes = buf.length;
+    } catch { /* absent/unreadable — recorded as null, which is itself a state worth comparing */ }
+    entries.push(rec);
+  }
+  return entries;
+}
+
+function snapshotLanes() {
+  const entries = _hashLaneArtifacts();
+  if (entries.length === 0) {
+    return { ok: true, lane_count: 0, reason: "no lanes registered — nothing to snapshot" };
+  }
+  const payload = { taken_at: new Date().toISOString(), lanes: entries };
+  const out = path.join(getStateDir(), "lane-snapshot.json");
+  try { atomicWriteJsonSync(out, payload); }
+  catch (e) { return { ok: false, reason: `snapshot write failed: ${e.message}` }; }
+  return { ok: true, lane_count: entries.length, snapshot: out, taken_at: payload.taken_at };
+}
+
+function assertLanesUnchanged() {
+  const snapPath = path.join(getStateDir(), "lane-snapshot.json");
+  let snap = null;
+  try { snap = JSON.parse(fs.readFileSync(snapPath, "utf8")); }
+  catch {
+    // No snapshot means the check never ran, which is not the same as passing.
+    return {
+      ok: true,
+      warn: true,
+      reason: "no lane-snapshot.json — lane stability was never recorded, so nothing can be said about whether the consolidator read a moving target. Run `state snapshot-lanes` at consolidation entry.",
+    };
+  }
+  const before = new Map((snap.lanes || []).map((l) => [l.id, l]));
+  const now = _hashLaneArtifacts();
+  const changed = [];
+  for (const cur of now) {
+    const prev = before.get(cur.id);
+    if (!prev) continue;
+    if (prev.sha256 !== cur.sha256) {
+      changed.push({ id: cur.id, review_file: cur.review_file, bytes_before: prev.bytes, bytes_after: cur.bytes });
+    }
+  }
+  if (changed.length === 0) {
+    return { ok: true, lane_count: now.length, taken_at: snap.taken_at, reason: `all ${now.length} lane artifact(s) byte-identical to the consolidation-entry snapshot` };
+  }
+  return {
+    ok: false,
+    taken_at: snap.taken_at,
+    changed_count: changed.length,
+    changed,
+    reason:
+      `${changed.length} lane artifact(s) were rewritten after the consolidation snapshot (${changed.map((c) => c.id).join(", ")}) — ` +
+      "the consolidated review may quote the PRE-change text. Re-read those lane files and reconcile any citation, count or finding " +
+      "the synthesis took from them before treating review.md as final.",
+  };
+}
+
 function laneSeverityTally(opts = {}) {
   const sidecar = opts.file || path.join(getStateDir(), "review.json");
   let parsed = null;
@@ -1326,6 +1404,8 @@ function updateLane(laneId, kvPairs) {
 
 module.exports = {
   laneSeverityTally,
+  snapshotLanes,
+  assertLanesUnchanged,
   laneSampleForVerification,
   partitionLanes,
   slugifyLaneName,

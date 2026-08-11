@@ -645,16 +645,25 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   // bare TypeVar and 13 untouched DTOs while five changed functions were
   // truncated away. Membership, not definition — a symbol referenced by the
   // diff is in scope for the review even if declared elsewhere.
-  const changedSymbolNames = () => {
+  // Occurrence COUNTS, not bare membership. Membership alone only sorts the
+  // pool into two buckets, and when a branch touches more symbols than the cap
+  // the whole cap falls inside the first bucket — where order is still just the
+  // upstream topic order. Field: a diff with >32 members dropped
+  // `ImpersonationResult`, which appears 9 times in that diff and is one of the
+  // types the change is about, while retaining members that appear once.
+  // Counting is what distinguishes "mentioned" from "central".
+  const changedSymbolCounts = () => {
     const text = branchDiffText();
     if (!text) return null;
-    const names = new Set();
+    const counts = new Map();
     for (const line of text.split("\n")) {
       if (line.startsWith("+++") || line.startsWith("---")) continue;
       if (line[0] !== "+" && line[0] !== "-") continue;
-      for (const m of line.slice(1).matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) names.add(m[0]);
+      for (const m of line.slice(1).matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
+        counts.set(m[0], (counts.get(m[0]) || 0) + 1);
+      }
     }
-    return names;
+    return counts;
   };
 
   // Rank diff members ahead of the rest, then cut once — kept list and dropped
@@ -665,12 +674,19 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   let ordered = topicSymbolsRaw;
   let topicSymbolsDiffRanked = false;
   if (topicSymbolsRawCount > TOPIC_CAP) {
-    const changed = changedSymbolNames();
+    const changed = changedSymbolCounts();
     if (changed && changed.size > 0) {
-      // Stable partition — order within each group is preserved, so ranking
-      // only ever promotes diff members past non-members.
-      ordered = topicSymbolsRaw.filter((s) => changed.has(s))
-        .concat(topicSymbolsRaw.filter((s) => !changed.has(s)));
+      // Sort diff members by how often the diff mentions them, ties keeping
+      // upstream order (index tiebreak = stable). Non-members follow, order
+      // untouched — ranking only ever promotes, never reshuffles the tail.
+      const members = [];
+      const others = [];
+      topicSymbolsRaw.forEach((s, i) => {
+        const n = changed.get(s) || 0;
+        (n > 0 ? members : others).push({ s, n, i });
+      });
+      members.sort((a, b) => (b.n - a.n) || (a.i - b.i));
+      ordered = members.map((m) => m.s).concat(others.map((m) => m.s));
       topicSymbolsDiffRanked = true;
     }
   }

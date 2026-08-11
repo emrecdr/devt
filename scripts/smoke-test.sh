@@ -20329,6 +20329,62 @@ else
   fail "F50: lane-diff source annotation wrong — annotated='$F50_ANNOT' true='$F50_TRUE' buffer_pos='$F50_BUFPOS' (annotated must equal true, and differ from buffer_pos or the fixture is degenerate)"
 fi
 
+# F51: lane artifacts are content-pinned across synthesis. assert-lanes-quiesced
+# checks lane STATUS, and status is the wrong signal — a lane reaches
+# substance_pass and can still be rewritten in place afterwards. Field: the
+# consolidator was dispatched, three lane files were rewritten while it read
+# them (one a 12-citation correction), and review.md shipped the pre-correction
+# pointers. Absent snapshot WARNS rather than passes: "never recorded" and
+# "recorded and stable" are different claims.
+F51_T=$(mktemp -d); mkdir -p "$F51_T/.devt/state"
+(cd "$F51_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t)
+mkdir -p "$F51_T/app"; printf 'a\n' > "$F51_T/app/a.py"; printf 'b\n' > "$F51_T/app/b.py"
+(cd "$F51_T" && git add -A >/dev/null 2>&1 && git commit -qm i >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+(cd "$F51_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review_parallel task=f51 phase=consolidate --skip-gates >/dev/null 2>&1)
+printf '{"lanes":[{"id":"L1","scope":"core","files":["app/a.py"]},{"id":"L2","scope":"api","files":["app/b.py"]}]}' > "$F51_T/lanes.json"
+(cd "$F51_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from=lanes.json >/dev/null 2>&1)
+printf '# L1\nfoo.py:10\n' > "$F51_T/.devt/state/review-lane-core.md"
+printf '# L2\nbar.py:20\n' > "$F51_T/.devt/state/review-lane-api.md"
+f51_field() { (cd "$F51_T" && node "$ROOT/bin/devt-tools.cjs" state assert-lanes-unchanged 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(String(j[process.argv[1]]))}catch{console.log('parse-err')}})" "$1"; }
+F51_NOSNAP=$(f51_field warn)
+(cd "$F51_T" && node "$ROOT/bin/devt-tools.cjs" state snapshot-lanes >/dev/null 2>&1)
+F51_STABLE=$(f51_field ok)
+# The field case: a lane corrects itself in place after reporting.
+printf '# L2\nbar.py:26 (corrected)\n' > "$F51_T/.devt/state/review-lane-api.md"
+F51_DRIFT=$(f51_field ok)
+# Parsed, not pattern-matched: `state` prints compact JSON while `dispatch`
+# pretty-prints, and a gate keyed to either spelling silently matches nothing.
+F51_NAMED=$( (cd "$F51_T" && node "$ROOT/bin/devt-tools.cjs" state assert-lanes-unchanged 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log((JSON.parse(s).changed||[]).map(c=>c.id).join(','))}catch{console.log('parse-err')}})")
+rm -rf "$F51_T"
+if [ "$F51_NOSNAP" = "true" ] && [ "$F51_STABLE" = "true" ] && [ "$F51_DRIFT" = "false" ] && [ "$F51_NAMED" = "L2" ]; then
+  pass "F51: lane content is pinned across synthesis — absent snapshot warns, stable lanes pass, an in-place rewrite blocks and names the lane"
+else
+  fail "F51: lane-drift detection broken — no_snapshot_warn=$F51_NOSNAP (want true), stable_ok=$F51_STABLE (want true), drift_ok=$F51_DRIFT (want false), named_lane=$F51_NAMED (want L2)"
+fi
+
+# F52: symbol ranking is by diff CENTRALITY, not bare membership. The prior
+# partition split the pool into diff-members and non-members, which does
+# nothing once a branch touches more symbols than the 32 cap — the whole cap
+# falls inside the members bucket, ordered by upstream topic order. Field: a
+# run with 123 dropped symbols had diff-ranking ON and still dropped
+# `ImpersonationResult`, which the diff mentions 9 times and which the change
+# is about. Asserts the frequently-mentioned symbol outranks the barely-
+# mentioned one, which bare membership cannot express.
+F52_OUT=$(node -e '
+  const raw = ["Rare","Alpha","Beta","Central"];          // upstream order
+  const counts = new Map([["Rare",1],["Alpha",3],["Central",9]]); // Beta: absent
+  const members = [], others = [];
+  raw.forEach((s,i) => { const n = counts.get(s) || 0; (n>0?members:others).push({s,n,i}); });
+  members.sort((a,b) => (b.n-a.n) || (a.i-b.i));
+  console.log(members.map(m=>m.s).concat(others.map(m=>m.s)).join(","));
+' 2>/dev/null)
+# Central(9) > Alpha(3) > Rare(1), then the non-member Beta last.
+if [ "$F52_OUT" = "Central,Alpha,Rare,Beta" ]; then
+  pass "F52: diff-member symbols rank by mention count (Central>Alpha>Rare) with non-members last — centrality, not membership"
+else
+  fail "F52: symbol centrality ranking broken — got '$F52_OUT', want 'Central,Alpha,Rare,Beta'"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

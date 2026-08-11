@@ -491,6 +491,7 @@ const STATE_FILE_CONTRACT = {
     "claim-checks.jsonl",       // Layer-1 claim-check log (successes AND failures — the success rows are what prove each lane wrote its artifact). Rotated by resetSoft rather than reset-exempt, so it belongs here rather than in RESET_EXEMPT
     "status.json",              // subagent-status.sh + state.cjs run status
     "lane-unassigned.txt",      // declared-scope files in no lane (coverage set-difference from register-lanes)
+    "lane-snapshot.json",       // per-lane artifact content hashes taken at consolidation entry; assert-lanes-unchanged compares against it
   ],
   allowed_patterns: [
     "^review-[A-Za-z0-9_.-]+\\.md$",                // review-architecture.md, review-pr367-slice-A.md
