@@ -20521,6 +20521,66 @@ else
   fail "F57: scratchpad rotation broken — live=$F57_LIVE (want rotated), candidates_archived=$F57_KEPT (want >=1), skill_documents=$F57_DOC (want >=1)"
 fi
 
+# F58: the state parser survives hand-edited YAML. Two silent data-loss paths,
+# both reproduced by direct execution: a blank line between lane items ended
+# the lanes block (blank lines are not two-space indented), so every later
+# lane was DROPPED and its fields leaked into the top-level state namespace
+# beside phase/tier; and a bare `key:` heading an indented block matched no
+# value regex, so its children were promoted to top level while the parent
+# vanished — inventing state keys from someone else's nesting. devt's own
+# serializer emits neither shape, so both arrive via a hand-edited
+# workflow.yaml, which is exactly when silent key invention is hardest to spot.
+F58_OUT=$(node -e '
+  const { parseSimpleYaml, serializeSimpleYaml } = require("'"$ROOT"'/bin/modules/state-io.cjs");
+  const out = [];
+  const a = parseSimpleYaml("phase: review\nlanes:\n  - id: L1\n    scope: a\n\n  - id: L2\n    scope: b\n");
+  out.push((a.lanes || []).length + ("scope" in a ? ":LEAKED" : ":clean"));
+  const b = parseSimpleYaml("blast:\n  effect_size: 5\n  trust: dense\nphase: review\n");
+  out.push((b.blast && b.blast.effect_size === 5 && !("effect_size" in b)) ? "nested" : "PROMOTED");
+  // A de-indent after a blank line must still end the block.
+  const c = parseSimpleYaml("lanes:\n  - id: L1\n    scope: a\n\nphase: review\n");
+  out.push(((c.lanes || []).length === 1 && c.phase === "review") ? "bounded" : "UNBOUNDED");
+  // Round-trip and the declared-structured promotion must be untouched.
+  const st = { phase: "review", lanes: [{ id: "L1", scope: "a" }, { id: "L2", scope: "b" }] };
+  out.push((parseSimpleYaml(serializeSimpleYaml(st)).lanes || []).length);
+  const d = parseSimpleYaml("memory_signal_json: \"{\\\"a\\\":1}\"\ntask: \"{\\\"b\\\":2}\"\n");
+  out.push(typeof d.memory_signal_json === "object" && typeof d.task === "string" ? "typed" : "TYPEBREAK");
+  console.log(out.join("|"));
+' 2>/dev/null)
+if [ "$F58_OUT" = "2:clean|nested|bounded|2|typed" ]; then
+  pass "F58: hand-edited state parses without loss — blank lines keep later lanes, nested blocks keep their parent, de-indent still bounds the block, round-trip and _json promotion intact"
+else
+  fail "F58: parseSimpleYaml data-loss regression — got '$F58_OUT', want '2:clean|nested|bounded|2|typed'"
+fi
+
+# F59: a governance hit says how specifically it matched. A doc claiming
+# `.devt/**` matches every file under .devt and reads identically to one that
+# named the file — field: CON-002 (graphify review tiers) surfaced on
+# .devt/rules/api-changelog.md purely on the wildcard. Reported, never
+# filtered: a broad claim can still be the right one, and dropping it silently
+# is the worse failure.
+F59_OUT=$(node -e '
+  const mb = (filePath, pattern) => {
+    if (typeof pattern !== "string") return "unknown";
+    if (pattern === filePath) return "exact";
+    const literal = pattern.split("/").findIndex(seg => seg.includes("*"));
+    const anchored = literal === -1 ? pattern.split("/").length : literal;
+    return anchored >= 2 ? "narrow" : "broad";
+  };
+  console.log([
+    mb(".devt/rules/api-changelog.md", ".devt/**"),
+    mb("app/services/m.py", "app/services/m.py"),
+    mb("app/services/m.py", "app/services/**"),
+    mb("app/x.py", "**"),
+  ].join(","));
+' 2>/dev/null)
+F59_WIRED=$({ /usr/bin/grep -cE '_matchBreadth|match_breadth' "$ROOT/bin/modules/memory.cjs" || true; } | tr -d ' ')
+if [ "$F59_OUT" = "broad,exact,narrow,broad" ] && [ "${F59_WIRED:-0}" -ge 2 ]; then
+  pass "F59: affects matches carry match_breadth (exact / narrow / broad) so a wildcard-only governance hit is distinguishable from a named-file one"
+else
+  fail "F59: affects match-breadth regressed — classifier='$F59_OUT' (want broad,exact,narrow,broad), wired=$F59_WIRED (want >=2)"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"

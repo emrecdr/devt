@@ -177,6 +177,13 @@ function parseSimpleYaml(content) {
       let current = null;
       while (i < lines.length) {
         const sub = lines[i];
+        // A blank line is not a de-indent. Treating it as one ended the block
+        // early and reparsed the remaining lane entries as TOP-LEVEL keys —
+        // so a blank line between two lane items dropped every later lane and
+        // leaked its fields (`scope`, `status`) into the state namespace
+        // beside `phase` and `tier`, silently. Blank lines between list items
+        // are idiomatic YAML and standard model output.
+        if (!sub.trim()) { i++; continue; }
         if (!sub.startsWith("  ")) break; // de-indent — block ended
         const subTrim = sub.trim();
         if (subTrim.startsWith("- id:")) {
@@ -200,6 +207,37 @@ function parseSimpleYaml(content) {
       }
       if (current) lanes.push(current);
       result.lanes = lanes;
+      continue;
+    }
+    // A bare `key:` heading an indented block. The value regex below needs a
+    // value, so the heading matched nothing and its children — being trimmed
+    // before matching — were promoted to TOP LEVEL while the parent vanished.
+    // Capturing the block keeps the shape honest; the alternative is inventing
+    // state keys from someone else's nesting. devt's own serializer never
+    // emits this (objects are JSON-stringified into quoted scalars), so it
+    // only arrives via a hand-edited workflow.yaml — which is exactly when
+    // silent key invention is hardest to notice.
+    const blockHead = trimmed.match(/^([\w-]+):$/);
+    if (blockHead && i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) {
+      const nested = {};
+      i++;
+      while (i < lines.length) {
+        const sub = lines[i];
+        if (!sub.trim()) { i++; continue; }
+        if (!/^\s/.test(sub)) break;
+        const kv = sub.trim().match(/^([\w-]+):\s*(.+)$/);
+        if (kv) {
+          let v = kv[2];
+          if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+          else if (v === "true") v = true;
+          else if (v === "false") v = false;
+          else if (v === "null") v = null;
+          else if (/^\d+$/.test(v)) v = parseInt(v, 10);
+          nested[kv[1]] = v;
+        }
+        i++;
+      }
+      result[blockHead[1]] = nested;
       continue;
     }
     const match = trimmed.match(/^([\w-]+):\s*(.+)$/);

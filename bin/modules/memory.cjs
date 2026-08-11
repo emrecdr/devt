@@ -1255,8 +1255,29 @@ function toRepoRelative(fp, canonRoot) {
   return path.relative(canonRoot, canonFp).split(path.sep).join("/");
 }
 
+// How SPECIFICALLY did the pattern match? A doc claiming `.devt/**` matches
+// every file under .devt and reads, to a consumer, exactly like a doc that
+// named the file — so a governance section gets written about a concept that
+// has nothing to do with the change. Field: CON-002 (about graphify review
+// tiers) surfaced on `.devt/rules/api-changelog.md` purely on `.devt/**`. The
+// lane disposed of it correctly, but ritual ADR sections are how real hits get
+// skimmed. Breadth is reported, never filtered — a broad claim can still be
+// the right one, and dropping it silently would be the worse failure.
+function _matchBreadth(filePath, pattern) {
+  if (typeof pattern !== "string") return "unknown";
+  if (pattern === filePath) return "exact";
+  // Literal segments before the first wildcard: the part of the pattern that
+  // actually discriminates. `app/services/**` commits to two, `.devt/**` to one.
+  const literal = pattern.split("/").findIndex(seg => seg.includes("*"));
+  const anchored = literal === -1 ? pattern.split("/").length : literal;
+  if (anchored >= 2) return "narrow";
+  return "broad";
+}
+
 function getByPath(filePath) {
-  return withDb(db => activeAffectsRows(db).filter(row => matchesGlob(filePath, row.pattern)));
+  return withDb(db => activeAffectsRows(db)
+    .filter(row => matchesGlob(filePath, row.pattern))
+    .map(row => ({ ...row, match_breadth: _matchBreadth(filePath, row.pattern) })));
 }
 
 function getBySymbol(symbol) {

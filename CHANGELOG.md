@@ -8,6 +8,16 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### The state parser survives a hand-edited workflow.yaml
+
+Two silent data-loss paths, both reproduced by direct execution. A **blank line between lane items** ended the lanes block — blank lines are not two-space indented — so every later lane was dropped and its fields leaked into the top-level state namespace beside `phase` and `tier`. A **bare `key:` heading an indented block** matched no value regex, so its children were promoted to top level while the parent vanished, inventing state keys out of someone else's nesting.
+
+devt's own serializer emits neither shape, which is why this never fired on the normal write path — and also why it matters: both arrive via a hand-edited `workflow.yaml`, which is exactly when silently invented keys are hardest to notice. Blank lines between list items are idiomatic YAML besides. **F58** pins both, plus the controls that must not move: a de-indent still bounds the block, the round-trip is unchanged, and `_json` keys still promote while free text does not.
+
+### Governance hits say how specifically they matched
+
+A doc claiming `.devt/**` matches every file under `.devt` and reads, to a consumer, exactly like a doc that named the file — so an ADR-compliance section gets written about a concept with nothing to do with the change. Field: CON-002 (graphify review tiers) surfaced on `.devt/rules/api-changelog.md` purely on the wildcard. `memory affects` matches now carry `match_breadth` — `exact`, `narrow`, or `broad`. Reported, never filtered: a broad claim can still be the right one, and dropping it silently would be the worse failure (**F59**).
+
 ### The provenance protocol promised args and responses it never logs
 
 `<provenance_protocol>` told agents that `mcp-stats --correlation-id=<id>` "resolves the call back to its **args + response**". It does not — the trace records `args_fp` (a fingerprint) and `args_size`, and devt deliberately never logs args or results. An auditor following that instruction got metadata and reasonably concluded the mechanism was broken. It now states what actually comes back (tool, timestamp, duration, ok/error, args fingerprint), names the trace path, and names the result shape — `{aggregate, tools[], entries_considered}` — because a jq selector that misses returns `null`, which is indistinguishable from a broken feature.
