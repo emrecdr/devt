@@ -8,7 +8,7 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
-## [0.242.0] - 2026-08-10
+## [0.242.0] - 2026-08-11
 
 ### The reviewer never knew what it was asked
 
