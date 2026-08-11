@@ -20,6 +20,24 @@ That same early return carried no `scope_missing` and hardcoded `degraded_fields
 
 `--fresh` was recommended by the short-circuit's own stderr hint and parsed by nothing; `review-context-init` accepted three flags and silently discarded it. It now bypasses the cache, as the hint always claimed. The message also names what the cache key is derived from and whether `task` was written this call — the two facts that cost the reporter three re-runs to establish by reading `workflow.yaml` directly (**F61**).
 
+### The rubric is reachable from where the reviewer actually runs
+
+`<rubric_path>` pointed at the plugin root — **outside the project under review**. A lane declined to open it: *"outside this repo and was not opened"*, a policy refusal rather than a filesystem error, which no path fix inside the plugin can reach. Making the path absolute was the earlier attempt at this and was not enough; the requirement is the project boundary, not the path shape.
+
+Field: of five lanes on one review, two read the rubric fully, one partially, one refused, one never said. The ones that could not reach it self-graded against the task prose, so their grades were not comparable with the rest — and nothing noticed, because a silent self-grade looks exactly like a real one.
+
+`init` now materializes the resolved rubric to `.devt/state/rubric-<workflow_type>.md` (project-local `.devt/rubrics/` override honoured, else the plugin default) and every `<rubric_path>` resolves there — the same place agents already read `code-review-input.md` from. For both init verbs, since dev workflows never inline the rubric and the verifier's `<rubric_path>` is the only copy it sees. An unreachable rubric must now be **declared**: say so and state the grades are not rubric-derived, rather than self-grading in silence. The resolution order is single-sourced, because two copies of a resolution order is how the pinned rubric and the inlined one come to disagree.
+
+### Lanes are asked for the score the consolidated report already prints
+
+The parallel report's headline carries a per-lane score distribution; the lane envelope never requested a score. Every run therefore produced an all-null column that read as a broken feature — a consumer specified with no producer.
+
+Lanes now emit a rubric-derived `score` in their own sidecar, **with the condition attached**: a lane that could not read the rubric emits `null` plus a `score_null_reason` instead. A manufactured score is worse than a null because it looks comparable with the lanes that could read it, and the distribution is read as a coverage signal first — one null beside three real scores says immediately which lane's grade cannot be trusted. The consolidator copies both through rather than filling the gap with a number of its own.
+
+### Axis H is asked once
+
+Marking the axis lane-skip in the rubric did not land: the shared envelope still told every reviewer to walk it, and the envelope won **4 of 5 lanes** in the field because it sits closer to the task. The rubric, the envelope task text, and the by-reference stub now all defer to a `<lane_axis_policy>` block that `render-lanes` injects into lane dispatches only — so the single reviewer, who genuinely owns the axis, is unaffected. Fixing one end of a two-ended contract and reporting it closed is what produced the 4–1 (**F63**).
+
 ### Two gates stop reporting on mechanisms they never consulted
 
 **Axis H punished explanation.** Its `n/a` branch was disqualified by a bare substring test for `counts:` across the whole section, so a consolidator explaining *why* zeros would mislead failed on its own explanation while a terser answer passed — and the failure message claimed the section lacked a valid `n/a` while one sat in it, sending the reader to look for a formatting fault in the line that was already correct. The branch is now chosen by what **parses**, not by which tokens appear, and the failure names what was actually found. Field consequence worth recording: the retry hid the reasoning and shipped three zeros that read as "verified clean" when the honest claim was "nothing was recorded" — the gate rejected the better answer and accepted the misleading one.

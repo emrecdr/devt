@@ -104,7 +104,7 @@ Dispatch the verifier:
 Task(subagent_type="devt:verifier", model="{models.verifier}", prompt="
   <context>
     <workflow_type>code_review</workflow_type>
-    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>.devt/state/rubric-code_review.md</rubric_path>
     <original_task>{review_scope_description}</original_task>
 <memory_signal>{memory_signal_json}</memory_signal>
     <scope_hint>{scope_hint_json}</scope_hint>

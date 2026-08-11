@@ -4013,17 +4013,17 @@ else
   fail "init payload missing or wrong rubrics.dev (expected dev.v1.md)"
 fi
 # Dev-workflow verifier dispatch must reference {rubrics.dev} in a <rubric_path> tag.
-if grep -q '<rubric_path>{plugin_root}/references/rubrics/{rubrics.dev}</rubric_path>' "$ROOT/workflows/dev-workflow.standard.md"; then
+if grep -q '<rubric_path>.devt/state/rubric-dev.md</rubric_path>' "$ROOT/workflows/dev-workflow.standard.md"; then
   pass "dev-workflow verifier dispatch injects <rubric_path>"
 else
-  fail "dev-workflow verifier dispatch missing <rubric_path>{plugin_root}/references/rubrics/{rubrics.dev}</rubric_path>"
+  fail "dev-workflow verifier dispatch missing <rubric_path>.devt/state/rubric-dev.md</rubric_path>"
 fi
 # Code-review verifier dispatch must reference {rubrics.code_review} in a <rubric_path> tag.
 # The dispatch lives in the shared step file (single source for both review paths).
-if grep -q '<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>' "$ROOT/workflows/code-review.steps.md"; then
+if grep -q '<rubric_path>.devt/state/rubric-code_review.md</rubric_path>' "$ROOT/workflows/code-review.steps.md"; then
   pass "code-review verifier dispatch injects <rubric_path>"
 else
-  fail "code-review verifier dispatch missing <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>"
+  fail "code-review verifier dispatch missing <rubric_path>.devt/state/rubric-code_review.md</rubric_path>"
 fi
 # Code-review must dispatch the verifier (subagent_type=devt:verifier) with workflow_type=code_review.
 # Both live in the shared step file; the parents carry SHARED-STEP pointers to it.
@@ -9127,8 +9127,8 @@ fi
 M15_REVIEWER_INLINE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_review}</rubric_content>" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0)
 # Reviewer rubric_path lives in code-review.md (review step); the verifier's
 # lives in the shared step file both paths load — count the pair across both.
-M15_PATH_REFS=$(( $(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0) + $(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review.steps.md" 2>/dev/null || echo 0) ))
-M15_PARALLEL_BYREF=$(/usr/bin/grep -c "references/rubrics/{rubrics.code_review}" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+M15_PATH_REFS=$(( $(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0) + $(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review.steps.md" 2>/dev/null || echo 0) ))
+M15_PARALLEL_BYREF=$(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
 M15_AGENT=$(/usr/bin/grep -c "Rubric self-check" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 if [ "${M15_REVIEWER_INLINE:-0}" -ge 1 ] && [ "${M15_PATH_REFS:-0}" -ge 2 ] && [ "${M15_PARALLEL_BYREF:-0}" -ge 1 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
   pass "M15: code_review rubric aligned — reviewer inline self-check (${M15_REVIEWER_INLINE}) + reviewer/verifier rubric_path (${M15_PATH_REFS}) + parallel by-reference (${M15_PARALLEL_BYREF}) + agent self-check (${M15_AGENT})"
@@ -17756,10 +17756,12 @@ else
   fail "K291: field-receipt fix surface regressed:$K291_MISS"
 fi
 
-# K292: trust batch from the native-run receipt — (a) rubric_path renders
-# ABSOLUTE (plugin-root-relative broke rubric resolution for every
-# project-cwd lane: ad-hoc self-grades, all-null lane_scores) and no
-# template/workflow carries the relative value form; (b) pointer stubs carry
+# K292: trust batch from the native-run receipt — (a) rubric_path resolves
+# INSIDE the project and no template/workflow reaches for the rubric under the
+# plugin root in any form. Making the path absolute was the first fix and it
+# was not enough: a lane declined to open an absolute plugin-root path as
+# outside the repo, so the requirement is the project boundary, not the path
+# shape (F63 owns the behavioral half); (b) pointer stubs carry
 # a full-envelope sha256 + render-lanes prints a tail-safe stderr trailer;
 # (c) `state assert-all --phase=X` runs the registered gate set with a
 # NONZERO EXIT on failure (the silent-empty pipeline class); (d) the
@@ -17778,8 +17780,8 @@ mkdir -p "$K292_TMP/.devt/state" "$K292_TMP/.devt/rules"
 printf 'active: true\nworkflow_id: "fx-4"\nworkflow_type: "code_review"\nphase: "review"\ncreated_at: "2026-07-19T00:00:00Z"\nfirst_created_at: "2026-07-19T00:00:00Z"\n' > "$K292_TMP/.devt/state/workflow.yaml"
 printf '# CS\nK292_RULES_MARKER.\n' > "$K292_TMP/.devt/rules/coding-standards.md"
 K292_DEF=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review 2>/dev/null) || true)
-printf '%s' "$K292_DEF" | /usr/bin/grep -qF "<rubric_path>$ROOT/references/rubrics/" || { K292_OK=0; K292_MISS="$K292_MISS rubric-abs-render"; }
-if /usr/bin/grep -rq 'rubric_path>references/rubrics' "$ROOT/templates" "$ROOT/workflows"; then K292_OK=0; K292_MISS="$K292_MISS rubric-relative-residue"; fi
+printf '%s' "$K292_DEF" | /usr/bin/grep -qF "<rubric_path>.devt/state/rubric-" || { K292_OK=0; K292_MISS="$K292_MISS rubric-inproject-render"; }
+if /usr/bin/grep -rq 'rubric_path>[^<]*references/rubrics' "$ROOT/templates" "$ROOT/workflows"; then K292_OK=0; K292_MISS="$K292_MISS rubric-plugin-root-residue"; fi
 K292_STUB=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review --out="$K292_TMP/env.txt" 2>/dev/null) || true)
 printf '%s' "$K292_STUB" | /usr/bin/grep -q ' sha256="[0-9a-f]\{16\}"' || { K292_OK=0; K292_MISS="$K292_MISS stub-sha256"; }
 { [ -s "$K292_TMP/.devt/state/dispatch-stamps.jsonl" ] && /usr/bin/grep -q '"cid":"cid_' "$K292_TMP/.devt/state/dispatch-stamps.jsonl"; } || { K292_OK=0; K292_MISS="$K292_MISS render-stamp"; }
@@ -17811,7 +17813,7 @@ rm -rf "$K292_TMP"
   && /usr/bin/grep -qF 'MANDATORY provenance header' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" \
   && /usr/bin/grep -qF 'lane_scores_null_reason' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md"; } || { K292_OK=0; K292_MISS="$K292_MISS prose-pins"; }
 if [ "$K292_OK" -eq 1 ]; then
-  pass "K292: trust batch (rubric_path absolute behavioral + no relative residue, stub sha256, render stamp + provenance gate behavioral, sidecar schema checks behavioral, assert-all nonzero exit, footer always-on line, CLI+prose pins)"
+  pass "K292: trust batch (rubric_path in-project behavioral + no plugin-root residue, stub sha256, render stamp + provenance gate behavioral, sidecar schema checks behavioral, assert-all nonzero exit, footer always-on line, CLI+prose pins)"
 else
   fail "K292: trust-batch surface regressed:$K292_MISS"
 fi
@@ -20742,6 +20744,52 @@ if [ "$F62_OUT" = "terse,explained,named,unknown,windowed,clean,blocks" ]; then
   pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window guard firing to back it, 'unknown' otherwise, and a real dispatch still blocks"
 else
   fail "F62: gate-honesty regressed — got '$F62_OUT' (want terse,explained,named,unknown,windowed,clean,blocks)"
+fi
+
+# F63: the rubric is reachable from where the reviewer runs, lanes are asked
+# for the score the consolidated report already prints, and axis H is asked
+# once. <rubric_path> pointed at the plugin root — OUTSIDE the project under
+# review — and a lane declined to open it ("outside this repo and was not
+# opened"): a policy refusal, not a filesystem error, so no path fix inside the
+# plugin could reach it. Of five lanes, two read it fully, one partially, one
+# refused, one never said; the ones that could not reach it self-graded against
+# the task prose. That is also why lane_scores came back all-null — and the
+# consolidated report asks for a per-lane score distribution the lane envelope
+# never requested. Axis H is the third head: the rubric says lanes skip it, the
+# shared envelope told them to walk it, and the envelope won 4-1 in the field
+# because it sits closer to the task, so every surface now defers to the
+# lane-only policy block instead of asserting the axis inventory itself.
+F63_T=$(mktemp -d); mkdir -p "$F63_T/.devt/rules" "$F63_T/app"
+printf '{}' > "$F63_T/.devt/config.json"
+printf 'x=1\n' > "$F63_T/app/a.py"; printf 'y=2\n' > "$F63_T/app/b.py"
+(cd "$F63_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+printf 'x=2\n' > "$F63_T/app/a.py"
+(cd "$F63_T" && node "$ROOT/bin/devt-tools.cjs" init review "review the app changes" >/dev/null 2>&1)
+(cd "$F63_T" && node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=api --files=app/a.py >/dev/null 2>&1)
+F63_RUBRIC=$([ -s "$F63_T/.devt/state/rubric-code_review.md" ] && /usr/bin/grep -q 'Axis H' "$F63_T/.devt/state/rubric-code_review.md" && echo materialized || echo MISSING)
+F63_LANES=$(cd "$F63_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>/dev/null)
+rm -rf "$F63_T"
+F63_OUT=$(printf '%s' "$F63_LANES" | node -e "
+  let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{
+    const out=[];
+    const m = s.match(/<rubric_path>([^<]*)<\/rubric_path>/);
+    const p = m ? m[1].trim() : '';
+    // Must be inside the project, and must not reach for the plugin root.
+    out.push(p.startsWith('.devt/state/rubric-') && !/plugin_root|references\/rubrics/.test(s) ? 'inproject' : 'OUTSIDE:'+p);
+    out.push(/<lane_axis_policy>[^<]*ORCHESTRATOR-LEVEL/.test(s) ? 'axispolicy' : 'NOPOLICY');
+    // [\s\S] not [^<]: the block legitimately names <rubric_path> inside itself.
+    out.push(/<lane_scoring>[\s\S]*?score_null_reason[\s\S]*?<\/lane_scoring>/.test(s) ? 'scored' : 'NOSCORE');
+    // No surface may hard-assert the axis inventory at a lane — that is what beat the rubric.
+    out.push(!/currently H and I|including axis H/.test(s) ? 'deferred' : 'CONTRADICTS');
+    out.push(/never self-grade against this prompt in silence/.test(s) ? 'declares' : 'SILENT');
+    console.log(out.join(','));
+  });" 2>/dev/null)
+F63_CONS=$({ /usr/bin/grep -c 'COPIED from that lane' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || true; } | tr -d ' ')
+if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
+  pass "F63: the rubric is materialized inside the project and every <rubric_path> resolves there, lanes are asked for a score with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
+else
+  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render='$F63_OUT' (want inproject,axispolicy,scored,deferred,declares) consolidator_copies=$F63_CONS"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

@@ -67,6 +67,63 @@ const MAX_INLINE_BYTES = 64 * 1024;
 // received.
 const MAX_INLINE_RUBRIC_BYTES = 48 * 1024;
 
+// Resolution order mirrors grader.cjs::resolveRubricPath: absolute path →
+// project-local .devt/rubrics/<f> → plugin defaults. Each candidate is confined
+// to its trusted root. Single-sourced because two copies of a resolution order
+// is how the pinned rubric and the inlined one come to disagree.
+function _resolveRubricFile(pluginRoot, projectRoot, filename) {
+  if (!filename || typeof filename !== "string") return null;
+  if (path.isAbsolute(filename)) return filename;
+  if (projectRoot) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const projectDir = path.join(projectRoot, ".devt", "rubrics");
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const cand = path.normalize(path.join(projectDir, filename));
+    const scoped = cand === projectDir || cand.startsWith(projectDir + path.sep);
+    if (scoped && fs.existsSync(cand)) return cand;
+  }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const pluginDir = path.join(pluginRoot, "references", "rubrics");
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const cand = path.normalize(path.join(pluginDir, filename));
+  const scoped = cand === pluginDir || cand.startsWith(pluginDir + path.sep);
+  return scoped && fs.existsSync(cand) ? cand : null;
+}
+
+
+// The rubric has to be readable from wherever the reviewer actually runs.
+// Pointing at the plugin root put it OUTSIDE the project under review, and a
+// lane declined to open it — "outside this repo and was not opened", a policy
+// refusal rather than a filesystem error, which no path fix inside the plugin
+// can reach. Field: of five lanes on one review, two read it fully, one
+// partially, one refused, one never said; the ones that could not reach it
+// self-graded against the task prose, so their grades were not comparable with
+// the rest. A copy under .devt/state/ is reachable by the same rules that
+// already let every agent read code-review-input.md.
+function materializeRubrics(pluginRoot, projectRoot, rubrics) {
+  const written = {};
+  if (!pluginRoot || !projectRoot || !rubrics) return written;
+  const stateDir = path.join(projectRoot, ".devt", "state");
+  for (const [workflowType, filename] of Object.entries(rubrics)) {
+    const resolved = _resolveRubricFile(pluginRoot, projectRoot, filename);
+    if (!resolved || !fs.existsSync(resolved)) continue;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const dest = path.join(stateDir, `rubric-${workflowType}.md`);
+    try {
+      fs.mkdirSync(stateDir, { recursive: true });
+      const body = fs.readFileSync(resolved, "utf8");
+      let current = null;
+      try { current = fs.readFileSync(dest, "utf8"); } catch { /* absent — write it */ }
+      // Renders are frequent; an unchanged rubric should not churn state mtimes,
+      // which several freshness gates read.
+      if (current !== body) require("./io.cjs").atomicWriteFileSync(dest, body);
+      written[workflowType] = `.devt/state/rubric-${workflowType}.md`;
+    } catch { /* unwritable state dir — the envelope's absence directive covers it */ }
+  }
+  return written;
+}
+
+
 function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   if (!pluginRoot || !rubrics) return { content: null, bytes: 0, warnings: [] };
   const result = {};
@@ -79,28 +136,7 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   let totalBytes = 0;
   for (const [workflowType, filename] of Object.entries(rubrics)) {
     if (!filename || typeof filename !== "string") continue;
-    // Resolution order mirrors grader.cjs::resolveRubricPath:
-    // absolute path → project-local .devt/rubrics/<f> → plugin defaults.
-    // Each candidate is confined to its trusted root.
-    let resolved = null;
-    if (path.isAbsolute(filename)) {
-      resolved = filename;
-    } else if (projectRoot) {
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-      const projectDir = path.join(projectRoot, ".devt", "rubrics");
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-      const cand = path.normalize(path.join(projectDir, filename));
-      const scoped = cand === projectDir || cand.startsWith(projectDir + path.sep);
-      if (scoped && fs.existsSync(cand)) resolved = cand;
-    }
-    if (!resolved) {
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-      const pluginDir = path.join(pluginRoot, "references", "rubrics");
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-      const cand = path.normalize(path.join(pluginDir, filename));
-      const scoped = cand === pluginDir || cand.startsWith(pluginDir + path.sep);
-      if (scoped && fs.existsSync(cand)) resolved = cand;
-    }
+    const resolved = _resolveRubricFile(pluginRoot, projectRoot, filename);
     if (!resolved) {
       warnings.push(`rubric missing on disk for workflow_type=${workflowType}: ${filename}`);
       continue;
@@ -807,6 +843,9 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // bodies. inline_rubrics_omitted keeps the reduction visible (payload-size
   // delta stays attributable); its universe is the CONFIGURED rubric set, so an
   // oversized-rubric fallback still reports the bodies as omitted.
+  // Materialized for BOTH verbs: dev workflows never inline the rubric, so the
+  // verifier's <rubric_path> is the only copy it ever sees.
+  const rubricPaths = materializeRubrics(pluginRoot, projectRoot, config.rubrics || {});
   const _inlineRubrics = initVerb === "review"
     ? loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {})
     : null;
@@ -892,6 +931,7 @@ function initWorkflow(task, pluginRoot, initVerb) {
     rubrics: config.rubrics || {},
     inline_rubrics: inlineRubricsForVerb,
     inline_rubrics_omitted: inlineRubricsOmitted,
+    rubric_paths: rubricPaths,
     warnings: warnings.concat(injectionWarning),
   };
 }
@@ -1042,4 +1082,4 @@ function runReviewBundle(taskText) {
   };
 }
 
-module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB, GUARDRAILS_BY_REFERENCE_STUB };
+module.exports = { run, REQUIRED_DEV_RULES, loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, materializeRubrics, loadGraphImpact, loadPriorSidecars, CLAUDE_MD_BY_REFERENCE_STUB, RULES_BY_REFERENCE_STUB, GUARDRAILS_BY_REFERENCE_STUB };

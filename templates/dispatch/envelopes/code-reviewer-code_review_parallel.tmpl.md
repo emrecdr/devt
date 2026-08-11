@@ -15,7 +15,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>.devt/state/rubric-code_review.md</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -38,6 +38,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       community, score, verdict, findings_contributed}]; the review.md headline is verdict +
       severity counts + the per-lane score distribution. A consolidated deduction score
       saturates at the 0 floor and misleads any consumer that trusts it.
+      Each lane_scores[].score is COPIED from that lane's own review-lane-<id>.json::score —
+      never re-derived here. A lane that could not read the rubric reports "score": null with
+      a "score_null_reason"; carry both through rather than filling the gap with a number of
+      your own, and read the distribution as a coverage signal: one null beside three real
+      scores means that lane's grade is not comparable with the others.
     - review.json MUST carry the routing fields: "status" ("DONE" | "PARTIAL" | "BLOCKED") and
       "verdict" — status absent fails the sidecar consistency check on every later state update.
       When any lane_scores[].score is null, add "lane_scores_null_reason" (one line: why lanes

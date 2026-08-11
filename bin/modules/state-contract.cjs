@@ -511,6 +511,7 @@ const STATE_FILE_CONTRACT = {
     "^[a-z][a-z0-9]*(-[a-z0-9]+)+-summary\\.md$",  // topical summaries (module-md-update-summary.md) when no slugged class fits. ≥2 segments before "-summary" required: single-word forms (test-summary.md) ARE the canonical namespace — F10e enforces the disjointness
     "^lane-diff-L\\d+\\.txt$",   // per-lane diff artifact from register-lane
     "^review-lane-[A-Za-z0-9_.-]+\\.json$",  // per-lane severity sidecar. The .md side rides the review-* pattern above; the .json side matched nothing and was classified foreign — devt's own dispatch renders the write instruction for it
+    "^rubric-[a-z_]+\\.md$",  // in-project rubric copy materialized by init. <rubric_path> must resolve INSIDE the project: a lane declined to open the plugin-root path as outside the repo and self-graded instead
     "^[a-z][a-z0-9-]*\\.archive-[0-9A-Za-z:.\\-]+\\.jsonl$",  // logs rotated by resetSoft. Undeclared, these were litter one devt command created and the next archived 22 seconds later
   ],
   ephemeral_patterns: [

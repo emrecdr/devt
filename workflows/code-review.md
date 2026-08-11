@@ -484,7 +484,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <evolution>Read .devt/state/evolution-report.md (if it exists) — git-history hotspots, change coupling, fix density; check generated_at for staleness. Elevate finding severity one notch on high fix-density files: recurring-fix hotspots break again.</evolution>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>.devt/state/rubric-code_review.md</rubric_path>
     <!-- Inline rubric body from init payload — reviewer self-checks against
          the same axes the verifier will grade, reducing verifier-revision
          loops. Falls back to <rubric_path> on-disk Read when omitted
@@ -506,16 +506,18 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     **Self-grade against the rubric as you write.** The same axes the
     verifier will use to grade your review are inlined in <rubric_content> (or
     readable at <rubric_path> as fallback). Walk EVERY declared axis (both the
-    A–G table rows AND any `## Axis [A-Z] —` top-level headings, currently
-    including axis H for dispatch warnings acknowledgment)
+    A–G table rows AND any `## Axis [A-Z] —` top-level headings), honouring any
+    per-axis scope note the rubric itself carries — an axis the rubric marks
+    orchestrator-level is skipped by lane reviewers, and a `<lane_axis_policy>`
+    block in your context is authoritative about which those are
     before emitting review.md: scope coverage (every input file mentioned),
     finding specificity (file:line + rule ref or pattern citation), severity
     calibration (no Critical-rated nits, no Minor-rated security issues),
     remediation concreteness (Critical/Important findings include a fix
     direction), ADR Compliance section when memory affects-paths returned
     hits, Reuse Discipline section when reuse-candidates.md is non-empty,
-    Dispatch warnings section per axis H. Closing these gaps in your first
-    pass avoids a verifier revision loop.
+    and the Dispatch warnings section unless an axis policy excuses you from it.
+    Closing these gaps in your first pass avoids a verifier revision loop.
 
     Graph-impact map: the orchestrator wrote `.devt/state/graph-impact.md` (or `graphify-skip-reason.txt`)
     during context_init using upstream Graphify MCP. You consume that file READ-ONLY — your tool surface

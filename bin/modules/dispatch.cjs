@@ -651,12 +651,15 @@ function cmdRenderFilled(target, options) {
   // rubricByReference: swap the inline rubric body for a short directive stub
   // that points at <rubric_path>. The rubric body is byte-identical across all
   // N lanes, so inlining it multiplies a large static block per lane for zero
-  // signal gain. The plugin-root rubric path is a stable Read even from
-  // worktree-isolated lanes, so no inline fallback is needed. The axis-walk
-  // instruction stays STRONG — a weak or absent "walk EVERY declared axis"
-  // directive is what degrades lane reviews to topic-shape output.
+  // signal gain. By-reference only holds because <rubric_path> now resolves
+  // INSIDE the project: a plugin-root path was assumed to be "a stable Read"
+  // and was not — a lane declined to open it as outside the repo, which no
+  // path fix inside the plugin can reach. The axis-walk instruction stays
+  // STRONG — a weak or absent "walk EVERY declared axis" directive is what
+  // degrades lane reviews to topic-shape output — and unreachability must be
+  // DECLARED, because a silent self-grade is indistinguishable from a real one.
   if (rubricByRef && subs.inline_rubrics) {
-    const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading (currently H and I). These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop.)";
+    const stub = "(by-reference: Read the rubric at <rubric_path> FIRST, before writing any finding, and walk EVERY declared axis — both the A–G grading-table rows AND every `## Axis [A-Z] —` heading — honouring the rubric's own per-axis scope notes and any `<lane_axis_policy>` block in your context, which is authoritative about the axes you skip. These are the SAME axes the verifier will grade; closing them in your first pass avoids a revision loop. If that file cannot be read, SAY SO explicitly in your output and state that your grades are not rubric-derived — never self-grade against this prompt in silence.)";
     // Stub every configured rubric key — not just the ones loadInlineRubrics
     // returned — so an oversized-rubric empty map still resolves each template's
     // {inline_rubrics.<type>} placeholder to the stub instead of leaking it.
@@ -1861,6 +1864,21 @@ function cmdRenderLanes(target, options) {
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
       `    <memory_affects>${memoryAffects}</memory_affects>`,
+      // Axis H is dispatch-time and orchestrator-level: warnings are written AT
+      // dispatch, so a lane's snapshot is stale by construction and every lane
+      // emits the same paragraph the consolidator then discards. The rubric says
+      // lanes skip it; the SHARED envelope told every reviewer to walk it, and
+      // the envelope won 4-1 in the field because it sits closer to the task.
+      // Said here, where only lanes can see it, rather than weakening the
+      // single reviewer's instruction — that reviewer genuinely owns axis H.
+      `    <lane_axis_policy>Axis H (Dispatch warnings) is ORCHESTRATOR-LEVEL — SKIP it. Write "skipped — orchestrator-level axis" and move on; the consolidator produces that section from its own live read of the ledger. Grade every OTHER declared axis normally.</lane_axis_policy>`,
+      // The consolidated report's headline carries a per-lane score
+      // distribution, and the lane envelope never asked for a score — so every
+      // run produced an all-null column that read as a broken feature. Asked
+      // WITH its condition attached: a score is only meaningful when it came
+      // from the rubric, and a manufactured one is worse than null because it
+      // looks comparable with the lanes that could read it.
+      `    <lane_scoring>Emit a 0-100 \`score\` in your \`review-lane-${lane.id}.json\` sidecar, derived from the rubric's grading table. If you could not read the rubric at <rubric_path>, emit \`"score": null\` together with \`"score_null_reason": "<one line>"\` — a null with a reason is a usable signal; a guessed number that looks comparable is not.</lane_scoring>`,
     ];
     const neighbors = laneOwnership.filter((n) => n.id !== lane.id);
     if (neighbors.length > 0) {

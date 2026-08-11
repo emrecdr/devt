@@ -183,7 +183,7 @@ For each lane in `$LANES_JSON.lanes[]`, prepare a dispatch prompt with these con
 - `<scope_hint>{filtered to this lane's files only}</scope_hint>`
 - `<memory_signal>{cached from workflow.yaml::memory_signal_json}</memory_signal>`
 - `<governing_rules rules_hash="{governing_rules.rules_hash}">by-reference: Read the .devt/rules/ files relevant to your lane scope from disk ({governing_rules.paths_included, .devt/rules/* entries only}). CLAUDE.md is auto-injected by the harness — do not re-read it.</governing_rules>` — rules-by-reference is the lane default: the rules body is byte-identical across all N lanes and lane agents share the orchestrator's working tree, so inlining it multiplies ~57KB per lane for zero signal gain. Inline the full content only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
-- `<rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>` — ABSOLUTE path (`{plugin_root}` fills from `$CTX.init.plugin_root` / render substitution): a plugin-root-relative rubric path is unresolvable from every project cwd, and lanes that can't find the rubric silently self-grade ad hoc. Rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric at `<rubric_path>` FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently H and I) — the same axes the verifier will grade. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
+- `<rubric_path>.devt/state/rubric-code_review.md</rubric_path>` — an IN-PROJECT copy, materialized by `init` from the resolved rubric (project-local `.devt/rubrics/` override, else the plugin default). The path must land inside the project: a plugin-root path was assumed to be readable from anywhere and was not — a lane declined to open it as *outside this repo* (a policy refusal, not a filesystem error, so no path fix inside the plugin can reach it) and self-graded against the task prose instead, which is also why its `score` came back null. Rubric-by-reference is the lane default: `render-lanes` replaces the inline body with a directive stub, so each lane reviewer Reads the rubric FIRST and walks EVERY declared axis (the A–G grading-table rows AND every `## Axis [A-Z] —` heading, currently H and I) — the same axes the verifier will grade — **except Axis H, which `render-lanes` marks lane-skip per the rubric**. A lane that still cannot read the rubric must SAY so and declare its grades non-rubric-derived rather than self-grading in silence. Inline the full rubric body only for worktree-isolated lanes (mirror `dispatch render-lanes --inline-rules`).
 
 **Pre-dispatch graphify re-check.** The decision gate ran at `context_init` — before the scope artifact was pre-written and the bundle re-anchored. Anything that removed the map in between leaves `<graph_impact>` as a by-reference pointer to a file that is not there, and every lane inherits it at once. Re-run the same gate here, where the pointer is actually handed out:
 
@@ -415,7 +415,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>{plugin_root}/references/rubrics/{rubrics.code_review}</rubric_path>
+    <rubric_path>.devt/state/rubric-code_review.md</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>
@@ -438,6 +438,11 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
       community, score, verdict, findings_contributed}]; the review.md headline is verdict +
       severity counts + the per-lane score distribution. A consolidated deduction score
       saturates at the 0 floor and misleads any consumer that trusts it.
+      Each lane_scores[].score is COPIED from that lane's own review-lane-<id>.json::score —
+      never re-derived here. A lane that could not read the rubric reports "score": null with
+      a "score_null_reason"; carry both through rather than filling the gap with a number of
+      your own, and read the distribution as a coverage signal: one null beside three real
+      scores means that lane's grade is not comparable with the others.
     - review.json MUST carry the routing fields: "status" ("DONE" | "PARTIAL" | "BLOCKED") and
       "verdict" — status absent fails the sidecar consistency check on every later state update.
       When any lane_scores[].score is null, add "lane_scores_null_reason" (one line: why lanes
