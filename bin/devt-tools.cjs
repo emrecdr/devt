@@ -230,9 +230,10 @@ Commands:
   state audit               Classify .devt/state/ files: canonical | pattern_allowed | ephemeral | ad_hoc
   state cleanup [--apply] [--stale-days=N]
                             Archive ad_hoc + ephemeral + stale pattern_allowed files to .archive/cleanup-<ts>/
-  state review-context-init [--scope=...] [--primary-branch=...] [--range=<a>..<b>]
+  state review-context-init [--scope=...] [--primary-branch=...] [--range=<a>..<b>] [--fresh]
                             Compound review-context blob (scope + eviction + preflight surface) — one spawn
-  state workflow-context-init [--workflow-type=dev] [--scope=...] [--primary-branch=...]
+                            --fresh bypasses the cached-bundle short-circuit and recomputes
+  state workflow-context-init [--workflow-type=dev] [--scope=...] [--primary-branch=...] [--fresh]
                             Compound dev-workflow context blob — the workflow-side twin
   state stop-hook           Stop-event compound (hook JSON on stdin): loop guard, candidate harvest,
                             curation hint, stop stamp, stopReason emission — hooks/stop.sh's single call

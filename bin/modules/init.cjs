@@ -930,10 +930,25 @@ function scanDevRules(dir, prefix, rootDir) {
   return files;
 }
 
+// An `init` with no task argument must not replace a task the caller already
+// scoped. init runs at the top of every context-init bundle purely for its
+// payload, and the placeholder it used to write unconditionally destroyed the
+// real task on the way past — invisibly on the cached-bundle path, where
+// nothing downstream rewrites it afterwards. Preserve what is already there;
+// fall back to the placeholder only when state carries nothing.
+function _taskOrExisting(supplied, placeholder) {
+  if (supplied && supplied.trim()) return supplied;
+  try {
+    const existing = String((readState() || {}).task || "").trim();
+    if (existing) return existing;
+  } catch { /* unreadable state — fall through to the placeholder */ }
+  return placeholder;
+}
+
 function run(subcommand, args, pluginRoot) {
   switch (subcommand) {
     case "workflow":
-      return initWorkflow(args.join(" "), pluginRoot, "workflow");
+      return initWorkflow(_taskOrExisting(args.join(" "), ""), pluginRoot, "workflow");
     case "review": {
       // G6 (cal #31.D) — opt-in compound bundling. `--bundle` attaches the
       // post-init context-build steps (preflight, memory signal, graphify
@@ -944,7 +959,7 @@ function run(subcommand, args, pluginRoot) {
       // with `bundle.errors[]` populated; init.workflow_id always succeeds.
       const wantBundle = args.includes("--bundle");
       const cleanArgs = args.filter(a => a !== "--bundle");
-      const baseResult = initWorkflow(cleanArgs.join(" ") || "code review", pluginRoot, "review");
+      const baseResult = initWorkflow(_taskOrExisting(cleanArgs.join(" "), "code review"), pluginRoot, "review");
       if (!wantBundle) return baseResult;
       const bundle = runReviewBundle(cleanArgs.join(" "));
       return { ...baseResult, bundle };

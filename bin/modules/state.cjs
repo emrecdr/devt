@@ -1143,7 +1143,7 @@ function diskCheck() {
 
 
 
-function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, range, taskDefault = "code review" } = {}) {
+function contextInitBundle({ mode = "review", workflowType = "code_review", scope, primaryBranch, range, taskDefault = "code review", fresh = false } = {}) {
   const { spawnSync } = require("child_process");
   const selfBin = path.join(__dirname, "..", "devt-tools.cjs");
   const initMode = mode === "workflow" ? "workflow" : "review";
@@ -1166,6 +1166,18 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
   const scopeMissing = !scope || !String(scope).trim();
   if (scopeMissing) {
     degraded.push(`scope empty — task/preflight/memory-signal all fall back to the literal "${taskDefault}"; the caller did not bind a scope string`);
+  }
+  // An empty scope must never overwrite a task an earlier call got right.
+  // Overwriting turns a recoverable degrade into a terminal one: the good text
+  // is gone, and every later consumer reads the literal as though an operator
+  // typed it. Keeping the prior task leaves the run degraded but repairable —
+  // the caller can still fix it by passing a scope.
+  let priorTask = "";
+  try { priorTask = String((readState() || {}).task || "").trim(); } catch { /* unreadable state — treat as absent */ }
+  const priorTaskUsable = priorTask.length > 0 && priorTask !== taskDefault;
+  const effectiveTask = scopeMissing ? (priorTaskUsable ? priorTask : taskDefault) : scope;
+  if (scopeMissing && priorTaskUsable) {
+    degraded.push(`scope empty — preserved the prior task rather than overwriting it with "${taskDefault}"`);
   }
   // Range is written before any child CLI runs so the entire bundle tree
   // (init, preflight generate, impact-plan) sees one consistent scope; an
@@ -1221,9 +1233,20 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     const stampHead = st.context_init_graph_head || null;
     const scopeMatches = curSig !== null && stampSig !== null && curSig === stampSig;
     const headMatches = curHead !== null && stampHead !== null && curHead === stampHead;
-    if (scopeMatches && headMatches && fs.existsSync(planPath) && brief && pfresh.ok && graphFresh) {
+    if (!fresh && scopeMatches && headMatches && fs.existsSync(planPath) && brief && pfresh.ok && graphFresh) {
       const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
-      process.stderr.write(`[devt] context-init: reused cached bundle for scope ${curSig} @ graph ${String(curHead).slice(0, 8)} — pass --fresh to force a recompute\n`);
+      // The cache key is the changed-file set, deliberately NOT the task text —
+      // free text degrades to a generic default and would bust the cache on
+      // every paraphrase. The cost was that a corrected scope arriving on a
+      // cache hit got discarded: this early return sits above the activation
+      // write, so re-running with fixed text re-served the poisoned task
+      // indefinitely and the only exit was `state update task=` by hand.
+      // Cache the expensive computation; never cache the task text.
+      let taskWritten = false;
+      if (!scopeMissing && priorTask !== String(scope).trim()) {
+        try { updateState([`task=${effectiveTask}`]); taskWritten = true; } catch { /* write race — caller may retry */ }
+      }
+      process.stderr.write(`[devt] context-init: reused cached bundle (key: HEAD + changed-file list, sig ${curSig} @ graph ${String(curHead).slice(0, 8)}) — task ${taskWritten ? "UPDATED from --scope" : "unchanged"}; pass --fresh to force a full recompute\n`);
       return {
         ok: true,
         short_circuited: true,
@@ -1234,7 +1257,9 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
         memory_signal: st.memory_signal_json || null,
         god_node_warnings: st.god_node_warnings_json || null,
         freshness: brief.staleness || { state: "unknown" },
-        degraded_fields: [],
+        scope_missing: scopeMissing,
+        task_written: taskWritten,
+        degraded_fields: degraded,
       };
     }
     // Loud signal when a cached bundle exists but belongs to a DIFFERENT scope:
@@ -1251,14 +1276,14 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     updateState([
       "active=true", `workflow_type=${workflowType}`, "phase=context_init", "status=DONE",
       "stopped_at=null", "stopped_phase=null", "verdict=null", "repair=null",
-      "verify_iteration=0", "resume_context=null", `task=${scope || taskDefault}`,
+      "verify_iteration=0", "resume_context=null", `task=${effectiveTask}`,
     ]);
   } catch (e) {
     return { ok: false, prerequisite_failed: "state activate", detail: String(e && e.message) };
   }
 
   // ── Preflight brief (important; degrade, don't abort) ──────────────────
-  const pfGen = sh(["preflight", "generate", scope || taskDefault]);
+  const pfGen = sh(["preflight", "generate", effectiveTask]);
   if (!pfGen.ok) degraded.push("preflight_brief");
 
   // ── memory_signal: affects-union PRIMARY + prose-FTS supplement ────────
@@ -1305,7 +1330,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     }
   } catch { memAvailable = false; }
   let supplement = null;
-  const memRes = sh(["memory", "query", scope || taskDefault, "--signal=3", "--json-compact"]);
+  const memRes = sh(["memory", "query", effectiveTask, "--signal=3", "--json-compact"]);
   if (memRes.ok && memRes.stdout) {
     try {
       const fts = JSON.parse(memRes.stdout);
@@ -1439,6 +1464,7 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     staleness_tier: stalenessTier,
     graphify_evicted: graphifyEvicted,
     scope_missing: scopeMissing,
+    task_written: true,
     degraded_fields: degraded,
   };
 }
@@ -1451,13 +1477,13 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
 // envelopes + the still-separate gates/MCP/scan-prep steps consume them
 // uniformly. memory_signal is gathered for EVERY mode — closing the gap where
 // debug + research dispatches previously received no <memory_signal> block.
-function reviewContextInit({ scope, primaryBranch, range } = {}) {
-  return contextInitBundle({ mode: "review", workflowType: "code_review", scope, primaryBranch, range, taskDefault: "code review" });
+function reviewContextInit({ scope, primaryBranch, range, fresh } = {}) {
+  return contextInitBundle({ mode: "review", workflowType: "code_review", scope, primaryBranch, range, fresh, taskDefault: "code review" });
 }
 
 
-function workflowContextInit({ workflowType = "dev", scope, primaryBranch } = {}) {
-  return contextInitBundle({ mode: "workflow", workflowType, scope, primaryBranch, taskDefault: "development task" });
+function workflowContextInit({ workflowType = "dev", scope, primaryBranch, fresh } = {}) {
+  return contextInitBundle({ mode: "workflow", workflowType, scope, primaryBranch, fresh, taskDefault: "development task" });
 }
 
 
@@ -1776,7 +1802,7 @@ function run(subcommand, args) {
       const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
       const range = rangeArg ? rangeArg.slice("--range=".length) : undefined;
-      return reviewContextInit({ scope, primaryBranch, range });
+      return reviewContextInit({ scope, primaryBranch, range, fresh: args.includes("--fresh") });
     }
     case "workflow-context-init": {
       const wtArg = args.find(a => a.startsWith("--workflow-type="));
@@ -1785,7 +1811,7 @@ function run(subcommand, args) {
       const workflowType = wtArg ? wtArg.slice("--workflow-type=".length) : "dev";
       const scope = scopeArg ? scopeArg.slice("--scope=".length) : undefined;
       const primaryBranch = branchArg ? branchArg.slice("--primary-branch=".length) : undefined;
-      return workflowContextInit({ workflowType, scope, primaryBranch });
+      return workflowContextInit({ workflowType, scope, primaryBranch, fresh: args.includes("--fresh") });
     }
     case "mark-claude-mem-skipped": {
       // Operator-declarable skip for claude-mem harvest. When session

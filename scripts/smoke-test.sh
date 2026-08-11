@@ -20625,6 +20625,65 @@ else
   fail "F60: scope_hint provenance regressed — got '$F60_OUT' (want in_diff,governed_only), contract_documented=$F60_DOC (want >=1)"
 fi
 
+# F61: a corrected scope survives a cache hit, and `init` stops eating the task.
+# The cache key is the changed-file set, deliberately not the free-text task —
+# but the early return sat ABOVE the activation write, so re-running with fixed
+# scope text re-served the stale task and the only exit was `state update task=`
+# by hand. Compounding it, `init` (which every context-init runs at the top for
+# its payload alone) wrote its placeholder unconditionally, so the real task was
+# destroyed before the bundle ever looked at it — invisible on the cached path,
+# where nothing downstream rewrites it. Field: an operator passed a 1.6KB scope
+# and read back the literal "code review". The four assertions below are the
+# four halves of that trap; `--fresh` is asserted because the CLI's own hint
+# recommends it and it was parsed by nothing.
+F61_T=$(mktemp -d); mkdir -p "$F61_T/.devt/state"
+printf '{}' > "$F61_T/.devt/config.json"
+(cd "$F61_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git commit -q --allow-empty -m base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+cat > "$F61_T/probe.cjs" <<'F61EOF'
+const path = require("path"), fs = require("fs");
+const M = process.env.DEVT_MODULES;
+// Stub ONLY graphify freshness — the short-circuit is unreachable without a
+// graph, and this gate is about what the short-circuit does, not about graphify.
+const gpath = require.resolve(M + "/graphify.cjs");
+const real = require(gpath);
+require.cache[gpath].exports = { ...real, freshness: () => ({ fresh: true, head: "f61f61f61f61f61f" }) };
+const state = require(M + "/state.cjs"), sg = require(M + "/state-graphify.cjs");
+const CLI = M.replace(/modules$/, "devt-tools.cjs");
+const dir = path.join(process.cwd(), ".devt", "state");
+const T = () => String((state.readState() || {}).task || "");
+const seed = (task) => {
+  state.updateState(["active=true", "workflow_type=code_review", "phase=context_init", "task=" + task]);
+  fs.writeFileSync(path.join(dir, "preflight-brief.json"), JSON.stringify({ staleness: { state: "ready" }, topic: { symbols: [] }, graph_stats: { state: "ready", trust: "dense" } }));
+  fs.writeFileSync(path.join(dir, "graphify-impact-plan.json"), JSON.stringify({ tier: "skip", args: {} }));
+  state.updateState(["context_init_scope_sig=" + sg.contextInitScopeSig("main"), "context_init_graph_head=f61f61f61f61f61f"]);
+};
+const out = [];
+seed("code review");
+const a = state.run("review-context-init", ["--scope=CORRECTED", "--primary-branch=main"]);
+out.push(a.short_circuited === true && T() === "CORRECTED" ? "persisted" : "LOST");
+seed("a real prior task");
+const b = state.run("review-context-init", ["--primary-branch=main"]);
+out.push(b.short_circuited === true && b.scope_missing === true && (b.degraded_fields || []).length > 0 && T() === "a real prior task" ? "reported" : "SILENT");
+seed("code review");
+const c = state.run("review-context-init", ["--scope=FRESHSCOPE", "--primary-branch=main", "--fresh"]);
+out.push(c.short_circuited === false && T() === "FRESHSCOPE" ? "bypassed" : "IGNORED");
+const { spawnSync } = require("child_process");
+state.updateState(["task=OPERATOR SCOPED"]);
+spawnSync("node", [CLI, "init", "review"], { cwd: process.cwd(), encoding: "utf8" });
+out.push(T() === "OPERATOR SCOPED" ? "preserved" : "CLOBBERED");
+spawnSync("node", [CLI, "init", "review", "EXPLICIT TASK"], { cwd: process.cwd(), encoding: "utf8" });
+out.push(T() === "EXPLICIT TASK" ? "set" : "DROPPED");
+console.log(out.join(","));
+F61EOF
+F61_OUT=$(cd "$F61_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
+rm -rf "$F61_T"
+if [ "$F61_OUT" = "persisted,reported,bypassed,preserved,set" ]; then
+  pass "F61: a corrected scope survives a cache hit, an absent one is reported not silently defaulted, --fresh bypasses the cache, and init preserves a scoped task while still honouring an explicit one"
+else
+  fail "F61: context-init scope handling regressed — got '$F61_OUT' (want persisted,reported,bypassed,preserved,set)"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"
