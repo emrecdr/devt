@@ -16485,7 +16485,7 @@ fi
 K250_CHECK=$(node -e '
 const { loadInlineRubrics } = require("'"$ROOT"'/bin/modules/init.cjs");
 const r = loadInlineRubrics("'"$ROOT"'", null, {dev:"dev.v1.md", code_review:"code_review.v2.md", code_review_parallel:"code_review.v2.md"});
-console.log(r.content !== null && Object.keys(r.content).length === 3 && r.bytes <= 32768 ? "OK" : "FAIL:bytes=" + r.bytes);
+console.log(r.content !== null && Object.keys(r.content).length === 3 && r.bytes <= 49152 ? "OK" : "FAIL:bytes=" + r.bytes);
 ' 2>/dev/null || echo "FAIL:node error")
 if [ "$K250_CHECK" = "OK" ]; then
   pass "K250: inline rubrics dedup aliased files — shipped default trio inlines under the cap (was silently path-only)"
@@ -20493,6 +20493,32 @@ if [ "$F56_OK" -eq 1 ]; then
   pass "F56: axis H is orchestrator-only (lanes excused), absent ledger reads differently from a clean one, inline-rubric fallback is announced, trio still inlines ($F56_INLINE)"
 else
   fail "F56: orchestrator-axis / rubric-budget contract regressed:$F56_WHY"
+fi
+
+# F57: the scratchpad's documented reset is real, and it archives rather than
+# deletes. Its skill said "Ephemeral — resets between workflows" while
+# resetSoft left it untouched, so it accumulated across every workflow a
+# project ever ran: 80KB / 345 lines / 143 #KNOWLEDGE-CANDIDATE tags in the
+# field, INCLUDING four entries that explicitly invalidate earlier ones. The
+# curator promotes from that pile, so the memory layer's premise — that it is
+# trustworthy — was being fed known-refuted claims. Rotation must PRESERVE the
+# content: candidates are real work, and deleting them to fix an accumulation
+# bug would trade one silent loss for another.
+F57_T=$(mktemp -d); mkdir -p "$F57_T/.devt/state"
+(cd "$F57_T" && git init -q . >/dev/null 2>&1)
+(cd "$F57_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review task="f57 prior" phase=review --skip-gates >/dev/null 2>&1)
+printf '#KNOWLEDGE-CANDIDATE: [type=concept] carried from a prior workflow\n' > "$F57_T/.devt/state/scratchpad.md"
+(cd "$F57_T" && node "$ROOT/bin/devt-tools.cjs" state reset-soft >/dev/null 2>&1)
+F57_LIVE=$([ -f "$F57_T/.devt/state/scratchpad.md" ] && echo present || echo rotated)
+F57_KEPT=$({ /usr/bin/grep -rc 'KNOWLEDGE-CANDIDATE' "$F57_T/.devt/state/.archive/" 2>/dev/null || true; } | head -1 | cut -d: -f2)
+[ -z "$F57_KEPT" ] && F57_KEPT=$({ /usr/bin/grep -rh -c 'KNOWLEDGE-CANDIDATE' "$F57_T/.devt/state/.archive/" 2>/dev/null || true; } | head -1)
+# The skill text must describe what actually happens.
+F57_DOC=$({ /usr/bin/grep -c 'rotates it to' "$ROOT/skills/scratchpad/SKILL.md" || true; })
+rm -rf "$F57_T"
+if [ "$F57_LIVE" = "rotated" ] && [ "${F57_KEPT:-0}" -ge 1 ] && [ "${F57_DOC:-0}" -ge 1 ]; then
+  pass "F57: reset-soft rotates scratchpad.md into .archive/ preserving its candidates, and the skill documents the real behaviour"
+else
+  fail "F57: scratchpad rotation broken — live=$F57_LIVE (want rotated), candidates_archived=$F57_KEPT (want >=1), skill_documents=$F57_DOC (want >=1)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

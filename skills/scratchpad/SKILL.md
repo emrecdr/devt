@@ -76,7 +76,7 @@ The scratchpad is cleared at the start of each new workflow. Do not rely on scra
 - **Timestamped**: Every entry includes the time for ordering
 - **Categorized**: Every entry has a category label from the table above
 - **Concise**: Capture the essential information, not a full narrative (1-2 lines per entry)
-- **Ephemeral**: Do not treat the scratchpad as permanent storage — it resets between workflows
+- **Ephemeral**: Do not treat the scratchpad as permanent storage — `state reset-soft` rotates it to `.devt/state/.archive/scratchpad-<workflow_id>.md` at workflow start. Rotated, not deleted: knowledge candidates stay harvestable and keep the provenance of the workflow that produced them. Anything that must outlive the workflow belongs in `.devt/memory/` via the curator, not here — an un-rotated scratchpad accumulates entries that later ones explicitly refute, and the curator then promotes from a pile containing known-false claims
 
 ## Anti-patterns
 

@@ -8,6 +8,17 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### The scratchpad's documented reset is now real
+
+`skills/scratchpad/SKILL.md` says *"Ephemeral: do not treat the scratchpad as permanent storage — it resets between workflows"*, and `reset-soft` left it untouched — so it accumulated across every workflow a project ever ran. Field: **80 KB, 345 lines, 143 `#KNOWLEDGE-CANDIDATE` tags** spanning domains absent from the diff, and it grew during the run that reported it. Four entries explicitly invalidate earlier ones ("CORRECTS the stale line-9 candidate", "is FALSE", "must NOT be promoted to memory") — and the curator promotes from that pile, so the memory layer's entire premise, that it is trustworthy, was being fed known-refuted claims.
+
+`reset-soft` now rotates it to `.devt/state/.archive/scratchpad-<workflow_id>.md`. **Archived, never deleted** — the candidates are real work and stay harvestable, keyed by the workflow that produced them so provenance survives the rotation. Fixing an accumulation bug by deleting the pile would have traded one silent loss for another. The skill text now describes what actually happens (**F57**).
+
+### Inline rubric cap raised to 48 KB
+
+The shipped trio had reached ~32.6 KB against a 32 KB ceiling, and correct rubric content was being trimmed to fit — twice in one release. The cap was shaped when the corpus was smaller and inlining was the default; rubric-by-reference is the default now, so it bounds the `--inline-rules` worktree path rather than the common one. Breaching it is loud at both call sites, which was the actual fix: over the cap, every dispatch loses its inline rubric and lanes self-grade ad hoc against one they never received.
+
+
 ## [0.242.1] - 2026-08-11
 
 ### First receipt on v0.242.0 — two of these were my own regressions

@@ -55,10 +55,17 @@ const MAX_INLINE_BYTES = 64 * 1024;
 // Pinned-rubric content inlined into the init payload. The verifier reads
 // `references/rubrics/<filename>` on every iteration; inlining keeps the
 // dispatch prompt byte-stable across retries and saves one Read per iter.
-// Mirrors loadInlineGuardrails: small files (~5 KB each); cap at 32 KB total
-// so a future multi-rubric project still fits before falling back to
-// path-only via `<rubric_path>`.
-const MAX_INLINE_RUBRIC_BYTES = 32 * 1024;
+// Mirrors loadInlineGuardrails, capped so a runaway rubric corpus cannot
+// dominate a dispatch. Raised from 32 KB once the shipped trio reached ~32.6 KB
+// and started forcing prose to be trimmed out of correct rubrics to fit — the
+// cap was shaped when the corpus was smaller and inlining was the default.
+// Rubric-by-reference is the default now, so this bounds the `--inline-rules`
+// worktree path rather than the common one. Breaching it is loud at both call
+// sites (init propagates the warning, dispatch prints it); it was the SILENCE
+// that made this dangerous, not the number — over the cap every dispatch
+// loses its inline rubric and lanes self-grade ad hoc against one they never
+// received.
+const MAX_INLINE_RUBRIC_BYTES = 48 * 1024;
 
 function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   if (!pluginRoot || !rubrics) return { content: null, bytes: 0, warnings: [] };

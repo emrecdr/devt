@@ -666,6 +666,32 @@ function resetSoft() {
       }
     }
 
+    // Rotate the scratchpad. Its own skill says "Ephemeral: do not treat the
+    // scratchpad as permanent storage — it resets between workflows", and
+    // resetSoft left it alone — so it accumulated across every workflow a
+    // project ever ran. Field: 80KB / 345 lines / 143 #KNOWLEDGE-CANDIDATE
+    // tags spanning domains absent from the diff, INCLUDING four entries that
+    // explicitly invalidate earlier ones ("CORRECTS the stale line-9
+    // candidate", "is FALSE", "must NOT be promoted"). The curator promotes
+    // from that pile, so the memory layer's whole premise — that it is
+    // trustworthy — was being fed known-refuted claims.
+    //
+    // Archived, never deleted: the candidates are real work and the curator
+    // can still harvest them. Keyed by the workflow that produced them so the
+    // provenance survives the rotation.
+    let scratchpadRotated = null;
+    try {
+      const spSrc = path.join(stateDir, "scratchpad.md");
+      if (fs.existsSync(spSrc) && fs.statSync(spSrc).size > 0) {
+        const archDir = path.join(getStateRoot(), ARCHIVE_DIR);
+        fs.mkdirSync(archDir, { recursive: true });
+        const tag = prevWorkflowId || archiveTs;
+        const dst = path.join(archDir, `scratchpad-${tag}.md`);
+        fs.renameSync(spSrc, dst);
+        scratchpadRotated = path.relative(getStateRoot(), dst);
+      }
+    } catch (e) { scratchpadRotated = `rotation failed: ${e && e.message}`; }
+
     // Evict review-instance artifacts to prevent fresh-run collision
     // (filename claim conflicts + stale-cid leakage into consolidation).
     // See RESET_SOFT_EVICT_PATTERNS comment for safety rationale.
@@ -711,6 +737,7 @@ function resetSoft() {
       new_first_created_at: nowIso,
       cleared_fields: RESET_SOFT_CLEAR_KEYS,
       rotated_logs: rotated,
+      ...(scratchpadRotated ? { scratchpad_rotated: scratchpadRotated } : {}),
       evicted_artifacts: evicted,
       preserved: {
         workflow_id_history_depth: history.length,
