@@ -20,6 +20,16 @@ That same early return carried no `scope_missing` and hardcoded `degraded_fields
 
 `--fresh` was recommended by the short-circuit's own stderr hint and parsed by nothing; `review-context-init` accepted three flags and silently discarded it. It now bypasses the cache, as the hint always claimed. The message also names what the cache key is derived from and whether `task` was written this call — the two facts that cost the reporter three re-runs to establish by reading `workflow.yaml` directly (**F61**).
 
+### The truncation notice reports what was actually withheld
+
+`args.symbols` for the `symbol_anchored` tier is a **union** — the diff-symbol extractor's output merged with the exact-resolved topic anchors — while `topic-symbols-dropped.json` was the tail of the *topic* list alone. Two different lists. A symbol cut from the topic tail could therefore be submitted anyway through the diff leg, and the notice reported it as absent.
+
+Field: a reviewer compared `args.symbols` against the dropped list, found two names in **both**, and reasonably concluded the artifact was lying about its own truncation. A lane's truncation claim built on that notice was then half-wrong, and the verifier adjudicating it had to work out which half. The list was never internally inconsistent — it was answering a question nobody asked it.
+
+The notice is now reconciled against what actually went to the MCP call: only symbols no leg submitted are listed, and the ones recovered via the diff leg are **counted rather than absorbed**, so the reduction is visible.
+
+Three adjacent honesty fixes in the same path. The section claimed its contents were "listed in original preflight ranking order", which stopped being true the moment diff-ranking shipped — it now states the ordering it actually used, read from the plan rather than assumed, and says nothing when the plan doesn't say. `branchDiffText` diffed `base...HEAD` only, so symbol ranking and the hunk census both silently no-opped on uncommitted work — the same empty-`base...HEAD` hole `collectChangedFiles` was already fixed for, whose comment says exactly that; it now falls back to the working tree (fallback, not union, because a change both committed and further modified would otherwise count twice and the census reads these hunks too). And the graph-node filter — the only thing that removes plausible-looking non-symbols the shape gate and verb denylist both pass, like `Verify`, `Modern`, or a project name — sat behind a catch-all that made "found nothing to remove" and "never ran" identical; `preflight-brief.json::topic.symbol_graph_filter` now says which (**F64**).
+
 ### The rubric is reachable from where the reviewer actually runs
 
 `<rubric_path>` pointed at the plugin root — **outside the project under review**. A lane declined to open it: *"outside this repo and was not opened"*, a policy refusal rather than a filesystem error, which no path fix inside the plugin can reach. Making the path absolute was the earlier attempt at this and was not enough; the requirement is the project boundary, not the path shape.

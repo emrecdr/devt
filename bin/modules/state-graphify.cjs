@@ -629,10 +629,20 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     if (_branchDiff !== undefined) return _branchDiff;
     try {
       const { spawnSync } = require("child_process");
-      const d = spawnSync("git", ["diff", "-U0", `${primaryBranch}...HEAD`], {
-        cwd: findProjectRoot(), encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
-      });
-      _branchDiff = (d.status !== 0 || !d.stdout) ? null : d.stdout;
+      const gitDiff = (args) => {
+        const d = spawnSync("git", args, {
+          cwd: findProjectRoot(), encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
+        });
+        return (d.status !== 0 || !d.stdout) ? null : d.stdout;
+      };
+      // An uncommitted branch has an EMPTY base...HEAD diff — the same hole
+      // collectChangedFiles was fixed for, still open here. Left as-is, symbol
+      // ranking and the hunk census both silently no-op exactly when the review
+      // scope lives in the working tree, which is the common case for a review
+      // run before committing. Fall back rather than union: a change that is
+      // both committed and further modified would otherwise be counted twice,
+      // and the census reads these hunks too.
+      _branchDiff = gitDiff(["diff", "-U0", `${primaryBranch}...HEAD`]) || gitDiff(["diff", "-U0", "HEAD"]) || null;
     } catch { _branchDiff = null; }
     return _branchDiff;
   };
@@ -692,13 +702,12 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   }
   const topicSymbols = ordered.slice(0, TOPIC_CAP);
   const topicSymbolsCount = topicSymbols.length;
+  // The tail of the TOPIC list — not yet "what was dropped". args.symbols is a
+  // union of this list with the diff-symbol extractor's output, so a symbol
+  // cut from the topic tail can still be submitted via the diff leg. The
+  // reconciliation happens once `args` is known; writing the raw tail here
+  // told a reviewer a symbol was absent when it had in fact been sent.
   const droppedSymbols = ordered.slice(TOPIC_CAP);
-  const topicSymbolsDroppedCount = droppedSymbols.length;
-  if (topicSymbolsDroppedCount > 0) {
-    try { atomicWriteJsonSync(droppedPath, droppedSymbols); } catch { /* best-effort */ }
-  } else {
-    try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
-  }
 
   // Config — graphify provider + impact threshold (single config read)
   let gitProvider = "";
@@ -1043,8 +1052,26 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (symbolAnchoredCaveat) plan.symbol_anchored_caveat = symbolAnchoredCaveat;
   if (census) plan.hunk_census = census;
   if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
+  // Reconcile the topic tail against what actually went to the MCP call. The
+  // symbol_anchored tier submits `merged` — the union of the diff-symbol
+  // extractor's output with the exact-resolved topic anchors — so membership in
+  // the topic tail does NOT mean the symbol was withheld. Field: a reviewer
+  // compared args.symbols against the dropped list, found two names in both,
+  // and reasonably concluded the artifact was lying about its own truncation.
+  // Only symbols absent from the submitted set were genuinely dropped; the rest
+  // are reported as recovered so the reduction is visible rather than silent.
+  const submittedSymbols = new Set(Array.isArray(args && args.symbols) ? args.symbols : []);
+  const genuinelyDropped = droppedSymbols.filter((s) => !submittedSymbols.has(s));
+  const recoveredViaOtherLeg = droppedSymbols.length - genuinelyDropped.length;
+  const topicSymbolsDroppedCount = genuinelyDropped.length;
+  if (topicSymbolsDroppedCount > 0) {
+    try { atomicWriteJsonSync(droppedPath, genuinelyDropped); } catch { /* best-effort */ }
+  } else {
+    try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
+  }
   if (topicSymbolsDroppedCount > 0) {
     plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
+    if (recoveredViaOtherLeg > 0) plan.topic_symbols_recovered_via_diff_leg = recoveredViaOtherLeg;
     // Whether the truncation was diff-ranked or fell back to topic order —
     // a reader auditing what was dropped needs to know which ordering produced
     // the tail. Diff-ranking is safe to apply to this budget ONLY because the

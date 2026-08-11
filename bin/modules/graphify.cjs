@@ -2005,26 +2005,38 @@ function augmentImpactMap(opts = {}) {
   const dropped = readJson(droppedPath, null);
   if (Array.isArray(dropped) && dropped.length > 0) {
     const n = dropped.length;
-    // True pre-truncation denominator. The workflow's `--raw-count` arg was
-    // never plumbed (TOPIC_SYMBOLS_RAW_COUNT is unset → always "unknown"),
-    // which fabricated the denominator. Prefer an explicit numeric rawCount
-    // (test/hand-set); otherwise derive from the authoritative source — the
-    // same preflight-brief.json::topic.symbols list state.cjs truncated — or
-    // fall back to kept(32)+dropped. The 32 is devt's OWN pre-truncation topic
-    // cap (state.cjs, applied before blast_radius to keep args verbatim), NOT
-    // blast_radius's own symbol limit (256).
-    const TOPIC_CAP = 32;
+    // The sidecar now holds only symbols the cap cut AND no other leg
+    // submitted, so a fabricated `dropped + 32` denominator would understate
+    // the pool it was drawn from. Prefer an explicit numeric rawCount
+    // (test/hand-set), else the authoritative source — the same
+    // preflight-brief.json::topic.symbols list the cap was applied to. When
+    // neither is available, state the count WITHOUT a denominator: an invented
+    // "N of M" is the failure this section exists to prevent.
     const optsRawNum = (rawCount !== "?" && !isNaN(Number(rawCount))) ? Number(rawCount) : null;
     const briefRaw = (brief && brief.topic && Array.isArray(brief.topic.symbols)) ? brief.topic.symbols.length : null;
-    const trueRaw = optsRawNum != null ? optsRawNum
-      : (briefRaw != null && briefRaw >= n + TOPIC_CAP) ? briefRaw
-      : (n + TOPIC_CAP);
+    const trueRaw = optsRawNum != null ? optsRawNum : (briefRaw != null && briefRaw >= n ? briefRaw : null);
+    const ofPool = trueRaw != null ? ` of the ${trueRaw} extracted topic symbols` : "";
+    // The tail is in the order the CAP saw it, which is diff-mention rank when a
+    // diff was available and upstream topic order otherwise — not "original
+    // preflight ranking order", which the section used to claim and which stopped
+    // being true the moment diff-ranking shipped. Read from the plan rather than
+    // guessed, and omitted when the plan does not say.
+    let orderNote = "";
+    try {
+      const plan = readJson(path.join(stateDir, "graphify-impact-plan.json"), null);
+      if (plan && typeof plan.topic_symbols_diff_ranked === "boolean") {
+        orderNote = plan.topic_symbols_diff_ranked
+          ? " Listed in the order the cap saw them: ranked by how often the diff mentions each symbol, so these are the LEAST diff-mentioned of the pool."
+          : " Listed in upstream topic order (no diff signal was available to rank by).";
+      }
+    } catch { /* plan unreadable — say nothing about ordering rather than guess */ }
+    const scopeNote = ` These were cut by devt's 32-symbol topic cap AND not submitted through any other leg — symbols the cap cut but the diff-symbol extractor sent anyway are excluded, because reporting those as absent is how this notice previously misled a reviewer.`;
     if (n > 5) {
-      const banner = `> **Subject symbols truncated**: ${n} of ${trueRaw} extracted topic symbols were dropped by devt's 32-symbol topic cap (applied before blast_radius to keep args verbatim). Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
+      const banner = `> **Subject symbols truncated**: ${n}${ofPool} were dropped and not submitted.${scopeNote} Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
       try { fs.writeFileSync(giPath, banner + (fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "")); appended.push("dropped_banner"); } catch { /* skip */ }
     }
     const rows = dropped.map(s => `- ${s}`);
-    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n} of the ${trueRaw} extracted topic symbols were truncated by devt's 32-symbol topic cap (applied before blast_radius to keep args verbatim). Listed below in original preflight ranking order. Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
+    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n}${ofPool} were dropped and not submitted.${scopeNote}${orderNote} Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
   }
 
   // 4. Hyperedge completeness (partial-coverage groupings).

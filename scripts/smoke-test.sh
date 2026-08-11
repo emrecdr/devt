@@ -16299,7 +16299,7 @@ K238_CHECK=$(node -e '
   const want = [
     ["## God-node warning", "- `app/routes.py` — `handler` has 60 edges; signature changes ripple to all callers. Prefer additive changes."],
     ["## Symbol-level god-nodes", "- `handler` (app/routes.py) has 60 edges; any non-additive change cascades through every caller."],
-    ["> **Subject symbols truncated**: 7 of 20", null],
+    ["> **Subject symbols truncated**: 7 of the 20 extracted topic symbols were dropped and not submitted.", null],
     ["## Subject symbols dropped (truncation notice)", null],
     ["## Hyperedge completeness (partial-coverage semantic groupings)", "- **lf** — 1 of 4 members in scope (25% complete). Out-of-scope members: b, c, d"],
     ["## Ambiguous bindings", "- `Foo` → resolves at `app/legacy.py` (label: `Foo`)"],
@@ -20790,6 +20790,82 @@ if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,sc
   pass "F63: the rubric is materialized inside the project and every <rubric_path> resolves there, lanes are asked for a score with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
 else
   fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render='$F63_OUT' (want inproject,axispolicy,scored,deferred,declares) consolidator_copies=$F63_CONS"
+fi
+
+# F64: the truncation notice reports what was actually withheld.
+# args.symbols for the symbol_anchored tier is a UNION of the diff-symbol
+# extractor's output with the exact-resolved topic anchors, while the dropped
+# sidecar was the tail of the TOPIC list alone — two different lists. A symbol
+# cut from the topic tail could therefore be submitted anyway via the diff leg,
+# and the notice reported it as absent. Field: a reviewer compared args.symbols
+# against the dropped list, found two names in both, and reasonably concluded
+# the artifact was lying about its own truncation; a lane's truncation claim
+# built on it was then half-wrong. Also pins the ordering claim (the section
+# asserted "original preflight ranking order", which stopped being true when
+# diff-ranking shipped), the ranking's blindness to uncommitted work (the same
+# empty-base...HEAD hole collectChangedFiles was already fixed for), and the
+# graph-node filter's silence (an empty dropped list means "nothing to remove"
+# only when the filter actually ran).
+F64_T=$(mktemp -d); mkdir -p "$F64_T/.devt/state" "$F64_T/app"
+printf '{}' > "$F64_T/.devt/config.json"
+printf 'class S36: pass\n' > "$F64_T/app/a.py"
+(cd "$F64_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+# Uncommitted change only — base...HEAD is empty, so ranking must fall back.
+printf 'class S36: pass\nclass S37: pass\n' > "$F64_T/app/a.py"
+cat > "$F64_T/probe.cjs" <<'F64EOF'
+const fs = require("fs"), path = require("path");
+const M = process.env.DEVT_MODULES;
+const gp = require.resolve(M + "/graphify.cjs");
+const real = require(gp);
+// The diff-symbol extractor independently returns S35 — which lives in the
+// TOPIC TAIL. That overlap is the whole point of the gate.
+require.cache[gp].exports = { ...real,
+  status: () => ({ state: "ready", trust: "dense" }),
+  freshness: () => ({ fresh: true, head: "f64" }),
+  symbolsInFiles: () => ({ symbols: [{ symbol: "S35" }], files_without_nodes: [] }),
+  resolveExactSymbols: () => ({ resolved: ["S1"], unresolved: [] }),
+};
+const sg = require(M + "/state-graphify.cjs");
+const dir = path.join(process.cwd(), ".devt", "state");
+const symbols = Array.from({ length: 40 }, (_, i) => "S" + (i + 1));
+fs.writeFileSync(path.join(dir, "preflight-brief.json"), JSON.stringify({
+  topic: { symbols }, graph_stats: { state: "ready", trust: "dense" }, staleness: { state: "ready" } }));
+const plan = sg.computeGraphifyImpactPlan({ reviewScope: "x", primaryBranch: "main" });
+const submitted = new Set((plan.args && plan.args.symbols) || []);
+let sidecar = []; try { sidecar = JSON.parse(fs.readFileSync(path.join(dir, "topic-symbols-dropped.json"), "utf8")); } catch { /* none */ }
+const out = [];
+out.push(sidecar.length > 0 && sidecar.filter((s) => submitted.has(s)).length === 0 ? "reconciled" : "OVERLAP");
+// The reduction must be visible, not silently absorbed.
+out.push(plan.topic_symbols_recovered_via_diff_leg > 0 ? "reported" : "SILENT");
+// base...HEAD is empty here; ranking must still see the working tree.
+out.push(plan.topic_symbols_diff_ranked === true ? "ranked" : "BLIND");
+const g = require(gp);
+g.augmentImpactMap({ projectRoot: process.cwd() });
+const gi = fs.readFileSync(path.join(dir, "graph-impact.md"), "utf8");
+out.push(!/original preflight ranking order/.test(gi) ? "honest" : "FALSECLAIM");
+// Anchored to the SECTION, not the file: the banner carries the same caveat
+// and only renders above 5 dropped, so a file-wide match let the section lose
+// its copy without the gate noticing.
+const sec = gi.slice(gi.indexOf("## Subject symbols dropped (truncation notice)"));
+out.push(/not submitted through any other leg/.test(sec) ? "scoped" : "UNSCOPED");
+console.log(out.join(","));
+F64EOF
+F64_OUT=$(cd "$F64_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
+# Graph-node filter liveness: with graphify unavailable the brief must SAY the
+# filter did not run, rather than leaving an empty dropped-list to read as clean.
+(cd "$F64_T" && node "$ROOT/bin/devt-tools.cjs" preflight generate "review the auth mapper" >/dev/null 2>&1)
+F64_FILT=$(node -e "
+  try {
+    const d = JSON.parse(require('fs').readFileSync('$F64_T/.devt/state/preflight-brief.json','utf8'));
+    const f = (d.topic || {}).symbol_graph_filter;
+    console.log(f && f.ran === false && typeof f.reason === 'string' && f.reason.length > 0 ? 'declared' : 'SILENT');
+  } catch { console.log('ERR'); }" 2>/dev/null)
+rm -rf "$F64_T"
+if [ "$F64_OUT" = "reconciled,reported,ranked,honest,scoped" ] && [ "$F64_FILT" = "declared" ]; then
+  pass "F64: the truncation notice lists only symbols no leg submitted (recovered ones counted, not absorbed), ranking sees uncommitted work, the notice no longer claims an ordering it abandoned, and a graph-node filter that did not run says so"
+else
+  fail "F64: truncation-notice honesty regressed — probe='$F64_OUT' (want reconciled,reported,ranked,honest,scoped) graph_filter=$F64_FILT (want declared)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

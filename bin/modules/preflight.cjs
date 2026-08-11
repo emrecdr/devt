@@ -1504,9 +1504,21 @@ function generate(taskText, opts) {
   // filtering) when graphify unavailable — identical degradation pattern to
   // the central-symbol filter in pickCentralSymbol.
   let symbolsDroppedNoGraphNode = [];
+  // This filter is the ONLY thing that removes plausible-looking non-symbols
+  // (PascalCase prose words the identifier-shape gate and the verb denylist
+  // both pass — "Verify", "Modern", a project name). When it does not run,
+  // those consume anchor slots and inflate the extracted-symbol denominator,
+  // and the previous catch-all made a skipped filter indistinguishable from a
+  // filter that found nothing to remove. Record which happened.
+  let graphFilterStatus = { ran: false, reason: "not attempted" };
   try {
     const graphStatus = graphify.status();
-    if (graphStatus && graphStatus.state === "ready" && Array.isArray(topic.symbols) && topic.symbols.length > 0) {
+    const before = Array.isArray(topic.symbols) ? topic.symbols.length : 0;
+    if (!graphStatus || graphStatus.state !== "ready") {
+      graphFilterStatus = { ran: false, reason: `graphify state=${(graphStatus && graphStatus.state) || "unavailable"} — every extracted symbol survives unverified` };
+    } else if (before === 0) {
+      graphFilterStatus = { ran: false, reason: "no topic symbols to filter" };
+    } else {
       const kept = [];
       for (const sym of topic.symbols) {
         if (typeof sym !== "string" || sym.length === 0) continue;
@@ -1520,8 +1532,11 @@ function generate(taskText, opts) {
         } catch { /* per-symbol getNode error — keep symbol (defensive) */ kept.push(sym); }
       }
       topic.symbols = kept;
+      graphFilterStatus = { ran: true, reason: `${symbolsDroppedNoGraphNode.length} of ${before} extracted symbols had no graph node` };
     }
-  } catch { /* graphify unavailable — leave topic.symbols intact (legacy) */ }
+  } catch (e) {
+    graphFilterStatus = { ran: false, reason: `graph-node filter failed (${String((e && e.message) || e).slice(0, 80)}) — every extracted symbol survives unverified` };
+  }
 
   // Run lanes
   const A = laneA(topic);
@@ -1844,6 +1859,9 @@ function generate(taskText, opts) {
     // (when graphify was ready). Empty array when graphify disabled OR all
     // extracted symbols were graph-anchored.
     symbols_dropped_no_graph_node: symbolsDroppedNoGraphNode,
+    // An empty symbols_dropped_no_graph_node means "nothing to remove" only
+    // when the filter actually ran; otherwise it means "nobody looked".
+    symbol_graph_filter: graphFilterStatus,
   };
   atomicWriteJsonSync(sidecarDest, {
     status: "FRESH",
