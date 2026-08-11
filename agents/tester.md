@@ -331,7 +331,7 @@ Write `.devt/state/test-summary.md` with:
 
 ```json
 {
-  "status": "DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+  "status": "DONE | DONE_WITH_CONCERNS | PARTIAL | BLOCKED | NEEDS_CONTEXT",
   "verdict": "PASS | FAIL | INDETERMINATE",
   "agent": "tester",
   "workflow_type": "<from workflow.yaml>",
@@ -363,6 +363,14 @@ The `verdict` is your assessment of whether the test run was successful (`PASS` 
 
 **`coverage_files` is the source files your tests actually exercise** — not the test files themselves (those go in `test_files`). Derive it from the imports + mock targets + system-under-test references in your test bodies. Populate it accurately — a missing entry here causes the grader to retry the tester dispatch with the gap as `<review_feedback>`.
 
-**`coverage_complete` is the boolean you compute** from comparing `coverage_files` against `impl-summary.json::files_changed`: read the upstream sidecar first, then set `coverage_complete: true` IFF every entry in `impl-summary.json::files_changed` appears in your `coverage_files`. Set `false` when any modified file lacks test coverage. The deterministic grader gates on this boolean BEFORE the LLM verifier dispatches — `false` short-circuits to a tester re-dispatch with the missing files surfaced as `<review_feedback>`. This catches the silent-skip failure mode where a JSON-first tester would loop over a truncated upstream `files_changed` and report `status=DONE` while testing nothing. When `files_changed` legitimately contains untestable entries (type-only changes, config-only edits, generated code), still set `coverage_complete: false` and surface the rationale in `concerns[]` with severity `low` — the rubric's allow-list handles the categorically-untestable subset.
+**`coverage_complete` is the boolean you compute** from comparing `coverage_files` against `impl-summary.json::files_changed`: read the upstream sidecar first, then set `coverage_complete: true` IFF every entry in `impl-summary.json::files_changed` appears in your `coverage_files`. Set `false` when any modified file lacks test coverage. The deterministic grader gates on this boolean BEFORE the LLM verifier dispatches — `false` short-circuits to a tester re-dispatch with the missing files surfaced as `<review_feedback>`. This catches the silent-skip failure mode where a JSON-first tester would loop over a truncated upstream `files_changed` and report `status=DONE` while testing nothing. When `files_changed` legitimately contains untestable entries (type-only changes, config-only edits, generated code), declare them in `coverage_exempt` and keep `coverage_complete: true` — the boolean means "every changed file is either covered **or** explicitly exempted with a reason", not "every changed file has a test":
+
+```json
+"coverage_exempt": [{"file": "app/types.py", "reason": "type-only declarations, no runtime behavior"}]
+```
+
+An exemption without a `reason` does not count. Do NOT set `coverage_complete: false` for a categorically-untestable file: the deterministic grader hard-requires `true`, so `false` short-circuits to a tester re-dispatch that will reach the same conclusion and loop. Reserve `false` for a file that SHOULD have coverage and does not.
+
+**Budget wall — emit `status: PARTIAL`.** When the task spans multiple logical sections and you hit the per-dispatch tool budget mid-way, set `status: PARTIAL` with `next_section: "<name>"` rather than reporting DONE on partial work. The orchestrator routes PARTIAL to a SendMessage-resume, so your completed sections are durable and the resume continues from the named point. PARTIAL ≠ DONE_WITH_CONCERNS: PARTIAL means sections remain, DONE_WITH_CONCERNS means all sections finished with quality flags.
 
 </output_format>

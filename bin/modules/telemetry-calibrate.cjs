@@ -82,19 +82,34 @@ function _aggregateHookTrace(records) {
 
 function _aggregateGateTrace(records) {
   const byGate = new Map();
+  let unkeyed = 0;
   for (const r of records) {
-    if (!r || typeof r.gate !== "string") continue;
-    let agg = byGate.get(r.gate);
-    if (!agg) { agg = { count: 0, pass: 0, fail: 0 }; byGate.set(r.gate, agg); }
+    if (!r) continue;
+    // gate-trace.jsonl has FOUR writers and only persistGateTrace emits
+    // `gate`; council, arch-scan and graphify-fallback identify themselves
+    // with `source`. Keying on `gate` alone silently discarded three quarters
+    // of the log — including the records three skill files name as their
+    // measurement channel — while the aggregate looked complete.
+    const key = typeof r.gate === "string" ? r.gate
+      : (typeof r.source === "string" ? r.source : null);
+    if (!key) { unkeyed++; continue; }
+    let agg = byGate.get(key);
+    if (!agg) { agg = { count: 0, pass: 0, fail: 0, warn: 0, unclassified: 0 }; byGate.set(key, agg); }
     agg.count++;
-    // Gate records use either boolean `ok` (newer asserts) or string
-    // `verdict` (older assertGraphifyDecision / assertPreflightFresh).
-    // Accept both shapes — verdict "ok" is the pass signal.
+    // persistGateTrace writes `verdict` as "ok" | "warn" | "fail"; event-style
+    // writers carry neither a verdict nor an `ok`. `warn` used to match no
+    // branch at all, so it incremented count while pass+fail silently failed
+    // to sum to it.
     if (r.ok === true || r.verdict === "ok" || r.verdict === "pass") agg.pass++;
     else if (r.ok === false || r.verdict === "fail" || r.verdict === "error") agg.fail++;
+    else if (r.verdict === "warn") agg.warn++;
+    else agg.unclassified++;
   }
   const out = {};
   for (const [gate, agg] of byGate) out[gate] = agg;
+  // Never silent about what was dropped: a records-in / records-counted gap is
+  // the thing that hid this bug for as long as it hid.
+  if (unkeyed > 0) out._unkeyed_records = unkeyed;
   return out;
 }
 

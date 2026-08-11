@@ -14,6 +14,20 @@ Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-hist
 
 **`criteria_total` said 7 in the verifier envelope while the rubric said 8.** Axis I took the code-review rubric to 8 axes; the envelope prose and a copy-paste `jq` recipe still said 7. `assert-verifier-graded-all-axes` counts from the *rubric*, so a verifier obediently following its envelope declares 7 and fails the gate on a **correct** verification. The field run survived only because the verifier read the rubric, caught the contradiction and overrode its own envelope — a more compliant agent would have failed. Both sites now instruct counting from the loaded rubric rather than quoting a number. (The first fix went into the compiled copy rather than the template; `compile --check` caught it, which is what the `EDIT-SOURCE` marker exists for.)
 
+### Telemetry stopped discarding three quarters of its own log
+
+`gate-trace.jsonl` has four writers and only `persistGateTrace` emits a `gate` key — council, arch-scan and graphify-fallback identify themselves with `source`. The aggregator keyed on `gate` alone, so those three landed on disk and were skipped, including the records three skill files name as their measurement channel, while the aggregate read as complete. It now keys on `gate` **or** `source`, and reports `_unkeyed_records` rather than dropping silently.
+
+`warn` also matched no branch: it incremented `count` while `pass + fail` quietly failed to sum to it, so a warn-heavy gate read as half-missing. Buckets now sum to count by construction (**F54**).
+
+### The tester contract could not be satisfied
+
+`tester.md` instructed the tester to answer `coverage_complete: false` for a categorically-untestable file and deferred to "the rubric's allow-list". `dev.v1.md` hard-requires `true`, `walkConstraints` implements scalars as strict equality, and **no allow-list exists anywhere**. A tester following its own contract short-circuited to a re-dispatch that reached the same answer — indefinitely.
+
+Untestable files now ride `coverage_exempt: [{file, reason}]` and still count complete, so the boolean means "covered **or** explicitly exempted" rather than "every file has a test". `false` is reserved for a file that should have coverage and doesn't.
+
+**The tester also had no way to signal a budget wall.** `PARTIAL` is in the sidecar enum and routed by `agent-resume.cjs`, and appeared **zero** times in `tester.md` — the agent most likely to exhaust its budget was the one never told the recovery value existed. Now declared in the status enum and explained, with the PARTIAL vs DONE_WITH_CONCERNS distinction stated (**F55**).
+
 ### State writers now resolve the same directory the readers do
 
 `subagent-status.sh` wrote `status.json` to a bare `.devt/state`, and `dispatch` stamped `dispatch-stamps.jsonl` under `process.cwd()` — while both readers go through `getStateDir()`, which honours `DEVT_WORKFLOW_ID`. Under multi-instance mode the concurrent-rotation guard and `assert-consolidator-dispatched` each read an absent file and **passed**, disabling themselves in exactly the concurrent case they exist for. The `cwd` form also broke whenever `devt-tools` ran from a subdirectory. Four writers moved onto `getStateDir()`; the hook mirrors the same resolution in bash rather than paying a node spawn on each of its ~260 per-run invocations (**F53**).

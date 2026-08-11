@@ -20412,6 +20412,62 @@ else
   fail "F53: state-path split-brain — default_write=$F53_DEFAULT (want 1), instance_write=$F53_INSTANCE (want 1), payload_probe=$F53_PROBE (want >=1), cwd_state_paths=$F53_CWD (want 0)"
 fi
 
+# F54: gate-trace aggregation reads every writer, and every record lands in a
+# bucket. gate-trace.jsonl has FOUR writers and only persistGateTrace emits a
+# `gate` key — council, arch-scan and graphify-fallback identify by `source`.
+# Keying on `gate` alone discarded three quarters of the log, including the
+# records three skill files name as their measurement channel, while the
+# aggregate looked complete. Separately `warn` matched no branch: it
+# incremented count while pass+fail failed to sum to it, so a warn-heavy gate
+# read as half-missing.
+F54_T=$(mktemp -d); mkdir -p "$F54_T/.devt/state"
+(cd "$F54_T" && git init -q . >/dev/null 2>&1)
+cat > "$F54_T/.devt/state/gate-trace.jsonl" <<'F54EOF'
+{"ts":"2026-08-11T10:00:00Z","source":"gate_trace","gate":"assert-preflight-fresh","verdict":"ok"}
+{"ts":"2026-08-11T10:01:00Z","source":"gate_trace","gate":"assert-preflight-fresh","verdict":"warn"}
+{"ts":"2026-08-11T10:02:00Z","source":"council","stage":2}
+{"ts":"2026-08-11T10:03:00Z","source":"arch_scan","scan_id":"s1"}
+{"ts":"2026-08-11T10:04:00Z","source":"graphify_fallback","trigger":"timeout"}
+F54EOF
+F54_OUT=$( (cd "$F54_T" && node "$ROOT/bin/devt-tools.cjs" telemetry calibrate 2>/dev/null) | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{
+    try {
+      const g=(JSON.parse(s).gates)||{};
+      const series=Object.keys(g).filter(k=>!k.startsWith('_')).sort().join(',');
+      const a=g['assert-preflight-fresh']||{};
+      const sums=(a.pass+a.fail+a.warn+a.unclassified)===a.count;
+      console.log(series+'|'+(sums?'sums':'LOSES')+'|'+(a.warn||0));
+    } catch { console.log('parse-err'); }
+  })" 2>/dev/null)
+rm -rf "$F54_T"
+if [ "$F54_OUT" = "arch_scan,assert-preflight-fresh,council,graphify_fallback|sums|1" ]; then
+  pass "F54: gate-trace aggregates all four writer shapes (gate OR source) and every record is classified — warn included, buckets sum to count"
+else
+  fail "F54: gate-trace aggregation regressed — got '$F54_OUT', want 'arch_scan,assert-preflight-fresh,council,graphify_fallback|sums|1'"
+fi
+
+# F55: the tester contract is satisfiable, and its budget-wall exit exists.
+# tester.md told the tester to answer `coverage_complete: false` for a
+# categorically-untestable file and deferred to "the rubric's allow-list";
+# dev.v1.md hard-requires `true` and walkConstraints implements scalars as
+# strict equality with no allow-list anywhere. A tester following its own
+# contract therefore re-dispatched into the same answer forever. Separately
+# `PARTIAL` is in the sidecar enum and routed by agent-resume, and appeared
+# ZERO times in tester.md — the agent most likely to exhaust its budget was
+# the one never told the recovery value existed.
+F55_OK=1; F55_WHY=""
+{ /usr/bin/grep -q '"status": "DONE | DONE_WITH_CONCERNS | PARTIAL' "$ROOT/agents/tester.md"; } || { F55_OK=0; F55_WHY="$F55_WHY partial-not-in-enum"; }
+{ /usr/bin/grep -q 'status: PARTIAL' "$ROOT/agents/tester.md"; } || { F55_OK=0; F55_WHY="$F55_WHY no-budget-wall-instruction"; }
+{ /usr/bin/grep -q 'coverage_exempt' "$ROOT/agents/tester.md"; } || { F55_OK=0; F55_WHY="$F55_WHY no-exempt-mechanism"; }
+{ /usr/bin/grep -q 'coverage_exempt' "$ROOT/references/rubrics/dev.v1.md"; } || { F55_OK=0; F55_WHY="$F55_WHY rubric-silent-on-exempt"; }
+# The promise that started it must be gone from BOTH sides.
+{ /usr/bin/grep -q "rubric's allow-list" "$ROOT/agents/tester.md"; } && { F55_OK=0; F55_WHY="$F55_WHY stale-allowlist-promise"; }
+if [ "$F55_OK" -eq 1 ]; then
+  pass "F55: tester contract is satisfiable — untestable files ride coverage_exempt (both sides), the nonexistent allow-list promise is gone, and PARTIAL is declared + explained"
+else
+  fail "F55: tester contract regressed:$F55_WHY"
+fi
+
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
 if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"
