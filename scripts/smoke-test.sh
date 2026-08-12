@@ -20931,6 +20931,27 @@ out.push(!/original preflight ranking order/.test(gi) ? "honest" : "FALSECLAIM")
 // its copy without the gate noticing.
 const sec = gi.slice(gi.indexOf("## Subject symbols dropped (truncation notice)"));
 out.push(/not submitted through any other leg/.test(sec) ? "scoped" : "UNSCOPED");
+// Reconciling against the LOCALLY GENERATED args is tautological — they are
+// disjoint from the tail by construction. An attested override replaces
+// plan.args afterwards, so the only way the reported defect can return is via
+// that path: a reviewer again finds the same symbol in both lists.
+const tail = sidecar[0];
+const prior = JSON.parse(fs.readFileSync(path.join(dir, "graphify-impact-plan.json"), "utf8"));
+prior.args_overridden = true;
+prior.override_args = { symbols: [...(plan.args.symbols || []), tail] };
+fs.writeFileSync(path.join(dir, "graphify-impact-plan.json"), JSON.stringify(prior));
+const plan2 = sg.computeGraphifyImpactPlan({ reviewScope: "x", primaryBranch: "main" });
+const sub2 = new Set((plan2.args && plan2.args.symbols) || []);
+let side2 = []; try { side2 = JSON.parse(fs.readFileSync(path.join(dir, "topic-symbols-dropped.json"), "utf8")); } catch { /* none */ }
+out.push(sub2.has(tail) && !side2.includes(tail) ? "override" : "STALEARGS");
+// A tier that submits nothing has no selective submission to contrast against,
+// so "dropped and not submitted" describes an event that did not occur.
+fs.writeFileSync(path.join(dir, "graphify-impact-plan.json"), JSON.stringify({ ...plan2, topic_symbols_none_submitted: true }));
+fs.rmSync(path.join(dir, "graph-impact.md"), { force: true });
+g.augmentImpactMap({ projectRoot: process.cwd() });
+const gi2 = fs.readFileSync(path.join(dir, "graph-impact.md"), "utf8");
+const sec2 = gi2.slice(gi2.indexOf("## Subject symbols dropped (truncation notice)"));
+out.push(/submitted no symbols at all/.test(sec2) && !/were dropped and not submitted/.test(sec2) ? "nosubmit" : "IMPLIESSUBMIT");
 console.log(out.join(","));
 F64EOF
 F64_OUT=$(cd "$F64_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
@@ -20944,10 +20965,10 @@ F64_FILT=$(node -e "
     console.log(f && f.ran === false && typeof f.reason === 'string' && f.reason.length > 0 ? 'declared' : 'SILENT');
   } catch { console.log('ERR'); }" 2>/dev/null)
 rm -rf "$F64_T"
-if [ "$F64_OUT" = "reconciled,reported,ranked,honest,scoped" ] && [ "$F64_FILT" = "declared" ]; then
+if [ "$F64_OUT" = "reconciled,reported,ranked,honest,scoped,override,nosubmit" ] && [ "$F64_FILT" = "declared" ]; then
   pass "F64: the truncation notice lists only symbols no leg submitted (recovered ones counted, not absorbed), ranking sees uncommitted work, the notice no longer claims an ordering it abandoned, and a graph-node filter that did not run says so"
 else
-  fail "F64: truncation-notice honesty regressed — probe='$F64_OUT' (want reconciled,reported,ranked,honest,scoped) graph_filter=$F64_FILT (want declared)"
+  fail "F64: truncation-notice honesty regressed — probe='$F64_OUT' (want reconciled,reported,ranked,honest,scoped,override,nosubmit) graph_filter=$F64_FILT (want declared)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

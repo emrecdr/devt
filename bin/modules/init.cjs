@@ -82,32 +82,39 @@ const MAX_INLINE_RUBRIC_BYTES = 48 * 1024;
 // skip for a byte-verbatim copy devt itself owns, and re-writing an unchanged
 // rubric would churn the state mtimes several freshness gates read.
 function materializeRubrics(pluginRoot, projectRoot, rubrics) {
-  const written = {};
-  if (!pluginRoot || !projectRoot || !rubrics) return written;
+  if (!pluginRoot || !projectRoot || !rubrics) return;
   const stateDir = path.join(projectRoot, ".devt", "state");
   let dirReady = false;
-  const resolvedCache = new Map();
+  // Keyed by source path, not by workflow_type: aliased types share one file
+  // (code_review and code_review_parallel both pin code_review.v2.md), and each
+  // still needs its OWN dest — <rubric_path> is .devt/state/rubric-<type>.md
+  // with no exceptions, so a project overriding one alias gets what it
+  // configured. Caching the body rather than only the resolved path is what
+  // stops the shared source being re-read once per alias.
+  const sources = new Map();
   for (const [workflowType, filename] of Object.entries(rubrics)) {
-    if (!resolvedCache.has(filename)) resolvedCache.set(filename, require("./grader.cjs").resolveRubricFile(filename, { pluginRoot, projectRoot, requireExists: true }));
-    const resolved = resolvedCache.get(filename);
-    if (!resolved) continue;
+    if (!sources.has(filename)) {
+      const resolved = require("./grader.cjs").resolveRubricFile(filename, { pluginRoot, projectRoot, requireExists: true });
+      let entry = null;
+      try { if (resolved) entry = { path: resolved, stat: fs.statSync(resolved), body: null }; } catch { /* unreadable source */ }
+      sources.set(filename, entry);
+    }
+    const src = sources.get(filename);
+    if (!src) continue;
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const dest = path.join(stateDir, `rubric-${workflowType}.md`);
     try {
-      const src = fs.statSync(resolved);
       let fresh = false;
       try {
         const cur = fs.statSync(dest);
-        fresh = cur.size === src.size && cur.mtimeMs >= src.mtimeMs;
+        fresh = cur.size === src.stat.size && cur.mtimeMs >= src.stat.mtimeMs;
       } catch { /* dest absent — write it */ }
-      if (!fresh) {
-        if (!dirReady) { fs.mkdirSync(stateDir, { recursive: true }); dirReady = true; }
-        atomicWriteFileSync(dest, fs.readFileSync(resolved, "utf8"));
-      }
-      written[workflowType] = `.devt/state/rubric-${workflowType}.md`;
+      if (fresh) continue;
+      if (src.body === null) src.body = fs.readFileSync(src.path, "utf8");
+      if (!dirReady) { fs.mkdirSync(stateDir, { recursive: true }); dirReady = true; }
+      atomicWriteFileSync(dest, src.body);
     } catch { /* unresolvable source or unwritable state dir — the envelope's absence directive covers it */ }
   }
-  return written;
 }
 
 

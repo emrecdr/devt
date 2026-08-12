@@ -2944,16 +2944,18 @@ function _hygieneGuardFiring(dir, sinceMs) {
 // A zero count is only "clean" when something was watching. Splits the old
 // single pass verdict into clean / unknown so a consumer can tell the guard
 // found nothing from the guard never having looked.
-function _guardLivenessVerdict(dir, anchorMs, base, ledgerProvesLive = false) {
+function _guardLivenessVerdict(dir, anchorMs, base, { ledgerProvesLive = false, scan = true } = {}) {
   // In-window ledger records are themselves proof the guard ran — it wrote them
   // — so that caller skips the trace read. Its evidence is named separately
   // from a trace count, because one carries a firing number and the other does
   // not, and collapsing them would make `evidence` mean two things.
-  const firing = ledgerProvesLive ? null : _hygieneGuardFiring(dir, anchorMs);
+  const firing = (ledgerProvesLive || !scan) ? null : _hygieneGuardFiring(dir, anchorMs);
   const live = ledgerProvesLive || Boolean(firing && firing.at);
   const why = ledgerProvesLive
     ? "the ledger carries this workflow's own records, so the guard demonstrably ran"
-    : firing === null
+    : !scan
+      ? "and dispatch_hygiene_mode=off, so guard liveness was not checked"
+      : firing === null
       ? "but the hook trace is unreadable, so a clean run cannot be told apart from a guard that never fired"
       : live
         ? `dispatch-hygiene-guard.sh last ran at ${firing.at} in this window and recorded nothing`
@@ -2978,14 +2980,10 @@ function assertNoRawDispatchesThisSession() {
   if (anchorMs === 0) {
     return { ok: true, warn: true, evidence: "unknown", raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined, so nothing could be counted; gate inapplicable" };
   }
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
-  if (!fs.existsSync(warningsPath)) {
-    return _guardLivenessVerdict(dir, anchorMs, {
-      raw_dispatch_count: 0,
-      reason: "no raw dispatches recorded in this workflow's window (dispatch-warnings.jsonl absent)",
-    });
-  }
+  // Read the config BEFORE gathering any evidence: liveness costs a backward
+  // walk of the hook trace, and it is pure waste for a gate the project turned
+  // off — worst-case waste, since a disabled guard never fires and the walk
+  // therefore runs to the window's end before concluding so.
   // Honor the same config knob the PreToolUse hook reads. When mode is "warn"
   // or "off", this gate returns ok:true with the count surfaced so consumers
   // can choose to log it without blocking.
@@ -3009,6 +3007,15 @@ function assertNoRawDispatchesThisSession() {
       killThreshold = cfg.dispatch_hygiene_kill_threshold;
     }
   } catch { /* keep defaults on any failure */ }
+
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
+  if (!fs.existsSync(warningsPath)) {
+    return _guardLivenessVerdict(dir, anchorMs, {
+      raw_dispatch_count: 0,
+      reason: "no raw dispatches recorded in this workflow's window (dispatch-warnings.jsonl absent)",
+    }, { scan: mode !== "off" });
+  }
 
   const body = fs.readFileSync(warningsPath, "utf8");
   // Two passes: collect in-window raw_dispatch records AND resolution
@@ -3050,7 +3057,7 @@ function assertNoRawDispatchesThisSession() {
       reason: resolvedCount > 0
         ? `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`
         : "no raw dispatches in this workflow's window",
-    }, resolvedCount > 0);
+    }, { ledgerProvesLive: resolvedCount > 0, scan: mode !== "off" });
   }
   // Kill-threshold runs BEFORE the mode check — hard-limit safety
   // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
