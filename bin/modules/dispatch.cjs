@@ -432,7 +432,7 @@ function _taskToText(value) {
 function buildSubstitutionTable(agent, loadOpts) {
   const { findProjectRoot } = require("./config.cjs");
   const { getMergedConfig } = require("./config.cjs");
-  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, loadGraphImpact, loadPriorSidecars } = require("./init.cjs");
+  const { loadGoverningRules, loadInlineGuardrails, loadInlineRubrics, materializeRubrics, loadGraphImpact, loadPriorSidecars } = require("./init.cjs");
   const { getModels } = require("./model-profiles.cjs");
   const state = require("./state.cjs");
 
@@ -448,6 +448,13 @@ function buildSubstitutionTable(agent, loadOpts) {
   // by-key without an extra .content prop dance.
   const gr = loadGoverningRules(projectRoot, loadOpts);
   const ig = loadInlineGuardrails(PLUGIN_ROOT);
+  // Every envelope points <rubric_path> at .devt/state/rubric-<type>.md, so the
+  // copy has to exist on BOTH delivery paths. `init` covers the workflow path;
+  // this covers `render-filled` / `render-lanes`, which the documented
+  // register-lanes shortcut reaches without a fresh init — otherwise that
+  // envelope names a file that was never written. Idempotent and stat-cheap
+  // when the copy is already current.
+  materializeRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
   const ir = loadInlineRubrics(PLUGIN_ROOT, projectRoot, (config.rubrics || {}));
   // Announce the degradation. Over the byte cap, loadInlineRubrics returns
   // content: null and every dispatch silently loses its inline rubric — the

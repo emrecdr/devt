@@ -2401,6 +2401,7 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
   const fns = _phaseGateFns();
   const gateResults = [];
   const blockedBy = [];
+  const unknowns = [];
   for (const gateName of gates) {
     const fn = fns[gateName];
     let result;
@@ -2416,10 +2417,20 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
     // detail carries the gate's own evidence payload (claim-check unresolved
     // ids, axis-H counts, warning ids …) — a bare ok/reason pair forces the
     // consumer back to per-gate re-runs to see what actually failed.
-    gateResults.push({ gate: gateName, ok: !!result.ok, reason: result.reason || "", elapsed_ms: result._elapsed_ms ?? null, detail: result });
+    // warn/evidence ride the projection, not just `detail`. A gate that passes
+    // only because its evidence was missing says so in `reason`, and every
+    // consumer filters `select(.ok==false)` — so without these fields the
+    // caveat is computed and then never printed by anything.
+    gateResults.push({
+      gate: gateName, ok: !!result.ok, reason: result.reason || "",
+      ...(result.warn === true ? { warn: true } : {}),
+      ...(result.evidence ? { evidence: result.evidence } : {}),
+      elapsed_ms: result._elapsed_ms ?? null, detail: result,
+    });
     if (result.ok === false) blockedBy.push({ gate: gateName, reason: result.reason || "" });
+    else if (result.warn === true) unknowns.push({ gate: gateName, reason: result.reason || "" });
   }
-  return { fired: true, gateResults, blockedBy };
+  return { fired: true, gateResults, blockedBy, unknowns };
 }
 
 
@@ -2454,6 +2465,8 @@ function cmdAssertAll(args) {
     workflow_id: st.workflow_id || null,
     registry_count: run.gateResults.length,
     gates_run: run.gateResults.length,
+    unknown_count: run.unknowns.length,
+    ...(run.unknowns.length > 0 ? { unknowns: run.unknowns } : {}),
     gates: run.gateResults,
   };
 }
@@ -2589,6 +2602,7 @@ function finalizeGates(args) {
   const run = runPhaseGates(workflowType, phase, { tracePrefix: "finalize-gates" });
   const gates = run.fired ? run.gateResults : [];
   const allOk = run.fired ? run.blockedBy.length === 0 : true;
+  const unknowns = run.fired ? run.unknowns : [];
 
   if (!allOk) process.exitCode = 1;
   return {
@@ -2600,6 +2614,8 @@ function finalizeGates(args) {
     aggregated: (aggregated && aggregated.ok !== false)
       ? { aggregated: aggregated.aggregated ?? 0, sources_scanned: aggregated.sources_scanned ?? 0 }
       : aggregated,
+    unknown_count: unknowns.length,
+    ...(unknowns.length > 0 ? { unknowns } : {}),
     gates_run: gates.length,
     gates,
     ...(run.fired ? {} : { note: run.note }),
@@ -2739,21 +2755,8 @@ function assertClaimChecksResolved() {
   if (mode === "off") {
     return { ok: true, unresolved_count: 0, mode, reason: "claim_check_mode=off — gate disabled" };
   }
-  // Workflow window anchor — same pattern as assertNoRawDispatchesThisSession.
-  // Scope is per-workflow: each new init * gets a clean window.
-  let anchorMs = 0;
-  try {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const wfPath = path.join(dir, "workflow.yaml");
-    if (fs.existsSync(wfPath)) {
-      const yaml = fs.readFileSync(wfPath, "utf8");
-      const m = yaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
-      if (m) {
-        const parsed = new Date(m[1].trim()).getTime();
-        if (Number.isFinite(parsed)) anchorMs = parsed;
-      }
-    }
-  } catch { /* no anchor — gate auto-passes since we can't bound the window */ }
+  // Per-workflow window: each new init * gets a clean one.
+  const anchorMs = _workflowWindowAnchorMs(dir);
   if (anchorMs === 0) {
     return { ok: true, unresolved_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
   }
@@ -2862,27 +2865,49 @@ function _workflowWindowAnchorMs(dir) {
 
 // Liveness evidence for the dispatch-hygiene guard. The guard appends ONLY on a
 // violation, so a violation-free ledger and a guard that never ran produce the
-// same silence — and this gate reported the first. The universal hook trace
-// already records every invocation, so the evidence existed the whole time and
-// nothing consulted it. Returns null when the trace itself is unreadable: "we
-// cannot tell" is a different claim from "it did not fire", and the caller says
-// which one it is rather than collapsing both into a pass.
+// same silence. The universal hook trace records every invocation, which is
+// what distinguishes them. Returns null when the trace itself is unreadable:
+// "we cannot tell" is a different claim from "it did not fire", and the caller
+// says which rather than collapsing both into a pass.
 function _hygieneGuardFirings(dir, sinceMs) {
-  let body;
-  try {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    body = fs.readFileSync(path.join(dir, "hook-trace", "run-hook.jsonl"), "utf8");
-  } catch { return null; }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const tracePath = path.join(dir, "hook-trace", "run-hook.jsonl");
+  let size, fd;
+  try { size = fs.statSync(tracePath).size; fd = fs.openSync(tracePath, "r"); } catch { return null; }
+  const NEEDLE = '"dispatch-hygiene-guard.sh"';
+  const TS_RE = /"ts"\s*:\s*"([^"]+)"/;
   let fired = 0;
-  for (const line of body.split("\n")) {
-    if (!line) continue;
-    try {
-      const rec = JSON.parse(line);
-      if (rec.script !== "dispatch-hygiene-guard.sh") continue;
-      const ts = rec.ts ? new Date(rec.ts).getTime() : NaN;
-      if (Number.isFinite(ts) && ts >= sinceMs) fired++;
-    } catch { /* malformed line — skip */ }
-  }
+  try {
+    // The trace is append-only and chronological, so the workflow window is
+    // always a SUFFIX: walk backwards and stop at the first record older than
+    // the anchor. The registry fires this gate at every phase of every workflow
+    // (~99 state updates per run), and the trace has no rotation — reading it
+    // whole cost 1.16 MB and ~6.4K JSON.parse per call on this repo. Timestamps
+    // are matched with a regex rather than parsed, so only the records that
+    // actually matter are ever examined closely.
+    const CHUNK = 64 * 1024;
+    let end = size, tail = "";
+    while (end > 0) {
+      const start = Math.max(0, end - CHUNK);
+      const buf = Buffer.alloc(end - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      const lines = (buf.toString("utf8") + tail).split("\n");
+      // Unless this chunk reaches the start of the file, its first element is a
+      // partial record whose head lives in the next chunk back.
+      tail = start > 0 ? lines.shift() : "";
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i];
+        if (!line) continue;
+        const m = TS_RE.exec(line);
+        const ts = m ? new Date(m[1]).getTime() : NaN;
+        if (!Number.isFinite(ts)) continue;
+        if (ts < sinceMs) return fired;
+        if (line.includes(NEEDLE)) fired++;
+      }
+      end = start;
+    }
+  } catch { return null; }
+  finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
   return fired;
 }
 
@@ -2890,18 +2915,28 @@ function _hygieneGuardFirings(dir, sinceMs) {
 // A zero count is only "clean" when something was watching. Splits the old
 // single pass verdict into clean / unknown so a consumer can tell the guard
 // found nothing from the guard never having looked.
-function _guardLivenessVerdict(dir, anchorMs, base) {
-  const fired = _hygieneGuardFirings(dir, anchorMs);
-  if (fired === null) {
-    return { ...base, ok: true, warn: true, guard_fired: null, evidence: "unknown",
-      reason: `${base.reason} — but the hook trace is unreadable, so a clean run cannot be told apart from a guard that never fired` };
-  }
-  if (fired === 0) {
-    return { ...base, ok: true, warn: true, guard_fired: 0, evidence: "unknown",
-      reason: `${base.reason} — but dispatch-hygiene-guard.sh has ZERO firings in this window, so this is "unknown", not "clean" (check DEVT_HOOK_PROFILE / DEVT_DISABLED_HOOKS)` };
-  }
-  return { ...base, ok: true, guard_fired: fired, evidence: "guard_fired",
-    reason: `${base.reason} — dispatch-hygiene-guard.sh fired ${fired}x in this window and recorded nothing` };
+function _guardLivenessVerdict(dir, anchorMs, base, ledgerProvesLive = false) {
+  // In-window ledger records are themselves proof the guard ran — it wrote them
+  // — so that caller skips the trace read. Its evidence is named separately
+  // from a trace count, because one carries a firing number and the other does
+  // not, and collapsing them would make `evidence` mean two things.
+  const fired = ledgerProvesLive ? null : _hygieneGuardFirings(dir, anchorMs);
+  const live = ledgerProvesLive || fired > 0;
+  const why = ledgerProvesLive
+    ? "the ledger carries this workflow's own records, so the guard demonstrably ran"
+    : fired === null
+      ? "but the hook trace is unreadable, so a clean run cannot be told apart from a guard that never fired"
+      : live
+        ? `dispatch-hygiene-guard.sh fired ${fired}x in this window and recorded nothing`
+        : `but dispatch-hygiene-guard.sh has ZERO firings in this window, so this is "unknown", not "clean" (check DEVT_HOOK_PROFILE / DEVT_DISABLED_HOOKS)`;
+  return {
+    ...base,
+    ok: true,
+    warn: !live,
+    guard_fired: fired,
+    evidence: live ? (ledgerProvesLive ? "ledger_records" : "guard_fired") : "unknown",
+    reason: `${base.reason} — ${why}`,
+  };
 }
 
 
@@ -2980,23 +3015,13 @@ function assertNoRawDispatchesThisSession() {
   const agents = unresolved.map(r => r.agent || "(unknown)");
   const rawDispatchCount = agents.length;
   if (rawDispatchCount === 0) {
-    // Resolved records are themselves proof the guard ran — it wrote them.
-    // Only a ledger with nothing in-window needs the trace to tell clean from
-    // never-looked.
-    if (resolvedCount > 0) {
-      return {
-        ok: true,
-        raw_dispatch_count: 0,
-        resolved_count: resolvedCount,
-        evidence: "guard_fired",
-        reason: `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`,
-      };
-    }
     return _guardLivenessVerdict(dir, anchorMs, {
       raw_dispatch_count: 0,
-      resolved_count: 0,
-      reason: "no raw dispatches in this workflow's window",
-    });
+      resolved_count: resolvedCount,
+      reason: resolvedCount > 0
+        ? `no unresolved raw dispatches in this workflow's window (${resolvedCount} resolved-with-reason — see dispatch warnings list)`
+        : "no raw dispatches in this workflow's window",
+    }, resolvedCount > 0);
   }
   // Kill-threshold runs BEFORE the mode check — hard-limit safety
   // bypasses warn-mode. Closes the loop GF flagged explicitly in Q22 (62
@@ -3086,17 +3111,8 @@ function assertDispatchWarningsAcknowledged() {
   const section = secMatch[1];
   const reviewMtime = fs.statSync(reviewPath).mtimeMs;
 
-  // Anchor: same workflow window as assert-no-raw-dispatches.
-  let anchorMs = 0;
-  try {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const wfYaml = fs.readFileSync(path.join(dir, "workflow.yaml"), "utf8");
-    const m = wfYaml.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
-    if (m) {
-      const parsed = new Date(m[1].trim()).getTime();
-      if (Number.isFinite(parsed)) anchorMs = parsed;
-    }
-  } catch { /* no anchor — window unbounded below */ }
+  // Same workflow window as assert-no-raw-dispatches; 0 leaves it unbounded below.
+  const anchorMs = _workflowWindowAnchorMs(dir);
 
   // Actual counts from the file, bounded to [anchor, review mtime].
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -3127,14 +3143,10 @@ function assertDispatchWarningsAcknowledged() {
   }
 
   // Which claim the section makes is decided by what PARSES, not by which
-  // tokens appear anywhere in it. The n/a branch used to be disqualified by a
-  // bare substring test for `counts:` across the whole section, so a
-  // consolidator that explained WHY zeros would mislead was disqualified by its
-  // own explanation while a terser answer passed. Field: the retry hid the
-  // reasoning and shipped three zeros that read as "verified clean" when the
-  // honest claim was "nothing was recorded" — the gate rejected the better
-  // answer and accepted the misleading one. A gate that can only be satisfied
-  // by withholding reasoning trains the thing it audits.
+  // tokens appear anywhere in it. A bare substring test for `counts:` across
+  // the whole section disqualified the n/a branch whenever the author explained
+  // why zeros would mislead — so prose about the answer failed while a terser
+  // answer passed, and the recovery was to hide the reasoning.
   const cm = section.match(/counts:\s*raw_dispatch=(\d+)\s+resolved=(\d+)\s+cliff_signal=(\d+)/);
 
   if (!cm) {

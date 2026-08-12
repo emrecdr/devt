@@ -425,6 +425,18 @@ function readState() {
   return parsed;
 }
 
+
+// The task already in state is usable as a fallback only when it is real — a
+// placeholder written by an earlier degraded run is not a task anybody meant.
+// Shared because `init` and `contextInitBundle` both answer this question in
+// the same call chain, and answering it two ways let a standalone init preserve
+// the very literal the bundle classifies as unusable.
+function priorTaskState(placeholder) {
+  let prior = "";
+  try { prior = String((readState() || {}).task || "").trim(); } catch { /* unreadable state — no prior */ }
+  return { prior, usable: Boolean(prior && prior !== placeholder) };
+}
+
 /**
  * Extract the `## Status` value from an artifact's first 100 lines.
  * Long verifier reports with prologue / scope / requirements-coverage
@@ -1016,6 +1028,7 @@ module.exports = {
   getScopeFileCount,
   computeTierFloor,
   readState,
+  priorTaskState,
   extractStatus,
   validateConsistency,
   validateInputJson,

@@ -13,8 +13,9 @@ const path = require("path");
 const crypto = require("crypto");
 const { getMergedConfig, findProjectRoot } = require("./config.cjs");
 const { getModels } = require("./model-profiles.cjs");
-const { readState, checkWorkflowLock, ensureStateDir, updateState } = require("./state.cjs");
+const { readState, checkWorkflowLock, ensureStateDir, updateState, priorTaskState } = require("./state.cjs");
 const { sanitizeForPrompt, scanForInjection, validatePath, maskSecrets } = require("./security.cjs");
+const { atomicWriteFileSync } = require("./io.cjs");
 const { detectTier } = require("./preflight.cjs");
 
 // Maps the `init <verb>` CLI verb to the canonical workflow_type written
@@ -95,30 +96,38 @@ function _resolveRubricFile(pluginRoot, projectRoot, filename) {
 // Pointing at the plugin root put it OUTSIDE the project under review, and a
 // lane declined to open it — "outside this repo and was not opened", a policy
 // refusal rather than a filesystem error, which no path fix inside the plugin
-// can reach. Field: of five lanes on one review, two read it fully, one
-// partially, one refused, one never said; the ones that could not reach it
-// self-graded against the task prose, so their grades were not comparable with
-// the rest. A copy under .devt/state/ is reachable by the same rules that
+// can reach. A copy under .devt/state/ is reachable by the same rules that
 // already let every agent read code-review-input.md.
+//
+// Runs on every init and every dispatch render, so the steady state — dest
+// already correct — must not read either file: size+mtime is an exact-enough
+// skip for a byte-verbatim copy devt itself owns, and re-writing an unchanged
+// rubric would churn the state mtimes several freshness gates read.
 function materializeRubrics(pluginRoot, projectRoot, rubrics) {
   const written = {};
   if (!pluginRoot || !projectRoot || !rubrics) return written;
   const stateDir = path.join(projectRoot, ".devt", "state");
+  let dirReady = false;
+  const resolvedCache = new Map();
   for (const [workflowType, filename] of Object.entries(rubrics)) {
-    const resolved = _resolveRubricFile(pluginRoot, projectRoot, filename);
-    if (!resolved || !fs.existsSync(resolved)) continue;
+    if (!resolvedCache.has(filename)) resolvedCache.set(filename, _resolveRubricFile(pluginRoot, projectRoot, filename));
+    const resolved = resolvedCache.get(filename);
+    if (!resolved) continue;
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const dest = path.join(stateDir, `rubric-${workflowType}.md`);
     try {
-      fs.mkdirSync(stateDir, { recursive: true });
-      const body = fs.readFileSync(resolved, "utf8");
-      let current = null;
-      try { current = fs.readFileSync(dest, "utf8"); } catch { /* absent — write it */ }
-      // Renders are frequent; an unchanged rubric should not churn state mtimes,
-      // which several freshness gates read.
-      if (current !== body) require("./io.cjs").atomicWriteFileSync(dest, body);
+      const src = fs.statSync(resolved);
+      let fresh = false;
+      try {
+        const cur = fs.statSync(dest);
+        fresh = cur.size === src.size && cur.mtimeMs >= src.mtimeMs;
+      } catch { /* dest absent — write it */ }
+      if (!fresh) {
+        if (!dirReady) { fs.mkdirSync(stateDir, { recursive: true }); dirReady = true; }
+        atomicWriteFileSync(dest, fs.readFileSync(resolved, "utf8"));
+      }
       written[workflowType] = `.devt/state/rubric-${workflowType}.md`;
-    } catch { /* unwritable state dir — the envelope's absence directive covers it */ }
+    } catch { /* unresolvable source or unwritable state dir — the envelope's absence directive covers it */ }
   }
   return written;
 }
@@ -844,8 +853,9 @@ function initWorkflow(task, pluginRoot, initVerb) {
   // delta stays attributable); its universe is the CONFIGURED rubric set, so an
   // oversized-rubric fallback still reports the bodies as omitted.
   // Materialized for BOTH verbs: dev workflows never inline the rubric, so the
-  // verifier's <rubric_path> is the only copy it ever sees.
-  const rubricPaths = materializeRubrics(pluginRoot, projectRoot, config.rubrics || {});
+  // verifier's <rubric_path> is the only copy it ever sees. The templates carry
+  // the destination as a literal, so the return value has no consumer.
+  materializeRubrics(pluginRoot, projectRoot, config.rubrics || {});
   const _inlineRubrics = initVerb === "review"
     ? loadInlineRubrics(pluginRoot, projectRoot, config.rubrics || {})
     : null;
@@ -931,7 +941,6 @@ function initWorkflow(task, pluginRoot, initVerb) {
     rubrics: config.rubrics || {},
     inline_rubrics: inlineRubricsForVerb,
     inline_rubrics_omitted: inlineRubricsOmitted,
-    rubric_paths: rubricPaths,
     warnings: warnings.concat(injectionWarning),
   };
 }
@@ -978,11 +987,8 @@ function scanDevRules(dir, prefix, rootDir) {
 // fall back to the placeholder only when state carries nothing.
 function _taskOrExisting(supplied, placeholder) {
   if (supplied && supplied.trim()) return supplied;
-  try {
-    const existing = String((readState() || {}).task || "").trim();
-    if (existing) return existing;
-  } catch { /* unreadable state — fall through to the placeholder */ }
-  return placeholder;
+  const { prior, usable } = priorTaskState(placeholder);
+  return usable ? prior : placeholder;
 }
 
 function run(subcommand, args, pluginRoot) {

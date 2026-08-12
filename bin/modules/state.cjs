@@ -70,6 +70,7 @@ const {
   getScopeFileCount,
   computeTierFloor,
   readState,
+  priorTaskState,
   extractStatus,
   validateConsistency,
   validateInputJson,
@@ -1155,29 +1156,22 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     } catch { primaryBranch = "main"; }
   }
   const degraded = [];
-  // An absent scope is a DEGRADED run, not a defaulted one. `scope || taskDefault`
-  // substitutes a literal like "code review" into three consumers at once —
-  // workflow.yaml::task, `preflight generate`, and the memory signal query — and
-  // every one of them then operates on a content-free string that looks like a
-  // real task. Field signature: task reading exactly the taskDefault while the
-  // operator had passed a full paragraph, because the workflow's REVIEW_SCOPE was
-  // never bound (shell state does not survive between Bash calls). Nothing failed;
-  // preflight simply searched for the words "code review".
+  // An absent scope is a DEGRADED run, not a defaulted one: the literal reaches
+  // workflow.yaml::task, `preflight generate` AND the memory-signal query at
+  // once, and each then operates on a content-free string that looks like a real
+  // task. Nothing fails — preflight simply searches for the words "code review".
+  // An empty scope must also never overwrite a task an earlier call got right:
+  // that turns a recoverable degrade into a terminal one, since the good text is
+  // gone and every later consumer reads the literal as though an operator typed
+  // it. One entry, not two — reporting the fallback AND the preservation says
+  // the literal was substituted on a run where it was not.
   const scopeMissing = !scope || !String(scope).trim();
-  if (scopeMissing) {
-    degraded.push(`scope empty — task/preflight/memory-signal all fall back to the literal "${taskDefault}"; the caller did not bind a scope string`);
-  }
-  // An empty scope must never overwrite a task an earlier call got right.
-  // Overwriting turns a recoverable degrade into a terminal one: the good text
-  // is gone, and every later consumer reads the literal as though an operator
-  // typed it. Keeping the prior task leaves the run degraded but repairable —
-  // the caller can still fix it by passing a scope.
-  let priorTask = "";
-  try { priorTask = String((readState() || {}).task || "").trim(); } catch { /* unreadable state — treat as absent */ }
-  const priorTaskUsable = priorTask.length > 0 && priorTask !== taskDefault;
+  const { prior: priorTask, usable: priorTaskUsable } = priorTaskState(taskDefault);
   const effectiveTask = scopeMissing ? (priorTaskUsable ? priorTask : taskDefault) : scope;
-  if (scopeMissing && priorTaskUsable) {
-    degraded.push(`scope empty — preserved the prior task rather than overwriting it with "${taskDefault}"`);
+  if (scopeMissing) {
+    degraded.push(priorTaskUsable
+      ? `scope empty — kept the prior task instead of the literal "${taskDefault}"; the caller did not bind a scope string`
+      : `scope empty — task/preflight/memory-signal all fall back to the literal "${taskDefault}"; the caller did not bind a scope string`);
   }
   // Range is written before any child CLI runs so the entire bundle tree
   // (init, preflight generate, impact-plan) sees one consistent scope; an
@@ -2083,6 +2077,7 @@ function run(subcommand, args) {
 }
 
 module.exports = {
+  priorTaskState,
   run,
   diskCheck,
   _guardConcurrentRotation,

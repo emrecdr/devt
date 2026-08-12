@@ -636,13 +636,17 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
         return (d.status !== 0 || !d.stdout) ? null : d.stdout;
       };
       // An uncommitted branch has an EMPTY base...HEAD diff — the same hole
-      // collectChangedFiles was fixed for, still open here. Left as-is, symbol
-      // ranking and the hunk census both silently no-op exactly when the review
-      // scope lives in the working tree, which is the common case for a review
-      // run before committing. Fall back rather than union: a change that is
-      // both committed and further modified would otherwise be counted twice,
-      // and the census reads these hunks too.
-      _branchDiff = gitDiff(["diff", "-U0", `${primaryBranch}...HEAD`]) || gitDiff(["diff", "-U0", "HEAD"]) || null;
+      // collectChangedFiles was fixed for. Left unhandled, symbol ranking and
+      // the hunk census both silently no-op exactly when the review scope lives
+      // in the working tree, which is the common case for a review run before
+      // committing. `--merge-base` covers committed AND uncommitted in ONE fork
+      // and cannot double-count a file that is both, which a union of the two
+      // separate diffs would; the older two-step is kept only as a fallback for
+      // git below 2.30, where the flag does not exist.
+      _branchDiff = gitDiff(["diff", "-U0", "--merge-base", primaryBranch])
+        || gitDiff(["diff", "-U0", `${primaryBranch}...HEAD`])
+        || gitDiff(["diff", "-U0", "HEAD"])
+        || null;
     } catch { _branchDiff = null; }
     return _branchDiff;
   };
@@ -702,12 +706,6 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   }
   const topicSymbols = ordered.slice(0, TOPIC_CAP);
   const topicSymbolsCount = topicSymbols.length;
-  // The tail of the TOPIC list — not yet "what was dropped". args.symbols is a
-  // union of this list with the diff-symbol extractor's output, so a symbol
-  // cut from the topic tail can still be submitted via the diff leg. The
-  // reconciliation happens once `args` is known; writing the raw tail here
-  // told a reviewer a symbol was absent when it had in fact been sent.
-  const droppedSymbols = ordered.slice(TOPIC_CAP);
 
   // Config — graphify provider + impact threshold (single config read)
   let gitProvider = "";
@@ -1052,34 +1050,27 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (symbolAnchoredCaveat) plan.symbol_anchored_caveat = symbolAnchoredCaveat;
   if (census) plan.hunk_census = census;
   if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
-  // Reconcile the topic tail against what actually went to the MCP call. The
-  // symbol_anchored tier submits `merged` — the union of the diff-symbol
-  // extractor's output with the exact-resolved topic anchors — so membership in
-  // the topic tail does NOT mean the symbol was withheld. Field: a reviewer
-  // compared args.symbols against the dropped list, found two names in both,
-  // and reasonably concluded the artifact was lying about its own truncation.
-  // Only symbols absent from the submitted set were genuinely dropped; the rest
-  // are reported as recovered so the reduction is visible rather than silent.
-  const submittedSymbols = new Set(Array.isArray(args && args.symbols) ? args.symbols : []);
-  const genuinelyDropped = droppedSymbols.filter((s) => !submittedSymbols.has(s));
-  const recoveredViaOtherLeg = droppedSymbols.length - genuinelyDropped.length;
-  const topicSymbolsDroppedCount = genuinelyDropped.length;
-  if (topicSymbolsDroppedCount > 0) {
-    try { atomicWriteJsonSync(droppedPath, genuinelyDropped); } catch { /* best-effort */ }
+  // Reconcile the topic tail against what actually went to the MCP call: the
+  // symbol_anchored tier submits the UNION of the diff-symbol extractor's output
+  // with the exact-resolved topic anchors, so membership in the tail does not
+  // mean the symbol was withheld. Writing the raw tail reported symbols as
+  // absent that had in fact been sent. Recovered ones are counted so the
+  // reduction is visible rather than silently absorbed.
+  const submitted = new Set(Array.isArray(args && args.symbols) ? args.symbols : []);
+  const dropped = ordered.slice(TOPIC_CAP).filter((s) => !submitted.has(s));
+  if (dropped.length > 0) {
+    try { atomicWriteJsonSync(droppedPath, dropped); } catch { /* best-effort */ }
+    plan.topic_symbols_dropped_count = dropped.length;
+    const recovered = (ordered.length - TOPIC_CAP) - dropped.length;
+    if (recovered > 0) plan.topic_symbols_recovered_via_diff_leg = recovered;
+    // A reader auditing the tail needs to know which ordering produced it.
+    // Diff-ranking is safe for this budget ONLY because the structural signal
+    // (high-edge/god-node symbols) reaches the impact map through graphify's
+    // post-MCP augmentation, which does not draw on it. If augmentation ever
+    // becomes coupled to this budget, it must reserve slots for them again.
+    plan.topic_symbols_diff_ranked = topicSymbolsDiffRanked;
   } else {
     try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
-  }
-  if (topicSymbolsDroppedCount > 0) {
-    plan.topic_symbols_dropped_count = topicSymbolsDroppedCount;
-    if (recoveredViaOtherLeg > 0) plan.topic_symbols_recovered_via_diff_leg = recoveredViaOtherLeg;
-    // Whether the truncation was diff-ranked or fell back to topic order —
-    // a reader auditing what was dropped needs to know which ordering produced
-    // the tail. Diff-ranking is safe to apply to this budget ONLY because the
-    // structural signal (high-edge/god-node symbols) reaches the impact map
-    // through graphify's post-MCP augmentation, which does not draw on this
-    // budget. If augmentation ever becomes coupled to it, this budget must
-    // reserve slots for high-edge symbols again.
-    plan.topic_symbols_diff_ranked = topicSymbolsDiffRanked;
   }
   if (symbolSources) plan.symbol_sources = symbolSources;
   if (anchorsDropped && anchorsDropped.length > 0) plan.anchors_dropped = anchorsDropped;

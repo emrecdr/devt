@@ -20736,12 +20736,22 @@ out.push(live.ok && !live.warn && live.evidence === "guard_fired" && live.guard_
 // A real in-window raw dispatch must still block.
 fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), JSON.stringify({ ts: "2026-08-05T00:00:00Z", source: "raw_dispatch", agent: "devt:code-reviewer", warning_id: "w1" }) + "\n");
 out.push(g.assertNoRawDispatchesThisSession().ok === false ? "blocks" : "LETSTHROUGH");
+// The verdict has to reach a consumer. runPhaseGates projects each gate to a
+// fixed field set and every workflow filters `select(.ok==false)`, so a warn
+// that stops at the gate boundary is computed and then never printed.
+fs.rmSync(path.join(dir, "dispatch-warnings.jsonl"), { force: true });
+fs.rmSync(path.join(dir, "hook-trace"), { recursive: true, force: true });
+fs.writeFileSync(path.join(dir, "workflow.yaml"), `created_at: "${ANCHOR}"\nworkflow_type: code_review\nphase: complete\nactive: true\n`);
+const projected = g.runPhaseGates("code_review", "complete", { tracePrefix: "f62" });
+const row = (projected.gateResults || []).find((r) => r.gate === "assert-no-raw-dispatches-this-session");
+out.push(row && row.warn === true && row.evidence === "unknown" ? "projected" : "DROPPED");
+out.push(Array.isArray(projected.unknowns) && projected.unknowns.length > 0 ? "counted" : "UNCOUNTED");
 console.log(out.join(","));
 F62EOF
 F62_OUT=$(cd "$F62_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
 rm -rf "$F62_T"
-if [ "$F62_OUT" = "terse,explained,named,unknown,windowed,clean,blocks" ]; then
-  pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window guard firing to back it, 'unknown' otherwise, and a real dispatch still blocks"
+if [ "$F62_OUT" = "terse,explained,named,unknown,windowed,clean,blocks,projected,counted" ]; then
+  pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window guard firing to back it, 'unknown' otherwise, a real dispatch still blocks, and the unknown verdict survives the phase-gate projection instead of dying at the gate boundary"
 else
   fail "F62: gate-honesty regressed — got '$F62_OUT' (want terse,explained,named,unknown,windowed,clean,blocks)"
 fi
@@ -20785,11 +20795,23 @@ F63_OUT=$(printf '%s' "$F63_LANES" | node -e "
     out.push(/never self-grade against this prompt in silence/.test(s) ? 'declares' : 'SILENT');
     console.log(out.join(','));
   });" 2>/dev/null)
+# Both delivery paths must materialize the copy. `init` covers the workflow
+# path; the documented register-lanes shortcut reaches `render-*` WITHOUT a
+# fresh init, and the envelope names the file either way — so a render that
+# does not write it points every lane at a path that was never created.
+F63_T2=$(mktemp -d); mkdir -p "$F63_T2/.devt/state"
+printf '{}' > "$F63_T2/.devt/config.json"
+(cd "$F63_T2" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git commit -q --allow-empty -m base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+(cd "$F63_T2" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review phase=review task=t >/dev/null 2>&1)
+(cd "$F63_T2" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review >/dev/null 2>&1)
+F63_NOINIT=$([ -s "$F63_T2/.devt/state/rubric-code_review.md" ] && echo materialized || echo MISSING)
+rm -rf "$F63_T2"
 F63_CONS=$({ /usr/bin/grep -c 'COPIED from that lane' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || true; } | tr -d ' ')
-if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
-  pass "F63: the rubric is materialized inside the project and every <rubric_path> resolves there, lanes are asked for a score with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
+if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
+  pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
 else
-  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render='$F63_OUT' (want inproject,axispolicy,scored,deferred,declares) consolidator_copies=$F63_CONS"
+  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT render='$F63_OUT' (want inproject,axispolicy,scored,deferred,declares) consolidator_copies=$F63_CONS"
 fi
 
 # F64: the truncation notice reports what was actually withheld.

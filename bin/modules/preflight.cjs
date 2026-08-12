@@ -1510,7 +1510,7 @@ function generate(taskText, opts) {
   // those consume anchor slots and inflate the extracted-symbol denominator,
   // and the previous catch-all made a skipped filter indistinguishable from a
   // filter that found nothing to remove. Record which happened.
-  let graphFilterStatus = { ran: false, reason: "not attempted" };
+  let graphFilterStatus;
   try {
     const graphStatus = graphify.status();
     const before = Array.isArray(topic.symbols) ? topic.symbols.length : 0;

@@ -1935,6 +1935,9 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
 //   5. Ambiguous bindings (from the brief's blast.ambiguous_details)
 //   6. Symbol-level god-nodes from preflight (fallback when 1 AND 2 are empty)
 // Returns a summary of what was appended so the workflow can echo it in one line.
+const SCOPE_NOTE = " These were cut by devt's 32-symbol topic cap AND not submitted through any other leg — symbols the cap cut but the diff-symbol extractor sent anyway are excluded, because reporting those as absent is how this notice previously misled a reviewer.";
+
+
 function augmentImpactMap(opts = {}) {
   const proot = opts.projectRoot || (() => { try { return require("./config.cjs").findProjectRoot(); } catch { return process.cwd(); } })();
   const edgeThreshold = Number.isInteger(opts.edgeThreshold) && opts.edgeThreshold > 0 ? opts.edgeThreshold : 50;
@@ -1969,6 +1972,9 @@ function augmentImpactMap(opts = {}) {
 
   const readJson = (p, fallback) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } };
   const brief = readJson(briefPath, null);
+  // Read once: the dropped-symbol ordering note and the god-node severity note
+  // both need it, and it was being opened twice in a single call.
+  const plan = readJson(path.join(stateDir, "graphify-impact-plan.json"), null);
 
   // Resolve the diff files (the two god-node CLIs need them).
   let diffFiles = Array.isArray(opts.files) ? opts.files.slice() : [];
@@ -2016,27 +2022,26 @@ function augmentImpactMap(opts = {}) {
     const briefRaw = (brief && brief.topic && Array.isArray(brief.topic.symbols)) ? brief.topic.symbols.length : null;
     const trueRaw = optsRawNum != null ? optsRawNum : (briefRaw != null && briefRaw >= n ? briefRaw : null);
     const ofPool = trueRaw != null ? ` of the ${trueRaw} extracted topic symbols` : "";
-    // The tail is in the order the CAP saw it, which is diff-mention rank when a
-    // diff was available and upstream topic order otherwise — not "original
-    // preflight ranking order", which the section used to claim and which stopped
-    // being true the moment diff-ranking shipped. Read from the plan rather than
-    // guessed, and omitted when the plan does not say.
+    // The tail is in the order the CAP saw it — diff-mention rank when a diff
+    // was available, upstream topic order otherwise. Read from the plan rather
+    // than assumed, and omitted entirely when the plan does not say.
     let orderNote = "";
-    try {
-      const plan = readJson(path.join(stateDir, "graphify-impact-plan.json"), null);
-      if (plan && typeof plan.topic_symbols_diff_ranked === "boolean") {
-        orderNote = plan.topic_symbols_diff_ranked
-          ? " Listed in the order the cap saw them: ranked by how often the diff mentions each symbol, so these are the LEAST diff-mentioned of the pool."
-          : " Listed in upstream topic order (no diff signal was available to rank by).";
-      }
-    } catch { /* plan unreadable — say nothing about ordering rather than guess */ }
-    const scopeNote = ` These were cut by devt's 32-symbol topic cap AND not submitted through any other leg — symbols the cap cut but the diff-symbol extractor sent anyway are excluded, because reporting those as absent is how this notice previously misled a reviewer.`;
+    if (plan && typeof plan.topic_symbols_diff_ranked === "boolean") {
+      orderNote = plan.topic_symbols_diff_ranked
+        ? " Listed in the order the cap saw them: ranked by how often the diff mentions each symbol, so these are the LEAST diff-mentioned of the pool."
+        : " Listed in upstream topic order (no diff signal was available to rank by).";
+    }
+    // Single-sourced: banner and section state the same claim, and a wording fix
+    // that lands in only one of them is exactly the drift this notice exists to
+    // stop reporting.
+    const lede = `${n}${ofPool} were dropped and not submitted.${SCOPE_NOTE}`;
+    const spotCheck = "spot-check for high-risk symbols whose absence may affect severity calibration";
     if (n > 5) {
-      const banner = `> **Subject symbols truncated**: ${n}${ofPool} were dropped and not submitted.${scopeNote} Full list in the **## Subject symbols dropped** section below — spot-check for high-risk symbols whose absence may affect severity calibration.\n\n`;
+      const banner = `> **Subject symbols truncated**: ${lede} Full list in the **## Subject symbols dropped** section below — ${spotCheck}.\n\n`;
       try { fs.writeFileSync(giPath, banner + (fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "")); appended.push("dropped_banner"); } catch { /* skip */ }
     }
     const rows = dropped.map(s => `- ${s}`);
-    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${n}${ofPool} were dropped and not submitted.${scopeNote}${orderNote} Spot-check for any high-risk symbols whose absence may affect severity calibration._\n\n${rows.join("\n")}\n`);
+    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${lede}${orderNote} ${spotCheck.charAt(0).toUpperCase()}${spotCheck.slice(1)}._\n\n${rows.join("\n")}\n`);
   }
 
   // 4. Hyperedge completeness (partial-coverage groupings).
@@ -2076,8 +2081,7 @@ function augmentImpactMap(opts = {}) {
   // The plan's anchors give the discrimination; both branches name names so
   // reviewers weight findings by mechanism, not a bare scalar (template from
   // an operator's hand-written note, field receipt).
-  const planForNote = readJson(path.join(stateDir, "graphify-impact-plan.json"), null);
-  const planSymbols = (planForNote && planForNote.args && Array.isArray(planForNote.args.symbols)) ? planForNote.args.symbols : [];
+  const planSymbols = (plan && plan.args && Array.isArray(plan.args.symbols)) ? plan.args.symbols : [];
   const effectSizeForNote = (brief && brief.blast && brief.blast.effect_size) || null;
   const godPool = [
     ...symGods.map(g => ({ symbol: g.symbol, edge_count: g.edge_count })),
