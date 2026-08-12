@@ -76,6 +76,12 @@ The parallel report's headline carries a per-lane score distribution; the lane e
 
 Lanes now emit a rubric-derived `score` in their own sidecar, **with the condition attached**: a lane that could not read the rubric emits `null` plus a `score_null_reason` instead. A manufactured score is worse than a null because it looks comparable with the lanes that could read it, and the distribution is read as a coverage signal first — one null beside three real scores says immediately which lane's grade cannot be trusted. The consolidator copies both through rather than filling the gap with a number of its own.
 
+### The lane-skip policy is read out of the rubric instead of asserted beside it
+
+The injected `<lane_axis_policy>` block named axis H against a document it never opened. That is correct for the shipped default — and the default rubric **already carries the exemption**, so the block was a second copy of something the rubric says itself. Where it is not a copy, it is wrong: `code_review.v1.md` is still shipped and still pinnable, carries no exemption, and requires the axis unconditionally, so a v1-pinned project was handing every lane an instruction to skip an axis its own rubric mandates. A project-local rubric that renames or reorders axes fails the same way.
+
+`render-lanes` now parses the in-project rubric copy the lanes are pointed at, attributes each lane-skip marker to the axis block containing it, and emits the policy naming those axes with the titles the rubric gives them — or emits nothing at all when the rubric exempts none, which is the honest default. The by-reference stub already said "**any** `<lane_axis_policy>` block", so absence degrades without a second edit. The gate moved with it: F63 computes its expectation from the pinned rubric rather than matching a fixed string, and a v1 pin must produce no block.
+
 ### Axis H is asked once
 
 Marking the axis lane-skip in the rubric did not land: the shared envelope still told every reviewer to walk it, and the envelope won **4 of 5 lanes** in the field because it sits closer to the task. The rubric, the envelope task text, and the by-reference stub now all defer to a `<lane_axis_policy>` block that `render-lanes` injects into lane dispatches only — so the single reviewer, who genuinely owns the axis, is unaffected. Fixing one end of a two-ended contract and reporting it closed is what produced the 4–1 (**F63**).

@@ -20812,15 +20812,34 @@ printf 'x=2\n' > "$F63_T/app/a.py"
 (cd "$F63_T" && node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=api --files=app/a.py >/dev/null 2>&1)
 F63_RUBRIC=$([ -s "$F63_T/.devt/state/rubric-code_review.md" ] && /usr/bin/grep -q 'Axis H' "$F63_T/.devt/state/rubric-code_review.md" && echo materialized || echo MISSING)
 F63_LANES=$(cd "$F63_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>/dev/null)
+# The policy must be DERIVED from the pinned rubric, not asserted beside it —
+# so the expectation is computed from the rubric the lanes were actually given.
+F63_AXES=$(python3 -c '
+import sys, re
+t = open(sys.argv[1]).read()
+parts = re.split(r"(?m)^##\s+Axis\s+([A-Z])\s+—", t)
+print(",".join(parts[i] for i in range(1, len(parts), 2)
+                if re.search(r"(?i)lane\s+reviewers?\s+skip", parts[i + 1])))
+' "$F63_T/.devt/state/rubric-code_review.md" 2>/dev/null)
 rm -rf "$F63_T"
-F63_OUT=$(printf '%s' "$F63_LANES" | node -e "
+F63_OUT=$(printf '%s' "$F63_LANES" | F63_AXES="$F63_AXES" node -e "
   let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{
     const out=[];
     const m = s.match(/<rubric_path>([^<]*)<\/rubric_path>/);
     const p = m ? m[1].trim() : '';
     // Must be inside the project, and must not reach for the plugin root.
     out.push(p.startsWith('.devt/state/rubric-') && !/plugin_root|references\/rubrics/.test(s) ? 'inproject' : 'OUTSIDE:'+p);
-    out.push(/<lane_axis_policy>[^<]*ORCHESTRATOR-LEVEL/.test(s) ? 'axispolicy' : 'NOPOLICY');
+    // Anchored to a line start: the by-reference rubric stub NAMES the tag in
+    // its prose, so a bare tag search matches the stub rather than the block.
+    const pol = (s.match(/^\s*<lane_axis_policy>([\s\S]*?)<\/lane_axis_policy>/m) || [])[1] || '';
+    const want = (process.env.F63_AXES || '').split(',').filter(Boolean).sort();
+    // Parsed by marker rather than regex: a backslash escape does not survive
+    // this double-quoted heredoc into the JS string, and would silently become
+    // a backspace char that matches nothing.
+    const listed = ((pol.split('lane-skip: ')[1] || '').split('. SKIP')[0] || '')
+      .split(',').map((x) => x.trim().charAt(0)).filter(Boolean).sort();
+    out.push(want.length > 0 && listed.join('') === want.join('') && pol.indexOf('SKIP') >= 0
+      ? 'axispolicy' : 'NOPOLICY:want=' + want.join('|') + ' got=' + listed.join('|'));
     // [\s\S] not [^<]: the block legitimately names <rubric_path> inside itself.
     out.push(/<lane_scoring>[\s\S]*?score_null_reason[\s\S]*?<\/lane_scoring>/.test(s) ? 'scored' : 'NOSCORE');
     // review_file is slugified from the lane's SCOPE, not its id (here: scope
@@ -20867,11 +20886,27 @@ F63_OVERRIDE=$(cd "$F63_T3" && DEVT_MODULES="$ROOT/bin/modules" node -e '
   console.log(copied && r.rubric_axes_present === 3 ? "override" : "PLUGINDEFAULT:" + r.rubric_axes_present);
 ' 2>/dev/null)
 rm -rf "$F63_T3"
+# A v1 pin carries NO lane exemption and requires axis H unconditionally, so a
+# policy block there tells every lane to skip an axis its own rubric mandates —
+# which is what a hardcoded block, correct against the shipped default, cannot
+# know. No exemption in the rubric must mean no block in the envelope.
+F63_T4=$(mktemp -d); mkdir -p "$F63_T4/.devt/state"
+printf '{"rubrics":{"code_review":"code_review.v1.md"}}' > "$F63_T4/.devt/config.json"
+printf 'x=1\n' > "$F63_T4/a.py"
+(cd "$F63_T4" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+(cd "$F63_T4" && node "$ROOT/bin/devt-tools.cjs" init review "v1 pin" >/dev/null 2>&1)
+(cd "$F63_T4" && node "$ROOT/bin/devt-tools.cjs" state register-lane --id=L1 --scope=api --files=a.py >/dev/null 2>&1)
+F63_V1=$(cd "$F63_T4" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes 2>/dev/null | node -e "
+  let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{
+    console.log(/^\s*<lane_axis_policy>/m.test(s) ? 'IMPOSED' : 'nopolicy');
+  });" 2>/dev/null)
+rm -rf "$F63_T4"
 F63_CONS=$({ /usr/bin/grep -c 'COPIED from that lane' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || true; } | tr -d ' ')
-if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OVERRIDE" = "override" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,onesidecar,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
-  pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score in the SAME sidecar their write instruction names, with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
+if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OVERRIDE" = "override" ] && [ "$F63_V1" = "nopolicy" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,onesidecar,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
+  pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score in the SAME sidecar their write instruction names, with a null-reason fallback the consolidator copies through, the lane-skip policy is DERIVED from the pinned rubric (named where the rubric exempts it, absent where it does not), and an unreachable rubric must be declared rather than silently self-graded"
 else
-  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT project_override=$F63_OVERRIDE render='$F63_OUT' (want inproject,axispolicy,scored,onesidecar,deferred,declares) consolidator_copies=$F63_CONS"
+  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT project_override=$F63_OVERRIDE v1_pin=$F63_V1 render='$F63_OUT' (want inproject,axispolicy,scored,onesidecar,deferred,declares) consolidator_copies=$F63_CONS"
 fi
 
 # F64: the truncation notice reports what was actually withheld.

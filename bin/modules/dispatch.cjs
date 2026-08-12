@@ -1744,6 +1744,34 @@ function _laneAutoMemorySummary(topN) {
   } catch { return null; }
 }
 
+// Which axes the PINNED rubric marks lane-skip, read from the in-project copy
+// the lanes themselves are pointed at. The policy used to be asserted beside
+// the rubric rather than derived from it: correct for the shipped default,
+// and flatly wrong for a v1 pin or a project-local rubric, where it told every
+// lane to skip an axis its own rubric requires unconditionally. Returns null
+// when the rubric marks none — then no block is emitted and the lane grades
+// its full declared inventory, which is the honest default.
+function _laneAxisPolicy(stateDir, workflowType) {
+  let body;
+  try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    body = fs.readFileSync(path.join(stateDir, `rubric-${workflowType}.md`), "utf8");
+  } catch { return null; }
+  // Split on the axis headings so a marker is attributed to the axis whose
+  // block contains it, not to whichever letter appears nearest in the file.
+  const parts = body.split(/^##\s+Axis\s+([A-Z])\s+—\s*(.*)$/m);
+  const skipped = [];
+  for (let i = 1; i + 2 < parts.length + 1; i += 3) {
+    const letter = parts[i], title = (parts[i + 1] || "").trim(), section = parts[i + 2] || "";
+    if (/lane\s+reviewers?\s+skip/i.test(section)) skipped.push(title ? `${letter} (${title})` : letter);
+  }
+  if (skipped.length === 0) return null;
+  const list = skipped.join(", ");
+  const s = skipped.length > 1;
+  return `Your pinned rubric marks ${s ? "these axes" : "this axis"} lane-skip: ${list}. SKIP ${s ? "them" : "it"} — write "skipped — orchestrator-level axis" and move on; the consolidator produces ${s ? "those sections" : "that section"} from its own live read. Grade every OTHER declared axis normally.`;
+}
+
+
 function cmdRenderLanes(target, options) {
   options = options || {};
   const stateMod = require("./state.cjs");
@@ -1792,6 +1820,8 @@ function cmdRenderLanes(target, options) {
     ...(options.inlineRules ? { guardrailsByReference: false } : {}),
   });
   const stateDir = require("./state.cjs").getStateDir();
+  // One read for the whole fan-out — every lane gets the same policy.
+  const laneAxisPolicy = _laneAxisPolicy(stateDir, currentState.workflow_type || "code_review");
   const sidecarDir = pathLocal.join(stateDir, "lane-files");
   // Per-lane ownership map, computed once. Lanes could not see each other's
   // scope, so any observation touching a neighbor's files was a guess — it
@@ -1877,14 +1907,10 @@ function cmdRenderLanes(target, options) {
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
       `    <memory_affects>${memoryAffects}</memory_affects>`,
-      // Axis H is dispatch-time and orchestrator-level: warnings are written AT
-      // dispatch, so a lane's snapshot is stale by construction and every lane
-      // emits the same paragraph the consolidator then discards. The rubric says
-      // lanes skip it; the SHARED envelope told every reviewer to walk it, and
-      // the envelope won 4-1 in the field because it sits closer to the task.
+      // Emitted only when the pinned rubric actually marks an axis lane-skip.
       // Said here, where only lanes can see it, rather than weakening the
       // single reviewer's instruction — that reviewer genuinely owns axis H.
-      `    <lane_axis_policy>Axis H (Dispatch warnings) is ORCHESTRATOR-LEVEL — SKIP it. Write "skipped — orchestrator-level axis" and move on; the consolidator produces that section from its own live read of the ledger. Grade every OTHER declared axis normally.</lane_axis_policy>`,
+      ...(laneAxisPolicy ? [`    <lane_axis_policy>${laneAxisPolicy}</lane_axis_policy>`] : []),
       // The consolidated report's headline carries a per-lane score
       // distribution, and the lane envelope never asked for a score — so every
       // run produced an all-null column that read as a broken feature. Asked
