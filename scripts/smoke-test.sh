@@ -17786,6 +17786,12 @@ printf '# CS\nK292_RULES_MARKER.\n' > "$K292_TMP/.devt/rules/coding-standards.md
 K292_DEF=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review 2>/dev/null) || true)
 printf '%s' "$K292_DEF" | /usr/bin/grep -qF "<rubric_path>.devt/state/rubric-" || { K292_OK=0; K292_MISS="$K292_MISS rubric-inproject-render"; }
 if /usr/bin/grep -rq 'rubric_path>[^<]*references/rubrics' "$ROOT/templates" "$ROOT/workflows"; then K292_OK=0; K292_MISS="$K292_MISS rubric-plugin-root-residue"; fi
+# The tag-scoped check above missed the PROSE describing where the rubric is
+# read — two copies still said `references/rubrics/` after the path moved, one
+# of them ten lines above a <rubric_path> contradicting it. Naming which rubric
+# is PINNED (`references/rubrics/dev.v1.md` defines the verdict semantics) stays
+# legal; claiming an agent READS it from there does not.
+if /usr/bin/grep -rqE '[Rr]eads?[^.]{0,90}references/rubrics' "$ROOT/templates" "$ROOT/workflows" "$ROOT/agents"; then K292_OK=0; K292_MISS="$K292_MISS rubric-read-from-plugin-root-prose"; fi
 K292_STUB=$( (cd "$K292_TMP" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review --out="$K292_TMP/env.txt" 2>/dev/null) || true)
 printf '%s' "$K292_STUB" | /usr/bin/grep -q ' sha256="[0-9a-f]\{16\}"' || { K292_OK=0; K292_MISS="$K292_MISS stub-sha256"; }
 { [ -s "$K292_TMP/.devt/state/dispatch-stamps.jsonl" ] && /usr/bin/grep -q '"cid":"cid_' "$K292_TMP/.devt/state/dispatch-stamps.jsonl"; } || { K292_OK=0; K292_MISS="$K292_MISS render-stamp"; }
@@ -20841,11 +20847,31 @@ printf '{}' > "$F63_T2/.devt/config.json"
 (cd "$F63_T2" && node "$ROOT/bin/devt-tools.cjs" dispatch render-filled code-reviewer:code_review >/dev/null 2>&1)
 F63_NOINIT=$([ -s "$F63_T2/.devt/state/rubric-code_review.md" ] && echo materialized || echo MISSING)
 rm -rf "$F63_T2"
+# The project-local .devt/rubrics/ override is the ONLY path on which the
+# materializer and the axis gate can disagree — and they did: the gate resolved
+# plugin-root-only, so on any project using the documented escape hatch it
+# counted axes in a file the verifier never read, then reported the mismatch as
+# "gate does not apply". One resolution order now serves both.
+F63_T3=$(mktemp -d); mkdir -p "$F63_T3/.devt/rubrics"
+printf '{"rubrics":{"code_review":"house.v1.md"}}' > "$F63_T3/.devt/config.json"
+printf '# House\n\n## Grading axes\n\n| Axis | What |\n|---|---|\n| **A. Scope** | x |\n| **B. Correctness** | y |\n| **C. Tests** | z |\n' > "$F63_T3/.devt/rubrics/house.v1.md"
+(cd "$F63_T3" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git commit -q --allow-empty -m base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+(cd "$F63_T3" && node "$ROOT/bin/devt-tools.cjs" init review "override check" >/dev/null 2>&1)
+F63_OVERRIDE=$(cd "$F63_T3" && DEVT_MODULES="$ROOT/bin/modules" node -e '
+  const g = require(process.env.DEVT_MODULES + "/state-gates.cjs");
+  const fs = require("fs");
+  const copied = fs.readFileSync(".devt/state/rubric-code_review.md", "utf8") === fs.readFileSync(".devt/rubrics/house.v1.md", "utf8");
+  const r = g.assertVerifierGradedAllAxes();
+  // 3 axes from the PROJECT rubric, not the 8-axis plugin default.
+  console.log(copied && r.rubric_axes_present === 3 ? "override" : "PLUGINDEFAULT:" + r.rubric_axes_present);
+' 2>/dev/null)
+rm -rf "$F63_T3"
 F63_CONS=$({ /usr/bin/grep -c 'COPIED from that lane' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || true; } | tr -d ' ')
-if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,onesidecar,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
+if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OVERRIDE" = "override" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,onesidecar,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
   pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score in the SAME sidecar their write instruction names, with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
 else
-  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT render='$F63_OUT' (want inproject,axispolicy,scored,onesidecar,deferred,declares) consolidator_copies=$F63_CONS"
+  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT project_override=$F63_OVERRIDE render='$F63_OUT' (want inproject,axispolicy,scored,onesidecar,deferred,declares) consolidator_copies=$F63_CONS"
 fi
 
 # F64: the truncation notice reports what was actually withheld.

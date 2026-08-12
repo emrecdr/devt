@@ -68,28 +68,6 @@ const MAX_INLINE_BYTES = 64 * 1024;
 // received.
 const MAX_INLINE_RUBRIC_BYTES = 48 * 1024;
 
-// Resolution order mirrors grader.cjs::resolveRubricPath: absolute path →
-// project-local .devt/rubrics/<f> → plugin defaults. Each candidate is confined
-// to its trusted root. Single-sourced because two copies of a resolution order
-// is how the pinned rubric and the inlined one come to disagree.
-function _resolveRubricFile(pluginRoot, projectRoot, filename) {
-  if (!filename || typeof filename !== "string") return null;
-  if (path.isAbsolute(filename)) return filename;
-  if (projectRoot) {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const projectDir = path.join(projectRoot, ".devt", "rubrics");
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const cand = path.normalize(path.join(projectDir, filename));
-    const scoped = cand === projectDir || cand.startsWith(projectDir + path.sep);
-    if (scoped && fs.existsSync(cand)) return cand;
-  }
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const pluginDir = path.join(pluginRoot, "references", "rubrics");
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const cand = path.normalize(path.join(pluginDir, filename));
-  const scoped = cand === pluginDir || cand.startsWith(pluginDir + path.sep);
-  return scoped && fs.existsSync(cand) ? cand : null;
-}
 
 
 // The rubric has to be readable from wherever the reviewer actually runs.
@@ -110,7 +88,7 @@ function materializeRubrics(pluginRoot, projectRoot, rubrics) {
   let dirReady = false;
   const resolvedCache = new Map();
   for (const [workflowType, filename] of Object.entries(rubrics)) {
-    if (!resolvedCache.has(filename)) resolvedCache.set(filename, _resolveRubricFile(pluginRoot, projectRoot, filename));
+    if (!resolvedCache.has(filename)) resolvedCache.set(filename, require("./grader.cjs").resolveRubricFile(filename, { pluginRoot, projectRoot, requireExists: true }));
     const resolved = resolvedCache.get(filename);
     if (!resolved) continue;
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -145,7 +123,7 @@ function loadInlineRubrics(pluginRoot, projectRoot, rubrics) {
   let totalBytes = 0;
   for (const [workflowType, filename] of Object.entries(rubrics)) {
     if (!filename || typeof filename !== "string") continue;
-    const resolved = _resolveRubricFile(pluginRoot, projectRoot, filename);
+    const resolved = require("./grader.cjs").resolveRubricFile(filename, { pluginRoot, projectRoot, requireExists: true });
     if (!resolved) {
       warnings.push(`rubric missing on disk for workflow_type=${workflowType}: ${filename}`);
       continue;

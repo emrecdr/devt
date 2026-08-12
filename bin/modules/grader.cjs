@@ -80,25 +80,35 @@ function gradeArtifact(rubricPath, sidecarName, sidecarData) {
 // Relative paths are checked for traversal — they must normalize to stay
 // within their target directory. Absolute paths bypass this check because
 // they're an explicit operator choice (the user owns their own machine).
+// The single implementation of that order. Three copies of it existed, and the
+// one that drifted stopped honouring the project override entirely — so the
+// gate counting a review's axes read a different file than the reviewer did.
+// `requireExists` is the one real difference between the old copies: the grader
+// wants the plugin candidate back even when absent, so `gradeArtifact` can
+// report the path it looked for; init wants null, so it can warn per rubric.
+function resolveRubricFile(filename, { pluginRoot = PLUGIN_ROOT, projectRoot, requireExists = false } = {}) {
+  if (!filename || typeof filename !== "string") return null;
+  if (path.isAbsolute(filename)) return filename;
+  const scopedCandidate = (dir) => {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+    const cand = path.normalize(path.join(dir, filename));
+    return (cand === dir || cand.startsWith(dir + path.sep)) ? cand : null;
+  };
+  if (projectRoot) {
+    const projectCandidate = scopedCandidate(path.join(projectRoot, ".devt", "rubrics"));
+    if (projectCandidate && fs.existsSync(projectCandidate)) return projectCandidate;
+  }
+  const pluginCandidate = scopedCandidate(path.join(pluginRoot, "references", "rubrics"));
+  if (!pluginCandidate) return null;
+  // A relative path that escaped both trusted roots via .. is rejected above.
+  return (!requireExists || fs.existsSync(pluginCandidate)) ? pluginCandidate : null;
+}
+
 function resolveRubricPath(workflowType) {
   const merged = config.getMergedConfig();
   const rubricFile = merged.rubrics && merged.rubrics[workflowType];
   if (!rubricFile) return null;
-  if (path.isAbsolute(rubricFile)) return rubricFile;
-  const projectRoot = config.findProjectRoot();
-  if (projectRoot) {
-    const projectRubricsDir = path.join(projectRoot, ".devt", "rubrics");
-    const projectCandidate = path.normalize(path.join(projectRubricsDir, rubricFile));
-    const projectScoped = projectCandidate === projectRubricsDir || projectCandidate.startsWith(projectRubricsDir + path.sep);
-    if (projectScoped && fs.existsSync(projectCandidate)) return projectCandidate;
-  }
-  const pluginRubricsDir = path.join(PLUGIN_ROOT, "references", "rubrics");
-  const pluginCandidate = path.normalize(path.join(pluginRubricsDir, rubricFile));
-  const pluginScoped = pluginCandidate === pluginRubricsDir || pluginCandidate.startsWith(pluginRubricsDir + path.sep);
-  if (pluginScoped) return pluginCandidate;
-  // Relative path escaped both trusted roots via .. — reject. Caller
-  // surfaces this as ok:false via the "no rubric registered" path.
-  return null;
+  return resolveRubricFile(rubricFile, { projectRoot: config.findProjectRoot() });
 }
 
 function run(subcommand, args) {
@@ -147,4 +157,4 @@ function run(subcommand, args) {
   return result.pass ? 0 : 1;
 }
 
-module.exports = { gradeArtifact, extractDeterministicGates, walkConstraints, resolveRubricPath, run };
+module.exports = { gradeArtifact, extractDeterministicGates, walkConstraints, resolveRubricFile, resolveRubricPath, run };
