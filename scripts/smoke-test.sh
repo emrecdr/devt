@@ -15926,12 +15926,19 @@ K227_T=$(mktemp -d); (
   mkdir -p .devt/state app graphify-out
   echo '{"graphify":{"enabled":true}}' > .devt/config.json
   printf 'import os\n\ndef popular_svc():\n    return os.getcwd()\n' > app/svc.py
+  # A second tracked file so the cosmetic majority survives counting the
+  # untracked module below. The census was blind to untracked files, so this
+  # fixture read as cosmetic-heavy only because the one real-code addition in
+  # it was invisible — the ratio measured a subset, not the change.
+  node -e "require('fs').writeFileSync('app/helpers.py', Array.from({length:8},(_,i)=>'def f'+(i+1)+'():\n    return '+(i+1)).join('\n')+'\n')"
   git add -A && git commit -qm base
   BUILT=$(git rev-parse HEAD)
   node -e "require('fs').writeFileSync('graphify-out/graph.json', JSON.stringify({built_at_commit:'$BUILT', nodes:[{id:'n1',label:'popular_svc',source_file:'app/svc.py',source_location:'app/svc.py:3'}], edges:[]}))"
   git checkout -qb feature
   printf 'import sys\nimport os\n\n# comment one\n# comment two\ndef popular_svc():\n    return os.getcwd()\n' > app/svc.py
   printf '# prose\nnew doc line\n' > NOTES.md
+  # Three SEPARATED comment insertions — three distinct cosmetic hunks.
+  node -e "const fs=require('fs');const L=fs.readFileSync('app/helpers.py','utf8').split('\n');const o=[];L.forEach((l,i)=>{if(i===0||i===6||i===12)o.push('# explanatory comment');o.push(l)});fs.writeFileSync('app/helpers.py',o.join('\n'))"
   git add -A && git commit -qm cosmetic
   printf 'def moved_thing():\n    pass\n' > app/untracked_new.py
   printf '{"topic":{"symbols":["popular_svc"]},"graph_stats":{"state":"ready"}}' > .devt/state/preflight-brief.json
@@ -20930,7 +20937,10 @@ printf 'class S36: pass\n' > "$F64_T/app/a.py"
   && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
 # Uncommitted change only — base...HEAD is empty, so ranking must fall back.
 printf 'class S36: pass\nclass S37: pass\n' > "$F64_T/app/a.py"
-cat > "$F64_T/probe.cjs" <<'F64EOF'
+# The probe lives OUTSIDE the fixture: written inside it, the script becomes an
+# untracked file in the very change set it is measuring.
+F64_P=$(mktemp -d)
+cat > "$F64_P/probe.cjs" <<'F64EOF'
 const fs = require("fs"), path = require("path");
 const M = process.env.DEVT_MODULES;
 const gp = require.resolve(M + "/graphify.cjs");
@@ -20989,7 +20999,7 @@ const sec2 = gi2.slice(gi2.indexOf("## Subject symbols dropped (truncation notic
 out.push(/submitted no symbols at all/.test(sec2) && !/were dropped and not submitted/.test(sec2) ? "nosubmit" : "IMPLIESSUBMIT");
 console.log(out.join(","));
 F64EOF
-F64_OUT=$(cd "$F64_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
+F64_OUT=$(cd "$F64_T" && DEVT_MODULES="$ROOT/bin/modules" node "$F64_P/probe.cjs" 2>/dev/null | tail -1)
 # Graph-node filter liveness: with graphify unavailable the brief must SAY the
 # filter did not run, rather than leaving an empty dropped-list to read as clean.
 (cd "$F64_T" && node "$ROOT/bin/devt-tools.cjs" preflight generate "review the auth mapper" >/dev/null 2>&1)
@@ -20999,9 +21009,46 @@ F64_FILT=$(node -e "
     const f = (d.topic || {}).symbol_graph_filter;
     console.log(f && f.ran === false && typeof f.reason === 'string' && f.reason.length > 0 ? 'declared' : 'SILENT');
   } catch { console.log('ERR'); }" 2>/dev/null)
-rm -rf "$F64_T"
+rm -rf "$F64_T" "$F64_P"
+# F65: the change set includes untracked files, and gets them without touching
+# the caller's index. `git diff` cannot show untracked files at all, so every
+# consumer reading diff TEXT — symbol ranking, the hunk census — was blind to a
+# branch whose centrepiece is a NEW module, while the truncation notice asserted
+# the ordering it had derived from exactly that blind diff. Surfaced via a
+# scratch GIT_INDEX_FILE: one diff, constant forks, caller's index untouched.
+F65_T=$(mktemp -d); mkdir -p "$F65_T/app"
+printf 'class OldThing: pass\n' > "$F65_T/app/old.py"
+(cd "$F65_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t \
+  && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 && git branch -M main >/dev/null 2>&1)
+printf 'class CentrepieceSymbol:\n    def run(self): pass\n' > "$F65_T/app/new_module.py"
+printf 'class OldThing:\n    def touched(self): pass\n' > "$F65_T/app/old.py"
+F65_OUT=$(cd "$F65_T" && DEVT_MODULES="$ROOT/bin/modules" node -e '
+  const cp = require("child_process");
+  const rw = require(process.env.DEVT_MODULES + "/review-weight.cjs");
+  const out = [];
+  const txt = rw.changeSetText(process.cwd(), "main") || "";
+  out.push(/CentrepieceSymbol/.test(txt) ? "untracked" : "MISSESNEW");
+  out.push(/def touched/.test(txt) ? "tracked" : "MISSESMOD");
+  // The scratch index must not be the caller|s: an untracked file that came
+  // back staged would mean the analysis mutated the repo it was reading.
+  const st = cp.execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" });
+  out.push(/^\?\? app\/new_module\.py$/m.test(st) ? "noindexmut" : "MUTATEDINDEX");
+  // devt|s own ephemeral layer is never a change under review.
+  require("fs").mkdirSync(".devt/state", { recursive: true });
+  require("fs").writeFileSync(".devt/state/scratch.json", "{}");
+  const t2 = rw.changeSetText(process.cwd(), "main") || "";
+  out.push(!/scratch\.json/.test(t2) ? "noephemeral" : "LEAKSSTATE");
+  console.log(out.join(","));
+' 2>/dev/null | tail -1)
+rm -rf "$F65_T"
+if [ "$F65_OUT" = "untracked,tracked,noindexmut,noephemeral" ]; then
+  pass "F65: the change set carries untracked AND tracked changes in one diff, leaves the caller's index untouched, and excludes devt's own ephemeral state"
+else
+  fail "F65: change-set collection regressed — got '$F65_OUT' (want untracked,tracked,noindexmut,noephemeral)"
+fi
+
 if [ "$F64_OUT" = "reconciled,reported,ranked,honest,scoped,override,nosubmit" ] && [ "$F64_FILT" = "declared" ]; then
-  pass "F64: the truncation notice lists only symbols no leg submitted (recovered ones counted, not absorbed), ranking sees uncommitted work, the notice no longer claims an ordering it abandoned, and a graph-node filter that did not run says so"
+  pass "F64: the truncation notice lists only symbols no leg submitted (recovered ones counted, not absorbed), ranking sees uncommitted AND untracked work without mutating the caller\x27s index, the notice no longer claims an ordering it abandoned, and a graph-node filter that did not run says so"
 else
   fail "F64: truncation-notice honesty regressed — probe='$F64_OUT' (want reconciled,reported,ranked,honest,scoped,override,nosubmit) graph_filter=$F64_FILT (want declared)"
 fi

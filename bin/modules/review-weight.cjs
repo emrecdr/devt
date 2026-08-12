@@ -70,6 +70,16 @@ function _compilePatterns(defaults, extra) {
   return compiled;
 }
 
+// devt's own ephemeral layer is never part of a change under review, and it is
+// rewritten DURING the run that inspects it — an impact plan written by
+// compute-impact-plan then feeds back into the next call's hunk census. Git's
+// --exclude-standard covers this wherever .devt/state/ is gitignored; no
+// consumer's correctness should depend on a project having done that.
+// Scoped to state/ deliberately: .devt/rules/ and .devt/config.json are
+// author-maintained and legitimately reviewable.
+const DEVT_EPHEMERAL = ".devt/state/";
+function _reviewable(f) { return f && !f.startsWith(DEVT_EPHEMERAL); }
+
 /**
  * collectChangedFiles — union of committed-range diff + uncommitted working-tree
  * changes + untracked files. The one file-collection semantic every scope-
@@ -95,14 +105,74 @@ function collectChangedFiles(projectRoot, baseRef, opts) {
       const argv = range.includes("..")
         ? ["diff", "--name-only", range]
         : ["diff", "--name-only", `${range}...HEAD`];
-      return Array.from(new Set(collect(argv)));
+      return Array.from(new Set(collect(argv))).filter(_reviewable);
     } catch { return []; }
   }
   const union = new Set();
   try { for (const f of collect(["diff", "--name-only", `${baseRef}...HEAD`])) union.add(f); } catch { /* base unreachable — working-tree passes below still apply */ }
   for (const f of collect(["diff", "--name-only", "HEAD"])) union.add(f);
   for (const f of collect(["ls-files", "--others", "--exclude-standard"])) union.add(f);
-  return Array.from(union);
+  return Array.from(union).filter(_reviewable);
+}
+
+/**
+ * changeSetText — the same change set collectChangedFiles enumerates, as `-U0`
+ * hunk text. Consumers that rank symbols or census hunks need the diff body,
+ * not the file list, and a bare `git diff` cannot show untracked files at all —
+ * so a branch whose centerpiece is a new module ranked and censused as though
+ * that module did not exist, while asserting the ordering it had derived.
+ *
+ * Untracked files are surfaced by staging them intent-to-add into a SCRATCH
+ * index (GIT_INDEX_FILE), never the caller's: one diff covers modified,
+ * committed and new files together, at a constant two forks regardless of how
+ * many new files there are, and `git status` in the caller's repo is unchanged.
+ * The alternative — one `git diff --no-index` per untracked file — forks once
+ * per file and emits fragments the consumer has to concatenate itself.
+ */
+function changeSetText(projectRoot, baseRef, opts) {
+  const os = require("os");
+  const fs = require("fs");
+  const path = require("path");
+  const git = (argv, env) => {
+    // status 1 means "differences found", which is the expected outcome here;
+    // only a real failure (128, etc.) returns null.
+    const r = require("child_process").spawnSync("git", argv, {
+      cwd: projectRoot, encoding: "utf8", timeout: 10000,
+      maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
+    return (r.status === 0 || r.status === 1) ? (r.stdout || "") : null;
+  };
+  // An explicit range is a committed span — no working-tree or untracked union,
+  // for the reason collectChangedFiles states: it would contaminate a merged-PR
+  // or historical-range review with unrelated local edits.
+  const range = opts && typeof opts.range === "string" && opts.range.trim() ? opts.range.trim() : null;
+  if (range) {
+    return git(["diff", "-U0", range.includes("..") ? range : `${range}...HEAD`]);
+  }
+  let scratch = null, env = null;
+  try {
+    const untracked = (git(["ls-files", "--others", "--exclude-standard"]) || "")
+      .split("\n").map(s => s.trim()).filter(_reviewable);
+    if (untracked.length > 0) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devt-idx-"));
+      scratch = path.join(dir, "index");
+      // Seeded from the real index so tracked state is preserved; without the
+      // copy every tracked file would read as a deletion.
+      fs.copyFileSync(path.join(projectRoot, ".git", "index"), scratch);
+      env = { GIT_INDEX_FILE: scratch };
+      git(["add", "-N", "--", ...untracked], env);
+    }
+  } catch { env = null; /* no scratch index — fall through to the tracked-only diff */ }
+  try {
+    // `--merge-base` covers committed AND uncommitted in one fork; the two-step
+    // and the HEAD diff remain for git below 2.30 and for a missing base ref.
+    return git(["diff", "-U0", "--merge-base", baseRef], env)
+      ?? git(["diff", "-U0", `${baseRef}...HEAD`], env)
+      ?? git(["diff", "-U0", "HEAD"], env);
+  } finally {
+    if (scratch) { try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ } }
+  }
 }
 
 function _reviewConfig() {
@@ -371,4 +441,4 @@ function run(subcommand, args) {
   return 0;
 }
 
-module.exports = { run, assessReviewWeight, adviseReviewWeight, collectChangedFiles, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };
+module.exports = { run, assessReviewWeight, adviseReviewWeight, collectChangedFiles, changeSetText, DEFAULT_RISK_SURFACE_PATTERNS, DEFAULT_LOGIC_EXCLUDES };
