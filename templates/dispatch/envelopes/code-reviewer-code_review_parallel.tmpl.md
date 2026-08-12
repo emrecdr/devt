@@ -15,7 +15,7 @@ Task(subagent_type="devt:code-reviewer", model="{models.code-reviewer}", prompt=
     <god_node_warnings>{god_node_warnings_json}</god_node_warnings>
     {prior_outputs}
     {provenance_protocol}
-    <rubric_path>.devt/state/rubric-code_review.md</rubric_path>
+    <rubric_path>.devt/state/rubric-code_review_parallel.md</rubric_path>
     <lane_files>{lane_files_newline_separated}</lane_files>
     <unassigned_scope>{unassigned_scope}</unassigned_scope>
     <agent_skills>{injected from .devt/config.json if available}</agent_skills>

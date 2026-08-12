@@ -1070,7 +1070,7 @@ function blastRadius(topic) {
 /**
  * Render the markdown Brief from lane outputs.
  */
-function renderBrief({ task, topic, lanes, governing, triples, blast, report, generatedAt, suggestedReading }) {
+function renderBrief({ task, topic, graphFilterStatus, lanes, governing, triples, blast, report, generatedAt, suggestedReading }) {
   const lines = [];
   lines.push(`# Pre-Flight Brief: ${task || "(unspecified task)"}`);
   lines.push("");
@@ -1117,6 +1117,13 @@ function renderBrief({ task, topic, lanes, governing, triples, blast, report, ge
   lines.push(`- **Domains:** ${topic.domains.length ? topic.domains.join(", ") : "_(none)_"}`);
   lines.push(`- **Symbols:** ${topic.symbols.length ? topic.symbols.join(", ") : "_(none)_"}`);
   lines.push(`- **Keywords:** ${topic.keywords.length ? topic.keywords.slice(0, 12).join(", ") : "_(none)_"}`);
+  // The graph-node filter is the only thing that removes plausible-looking
+  // non-symbols the shape gate and verb denylist both pass. When it did not
+  // run, the list above is unfiltered — a reader who assumes otherwise trusts
+  // names that were never checked against the graph.
+  if (graphFilterStatus && graphFilterStatus.ran === false) {
+    lines.push(`- **Graph-node filter:** did not run — ${graphFilterStatus.reason}. The symbols above are UNFILTERED.`);
+  }
   lines.push("");
 
   // Caller passes the deduped union directly. Defensive fallback for tests
@@ -1703,7 +1710,7 @@ function generate(taskText, opts) {
 
   const lanes = { A, B, C, D, E, F, G, H };
   const generatedAt = new Date().toISOString();
-  const brief = renderBrief({ task: taskText, topic, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
+  const brief = renderBrief({ task: taskText, topic, graphFilterStatus, lanes, governing: governingUnion, triples, blast, report, generatedAt, suggestedReading });
 
   // Write atomically to .devt/state/preflight-brief.md
   const root = findProjectRoot();

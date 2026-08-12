@@ -9128,7 +9128,11 @@ M15_REVIEWER_INLINE=$(/usr/bin/grep -c "<rubric_content>{inline_rubrics.code_rev
 # Reviewer rubric_path lives in code-review.md (review step); the verifier's
 # lives in the shared step file both paths load — count the pair across both.
 M15_PATH_REFS=$(( $(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review.md" 2>/dev/null || echo 0) + $(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review.steps.md" 2>/dev/null || echo 0) ))
-M15_PARALLEL_BYREF=$(/usr/bin/grep -c "rubric_path>.devt/state/rubric-code_review.md" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
+# The parallel path points at its OWN materialized copy: every workflow_type
+# maps to .devt/state/rubric-<workflow_type>.md with no exceptions, so a project
+# overriding rubrics.code_review_parallel gets the rubric it configured rather
+# than the single reviewer's.
+M15_PARALLEL_BYREF=$(/usr/bin/grep -c "rubric_path>\.devt/state/rubric-code_review_parallel\.md" "$ROOT/workflows/code-review-parallel.md" 2>/dev/null || echo 0)
 M15_AGENT=$(/usr/bin/grep -c "Rubric self-check" "$ROOT/agents/code-reviewer.md" 2>/dev/null || echo 0)
 if [ "${M15_REVIEWER_INLINE:-0}" -ge 1 ] && [ "${M15_PATH_REFS:-0}" -ge 2 ] && [ "${M15_PARALLEL_BYREF:-0}" -ge 1 ] && [ "${M15_AGENT:-0}" -ge 1 ]; then
   pass "M15: code_review rubric aligned — reviewer inline self-check (${M15_REVIEWER_INLINE}) + reviewer/verifier rubric_path (${M15_PATH_REFS}) + parallel by-reference (${M15_PARALLEL_BYREF}) + agent self-check (${M15_AGENT})"
@@ -20719,6 +20723,16 @@ out.push(axis(H + NA).ok ? "terse" : "TERSE_BROKE");
 out.push(axis(H + NA + "\nI considered emitting counts: with zeros, but zeros imply the ledger was read and found empty.\n").ok ? "explained" : "PUNISHED");
 const mal = axis(H + "counts: raw_dispatch=0\n");
 out.push(!mal.ok && /does not parse/.test(mal.reason) ? "named" : "MISDIAGNOSED");
+// The rubric tells the reviewer to count from first_created_at, and re-routing
+// to the parallel path rotates created_at mid-review. Anchored on the rotating
+// stamp, the gate computes 0 where the reviewer honestly counted 1 and blocks
+// on the correct answer. A record BETWEEN the two anchors is what separates them.
+fs.writeFileSync(path.join(dir, "workflow.yaml"), `first_created_at: "${ANCHOR}"\ncreated_at: "2026-08-09T00:00:00Z"\n`);
+fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), JSON.stringify({ ts: "2026-08-03T00:00:00Z", source: "raw_dispatch", agent: "devt:programmer", warning_id: "wr" }) + "\n");
+const rot = axis(H + "counts: raw_dispatch=1 resolved=0 cliff_signal=0\n");
+out.push(rot.ok ? "rotation" : "WRONGWINDOW");
+fs.writeFileSync(path.join(dir, "workflow.yaml"), `created_at: "${ANCHOR}"\n`);
+fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), "");
 // Liveness: zero is only clean when something was watching.
 fs.rmSync(path.join(dir, "dispatch-warnings.jsonl"), { force: true });
 fs.rmSync(path.join(dir, "hook-trace"), { recursive: true, force: true });
@@ -20729,10 +20743,16 @@ const tr = (recs) => fs.writeFileSync(path.join(dir, "hook-trace", "run-hook.jso
 // A pre-anchor firing and a different hook must NOT count as evidence.
 tr([{ ts: "2026-07-01T00:00:00Z", script: "dispatch-hygiene-guard.sh" }, { ts: "2026-08-05T00:00:00Z", script: "bash-guard.sh" }]);
 const stale = g.assertNoRawDispatchesThisSession();
-out.push(stale.warn === true && stale.guard_fired === 0 ? "windowed" : "LEAKED");
+out.push(stale.warn === true && stale.guard_fired_at === null ? "windowed" : "LEAKED");
+// The runner traces hooks it SKIPS, and those records carry the script name.
+// A substring match reports a profile-disabled guard as a live one — the same
+// vacuous pass, through the back door.
+tr([{ ts: "2026-08-05T00:00:00Z", script: "dispatch-hygiene-guard.sh", enabled: false, reason: "disabled_by_profile_or_env" }]);
+const off = g.assertNoRawDispatchesThisSession();
+out.push(off.warn === true && off.guard_fired_at === null ? "disabled" : "COUNTEDSKIP");
 tr([{ ts: "2026-08-05T00:00:00Z", script: "dispatch-hygiene-guard.sh" }, { ts: "2026-08-05T00:01:00Z", script: "dispatch-hygiene-guard.sh" }]);
 const live = g.assertNoRawDispatchesThisSession();
-out.push(live.ok && !live.warn && live.evidence === "guard_fired" && live.guard_fired === 2 ? "clean" : "NOEVIDENCE");
+out.push(live.ok && !live.warn && live.evidence === "guard_fired" && live.guard_fired_at === "2026-08-05T00:01:00Z" ? "clean" : "NOEVIDENCE");
 // A real in-window raw dispatch must still block.
 fs.writeFileSync(path.join(dir, "dispatch-warnings.jsonl"), JSON.stringify({ ts: "2026-08-05T00:00:00Z", source: "raw_dispatch", agent: "devt:code-reviewer", warning_id: "w1" }) + "\n");
 out.push(g.assertNoRawDispatchesThisSession().ok === false ? "blocks" : "LETSTHROUGH");
@@ -20750,10 +20770,17 @@ console.log(out.join(","));
 F62EOF
 F62_OUT=$(cd "$F62_T" && DEVT_MODULES="$ROOT/bin/modules" node probe.cjs 2>/dev/null | tail -1)
 rm -rf "$F62_T"
-if [ "$F62_OUT" = "terse,explained,named,unknown,windowed,clean,blocks,projected,counted" ]; then
-  pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window guard firing to back it, 'unknown' otherwise, a real dispatch still blocks, and the unknown verdict survives the phase-gate projection instead of dying at the gate boundary"
+# The projection is only half the delivery: every workflow's finalize-gates
+# reader filters `select(.ok==false)`, so a warn row that nothing echoes is
+# computed, projected, and still never seen by an operator.
+F62_ECHO=ok
+for f in dev-workflow quick-implement debug; do
+  grep -q 'select(.warn==true)' "$ROOT/workflows/$f.md" || F62_ECHO="UNREAD:$f"
+done
+if [ "$F62_OUT" = "terse,explained,named,rotation,unknown,windowed,disabled,clean,blocks,projected,counted" ] && [ "$F62_ECHO" = "ok" ]; then
+  pass "F62: Axis H accepts a reasoned n/a and names what it actually found; a zero raw-dispatch count reads 'clean' only with an in-window firing of an ENABLED guard to back it, 'unknown' otherwise, a real dispatch still blocks, and the unknown verdict survives both the phase-gate projection and the workflow reader instead of dying at either boundary"
 else
-  fail "F62: gate-honesty regressed — got '$F62_OUT' (want terse,explained,named,unknown,windowed,clean,blocks)"
+  fail "F62: gate-honesty regressed — got '$F62_OUT' (want terse,explained,named,rotation,unknown,windowed,disabled,clean,blocks,projected,counted), echo=$F62_ECHO"
 fi
 
 # F63: the rubric is reachable from where the reviewer runs, lanes are asked
@@ -20790,6 +20817,13 @@ F63_OUT=$(printf '%s' "$F63_LANES" | node -e "
     out.push(/<lane_axis_policy>[^<]*ORCHESTRATOR-LEVEL/.test(s) ? 'axispolicy' : 'NOPOLICY');
     // [\s\S] not [^<]: the block legitimately names <rubric_path> inside itself.
     out.push(/<lane_scoring>[\s\S]*?score_null_reason[\s\S]*?<\/lane_scoring>/.test(s) ? 'scored' : 'NOSCORE');
+    // review_file is slugified from the lane's SCOPE, not its id (here: scope
+    // 'api' vs id 'L1'). A score written to a sidecar the consolidator never
+    // opens is the all-null column this gate exists to prevent, so the two
+    // instructions must name ONE file.
+    const sc = (s.match(/<lane_scoring>[\s\S]*?<\/lane_scoring>/) || [''])[0].match(/review-lane-[A-Za-z0-9_]+\.json/);
+    const tr = (s.match(/machine-readable sidecar (\S*review-lane-[A-Za-z0-9_]+\.json)/) || [])[1];
+    out.push(sc && tr && tr.endsWith(sc[0]) ? 'onesidecar' : 'SPLIT:' + (sc && sc[0]) + '/' + tr);
     // No surface may hard-assert the axis inventory at a lane — that is what beat the rubric.
     out.push(!/currently H and I|including axis H/.test(s) ? 'deferred' : 'CONTRADICTS');
     out.push(/never self-grade against this prompt in silence/.test(s) ? 'declares' : 'SILENT');
@@ -20808,10 +20842,10 @@ printf '{}' > "$F63_T2/.devt/config.json"
 F63_NOINIT=$([ -s "$F63_T2/.devt/state/rubric-code_review.md" ] && echo materialized || echo MISSING)
 rm -rf "$F63_T2"
 F63_CONS=$({ /usr/bin/grep -c 'COPIED from that lane' "$ROOT/templates/dispatch/envelopes/code-reviewer-code_review_parallel.tmpl.md" || true; } | tr -d ' ')
-if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
-  pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
+if [ "$F63_RUBRIC" = "materialized" ] && [ "$F63_NOINIT" = "materialized" ] && [ "$F63_OUT" = "inproject,axispolicy,scored,onesidecar,deferred,declares" ] && [ "${F63_CONS:-0}" -ge 1 ]; then
+  pass "F63: the rubric is materialized inside the project on BOTH delivery paths (init and render) and every <rubric_path> resolves there, lanes are asked for a score in the SAME sidecar their write instruction names, with a null-reason fallback the consolidator copies through, axis H is asked once via a lane-only policy, and an unreachable rubric must be declared rather than silently self-graded"
 else
-  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT render='$F63_OUT' (want inproject,axispolicy,scored,deferred,declares) consolidator_copies=$F63_CONS"
+  fail "F63: rubric-reachability / lane-contract regressed — rubric=$F63_RUBRIC render_path_rubric=$F63_NOINIT render='$F63_OUT' (want inproject,axispolicy,scored,onesidecar,deferred,declares) consolidator_copies=$F63_CONS"
 fi
 
 # F64: the truncation notice reports what was actually withheld.

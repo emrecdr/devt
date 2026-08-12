@@ -222,6 +222,8 @@ if [ "$(printf '%s\n' "$FG" | jq -r '.all_ok')" != "true" ]; then
   echo "BLOCKED: $(printf '%s\n' "$FG" | jq -r '[.gates[] | select(.ok==false) | .gate + ": " + .reason] | join(" | ")')"
   exit 0
 fi
+UNK=$(printf '%s\n' "$FG" | jq -r '[.gates[] | select(.warn==true) | .gate + ": " + .reason] | join(" | ")')
+[ -n "$UNK" ] && echo "UNKNOWN (advisory, does not block): $UNK"
 ```
 
 When the gate trips: re-read debug-summary.md, identify non-obvious patterns the debugger described in prose (recurring bug class, hidden invariant, environmental gotcha) but did not tag, append `#KNOWLEDGE-CANDIDATE: [type=...] <summary>` lines to scratchpad.md, then re-enter report. If genuinely none qualify, write the structured none-declaration: `printf 'reason=no_novel_patterns\ndeclared_at=%s\n' "$(date -u +%FT%TZ)" > .devt/state/knowledge-candidates-none.txt`.

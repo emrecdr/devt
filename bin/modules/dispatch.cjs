@@ -1865,6 +1865,12 @@ function cmdRenderLanes(target, options) {
       }
       memoryAffects = JSON.stringify(hits.slice(0, 10));
     } catch { /* memory layer unavailable — [] is the honest answer */ }
+    // review_file is slugified from the lane's SCOPE, not its id, so naming the
+    // sidecar after the id sends the score to a file the consolidator never
+    // opens. Derived once and shared with the write trailer below.
+    const laneSidecar = lane.review_file
+      ? String(lane.review_file).replace(/\.md$/, ".json")
+      : `review-lane-${lane.id}.json`;
     const blockLines = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
@@ -1885,7 +1891,7 @@ function cmdRenderLanes(target, options) {
       // WITH its condition attached: a score is only meaningful when it came
       // from the rubric, and a manufactured one is worse than null because it
       // looks comparable with the lanes that could read it.
-      `    <lane_scoring>Emit a 0-100 \`score\` in your \`review-lane-${lane.id}.json\` sidecar, derived from the rubric's grading table. If you could not read the rubric at <rubric_path>, emit \`"score": null\` together with \`"score_null_reason": "<one line>"\` — a null with a reason is a usable signal; a guessed number that looks comparable is not.</lane_scoring>`,
+      `    <lane_scoring>Emit a 0-100 \`score\` in the SAME \`${path.basename(laneSidecar)}\` sidecar named in your write instruction, computed the way your scoring guide already specifies: start at 100 and subtract per finding by severity. Do NOT derive it from the rubric — the rubric grades axes pass/fail and defines no 0-100 scale, so a score built from it is a mapping you invented, and the consolidated distribution invites the reader to compare it against single-dispatch scores that are deduction-derived. If you could not complete the review of your lane files, emit \`"score": null\` together with \`"score_null_reason": "<one line>"\` — a null with a reason is a usable signal; a guessed number that looks comparable is not.</lane_scoring>`,
     ];
     const neighbors = laneOwnership.filter((n) => n.id !== lane.id);
     if (neighbors.length > 0) {
@@ -1967,7 +1973,6 @@ function cmdRenderLanes(target, options) {
       // consolidator that drops findings and under-reports the raw total to
       // match reads as consistent. One Write per lane buys a number the
       // consolidator cannot author.
-      const laneSidecar = String(lane.review_file).replace(/\.md$/, ".json");
       injected = injected.replace(
         /Write review to \.devt\/state\/review\.md/g,
         `Write review to ${lane.review_file}, AND write the machine-readable sidecar ${laneSidecar} carrying ` +

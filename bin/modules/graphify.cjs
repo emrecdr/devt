@@ -1922,6 +1922,8 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
   return out_;
 }
 
+const SCOPE_NOTE = " These were cut by devt's 32-symbol topic cap AND not submitted through any other leg — symbols the cap cut but the diff-symbol extractor sent anyway are excluded, because reporting those as absent is how this notice previously misled a reviewer.";
+
 // augmentImpactMap — the deterministic post-MCP augmentation that used to live
 // as ~113 lines of inline jq in code-review.md's context_init (substep 7). It
 // runs AFTER the MCP tier call wrote graph-impact.md, so it cannot fold into the
@@ -1935,9 +1937,6 @@ function checkLargeFilesGodNodes(diffFiles, edgeThreshold = 50) {
 //   5. Ambiguous bindings (from the brief's blast.ambiguous_details)
 //   6. Symbol-level god-nodes from preflight (fallback when 1 AND 2 are empty)
 // Returns a summary of what was appended so the workflow can echo it in one line.
-const SCOPE_NOTE = " These were cut by devt's 32-symbol topic cap AND not submitted through any other leg — symbols the cap cut but the diff-symbol extractor sent anyway are excluded, because reporting those as absent is how this notice previously misled a reviewer.";
-
-
 function augmentImpactMap(opts = {}) {
   const proot = opts.projectRoot || (() => { try { return require("./config.cjs").findProjectRoot(); } catch { return process.cwd(); } })();
   const edgeThreshold = Number.isInteger(opts.edgeThreshold) && opts.edgeThreshold > 0 ? opts.edgeThreshold : 50;
@@ -2034,14 +2033,29 @@ function augmentImpactMap(opts = {}) {
     // Single-sourced: banner and section state the same claim, and a wording fix
     // that lands in only one of them is exactly the drift this notice exists to
     // stop reporting.
-    const lede = `${n}${ofPool} were dropped and not submitted.${SCOPE_NOTE}`;
-    const spotCheck = "spot-check for high-risk symbols whose absence may affect severity calibration";
+    // The cap's full reduction is what the reader is judging, and the dropped
+    // list alone understates it: symbols the cap cut but the diff leg submitted
+    // anyway are excluded by design, so without this the recovery is invisible
+    // and the two numbers cannot be reconciled from the artifact.
+    const recovered = plan && Number.isInteger(plan.topic_symbols_recovered_via_diff_leg)
+      ? plan.topic_symbols_recovered_via_diff_leg : 0;
+    const recoveredNote = recovered > 0
+      ? ` A further ${recovered} were cut by the cap but submitted through the diff leg, so they are NOT listed here.`
+      : "";
+    // "dropped and not submitted" contrasts with symbols that WERE submitted.
+    // On the tiers that submit no symbols at all that contrast is false, and the
+    // sentence reads as though a selective submission took place.
+    const noneSubmitted = plan && plan.topic_symbols_none_submitted === true;
+    const lede = noneSubmitted
+      ? `${n}${ofPool} are not represented in this map — this tier submitted no symbols at all, so none of them were.`
+      : `${n}${ofPool} were dropped and not submitted.${recoveredNote}${SCOPE_NOTE}`;
+    const spotCheck = "Spot-check for high-risk symbols whose absence may affect severity calibration";
     if (n > 5) {
-      const banner = `> **Subject symbols truncated**: ${lede} Full list in the **## Subject symbols dropped** section below — ${spotCheck}.\n\n`;
+      const banner = `> **Subject symbols truncated**: ${lede} Full list in the **## Subject symbols dropped** section below — ${spotCheck.toLowerCase()}.\n\n`;
       try { fs.writeFileSync(giPath, banner + (fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "")); appended.push("dropped_banner"); } catch { /* skip */ }
     }
     const rows = dropped.map(s => `- ${s}`);
-    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${lede}${orderNote} ${spotCheck.charAt(0).toUpperCase()}${spotCheck.slice(1)}._\n\n${rows.join("\n")}\n`);
+    append("dropped_section", `\n## Subject symbols dropped (truncation notice)\n\n_${lede}${orderNote} ${spotCheck}._\n\n${rows.join("\n")}\n`);
   }
 
   // 4. Hyperedge completeness (partial-coverage groupings).

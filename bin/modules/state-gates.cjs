@@ -475,8 +475,6 @@ function assertVerifierGradedAllAxes() {
   if (!workflowType) {
     return { ok: true, reason: "no active workflow — gate does not apply" };
   }
-  // Resolve rubric path: cfg.rubrics[<workflow_type>] is the filename in
-  // references/rubrics/. Same pattern as the workflow dispatch templates.
   const rubricFilename = cfg && cfg.rubrics && cfg.rubrics[workflowType];
   if (!rubricFilename) {
     return {
@@ -485,14 +483,27 @@ function assertVerifierGradedAllAxes() {
       reason: `no rubric pinned for workflow_type=${workflowType} — gate does not apply`,
     };
   }
+  // Count axes in the copy the verifier was actually pointed at. Resolving from
+  // the plugin root instead ignored a project's .devt/rubrics/ override, so on
+  // any project using the documented escape hatch the reviewer graded one axis
+  // set and this gate counted another — and then reported the mismatch as
+  // "gate does not apply". Falls back to the shared resolver when the
+  // materialized copy is absent (gate invoked outside a rendered dispatch).
+  // Required lazily: grader pulls in state.cjs, which loads this module.
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-  const rubricPath = path.join(__dirname, "..", "..", "references", "rubrics", rubricFilename);
+  let rubricPath = path.join(dir, `rubric-${workflowType}.md`);
   if (!fs.existsSync(rubricPath)) {
+    try { rubricPath = require("./grader.cjs").resolveRubricPath(workflowType); }
+    catch { rubricPath = null; }
+  }
+  if (!rubricPath || !fs.existsSync(rubricPath)) {
     return {
       ok: true,
+      warn: true,
+      evidence: "unknown",
       workflow_type: workflowType,
       rubric_path: rubricFilename,
-      reason: `rubric file ${rubricFilename} not found at expected path — gate does not apply`,
+      reason: `rubric ${rubricFilename} resolved to no readable file, so the declared axis count is unknown and coverage could not be checked`,
     };
   }
   const rubricBody = fs.readFileSync(rubricPath, "utf8");
@@ -1922,24 +1933,11 @@ function assertCouncilBudget(args) {
   args = args || [];
   const max = parseInt(_getFlag(args, "--max-per-workflow") || "1", 10);
   const dir = getStateDir();
-  // Anchor on workflow.yaml::first_created_at to scope the count to the
-  // current workflow window. Without an anchor, all prior records would
-  // count and the gate would always block.
-  let anchorMs = 0;
-  try {
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
-    const wfPath = path.join(dir, "workflow.yaml");
-    if (fs.existsSync(wfPath)) {
-      const yaml = fs.readFileSync(wfPath, "utf8");
-      const m = yaml.match(/^first_created_at:\s*"?([^"\n]+)"?\s*$/m);
-      if (m) {
-        const parsed = new Date(m[1].trim()).getTime();
-        if (Number.isFinite(parsed)) anchorMs = parsed;
-      }
-    }
-  } catch { /* no anchor — gate auto-passes */ }
+  // Anchor on the immutable session stamp, not the per-init one: a council
+  // budget spans the whole session, so a rotation must not reset the count.
+  const anchorMs = _workflowWindowAnchorMs(dir, "first_created_at");
   if (anchorMs === 0) {
-    return { ok: true, count: 0, max, reason: "workflow.yaml::first_created_at absent — no anchor for windowing; gate inapplicable" };
+    return { ok: true, warn: true, evidence: "unknown", count: 0, max, reason: "workflow.yaml::first_created_at absent — no anchor for windowing, so nothing could be counted; gate inapplicable" };
   }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const tracePath = path.join(dir, "gate-trace.jsonl");
@@ -2401,7 +2399,6 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
   const fns = _phaseGateFns();
   const gateResults = [];
   const blockedBy = [];
-  const unknowns = [];
   for (const gateName of gates) {
     const fn = fns[gateName];
     let result;
@@ -2428,8 +2425,13 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
       elapsed_ms: result._elapsed_ms ?? null, detail: result,
     });
     if (result.ok === false) blockedBy.push({ gate: gateName, reason: result.reason || "" });
-    else if (result.warn === true) unknowns.push({ gate: gateName, reason: result.reason || "" });
   }
+  // Derived from the rows rather than accumulated beside them: a parallel
+  // accumulator only agrees with the rows until a gate returns ok:false AND
+  // warn:true, which the rows carry and an `else` branch drops.
+  const unknowns = gateResults
+    .filter((r) => r.warn === true)
+    .map((r) => ({ gate: r.gate, reason: r.reason }));
   return { fired: true, gateResults, blockedBy, unknowns };
 }
 
@@ -2442,6 +2444,18 @@ function runPhaseGates(workflowType, targetPhase, { tracePrefix = "advance-phase
 // survives any output mangling. Sources the SAME registry advance-phase
 // consults — a hand-listed gate set would drift exactly like the copy-pasted
 // step bodies once did.
+// A gate that passed only because it could not look is advisory, so no
+// consumer's blocking path will surface it — and every consumer's non-blocking
+// path is a jq filter someone has to remember to write. Announced by the
+// PRODUCER instead, once, so the guarantee does not have to be re-established
+// at each call site.
+function _announceUnknowns(unknowns) {
+  if (!Array.isArray(unknowns) || unknowns.length === 0) return;
+  const lines = unknowns.map((u) => `  - ${u.gate}: ${u.reason}`).join("\n");
+  process.stderr.write(`[devt] ⚠️ ${unknowns.length} gate(s) passed WITHOUT evidence (advisory, not blocking):\n${lines}\n`);
+}
+
+
 function cmdAssertAll(args) {
   const phase = _getFlag(args || [], "--phase");
   if (!phase) {
@@ -2457,6 +2471,7 @@ function cmdAssertAll(args) {
   }
   const allOk = run.blockedBy.length === 0;
   if (!allOk) process.exitCode = 1;
+  _announceUnknowns(run.unknowns);
   return {
     ok: allOk,
     all_ok: allOk,
@@ -2605,6 +2620,7 @@ function finalizeGates(args) {
   const unknowns = run.fired ? run.unknowns : [];
 
   if (!allOk) process.exitCode = 1;
+  _announceUnknowns(unknowns);
   return {
     ok: allOk,
     all_ok: allOk,
@@ -2758,7 +2774,7 @@ function assertClaimChecksResolved() {
   // Per-workflow window: each new init * gets a clean one.
   const anchorMs = _workflowWindowAnchorMs(dir);
   if (anchorMs === 0) {
-    return { ok: true, unresolved_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
+    return { ok: true, warn: true, evidence: "unknown", unresolved_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined, so nothing could be counted; gate inapplicable" };
   }
   const body = fs.readFileSync(failsPath, "utf8");
   const latestByAgent = new Map();
@@ -2850,12 +2866,19 @@ function assertClaimChecksResolved() {
 }
 
 
-function _workflowWindowAnchorMs(dir) {
+// `field` picks the window: `created_at` rotates per init, so a gate scoped to
+// one workflow's own hygiene uses it; `first_created_at` is the immutable
+// session anchor for gates that must span a whole session's rotations.
+// `fallbackField` covers a workflow.yaml written before the preferred stamp
+// existed — the same legacy accommodation assertPreflightFresh already makes.
+function _workflowWindowAnchorMs(dir, field = "created_at", fallbackField = null) {
   try {
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
     const wfPath = path.join(dir, "workflow.yaml");
     if (!fs.existsSync(wfPath)) return 0;
-    const m = fs.readFileSync(wfPath, "utf8").match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
+    const body = fs.readFileSync(wfPath, "utf8");
+    const at = (f) => body.match(new RegExp(`^${f}:\\s*"?([^"\\n]+)"?\\s*$`, "m"));
+    const m = at(field) || (fallbackField ? at(fallbackField) : null);
     if (!m) return 0;
     const parsed = new Date(m[1].trim()).getTime();
     return Number.isFinite(parsed) ? parsed : 0;
@@ -2869,22 +2892,20 @@ function _workflowWindowAnchorMs(dir) {
 // what distinguishes them. Returns null when the trace itself is unreadable:
 // "we cannot tell" is a different claim from "it did not fire", and the caller
 // says which rather than collapsing both into a pass.
-function _hygieneGuardFirings(dir, sinceMs) {
+function _hygieneGuardFiring(dir, sinceMs) {
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const tracePath = path.join(dir, "hook-trace", "run-hook.jsonl");
   let size, fd;
   try { size = fs.statSync(tracePath).size; fd = fs.openSync(tracePath, "r"); } catch { return null; }
   const NEEDLE = '"dispatch-hygiene-guard.sh"';
   const TS_RE = /"ts"\s*:\s*"([^"]+)"/;
-  let fired = 0;
   try {
     // The trace is append-only and chronological, so the workflow window is
     // always a SUFFIX: walk backwards and stop at the first record older than
     // the anchor. The registry fires this gate at every phase of every workflow
-    // (~99 state updates per run), and the trace has no rotation — reading it
-    // whole cost 1.16 MB and ~6.4K JSON.parse per call on this repo. Timestamps
-    // are matched with a regex rather than parsed, so only the records that
-    // actually matter are ever examined closely.
+    // and the trace has no rotation, so reading it whole cost 1.16 MB per call
+    // on this repo. Only liveness is load-bearing, so the walk also stops at
+    // the first firing it finds — a live guard is answered from one chunk.
     const CHUNK = 64 * 1024;
     let end = size, tail = "";
     while (end > 0) {
@@ -2901,14 +2922,22 @@ function _hygieneGuardFirings(dir, sinceMs) {
         const m = TS_RE.exec(line);
         const ts = m ? new Date(m[1]).getTime() : NaN;
         if (!Number.isFinite(ts)) continue;
-        if (ts < sinceMs) return fired;
-        if (line.includes(NEEDLE)) fired++;
+        if (ts < sinceMs) return { at: null };
+        // The runner traces hooks it SKIPS too (`enabled:false`), and those
+        // records carry the script name — so a substring match reports a
+        // profile-disabled guard as a live one, which is the exact vacuous
+        // pass this function exists to prevent. Only needle hits are parsed.
+        if (!line.includes(NEEDLE)) continue;
+        let rec;
+        try { rec = JSON.parse(line); } catch { continue; }
+        if (rec.script !== "dispatch-hygiene-guard.sh" || rec.enabled === false) continue;
+        return { at: m[1] };
       }
       end = start;
     }
   } catch { return null; }
   finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
-  return fired;
+  return { at: null };
 }
 
 
@@ -2920,20 +2949,20 @@ function _guardLivenessVerdict(dir, anchorMs, base, ledgerProvesLive = false) {
   // — so that caller skips the trace read. Its evidence is named separately
   // from a trace count, because one carries a firing number and the other does
   // not, and collapsing them would make `evidence` mean two things.
-  const fired = ledgerProvesLive ? null : _hygieneGuardFirings(dir, anchorMs);
-  const live = ledgerProvesLive || fired > 0;
+  const firing = ledgerProvesLive ? null : _hygieneGuardFiring(dir, anchorMs);
+  const live = ledgerProvesLive || Boolean(firing && firing.at);
   const why = ledgerProvesLive
     ? "the ledger carries this workflow's own records, so the guard demonstrably ran"
-    : fired === null
+    : firing === null
       ? "but the hook trace is unreadable, so a clean run cannot be told apart from a guard that never fired"
       : live
-        ? `dispatch-hygiene-guard.sh fired ${fired}x in this window and recorded nothing`
-        : `but dispatch-hygiene-guard.sh has ZERO firings in this window, so this is "unknown", not "clean" (check DEVT_HOOK_PROFILE / DEVT_DISABLED_HOOKS)`;
+        ? `dispatch-hygiene-guard.sh last ran at ${firing.at} in this window and recorded nothing`
+        : `but dispatch-hygiene-guard.sh has ZERO enabled firings in this window, so this is "unknown", not "clean" (check DEVT_HOOK_PROFILE / DEVT_DISABLED_HOOKS)`;
   return {
     ...base,
     ok: true,
     warn: !live,
-    guard_fired: fired,
+    guard_fired_at: firing ? firing.at : null,
     evidence: live ? (ledgerProvesLive ? "ledger_records" : "guard_fired") : "unknown",
     reason: `${base.reason} — ${why}`,
   };
@@ -2947,7 +2976,7 @@ function assertNoRawDispatchesThisSession() {
   // gets a clean window, so a pass/fail reflects ONLY its own dispatch hygiene.
   const anchorMs = _workflowWindowAnchorMs(dir);
   if (anchorMs === 0) {
-    return { ok: true, raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined; gate inapplicable" };
+    return { ok: true, warn: true, evidence: "unknown", raw_dispatch_count: 0, reason: "workflow.yaml::created_at absent — workflow window undefined, so nothing could be counted; gate inapplicable" };
   }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const warningsPath = path.join(dir, "dispatch-warnings.jsonl");
@@ -3111,8 +3140,20 @@ function assertDispatchWarningsAcknowledged() {
   const section = secMatch[1];
   const reviewMtime = fs.statSync(reviewPath).mtimeMs;
 
-  // Same workflow window as assert-no-raw-dispatches; 0 leaves it unbounded below.
-  const anchorMs = _workflowWindowAnchorMs(dir);
+  // The rubric tells the reviewer to count from `first_created_at`, and the CLI
+  // it names (`dispatch warnings --since=`) does the same. Anchoring the gate on
+  // `created_at` made them different windows: re-routing to the parallel path
+  // rotates `created_at` mid-review, so records the reviewer correctly counted
+  // fell outside the gate's window and the gate blocked on the honest read.
+  const anchorMs = _workflowWindowAnchorMs(dir, "first_created_at", "created_at");
+  if (anchorMs === 0) {
+    return {
+      ok: true,
+      warn: true,
+      evidence: "unknown",
+      reason: "workflow.yaml carries no session anchor — no window to bound the ledger by, so the section's counts could not be checked against it",
+    };
+  }
 
   // Actual counts from the file, bounded to [anchor, review mtime].
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -3300,7 +3341,7 @@ function assertPreflightFresh() {
   const workflowPath = path.join(dir, "workflow.yaml");
 
   if (!fs.existsSync(workflowPath)) {
-    return { ok: true, reason: "no workflow.yaml — gate does not apply" };
+    return { ok: true, warn: true, evidence: "unknown", reason: "no workflow.yaml — freshness has no anchor to compare against, so staleness is unknown" };
   }
   if (!fs.existsSync(briefPath)) {
     // Warn, don't pass silently. This gate caught a STALE brief and never a
@@ -3328,21 +3369,21 @@ function assertPreflightFresh() {
     const mLegacy = content.match(/^created_at:\s*"?([^"\n]+)"?\s*$/m);
     const m = mFirst || mLegacy;
     if (!m) {
-      return { ok: true, reason: "workflow.yaml has no created_at stamp (legacy workflow)" };
+      return { ok: true, warn: true, evidence: "unknown", reason: "workflow.yaml has no created_at stamp — freshness has no anchor to compare against, so staleness is unknown" };
     }
     createdAt = new Date(m[1]);
     if (isNaN(createdAt.getTime())) {
-      return { ok: true, reason: `workflow.yaml::created_at unparseable: ${m[1]}` };
+      return { ok: true, warn: true, evidence: "unknown", reason: `workflow.yaml::created_at unparseable (${m[1]}) — staleness could not be computed` };
     }
   } catch (e) {
-    return { ok: true, reason: `workflow.yaml read failure: ${e.message}` };
+    return { ok: true, warn: true, evidence: "unknown", reason: `workflow.yaml read failure (${e.message}) — staleness could not be computed` };
   }
 
   let briefMtime;
   try {
     briefMtime = fs.statSync(briefPath).mtime;
   } catch (e) {
-    return { ok: true, reason: `preflight-brief.json stat failure: ${e.message}` };
+    return { ok: true, warn: true, evidence: "unknown", reason: `preflight-brief.json stat failure (${e.message}) — staleness could not be computed` };
   }
 
   // Allow a small grace window: the brief can be written up to 30s BEFORE the
@@ -3389,7 +3430,7 @@ function assertClaudeMemHarvest() {
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const workflowPath = path.join(dir, "workflow.yaml");
   if (!fs.existsSync(workflowPath)) {
-    return { ok: true, reason: "no workflow.yaml — gate does not apply" };
+    return { ok: true, warn: true, evidence: "unknown", reason: "no workflow.yaml — the harvest decision has no workflow to be scoped to, so nothing could be checked" };
   }
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const harvestPath = path.join(dir, "claude-mem-harvest.md");

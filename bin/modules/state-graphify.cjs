@@ -629,12 +629,21 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
     if (_branchDiff !== undefined) return _branchDiff;
     try {
       const { spawnSync } = require("child_process");
+      // Falls through on a git-level FAILURE only. Keying the fallback on empty
+      // output instead made "nothing changed" indistinguishable from "this git
+      // does not know the flag", so a clean tree paid all three forks to
+      // rediscover the same emptiness.
       const gitDiff = (args) => {
         const d = spawnSync("git", args, {
           cwd: findProjectRoot(), encoding: "utf8", timeout: 10000, maxBuffer: 32 * 1024 * 1024,
         });
-        return (d.status !== 0 || !d.stdout) ? null : d.stdout;
+        return d.status !== 0 ? null : (d.stdout || "");
       };
+      // An explicit range is the review scope when one is set — the file list
+      // 180 lines below already honours it, and ranking the symbols of one
+      // change set against the hunks of another is how `topic_symbols_diff_ranked`
+      // comes to be an honest claim over a dishonest ranking.
+      const range = _activeRange();
       // An uncommitted branch has an EMPTY base...HEAD diff — the same hole
       // collectChangedFiles was fixed for. Left unhandled, symbol ranking and
       // the hunk census both silently no-op exactly when the review scope lives
@@ -642,11 +651,13 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
       // committing. `--merge-base` covers committed AND uncommitted in ONE fork
       // and cannot double-count a file that is both, which a union of the two
       // separate diffs would; the older two-step is kept only as a fallback for
-      // git below 2.30, where the flag does not exist.
-      _branchDiff = gitDiff(["diff", "-U0", "--merge-base", primaryBranch])
-        || gitDiff(["diff", "-U0", `${primaryBranch}...HEAD`])
-        || gitDiff(["diff", "-U0", "HEAD"])
-        || null;
+      // git below 2.30, where the flag does not exist, and for a missing base ref.
+      _branchDiff = range
+        ? gitDiff(["diff", "-U0", range.includes("..") ? range : `${range}...HEAD`])
+        : (gitDiff(["diff", "-U0", "--merge-base", primaryBranch])
+          ?? gitDiff(["diff", "-U0", `${primaryBranch}...HEAD`])
+          ?? gitDiff(["diff", "-U0", "HEAD"]));
+      if (!_branchDiff) _branchDiff = null;
     } catch { _branchDiff = null; }
     return _branchDiff;
   };
@@ -1050,28 +1061,6 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
   if (symbolAnchoredCaveat) plan.symbol_anchored_caveat = symbolAnchoredCaveat;
   if (census) plan.hunk_census = census;
   if (severityCalibrationNote) plan.severity_calibration_note = severityCalibrationNote;
-  // Reconcile the topic tail against what actually went to the MCP call: the
-  // symbol_anchored tier submits the UNION of the diff-symbol extractor's output
-  // with the exact-resolved topic anchors, so membership in the tail does not
-  // mean the symbol was withheld. Writing the raw tail reported symbols as
-  // absent that had in fact been sent. Recovered ones are counted so the
-  // reduction is visible rather than silently absorbed.
-  const submitted = new Set(Array.isArray(args && args.symbols) ? args.symbols : []);
-  const dropped = ordered.slice(TOPIC_CAP).filter((s) => !submitted.has(s));
-  if (dropped.length > 0) {
-    try { atomicWriteJsonSync(droppedPath, dropped); } catch { /* best-effort */ }
-    plan.topic_symbols_dropped_count = dropped.length;
-    const recovered = (ordered.length - TOPIC_CAP) - dropped.length;
-    if (recovered > 0) plan.topic_symbols_recovered_via_diff_leg = recovered;
-    // A reader auditing the tail needs to know which ordering produced it.
-    // Diff-ranking is safe for this budget ONLY because the structural signal
-    // (high-edge/god-node symbols) reaches the impact map through graphify's
-    // post-MCP augmentation, which does not draw on it. If augmentation ever
-    // becomes coupled to this budget, it must reserve slots for them again.
-    plan.topic_symbols_diff_ranked = topicSymbolsDiffRanked;
-  } else {
-    try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
-  }
   if (symbolSources) plan.symbol_sources = symbolSources;
   if (anchorsDropped && anchorsDropped.length > 0) plan.anchors_dropped = anchorsDropped;
   if (corpusBlindFiles.length > 0) plan.corpus_blind_files = corpusBlindFiles;
@@ -1111,6 +1100,40 @@ function computeGraphifyImpactPlan({ reviewScope, primaryBranch } = {}) {
       }
     }
   } catch { /* unreadable prior plan — regenerate clean */ }
+
+  // Reconcile the topic tail against what actually went to the MCP call: the
+  // symbol_anchored tier submits the UNION of the diff-symbol extractor's output
+  // with the exact-resolved topic anchors, so membership in the tail does not
+  // mean the symbol was withheld. Writing the raw tail reported symbols as
+  // absent that had in fact been sent. Recovered ones are counted so the
+  // reduction is visible rather than silently absorbed.
+  //
+  // Runs AFTER the attested-override block, and reconciles against `plan.args`
+  // rather than the locally generated `args` — an override replaces the former,
+  // so reconciling earlier restored the very defect this is here to fix: a
+  // reviewer comparing the submitted symbols against the dropped list could
+  // again find the same name in both.
+  const submittedArgs = plan.args || args;
+  const submitted = new Set(Array.isArray(submittedArgs && submittedArgs.symbols) ? submittedArgs.symbols : []);
+  const dropped = ordered.slice(TOPIC_CAP).filter((s) => !submitted.has(s));
+  if (dropped.length > 0) {
+    try { atomicWriteJsonSync(droppedPath, dropped); } catch { /* best-effort */ }
+    plan.topic_symbols_dropped_count = dropped.length;
+    // Tiers that submit no symbols at all (bulk/pr-scoped, skip) have nothing to
+    // recover and nothing to contrast against — saying "dropped and not
+    // submitted" there implies a submission that never happened.
+    plan.topic_symbols_none_submitted = submitted.size === 0;
+    const recovered = (ordered.length - TOPIC_CAP) - dropped.length;
+    if (recovered > 0) plan.topic_symbols_recovered_via_diff_leg = recovered;
+    // A reader auditing the tail needs to know which ordering produced it.
+    // Diff-ranking is safe for this budget ONLY because the structural signal
+    // (high-edge/god-node symbols) reaches the impact map through graphify's
+    // post-MCP augmentation, which does not draw on it. If augmentation ever
+    // becomes coupled to this budget, it must reserve slots for them again.
+    plan.topic_symbols_diff_ranked = topicSymbolsDiffRanked;
+  } else {
+    try { if (fs.existsSync(droppedPath)) fs.unlinkSync(droppedPath); } catch { /* best-effort */ }
+  }
 
   try { atomicWriteJsonSync(planPath, plan); } catch { /* best-effort */ }
   return plan;
@@ -1164,8 +1187,24 @@ function contextInitScopeSig(primaryBranch) {
       const explicit = scopeInputFiles();
       if (explicit) files = explicit.slice().sort();
     } catch { /* fall through to diff */ }
+    // Via the shared collector, which is range- and untracked-aware. A bare
+    // `base...HEAD` here returned nothing on an uncommitted branch, so the key
+    // degraded to HEAD-only and every working-tree edit produced the SAME
+    // signature — the short-circuit then re-served a stale brief and impact
+    // plan for the whole uncommitted phase, which is precisely when the scope
+    // is still moving.
     if (files.length === 0) try {
-      files = runGit(["diff", "--name-only", `${base}...HEAD`]).split("\n").map(s => s.trim()).filter(Boolean).sort();
+      const { collectChangedFiles } = require("./review-weight.cjs");
+      const range = _activeRange();
+      files = (collectChangedFiles(proot, base, range ? { range } : undefined) || [])
+        .map(s => String(s).trim())
+        // devt's own bookkeeping is never part of the review scope, and it is
+        // rewritten continuously during the very run this key is caching — left
+        // in, the signature changes under its own workflow and the cache never
+        // hits. `--exclude-standard` covers this wherever .devt/ is gitignored;
+        // the key must not depend on a project having done that.
+        .filter(f => f && !f.startsWith(".devt/"))
+        .sort();
     } catch { /* base ref unresolvable — fall through to the HEAD-only signature */ }
     let head = "";
     try { head = runGit(["rev-parse", "HEAD"]); } catch { head = ""; }
@@ -1193,7 +1232,7 @@ function assertScopeCheckHandled() {
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const answerPath = path.join(dir, "scope-check-answer.txt");
   if (!fs.existsSync(requiredPath)) {
-    return { ok: true, reason: "scope-check-required.txt absent — gate does not apply" };
+    return { ok: true, warn: true, evidence: "unknown", reason: "scope-check-required.txt absent — the marker is written BY the step under audit, so a skipped step and an unmet condition look identical here" };
   }
   if (!fs.existsSync(answerPath)) {
     return {

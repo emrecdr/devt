@@ -1252,7 +1252,6 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
         god_node_warnings: st.god_node_warnings_json || null,
         freshness: brief.staleness || { state: "unknown" },
         scope_missing: scopeMissing,
-        task_written: taskWritten,
         degraded_fields: degraded,
       };
     }
@@ -1458,7 +1457,6 @@ function contextInitBundle({ mode = "review", workflowType = "code_review", scop
     staleness_tier: stalenessTier,
     graphify_evicted: graphifyEvicted,
     scope_missing: scopeMissing,
-    task_written: true,
     degraded_fields: degraded,
   };
 }
