@@ -4,9 +4,11 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/). The `[Unreleased]` section below stages changes for the next version — when bumping, rename it to `## [X.Y.Z] - YYYY-MM-DD` so the release workflow's changelog extractor (`scripts/extract-changelog.sh`) can find it.
 
-Older releases (v0.1.0–v0.196.0) are rotated into `docs/archive/CHANGELOG-historical.md` — the root file keeps `[Unreleased]` plus the most recent releases (rotation ceiling enforced by smoke gate K288).
+Older releases (v0.1.0–v0.208.0) are rotated into `docs/archive/CHANGELOG-historical.md` — the root file keeps `[Unreleased]` plus the most recent releases (rotation ceiling enforced by smoke gate K288).
 
 ## [Unreleased]
+
+## [0.243.0] - 2026-08-13
 
 ### Four fixes in this release were themselves half-wired — a second review pass found them
 
@@ -809,14 +811,3 @@ Post-release adversarial validation of the 0.205.0–0.209.0 batch: every new ga
 
 - **Lazy facade requires — refuted by measurement.** The entire 5-submodule state family parses in **+2ms** over bare node startup (28ms vs 26ms; full CLI verbs 37–39ms warm). Lazy getters plus ~50 call-site rewrites to save 2ms fails the receipt bar; the earlier ~440ms stop-hook reading was load-inflated, not require-dominated.
 - **bash-guard in-process fast path — deferred with a named trigger.** Measured chain: runner-node 26ms + bash ~8ms + CLI-node 39ms = **73ms warm**; in-process would save ~45ms/call (~1–2s/day at observed frequency) at the cost of a second execution model inside the runner. Recorded in RETIREMENT-WATCH's receipt-gated list — TRIGGER: sustained warm p50 > 250ms on a PreToolUse guard, or an order-of-magnitude frequency jump.
-
-
-## [0.208.0] - 2026-07-26
-
-### Fixed
-
-- **K321 no longer fails on Linux CI (field report: "binary file matches").** `scripts/smoke-test.sh` legitimately contains one NUL byte — a `'/some/path\u0000evil'` fixture inside the memory-paths sanitization gate (present since before v0.203.0 and load-bearing). GNU grep therefore classifies the file as binary, and K321's two kcorpus legs — the first NON-quiet greps of the file, added in 0.205.0 — got "binary file matches" instead of matching lines on ubuntu runners (BSD grep on macOS masked it; 0.204.0–0.207.0 first met CI at the release push). Both legs now pass `-a` (`--text`, portable BSD+GNU). The NUL fixture stays — it is test substance, not corruption.
-
-### Changed
-
-- **The Context-Loaded contract is single-sourced (N4, K325).** The read-and-record paragraph the by-reference stubs lean on was copy-pasted 28× (byte-identical — verified by checksum — but 14 hand-maintained template copies + 14 compiled copies of pure drift surface). It now lives once in `dispatch.cjs::CONTEXT_LOADED_CONTRACT` and is render-time expanded into every envelope's `{context_loaded_contract}` placeholder — `renderEnvelope` is the single chokepoint (`compile`, `render`, `render-filled`, and `render-lanes` all route through it, verified at call-site level), so compiled workflow regions and rendered envelopes are **byte-identical to before** (`dispatch compile --check`: 21 regions, zero drift; workflows untouched). Templates carry only the placeholder. Gate **K325** locks it: constant present, zero literal template bodies, 14 placeholder templates, compiled regions still full-text for the LLM-fill path, rendered envelope carries the body with no placeholder leak.

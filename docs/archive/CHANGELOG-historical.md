@@ -1,10 +1,20 @@
-# devt — Historical Changelog (v0.1.0–v0.196.0)
+# devt — Historical Changelog (v0.1.0–v0.208.0)
 
 Older release sections rotated out of the root CHANGELOG.md, newest first. The root file keeps the [Unreleased] section plus the most recent releases; everything older lives here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+
+## [0.208.0] - 2026-07-26
+
+### Fixed
+
+- **K321 no longer fails on Linux CI (field report: "binary file matches").** `scripts/smoke-test.sh` legitimately contains one NUL byte — a `'/some/path\u0000evil'` fixture inside the memory-paths sanitization gate (present since before v0.203.0 and load-bearing). GNU grep therefore classifies the file as binary, and K321's two kcorpus legs — the first NON-quiet greps of the file, added in 0.205.0 — got "binary file matches" instead of matching lines on ubuntu runners (BSD grep on macOS masked it; 0.204.0–0.207.0 first met CI at the release push). Both legs now pass `-a` (`--text`, portable BSD+GNU). The NUL fixture stays — it is test substance, not corruption.
+
+### Changed
+
+- **The Context-Loaded contract is single-sourced (N4, K325).** The read-and-record paragraph the by-reference stubs lean on was copy-pasted 28× (byte-identical — verified by checksum — but 14 hand-maintained template copies + 14 compiled copies of pure drift surface). It now lives once in `dispatch.cjs::CONTEXT_LOADED_CONTRACT` and is render-time expanded into every envelope's `{context_loaded_contract}` placeholder — `renderEnvelope` is the single chokepoint (`compile`, `render`, `render-filled`, and `render-lanes` all route through it, verified at call-site level), so compiled workflow regions and rendered envelopes are **byte-identical to before** (`dispatch compile --check`: 21 regions, zero drift; workflows untouched). Templates carry only the placeholder. Gate **K325** locks it: constant present, zero literal template bodies, 14 placeholder templates, compiled regions still full-text for the LLM-fill path, rendered envelope carries the body with no placeholder leak.
 
 ## [0.207.0] - 2026-07-26
 
