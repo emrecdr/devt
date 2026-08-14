@@ -40,6 +40,28 @@ command -v shasum >/dev/null 2>&1 || { echo "FATAL: shasum not found — the KCO
 KCORPUS_DIGEST() { (cd "$ROOT" && find guardrails skills -type f ! -name '.DS_Store' -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | cut -d' ' -f1); }
 KCORPUS_SHA0=$(KCORPUS_DIGEST)
 
+# Live-state baseline, same contract as KCORPUS one scope over. Hooks and the
+# CLI resolve their state dir by walking UP from cwd, so a gate that invokes
+# them from the repo root writes into devt's OWN .devt/state/ instead of its
+# fixture — invisible in a passing suite, and permanent. Two surfaces where that
+# did measurable damage: fake raw_dispatch records accumulated across runs until
+# the session banner reported four figures of violations that never happened,
+# training the reader to ignore it; and a probe seeded an ACTIVE workflow that
+# then sat open for days because no run owned it.
+#
+# Scoped to those two invariants rather than a whole-directory digest: other
+# gates still write assorted state from the repo root, and a tripwire that fires
+# on writes nobody has triaged is the same cry-wolf failure this gate exists to
+# prevent. Widening it is a hermeticity sweep, not a one-line change.
+# `grep -c` prints 0 AND exits 1 on zero matches, so a bare `|| echo 0` fallback
+# emits TWO lines the moment the ledger is clean — the count then differs from
+# itself between two identical readings and the gate fails on its own arithmetic
+# (CON-003). Defuse with `|| true`, then normalize the missing-file empty to 0.
+KSTATE_RAW() { (cd "$ROOT" && n=$({ /usr/bin/grep -ac '"source":"raw_dispatch"' .devt/state/dispatch-warnings.jsonl 2>/dev/null || true; } | head -1); echo "${n:-0}"); }
+KSTATE_TASK() { (cd "$ROOT" && /usr/bin/sed -n 's/^task: *//p' .devt/state/workflow.yaml 2>/dev/null | head -1 || true); }
+KSTATE_RAW0=$(KSTATE_RAW)
+KSTATE_TASK0=$(KSTATE_TASK)
+
 run() {
   local name="$1"; shift
   if "$@" >/dev/null 2>&1; then pass "$name"; else fail "$name ($*)"; fi
@@ -5089,15 +5111,20 @@ if grep -q '"dispatch-hygiene-guard.sh": \["standard", "full"\]' "$ROOT/hooks/ru
 else
   fail "dispatch-hygiene-guard.sh not declared in run-hook.js profile registry"
 fi
-# Functional: raw dispatch (no context) triggers the advisory
-RAW_OUT=$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review files X Y Z"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+# Functional: raw dispatch (no context) triggers the advisory.
+# Run from a fixture project, never the repo root: the guard resolves its state
+# dir by walking UP from cwd, so a root-run probe appends its fake raw_dispatch
+# to devt's own dispatch-warnings.jsonl — where the session banner then counts it
+# as a real violation forever.
+HYG_FX=$(mktemp -d); mkdir -p "$HYG_FX/.devt/state"
+RAW_OUT=$(cd "$HYG_FX" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review files X Y Z"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
 if echo "$RAW_OUT" | grep -q "raw_dispatch\|Raw devt"; then
   pass "dispatch-hygiene-guard.sh emits advisory on raw devt:* dispatch (no <scope_trust>/<scope_hint>/<memory_signal>)"
 else
   fail "dispatch-hygiene-guard.sh missed a raw dispatch (output: $(echo "$RAW_OUT" | head -1))"
 fi
 # Functional: workflow-managed dispatch is silent
-MGD_OUT=$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<scope_trust>{}</scope_trust>\nReview files"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+MGD_OUT=$(cd "$HYG_FX" && echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<scope_trust>{}</scope_trust>\nReview files"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
 if [ -z "$MGD_OUT" ]; then
   pass "dispatch-hygiene-guard.sh stays silent on workflow-managed dispatches (has <scope_trust>)"
 else
@@ -5162,34 +5189,19 @@ fi
 # .devt/state/ doesn't exist yet (gitignored), so pre-create it explicitly —
 # the trace function performs an upward search and silently no-ops when no
 # state dir is found (intentional: trace failures must never break hooks).
-TRACE_TMP="$ROOT/.devt/state/hook-trace/run-hook.jsonl"
-TRACE_BAK=""
-TRACE_STATE_PRECREATED=0
-if [ ! -d "$ROOT/.devt/state" ]; then
-  mkdir -p "$ROOT/.devt/state" 2>/dev/null || true
-  TRACE_STATE_PRECREATED=1
-fi
-if [ -f "$TRACE_TMP" ]; then
-  TRACE_BAK="/tmp/devt-smoke-trace-bak-$$.jsonl"
-  mv "$TRACE_TMP" "$TRACE_BAK"
-fi
+# Runs inside a fixture project rather than the repo root. Both the trace writer
+# and the guard resolve their state dir by walking up from cwd, so a root-run
+# probe writes to devt's own .devt/state/ — the previous backup-and-restore dance
+# covered run-hook.jsonl and left the guard's dispatch-warnings.jsonl append
+# behind, seeding a fake raw_dispatch into devt's ledger on every suite run.
+TRACE_FX=$(mktemp -d); mkdir -p "$TRACE_FX/.devt/state"
+TRACE_TMP="$TRACE_FX/.devt/state/hook-trace/run-hook.jsonl"
 ( echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"smoke-trace probe"}}' | \
-  ( cd "$ROOT" && node hooks/run-hook.js dispatch-hygiene-guard.sh >/dev/null 2>&1 ) ) || true
+  ( cd "$TRACE_FX" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh >/dev/null 2>&1 ) ) || true
 if [ -f "$TRACE_TMP" ] && grep -q '"script":"dispatch-hygiene-guard.sh"' "$TRACE_TMP"; then
   pass "run-hook.js writes trace record to .devt/state/hook-trace/run-hook.jsonl on every invocation"
 else
   fail "run-hook.js failed to write trace record (file: $TRACE_TMP)"
-fi
-# Restore the prior trace file if any, so we don't pollute devt's working tree.
-rm -f "$TRACE_TMP"
-if [ -n "$TRACE_BAK" ] && [ -f "$TRACE_BAK" ]; then
-  mv "$TRACE_BAK" "$TRACE_TMP"
-fi
-# Remove the precreated state dir on CI to keep devt's working tree pristine.
-if [ "$TRACE_STATE_PRECREATED" = "1" ]; then
-  rmdir "$ROOT/.devt/state/hook-trace" 2>/dev/null || true
-  rmdir "$ROOT/.devt/state" 2>/dev/null || true
-  rmdir "$ROOT/.devt" 2>/dev/null || true
 fi
 
 # End-to-end: dispatch-hygiene-guard via run-hook.js (matches the CC harness path,
@@ -5197,12 +5209,13 @@ fi
 # catches runner-layer regressions (profile registry, stdin passthrough, env env)
 # that the direct-bash test would miss.
 E2E_OUT=$( ( echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review files X Y Z"}}' | \
-  ( cd "$ROOT" && node hooks/run-hook.js dispatch-hygiene-guard.sh 2>&1 ) ) || true)
+  ( cd "$TRACE_FX" && CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>&1 ) ) || true)
 if echo "$E2E_OUT" | grep -q "raw_dispatch\|Raw devt"; then
   pass "dispatch-hygiene-guard.sh emits advisory when invoked via run-hook.js (production path, not just bash-direct)"
 else
   fail "dispatch-hygiene-guard.sh advisory missing via run-hook.js path (output: $(echo "$E2E_OUT" | head -1))"
 fi
+rm -rf "$TRACE_FX" "$HYG_FX"
 
 echo
 echo "== Telemetry attribution + wildcard queries =="
@@ -6131,12 +6144,12 @@ if ! tail -1 "$AGENT_TMP/.devt/state/dispatch-warnings.jsonl" 2>/dev/null | /usr
   AGENT_FAILURES="${AGENT_FAILURES}task-truncation-detector "
 fi
 # dispatch-hygiene-guard emits an advisory on raw dispatches
-HG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review X"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+HG=$(cd "$AGENT_TMP" && echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"Review X"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1|| true)
 if ! echo "$HG" | /usr/bin/grep -q "Raw devt:\|raw_dispatch"; then
   AGENT_FAILURES="${AGENT_FAILURES}dispatch-hygiene-guard "
 fi
 # dispatch-scope-guard fires its scope warnings — feed it a payload that triggers a warning
-SG=$(echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"x"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
+SG=$(cd "$AGENT_TMP" && echo '{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"x"}}' | bash "$ROOT/hooks/dispatch-hygiene-guard.sh" 2>&1 || true)
 # (no advisory expected on small prompt — just verify it doesn't error out)
 if [ -z "$AGENT_FAILURES" ]; then
   pass "all 3 Task-matcher hooks accept tool_name='Agent' (the actual Claude Code payload key)"
@@ -10377,26 +10390,25 @@ fi
 # K4: dispatch-hygiene-guard.sh attaches <canonical_envelope> block in warn mode.
 # Simulates a raw Agent() dispatch (prompt missing all three scope blocks) and
 # asserts the hook responds with hookSpecificOutput.additionalContext that
-# includes the rendered envelope. State may have been reset by earlier tests
-# (L622, L631), so seed a fresh active workflow first — `:auto` resolution
-# needs workflow.yaml::active=true to render successfully.
-node "$CLI" init workflow "K4 hook envelope test" >/dev/null 2>&1 || true
-K4_CFG_BAK=$(mktemp)
-[ -f .devt/config.json ] && cp .devt/config.json "$K4_CFG_BAK"
-echo '{"dispatch_hygiene_mode":"warn"}' > .devt/config.json
+# includes the rendered envelope. Runs entirely inside a fixture project:
+# `:auto` resolution needs workflow.yaml::active=true, and seeding that at the
+# repo root left devt itself carrying a permanently-open workflow — reported by
+# the session banner on every prompt, and never closed because no run owned it.
+# The same root invocation also appended a fake raw_dispatch to devt's ledger.
+K4_FX=$(mktemp -d); mkdir -p "$K4_FX/.devt/state"
+(cd "$K4_FX" && node "$CLI" init workflow "hook envelope fixture" >/dev/null 2>&1) || true
+echo '{"dispatch_hygiene_mode":"warn"}' > "$K4_FX/.devt/config.json"
 K4_INPUT='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:programmer","prompt":"do a thing"}}'
 K4_OUTFILE=$(mktemp)
 # The envelope can exceed 60KB; bash variable capture mangles output at that
 # scale on macOS bash 3.2. Write to a tempfile instead.
-CLAUDE_PLUGIN_ROOT="$ROOT" bash -c "printf '%s' '$K4_INPUT' | bash '$ROOT/hooks/dispatch-hygiene-guard.sh'" > "$K4_OUTFILE" 2>/dev/null
+(cd "$K4_FX" && CLAUDE_PLUGIN_ROOT="$ROOT" bash -c "printf '%s' '$K4_INPUT' | bash '$ROOT/hooks/dispatch-hygiene-guard.sh'") > "$K4_OUTFILE" 2>/dev/null
 if node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync('$K4_OUTFILE','utf8'));const ctx=(j.hookSpecificOutput||{}).additionalContext||'';process.exit(ctx.includes('<canonical_envelope>')?0:1);}catch{process.exit(2);}" 2>/dev/null; then
   pass "K4: dispatch-hygiene-guard.sh attaches <canonical_envelope> in warn mode"
 else
   fail "K4: hook did not attach <canonical_envelope> in warn mode"
 fi
-rm -f "$K4_OUTFILE"
-if [ -s "$K4_CFG_BAK" ]; then cp "$K4_CFG_BAK" .devt/config.json; else rm -f .devt/config.json; fi
-rm -f "$K4_CFG_BAK"
+rm -f "$K4_OUTFILE"; rm -rf "$K4_FX"
 
 # K5 (field calibration #16): every workflow that reads STATE=$(... state read)
 # to extract scope_trust_json must invoke `state refresh-scope-context` immediately
@@ -12293,9 +12305,11 @@ fi
 K92_PROBE_HAND_INJECTED='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"<context> <workflow_type>code_review_parallel</workflow_type> <mode>synthesis_revision</mode> <original_review>.devt/state/review.md</original_review> </context> Do the work."}}'
 K92_PROBE_DOCS_WRITER='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:docs-writer","prompt":"You are the docs-writer for Batch A. Update changelog."}}'
 K92_PROBE_BARE='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"You are reviewing Lane A. Just do it."}}'
-K92_HAND_RESULT=$(echo "$K92_PROBE_HAND_INJECTED" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
-K92_DOCS_RESULT=$(echo "$K92_PROBE_DOCS_WRITER" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
-K92_BARE_RESULT=$(echo "$K92_PROBE_BARE" | node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_FX=$(mktemp -d); mkdir -p "$K92_FX/.devt/state"
+K92_HAND_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_HAND_INJECTED" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_DOCS_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_DOCS_WRITER" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_BARE_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_BARE" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+rm -rf "$K92_FX"
 # Hand-injected and docs-writer should produce NO deny output (empty stdout).
 K92_HAND_PASS=$([ -z "$K92_HAND_RESULT" ] && echo yes || echo no)
 K92_DOCS_PASS=$([ -z "$K92_DOCS_RESULT" ] && echo yes || echo no)
@@ -21149,6 +21163,14 @@ if [ "$KCORPUS_SHA0" = "$KCORPUS_SHA1" ]; then
   pass "KCORPUS: guardrails/ + skills/ corpus byte-identical across the suite (no gate mutated the live behavioral surfaces)"
 else
   fail "KCORPUS: guardrails/ + skills/ corpus MUTATED by the suite run (start=$KCORPUS_SHA0 end=$KCORPUS_SHA1) — a gate edited the live corpus in place; inspect with 'git status guardrails skills' and restore via 'git checkout -- guardrails skills'"
+fi
+
+KSTATE_RAW1=$(KSTATE_RAW)
+KSTATE_TASK1=$(KSTATE_TASK)
+if [ "$KSTATE_RAW0" = "$KSTATE_RAW1" ] && [ "$KSTATE_TASK0" = "$KSTATE_TASK1" ]; then
+  pass "KSTATE: the suite seeded no raw_dispatch records and no active workflow into devt's own .devt/state/ (hook + CLI probes ran in their fixtures, not at the repo root)"
+else
+  fail "KSTATE: the suite wrote to devt's own .devt/state/ — raw_dispatch ${KSTATE_RAW0}→${KSTATE_RAW1}, task '${KSTATE_TASK0}'→'${KSTATE_TASK1}'. A gate invoked a hook or the CLI with cwd at the repo root, so state resolution walked up into the live project; every future session then reads those records as real. Give that gate a mktemp fixture carrying its own .devt/state, as the L1a-L1e hygiene gates do."
 fi
 
 SUITE_COMPLETED=1

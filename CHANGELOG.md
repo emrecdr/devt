@@ -8,6 +8,20 @@ Older releases (v0.1.0–v0.208.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### The suite was writing test fixtures into devt's own state, and the session banner reported them as real
+
+Every prompt in this repo carried `1107 raw_dispatch … in this workflow` and a workflow that had been open for ten days. Neither was real. `bash scripts/smoke-test.sh` added exactly six raw_dispatch records to `.devt/state/dispatch-warnings.jsonl` per run — measured, not inferred: `1107 → 1113` across one controlled run, with previews reading `smoke-trace probe`, `do a thing`, `Review X`. The hooks and the CLI resolve their state dir by walking UP from `cwd`, so any gate invoking them from the repo root wrote into the live project instead of its fixture. One of those gates seeded an ACTIVE workflow at the repo root to satisfy `:auto` envelope resolution; nothing owned it afterwards, so it stayed open and the banner reported it every turn for ten days.
+
+The cost is the one the field report named as the worst outcome for any advisory: a number that is always wrong trains the reader to stop reading it. It had — the count sat in every prompt of this session and was correctly ignored each time.
+
+Two of the leaking gates already backed up what they touched — one restored `run-hook.jsonl`, another restored `.devt/config.json` — so the pollution was understood and half-cleaned. Neither backup covered the guard's own append, which happened in the same invocation. The probes now run inside `mktemp` fixtures carrying their own `.devt/state`, the way the `L1a`–`L1e` hygiene gates always have, which also retires a backup-restore-rmdir dance that only ever protected one of the two files it needed to.
+
+**`KSTATE`** is the standing tripwire, scoped to the two invariants with proven operator impact: the suite must seed no raw_dispatch record and no active workflow into devt's own state. It is deliberately narrower than `KCORPUS`'s whole-directory digest — other gates still write assorted state from the repo root, and a tripwire firing on writes nobody has triaged is the same cry-wolf failure it exists to prevent. Widening it to full hermeticity is a sweep, not a one-line change, and is not claimed here.
+
+The residue is cleared: `state reset-soft` closed the phantom workflow and rotated the 1115 fabricated records into `dispatch-warnings.archive-*.jsonl` — archived rather than deleted, since a forensic log that a cleanup can silently drop is worth less than one that grows.
+
+Two things caught in the building, both worth recording because both are the class this batch is about. The first falsifiability probe reverted a call site that turned out never to have leaked — an earlier gate leaves `cwd` in a temp dir, so that probe passed for a reason unrelated to the fix and briefly read as "the gate cannot fail". The second was real: `KSTATE`'s counter used `grep -c` with an `|| echo 0` fallback, and `grep -c` prints `0` **and** exits 1 on zero matches, so a clean ledger produced a two-line count that differed from itself between two identical readings. The gate failed on its own arithmetic the moment the thing it guards became clean — passing only while the bug it was built to catch was still present. Defused per CON-003.
+
 ### A field evaluation's five real findings — and the three that did not survive verification
 
 A calibration run on a downstream project graded a five-lane parallel review and filed eight numbered findings. Each was checked against the code and against that run's own artifacts before anything was built; the two it ranked highest turned out to be a no-op and a hook devt does not ship, while its lowest-ranked item was the root cause of both.
